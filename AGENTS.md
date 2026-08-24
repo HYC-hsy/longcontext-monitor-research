@@ -17,6 +17,7 @@
 - M0 人工能力上界阶段：`method_discovery/docs/M0_HUMAN_CAPABILITY_UPPER_BOUND_STAGE_20260822.md`。该阶段已于 2026-08-22 经用户确认，当前执行优先级高于旧 R1–R7 组件顺序：先在完整真实任务中建立不限成本、可在线暂停和多轮纠偏的持续监察者能力上界，再依据其真实成功与失败形式化、消融和降本。它不改变研究问题、创新 A–D 或无 checker 边界。
 - M0 递增演化路线：`method_discovery/docs/METHOD_DISCOVERY_M0_EVOLUTIONARY_ROADMAP_20260824.md`。该文件于 2026-08-24 经用户确认，是 M0-v1 冻结后的最高优先级执行规划：M0-v1 是唯一可运行母体和回退点；后续版本只在上一接受版本上递增改造，每次必须以完整真实任务同时验证预期增益与既有 M0 能力退化；有效才提交并打版本标签，无效则回退。它覆盖旧 R1–R7 在 M0 之后的组件筛选顺序，但不改变研究问题、创新 A–D、无 checker 边界、数据划分或 final holdout 禁令。
 - 最终方法运行规范：`method_discovery/docs/FINAL_METHOD_OPERATIONAL_NORTH_STAR_20260824.md`。该文件定义最终 best-paper 产物从任务初始化、持续静默、注意激活、主动重建、判断、干预、持续 repair、局部释放、根任务完成到非成功终止和事后归档的完整生命周期。M1–M7 的实现和验收必须反向覆盖该规范；机制文件存在不等于方法完成。该规范固定目标行为而不固定唯一 schema、图实现、prompt 或数学估计器，允许在阶段目标不漂移、真实任务留痕和防过拟合约束下进行多轮实现尝试。
+- 成本贯穿而非延后：从 M1 起每次真实运行都必须记录 Agent/monitor 调用、输入输出与可见 token、延迟、wall time 和可得美元成本；同等效果下前期即优先简单、低成本实现。若增益只来自更多计算、出现异常成本或明显能力—成本冲突，必须按结果停止点汇报。M6 是在可靠能力成立后的系统性降本、active-view 和严格等预算验证阶段，不意味着 M1–M5 可以忽略成本，也不授权在能力成立前以降本为由削弱监察能力。
 
 ### 已确认的研究问题
 
@@ -59,7 +60,7 @@
 6. M3：增加 decision-centered epistemic control，解决调查范围与停止问题；
 7. M4：形式化证据门控边界、typed recovery 和持续 repair/release；
 8. M5：对单一累计方法做可靠性稳定、回滚消融和跨来源复验；
-9. M6：在不预设成功的前提下尝试 capability-preserving cost reduction 与 active view；
+9. M6：汇总 M1–M5 持续记录的成本证据，在不预设成功的前提下进行系统性 capability-preserving cost reduction、active view 和等预算验证；
 10. M7：未见真实任务、等预算消融与最终最小方法冻结；
 11. Stage 7：冻结后运行多来源正式实验与论文证据。
 

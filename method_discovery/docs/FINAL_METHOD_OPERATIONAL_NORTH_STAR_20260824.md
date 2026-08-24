@@ -315,7 +315,7 @@ Relative to B0, strong memory/reminder baselines, and M0-v1 where appropriate, t
 
 ### 5.4 Reliability--cost evidence
 
-All costs are reported. Equal-budget and Pareto comparisons determine whether cost control is a core contribution. The reliability method may survive even if cost reduction fails, but an advantage that disappears under reasonable matched-compute controls cannot be presented as an algorithmic gain.
+All costs are reported from the first evolutionary increment. Earlier stages use cost as a continuous diagnostic and a tie-breaker between capability-equivalent implementations; an abnormal cost increase or gain explained only by more compute triggers immediate review. Equal-budget and Pareto comparisons in the dedicated cost stage determine whether cost control is a core contribution. The reliability method may survive if systematic cost reduction fails, but an advantage that disappears under reasonable matched-compute controls cannot be presented as an algorithmic gain.
 
 ## 6. Failure criteria
 

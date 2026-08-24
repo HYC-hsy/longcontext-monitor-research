@@ -80,6 +80,8 @@ Every run records:
 - Agent and monitor calls, tokens, latency, wall time, and available dollar cost;
 - complete public trajectory, state revisions, prompts/views, workspace result, and post-run verifier.
 
+Cost awareness begins with M1, not M6. At every stage, prefer the simpler and cheaper implementation when real-task capability is equivalent, and stop for review when an apparent gain is explained only by additional compute or introduces an abnormal cost increase. This is continuous cost accounting and local parsimony, not premature optimization: an unproven capability must not be removed merely to make an early version cheap.
+
 An increment is accepted only when:
 
 - it produces the intended behavioral improvement on at least one complete target task;
@@ -225,7 +227,7 @@ If two mechanisms duplicate each other after integration, retain the simpler one
 
 ### M6: capability-preserving cost reduction
 
-**Purpose:** remove wasted computation after the reliable method exists.
+**Purpose:** use the cost evidence accumulated since M1 to systematically remove wasted computation after the reliable method exists and run the strict matched-budget comparisons that earlier capability stages cannot settle.
 
 Starting from accepted M5, progressively test:
 
@@ -305,4 +307,5 @@ No lifecycle aspect is intentionally left without a stage after this revision. W
 - Offline tests validate engineering only.
 - No online checker, hidden verifier, gold answer, or future trajectory is introduced.
 - Reliability is optimized before cost; cost remains measured from the beginning.
+- Cost is considered in every increment; M6 is the dedicated optimization and causal validation stage rather than the first time cost appears.
 - The ideal architecture guides development, but real evidence determines the final minimal method.
