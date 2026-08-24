@@ -4,6 +4,8 @@ Date: 2026-08-24
 Status: user-confirmed execution authority after M0-v1 freeze  
 Scope: replaces the post-M0 component-screening order in earlier R1--R7 plans; it does not change the paper problem, innovations A--D, no-checker boundary, frozen data split, or final-holdout policy.
 
+Behavioral target: `method_discovery/docs/FINAL_METHOD_OPERATIONAL_NORTH_STAR_20260824.md`. The roadmap is complete only insofar as its accepted versions implement and validate that lifecycle; component existence alone is not completion.
+
 ## 1. Development decision
 
 Method discovery now uses one continuous method lineage:
@@ -86,11 +88,13 @@ An increment is accepted only when:
 - cross-source behavior does not reveal a severe new failure such as false blocking, objective shift, evidence pollution, or unbounded verification;
 - its complexity is justified by the observed gain.
 
-If the first run reveals an implementation defect, repair the defect and rerun. If it reveals a mechanism failure, perform a bounded postmortem and at most one evidence-motivated redesign unless the user approves a wider search. If the increment still fails, revert to the previous accepted Git tag and record the negative result.
+If a run reveals an implementation defect, repair the defect and rerun. If it reveals a mechanism failure, perform a bounded postmortem and make another evidence-motivated attempt within the same mechanism purpose. Research iteration is not capped at one redesign: state format, update rule, trigger, view, or control details may require multiple attempts. Each attempt must be logged, exercised on complete real tasks, and followed by task rotation so that one case does not become the de facto specification. The stage stops for user review when results are interpretable, the preregistered task/API budget is exhausted, a major design choice appears, or evidence supports reverting the mechanism. Failed attempts remain part of the record.
 
 Every accepted version receives a Git commit and annotated tag (`m1`, `m2`, ...). Reports must state the parent tag and exact code/config delta. A tag means the version passed its stage gate; intermediate engineering commits do not.
 
 ## 5. Evolution stages
+
+The stages below define **capability gaps to close**, not predetermined implementations. Lists of state content, relations, decision factors, boundaries, or actions are behavioral requirements and diagnostic dimensions. They do not preselect a fixed graph schema, storage engine, prompt, scoring formula, trigger algorithm, or intervention template. Those details are discovered iteratively from complete real-task evidence inside the stage.
 
 ### M0-F: freeze and infrastructure correctness
 
@@ -118,6 +122,8 @@ Starting from M0-v1, add the smallest state that preserves:
 - current repair episode, prior intervention, Agent response, and observed uptake;
 - the relation of local work to the root task.
 
+M1 also implements the lifecycle's boot/orientation and continuous semantic compilation behavior: the initial root model may be incomplete, new obligations or relations may be discovered later, and the monitor can rebuild detail from raw history rather than treating the compiled state as authority.
+
 Natural-language content remains allowed. The initial implementation may use JSON/Markdown objects and explicit relations; a graph database is not required. The monitor retains direct access to raw trajectory and workspace and may reconstruct details instead of trusting the compiled state.
 
 **Targeted failures:** monitor obligation loss, local-task tunnel vision, repeated reconstruction, and failure to reconnect the current repair to the root task.
@@ -137,13 +143,15 @@ Starting from accepted M1, add:
 - preservation of conflicting evidence without same-version washing;
 - selective, relation-based revalidation rather than global reset.
 
+Revision is bidirectional: later evidence or justified Agent pushback can also contest and revise the monitor's own hypothesis, intervention, or state update. The monitor must not become an unchallengeable second source of truth.
+
 **Targeted failures:** proxy evidence promoted to completion, stale tests supporting changed behavior, old success surviving a relevant modification, and new success erasing a prior unresolved conflict.
 
 **Regression focus:** avoid reopening unrelated obligations or turning every edit into full-task verification.
 
-### M3: decision-centered epistemic control
+### M3: attention activation and decision-centered epistemic control
 
-**Purpose:** teach the evolving monitor to choose what is worth investigating now and when to stop.
+**Purpose:** implement the transition from cheap silent shadowing to deep deliberation, then teach the evolving monitor to choose what is worth investigating now and when to stop.
 
 Starting from accepted M2, introduce a transient decision view containing only what is needed to judge the current consequential choice:
 
@@ -154,6 +162,8 @@ Starting from accepted M2, introduce a transient decision view containing only w
 - reversibility and cost of acting or waiting;
 - one candidate decision-changing observation;
 - an explicit finite stopping condition.
+
+M3 must separately expose: event ingestion, attention activation, active reconstruction, and intervention judgment. A trigger may increase attention without producing a HOLD. Fixed keywords or intervals may support deterministic indexing but cannot be the complete semantic activation policy.
 
 The mechanism must distinguish semantic similarity from decision relevance. UNKNOWN is investigated only when a plausible result would materially change the next action, release decision, or completion claim.
 
@@ -192,6 +202,8 @@ challenge -> Agent interpretation -> intended action -> actual action
           -> public evidence -> residual -> re-correct or release
 ```
 
+M4 must also implement lifecycle-complete intervention delivery, local release, root completion, and non-success terminal semantics. Timeout, missing authority, environment failure, or exhausted investigation must preserve unresolved state and produce abstention/escalation rather than accidental completion.
+
 **Targeted failures:** one-shot reminders, verbal acceptance treated as repair, premature release, local success treated as global completion, and repeated HOLD while the Agent is already carrying out the requested probe.
 
 **Regression focus:** preserve correct silence and autonomy during coherent repair and ordinary recoverable failures.
@@ -206,6 +218,8 @@ This is not a new component tournament. Begin with the latest accepted version a
 - one-at-a-time rollback to its accepted parent behavior;
 - only the few interaction tests motivated by an observed regression;
 - cross-source and rotating method-development tasks.
+
+M5 includes a lifecycle coverage audit against `FINAL_METHOD_OPERATIONAL_NORTH_STAR_20260824.md`. Every required phase and invariant must point to implementation, trace evidence, or an explicit unresolved gap. Passing component tests without lifecycle coverage cannot complete M5.
 
 If two mechanisms duplicate each other after integration, retain the simpler one. If an earlier mechanism helps alone but harms the cumulative method, revert or simplify it. The output is the reliability-first candidate, not yet the cheapest candidate.
 
@@ -258,7 +272,31 @@ Every evolution stage stops after its first interpretable complete real-task bat
 
 The next stage cannot start until the user confirms the result and the accepted version is tagged.
 
-## 7. Anti-drift summary
+## 7. North-star coverage audit
+
+The revised roadmap covers the final lifecycle at the following capability level:
+
+| Required final behavior | Primary evolution stage |
+|---|---|
+| boot from the public task without inventing a perfect specification | M1 |
+| preserve root task, local intent, evidence, and repair history across a long run | M1 |
+| revise state, evidence, and the monitor's own mistaken judgments | M2 |
+| remain silently aware during coherent work | M1 and M3 |
+| activate attention on a consequential semantic event | M3 |
+| actively reconstruct the evidence needed for the current decision | M1 and M3 |
+| decide whether to observe, stay silent, or intervene without eliminating every UNKNOWN | M3 |
+| deliver a minimal adaptive intervention | M4 |
+| follow multi-turn uptake, residuals, and re-correction | M4 |
+| release local control without losing the root task | M4 |
+| audit root completion and distinguish residual uncertainty from evidence debt | M2--M4 |
+| terminate honestly on timeout, missing authority, environment failure, or irreducible uncertainty | M4 |
+| demonstrate the whole lifecycle without hidden checker information | M5 |
+| reduce redundant observation/context while preserving capability | M6 |
+| establish unseen-task, matched-budget, and ablation evidence | M7 |
+
+No lifecycle aspect is intentionally left without a stage after this revision. What remains intentionally unresolved is **how** each aspect should be implemented and which implementation survives real-task testing.
+
+## 8. Anti-drift summary
 
 - M0-v1 is the only starting method lineage.
 - Every later method is an incremental modification of the last accepted version.
