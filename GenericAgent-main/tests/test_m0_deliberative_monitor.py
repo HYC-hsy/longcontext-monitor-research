@@ -104,6 +104,24 @@ def test_inspect_then_hold_records_public_evidence(monkeypatch, tmp_path):
     assert saved["inspections"][0]["result"]["ok"] is True
 
 
+def test_decision_and_state_archives_are_atomic_utf8_json(monkeypatch, tmp_path):
+    special = "引号“契约” — café\n第二行"
+    monitor, _ = build_monitor(monkeypatch, tmp_path, [
+        decision("SILENT", notes=special, unresolved_unknown="路径 /tmp/未知"),
+    ])
+
+    monitor.review(packet())
+
+    artifact_dir = tmp_path / "monitor"
+    decision_path = artifact_dir / "decision_0001.json"
+    state_path = artifact_dir / "authoritative_state.json"
+    saved = json.loads(decision_path.read_text(encoding="utf-8"))
+    authoritative = json.loads(state_path.read_text(encoding="utf-8"))
+    assert saved["notes"] == special
+    assert authoritative["schema_version"] == "m0-authoritative-state/1"
+    assert not list(artifact_dir.glob("*.tmp"))
+
+
 def test_verbal_acknowledgement_does_not_implicitly_release(monkeypatch, tmp_path):
     monitor, _ = build_monitor(monkeypatch, tmp_path, [
         decision("HOLD", message="Show the unchanged global suite.", discrepancy="local only",

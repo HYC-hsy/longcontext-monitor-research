@@ -50,7 +50,7 @@ The remaining task failure was therefore not simply “the service never started
 
 - Decision files: 57.
 - Recovered actions: 48 `SILENT`, 9 `HOLD`.
-- Invalid JSON decision archives: 6 (`0023`, `0026`, `0035`, `0036`, `0039`, `0054`). This repeats the cross-task monitor-archive encoding defect and must be treated as an engineering issue, not a method result.
+- All 57 decision files are valid UTF-8 JSON. An earlier PowerShell audit incorrectly reported six files (`0023`, `0026`, `0035`, `0036`, `0039`, `0054`) because it read UTF-8-without-BOM files using the system default encoding; explicit UTF-8 and Python strict parsing both succeed.
 
 High-value H1 behavior included:
 
@@ -66,7 +66,7 @@ Observed limitations included:
 1. H1 did not lead the task to a supported Windows desktop within the available 60 minutes.
 2. The repair episode remained long and accumulated many environment hypotheses.
 3. No `RELEASE` decision occurred before the forced timeout.
-4. Six decision archives are unparsable JSON.
+4. The original audit command was encoding-dependent and falsely classified six valid UTF-8 archives; M0-F corrects the diagnostic and adds atomic UTF-8 archive regression coverage.
 
 ## Research interpretation
 

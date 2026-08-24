@@ -50,12 +50,21 @@ class MonitorCheckpointStore:
             "public_task_sha256": self.public_task_sha256,
             **dict(state),
         }
-        temporary = self.path.with_suffix(".json.tmp")
-        temporary.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2, default=str),
-            encoding="utf-8",
-        )
-        os.replace(temporary, self.path)
+        self.write_json(self.path, payload)
+
+    @staticmethod
+    def write_json(path: Path, payload: Mapping[str, Any]) -> None:
+        """Write one UTF-8 JSON object atomically without changing its semantics."""
+        serialized = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+        # Validate the exact serialized text before it can replace an archive.
+        json.loads(serialized)
+        temporary = path.with_name(path.name + ".tmp")
+        try:
+            temporary.write_text(serialized, encoding="utf-8")
+            os.replace(temporary, path)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
 
     def load_archives(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Recover raw public trajectory and decisions without trusting them as authority."""
@@ -80,4 +89,3 @@ class MonitorCheckpointStore:
             if isinstance(value, dict):
                 decisions.append(value)
         return trajectory, decisions
-

@@ -322,6 +322,7 @@ def harbor_job(
     *,
     agent_timeout_sec: int = 900,
     launcher_timeout_sec: int = 1500,
+    agent_timeout_multiplier: float | None = None,
 ) -> Path:
     if (JOBS_ROOT / job_name).exists():
         raise RuntimeError(f"job already exists: {job_name}")
@@ -330,6 +331,10 @@ def harbor_job(
         "--jobs-dir", str(JOBS_ROOT.resolve()), "--path", str(TASK_ROOT.resolve()),
         "--agent", agent, "--n-concurrent", "1", "--max-retries", "0", "--yes", "--delete",
     ]
+    if agent_timeout_multiplier is not None:
+        if agent_timeout_multiplier <= 0:
+            raise ValueError("agent_timeout_multiplier must be positive")
+        command += ["--agent-timeout-multiplier", str(agent_timeout_multiplier)]
     if identity is not None:
         model = identity["model"]
         mounts = [

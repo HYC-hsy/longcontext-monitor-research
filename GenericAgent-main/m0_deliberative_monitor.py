@@ -835,11 +835,12 @@ CURRENT PUBLIC BOUNDARY:
         self.decisions.append(row)
         if self.artifact_dir:
             index = len(self.decisions)
-            (self.artifact_dir / f"decision_{index:04d}.json").write_text(
-                json.dumps(row, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+            self.checkpoints.write_json(
+                self.artifact_dir / f"decision_{index:04d}.json", row
             )
-            (self.artifact_dir / "authoritative_state.json").write_text(
-                json.dumps({
+            self.checkpoints.write_json(
+                self.artifact_dir / "authoritative_state.json",
+                {
                     "schema_version": "m0-authoritative-state/1",
                     "public_task_sha256": hashlib.sha256(
                         self.public_task.encode("utf-8", errors="replace")
@@ -851,8 +852,7 @@ CURRENT PUBLIC BOUNDARY:
                     "pending_discriminating_probe": self.pending_discriminating_probe,
                     "recovery_level": self.recovery_level,
                     "last_internal_turn": packet.get("internal_turn"),
-                }, ensure_ascii=False, indent=2, default=str),
-                encoding="utf-8",
+                },
             )
         self.checkpoints.save(self._checkpoint_state(packet.get("internal_turn")))
         emit("m0_monitor_decision", row)

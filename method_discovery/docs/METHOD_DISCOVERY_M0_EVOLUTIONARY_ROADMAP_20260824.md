@@ -102,14 +102,14 @@ The stages below define **capability gaps to close**, not predetermined implemen
 
 **Purpose:** create the immutable starting point and remove experimental faults that can invalidate later comparisons.
 
-**Current state:** M0-v1 is frozen. Remaining work is limited to infrastructure:
+**Current state:** completed on 2026-08-24 and prepared as M0-v1.1. M0-v1 was frozen and the infrastructure work was limited to:
 
 - correct Harbor's outer 3,600-second timeout so it matches the approved 7,200-second adapter/task limit;
-- repair invalid monitor-decision JSON archival;
-- verify timeout and archive behavior without changing M0 judgment policy;
+- establish that historical decision archives were valid UTF-8 JSON and correct the encoding-dependent audit diagnosis;
+- make complete JSON-object writes atomic and verify timeout/archive behavior without changing M0 judgment policy;
 - optionally rerun install-windows only as an M0 confirmation/engineering run.
 
-Infrastructure fixes may receive a patch tag such as `m0-v1.1`; they must not silently alter M0 behavior.
+The patch is tagged `m0-v1.1`; it does not alter M0 behavior. Its first M1 long run must still confirm the two-hour limit end to end.
 
 ### M1: persistent task--reasoning--evidence workspace
 

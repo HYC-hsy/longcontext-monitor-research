@@ -304,6 +304,7 @@ def run_one(
                 identity,
                 agent_timeout_sec=smoke_agent,
                 launcher_timeout_sec=smoke_agent + native_verifier + 900,
+                agent_timeout_multiplier=smoke_agent / native_agent,
             )
             manifest = m4.finalize_ga(run_id, identity)
             reward = manifest["reward"]

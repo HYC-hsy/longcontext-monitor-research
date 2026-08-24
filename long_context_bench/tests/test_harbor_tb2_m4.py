@@ -252,7 +252,12 @@ def test_harbor_ga_command_uses_read_only_mounts_and_no_solution(tmp_path, monke
         "generic_agent": {"source_sha256": "source-hash"},
     }
 
-    m4.harbor_job("run-1", "adapters.harbor_ga_agent:M4GenericAgent", identity)
+    m4.harbor_job(
+        "run-1",
+        "adapters.harbor_ga_agent:M4GenericAgent",
+        identity,
+        agent_timeout_multiplier=2.0,
+    )
 
     command = seen["command"]
     mounts = json.loads(command[command.index("--mounts") + 1])
@@ -264,6 +269,13 @@ def test_harbor_ga_command_uses_read_only_mounts_and_no_solution(tmp_path, monke
     assert "llm_no=3" in command
     assert "expected_model=model-x" in command
     assert "task_id=tb2:fix-code-vulnerability" in command
+    assert command[command.index("--agent-timeout-multiplier") + 1] == "2.0"
+
+
+def test_harbor_job_rejects_nonpositive_agent_timeout_multiplier(tmp_path, monkeypatch):
+    monkeypatch.setattr(m4, "JOBS_ROOT", tmp_path / "jobs")
+    with pytest.raises(ValueError, match="must be positive"):
+        m4.harbor_job("run-1", "nop", agent_timeout_multiplier=0)
 
 
 @pytest.mark.parametrize(("metadata", "message"), [
