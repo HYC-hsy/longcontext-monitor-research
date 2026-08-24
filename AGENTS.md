@@ -15,6 +15,7 @@
 - 交互感知选择逻辑：`method_discovery/docs/METHOD_DISCOVERY_INTERACTION_AWARE_SELECTION_REVISION_20260822.md`。该文件修订 R1–R7 的候选筛选与淘汰方式，不改变研究问题和创新 A–D。
 - Real-task-first 阶段修订：`method_discovery/docs/METHOD_DISCOVERY_REAL_TASK_FIRST_REVISION_20260822.md`。该文件是当前最高优先级的方法发现执行规划，覆盖前两份规划中冲突的 R1–R7 顺序、候选晋级门禁和离线实验权限；旧文档继续保留贡献定义、理论脉络和历史结果。
 - M0 人工能力上界阶段：`method_discovery/docs/M0_HUMAN_CAPABILITY_UPPER_BOUND_STAGE_20260822.md`。该阶段已于 2026-08-22 经用户确认，当前执行优先级高于旧 R1–R7 组件顺序：先在完整真实任务中建立不限成本、可在线暂停和多轮纠偏的持续监察者能力上界，再依据其真实成功与失败形式化、消融和降本。它不改变研究问题、创新 A–D 或无 checker 边界。
+- M0 递增演化路线：`method_discovery/docs/METHOD_DISCOVERY_M0_EVOLUTIONARY_ROADMAP_20260824.md`。该文件于 2026-08-24 经用户确认，是 M0-v1 冻结后的最高优先级执行规划：M0-v1 是唯一可运行母体和回退点；后续版本只在上一接受版本上递增改造，每次必须以完整真实任务同时验证预期增益与既有 M0 能力退化；有效才提交并打版本标签，无效则回退。它覆盖旧 R1–R7 在 M0 之后的组件筛选顺序，但不改变研究问题、创新 A–D、无 checker 边界、数据划分或 final holdout 禁令。
 
 ### 已确认的研究问题
 
@@ -50,19 +51,22 @@
 已完成 Stage 1–4.5 基础设施和基线；Stage 5 substrate 保留；Stage 6C 的版本化修订核心结果保留，不重复包装为新实验。2026-08-22 起，先执行 M0 人工能力上界阶段；旧 R1–R7 保留为 M0 成立后按真实失败驱动调用的机制目录，不再要求在 M0 前逐组件筛选。当前顺序为：
 
 1. R0：多来源偏移事件、真实任务协议和 held-out 划分冻结（已完成）；
-2. M0.1：从无泄漏原始人工轨迹重建监察策略；
-3. M0.2：实现真正在线暂停、复查、再次纠偏和释放的持久监察循环；
-4. M0.3：只在历史任务上完成工程与行为复现；
-5. M0.4：在未见 `method_dev` 真实任务上完成 B0 与 M0 首批比较并停止汇报；
-6. 后续机制阶段：依据 M0 的真实失败依次形式化状态、证据/修订、修复/边界与成本控制；
-7. R7：真实任务重复、未见任务、等预算消融与最小方法冻结；
-8. Stage 7：多来源正式实验与论文证据。
+2. M0.1--M0.4：人工能力上界重建、在线循环和真实任务确认（已完成核心能力构建）；
+3. M0-F：冻结 `m0-v1`，修复 timeout/JSON 归档等不改变策略的实验基础设施；
+4. M1：在 M0 上增加持久任务—推理—证据工作区，并以真实任务验证增益和退化；
+5. M2：在上一接受版本上增加 evidence-carrying versioned revision；
+6. M3：增加 decision-centered epistemic control，解决调查范围与停止问题；
+7. M4：形式化证据门控边界、typed recovery 和持续 repair/release；
+8. M5：对单一累计方法做可靠性稳定、回滚消融和跨来源复验；
+9. M6：在不预设成功的前提下尝试 capability-preserving cost reduction 与 active view；
+10. M7：未见真实任务、等预算消融与最终最小方法冻结；
+11. Stage 7：冻结后运行多来源正式实验与论文证据。
 
-R0 同时冻结事件级诊断集与 Final120 真实任务协议。离线事件、静态 JSON、轨迹重放、schema 有效率和 LLM judge 只属于工程验证或候选生成，没有核心方法晋级权和淘汰权。R1–R7 的机制选择必须主要依据 `method_discovery/r0_real_tasks/protocol.json` 规定的完整真实 GenericAgent 分支；不得用压缩 packet、模拟事件或模块分数替代真实任务。`final_holdout` 在方法冻结前不得运行 treatment 或用于方法选择。
+R0 同时冻结事件级诊断集与 Final120 真实任务协议。离线事件、静态 JSON、轨迹重放、schema 有效率和 LLM judge 只属于工程验证或候选生成，没有核心方法晋级权和淘汰权。M1–M7 的版本接受必须主要依据 `method_discovery/r0_real_tasks/protocol.json` 规定的完整真实 GenericAgent 分支；不得用压缩 packet、模拟事件或模块分数替代真实任务。`final_holdout` 在方法冻结前不得运行 treatment 或用于方法选择。
 
-R1 必须先验证不受复杂 schema 约束的 B1 直接监察者相对 B0 是否在真实长任务上产生行为收益；不得先以状态格式决定方法母体。R2 只能根据 B1 的真实失败加入最小外部语义锚点，并验证连续更新中的信息存活、错误闭合、冲突重开、污染累积和成本。R3 必须允许 UNKNOWN、区分“未观察到”与“未发生”，并测量错误 warrant/错误阻断。R4 必须与一次性提醒做等预算比较，并以 Agent 后续行为而非口头接受判定 uptake。R5 的 revision、dependency 和各类 gate 必须独立开关，不得一次堆叠。R6 必须验证 query/use-site-conditioned active view，并与静态截断、完整 ledger/history、PMA-style reminder、always-visible state 和等频随机选择做严格等可见 token/call/cost 比较；该遗留验证不得删除或跳过。小模型维护只作为附加消融，主实验默认同一监察者模型。
+旧 R1 已由 M0-v1 的真实任务能力证据完成其“先建立不受复杂 schema 约束的直接监察者母体”使命，不再重复筛选 B1。旧 R2–R6 的机制门禁继续作为 M1–M6 的验收约束：M1 只能根据 M0 的真实失败加入最小外部语义锚点，并验证连续更新中的信息存活、错误闭合、冲突重开、污染累积和成本；M2–M3 必须允许 UNKNOWN、区分“未观察到”与“未发生”，并测量错误 warrant/错误阻断；M4 必须与一次性提醒比较，并以 Agent 后续行为而非口头接受判定 uptake；revision、dependency 和各类 gate 必须独立开关，不得一次堆叠；M6 必须验证 query/use-site-conditioned active view，并与静态截断、完整 ledger/history、PMA-style reminder、always-visible state 和等频随机选择做严格等可见 token/call/cost 比较。小模型维护只作为附加消融，主实验默认同一监察者模型。
 
-方法发现采用真实任务驱动的有界候选束，不采用“每阶段模块分数冠军串联”的贪心策略。每类默认最多保留三个槽位：最简单基线、具有完整真实任务证据的 Pareto 候选、一个具有真实轨迹互补依据的交互救援候选。静态模块较弱或较强都不能单独决定去留；交互救援只有一次预注册真实组合机会，不得以此无限增加组合。R6 使用真实任务主效应加理论关键二阶交互筛选，R7 才按未见真实任务、等预算和交互消融冻结最小有效组合。
+方法发现采用 M0-v1 起步的单一递增版本线，不采用逐阶段孤立模块冠军串联，也不并行维护无界候选束。每次只在上一接受版本上增加一个服务于最终目标的相干机制；完整真实任务同时裁决预期增益与既有 M0 能力退化。首轮失败后只允许一次由真实轨迹支持的有界重设计；仍无效则回退上一 Git 标签并记录负结果。M5 才检查累计机制的必要性与少量关键交互，M7 才按未见真实任务、等预算和消融冻结最小有效组合。
 
 每层必须可单独关闭并通过判别实验。不得在状态表示尚未成立时同时堆叠提醒、触发、完成控制和主动再观察；不得因为叙事完整而保留无独立增益的组件。
 
