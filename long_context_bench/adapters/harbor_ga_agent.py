@@ -73,6 +73,7 @@ class M4GenericAgent(BaseAgent):
         m0_monitor_enabled: bool | str = False,
         m0_monitor_config: str = "",
         m0_max_inspections: int | str = 8,
+        m1_workspace_enabled: bool | str = False,
         max_turns: int | str = 180,
         task_workspace_dir: str = "/app",
         **kwargs,
@@ -121,8 +122,11 @@ class M4GenericAgent(BaseAgent):
         self.m0_monitor_enabled = str(m0_monitor_enabled).lower() in {"1", "true", "yes"}
         self.m0_monitor_config = m0_monitor_config
         self.m0_max_inspections = int(m0_max_inspections)
+        self.m1_workspace_enabled = str(m1_workspace_enabled).lower() in {"1", "true", "yes"}
         if self.m0_monitor_enabled and not self.m0_monitor_config:
             raise ValueError("M0 monitor config is required when M0 is enabled")
+        if self.m1_workspace_enabled and not self.m0_monitor_enabled:
+            raise ValueError("M1 workspace requires the persistent M0 monitor")
         self.max_turns = int(max_turns)
         if not task_workspace_dir.startswith("/"):
             raise ValueError("task_workspace_dir must be an absolute container path")
@@ -318,6 +322,8 @@ class M4GenericAgent(BaseAgent):
             env["GA_M0_MONITOR_CONFIG"] = self.m0_monitor_config
             env["GA_M0_MAX_INSPECTIONS"] = str(self.m0_max_inspections)
             env["GA_M0_MONITOR_ARTIFACT_DIR"] = "/logs/agent/m0_monitor"
+            if self.m1_workspace_enabled:
+                env["GA_M1_WORKSPACE_ENABLED"] = "1"
         if os.environ.get("GA_COMPLETION_CHECKPOINT_ROOT"):
             env["GA_COMPLETION_CHECKPOINT_ROOT"] = "/logs/agent/completion_checkpoints"
         for name in FORWARDED_ENV_VARS:

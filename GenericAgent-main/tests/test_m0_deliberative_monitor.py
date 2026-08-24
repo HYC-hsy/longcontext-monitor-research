@@ -80,6 +80,86 @@ def build_monitor(monkeypatch, tmp_path, responses):
     return monitor, session
 
 
+def build_m1_monitor(monkeypatch, tmp_path, responses):
+    session = FakeSession(responses)
+    monkeypatch.setattr(m0, "resolve_session", lambda _: session)
+    monitor = m0.M0DeliberativeMonitor(
+        public_task="Implement A and B; demonstrate both.",
+        workspace=tmp_path,
+        config_name="fake",
+        artifact_dir=tmp_path / "monitor",
+        m1_workspace_enabled=True,
+    )
+    monitor.root_obligation_audit = root_audit()
+    return monitor, session
+
+
+def test_m1_workspace_is_independently_disabled_in_m0(monkeypatch, tmp_path):
+    monitor, _ = build_monitor(monkeypatch, tmp_path, [decision("SILENT")])
+    monitor.review(packet())
+
+    checkpoint = json.loads((tmp_path / "monitor" / "monitor_checkpoint.json").read_text(
+        encoding="utf-8"
+    ))
+    assert monitor.semantic_workspace is None
+    assert "m1_workspace" not in checkpoint
+    assert not (tmp_path / "monitor" / "m1_workspace.json").exists()
+
+
+def test_m1_final_decision_updates_workspace_without_forcing_hold(monkeypatch, tmp_path):
+    response = decision("SILENT", workspace_delta={
+        "upsert": [{
+            "id": "intent:edit-a", "role": "local_intent",
+            "summary": "Edit A based on the observed failing branch",
+            "state": "active", "source_anchors": ["turn:1 response"],
+            "root_links": ["root:public-task"],
+        }],
+        "deactivate": [],
+        "relations": [{
+            "source": "intent:edit-a", "relation": "contributes_to",
+            "target": "root:public-task", "summary": "Current local work serves A",
+        }],
+    })
+    monitor, session = build_m1_monitor(monkeypatch, tmp_path, [response])
+
+    assert monitor.review(packet()) == ""
+    saved = json.loads((tmp_path / "monitor" / "m1_workspace.json").read_text(
+        encoding="utf-8"
+    ))
+    assert any(row["id"] == "intent:edit-a" for row in saved["objects"])
+    assert monitor.decisions[0]["workspace_update_result"]["upserted"] == 1
+    assert '"m1_semantic_workspace"' in session.prompts[0]
+
+
+def test_m1_monitor_can_reconstruct_from_semantic_workspace(monkeypatch, tmp_path):
+    first, _ = build_m1_monitor(monkeypatch, tmp_path, [decision(
+        "SILENT", workspace_delta={
+            "upsert": [{"id": "hypothesis:one", "role": "causal_hypothesis",
+                        "summary": "A parser branch is suspect", "source_anchors": ["turn:1"],
+                        "root_links": ["root:public-task"]}],
+            "deactivate": [], "relations": [],
+        },
+    )])
+    first.review(packet(1))
+
+    second_session = FakeSession([
+        {"action": "INSPECT", "reason": "reconstruct hypothesis", "inspection": {
+            "operation": "search_semantic_workspace", "pattern": "parser",
+        }},
+        decision("SILENT"),
+    ])
+    monkeypatch.setattr(m0, "resolve_session", lambda _: second_session)
+    restored = m0.M0DeliberativeMonitor(
+        public_task="Implement A and B; demonstrate both.", workspace=tmp_path,
+        config_name="fake", artifact_dir=tmp_path / "monitor",
+        m1_workspace_enabled=True,
+    )
+    restored.review(packet(2))
+
+    assert '"matched": 1' in second_session.prompts[1]
+    assert "A parser branch is suspect" in second_session.prompts[1]
+
+
 def test_inspect_then_hold_records_public_evidence(monkeypatch, tmp_path):
     (tmp_path / "test_contract.py").write_text("assert feature_a()\n", encoding="utf-8")
     monitor, session = build_monitor(monkeypatch, tmp_path, [

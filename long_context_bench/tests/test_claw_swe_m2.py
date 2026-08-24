@@ -62,6 +62,7 @@ class M2AdapterTests(unittest.TestCase):
             "GA_M0_MONITOR_ENABLED": "1",
             "GA_M0_MONITOR_CONFIG": "native_oai_cc_vibe_gpt55_xhigh",
             "GA_M0_MAX_INSPECTIONS": "12",
+            "GA_M1_WORKSPACE_ENABLED": "1",
         }
         with patch.dict("os.environ", env, clear=False):
             adapter = self.m.M2GenericAgentAdapter("m2-test", self.identity)
@@ -72,6 +73,7 @@ class M2AdapterTests(unittest.TestCase):
         self.assertIn("GA_M0_MONITOR_CONFIG=native_oai_cc_vibe_gpt55_xhigh", cmd)
         self.assertIn("GA_M0_MAX_INSPECTIONS=12", cmd)
         self.assertIn("GA_M0_MONITOR_ARTIFACT_DIR=/opt/m2-artifacts/m0_monitor", cmd)
+        self.assertIn("GA_M1_WORKSPACE_ENABLED=1", cmd)
 
     def test_method_run_requires_an_exact_explicit_current_ga_hash(self):
         current = "a" * 64

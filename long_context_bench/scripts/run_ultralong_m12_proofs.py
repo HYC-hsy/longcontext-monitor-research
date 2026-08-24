@@ -87,6 +87,10 @@ def stage4_agent_kwargs() -> dict[str, object]:
         values["m0_recent_trajectory_turns"] = int(
             os.environ.get("GA_M0_RECENT_TRAJECTORY_TURNS", "0")
         )
+        if os.environ.get("GA_M1_WORKSPACE_ENABLED") == "1":
+            values["m1_workspace_enabled"] = True
+    elif os.environ.get("GA_M1_WORKSPACE_ENABLED") == "1":
+        raise ValueError("GA_M1_WORKSPACE_ENABLED requires GA_M0_MONITOR_ENABLED")
     card_path = os.environ.get("GA_TASK_CARD_PATH")
     if condition == "static_checklist":
         if not card_path:

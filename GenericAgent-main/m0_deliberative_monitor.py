@@ -15,6 +15,7 @@ from typing import Any, Mapping
 
 from llmcore import resolve_session
 from m0_monitor_checkpoint import MonitorCheckpointStore
+from m1_task_workspace import PersistentTaskWorkspace
 from research_runtime import CompletionDecision, emit
 
 
@@ -27,6 +28,9 @@ TRAJECTORY_INSPECTIONS = {
     "read_public_trajectory", "search_public_trajectory",
     "read_monitor_decisions", "search_monitor_decisions",
     "read_repair_episode",
+}
+M1_WORKSPACE_INSPECTIONS = {
+    "read_semantic_workspace", "search_semantic_workspace",
 }
 
 
@@ -190,7 +194,8 @@ class M0DeliberativeMonitor:
 
     def __init__(self, *, public_task: str, workspace: str | os.PathLike[str] | None,
                  config_name: str, artifact_dir: str | os.PathLike[str] | None = None,
-                 max_inspections: int = 8, recent_trajectory_turns: int = 0):
+                 max_inspections: int = 8, recent_trajectory_turns: int = 0,
+                 m1_workspace_enabled: bool = False):
         session = resolve_session(config_name)
         if session is None:
             raise ValueError(f"Unsupported M0 monitor config: {config_name}")
@@ -204,6 +209,11 @@ class M0DeliberativeMonitor:
         if self.artifact_dir:
             self.artifact_dir.mkdir(parents=True, exist_ok=True)
         self.checkpoints = MonitorCheckpointStore(self.artifact_dir, public_task)
+        self.m1_workspace_enabled = bool(m1_workspace_enabled)
+        self.semantic_workspace = (
+            PersistentTaskWorkspace(self.artifact_dir, public_task)
+            if self.m1_workspace_enabled else None
+        )
         self.max_inspections = max_inspections
         self.recent_trajectory_turns = max(0, min(50, recent_trajectory_turns))
         self.notes = "No observations yet. Preserve every explicit task obligation and UNKNOWN."
@@ -267,7 +277,7 @@ class M0DeliberativeMonitor:
         self.attention_mode = str(checkpoint.get("attention_mode", self.attention_mode))
 
     def _checkpoint_state(self, internal_turn: Any) -> dict[str, Any]:
-        return {
+        state = {
             "root_task_release_basis": self.root_task_release_basis,
             "root_obligation_audit": self.root_obligation_audit,
             "contested_artifacts": self.contested_artifacts,
@@ -280,6 +290,10 @@ class M0DeliberativeMonitor:
             "trajectory_count": len(self.trajectory),
             "decision_count": len(self.decisions),
         }
+        if self.semantic_workspace is not None:
+            state["m1_workspace_enabled"] = True
+            state["m1_workspace"] = self.semantic_workspace.view()
+        return state
 
     def _base_prompt(self) -> str:
         return """You are M0, a persistent human-style monitor supervising a long-running task Agent.
@@ -694,6 +708,65 @@ ORIGINAL PUBLIC TASK:
                     "truncated": len(rows) > limit}
         return {"ok": False, "error": f"unsupported trajectory inspection: {operation}"}
 
+    def _inspect_semantic_workspace(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        if self.semantic_workspace is None:
+            return {"ok": False, "error": "M1 semantic workspace is disabled"}
+        operation = str(request.get("operation", ""))
+        if operation == "read_semantic_workspace":
+            return {"ok": True, "workspace": self.semantic_workspace.view(
+                include_inactive=bool(request.get("include_inactive", False))
+            )}
+        if operation == "search_semantic_workspace":
+            return self.semantic_workspace.search(
+                str(request.get("pattern", "")), limit=int(request.get("limit", 30))
+            )
+        return {"ok": False, "error": f"unsupported M1 workspace inspection: {operation}"}
+
+    def _inspection_schema(self) -> str:
+        operations = (
+            "read_file|list_files|search_text|git_diff|git_status|list_changed_tests|"
+            "read_test_change|search_test_contract"
+        )
+        if self.semantic_workspace is not None:
+            operations += "|read_semantic_workspace|search_semantic_workspace"
+        return (
+            '{"action":"INSPECT","reason":"...","inspection":{"operation":"'
+            + operations
+            + '","path":"relative/path","pattern":"optional regex","glob":"optional glob",'
+              '"start_line":1,"line_count":400}}'
+        )
+
+    def _m1_prompt_guidance(self) -> str:
+        if self.semantic_workspace is None:
+            return "\n"
+        return """
+When M1 semantic workspace is present, it is a reconstructable projection, never authority. Use
+read_semantic_workspace to revisit all active objects and relations, or search_semantic_workspace with
+pattern/limit to find intent, hypothesis, evidence, UNKNOWN, repair, or root-linked objects. If it
+conflicts with the immutable task or raw public history, trust those sources and correct the projection.
+
+"""
+
+    def _decision_schema(self) -> str:
+        base = (
+            '{"action":"SILENT|HOLD|RELEASE|ABSTAIN","epistemic_status":"confirmed_conflict|unsupported_closure|observed_failure|causal_uncertainty|watch",'
+            '"intervention_mode":"repair|discriminating_probe|prevent_irreversible|none","imminent_action_anchor":"public Agent statement/action that makes unresolved uncertainty unsafe to merely watch, otherwise empty",'
+            '"reason":"...","message":"recovery-complete text injected to task Agent for HOLD/ABSTAIN, otherwise empty","public_anchors":["..."],"discrepancy":"... or empty",'
+            '"exit_condition":"observable evidence needed before release, or empty","authority_basis":"user_contract|safety|correctness_evidence|agent_workflow|none",'
+            '"material_task_impact":"specific causal harm if not intervening, or empty","why_silence_is_insufficient":"why one more silent observation is unsafe, or empty",'
+            '"evidence_availability":"obtainable_now|environment_blocked|unknown|not_applicable","next_safe_action":"specific executable implementation/test/investigation action, never \'write a root audit\'",'
+            '"unresolved_unknown":"explicit residual uncertainty preserved on root RELEASE, otherwise empty","contested_artifacts":[{"path":"public relative path","reason":"contract/evidence conflict"}],'
+            '"root_obligation_audit":[]'
+        )
+        if self.semantic_workspace is not None:
+            base += (
+                ',"workspace_delta":{"upsert":[{"id":"stable-open-semantic-id","role":"root_obligation|local_intent|causal_hypothesis|public_evidence|open_question|repair_episode|other",'
+                '"summary":"natural-language semantic content","state":"open semantic state","source_anchors":["public turn/file/test/diff anchor"],'
+                '"root_links":["root:public-task or obligation id"]}],"deactivate":["obsolete active object id"],'
+                '"relations":[{"source":"object id","relation":"open semantic relation","target":"object id","summary":"why this relation matters"}]}'
+            )
+        return base + ',"notes":"updated compact but complete monitor memory"}'
+
     def _prompt(self, packet: Mapping[str, Any], inspection_results: list[dict[str, Any]]) -> str:
         public_packet = {
             "boundary": packet.get("boundary"),
@@ -717,6 +790,8 @@ ORIGINAL PUBLIC TASK:
             ),
             "inspection_results": inspection_results,
         }
+        if self.semantic_workspace is not None:
+            public_packet["m1_semantic_workspace"] = self.semantic_workspace.view()
         if self.recent_trajectory_turns:
             public_packet["recent_public_trajectory"] = self.trajectory[
                 -self.recent_trajectory_turns:
@@ -740,7 +815,7 @@ it requests one concrete, safe, decision-changing action that is currently execu
 impossible request or recursively improve a monitor-requested verifier.
 
 Return JSON only. To inspect first:
-{"action":"INSPECT","reason":"...","inspection":{"operation":"read_file|list_files|search_text|git_diff|git_status|list_changed_tests|read_test_change|search_test_contract","path":"relative/path","pattern":"optional regex","glob":"optional glob","start_line":1,"line_count":400}}
+""" + self._inspection_schema() + """
 Use list_changed_tests to find public test edits, read_test_change to inspect one changed test, and
 search_test_contract to find a clause/API/assertion only across recognized public test files.
 To revisit the complete public run rather than only the recent window, use operation
@@ -751,8 +826,7 @@ recorded public decisions and inspections. No trajectory operation exposes verif
 While a repair episode is open, read_repair_episode returns its original challenge plus every public
 response/action and monitor decision since HOLD, so you can follow uptake and residuals without
 depending on a compressed acknowledgement.
-
-The root obligation ledger and the current repair episode have different jobs. If
+""" + self._m1_prompt_guidance() + """The root obligation ledger and the current repair episode have different jobs. If
 root_ledger_initialized is false, extract every separately testable explicit obligation from the
 ORIGINAL PUBLIC TASK into root_obligation_audit in this boundary's final decision, initially using
 UNKNOWN unless current public evidence already supports or contests it. On later meaningful boundaries,
@@ -784,7 +858,15 @@ never exercise a newly requested API are not coverage. RELEASE/SILENT at root co
 complete audit is invalid.
 
 For a final decision:
-{"action":"SILENT|HOLD|RELEASE|ABSTAIN","epistemic_status":"confirmed_conflict|unsupported_closure|observed_failure|causal_uncertainty|watch","intervention_mode":"repair|discriminating_probe|prevent_irreversible|none","imminent_action_anchor":"public Agent statement/action that makes unresolved uncertainty unsafe to merely watch, otherwise empty","reason":"...","message":"recovery-complete text injected to task Agent for HOLD/ABSTAIN, otherwise empty","public_anchors":["..."],"discrepancy":"... or empty","exit_condition":"observable evidence needed before release, or empty","authority_basis":"user_contract|safety|correctness_evidence|agent_workflow|none","material_task_impact":"specific causal harm if not intervening, or empty","why_silence_is_insufficient":"why one more silent observation is unsafe, or empty","evidence_availability":"obtainable_now|environment_blocked|unknown|not_applicable","next_safe_action":"specific executable implementation/test/investigation action, never 'write a root audit'","unresolved_unknown":"explicit residual uncertainty preserved on root RELEASE, otherwise empty","contested_artifacts":[{"path":"public relative path","reason":"contract/evidence conflict"}],"root_obligation_audit":[],"notes":"updated compact but complete monitor memory"}
+""" + self._decision_schema() + ("""
+
+When M1 is enabled, update workspace_delta only for semantic state that should survive beyond this
+boundary: the current local intent or causal hypothesis, public evidence and its scope, material open
+questions, repair state, and links back to root obligations. Stable roles organize meaning but do not
+limit it: role, state, relation, and natural-language payloads are extensible. Reuse stable ids instead
+of duplicating objects. Deactivate stale working objects rather than erasing raw history. A workspace
+update is private memory maintenance and never by itself justifies INSPECT, HOLD, or broader scope.
+""" if self.semantic_workspace is not None else "") + """
 
 CURRENT PUBLIC BOUNDARY:
 """ + json.dumps(public_packet, ensure_ascii=False, default=str)
@@ -909,9 +991,12 @@ CURRENT PUBLIC BOUNDARY:
                     inspections.append({"ok": False, "error": "missing inspection object"})
                 else:
                     operation = str(request.get("operation", ""))
-                    result = (self._inspect_trajectory(request)
-                              if operation in TRAJECTORY_INSPECTIONS
-                              else self.inspector.execute(request))
+                    if operation in TRAJECTORY_INSPECTIONS:
+                        result = self._inspect_trajectory(request)
+                    elif operation in M1_WORKSPACE_INSPECTIONS:
+                        result = self._inspect_semantic_workspace(request)
+                    else:
+                        result = self.inspector.execute(request)
                     inspections.append({"request": dict(request), "result": result})
                 continue
             if action not in DECISIONS:
@@ -1154,6 +1239,9 @@ CURRENT PUBLIC BOUNDARY:
                 "notes": str(decision.get("notes", "")).strip() or self.notes,
                 "inspections": inspections,
             }
+            workspace_delta = decision.get("workspace_delta")
+            if self.semantic_workspace is not None and isinstance(workspace_delta, Mapping):
+                normalized["workspace_delta"] = dict(workspace_delta)
             self.notes = normalized["notes"]
             for item in contested:
                 self.contested_artifacts[item["path"]] = item
@@ -1230,6 +1318,30 @@ CURRENT PUBLIC BOUNDARY:
                 self.attention_mode = "SHADOW"
             elif action == "SILENT" and self.open_episode is None:
                 self.attention_mode = "SHADOW"
+            if self.semantic_workspace is not None:
+                decision_index = len(self.decisions) + 1
+                root_changes = self.semantic_workspace.sync_root_obligations(
+                    self.root_obligation_audit,
+                    int(packet.get("internal_turn") or 0),
+                    decision_index,
+                )
+                repair_changes = self.semantic_workspace.sync_repair_episode(
+                    self.open_episode,
+                    turn=int(packet.get("internal_turn") or 0),
+                    decision_index=decision_index,
+                )
+                workspace_result = self.semantic_workspace.apply_delta(
+                    normalized.get("workspace_delta"),
+                    turn=int(packet.get("internal_turn") or 0),
+                    decision_index=decision_index,
+                )
+                workspace_result["root_obligations_changed"] = root_changes
+                workspace_result["repair_episodes_changed"] = repair_changes
+                normalized["workspace_update_result"] = workspace_result
+                emit("m1_workspace_update", {
+                    "internal_turn": packet.get("internal_turn"),
+                    **workspace_result,
+                })
             self._record(normalized, packet)
             return normalized["message"] if action in {"HOLD", "ABSTAIN"} else ""
         # Inspection exhaustion is a monitor limitation, not evidence that the

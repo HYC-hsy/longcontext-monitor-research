@@ -367,6 +367,10 @@ def harbor_job(
                 "m0_monitor_config": os.environ["GA_M0_MONITOR_CONFIG"],
                 "m0_max_inspections": int(os.environ.get("GA_M0_MAX_INSPECTIONS", "8")),
             })
+            if os.environ.get("GA_M1_WORKSPACE_ENABLED") == "1":
+                kwargs["m1_workspace_enabled"] = True
+        elif os.environ.get("GA_M1_WORKSPACE_ENABLED") == "1":
+            raise ValueError("GA_M1_WORKSPACE_ENABLED requires GA_M0_MONITOR_ENABLED")
         ledger_path = os.environ.get("GA_OBLIGATION_LEDGER_CARD_PATH")
         if ledger_path:
             kwargs["obligation_ledger_card_b64"] = base64.b64encode(

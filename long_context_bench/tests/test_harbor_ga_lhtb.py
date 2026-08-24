@@ -126,6 +126,7 @@ def test_lhtb_forwards_research_and_manual_completion_environment(monkeypatch):
         m0_monitor_enabled=True,
         m0_monitor_config="native_openai_cc_vibe",
         m0_max_inspections=12,
+        m1_workspace_enabled=True,
     )
 
     env = agent._agent_env("/site-packages")
@@ -141,6 +142,18 @@ def test_lhtb_forwards_research_and_manual_completion_environment(monkeypatch):
     assert env["GA_M0_MONITOR_CONFIG"] == "native_openai_cc_vibe"
     assert env["GA_M0_MAX_INSPECTIONS"] == "12"
     assert env["GA_M0_MONITOR_ARTIFACT_DIR"] == "/logs/agent/m0_monitor"
+    assert env["GA_M1_WORKSPACE_ENABLED"] == "1"
+
+
+def test_m1_workspace_requires_m0_monitor(monkeypatch):
+    module = load_adapter(monkeypatch)
+    with pytest.raises(ValueError, match="requires the persistent M0 monitor"):
+        module.HarborLHTBGenericAgent(
+            model_name="claude-opus-4-6", llm_no=0, run_id="invalid-m1",
+            expected_model="claude-opus-4-6", python_home="python-home",
+            ga_source_sha256="abc", timeout_sec=60, task_id="lhtb:task",
+            m1_workspace_enabled=True,
+        )
 
 
 def test_second_phase_uses_reply_without_restarting(monkeypatch):

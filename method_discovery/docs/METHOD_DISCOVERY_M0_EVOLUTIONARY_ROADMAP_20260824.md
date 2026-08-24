@@ -115,6 +115,8 @@ The patch is tagged `m0-v1.1`; it does not alter M0 behavior. Its first M1 long 
 
 **Purpose:** give M0's existing intelligence a reliable external cognitive substrate without constraining its open semantic judgment.
 
+**Current state (2026-08-24):** the independently switchable engineering candidate is implemented and its non-paid unit/integration/configuration gates pass. The control prompt was byte-for-byte compared with `m0-v1.1` under the disabled switch and is unchanged for the audited fixture. The four-task, three-source real panel and eight-run prepared manifest are frozen, but no M1 treatment run has started. Therefore M1 is not accepted and no `m1` tag exists.
+
 Starting from M0-v1, add the smallest state that preserves:
 
 - immutable references to original root obligations;

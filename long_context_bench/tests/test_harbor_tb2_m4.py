@@ -251,6 +251,9 @@ def test_harbor_ga_command_uses_read_only_mounts_and_no_solution(tmp_path, monke
         "runtime": {"python_home": "cpython-test"},
         "generic_agent": {"source_sha256": "source-hash"},
     }
+    monkeypatch.setenv("GA_M0_MONITOR_ENABLED", "1")
+    monkeypatch.setenv("GA_M0_MONITOR_CONFIG", "native_oai_cc_vibe_gpt56_sol_high")
+    monkeypatch.setenv("GA_M1_WORKSPACE_ENABLED", "1")
 
     m4.harbor_job(
         "run-1",
@@ -270,6 +273,8 @@ def test_harbor_ga_command_uses_read_only_mounts_and_no_solution(tmp_path, monke
     assert "expected_model=model-x" in command
     assert "task_id=tb2:fix-code-vulnerability" in command
     assert command[command.index("--agent-timeout-multiplier") + 1] == "2.0"
+    assert "m0_monitor_enabled=True" in command
+    assert "m1_workspace_enabled=True" in command
 
 
 def test_harbor_job_rejects_nonpositive_agent_timeout_multiplier(tmp_path, monkeypatch):

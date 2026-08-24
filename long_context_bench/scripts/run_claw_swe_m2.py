@@ -313,12 +313,15 @@ class M2GenericAgentAdapter(GenericAgentAdapter):
             "GA_LLM_CONFIG_NAME", "GA_MAX_TURNS", "GA_M0_MONITOR_ENABLED",
             "GA_M0_MONITOR_CONFIG", "GA_M0_MAX_INSPECTIONS",
             "GA_M0_RECENT_TRAJECTORY_TURNS",
+            "GA_M1_WORKSPACE_ENABLED",
         ):
             value = os.environ.get(name)
             if value:
                 cmd += ["-e", f"{name}={value}"]
         if os.environ.get("GA_M0_MONITOR_ENABLED") == "1":
             cmd += ["-e", "GA_M0_MONITOR_ARTIFACT_DIR=/opt/m2-artifacts/m0_monitor"]
+        elif os.environ.get("GA_M1_WORKSPACE_ENABLED") == "1":
+            raise ValueError("GA_M1_WORKSPACE_ENABLED requires GA_M0_MONITOR_ENABLED")
         cmd += [
             container_name, python_bin, f"{CONTAINER_GA}/agentmain.py",
             "--task", agent_id, "--llm_no", str(self.llm_no),
