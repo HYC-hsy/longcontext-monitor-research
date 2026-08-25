@@ -15,7 +15,7 @@ from typing import Any, Mapping
 from m0_monitor_checkpoint import MonitorCheckpointStore
 
 
-SCHEMA_VERSION = "m1-task-workspace/1"
+SCHEMA_VERSION = "m1-task-workspace/2"
 EVENT_SCHEMA_VERSION = "m1-task-workspace-event/1"
 _ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
@@ -38,6 +38,8 @@ class PersistentTaskWorkspace:
         self.relations: dict[str, dict[str, Any]] = {}
         self.update_count = 0
         self.last_internal_turn: int | None = None
+        self.root_ledger_frozen = False
+        self.rejected_root_mutations = 0
         self._load_or_bootstrap()
 
     def _load_or_bootstrap(self) -> None:
@@ -55,6 +57,8 @@ class PersistentTaskWorkspace:
             }
             self.update_count = int(loaded.get("update_count", 0))
             self.last_internal_turn = loaded.get("last_internal_turn")
+            self.root_ledger_frozen = bool(loaded.get("root_ledger_frozen", False))
+            self.rejected_root_mutations = int(loaded.get("rejected_root_mutations", 0))
             return
         self.objects["root:public-task"] = {
             "id": "root:public-task",
@@ -154,14 +158,29 @@ class PersistentTaskWorkspace:
 
     def sync_root_obligations(self, rows: list[dict[str, Any]], turn: int,
                               decision_index: int | None = None) -> int:
-        """Project M0's existing root ledger without inventing new semantics."""
+        """Project the frozen root ledger using stable, source-ordered identities.
+
+        Existing identities are immutable. Later audits may recover an omitted
+        public-task obligation by appending it, but cannot delete, reorder, or
+        paraphrase an existing obligation into a new object.
+        """
+        existing = sorted(
+            (row for row in self.objects.values() if row.get("role") == "root_obligation"),
+            key=lambda row: int(row.get("source_order", 0)),
+        )
+        if self.root_ledger_frozen and len(rows) < len(existing):
+            self.rejected_root_mutations += len(existing) - len(rows)
+        accepted_count = len(rows)
         changed = 0
-        for index, row in enumerate(rows):
+        for index, row in enumerate(rows[:accepted_count]):
             obligation = self._clean_text(row.get("obligation"), 4000)
             if not obligation:
                 continue
-            digest = hashlib.sha256(obligation.encode("utf-8", errors="replace")).hexdigest()[:16]
-            identifier = f"obligation:{digest}"
+            if self.root_ledger_frozen and index < len(existing):
+                identifier = str(existing[index]["id"])
+                obligation = str(existing[index]["summary"])
+            else:
+                identifier = f"obligation:{index:04d}"
             anchors = row.get("public_evidence", [])
             projected = {
                 "id": identifier,
@@ -190,6 +209,8 @@ class PersistentTaskWorkspace:
                 "updated_turn": turn,
             }
             self.relations[self._relation_key(relation)] = relation
+        if rows and not self.root_ledger_frozen:
+            self.root_ledger_frozen = True
         if changed:
             self.last_internal_turn = turn
             self._append_event({
@@ -281,6 +302,17 @@ class PersistentTaskWorkspace:
             if normalized is None:
                 result["invalid"] += 1
                 continue
+            if normalized["role"] in {"root_contract", "root_obligation"}:
+                # Root authority is owned exclusively by sync_root_obligations.
+                result["invalid"] += 1
+                self.rejected_root_mutations += 1
+                continue
+            normalized["root_links"] = [
+                identifier for identifier in normalized["root_links"]
+                if identifier == "root:public-task"
+                or (identifier in self.objects
+                    and self.objects[identifier].get("role") == "root_obligation")
+            ]
             previous = self.objects.get(normalized["id"])
             if self._semantic_equal(previous, normalized):
                 normalized["updated_turn"] = previous.get("updated_turn", turn)
@@ -316,6 +348,45 @@ class PersistentTaskWorkspace:
         self._persist()
         return result
 
+    def active_view(self, *, object_limit: int = 48, relation_limit: int = 64) -> dict[str, Any]:
+        """Return a bounded, single-version projection for routine deliberation."""
+        active = [row for row in self.objects.values() if row.get("state") != "inactive"]
+        roots = sorted(
+            (row for row in active if row.get("role") in {"root_contract", "root_obligation"}),
+            key=lambda row: (int(row.get("source_order", -1)), str(row.get("id", ""))),
+        )
+        local = sorted(
+            (row for row in active if row.get("role") not in {"root_contract", "root_obligation"}),
+            key=lambda row: (int(row.get("updated_turn") or 0), str(row.get("id", ""))),
+            reverse=True,
+        )
+        # Root obligations are the immutable task basis and are never displaced
+        # by transient evidence. Local state receives the remaining bounded slots.
+        selected = roots + local[:max(0, object_limit - len(roots))]
+        selected_ids = {row["id"] for row in selected}
+        relations = [row for row in self.relations.values()
+                     if row["source"] in selected_ids and row["target"] in selected_ids]
+        relations.sort(key=lambda row: int(row.get("updated_turn") or 0), reverse=True)
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "public_task_sha256": self.public_task_sha256,
+            "objects": selected,
+            "relations": relations[:relation_limit],
+            "metrics": self.metrics(),
+            "truncated": len(selected) < len(active) or len(relations) > relation_limit,
+        }
+
+    def metrics(self) -> dict[str, Any]:
+        active = [row for row in self.objects.values() if row.get("state") != "inactive"]
+        return {
+            "objects_total": len(self.objects),
+            "objects_active": len(active),
+            "root_obligations": sum(row.get("role") == "root_obligation" for row in self.objects.values()),
+            "relations_total": len(self.relations),
+            "update_count": self.update_count,
+            "rejected_root_mutations": self.rejected_root_mutations,
+        }
+
     def view(self, *, include_inactive: bool = False) -> dict[str, Any]:
         objects = [row for row in self.objects.values()
                    if include_inactive or row.get("state") != "inactive"]
@@ -332,6 +403,8 @@ class PersistentTaskWorkspace:
             "relations": relations,
             "update_count": self.update_count,
             "last_internal_turn": self.last_internal_turn,
+            "root_ledger_frozen": self.root_ledger_frozen,
+            "rejected_root_mutations": self.rejected_root_mutations,
         }
 
     def search(self, pattern: str, *, limit: int = 30) -> dict[str, Any]:

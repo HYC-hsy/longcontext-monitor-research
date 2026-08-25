@@ -63,6 +63,12 @@ def register_provider_call(call: Mapping[str, Any]) -> None:
     _last_provider_call.set(dict(call))
 
 
+def current_provider_call() -> Optional[dict[str, Any]]:
+    """Return provider-call identity without consuming the completion link."""
+    value = _last_provider_call.get()
+    return dict(value) if value else None
+
+
 def consume_provider_call() -> Optional[dict[str, Any]]:
     value = _last_provider_call.get()
     _last_provider_call.set(None)

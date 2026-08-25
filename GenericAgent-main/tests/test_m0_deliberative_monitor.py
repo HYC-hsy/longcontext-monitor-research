@@ -131,6 +131,69 @@ def test_m1_final_decision_updates_workspace_without_forcing_hold(monkeypatch, t
     assert '"m1_semantic_workspace"' in session.prompts[0]
 
 
+def test_m1_read_only_watch_does_not_persist_semantic_churn(monkeypatch, tmp_path):
+    delta = {"upsert": [{
+        "id": "question:transient", "role": "open_question",
+        "summary": "A read-only search is still in progress",
+        "source_anchors": ["turn:1"], "root_links": ["root:public-task"],
+    }], "deactivate": [], "relations": []}
+    monitor, _ = build_m1_monitor(
+        monkeypatch, tmp_path, [decision("SILENT", workspace_delta=delta)]
+    )
+    current = packet()
+    current["tool_calls"] = [{"tool_name": "file_read", "args": {"path": "x.py"}}]
+
+    assert monitor.review(current) == ""
+    assert "question:transient" not in {
+        row["id"] for row in monitor.semantic_workspace.view()["objects"]
+    }
+    assert monitor.decisions[-1]["workspace_update_result"]["reason"] == "no_semantic_event"
+
+
+def test_m1_root_audit_rephrasing_updates_state_without_replacing_contract(
+        monkeypatch, tmp_path):
+    paraphrased = [
+        {"obligation": "A appears complete now", "status": "supported",
+         "public_evidence": ["turn 4"]},
+        {"obligation": "B remains uncertain", "status": "contested",
+         "public_evidence": ["turn 5"]},
+    ]
+    monitor, _ = build_m1_monitor(
+        monkeypatch, tmp_path, [decision("SILENT", root_obligation_audit=paraphrased)]
+    )
+
+    monitor.review(packet())
+
+    assert [row["obligation"] for row in monitor.root_obligation_audit] == [
+        "Implement A", "Implement B",
+    ]
+    assert [row["status"] for row in monitor.root_obligation_audit] == [
+        "supported", "contested",
+    ]
+    assert monitor.semantic_workspace.metrics()["root_obligations"] == 2
+
+
+def test_m1_routine_prompt_uses_bounded_view_not_full_workspace(monkeypatch, tmp_path):
+    monitor, session = build_m1_monitor(monkeypatch, tmp_path, [decision("SILENT")])
+    monitor.semantic_workspace.sync_root_obligations(root_audit(), 1, 1)
+    for index in range(60):
+        monitor.semantic_workspace.apply_delta({"upsert": [{
+            "id": f"evidence:{index}", "role": "public_evidence",
+            "summary": f"unique-evidence-{index}", "source_anchors": [f"turn:{index}"],
+            "root_links": ["obligation:0000"],
+        }], "deactivate": [], "relations": []}, turn=index + 2, decision_index=index + 2)
+
+    monitor.review(packet(70))
+
+    assert "unique-evidence-59" in session.prompts[0]
+    assert "unique-evidence-0" not in session.prompts[0]
+    checkpoint = json.loads((tmp_path / "monitor" / "monitor_checkpoint.json").read_text(
+        encoding="utf-8"
+    ))
+    assert "m1_workspace_metrics" in checkpoint
+    assert "m1_workspace" not in checkpoint
+
+
 def test_m1_monitor_can_reconstruct_from_semantic_workspace(monkeypatch, tmp_path):
     first, _ = build_m1_monitor(monkeypatch, tmp_path, [decision(
         "SILENT", workspace_delta={

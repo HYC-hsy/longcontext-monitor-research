@@ -13,10 +13,12 @@ from research_runtime import (
     decide_completion,
     emit,
     payload_summary,
+    register_provider_call,
     research_context,
     temporary_exporter,
     wrap_generator,
 )
+from llmcore import _record_usage
 
 
 def test_jsonl_sink_and_identity(tmp_path):
@@ -105,6 +107,30 @@ def test_process_exporter_enables_telemetry_without_artifact_sink():
     with temporary_exporter(exported.append), research_context({"run_id": "otel-only"}):
         emitted = emit("termination", {"result": "CURRENT_TASK_DONE"})
     assert exported == [emitted]
+
+
+def test_provider_usage_is_linked_and_separates_monitor_calls():
+    events = []
+    with research_context({"run_id": "usage"}, events.append):
+        register_provider_call({
+            "llm_call_id": "llm-monitor-1",
+            "provider_request_event_id": "evt-request-1",
+            "call_type": "monitor",
+        })
+        _record_usage({
+            "input_tokens": 31,
+            "output_tokens": 7,
+            "cache_read_input_tokens": 19,
+            "cache_creation_input_tokens": 3,
+        }, "messages")
+
+    usage = events[0]
+    assert usage["event_type"] == "provider_usage"
+    assert usage["llm_call_id"] == "llm-monitor-1"
+    assert usage["parent_event_id"] == "evt-request-1"
+    assert usage["payload"]["call_type"] == "monitor"
+    assert usage["payload"]["input_tokens"] == 31
+    assert usage["payload"]["output_tokens"] == 7
 
 
 def test_otel_exporter_adds_span_context_without_reserializing_event():

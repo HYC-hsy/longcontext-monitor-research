@@ -201,6 +201,9 @@ class M0DeliberativeMonitor:
             raise ValueError(f"Unsupported M0 monitor config: {config_name}")
         session.max_tokens = max(session.max_tokens or 0, 16000)
         self.session = session
+        # Research telemetry distinguishes the supervised task model from the
+        # monitor even when both use the same low-level provider client.
+        self.session.research_call_type = "monitor"
         self.deep_reasoning_effort = getattr(session, "reasoning_effort", None)
         self.shadow_reasoning_effort = "high" if self.deep_reasoning_effort == "xhigh" else self.deep_reasoning_effort
         self.public_task = public_task
@@ -292,7 +295,7 @@ class M0DeliberativeMonitor:
         }
         if self.semantic_workspace is not None:
             state["m1_workspace_enabled"] = True
-            state["m1_workspace"] = self.semantic_workspace.view()
+            state["m1_workspace_metrics"] = self.semantic_workspace.metrics()
         return state
 
     def _base_prompt(self) -> str:
@@ -744,6 +747,11 @@ When M1 semantic workspace is present, it is a reconstructable projection, never
 read_semantic_workspace to revisit all active objects and relations, or search_semantic_workspace with
 pattern/limit to find intent, hypothesis, evidence, UNKNOWN, repair, or root-linked objects. If it
 conflicts with the immutable task or raw public history, trust those sources and correct the projection.
+Root obligation identities are stable after initialization. Never create a root_contract or
+root_obligation through workspace_delta. A genuinely omitted explicit public-task obligation may be
+recovered only through root_obligation_audit; otherwise link local intent, evidence, questions, and
+repair state to existing ids. A failed patch, unrun test, fixture search, or temporary diagnostic is
+episode-local evidence, not a new root requirement.
 
 """
 
@@ -760,7 +768,7 @@ conflicts with the immutable task or raw public history, trust those sources and
         )
         if self.semantic_workspace is not None:
             base += (
-                ',"workspace_delta":{"upsert":[{"id":"stable-open-semantic-id","role":"root_obligation|local_intent|causal_hypothesis|public_evidence|open_question|repair_episode|other",'
+                ',"workspace_delta":{"upsert":[{"id":"stable-open-semantic-id","role":"local_intent|causal_hypothesis|public_evidence|open_question|repair_episode|other",'
                 '"summary":"natural-language semantic content","state":"open semantic state","source_anchors":["public turn/file/test/diff anchor"],'
                 '"root_links":["root:public-task or obligation id"]}],"deactivate":["obsolete active object id"],'
                 '"relations":[{"source":"object id","relation":"open semantic relation","target":"object id","summary":"why this relation matters"}]}'
@@ -791,7 +799,7 @@ conflicts with the immutable task or raw public history, trust those sources and
             "inspection_results": inspection_results,
         }
         if self.semantic_workspace is not None:
-            public_packet["m1_semantic_workspace"] = self.semantic_workspace.view()
+            public_packet["m1_semantic_workspace"] = self.semantic_workspace.active_view()
         if self.recent_trajectory_turns:
             public_packet["recent_public_trajectory"] = self.trajectory[
                 -self.recent_trajectory_turns:
@@ -863,9 +871,12 @@ For a final decision:
 When M1 is enabled, update workspace_delta only for semantic state that should survive beyond this
 boundary: the current local intent or causal hypothesis, public evidence and its scope, material open
 questions, repair state, and links back to root obligations. Stable roles organize meaning but do not
-limit it: role, state, relation, and natural-language payloads are extensible. Reuse stable ids instead
-of duplicating objects. Deactivate stale working objects rather than erasing raw history. A workspace
-update is private memory maintenance and never by itself justifies INSPECT, HOLD, or broader scope.
+limit it: role, state, relation, and natural-language payloads are extensible. Do not emit a semantic
+delta for ordinary reads, accepted repair progress, failed patch mechanics, or an unchanged watch.
+Reuse stable ids instead of duplicating objects. Deactivate stale working objects rather than erasing
+raw history. A workspace update is private memory maintenance and never by itself justifies INSPECT,
+HOLD, or broader scope. One repair episode has one current residual; refine it instead of creating a
+new root-linked obligation for each test detail.
 """ if self.semantic_workspace is not None else "") + """
 
 CURRENT PUBLIC BOUNDARY:
@@ -967,7 +978,7 @@ CURRENT PUBLIC BOUNDARY:
             if isinstance(supplied_audit, list) and supplied_audit:
                 captured = self._normalize_root_audit(supplied_audit)
                 if captured is not None:
-                    self.root_obligation_audit = captured
+                    self.root_obligation_audit = self._reconcile_root_audit(captured)
             action = str(decision.get("action", "")).upper()
             if action in DECISIONS and not self.root_obligation_audit:
                 protocol_failures += 1
@@ -1246,7 +1257,7 @@ CURRENT PUBLIC BOUNDARY:
             for item in contested:
                 self.contested_artifacts[item["path"]] = item
             if packet.get("boundary") == "completion_proposal":
-                self.root_obligation_audit = root_audit
+                self.root_obligation_audit = self._reconcile_root_audit(root_audit)
                 if action in {"HOLD", "ABSTAIN"}:
                     self.root_task_release_basis = (
                         "Root completion remains held. "
@@ -1330,11 +1341,17 @@ CURRENT PUBLIC BOUNDARY:
                     turn=int(packet.get("internal_turn") or 0),
                     decision_index=decision_index,
                 )
-                workspace_result = self.semantic_workspace.apply_delta(
-                    normalized.get("workspace_delta"),
-                    turn=int(packet.get("internal_turn") or 0),
-                    decision_index=decision_index,
-                )
+                if self._workspace_semantic_event(packet, normalized):
+                    workspace_result = self.semantic_workspace.apply_delta(
+                        normalized.get("workspace_delta"),
+                        turn=int(packet.get("internal_turn") or 0),
+                        decision_index=decision_index,
+                    )
+                else:
+                    workspace_result = {
+                        "applied": False, "reason": "no_semantic_event", "upserted": 0,
+                        "deactivated": 0, "relations": 0, "invalid": 0,
+                    }
                 workspace_result["root_obligations_changed"] = root_changes
                 workspace_result["repair_episodes_changed"] = repair_changes
                 normalized["workspace_update_result"] = workspace_result
@@ -1381,6 +1398,48 @@ CURRENT PUBLIC BOUNDARY:
                     item[key] = str(row[key]).strip()
             normalized.append(item)
         return normalized
+
+    def _reconcile_root_audit(self, captured: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Keep existing obligation text while allowing recovered omissions to append."""
+        if not self.root_obligation_audit:
+            return [dict(row) for row in captured]
+        previous = list(self.root_obligation_audit)
+        by_text = {str(row.get("obligation", "")).strip(): row for row in captured}
+        reconciled: list[dict[str, Any]] = []
+        for index, old in enumerate(previous):
+            old_text = str(old.get("obligation", "")).strip()
+            new = by_text.get(old_text)
+            if new is None and len(captured) == len(previous):
+                new = captured[index]
+            if new is None:
+                reconciled.append(dict(old))
+                continue
+            reconciled.append({
+                **new,
+                "obligation": old_text,
+            })
+        if len(captured) > len(previous):
+            reconciled.extend(dict(row) for row in captured[len(previous):])
+        return reconciled
+
+    @staticmethod
+    def _workspace_semantic_event(packet: Mapping[str, Any],
+                                  decision: Mapping[str, Any]) -> bool:
+        """Persist semantic deltas only at evidence or control state changes."""
+        if decision.get("action") in {"HOLD", "ABSTAIN", "RELEASE"}:
+            return True
+        if packet.get("boundary") == "completion_proposal":
+            return True
+        calls = packet.get("tool_calls", []) or []
+        informative_tools = {
+            "file_patch", "file_write", "code_run", "bash", "shell", "execute",
+            "git_commit", "git_apply", "write_file", "edit_file",
+        }
+        return any(
+            isinstance(call, Mapping)
+            and str(call.get("tool_name", call.get("name", ""))) in informative_tools
+            for call in calls
+        )
 
     def review_completion(self, proposal: Any, turn: int,
                           provider_link: Mapping[str, Any] | None = None,

@@ -1,6 +1,6 @@
 import os, json, re, time, requests, sys, threading, urllib3, base64, importlib, uuid, pathlib
 from datetime import datetime
-from research_runtime import emit as _research_emit, new_id as _research_id, payload_summary as _payload_summary, sha256_json as _sha256_json, telemetry_enabled as _telemetry_enabled, consume_pending_intervention as _consume_pending_intervention, register_provider_call as _register_provider_call
+from research_runtime import emit as _research_emit, new_id as _research_id, payload_summary as _payload_summary, sha256_json as _sha256_json, telemetry_enabled as _telemetry_enabled, consume_pending_intervention as _consume_pending_intervention, register_provider_call as _register_provider_call, current_provider_call as _current_provider_call
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 _RESP_CACHE_KEY = str(uuid.uuid4()); _RESP_CODEX_KEY = str(uuid.uuid4())
 _ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -321,6 +321,7 @@ def _parse_openai_sse(resp_lines, api_mode="chat_completions"):
 
 def _record_usage(usage, api_mode):
     if not usage: return
+    inp = out = cached = cache_creation = cache_read = 0
     if api_mode == 'responses':
         cached = (usage.get("input_tokens_details") or {}).get("cached_tokens", 0)
         inp = usage.get("input_tokens", 0); out = usage.get("output_tokens", 0)
@@ -332,8 +333,23 @@ def _record_usage(usage, api_mode):
         print(f"[Cache] input={inp} cached={cached}")
         if out: print(f"[Output] tokens={out}")
     elif api_mode == 'messages':
-        ci, cr, inp = usage.get("cache_creation_input_tokens", 0), usage.get("cache_read_input_tokens", 0), usage.get("input_tokens", 0)
-        print(f"[Cache] input={inp} creation={ci} read={cr}")
+        cache_creation = usage.get("cache_creation_input_tokens", 0)
+        cache_read = usage.get("cache_read_input_tokens", 0)
+        inp = usage.get("input_tokens", 0); out = usage.get("output_tokens", 0)
+        print(f"[Cache] input={inp} creation={cache_creation} read={cache_read}")
+    provider_call = _current_provider_call()
+    if provider_call:
+        _research_emit("provider_usage", {
+            "api_mode": api_mode,
+            "call_type": provider_call.get("call_type", "task_agent"),
+            "input_tokens": inp,
+            "output_tokens": out,
+            "cached_input_tokens": cached,
+            "cache_creation_input_tokens": cache_creation,
+            "cache_read_input_tokens": cache_read,
+            "raw_usage": dict(usage),
+        }, llm_call_id=provider_call.get("llm_call_id"),
+           parent_event_id=provider_call.get("provider_request_event_id"))
     otel_plugin = sys.modules.get('plugins.otel_tracing')
     if otel_plugin:
         try: otel_plugin.record_usage(usage, api_mode)
@@ -390,12 +406,15 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
         intervention_link = _consume_pending_intervention()
         capture = bool(getattr(sess, 'research_capture_payload', False))
         request_info = _payload_summary(payload, capture_content=capture)
-        request_info.update({'provider_url': url.split('?', 1)[0], 'max_retries': sess.max_retries})
+        call_type = str(getattr(sess, 'research_call_type', 'task_agent'))
+        request_info.update({'provider_url': url.split('?', 1)[0], 'max_retries': sess.max_retries,
+                             'call_type': call_type})
         if intervention_link: request_info.update(intervention_link)
         request_event = _research_emit('provider_request_ready', request_info, llm_call_id=llm_call_id)
         _register_provider_call({
             'llm_call_id': llm_call_id,
             'provider_request_event_id': request_event['event_id'] if request_event else None,
+            'call_type': call_type,
             **(intervention_link or {}),
         })
     def _delay(resp, attempt):
