@@ -71,11 +71,13 @@ def test_m0_monitor_is_explicitly_opt_in(monkeypatch):
     monkeypatch.setenv("GA_M0_MONITOR_CONFIG", "native_openai_cc_vibe")
     monkeypatch.setenv("GA_M0_MAX_INSPECTIONS", "12")
     monkeypatch.setenv("GA_M1_WORKSPACE_ENABLED", "1")
+    monkeypatch.setenv("GA_M1_ACTIVE_RECONSTRUCTION_ENABLED", "1")
     values = m12.stage4_agent_kwargs()
     assert values["m0_monitor_enabled"] is True
     assert values["m0_monitor_config"] == "native_openai_cc_vibe"
     assert values["m0_max_inspections"] == 12
     assert values["m1_workspace_enabled"] is True
+    assert values["m1_active_reconstruction_enabled"] is True
 
 
 def test_m1_workspace_cannot_run_without_m0(monkeypatch):

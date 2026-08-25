@@ -115,7 +115,7 @@ The patch is tagged `m0-v1.1`; it does not alter M0 behavior. Its first M1 long 
 
 **Purpose:** give M0's existing intelligence a reliable external cognitive substrate without constraining its open semantic judgment.
 
-**Current state (2026-08-24):** the independently switchable engineering candidate is implemented and its non-paid unit/integration/configuration gates pass. The control prompt was byte-for-byte compared with `m0-v1.1` under the disabled switch and is unchanged for the audited fixture. The four-task, three-source real panel and eight-run prepared manifest are frozen, but no M1 treatment run has started. Therefore M1 is not accepted and no `m1` tag exists.
+**Current state (2026-08-25):** the independently switchable engineering candidate is implemented. Its first bounded FBR treatment produced useful partial state/monitor evidence but terminated after about 71 minutes because the monitor provider exhausted its daily allowance; the interrupted workspace then scored 0/7 from one unfinished MIME import and is not a valid end-to-end effect sample. The run also exposed abnormal context cost: prior boundary prompts, complete passive state, and active tools duplicated information. Before a fresh treatment, M1 now has an M1-C gate implementing a minimal passive wake-up view plus monitor-directed active reconstruction, as specified in `M1_ACTIVE_RECONSTRUCTION_COST_GATE_20260825.md`. Non-paid connectivity tests pass, but capability preservation and task-level gain remain unverified. Therefore M1 is not accepted and no `m1` tag exists.
 
 Starting from M0-v1, add the smallest state that preserves:
 

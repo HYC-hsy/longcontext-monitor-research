@@ -376,6 +376,51 @@ class PersistentTaskWorkspace:
             "truncated": len(selected) < len(active) or len(relations) > relation_limit,
         }
 
+    def index_view(self, *, object_limit: int = 80) -> dict[str, Any]:
+        """Return a cheap navigation index, leaving semantic detail on demand."""
+        active = [row for row in self.objects.values()
+                  if row.get("state") != "inactive"]
+        active.sort(
+            key=lambda row: (
+                row.get("role") not in {"root_contract", "root_obligation", "repair_episode"},
+                -int(row.get("updated_turn") or 0),
+                str(row.get("id", "")),
+            )
+        )
+        selected = active[:max(1, min(200, object_limit))]
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "public_task_sha256": self.public_task_sha256,
+            "objects": [{
+                "id": row.get("id"),
+                "role": row.get("role"),
+                "state": row.get("state"),
+                "summary_hint": self._clean_text(row.get("summary"), 240),
+                "updated_turn": row.get("updated_turn"),
+                "root_links": list(row.get("root_links", []))[:8],
+            } for row in selected],
+            "metrics": self.metrics(),
+            "truncated": len(selected) < len(active),
+            "retrieval_hint": (
+                "Use read_semantic_object for an exact id or "
+                "search_semantic_workspace for a semantic query."
+            ),
+        }
+
+    def get_object(self, identifier: str) -> dict[str, Any]:
+        """Retrieve one semantic object and its directly connected relations."""
+        clean = self._clean_id(identifier)
+        if not clean:
+            return {"ok": False, "error": "valid object id is required"}
+        row = self.objects.get(clean)
+        if row is None:
+            return {"ok": False, "error": "semantic object not found", "id": clean}
+        relations = [value for value in self.relations.values()
+                     if value.get("source") == clean or value.get("target") == clean]
+        relations.sort(key=self._relation_key)
+        return {"ok": True, "object": dict(row), "relations": relations[:100],
+                "relations_truncated": len(relations) > 100}
+
     def metrics(self) -> dict[str, Any]:
         active = [row for row in self.objects.values() if row.get("state") != "inactive"]
         return {

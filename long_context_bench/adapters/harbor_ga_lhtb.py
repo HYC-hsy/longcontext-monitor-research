@@ -76,6 +76,8 @@ class HarborLHTBGenericAgent(HarborGenericAgent):
             env["GA_M0_MONITOR_ARTIFACT_DIR"] = "/logs/agent/m0_monitor"
             if self.m1_workspace_enabled:
                 env["GA_M1_WORKSPACE_ENABLED"] = "1"
+            if self.m1_active_reconstruction_enabled:
+                env["GA_M1_ACTIVE_RECONSTRUCTION_ENABLED"] = "1"
         import os
 
         for name in FORWARDED_ENV_VARS:

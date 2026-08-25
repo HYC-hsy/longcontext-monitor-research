@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
 import sys
 import types
 from pathlib import Path
@@ -127,6 +128,7 @@ def test_lhtb_forwards_research_and_manual_completion_environment(monkeypatch):
         m0_monitor_config="native_openai_cc_vibe",
         m0_max_inspections=12,
         m1_workspace_enabled=True,
+        m1_active_reconstruction_enabled=True,
     )
 
     env = agent._agent_env("/site-packages")
@@ -143,6 +145,7 @@ def test_lhtb_forwards_research_and_manual_completion_environment(monkeypatch):
     assert env["GA_M0_MAX_INSPECTIONS"] == "12"
     assert env["GA_M0_MONITOR_ARTIFACT_DIR"] == "/logs/agent/m0_monitor"
     assert env["GA_M1_WORKSPACE_ENABLED"] == "1"
+    assert env["GA_M1_ACTIVE_RECONSTRUCTION_ENABLED"] == "1"
 
 
 def test_m1_workspace_requires_m0_monitor(monkeypatch):
@@ -154,6 +157,92 @@ def test_m1_workspace_requires_m0_monitor(monkeypatch):
             ga_source_sha256="abc", timeout_sec=60, task_id="lhtb:task",
             m1_workspace_enabled=True,
         )
+
+
+def test_m1_active_reconstruction_requires_workspace(monkeypatch):
+    module = load_adapter(monkeypatch)
+    with pytest.raises(ValueError, match="active reconstruction requires"):
+        module.HarborLHTBGenericAgent(
+            model_name="claude-opus-4-6", llm_no=0, run_id="invalid-active-view",
+            expected_model="claude-opus-4-6", python_home="python-home",
+            ga_source_sha256="abc", timeout_sec=60, task_id="lhtb:task",
+            m0_monitor_enabled=True, m0_monitor_config="native_openai_cc_vibe",
+            m1_active_reconstruction_enabled=True,
+        )
+
+
+class FakeMonitorSession:
+    def __init__(self):
+        self.max_tokens = 0
+        self.reasoning_effort = "high"
+        self.calls = []
+
+    def raw_ask(self, messages):
+        self.calls.append(messages)
+        return iter([json.dumps({"action": "SILENT", "notes": "remember"})])
+
+
+def build_active_monitor(tmp_path, monkeypatch):
+    ga_root = ROOT.parent / "GenericAgent-main"
+    monkeypatch.syspath_prepend(str(ga_root))
+    import m0_deliberative_monitor as monitor_module
+    session = FakeMonitorSession()
+    monkeypatch.setattr(monitor_module, "resolve_session", lambda _: session)
+    monitor = monitor_module.M0DeliberativeMonitor(
+        public_task="Keep API compatibility and implement seven explicit targets.",
+        workspace=tmp_path,
+        config_name="fake",
+        artifact_dir=tmp_path / "active",
+        m1_workspace_enabled=True,
+        active_reconstruction_enabled=True,
+    )
+    return monitor, session
+
+
+def monitor_packet(turn, payload=""):
+    return {
+        "boundary": "turn", "internal_turn": turn,
+        "response_content": f"agent intent at {turn} {payload}",
+        "tool_calls": [{"tool_name": "code_run", "args": {"script": payload}}],
+        "tool_results": [f"result {turn} {payload}"],
+    }
+
+
+def test_active_monitor_does_not_resend_prior_boundary_prompts(tmp_path, monkeypatch):
+    monitor, session = build_active_monitor(tmp_path, monkeypatch)
+    monitor._ask(monitor._prompt(monitor_packet(1, "FIRST_UNIQUE_MARKER"), []))
+    monitor._ask(monitor._prompt(monitor_packet(2, "SECOND_UNIQUE_MARKER"), []))
+    assert len(session.calls) == 2
+    assert len(session.calls[0]) == len(session.calls[1]) == 3
+    second_wire = json.dumps(session.calls[1], ensure_ascii=False)
+    assert "SECOND_UNIQUE_MARKER" in second_wire
+    assert "FIRST_UNIQUE_MARKER" not in second_wire
+    assert len(monitor.history) == 2
+
+
+def test_active_monitor_indexes_and_retrieves_removed_detail(tmp_path, monkeypatch):
+    monitor, _ = build_active_monitor(tmp_path, monkeypatch)
+    monitor._observe_boundary(monitor_packet(1, "trajectory needle"))
+    monitor.semantic_workspace.apply_delta({
+        "upsert": [{
+            "id": "intent:one", "role": "local_intent",
+            "summary": "Inspect the changed test before production edits.",
+            "state": "active", "source_anchors": ["public_trajectory:turn:1"],
+            "root_links": ["root:public-task"],
+        }], "deactivate": [], "relations": [],
+    }, turn=1, decision_index=1)
+    prompt = monitor._prompt(monitor_packet(2), [])
+    assert '"semantic_workspace_index"' in prompt
+    assert '"m1_semantic_workspace"' not in prompt
+    assert '"durable_monitor_checkpoint"' not in prompt
+    original = monitor._inspect_trajectory({"operation": "read_original_task"})
+    recent = monitor._inspect_trajectory({"operation": "read_recent_delta", "limit": 1})
+    semantic = monitor._inspect_semantic_workspace({
+        "operation": "read_semantic_object", "id": "intent:one",
+    })
+    assert original["ok"] and "seven explicit targets" in original["public_task"]
+    assert recent["ok"] and "trajectory needle" in json.dumps(recent)
+    assert semantic["ok"] and semantic["object"]["id"] == "intent:one"
 
 
 def test_second_phase_uses_reply_without_restarting(monkeypatch):

@@ -315,6 +315,9 @@ class GenericAgent:
                     max_inspections=int(os.environ.get('GA_M0_MAX_INSPECTIONS', '8')),
                     recent_trajectory_turns=int(os.environ.get('GA_M0_RECENT_TRAJECTORY_TURNS', '0')),
                     m1_workspace_enabled=os.environ.get('GA_M1_WORKSPACE_ENABLED') == '1',
+                    active_reconstruction_enabled=(
+                        os.environ.get('GA_M1_ACTIVE_RECONSTRUCTION_ENABLED') == '1'
+                    ),
                 )
                 if self.completion_decision_callback is not None:
                     raise RuntimeError("M0 cannot share the completion boundary with another controller")

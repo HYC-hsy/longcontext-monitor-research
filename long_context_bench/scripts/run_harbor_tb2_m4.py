@@ -369,6 +369,8 @@ def harbor_job(
             })
             if os.environ.get("GA_M1_WORKSPACE_ENABLED") == "1":
                 kwargs["m1_workspace_enabled"] = True
+            if os.environ.get("GA_M1_ACTIVE_RECONSTRUCTION_ENABLED") == "1":
+                kwargs["m1_active_reconstruction_enabled"] = True
         elif os.environ.get("GA_M1_WORKSPACE_ENABLED") == "1":
             raise ValueError("GA_M1_WORKSPACE_ENABLED requires GA_M0_MONITOR_ENABLED")
         ledger_path = os.environ.get("GA_OBLIGATION_LEDGER_CARD_PATH")

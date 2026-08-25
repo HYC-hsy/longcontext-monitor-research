@@ -57,6 +57,7 @@ def common_environment(source_hash: str, condition: str) -> dict[str, str]:
     }
     if condition == "treatment":
         values["GA_M1_WORKSPACE_ENABLED"] = "1"
+        values["GA_M1_ACTIVE_RECONSTRUCTION_ENABLED"] = "1"
     return values
 
 
