@@ -245,6 +245,104 @@ def test_active_monitor_indexes_and_retrieves_removed_detail(tmp_path, monkeypat
     assert semantic["ok"] and semantic["object"]["id"] == "intent:one"
 
 
+def test_monitor_raises_bounded_transport_retry_floor(tmp_path, monkeypatch):
+    _, session = build_active_monitor(tmp_path, monkeypatch)
+    assert session.max_retries == 4
+
+
+@pytest.mark.parametrize("status,body", [
+    (400, '{"error":{"type":"upstream_error","message":"temporary"}}'),
+    (400, '{"error":{"message":"Upstream request failed"}}'),
+    (429, '{"code":"DAILY_LIMIT_EXCEEDED"}'),
+    (503, "temporarily unavailable"),
+])
+def test_retryable_provider_failures(status, body, monkeypatch):
+    ga_root = ROOT.parent / "GenericAgent-main"
+    monkeypatch.syspath_prepend(str(ga_root))
+    from llmcore import _retryable_http_error
+    assert _retryable_http_error(status, body)
+
+
+@pytest.mark.parametrize("status,body", [
+    (400, '{"error":{"type":"invalid_request_error"}}'),
+    (400, '{"error":{"message":"unsupported parameter"}}'),
+    (401, '{"error":{"type":"authentication_error"}}'),
+    (403, '{"error":{"type":"permission_error"}}'),
+    (404, "not found"),
+])
+def test_permanent_provider_failures_are_not_retried(status, body, monkeypatch):
+    ga_root = ROOT.parent / "GenericAgent-main"
+    monkeypatch.syspath_prepend(str(ga_root))
+    from llmcore import _retryable_http_error
+    assert not _retryable_http_error(status, body)
+
+
+class FakeHTTPResponse:
+    def __init__(self, status_code, text=""):
+        self.status_code = status_code
+        self.text = text
+        self.headers = {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+
+def stream_session():
+    return SimpleNamespace(
+        max_retries=4, stream=False, connect_timeout=1, read_timeout=1,
+        proxies=None, verify=True,
+    )
+
+
+def successful_parse(_response):
+    yield "ok"
+    return [{"type": "text", "text": "ok"}]
+
+
+def test_relay_wrapped_upstream_400_retries_through_success(monkeypatch):
+    ga_root = ROOT.parent / "GenericAgent-main"
+    monkeypatch.syspath_prepend(str(ga_root))
+    import llmcore
+    responses = iter([
+        FakeHTTPResponse(400, '{"error":{"type":"upstream_error"}}'),
+        FakeHTTPResponse(200),
+    ])
+    calls = []
+    monkeypatch.setattr(llmcore.requests, "post", lambda *a, **k: (calls.append(1), next(responses))[1])
+    monkeypatch.setattr(llmcore.time, "sleep", lambda seconds: None)
+
+    chunks = list(llmcore._stream_with_retry(
+        stream_session(), "https://relay.invalid/v1/responses", {}, {}, successful_parse,
+    ))
+
+    assert chunks == ["ok"]
+    assert len(calls) == 2
+
+
+def test_invalid_request_400_does_not_retry(monkeypatch):
+    ga_root = ROOT.parent / "GenericAgent-main"
+    monkeypatch.syspath_prepend(str(ga_root))
+    import llmcore
+    calls = []
+    monkeypatch.setattr(
+        llmcore.requests, "post",
+        lambda *a, **k: (
+            calls.append(1),
+            FakeHTTPResponse(400, '{"error":{"type":"invalid_request_error"}}'),
+        )[1],
+    )
+
+    chunks = list(llmcore._stream_with_retry(
+        stream_session(), "https://relay.invalid/v1/responses", {}, {}, successful_parse,
+    ))
+
+    assert len(calls) == 1
+    assert chunks and chunks[0].startswith("!!!Error: HTTP 400")
+
+
 def test_second_phase_uses_reply_without_restarting(monkeypatch):
     module = load_adapter(monkeypatch)
     agent = make_agent(module)

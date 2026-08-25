@@ -398,8 +398,25 @@ def _stamp_oai_cache_markers(messages, model):
             c = list(c); c[-1] = dict(c[-1], cache_control={'type': 'ephemeral'})
             messages[idx] = {**messages[idx], 'content': c}
 
+def _retryable_http_error(status_code, body=""):
+    """Classify transport-like HTTP failures without retrying ordinary 4xx errors."""
+    retryable_statuses = {
+        408, 409, 425, 429, 500, 502, 503, 504,
+        520, 521, 522, 523, 524, 525, 526, 527, 529,
+    }
+    if status_code in retryable_statuses:
+        return True
+    if status_code != 400:
+        return False
+    lowered = str(body or "").lower()
+    # Some OpenAI-compatible relays wrap a temporary upstream 5xx/transport
+    # failure in HTTP 400. Keep this deliberately narrow: malformed requests,
+    # authentication failures, and policy errors must not be retried.
+    return ('"type":"upstream_error"' in lowered
+            or '"type": "upstream_error"' in lowered
+            or "upstream request failed" in lowered)
+
 def _stream_with_retry(sess, url, headers, payload, parse_fn):
-    _RETRYABLE = {408, 409, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 527, 529}
     observing = _telemetry_enabled()
     llm_call_id = _research_id('llm') if observing else None
     if observing:
@@ -428,14 +445,15 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
             with requests.post(url, headers=headers, json=payload, stream=sess.stream, 
                                timeout=(sess.connect_timeout, sess.read_timeout), proxies=sess.proxies, verify=sess.verify) as r:
                 if r.status_code >= 400:
-                    if r.status_code in _RETRYABLE and attempt < sess.max_retries:
-                        d = _delay(r, attempt)
-                        _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code,
-                                       'outcome': 'retryable_http_error', 'retry_delay_seconds': d}, llm_call_id=llm_call_id)
-                        print(f"[LLM Retry] HTTP {r.status_code}, retry in {d:.1f}s ({attempt+1}/{sess.max_retries+1})")
-                        time.sleep(d); continue
                     try: body = r.text.strip()[:500]
                     except: body = ""
+                    if _retryable_http_error(r.status_code, body) and attempt < sess.max_retries:
+                        d = _delay(r, attempt)
+                        _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code,
+                                       'outcome': 'retryable_http_error', 'retry_delay_seconds': d,
+                                       'relay_wrapped_upstream_error': r.status_code == 400}, llm_call_id=llm_call_id)
+                        print(f"[LLM Retry] HTTP {r.status_code}, retry in {d:.1f}s ({attempt+1}/{sess.max_retries+1})")
+                        time.sleep(d); continue
                     err = f"!!!Error: HTTP {r.status_code}" + (f": {body}" if body else "")
                     _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code, 'outcome': 'http_error'}, llm_call_id=llm_call_id)
                     yield err; return [{"type": "text", "text": err}]

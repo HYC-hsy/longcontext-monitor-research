@@ -201,6 +201,10 @@ class M0DeliberativeMonitor:
         if session is None:
             raise ValueError(f"Unsupported M0 monitor config: {config_name}")
         session.max_tokens = max(session.max_tokens or 0, 16000)
+        # Monitor calls sit on the synchronous control boundary. A relay may
+        # expose a temporary upstream failure as HTTP 400; bounded transport
+        # retries are cheaper and safer than killing a long task mid-repair.
+        session.max_retries = max(getattr(session, "max_retries", 0), 4)
         self.session = session
         # Research telemetry distinguishes the supervised task model from the
         # monitor even when both use the same low-level provider client.
