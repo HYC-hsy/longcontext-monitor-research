@@ -18,7 +18,7 @@
 - M0 递增演化路线：`method_discovery/docs/METHOD_DISCOVERY_M0_EVOLUTIONARY_ROADMAP_20260824.md`。该文件于 2026-08-24 经用户确认，是 M0-v1 冻结后的最高优先级执行规划：M0-v1 是唯一可运行母体和回退点；后续版本只在上一接受版本上递增改造，每次必须以完整真实任务同时验证预期增益与既有 M0 能力退化；有效才提交并打版本标签，无效则回退。它覆盖旧 R1–R7 在 M0 之后的组件筛选顺序，但不改变研究问题、创新 A–D、无 checker 边界、数据划分或 final holdout 禁令。
 - 最终方法运行规范：`method_discovery/docs/FINAL_METHOD_OPERATIONAL_NORTH_STAR_20260824.md`。该文件定义最终 best-paper 产物从任务初始化、持续静默、注意激活、主动重建、判断、干预、持续 repair、局部释放、根任务完成到非成功终止和事后归档的完整生命周期。M1–M7 的实现和验收必须反向覆盖该规范；机制文件存在不等于方法完成。该规范固定目标行为而不固定唯一 schema、图实现、prompt 或数学估计器，允许在阶段目标不漂移、真实任务留痕和防过拟合约束下进行多轮实现尝试。
 - 成本贯穿而非延后：从 M1 起每次真实运行都必须记录 Agent/monitor 调用、输入输出与可见 token、延迟、wall time 和可得美元成本；同等效果下前期即优先简单、低成本实现。若增益只来自更多计算、出现异常成本或明显能力—成本冲突，必须按结果停止点汇报。M6 是在可靠能力成立后的系统性降本、active-view 和严格等预算验证阶段，不意味着 M1–M5 可以忽略成本，也不授权在能力成立前以降本为由削弱监察能力。
-- M1-C 成本门禁：`method_discovery/docs/M1_ACTIVE_RECONSTRUCTION_COST_GATE_20260825.md`。2026-08-25 的首个 bounded M1 FBR 真实运行因监察者日额度耗尽而终止，暴露旧实现重复发送历史边界 prompt、完整状态视图并同时保留主动工具的异常成本。下一次 M1 真实运行前，必须先通过“最小被动唤醒视图 + 同一监察者主动重建”修复：外部系统可靠保存原任务、ledger、repair episode、语义状态和完整归档；被动输入只承担态势唤醒与导航；监察者自主决定查看什么和查看多少。该修复提前实现 M6 的 active-view substrate，但不提前宣称成本贡献、不削弱持续 repair 能力，真实任务仍负责能力保持与 M1 晋级裁决。
+- M1-C 成本门禁：`method_discovery/docs/M1_ACTIVE_RECONSTRUCTION_COST_GATE_20260825.md`。M1-C 以“最小被动唤醒视图 + 同一监察者主动重建”修复旧实现重复发送历史边界 prompt、完整状态视图并同时保留主动工具的异常成本：外部系统可靠保存原任务、ledger、repair episode、语义状态和完整归档；被动输入承担态势唤醒与导航；监察者自主决定查看什么和查看多少。2026-08-26 用户裁决停止继续打磨 M1，回退到 commit `6128acc` 的 M1-C 能力—成本折中并将其冻结为 M2 的工程父版本；后续 sparse wake 与 bounded-UNKNOWN 候选保存在 rejected 历史分支，不进入 M2。系统性等预算降本仍属于 M6。
 
 ### 已确认的研究问题
 
@@ -56,8 +56,8 @@
 1. R0：多来源偏移事件、真实任务协议和 held-out 划分冻结（已完成）；
 2. M0.1--M0.4：人工能力上界重建、在线循环和真实任务确认（已完成核心能力构建）；
 3. M0-F：冻结 `m0-v1`，修复 timeout/JSON 归档等不改变策略的实验基础设施（已完成，`m0-v1.1`；首个 M1 长任务继续确认两小时外层限制）；
-4. M1：在 M0 上增加持久任务—推理—证据工作区，并以真实任务验证增益和退化；首个 bounded FBR 运行因监察者日额度耗尽而成为无效终局样本，但为状态边界修复提供了部分工程证据；当前先完成 M1-C 最小被动视图与主动重建成本门禁，再运行新的完整真实任务；M1 仍不能标记为 accepted `m1`；
-5. M2：在上一接受版本上增加 evidence-carrying versioned revision；
+4. M1：已按用户 2026-08-26 的阶段收束裁决冻结。M2 的父版本为 `6128acc` 的 M1-C 主动重建实现加行为中性的测试契约修复；这表示方法发现进入下一增量，不得夸大为已完成正式论文级充分验证；
+5. M2：当前阶段。在冻结 M1 父版本上增加 evidence-carrying versioned revision；不得带回 rejected sparse wake、bounded-UNKNOWN 或在线 checker；
 6. M3：增加 decision-centered epistemic control，解决调查范围与停止问题；
 7. M4：形式化证据门控边界、typed recovery 和持续 repair/release；
 8. M5：对单一累计方法做可靠性稳定、回滚消融和跨来源复验；

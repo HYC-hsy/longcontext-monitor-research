@@ -30,13 +30,14 @@ def test_manifest_prepares_eight_nonexecuting_runs_without_secrets():
     assert re.search(r"sk-[a-z0-9]{20,}", serialized) is None
 
 
-def test_treatment_diff_is_only_workspace_switch_before_runner_paths():
+def test_treatment_diff_is_only_m1c_switches_before_runner_paths():
     module = load_module()
     source_hash = "a" * 64
     control = module.common_environment(source_hash, "control")
     treatment = module.common_environment(source_hash, "treatment")
 
     assert treatment.pop("GA_M1_WORKSPACE_ENABLED") == "1"
+    assert treatment.pop("GA_M1_ACTIVE_RECONSTRUCTION_ENABLED") == "1"
     control["GA_CONDITION_ID"] = treatment["GA_CONDITION_ID"]
     assert treatment == control
 
