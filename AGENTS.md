@@ -57,8 +57,8 @@
 2. M0.1--M0.4：人工能力上界重建、在线循环和真实任务确认（已完成核心能力构建）；
 3. M0-F：冻结 `m0-v1`，修复 timeout/JSON 归档等不改变策略的实验基础设施（已完成，`m0-v1.1`；首个 M1 长任务继续确认两小时外层限制）；
 4. M1：已按用户 2026-08-26 的阶段收束裁决冻结。M2 的父版本为 `6128acc` 的 M1-C 主动重建实现加行为中性的测试契约修复；这表示方法发现进入下一增量，不得夸大为已完成正式论文级充分验证；
-5. M2：当前阶段。在冻结 M1 父版本上增加 evidence-carrying versioned revision；不得带回 rejected sparse wake、bounded-UNKNOWN 或在线 checker；
-6. M3：增加 decision-centered epistemic control，解决调查范围与停止问题；
+5. M2：已于 2026-08-28 收束。共同真实任务筛选保留 M2-C 的 scoped semantic-impact revision；M2-D 的直接依赖失效通道在 101 个监察边界内触发 0 次且运行超时，未证明相对 C 的独立收益，因此回退 D 并冻结 `m2-c-structural-gate`；详见 `method_discovery/docs/M2_STAGE_CLOSE_AND_M3_ENTRY_20260828.md`；
+6. M3：当前阶段。以冻结的 M2-C 为父版本增加 decision-centered epistemic control，解决调查范围、证据获取价值与停止问题；
 7. M4：形式化证据门控边界、typed recovery 和持续 repair/release；
 8. M5：对单一累计方法做可靠性稳定、回滚消融和跨来源复验；
 9. M6：汇总 M1–M5 持续记录的成本证据，在不预设成功的前提下进行系统性 capability-preserving cost reduction、active view 和等预算验证；
