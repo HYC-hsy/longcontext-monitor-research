@@ -7,6 +7,25 @@ from manual_completion_boundary import ManualCompletionBoundary
 from research_runtime import CompletionDecision, research_context
 
 
+class SSEStreamResponse:
+    status_code = 200
+    headers = {}
+
+    def __init__(self, events):
+        self.events = events
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def iter_lines(self):
+        import json
+        for event in self.events:
+            yield ("data: " + json.dumps(event)).encode()
+
+
 class Response:
     def __init__(self, content="done", tool_calls=None):
         self.content = content
@@ -49,6 +68,38 @@ def run_loop(handler, max_turns=2):
     return exhaust(agent_runner_loop(
         Client(Response()), "system", "task", handler, [], max_turns=max_turns, verbose=False
     ))
+
+
+def test_http_200_stream_read_error_retries_before_effective_output(monkeypatch):
+    responses = iter([
+        SSEStreamResponse([{
+            "type": "error",
+            "error": {"type": "stream_read_error", "message": "stream_read_error"},
+        }]),
+        SSEStreamResponse([
+            {"type": "response.output_text.delta", "delta": "OK"},
+            {"type": "response.completed", "response": {"usage": {}}},
+        ]),
+    ])
+    monkeypatch.setattr(llmcore.requests, "post", lambda *args, **kwargs: next(responses))
+    monkeypatch.setattr(llmcore.time, "sleep", lambda _: None)
+    session = SimpleNamespace(
+        max_retries=1, stream=True, connect_timeout=1, read_timeout=1,
+        proxies=None, verify=False, research_capture_payload=False,
+    )
+    events = []
+    with research_context({}, events.append):
+        chunks = list(llmcore._stream_with_retry(
+            session, "https://example.test/v1/responses", {}, {"model": "mock"},
+            lambda response: llmcore._parse_openai_sse(
+                response.iter_lines(), "responses",
+            ),
+        ))
+    assert chunks == ["OK"]
+    assert sum(e["event_type"] == "provider_request_attempt" for e in events) == 2
+    retry = next(e for e in events
+                 if e.get("payload", {}).get("outcome") == "retryable_transport_error")
+    assert retry["payload"]["error_type"] == "_RetryableStreamError"
 
 
 def test_default_gate_keeps_legacy_completion_and_event_order():

@@ -318,6 +318,15 @@ class GenericAgent:
                     active_reconstruction_enabled=(
                         os.environ.get('GA_M1_ACTIVE_RECONSTRUCTION_ENABLED') == '1'
                     ),
+                    m2_versioned_revision_enabled=(
+                        os.environ.get('GA_M2_VERSIONED_REVISION_ENABLED') == '1'
+                    ),
+                    m2_justification_invalidation_enabled=(
+                        os.environ.get('GA_M2_JUSTIFICATION_INVALIDATION_ENABLED') == '1'
+                    ),
+                    m2_semantic_impact_enabled=(
+                        os.environ.get('GA_M2_SEMANTIC_IMPACT_ENABLED') == '1'
+                    ),
                 )
                 if self.completion_decision_callback is not None:
                     raise RuntimeError("M0 cannot share the completion boundary with another controller")

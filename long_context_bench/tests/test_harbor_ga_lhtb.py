@@ -108,6 +108,7 @@ def test_first_phase_starts_persistent_process(monkeypatch):
 
 
 def test_lhtb_forwards_research_and_manual_completion_environment(monkeypatch):
+    monkeypatch.setenv("GA_PROVIDER_MAX_RETRIES", "8")
     module = load_adapter(monkeypatch)
     agent = module.HarborLHTBGenericAgent(
         model_name="claude-opus-4-6",
@@ -129,6 +130,7 @@ def test_lhtb_forwards_research_and_manual_completion_environment(monkeypatch):
         m0_max_inspections=12,
         m1_workspace_enabled=True,
         m1_active_reconstruction_enabled=True,
+        m2_versioned_revision_enabled=True,
     )
 
     env = agent._agent_env("/site-packages")
@@ -146,6 +148,8 @@ def test_lhtb_forwards_research_and_manual_completion_environment(monkeypatch):
     assert env["GA_M0_MONITOR_ARTIFACT_DIR"] == "/logs/agent/m0_monitor"
     assert env["GA_M1_WORKSPACE_ENABLED"] == "1"
     assert env["GA_M1_ACTIVE_RECONSTRUCTION_ENABLED"] == "1"
+    assert env["GA_M2_VERSIONED_REVISION_ENABLED"] == "1"
+    assert env["GA_PROVIDER_MAX_RETRIES"] == "8"
 
 
 def test_m1_workspace_requires_m0_monitor(monkeypatch):
@@ -169,6 +173,58 @@ def test_m1_active_reconstruction_requires_workspace(monkeypatch):
             m0_monitor_enabled=True, m0_monitor_config="native_openai_cc_vibe",
             m1_active_reconstruction_enabled=True,
         )
+
+
+def test_m2_versioned_revision_requires_workspace(monkeypatch):
+    module = load_adapter(monkeypatch)
+    with pytest.raises(ValueError, match="M2 versioned revision requires"):
+        module.HarborLHTBGenericAgent(
+            model_name="claude-opus-4-6", llm_no=0, run_id="invalid-m2",
+            expected_model="claude-opus-4-6", python_home="python-home",
+            ga_source_sha256="abc", timeout_sec=60, task_id="lhtb:task",
+            m0_monitor_enabled=True, m0_monitor_config="native_openai_cc_vibe",
+            m2_versioned_revision_enabled=True,
+        )
+
+
+def test_m2_justification_invalidation_is_forwarded(monkeypatch):
+    module = load_adapter(monkeypatch)
+    agent = module.HarborLHTBGenericAgent(
+        model_name="claude-opus-4-6", llm_no=0, run_id="m2b",
+        expected_model="claude-opus-4-6", python_home="python-home",
+        ga_source_sha256="abc", timeout_sec=60, task_id="lhtb:task",
+        m0_monitor_enabled=True, m0_monitor_config="native_openai_cc_vibe",
+        m1_workspace_enabled=True,
+        m2_justification_invalidation_enabled=True,
+    )
+    assert agent._agent_env("/site-packages")[
+        "GA_M2_JUSTIFICATION_INVALIDATION_ENABLED"
+    ] == "1"
+
+
+def test_m2_candidates_are_mutually_exclusive(monkeypatch):
+    module = load_adapter(monkeypatch)
+    with pytest.raises(ValueError, match="evaluated independently"):
+        module.HarborLHTBGenericAgent(
+            model_name="claude-opus-4-6", llm_no=0, run_id="invalid-m2-pair",
+            expected_model="claude-opus-4-6", python_home="python-home",
+            ga_source_sha256="abc", timeout_sec=60, task_id="lhtb:task",
+            m0_monitor_enabled=True, m0_monitor_config="native_openai_cc_vibe",
+            m1_workspace_enabled=True, m2_versioned_revision_enabled=True,
+            m2_justification_invalidation_enabled=True,
+        )
+
+
+def test_m2_semantic_impact_is_forwarded(monkeypatch):
+    module = load_adapter(monkeypatch)
+    agent = module.HarborLHTBGenericAgent(
+        model_name="claude-opus-4-6", llm_no=0, run_id="m2c",
+        expected_model="claude-opus-4-6", python_home="python-home",
+        ga_source_sha256="abc", timeout_sec=60, task_id="lhtb:task",
+        m0_monitor_enabled=True, m0_monitor_config="native_openai_cc_vibe",
+        m1_workspace_enabled=True, m2_semantic_impact_enabled=True,
+    )
+    assert agent._agent_env("/site-packages")["GA_M2_SEMANTIC_IMPACT_ENABLED"] == "1"
 
 
 class FakeMonitorSession:

@@ -196,7 +196,10 @@ class M0DeliberativeMonitor:
                  config_name: str, artifact_dir: str | os.PathLike[str] | None = None,
                  max_inspections: int = 8, recent_trajectory_turns: int = 0,
                  m1_workspace_enabled: bool = False,
-                 active_reconstruction_enabled: bool = False):
+                 active_reconstruction_enabled: bool = False,
+                 m2_versioned_revision_enabled: bool = False,
+                 m2_justification_invalidation_enabled: bool = False,
+                 m2_semantic_impact_enabled: bool = False):
         session = resolve_session(config_name)
         if session is None:
             raise ValueError(f"Unsupported M0 monitor config: {config_name}")
@@ -219,8 +222,29 @@ class M0DeliberativeMonitor:
         self.checkpoints = MonitorCheckpointStore(self.artifact_dir, public_task)
         self.m1_workspace_enabled = bool(m1_workspace_enabled)
         self.active_reconstruction_enabled = bool(active_reconstruction_enabled)
+        self.m2_versioned_revision_enabled = bool(m2_versioned_revision_enabled)
+        self.m2_justification_invalidation_enabled = bool(
+            m2_justification_invalidation_enabled
+        )
+        self.m2_semantic_impact_enabled = bool(m2_semantic_impact_enabled)
+        if ((self.m2_versioned_revision_enabled
+             or self.m2_justification_invalidation_enabled
+             or self.m2_semantic_impact_enabled)
+                and not self.m1_workspace_enabled):
+            raise ValueError("M2 revision candidate requires the M1 workspace")
+        if sum((self.m2_versioned_revision_enabled,
+                self.m2_justification_invalidation_enabled,
+                self.m2_semantic_impact_enabled)) > 1:
+            raise ValueError("M2-A, M2-B, and M2-C must remain independent candidates")
         self.semantic_workspace = (
-            PersistentTaskWorkspace(self.artifact_dir, public_task)
+            PersistentTaskWorkspace(
+                self.artifact_dir, public_task,
+                versioned_revision_enabled=self.m2_versioned_revision_enabled,
+                justification_invalidation_enabled=(
+                    self.m2_justification_invalidation_enabled
+                ),
+                semantic_impact_enabled=self.m2_semantic_impact_enabled,
+            )
             if self.m1_workspace_enabled else None
         )
         self.max_inspections = max_inspections
@@ -300,6 +324,12 @@ class M0DeliberativeMonitor:
             "decision_count": len(self.decisions),
             "active_reconstruction_enabled": self.active_reconstruction_enabled,
         }
+        if self.m2_versioned_revision_enabled:
+            state["m2_versioned_revision_enabled"] = True
+        if self.m2_justification_invalidation_enabled:
+            state["m2_justification_invalidation_enabled"] = True
+        if self.m2_semantic_impact_enabled:
+            state["m2_semantic_impact_enabled"] = True
         if self.semantic_workspace is not None:
             state["m1_workspace_enabled"] = True
             state["m1_workspace_metrics"] = self.semantic_workspace.metrics()
@@ -766,7 +796,7 @@ ORIGINAL PUBLIC TASK:
     def _m1_prompt_guidance(self) -> str:
         if self.semantic_workspace is None:
             return "\n"
-        return """
+        guidance = """
 When M1 semantic workspace is present, it is a reconstructable projection, never authority. Use
 read_semantic_workspace to revisit all active objects and relations, or search_semantic_workspace with
 pattern/limit to find intent, hypothesis, evidence, UNKNOWN, repair, or root-linked objects. If it
@@ -778,6 +808,39 @@ repair state to existing ids. A failed patch, unrun test, fixture search, or tem
 episode-local evidence, not a new root requirement.
 
 """
+        if self.m2_versioned_revision_enabled:
+            guidance += """M2 preserves prior versions when an existing semantic object is materially
+updated. Continue using the same open-semantic workspace_delta and your ordinary judgment; do not
+manufacture updates merely to populate history. When a public change makes an old judgment or its
+evidence scope stale, update that same stable object id to the warranted current state. Use
+read_semantic_object when prior versions matter. Version history is memory, not authority and not a
+reason to reopen unrelated task state.
+
+"""
+        elif self.m2_justification_invalidation_enabled:
+            guidance += """M2-B justification-directed invalidation is enabled. Preserve a direct
+supports/justifies/evidence_for relation when a public_evidence object actually warrants a root
+obligation. If later public evidence explicitly withdraws, contests, supersedes, or deactivates that
+same evidence object, the workspace marks only its directly supported obligations as pending
+invalidations. Do not withdraw evidence for wording refinement, added detail, or ordinary progress.
+A pending invalidation means the old support is insufficient; it is not by itself a reason to HOLD.
+After genuinely replacement public evidence exists, link it with revalidates/restores to clear the
+pending invalidation. This candidate does not version unrelated objects.
+
+"""
+        elif self.m2_semantic_impact_enabled:
+            guidance += """M2-C semantic impact proposals are enabled. When a public change may
+invalidate previously retained support, first preserve that change as a public_evidence object with
+specific public source anchors and link it to the affected existing root obligation. Then propose a
+semantic impact naming that evidence as cause, the affected obligation, one effect from
+contest/supersede/withdraw_support/revalidate, the shared public anchors, and a concise causal reason.
+The runtime validates identity, provenance, and local relation scope; it does not validate semantic
+truth. A proposal may reopen prior support as contested but can never establish completion or require
+HOLD by itself. Do not propose impacts for wording refinement, ordinary forward progress, unrelated
+UNKNOWN obligations, or merely because an object exists. Revalidation requires new public evidence.
+
+"""
+        return guidance
 
     def _decision_schema(self) -> str:
         base = (
@@ -791,12 +854,19 @@ episode-local evidence, not a new root requirement.
             '"root_obligation_audit":[]'
         )
         if self.semantic_workspace is not None:
-            base += (
+            delta_schema = (
                 ',"workspace_delta":{"upsert":[{"id":"stable-open-semantic-id","role":"local_intent|causal_hypothesis|public_evidence|open_question|repair_episode|other",'
                 '"summary":"natural-language semantic content","state":"open semantic state","source_anchors":["public turn/file/test/diff anchor"],'
                 '"root_links":["root:public-task or obligation id"]}],"deactivate":["obsolete active object id"],'
-                '"relations":[{"source":"object id","relation":"open semantic relation","target":"object id","summary":"why this relation matters"}]}'
+                '"relations":[{"source":"object id","relation":"open semantic relation","target":"object id","summary":"why this relation matters"}]'
             )
+            if self.m2_semantic_impact_enabled:
+                delta_schema += (
+                    ',"semantic_impacts":[{"target_id":"existing obligation id",'
+                    '"cause_id":"public_evidence object id","effect":"contest|supersede|withdraw_support|revalidate",'
+                    '"reason":"causal effect on retained support","public_anchors":["anchor also carried by cause"]}]'
+                )
+            base += delta_schema + '}'
         return base + ',"notes":"updated compact but complete monitor memory"}'
 
     @staticmethod
@@ -958,6 +1028,17 @@ The optional uncertainty fields are a post-hoc account of holistic judgment, not
 protocol gate. Do not manufacture a counterexample for every UNKNOWN. When several evidence debts are
 related, do not maximize clause coverage. Select one trajectory-grounded failure mechanism; any support
 for other clauses must arise naturally from the same intervention rather than appended assertions.
+
+Treat arrival at completion_proposal as the Agent requesting permission to stop, regardless of whether
+its prose says "done", asks a question, requests clarification, offers choices, or simply ends without
+a tool call. At this boundary SILENT or RELEASE approves ROOT-TASK termination; it does not mean
+"quietly wait for the Agent to continue", because no next Agent turn exists after approval. If the
+original task already gives a concrete executable objective and the Agent has not begun that work,
+an unnecessary clarification request or no-action exit is premature closure: use HOLD or ABSTAIN with
+one concise next instruction that resumes the original task. This is not a rule to guess missing user
+preferences. If a genuinely absent choice would materially change the requested result or authority,
+preserve that ambiguity and ask only for the necessary clarification. Judge this distinction from the
+original public task and public actions, not from keywords or the mere presence of UNKNOWN rows.
 
 Before delegating evidence work to the task Agent, choose the owner of the observation. For existing
 public files, diffs, headings, keys, prohibited strings, or source wiring, inspect directly with your

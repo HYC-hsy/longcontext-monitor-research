@@ -94,6 +94,21 @@ def build_m1_monitor(monkeypatch, tmp_path, responses):
     return monitor, session
 
 
+def build_m2_monitor(monkeypatch, tmp_path, responses):
+    session = FakeSession(responses)
+    monkeypatch.setattr(m0, "resolve_session", lambda _: session)
+    monitor = m0.M0DeliberativeMonitor(
+        public_task="Implement A and B; demonstrate both.",
+        workspace=tmp_path,
+        config_name="fake",
+        artifact_dir=tmp_path / "monitor",
+        m1_workspace_enabled=True,
+        m2_versioned_revision_enabled=True,
+    )
+    monitor.root_obligation_audit = root_audit()
+    return monitor, session
+
+
 def test_m1_workspace_is_independently_disabled_in_m0(monkeypatch, tmp_path):
     monitor, _ = build_monitor(monkeypatch, tmp_path, [decision("SILENT")])
     monitor.review(packet())
@@ -103,6 +118,38 @@ def test_m1_workspace_is_independently_disabled_in_m0(monkeypatch, tmp_path):
     ))
     assert monitor.semantic_workspace is None
     assert "m1_workspace" not in checkpoint
+
+
+def test_m2c_requires_workspace_and_is_independent(monkeypatch, tmp_path):
+    monkeypatch.setattr(m0, "resolve_session", lambda _: FakeSession([]))
+    with pytest.raises(ValueError, match="requires the M1 workspace"):
+        m0.M0DeliberativeMonitor(
+            public_task="Implement A.", workspace=tmp_path, config_name="fake",
+            artifact_dir=tmp_path / "missing-workspace",
+            m2_semantic_impact_enabled=True,
+        )
+    with pytest.raises(ValueError, match="must remain independent"):
+        m0.M0DeliberativeMonitor(
+            public_task="Implement A.", workspace=tmp_path, config_name="fake",
+            artifact_dir=tmp_path / "paired", m1_workspace_enabled=True,
+            m2_versioned_revision_enabled=True, m2_semantic_impact_enabled=True,
+        )
+
+
+def test_m2c_prompt_preserves_monitor_judgment_and_forbids_completion_authority(
+        monkeypatch, tmp_path):
+    monkeypatch.setattr(m0, "resolve_session", lambda _: FakeSession([]))
+    monitor = m0.M0DeliberativeMonitor(
+        public_task="Implement A.", workspace=tmp_path, config_name="fake",
+        artifact_dir=tmp_path / "monitor-c", m1_workspace_enabled=True,
+        m2_semantic_impact_enabled=True,
+    )
+    guidance = monitor._m1_prompt_guidance()
+    schema = monitor._decision_schema()
+    assert "runtime validates identity, provenance, and local relation scope" in guidance
+    assert "does not validate semantic" in guidance
+    assert "can never establish completion" in guidance
+    assert '"semantic_impacts"' in schema
     assert not (tmp_path / "monitor" / "m1_workspace.json").exists()
 
 
@@ -221,6 +268,43 @@ def test_m1_monitor_can_reconstruct_from_semantic_workspace(monkeypatch, tmp_pat
 
     assert '"matched": 1' in second_session.prompts[1]
     assert "A parser branch is suspect" in second_session.prompts[1]
+
+
+def test_m2_monitor_preserves_revision_without_changing_decision_protocol(
+        monkeypatch, tmp_path):
+    initial = decision("SILENT", workspace_delta={
+        "upsert": [{"id": "evidence:a", "role": "public_evidence",
+                    "summary": "A passed on implementation v1", "state": "supported",
+                    "source_anchors": ["turn:1:test", "code:a@v1"],
+                    "root_links": ["obligation:0000"]}],
+        "deactivate": [], "relations": [],
+    })
+    revised = decision("SILENT", workspace_delta={
+        "upsert": [{"id": "evidence:a", "role": "public_evidence",
+                    "summary": "A changed; prior test scope is stale", "state": "unknown",
+                    "source_anchors": ["turn:2:patch", "code:a@v2"],
+                    "root_links": ["obligation:0000"]}],
+        "deactivate": [], "relations": [],
+    })
+    monitor, session = build_m2_monitor(monkeypatch, tmp_path, [initial, revised])
+
+    assert monitor.review(packet(1)) == ""
+    assert monitor.review(packet(2)) == ""
+    evidence = monitor.semantic_workspace.get_object("evidence:a")
+    assert evidence["object"]["object_version"] == 2
+    assert evidence["revision_history"][0]["previous"]["state"] == "supported"
+    assert "do not\nmanufacture updates merely to populate history" in session.prompts[0]
+    assert all(row["action"] == "SILENT" for row in monitor.decisions)
+
+
+def test_m2_requires_m1_workspace(monkeypatch, tmp_path):
+    session = FakeSession([])
+    monkeypatch.setattr(m0, "resolve_session", lambda _: session)
+    with pytest.raises(ValueError, match="requires the M1 workspace"):
+        m0.M0DeliberativeMonitor(
+            public_task="Implement A.", workspace=tmp_path, config_name="fake",
+            artifact_dir=tmp_path / "monitor", m2_versioned_revision_enabled=True,
+        )
 
 
 def test_inspect_then_hold_records_public_evidence(monkeypatch, tmp_path):
@@ -481,7 +565,7 @@ def test_completion_hold_continues_task_with_full_public_response(monkeypatch, t
 
 
 def test_completion_silence_allows_task_to_finish(monkeypatch, tmp_path):
-    monitor, _ = build_monitor(monkeypatch, tmp_path, [
+    monitor, session = build_monitor(monkeypatch, tmp_path, [
         decision("SILENT", root_obligation_audit=root_audit())
     ])
 
@@ -489,6 +573,32 @@ def test_completion_silence_allows_task_to_finish(monkeypatch, tmp_path):
 
     assert result.decision == "ALLOW_COMPLETE"
     assert result.reason_codes == ("M0_SILENT",)
+    assert "Agent requesting permission to stop" in session.prompts[0]
+    assert "SILENT or RELEASE approves ROOT-TASK termination" in session.prompts[0]
+
+
+def test_completion_prompt_distinguishes_premature_clarification_from_real_ambiguity(
+    monkeypatch, tmp_path,
+):
+    hold = decision(
+        "HOLD",
+        message="Begin the concrete work already requested.",
+        discrepancy="The executable task was not started.",
+        authority_basis="user_contract",
+        material_task_impact="Stopping now leaves the requested work undone.",
+        why_silence_is_insufficient="Silence at this boundary permits termination.",
+        root_obligation_audit=root_audit(a="unknown", b="unknown"),
+    )
+    monitor, session = build_monitor(monkeypatch, tmp_path, [hold])
+
+    result = monitor.review_completion(
+        SimpleNamespace(response_preview="What would you like me to do?"), 2,
+    )
+
+    assert result.decision == "CONTINUE"
+    assert "unnecessary clarification request" in session.prompts[0]
+    assert "genuinely absent choice" in session.prompts[0]
+    assert "roadmap" not in session.prompts[0].lower()
 
 
 def test_completion_environment_blocked_unknown_must_release(monkeypatch, tmp_path):

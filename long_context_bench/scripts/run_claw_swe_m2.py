@@ -315,6 +315,9 @@ class M2GenericAgentAdapter(GenericAgentAdapter):
             "GA_M0_RECENT_TRAJECTORY_TURNS",
             "GA_M1_WORKSPACE_ENABLED",
             "GA_M1_ACTIVE_RECONSTRUCTION_ENABLED",
+            "GA_M2_VERSIONED_REVISION_ENABLED",
+            "GA_M2_JUSTIFICATION_INVALIDATION_ENABLED",
+            "GA_M2_SEMANTIC_IMPACT_ENABLED",
         ):
             value = os.environ.get(name)
             if value:

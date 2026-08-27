@@ -24,12 +24,19 @@ class PersistentTaskWorkspace:
     """Maintain a compact semantic projection with links to public sources."""
 
     def __init__(self, artifact_dir: str | os.PathLike[str] | None,
-                 public_task: str):
+                 public_task: str, versioned_revision_enabled: bool = False,
+                 justification_invalidation_enabled: bool = False,
+                 semantic_impact_enabled: bool = False):
         self.artifact_dir = Path(artifact_dir).resolve() if artifact_dir else None
         self.public_task = public_task
         self.public_task_sha256 = hashlib.sha256(
             public_task.encode("utf-8", errors="replace")
         ).hexdigest()
+        self.versioned_revision_enabled = bool(versioned_revision_enabled)
+        self.justification_invalidation_enabled = bool(
+            justification_invalidation_enabled
+        )
+        self.semantic_impact_enabled = bool(semantic_impact_enabled)
         self.path = self.artifact_dir / "m1_workspace.json" if self.artifact_dir else None
         self.events_path = (
             self.artifact_dir / "m1_workspace_events.jsonl" if self.artifact_dir else None
@@ -40,13 +47,22 @@ class PersistentTaskWorkspace:
         self.last_internal_turn: int | None = None
         self.root_ledger_frozen = False
         self.rejected_root_mutations = 0
+        self.revision_history: list[dict[str, Any]] = []
+        self.invalidation_history: list[dict[str, Any]] = []
+        self.pending_invalidations: dict[str, dict[str, Any]] = {}
+        self.semantic_impact_history: list[dict[str, Any]] = []
+        self.pending_semantic_impacts: dict[str, dict[str, Any]] = {}
+        self.rejected_semantic_impacts = 0
         self._load_or_bootstrap()
 
     def _load_or_bootstrap(self) -> None:
         loaded = self._read_snapshot()
         if loaded is not None:
             self.objects = {
-                str(row["id"]): dict(row)
+                str(row["id"]): (
+                    dict(row) if self.versioned_revision_enabled
+                    else {key: item for key, item in row.items() if key != "object_version"}
+                )
                 for row in loaded.get("objects", [])
                 if isinstance(row, Mapping) and row.get("id")
             }
@@ -59,6 +75,35 @@ class PersistentTaskWorkspace:
             self.last_internal_turn = loaded.get("last_internal_turn")
             self.root_ledger_frozen = bool(loaded.get("root_ledger_frozen", False))
             self.rejected_root_mutations = int(loaded.get("rejected_root_mutations", 0))
+            self.revision_history = [
+                dict(row) for row in loaded.get("revision_history", [])
+                if isinstance(row, Mapping) and row.get("object_id")
+            ] if self.versioned_revision_enabled else []
+            self.invalidation_history = [
+                dict(row) for row in loaded.get("invalidation_history", [])
+                if isinstance(row, Mapping) and row.get("target_id")
+            ] if self.justification_invalidation_enabled else []
+            self.pending_invalidations = {
+                str(row["target_id"]): dict(row)
+                for row in loaded.get("pending_invalidations", [])
+                if (self.justification_invalidation_enabled
+                    and isinstance(row, Mapping) and row.get("target_id"))
+            }
+            self.semantic_impact_history = [
+                dict(row) for row in loaded.get("semantic_impact_history", [])
+                if (self.semantic_impact_enabled and isinstance(row, Mapping)
+                    and row.get("target_id"))
+            ]
+            self.pending_semantic_impacts = {
+                str(row["target_id"]): dict(row)
+                for row in loaded.get("pending_semantic_impacts", [])
+                if (self.semantic_impact_enabled and isinstance(row, Mapping)
+                    and row.get("target_id"))
+            }
+            self.rejected_semantic_impacts = (
+                int(loaded.get("rejected_semantic_impacts", 0))
+                if self.semantic_impact_enabled else 0
+            )
             return
         self.objects["root:public-task"] = {
             "id": "root:public-task",
@@ -153,8 +198,152 @@ class PersistentTaskWorkspace:
                         right: Mapping[str, Any]) -> bool:
         if left is None:
             return False
-        return ({key: value for key, value in left.items() if key != "updated_turn"}
-                == {key: value for key, value in right.items() if key != "updated_turn"})
+        ignored = {"updated_turn", "object_version"}
+        return ({key: value for key, value in left.items() if key not in ignored}
+                == {key: value for key, value in right.items() if key not in ignored})
+
+    def _store_object(self, projected: Mapping[str, Any], *, turn: int,
+                      decision_index: int | None, reason: str) -> bool:
+        """Store the current projection, preserving replaced semantics only in M2.
+
+        M1 behavior is byte-for-byte compatible when versioned revision is off.
+        Versions describe monitor-owned semantic objects, not repository files or
+        hidden ground truth.  A version advance therefore never implies success.
+        """
+        row = dict(projected)
+        identifier = str(row["id"])
+        previous = self.objects.get(identifier)
+        changed = not self._semantic_equal(previous, row)
+        if not self.versioned_revision_enabled:
+            self.objects[identifier] = row
+            return changed
+        if previous is None:
+            row["object_version"] = 1
+        elif changed:
+            previous_version = int(previous.get("object_version", 1))
+            self.revision_history.append({
+                "object_id": identifier,
+                "previous_version": previous_version,
+                "new_version": previous_version + 1,
+                "superseded_turn": turn,
+                "decision_index": decision_index,
+                "reason": self._clean_text(reason, 160),
+                "previous": dict(previous),
+            })
+            row["object_version"] = previous_version + 1
+        else:
+            row["object_version"] = int(previous.get("object_version", 1))
+        self.objects[identifier] = row
+        return changed
+
+    @staticmethod
+    def _evidence_withdrawn(previous: Mapping[str, Any] | None,
+                            current: Mapping[str, Any]) -> bool:
+        """Recognize an explicit support withdrawal, not ordinary wording drift."""
+        if previous is None or previous.get("role") != "public_evidence":
+            return False
+        before = str(previous.get("state", "")).lower()
+        after = str(current.get("state", "")).lower()
+        negative = ("inactive", "contested", "invalid", "superseded", "withdrawn")
+        return (not any(token in before for token in negative)
+                and any(token in after for token in negative))
+
+    def _invalidate_supported_dependents(
+        self, evidence_id: str, previous: Mapping[str, Any],
+        current: Mapping[str, Any], *, turn: int, decision_index: int,
+    ) -> int:
+        if not self.justification_invalidation_enabled:
+            return 0
+        targets = {
+            str(row.get("target")) for row in self.relations.values()
+            if (row.get("source") == evidence_id
+                and str(row.get("relation", "")).lower()
+                in {"supports", "justifies", "evidence_for"})
+        }
+        changed = 0
+        for target_id in sorted(targets):
+            target = self.objects.get(target_id)
+            if target is None or target.get("role") != "root_obligation":
+                continue
+            record = {
+                "target_id": target_id,
+                "evidence_id": evidence_id,
+                "turn": turn,
+                "decision_index": decision_index,
+                "reason": "previously linked public evidence was explicitly withdrawn",
+                "previous_evidence_state": previous.get("state"),
+                "current_evidence_state": current.get("state"),
+            }
+            self.pending_invalidations[target_id] = record
+            self.invalidation_history.append(dict(record))
+            changed += 1
+        return changed
+
+    def _apply_semantic_impacts(self, values: Any, *, turn: int,
+                                decision_index: int) -> tuple[int, int, int]:
+        """Validate monitor proposals structurally; never infer semantic truth."""
+        if not self.semantic_impact_enabled or not isinstance(values, list):
+            return 0, 0, 0
+        accepted = rejected = revalidated = 0
+        allowed_relations = {
+            "supports", "partially_supports", "justifies", "evidence_for",
+            "conflicts_with", "bears_on", "invalidates", "revalidates", "restores",
+        }
+        for value in values[:50]:
+            if not isinstance(value, Mapping):
+                rejected += 1
+                continue
+            target_id = self._clean_id(value.get("target_id"))
+            cause_id = self._clean_id(value.get("cause_id"))
+            effect = self._clean_text(value.get("effect"), 40).lower()
+            reason = self._clean_text(value.get("reason"), 1000)
+            anchors = value.get("public_anchors", [])
+            target = self.objects.get(target_id)
+            cause = self.objects.get(cause_id)
+            clean_anchors = [self._clean_text(item, 500) for item in anchors[:20]
+                             if self._clean_text(item, 500)] if isinstance(anchors, list) else []
+            related = any(
+                row.get("source") == cause_id and row.get("target") == target_id
+                and str(row.get("relation", "")).lower() in allowed_relations
+                for row in self.relations.values()
+            )
+            # Natural-language anchors are citations, not canonical keys. The
+            # monitor may quote the same public event at different granularity;
+            # deterministic validation checks that both records carry public
+            # provenance while the explicit local relation constrains scope.
+            anchored = bool(clean_anchors) and bool((cause or {}).get("source_anchors", []))
+            valid = (
+                target is not None and target.get("role") == "root_obligation"
+                and cause is not None and cause.get("role") == "public_evidence"
+                and effect in {"contest", "supersede", "withdraw_support", "revalidate"}
+                and bool(reason) and anchored
+                and (related or target_id in cause.get("root_links", []))
+            )
+            if not valid:
+                rejected += 1
+                continue
+            record = {
+                "target_id": target_id, "cause_id": cause_id, "effect": effect,
+                "reason": reason, "public_anchors": clean_anchors,
+                "turn": turn, "decision_index": decision_index,
+            }
+            if effect == "revalidate":
+                if target_id not in self.pending_semantic_impacts:
+                    rejected += 1
+                    continue
+                del self.pending_semantic_impacts[target_id]
+                revalidated += 1
+            else:
+                previous = self.pending_semantic_impacts.get(target_id)
+                semantic_keys = ("target_id", "cause_id", "effect", "reason", "public_anchors")
+                if previous and all(previous.get(key) == record.get(key)
+                                    for key in semantic_keys):
+                    continue
+                self.pending_semantic_impacts[target_id] = record
+                self.semantic_impact_history.append(dict(record))
+                accepted += 1
+        self.rejected_semantic_impacts += rejected
+        return accepted, rejected, revalidated
 
     def sync_root_obligations(self, rows: list[dict[str, Any]], turn: int,
                               decision_index: int | None = None) -> int:
@@ -195,12 +384,23 @@ class PersistentTaskWorkspace:
                 "updated_turn": turn,
                 "source_order": index,
             }
+            pending = (self.pending_invalidations.get(identifier)
+                       or self.pending_semantic_impacts.get(identifier))
+            if pending:
+                projected["state"] = "contested"
+                projected["source_anchors"].append(
+                    "semantic_reopen:"
+                    f"{pending.get('evidence_id') or pending.get('cause_id')}:turn:{pending['turn']}"
+                )
             previous = self.objects.get(identifier)
             if not self._semantic_equal(previous, projected):
                 changed += 1
             elif previous is not None:
                 projected["updated_turn"] = previous.get("updated_turn", turn)
-            self.objects[identifier] = projected
+            self._store_object(
+                projected, turn=turn, decision_index=decision_index,
+                reason="root_obligation_projection_changed",
+            )
             relation = {
                 "source": identifier,
                 "relation": "part_of",
@@ -256,7 +456,10 @@ class PersistentTaskWorkspace:
                 changed += 1
             elif previous is not None:
                 projected["updated_turn"] = previous.get("updated_turn", turn)
-            self.objects[current_id] = projected
+            self._store_object(
+                projected, turn=turn, decision_index=decision_index,
+                reason="repair_episode_changed",
+            )
             relation = {
                 "source": current_id,
                 "relation": "repairs",
@@ -268,9 +471,11 @@ class PersistentTaskWorkspace:
         for identifier in active_repairs:
             if identifier == current_id:
                 continue
-            self.objects[identifier] = {
-                **self.objects[identifier], "state": "inactive", "updated_turn": turn,
-            }
+            self._store_object(
+                {**self.objects[identifier], "state": "inactive", "updated_turn": turn},
+                turn=turn, decision_index=decision_index,
+                reason="repair_episode_deactivated",
+            )
             changed += 1
         if changed:
             self.last_internal_turn = turn
@@ -297,6 +502,11 @@ class PersistentTaskWorkspace:
                     "deactivated": 0, "relations": 0, "invalid": 1}
         result = {"applied": True, "upserted": 0, "deactivated": 0,
                   "relations": 0, "invalid": 0}
+        if self.justification_invalidation_enabled:
+            result.update(dependency_invalidations=0, dependency_revalidations=0)
+        if self.semantic_impact_enabled:
+            result.update(semantic_impacts=0, rejected_semantic_impacts=0,
+                          semantic_revalidations=0)
         for value in upserts[:100]:
             normalized = self._normalize_object(value, turn) if isinstance(value, Mapping) else None
             if normalized is None:
@@ -318,15 +528,33 @@ class PersistentTaskWorkspace:
                 normalized["updated_turn"] = previous.get("updated_turn", turn)
             else:
                 result["upserted"] += 1
-            self.objects[normalized["id"]] = normalized
+            self._store_object(
+                normalized, turn=turn, decision_index=decision_index,
+                reason="monitor_semantic_update",
+            )
+            if (self.justification_invalidation_enabled
+                    and self._evidence_withdrawn(previous, normalized)):
+                result["dependency_invalidations"] += self._invalidate_supported_dependents(
+                    normalized["id"], previous, normalized,
+                    turn=turn, decision_index=decision_index,
+                )
         for value in deactivations[:100]:
             identifier = self._clean_id(value)
             if not identifier or identifier == "root:public-task" or identifier not in self.objects:
                 result["invalid"] += 1
                 continue
-            self.objects[identifier] = {
-                **self.objects[identifier], "state": "inactive", "updated_turn": turn,
-            }
+            previous = dict(self.objects[identifier])
+            inactive = {**previous, "state": "inactive", "updated_turn": turn}
+            self._store_object(
+                inactive,
+                turn=turn, decision_index=decision_index,
+                reason="monitor_deactivation",
+            )
+            if self.justification_invalidation_enabled:
+                result["dependency_invalidations"] += self._invalidate_supported_dependents(
+                    identifier, previous, inactive,
+                    turn=turn, decision_index=decision_index,
+                )
             result["deactivated"] += 1
         for value in relations[:200]:
             normalized = self._normalize_relation(value, turn) if isinstance(value, Mapping) else None
@@ -336,6 +564,19 @@ class PersistentTaskWorkspace:
                 continue
             self.relations[self._relation_key(normalized)] = normalized
             result["relations"] += 1
+            if (self.justification_invalidation_enabled
+                    and normalized["relation"].lower() in {"revalidates", "restores"}
+                    and normalized["target"] in self.pending_invalidations):
+                del self.pending_invalidations[normalized["target"]]
+                result["dependency_revalidations"] += 1
+        if self.semantic_impact_enabled:
+            accepted, rejected, revalidated = self._apply_semantic_impacts(
+                delta.get("semantic_impacts", []), turn=turn,
+                decision_index=decision_index,
+            )
+            result["semantic_impacts"] = accepted
+            result["rejected_semantic_impacts"] = rejected
+            result["semantic_revalidations"] = revalidated
         self.update_count += 1
         self.last_internal_turn = turn
         self._append_event({
@@ -373,6 +614,10 @@ class PersistentTaskWorkspace:
             "objects": selected,
             "relations": relations[:relation_limit],
             "metrics": self.metrics(),
+            **({"pending_invalidations": list(self.pending_invalidations.values())}
+               if self.justification_invalidation_enabled else {}),
+            **({"pending_semantic_impacts": list(self.pending_semantic_impacts.values())}
+               if self.semantic_impact_enabled else {}),
             "truncated": len(selected) < len(active) or len(relations) > relation_limit,
         }
 
@@ -400,6 +645,10 @@ class PersistentTaskWorkspace:
                 "root_links": list(row.get("root_links", []))[:8],
             } for row in selected],
             "metrics": self.metrics(),
+            **({"pending_invalidations": list(self.pending_invalidations.values())}
+               if self.justification_invalidation_enabled else {}),
+            **({"pending_semantic_impacts": list(self.pending_semantic_impacts.values())}
+               if self.semantic_impact_enabled else {}),
             "truncated": len(selected) < len(active),
             "retrieval_hint": (
                 "Use read_semantic_object for an exact id or "
@@ -418,8 +667,14 @@ class PersistentTaskWorkspace:
         relations = [value for value in self.relations.values()
                      if value.get("source") == clean or value.get("target") == clean]
         relations.sort(key=self._relation_key)
-        return {"ok": True, "object": dict(row), "relations": relations[:100],
-                "relations_truncated": len(relations) > 100}
+        result = {"ok": True, "object": dict(row), "relations": relations[:100],
+                  "relations_truncated": len(relations) > 100}
+        if self.versioned_revision_enabled:
+            result["revision_history"] = [
+                dict(value) for value in self.revision_history
+                if value.get("object_id") == clean
+            ][-50:]
+        return result
 
     def metrics(self) -> dict[str, Any]:
         active = [row for row in self.objects.values() if row.get("state") != "inactive"]
@@ -430,6 +685,15 @@ class PersistentTaskWorkspace:
             "relations_total": len(self.relations),
             "update_count": self.update_count,
             "rejected_root_mutations": self.rejected_root_mutations,
+            **({"revision_count": len(self.revision_history)}
+               if self.versioned_revision_enabled else {}),
+            **({"invalidation_count": len(self.invalidation_history),
+                "pending_invalidations": len(self.pending_invalidations)}
+               if self.justification_invalidation_enabled else {}),
+            **({"semantic_impact_count": len(self.semantic_impact_history),
+                "pending_semantic_impacts": len(self.pending_semantic_impacts),
+                "rejected_semantic_impacts": self.rejected_semantic_impacts}
+               if self.semantic_impact_enabled else {}),
         }
 
     def view(self, *, include_inactive: bool = False) -> dict[str, Any]:
@@ -441,7 +705,7 @@ class PersistentTaskWorkspace:
         if not include_inactive:
             relations = [row for row in relations
                          if row["source"] in active_ids and row["target"] in active_ids]
-        return {
+        result = {
             "schema_version": SCHEMA_VERSION,
             "public_task_sha256": self.public_task_sha256,
             "objects": objects,
@@ -451,6 +715,19 @@ class PersistentTaskWorkspace:
             "root_ledger_frozen": self.root_ledger_frozen,
             "rejected_root_mutations": self.rejected_root_mutations,
         }
+        if self.versioned_revision_enabled:
+            result["versioned_revision_enabled"] = True
+            result["revision_history"] = list(self.revision_history)
+        if self.justification_invalidation_enabled:
+            result["justification_invalidation_enabled"] = True
+            result["invalidation_history"] = list(self.invalidation_history)
+            result["pending_invalidations"] = list(self.pending_invalidations.values())
+        if self.semantic_impact_enabled:
+            result["semantic_impact_enabled"] = True
+            result["semantic_impact_history"] = list(self.semantic_impact_history)
+            result["pending_semantic_impacts"] = list(self.pending_semantic_impacts.values())
+            result["rejected_semantic_impacts"] = self.rejected_semantic_impacts
+        return result
 
     def search(self, pattern: str, *, limit: int = 30) -> dict[str, Any]:
         if not pattern:

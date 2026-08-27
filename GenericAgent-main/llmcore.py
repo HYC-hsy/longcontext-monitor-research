@@ -263,6 +263,8 @@ def _parse_openai_sse(resp_lines, api_mode="chat_completions"):
             elif etype == "error":
                 err = evt.get("error", {})
                 emsg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+                if _retryable_stream_error(err):
+                    raise _RetryableStreamError(emsg or str(err))
                 if emsg: content_text += f"!!!Error: {emsg}"; yield f"!!!Error: {emsg}"
                 break
             elif etype == "response.completed":
@@ -416,6 +418,24 @@ def _retryable_http_error(status_code, body=""):
             or '"type": "upstream_error"' in lowered
             or "upstream request failed" in lowered)
 
+class _RetryableStreamError(RuntimeError):
+    """A transient provider error delivered inside an otherwise-200 stream."""
+
+def _retryable_stream_error(error):
+    """Keep stream retries narrow so auth, policy, and request errors fail fast."""
+    if isinstance(error, dict):
+        value = " ".join(str(error.get(key, "")) for key in (
+            "type", "code", "message",
+        ))
+    else:
+        value = str(error or "")
+    lowered = value.lower()
+    return any(marker in lowered for marker in (
+        "stream_read_error", "upstream_error", "upstream request failed",
+        "server_error", "temporarily_unavailable", "service unavailable",
+        "overloaded", "gateway timeout",
+    ))
+
 def _stream_with_retry(sess, url, headers, payload, parse_fn):
     observing = _telemetry_enabled()
     llm_call_id = _research_id('llm') if observing else None
@@ -464,13 +484,15 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                     if not e.value and not streamed: raise requests.ConnectionError("empty response")
                     _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code, 'outcome': 'success'}, llm_call_id=llm_call_id)
                     return e.value or []
-        except (requests.Timeout, requests.ConnectionError, requests.exceptions.ChunkedEncodingError) as e:
+        except (_RetryableStreamError, requests.Timeout, requests.ConnectionError,
+                requests.exceptions.ChunkedEncodingError) as e:
             #pathlib.Path(__file__).parent.joinpath('temp','bad_requests.json').write_text(json.dumps({"url":url,"headers":headers,"payload":payload,"err":str(e),"t":time.time()},ensure_ascii=False),encoding='utf-8')
             err = f"!!!Error: {type(e).__name__}: {e}" if str(e) else f"!!!Error: {type(e).__name__}"
-            if attempt < sess.max_retries:
+            if attempt < sess.max_retries and not streamed:
                 d = _delay(None, attempt)
                 _research_emit('provider_response', {'attempt': attempt + 1, 'outcome': 'retryable_transport_error',
-                               'error_type': type(e).__name__, 'retry_delay_seconds': d}, llm_call_id=llm_call_id)
+                               'error_type': type(e).__name__, 'retry_delay_seconds': d,
+                               'streamed_before_error': streamed}, llm_call_id=llm_call_id)
                 print(f"[LLM Retry] {type(e).__name__}, retry in {d:.1f}s ({attempt+1}/{sess.max_retries+1})")
                 time.sleep(d); continue
             yield err; return [{"type": "text", "text": err}]
@@ -615,7 +637,11 @@ class BaseSession:
         self.name = cfg.get('name', self.model)
         proxy = cfg.get('proxy'); 
         self.proxies = {"http": proxy, "https": proxy} if proxy else None
-        self.max_retries = max(0, int(cfg.get('max_retries', 4)))
+        retry_override = os.environ.get('GA_PROVIDER_MAX_RETRIES')
+        self.max_retries = max(0, int(
+            retry_override if retry_override is not None
+            else cfg.get('max_retries', 4)
+        ))
         self.verify = cfg.get('verify', True)
         self.stream = cfg.get('stream', True)
         default_ct, default_rt = (5, 40) if self.stream else (10, 240)

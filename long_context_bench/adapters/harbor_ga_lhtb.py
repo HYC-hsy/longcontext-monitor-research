@@ -78,6 +78,12 @@ class HarborLHTBGenericAgent(HarborGenericAgent):
                 env["GA_M1_WORKSPACE_ENABLED"] = "1"
             if self.m1_active_reconstruction_enabled:
                 env["GA_M1_ACTIVE_RECONSTRUCTION_ENABLED"] = "1"
+            if self.m2_versioned_revision_enabled:
+                env["GA_M2_VERSIONED_REVISION_ENABLED"] = "1"
+            if self.m2_justification_invalidation_enabled:
+                env["GA_M2_JUSTIFICATION_INVALIDATION_ENABLED"] = "1"
+            if self.m2_semantic_impact_enabled:
+                env["GA_M2_SEMANTIC_IMPACT_ENABLED"] = "1"
         import os
 
         for name in FORWARDED_ENV_VARS:

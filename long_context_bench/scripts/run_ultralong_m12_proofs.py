@@ -91,6 +91,12 @@ def stage4_agent_kwargs() -> dict[str, object]:
             values["m1_workspace_enabled"] = True
         if os.environ.get("GA_M1_ACTIVE_RECONSTRUCTION_ENABLED") == "1":
             values["m1_active_reconstruction_enabled"] = True
+        if os.environ.get("GA_M2_VERSIONED_REVISION_ENABLED") == "1":
+            values["m2_versioned_revision_enabled"] = True
+        if os.environ.get("GA_M2_JUSTIFICATION_INVALIDATION_ENABLED") == "1":
+            values["m2_justification_invalidation_enabled"] = True
+        if os.environ.get("GA_M2_SEMANTIC_IMPACT_ENABLED") == "1":
+            values["m2_semantic_impact_enabled"] = True
     elif os.environ.get("GA_M1_WORKSPACE_ENABLED") == "1":
         raise ValueError("GA_M1_WORKSPACE_ENABLED requires GA_M0_MONITOR_ENABLED")
     card_path = os.environ.get("GA_TASK_CARD_PATH")
@@ -606,8 +612,9 @@ def run_proof(
         "--max-retries",
         "0",
         "--yes",
-        "--delete",
     ]
+    if os.environ.get("GA_KEEP_HARBOR_ENV") != "1":
+        command.append("--delete")
     for host in identity["agent_phase_allowed_hosts"]:
         command += ["--allow-agent-host", host]
     kwargs = {
