@@ -327,6 +327,9 @@ class GenericAgent:
                     m2_semantic_impact_enabled=(
                         os.environ.get('GA_M2_SEMANTIC_IMPACT_ENABLED') == '1'
                     ),
+                    m3_human_loop_enabled=(
+                        os.environ.get('GA_M3_HUMAN_LOOP_ENABLED') == '1'
+                    ),
                 )
                 if self.completion_decision_callback is not None:
                     raise RuntimeError("M0 cannot share the completion boundary with another controller")

@@ -109,6 +109,23 @@ def build_m2_monitor(monkeypatch, tmp_path, responses):
     return monitor, session
 
 
+def build_m3a_monitor(monkeypatch, tmp_path, responses):
+    session = FakeSession(responses)
+    monkeypatch.setattr(m0, "resolve_session", lambda _: session)
+    monitor = m0.M0DeliberativeMonitor(
+        public_task="Implement A and B; demonstrate both.",
+        workspace=tmp_path,
+        config_name="fake",
+        artifact_dir=tmp_path / "monitor",
+        m1_workspace_enabled=True,
+        active_reconstruction_enabled=True,
+        m2_semantic_impact_enabled=True,
+        m3_human_loop_enabled=True,
+    )
+    monitor.root_obligation_audit = root_audit()
+    return monitor, session
+
+
 def test_m1_workspace_is_independently_disabled_in_m0(monkeypatch, tmp_path):
     monitor, _ = build_monitor(monkeypatch, tmp_path, [decision("SILENT")])
     monitor.review(packet())
@@ -118,6 +135,9 @@ def test_m1_workspace_is_independently_disabled_in_m0(monkeypatch, tmp_path):
     ))
     assert monitor.semantic_workspace is None
     assert "m1_workspace" not in checkpoint
+    assert "m3_human_loop_enabled" not in checkpoint
+    assert "m3_decision_focus" not in checkpoint
+    assert '"decision_focus"' not in monitor._decision_schema()
 
 
 def test_m2c_requires_workspace_and_is_independent(monkeypatch, tmp_path):
@@ -134,6 +154,51 @@ def test_m2c_requires_workspace_and_is_independent(monkeypatch, tmp_path):
             artifact_dir=tmp_path / "paired", m1_workspace_enabled=True,
             m2_versioned_revision_enabled=True, m2_semantic_impact_enabled=True,
         )
+
+
+def test_m3a_requires_frozen_m2c_parent(monkeypatch, tmp_path):
+    monkeypatch.setattr(m0, "resolve_session", lambda _: FakeSession([]))
+    with pytest.raises(ValueError, match="requires the frozen M2-C"):
+        m0.M0DeliberativeMonitor(
+            public_task="Implement A.", workspace=tmp_path, config_name="fake",
+            artifact_dir=tmp_path / "m3-without-m2c", m1_workspace_enabled=True,
+            m3_human_loop_enabled=True,
+        )
+
+
+def test_m3a_focus_is_optional_post_hoc_memory_not_hold_gate(monkeypatch, tmp_path):
+    response = decision("SILENT", decision_focus={
+        "consequential_decision": "Whether the new test oracle represents clause A",
+        "threatened_transition": "Promoting a self-authored test to completion evidence",
+        "materiality_reversibility": "The Agent is about to run it, so another observation is safe",
+        "control_rationale": "Stay silent and inspect the informative result",
+        "repair_exit_condition": "No repair episode is open",
+    })
+    monitor, session = build_m3a_monitor(monkeypatch, tmp_path, [response])
+
+    assert monitor.review(packet()) == ""
+    assert monitor.decisions[0]["action"] == "SILENT"
+    assert monitor.decisions[0]["decision_focus"]["consequential_decision"].startswith(
+        "Whether the new test oracle"
+    )
+    assert monitor.decision_focus["action"] == "SILENT"
+    checkpoint = json.loads((tmp_path / "monitor" / "monitor_checkpoint.json").read_text(
+        encoding="utf-8"
+    ))
+    assert checkpoint["m3_human_loop_enabled"] is True
+    assert checkpoint["m3_decision_focus"]["updated_turn"] == 1
+    assert "post-hoc account" in session.prompts[0]
+    assert "never require HOLD" in session.prompts[0]
+
+
+def test_m3a_missing_focus_does_not_retry_or_block(monkeypatch, tmp_path):
+    monitor, session = build_m3a_monitor(
+        monkeypatch, tmp_path, [decision("SILENT")]
+    )
+
+    assert monitor.review(packet()) == ""
+    assert len(session.prompts) == 1
+    assert monitor.decisions[0]["decision_focus"] is None
 
 
 def test_m2c_prompt_preserves_monitor_judgment_and_forbids_completion_authority(
