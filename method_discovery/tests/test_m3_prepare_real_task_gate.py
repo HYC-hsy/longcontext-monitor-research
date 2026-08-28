@@ -49,3 +49,17 @@ def test_gate_rejects_non_method_dev_and_unknown_condition():
         gate.build_manifest("roadmapbench:does-not-exist")
     with pytest.raises(ValueError, match="unsupported M3 condition"):
         gate.environment("sha", "m3b")
+    with pytest.raises(ValueError, match="non-empty subset"):
+        gate.build_manifest("roadmapbench:fbr-2.27.0-roadmap", conditions=("m3b",))
+
+
+def test_treatment_only_manifest_does_not_schedule_control():
+    manifest = gate.build_manifest(
+        "roadmapbench:fyn-2.2.0-roadmap",
+        conditions=("m3a_human_loop",),
+    )
+
+    assert manifest["run_count"] == 1
+    assert manifest["candidate"] == "m3a_human_loop"
+    assert manifest["runs"][0]["condition"] == "m3a_human_loop"
+    assert manifest["runs"][0]["environment"]["GA_M3_HUMAN_LOOP_ENABLED"] == "1"

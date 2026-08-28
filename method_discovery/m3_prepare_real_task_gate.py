@@ -77,16 +77,22 @@ def run_spec(task: dict[str, Any], condition: str, source_hash: str,
     }
 
 
-def build_manifest(task_id: str, run_suffix: str = "r1") -> dict[str, Any]:
+def build_manifest(task_id: str, run_suffix: str = "r1",
+                   conditions: tuple[str, ...] = CONDITIONS) -> dict[str, Any]:
+    if not conditions or any(condition not in CONDITIONS for condition in conditions):
+        raise ValueError("conditions must be a non-empty subset of registered M3 conditions")
     task, registry_bytes = _task(task_id)
     source_hash = tree_hash(ROOT / "GenericAgent-main")
     runs = [run_spec(task, condition, source_hash, run_suffix)
-            for condition in CONDITIONS]
+            for condition in conditions]
     return {
         "schema_version": "m3-real-run-manifest/1",
         "status": "prepared_not_executed",
-        "candidate": "+".join(CONDITIONS),
-        "intended_difference": "only GA_M3_HUMAN_LOOP_ENABLED differs",
+        "candidate": "+".join(conditions),
+        "intended_difference": (
+            "only GA_M3_HUMAN_LOOP_ENABLED differs between paired conditions"
+            if len(conditions) == 2 else "single preregistered condition"
+        ),
         "task_registry_sha256": hashlib.sha256(registry_bytes).hexdigest(),
         "generic_agent_source_sha256": source_hash,
         "run_count": len(runs),
@@ -102,8 +108,11 @@ def main() -> int:
     parser.add_argument("--task-id", required=True)
     parser.add_argument("--run-suffix", default="r1")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--condition", action="append", choices=CONDITIONS)
     args = parser.parse_args()
-    manifest = build_manifest(args.task_id, args.run_suffix)
+    manifest = build_manifest(
+        args.task_id, args.run_suffix, tuple(args.condition or CONDITIONS)
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
