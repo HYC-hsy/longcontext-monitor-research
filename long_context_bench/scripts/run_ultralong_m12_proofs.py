@@ -97,6 +97,8 @@ def stage4_agent_kwargs() -> dict[str, object]:
             values["m2_justification_invalidation_enabled"] = True
         if os.environ.get("GA_M2_SEMANTIC_IMPACT_ENABLED") == "1":
             values["m2_semantic_impact_enabled"] = True
+        if os.environ.get("GA_M3_HUMAN_LOOP_ENABLED") == "1":
+            values["m3_human_loop_enabled"] = True
     elif os.environ.get("GA_M1_WORKSPACE_ENABLED") == "1":
         raise ValueError("GA_M1_WORKSPACE_ENABLED requires GA_M0_MONITOR_ENABLED")
     card_path = os.environ.get("GA_TASK_CARD_PATH")

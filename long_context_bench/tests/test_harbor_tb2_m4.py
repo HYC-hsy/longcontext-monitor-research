@@ -326,6 +326,8 @@ def test_adapter_source_stays_thin_and_uses_native_harbor_contract():
     assert "/solution" not in source
     assert 'exit 125' in source
     assert 'if [ "$found" -eq 1 ]; then exit 0' in source
+    assert "grep -Fxq" in source
+    assert "grep -Fq" not in source
     assert '"wrapper_return_code"' in source
     assert '"ga_process_return_code"' in source
     assert '"agent_return_code"' not in source
@@ -412,6 +414,33 @@ def test_adapter_stages_stage4_card_and_passes_explicit_environment(monkeypatch,
     assert context.metadata["experiment_id"] == "experiment-1"
     assert context.metadata["task_workspace_dir"] == "/app"
     assert context.metadata["inline_long_prompt"] is True
+
+
+def test_adapter_forwards_m3_only_on_the_m2c_parent(monkeypatch, tmp_path):
+    adapter = _load_adapter(monkeypatch)
+    with pytest.raises(ValueError, match="requires the frozen M2-C"):
+        adapter.M4GenericAgent(
+            logs_dir=tmp_path, model_name="model-x", run_id="invalid-m3",
+            expected_model="model-x", python_home="cpython-test",
+            ga_source_sha256="hash", m0_monitor_enabled=True,
+            m0_monitor_config="monitor", m1_workspace_enabled=True,
+            m3_human_loop_enabled=True,
+        )
+    agent = adapter.M4GenericAgent(
+        logs_dir=tmp_path, model_name="model-x", run_id="valid-m3",
+        expected_model="model-x", python_home="cpython-test",
+        ga_source_sha256="hash", timeout_sec=2, m0_monitor_enabled=True,
+        m0_monitor_config="monitor", m1_workspace_enabled=True,
+        m2_semantic_impact_enabled=True, m3_human_loop_enabled=True,
+    )
+    environment = _FakeEnvironment(wrapper_return_code=0, process_return_code=0)
+    context = _Context()
+
+    asyncio.run(agent.run("instruction", environment, context))
+
+    agent_call = next(call for call in environment.exec_calls if "agentmain.py" in call[0])
+    assert agent_call[1]["env"]["GA_M2_SEMANTIC_IMPACT_ENABLED"] == "1"
+    assert agent_call[1]["env"]["GA_M3_HUMAN_LOOP_ENABLED"] == "1"
 
 
 def test_adapter_stages_stage6d_bundle_inside_task_container(monkeypatch, tmp_path):

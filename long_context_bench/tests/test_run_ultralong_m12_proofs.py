@@ -102,6 +102,18 @@ def test_m2_semantic_impact_is_explicitly_forwarded(monkeypatch):
     assert values["m2_semantic_impact_enabled"] is True
 
 
+def test_m3_human_loop_is_explicitly_forwarded(monkeypatch):
+    monkeypatch.setenv("GA_BASELINE_CONDITION", "original")
+    monkeypatch.setenv("GA_M0_MONITOR_ENABLED", "1")
+    monkeypatch.setenv("GA_M0_MONITOR_CONFIG", "native_openai_cc_vibe")
+    monkeypatch.setenv("GA_M1_WORKSPACE_ENABLED", "1")
+    monkeypatch.setenv("GA_M2_SEMANTIC_IMPACT_ENABLED", "1")
+    monkeypatch.setenv("GA_M3_HUMAN_LOOP_ENABLED", "1")
+    values = m12.stage4_agent_kwargs()
+    assert values["m2_semantic_impact_enabled"] is True
+    assert values["m3_human_loop_enabled"] is True
+
+
 def test_m1_workspace_cannot_run_without_m0(monkeypatch):
     monkeypatch.setenv("GA_BASELINE_CONDITION", "original")
     monkeypatch.setenv("GA_M1_WORKSPACE_ENABLED", "1")

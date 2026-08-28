@@ -79,6 +79,7 @@ class M4GenericAgent(BaseAgent):
         m2_versioned_revision_enabled: bool | str = False,
         m2_justification_invalidation_enabled: bool | str = False,
         m2_semantic_impact_enabled: bool | str = False,
+        m3_human_loop_enabled: bool | str = False,
         max_turns: int | str = 180,
         task_workspace_dir: str = "/app",
         **kwargs,
@@ -140,6 +141,9 @@ class M4GenericAgent(BaseAgent):
         self.m2_semantic_impact_enabled = str(
             m2_semantic_impact_enabled
         ).lower() in {"1", "true", "yes"}
+        self.m3_human_loop_enabled = str(
+            m3_human_loop_enabled
+        ).lower() in {"1", "true", "yes"}
         if self.m0_monitor_enabled and not self.m0_monitor_config:
             raise ValueError("M0 monitor config is required when M0 is enabled")
         if self.m1_workspace_enabled and not self.m0_monitor_enabled:
@@ -157,6 +161,8 @@ class M4GenericAgent(BaseAgent):
                 self.m2_justification_invalidation_enabled,
                 self.m2_semantic_impact_enabled)) > 1:
             raise ValueError("M2 candidates must be evaluated independently")
+        if self.m3_human_loop_enabled and not self.m2_semantic_impact_enabled:
+            raise ValueError("M3-A requires the frozen M2-C parent")
         self.max_turns = int(max_turns)
         if not task_workspace_dir.startswith("/"):
             raise ValueError("task_workspace_dir must be an absolute container path")
@@ -362,6 +368,8 @@ class M4GenericAgent(BaseAgent):
                 env["GA_M2_JUSTIFICATION_INVALIDATION_ENABLED"] = "1"
             if self.m2_semantic_impact_enabled:
                 env["GA_M2_SEMANTIC_IMPACT_ENABLED"] = "1"
+            if self.m3_human_loop_enabled:
+                env["GA_M3_HUMAN_LOOP_ENABLED"] = "1"
         if os.environ.get("GA_COMPLETION_CHECKPOINT_ROOT"):
             env["GA_COMPLETION_CHECKPOINT_ROOT"] = "/logs/agent/completion_checkpoints"
         for name in FORWARDED_ENV_VARS:
@@ -381,7 +389,7 @@ pid=$!
 found=0
 timed_out=1
 for i in $(seq 1 {iterations}); do
-  if grep -Fq {_q(ROUND_END)} {_q(output)} 2>/dev/null; then found=1; timed_out=0; break; fi
+  if grep -Fxq {_q(ROUND_END)} {_q(output)} 2>/dev/null; then found=1; timed_out=0; break; fi
   if ! kill -0 "$pid" 2>/dev/null; then timed_out=0; break; fi
   sleep 2
 done

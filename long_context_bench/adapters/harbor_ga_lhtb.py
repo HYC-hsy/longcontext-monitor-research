@@ -84,6 +84,8 @@ class HarborLHTBGenericAgent(HarborGenericAgent):
                 env["GA_M2_JUSTIFICATION_INVALIDATION_ENABLED"] = "1"
             if self.m2_semantic_impact_enabled:
                 env["GA_M2_SEMANTIC_IMPACT_ENABLED"] = "1"
+            if self.m3_human_loop_enabled:
+                env["GA_M3_HUMAN_LOOP_ENABLED"] = "1"
         import os
 
         for name in FORWARDED_ENV_VARS:
@@ -146,7 +148,7 @@ set +e
 found=0
 timed_out=1
 for i in $(seq 1 {iterations}); do
-  if grep -Fq {_q(ROUND_END)} {_q(output)} 2>/dev/null; then found=1; timed_out=0; break; fi
+  if grep -Fxq {_q(ROUND_END)} {_q(output)} 2>/dev/null; then found=1; timed_out=0; break; fi
   if test -e {_q(task_dir + '/agent.rc')}; then timed_out=0; break; fi
   sleep 2
 done

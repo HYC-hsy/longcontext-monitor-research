@@ -431,6 +431,20 @@ def test_long_instruction_is_chunked_before_container_exec(monkeypatch):
     assert max(map(len, commands)) < 5000
 
 
+def test_round_end_requires_an_exact_protocol_line(monkeypatch):
+    module = load_adapter(monkeypatch)
+    agent = make_agent(module)
+    environment = FakeEnvironment([0])
+    context = StubContext()
+
+    asyncio.run(agent.run("instruction", environment, context))
+
+    wait = next(command for command, _ in environment.calls
+                if "for i in $(seq" in command)
+    assert "grep -Fxq" in wait
+    assert "grep -Fq" not in wait
+
+
 def test_missing_round_end_fails_without_advancing_phase(monkeypatch):
     module = load_adapter(monkeypatch)
     agent = make_agent(module)
