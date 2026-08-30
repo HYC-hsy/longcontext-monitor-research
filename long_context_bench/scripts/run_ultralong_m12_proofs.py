@@ -48,14 +48,10 @@ MANIFEST_CONTROLLED_ENV_KEYS = {
     "GA_M0_MONITOR_ENABLED", "GA_M0_MONITOR_CONFIG",
     "GA_M0_MONITOR_EXPECTED_MODEL", "GA_M0_MAX_INSPECTIONS",
     "GA_M0_RECENT_TRAJECTORY_TURNS", "GA_MONITOR_REQUEST_TIMEOUT_SECONDS",
-    "GA_M1_WORKSPACE_ENABLED", "GA_M1_ACTIVE_RECONSTRUCTION_ENABLED",
-    "GA_M2_VERSIONED_REVISION_ENABLED", "GA_M2_JUSTIFICATION_INVALIDATION_ENABLED",
-    "GA_M2_SEMANTIC_IMPACT_ENABLED", "GA_M3_HUMAN_LOOP_ENABLED",
+    "GA_M3_HUMAN_LOOP_ENABLED",
     "GA_M3_DECISION_VALUE_ENABLED", "GA_M3_DISCRIMINATIVE_CONTROL_ENABLED",
     "GA_M3_COMBINED_CONTROL_ENABLED",
-    "GA_M32_ADAPTIVE_OBSERVATION_ENABLED", "GA_M35_CONTINUITY_ENABLED",
-    "GA_M35_HISTORY_COMPACTION_ENABLED", "GA_M35_MINIMAL_FRONTSTAGE_ENABLED",
-    "GA_M35_HISTORY_SOFT_CHAR_LIMIT", "GA_M35_HISTORY_TARGET_CHARACTERS",
+    "GA_MONITOR_HISTORY_SOFT_CHAR_LIMIT", "GA_MONITOR_HISTORY_TARGET_CHARACTERS",
     "GA_MANUAL_COMPLETION_ENABLED", "GA_MANUAL_COMPLETION_TIMEOUT_SECONDS",
     "GA_TASK_CARD_PATH", "GA_OBLIGATION_LEDGER_CARD_PATH",
     "GA_STAGE6D_BUNDLE_DIR", "GA_EVIDENCE_STATE_PATH",
@@ -192,16 +188,6 @@ def stage4_agent_kwargs() -> dict[str, object]:
         values["m0_recent_trajectory_turns"] = int(
             os.environ.get("GA_M0_RECENT_TRAJECTORY_TURNS", "0")
         )
-        if os.environ.get("GA_M1_WORKSPACE_ENABLED") == "1":
-            values["m1_workspace_enabled"] = True
-        if os.environ.get("GA_M1_ACTIVE_RECONSTRUCTION_ENABLED") == "1":
-            values["m1_active_reconstruction_enabled"] = True
-        if os.environ.get("GA_M2_VERSIONED_REVISION_ENABLED") == "1":
-            values["m2_versioned_revision_enabled"] = True
-        if os.environ.get("GA_M2_JUSTIFICATION_INVALIDATION_ENABLED") == "1":
-            values["m2_justification_invalidation_enabled"] = True
-        if os.environ.get("GA_M2_SEMANTIC_IMPACT_ENABLED") == "1":
-            values["m2_semantic_impact_enabled"] = True
         if os.environ.get("GA_M3_HUMAN_LOOP_ENABLED") == "1":
             values["m3_human_loop_enabled"] = True
         if os.environ.get("GA_M3_DECISION_VALUE_ENABLED") == "1":
@@ -210,16 +196,6 @@ def stage4_agent_kwargs() -> dict[str, object]:
             values["m3_discriminative_control_enabled"] = True
         if os.environ.get("GA_M3_COMBINED_CONTROL_ENABLED") == "1":
             values["m3_combined_control_enabled"] = True
-        if os.environ.get("GA_M32_ADAPTIVE_OBSERVATION_ENABLED") == "1":
-            values["m32_adaptive_observation_enabled"] = True
-        if os.environ.get("GA_M35_CONTINUITY_ENABLED") == "1":
-            values["m35_continuity_enabled"] = True
-        if os.environ.get("GA_M35_HISTORY_COMPACTION_ENABLED") == "1":
-            values["m35_history_compaction_enabled"] = True
-        if os.environ.get("GA_M35_MINIMAL_FRONTSTAGE_ENABLED") == "1":
-            values["m35_minimal_frontstage_enabled"] = True
-    elif os.environ.get("GA_M1_WORKSPACE_ENABLED") == "1":
-        raise ValueError("GA_M1_WORKSPACE_ENABLED requires GA_M0_MONITOR_ENABLED")
     card_path = os.environ.get("GA_TASK_CARD_PATH")
     if condition == "static_checklist":
         if not card_path:

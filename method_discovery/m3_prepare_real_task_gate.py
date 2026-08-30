@@ -28,8 +28,6 @@ EXECUTION_HARNESS_FILES = (
 CONDITIONS = (
     "m2c_control", "m3a_human_loop", "m3b_decision_value",
     "m3c_discriminative_control", "m3d_decision_sufficient_control",
-    "m31_baseline_perception", "m32_adaptive_observation",
-    "m35_continuity", "m35_h4_minimal_frontstage",
 )
 DEFAULT_CONDITIONS = ("m2c_control", "m3a_human_loop")
 
@@ -61,32 +59,19 @@ def environment(source_hash: str, condition: str) -> dict[str, str]:
         "GA_M0_MAX_INSPECTIONS": "12",
         "GA_M0_RECENT_TRAJECTORY_TURNS": "0",
         "GA_PROVIDER_MAX_RETRIES": "8",
-        "GA_M1_WORKSPACE_ENABLED": "1",
-        "GA_M1_ACTIVE_RECONSTRUCTION_ENABLED": "1",
-        "GA_M2_SEMANTIC_IMPACT_ENABLED": "1",
         "GA_METHOD_EXPECTED_SOURCE_SHA256": source_hash,
         "GA_EXPERIMENT_HARNESS_SHA256": execution_harness_hash(),
     }
-    if condition in {"m3c_discriminative_control", "m3d_decision_sufficient_control", "m31_baseline_perception", "m32_adaptive_observation", "m35_continuity",
-                     "m35_h4_minimal_frontstage"}:
+    if condition in {"m3c_discriminative_control", "m3d_decision_sufficient_control"}:
         values["GA_EXPERIMENT_ID"] = "m3-human-gap-v1"
-    if condition in {"m3a_human_loop", "m3b_decision_value", "m3c_discriminative_control", "m3d_decision_sufficient_control", "m31_baseline_perception",
-                     "m32_adaptive_observation", "m35_continuity", "m35_h4_minimal_frontstage"}:
+    if condition in {"m3a_human_loop", "m3b_decision_value", "m3c_discriminative_control", "m3d_decision_sufficient_control"}:
         values["GA_M3_HUMAN_LOOP_ENABLED"] = "1"
-    if condition in {"m3b_decision_value", "m31_baseline_perception",
-                     "m32_adaptive_observation", "m35_continuity", "m35_h4_minimal_frontstage"}:
+    if condition == "m3b_decision_value":
         values["GA_M3_DECISION_VALUE_ENABLED"] = "1"
     if condition in {"m3c_discriminative_control", "m3d_decision_sufficient_control"}:
         values["GA_M3_DISCRIMINATIVE_CONTROL_ENABLED"] = "1"
     if condition == "m3d_decision_sufficient_control":
         values["GA_M3_COMBINED_CONTROL_ENABLED"] = "1"
-    if condition in {"m3c_discriminative_control", "m3d_decision_sufficient_control", "m32_adaptive_observation", "m35_continuity", "m35_h4_minimal_frontstage"}:
-        values["GA_M32_ADAPTIVE_OBSERVATION_ENABLED"] = "1"
-    if condition in {"m3c_discriminative_control", "m3d_decision_sufficient_control", "m35_continuity", "m35_h4_minimal_frontstage"}:
-        values["GA_M35_CONTINUITY_ENABLED"] = "1"
-    if condition in {"m3c_discriminative_control", "m3d_decision_sufficient_control", "m35_h4_minimal_frontstage"}:
-        values["GA_M35_HISTORY_COMPACTION_ENABLED"] = "1"
-        values["GA_M35_MINIMAL_FRONTSTAGE_ENABLED"] = "1"
     return values
 
 
@@ -106,8 +91,7 @@ def run_spec(task: dict[str, Any], condition: str, source_hash: str,
     run_id = f"m3-{condition}-{slug}-{run_suffix}"
     env = environment(source_hash, condition)
     stage_root = ("human_gap_increments"
-                  if condition in {"m3c_discriminative_control", "m3d_decision_sufficient_control", "m31_baseline_perception", "m32_adaptive_observation", "m35_continuity",
-                                   "m35_h4_minimal_frontstage"}
+                  if condition in {"m3c_discriminative_control", "m3d_decision_sufficient_control"}
                   else "m3a_first_gate")
     env["BENCHMARK_CAMPAIGN_ROOT"] = str(
         BENCH / "output" / "m3_real_tasks" / stage_root / condition / slug

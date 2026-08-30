@@ -77,16 +77,6 @@ class HarborLHTBGenericAgent(HarborGenericAgent):
                 self.m0_recent_trajectory_turns
             )
             env["GA_M0_MONITOR_ARTIFACT_DIR"] = "/logs/agent/m0_monitor"
-            if self.m1_workspace_enabled:
-                env["GA_M1_WORKSPACE_ENABLED"] = "1"
-            if self.m1_active_reconstruction_enabled:
-                env["GA_M1_ACTIVE_RECONSTRUCTION_ENABLED"] = "1"
-            if self.m2_versioned_revision_enabled:
-                env["GA_M2_VERSIONED_REVISION_ENABLED"] = "1"
-            if self.m2_justification_invalidation_enabled:
-                env["GA_M2_JUSTIFICATION_INVALIDATION_ENABLED"] = "1"
-            if self.m2_semantic_impact_enabled:
-                env["GA_M2_SEMANTIC_IMPACT_ENABLED"] = "1"
             if self.m3_human_loop_enabled:
                 env["GA_M3_HUMAN_LOOP_ENABLED"] = "1"
             if self.m3_decision_value_enabled:
@@ -95,14 +85,6 @@ class HarborLHTBGenericAgent(HarborGenericAgent):
                 env["GA_M3_DISCRIMINATIVE_CONTROL_ENABLED"] = "1"
             if self.m3_combined_control_enabled:
                 env["GA_M3_COMBINED_CONTROL_ENABLED"] = "1"
-            if self.m32_adaptive_observation_enabled:
-                env["GA_M32_ADAPTIVE_OBSERVATION_ENABLED"] = "1"
-            if self.m35_continuity_enabled:
-                env["GA_M35_CONTINUITY_ENABLED"] = "1"
-            if self.m35_history_compaction_enabled:
-                env["GA_M35_HISTORY_COMPACTION_ENABLED"] = "1"
-            if self.m35_minimal_frontstage_enabled:
-                env["GA_M35_MINIMAL_FRONTSTAGE_ENABLED"] = "1"
         import os
 
         for name in FORWARDED_ENV_VARS:

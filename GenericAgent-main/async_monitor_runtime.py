@@ -233,7 +233,6 @@ def _review_with_one_freshness_pass(monitor, archive_path: Path,
             "boundary_types": sorted({str(row.get("boundary", "")) for row in fresh}),
             "review_trigger": "prepublish_intervention_freshness",
         },
-        "baseline_observation": monitor.baseline_observation(len(fresh)),
         "prior_observation_plan": monitor.observation_plan or {},
         "response_content": "", "tool_calls": [], "tool_results": [],
     }
@@ -261,14 +260,9 @@ def _monitor_worker(monitor_kwargs: dict[str, Any], requests, responses, wake_ev
     event_path = values.pop("_runtime_event_path", None)
     identity = values.pop("_runtime_identity", {})
     archive_path = Path(values.pop("_runtime_boundary_archive"))
-    adaptive_observation = bool(values.pop("_runtime_adaptive_observation", False))
-    values["adaptive_review_planning_enabled"] = adaptive_observation
     monitor = M0DeliberativeMonitor(**values)
     archive_reader = _IncrementalArchiveReader(archive_path)
-    reviewed_sequence, stored_reviewed_sequence = (
-        _reconciled_review_cursor(archive_path)
-        if adaptive_observation else (0, 0)
-    )
+    reviewed_sequence, stored_reviewed_sequence = _reconciled_review_cursor(archive_path)
     archived_sequence = _max_archive_sequence(_read_archive(archive_path))
     if stored_reviewed_sequence > archived_sequence:
         emit("adaptive_monitor_review_cursor_reset", {
@@ -282,25 +276,24 @@ def _monitor_worker(monitor_kwargs: dict[str, Any], requests, responses, wake_ev
     pending_rows: list[dict[str, Any]] = []
     sink = JsonlEventSink(event_path) if event_path else None
     with research_context(identity, sink):
-        if adaptive_observation and getattr(monitor, "m35_continuity_enabled", False):
-            emit("m35_monitor_bootstrap_started", {
+        emit("monitor_bootstrap_started", {
+            "task_execution_blocked": False,
+            "trajectory_events_in_bootstrap": 0,
+        })
+        try:
+            result = monitor.bootstrap_task_state()
+            emit("monitor_bootstrap_ready", result)
+        except BaseException as error:
+            # Exit cleanly so the parent watchdog can restart a fresh
+            # monitor. Task execution remains independent and all public
+            # boundaries stay in the append-only archive.
+            emit("monitor_bootstrap_failed", {
+                "error_type": type(error).__name__,
+                "error": str(error)[:1000],
+                "traceback": traceback.format_exc()[-4000:],
                 "task_execution_blocked": False,
-                "trajectory_events_in_bootstrap": 0,
             })
-            try:
-                result = monitor.bootstrap_task_state()
-                emit("m35_monitor_bootstrap_ready", result)
-            except BaseException as error:
-                # Exit cleanly so the parent watchdog can restart a fresh
-                # monitor. Task execution remains independent and all public
-                # boundaries stay in the append-only archive.
-                emit("m35_monitor_bootstrap_failed", {
-                    "error_type": type(error).__name__,
-                    "error": str(error)[:1000],
-                    "traceback": traceback.format_exc()[-4000:],
-                    "task_execution_blocked": False,
-                })
-                return
+            return
         last_deferred_signature = None
         while True:
             try:
@@ -331,31 +324,27 @@ def _monitor_worker(monitor_kwargs: dict[str, Any], requests, responses, wake_ev
             if archive_reset:
                 pending_rows.clear()
                 reviewed_sequence = 0
-                if adaptive_observation:
-                    _save_review_cursor(archive_path, 0)
+                _save_review_cursor(archive_path, 0)
             unseen = [row for row in appended
                       if str(row.get("archive_event_id", "")) not in monitor._observed_archive_ids]
             if unseen:
                 monitor.observe_archived_boundaries(unseen)
-            if adaptive_observation:
-                pending_rows.extend(
-                    row for row in appended
-                    if int(row.get("archive_sequence") or 0) > reviewed_sequence
-                )
-                pending = pending_rows
-            else:
-                pending = unseen
+            pending_rows.extend(
+                row for row in appended
+                if int(row.get("archive_sequence") or 0) > reviewed_sequence
+            )
+            pending = pending_rows
             if not pending:
                 wake_event.wait(0.5)
                 wake_event.clear()
                 continue
 
             plan = monitor.observation_plan or {}
-            reason = (_adaptive_review_reason(
+            reason = _adaptive_review_reason(
                 pending, focused=monitor.attention_mode == "focused",
                 review_after_turns=int(plan.get("review_after_turns", 20)),
                 initial_calibration=not bool(monitor.decisions),
-            ) if adaptive_observation else "legacy_any_delta")
+            )
             if reason is None:
                 signature = (len(pending), pending[-1].get("archive_sequence"))
                 if signature != last_deferred_signature:
@@ -371,12 +360,9 @@ def _monitor_worker(monitor_kwargs: dict[str, Any], requests, responses, wake_ev
                 continue
             last_deferred_signature = None
 
-            # Archive ingestion and the first-look sensor are deterministic. The
-            # task side still pushes no semantic packet; inside the autonomous
-            # monitor process, unseen public boundaries become the same kind of
-            # low-friction recent view a human gets before deciding whether to
-            # investigate files, tests, diffs, or older history.
-            baseline_observation = monitor.baseline_observation(len(pending))
+            # Task-side publication carries only durable public facts and a
+            # wake signal. The monitor receives navigation metadata here and
+            # autonomously retrieves any semantic view it needs.
             request_id = new_id("monitor_observation")
             latest_turn = max(int(row.get("internal_turn") or 0) for row in pending)
             wake_packet = {
@@ -390,7 +376,6 @@ def _monitor_worker(monitor_kwargs: dict[str, Any], requests, responses, wake_ev
                     "boundary_types": sorted({str(row.get("boundary", "")) for row in pending}),
                     "review_trigger": reason,
                 },
-                "baseline_observation": baseline_observation,
                 "prior_observation_plan": plan,
                 "response_content": "", "tool_calls": [], "tool_results": [],
             }
@@ -422,20 +407,17 @@ def _monitor_worker(monitor_kwargs: dict[str, Any], requests, responses, wake_ev
                                    getattr(monitor, "last_intervention_delivery", None)
                                    or {}
                                )})
-                if adaptive_observation:
-                    reviewed_sequence = reviewed_through_sequence
-                    pending_rows = [
-                        row for row in pending_rows
-                        if int(row.get("archive_sequence") or 0) > reviewed_sequence
-                    ]
-                    _save_review_cursor(
-                        archive_path, reviewed_through_sequence
-                    )
-                    emit("adaptive_monitor_review_scheduled", {
-                        "reviewed_through_sequence": reviewed_through_sequence,
-                        "observation_plan": monitor.observation_plan,
-                        "attention_mode": monitor.attention_mode,
-                    })
+                reviewed_sequence = reviewed_through_sequence
+                pending_rows = [
+                    row for row in pending_rows
+                    if int(row.get("archive_sequence") or 0) > reviewed_sequence
+                ]
+                _save_review_cursor(archive_path, reviewed_through_sequence)
+                emit("adaptive_monitor_review_scheduled", {
+                    "reviewed_through_sequence": reviewed_through_sequence,
+                    "observation_plan": monitor.observation_plan,
+                    "attention_mode": monitor.attention_mode,
+                })
             except BaseException as error:
                 responses.put({"kind": "error", "request_id": request_id,
                                "error_type": type(error).__name__, "error": str(error)[:1000],
@@ -707,8 +689,8 @@ class AsyncMonitorRuntime:
         with self._archive_lock:
             self._archive_sequence += 1
             archive_id = new_id("public_boundary")
-            # Runtime identity is authoritative even if a compatibility caller
-            # accidentally supplies similarly named packet fields.
+            # Runtime identity is authoritative; untrusted packet fields cannot
+            # override archive identity.
             row = {**dict(packet), "archive_event_id": archive_id,
                    "archive_sequence": self._archive_sequence}
             with self.boundary_archive.open("a", encoding="utf-8") as stream:
@@ -720,10 +702,6 @@ class AsyncMonitorRuntime:
             "boundary": packet.get("boundary"),
         })
         return True
-
-    # Compatibility for non-M0 fixtures. Production M0 call sites use the
-    # explicit archive_boundary name to avoid implying semantic packet push.
-    publish = archive_boundary
 
     def consume_interventions(self) -> list[dict[str, Any]]:
         self._watchdog()

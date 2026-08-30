@@ -315,19 +315,6 @@ class GenericAgent:
                     artifact_dir=os.environ.get('GA_M0_MONITOR_ARTIFACT_DIR'),
                     max_inspections=int(os.environ.get('GA_M0_MAX_INSPECTIONS', '8')),
                     recent_trajectory_turns=int(os.environ.get('GA_M0_RECENT_TRAJECTORY_TURNS', '0')),
-                    m1_workspace_enabled=os.environ.get('GA_M1_WORKSPACE_ENABLED') == '1',
-                    active_reconstruction_enabled=(
-                        os.environ.get('GA_M1_ACTIVE_RECONSTRUCTION_ENABLED') == '1'
-                    ),
-                    m2_versioned_revision_enabled=(
-                        os.environ.get('GA_M2_VERSIONED_REVISION_ENABLED') == '1'
-                    ),
-                    m2_justification_invalidation_enabled=(
-                        os.environ.get('GA_M2_JUSTIFICATION_INVALIDATION_ENABLED') == '1'
-                    ),
-                    m2_semantic_impact_enabled=(
-                        os.environ.get('GA_M2_SEMANTIC_IMPACT_ENABLED') == '1'
-                    ),
                     m3_human_loop_enabled=(
                         os.environ.get('GA_M3_HUMAN_LOOP_ENABLED') == '1'
                     ),
@@ -340,28 +327,16 @@ class GenericAgent:
                     m3_combined_control_enabled=(
                         os.environ.get('GA_M3_COMBINED_CONTROL_ENABLED') == '1'
                     ),
-                    m35_continuity_enabled=(
-                        os.environ.get('GA_M35_CONTINUITY_ENABLED') == '1'
-                    ),
-                    m35_history_compaction_enabled=(
-                        os.environ.get('GA_M35_HISTORY_COMPACTION_ENABLED') == '1'
-                    ),
-                    m35_minimal_frontstage_enabled=(
-                        os.environ.get('GA_M35_MINIMAL_FRONTSTAGE_ENABLED') == '1'
-                    ),
                     history_soft_char_limit=int(
-                        os.environ.get('GA_M35_HISTORY_SOFT_CHAR_LIMIT', '128000')
+                        os.environ.get('GA_MONITOR_HISTORY_SOFT_CHAR_LIMIT', '128000')
                     ),
                     history_target_characters=int(
-                        os.environ.get('GA_M35_HISTORY_TARGET_CHARACTERS', '88000')
+                        os.environ.get('GA_MONITOR_HISTORY_TARGET_CHARACTERS', '88000')
                     ),
                 )
                 monitor_kwargs["_runtime_event_path"] = (
                     getattr(self, 'research_event_path', None)
                     or os.environ.get('GA_RESEARCH_EVENT_PATH')
-                )
-                monitor_kwargs["_runtime_adaptive_observation"] = (
-                    os.environ.get('GA_M32_ADAPTIVE_OBSERVATION_ENABLED') == '1'
                 )
                 monitor_kwargs["_runtime_identity"] = {
                     "experiment_id": os.environ.get('GA_EXPERIMENT_ID') or 'interactive',

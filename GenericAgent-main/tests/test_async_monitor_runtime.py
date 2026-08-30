@@ -334,16 +334,8 @@ def test_h4_f1_f2_f3_compose_in_one_persistent_monitor_review(
     monitor = m0.M0DeliberativeMonitor(
         public_task="Implement A and B; demonstrate both.", workspace=tmp_path,
         config_name="fake", artifact_dir=tmp_path / "monitor",
-        m1_workspace_enabled=True, active_reconstruction_enabled=True,
-        m2_semantic_impact_enabled=True, m3_human_loop_enabled=True,
-        m3_decision_value_enabled=True, adaptive_review_planning_enabled=True,
-        m35_continuity_enabled=True, m35_history_compaction_enabled=True,
-        m35_minimal_frontstage_enabled=True,
+        m3_human_loop_enabled=True, m3_decision_value_enabled=True,
     )
-    monitor.root_obligation_audit = [
-        {"obligation": "Implement A", "status": "supported", "public_evidence": ["A"]},
-        {"obligation": "Implement B", "status": "unknown", "public_evidence": []},
-    ]
     monitor.observe_archived_boundaries(initial)
 
     message, cursor, reviewed_turn, rechecked = _review_with_one_freshness_pass(
@@ -362,8 +354,7 @@ def test_h4_f1_f2_f3_compose_in_one_persistent_monitor_review(
     assert "read_public_trajectory" in history
     assert "read_inspection_result" in history
     assert monitor.open_episode is None
-    assert monitor.semantic_workspace is not None
-    assert monitor.m2_semantic_impact_enabled is True
+    assert monitor.semantic_files is not None
 
 
 def proposal():
