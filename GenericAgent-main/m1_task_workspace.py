@@ -5,6 +5,7 @@ replace the original task or raw trajectory and it makes no control decisions.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -53,6 +54,11 @@ class PersistentTaskWorkspace:
         self.semantic_impact_history: list[dict[str, Any]] = []
         self.pending_semantic_impacts: dict[str, dict[str, Any]] = {}
         self.rejected_semantic_impacts = 0
+        self.last_state_transaction_id = "decision:0000"
+        self.transaction_backup_path = (
+            self.artifact_dir / "m1_workspace_transaction_backup.json"
+            if self.artifact_dir else None
+        )
         self._load_or_bootstrap()
 
     def _load_or_bootstrap(self) -> None:
@@ -103,6 +109,9 @@ class PersistentTaskWorkspace:
             self.rejected_semantic_impacts = (
                 int(loaded.get("rejected_semantic_impacts", 0))
                 if self.semantic_impact_enabled else 0
+            )
+            self.last_state_transaction_id = str(
+                loaded.get("last_state_transaction_id", "decision:0000")
             )
             return
         self.objects["root:public-task"] = {
@@ -369,7 +378,10 @@ class PersistentTaskWorkspace:
                 identifier = str(existing[index]["id"])
                 obligation = str(existing[index]["summary"])
             else:
-                identifier = f"obligation:{index:04d}"
+                identifier = (
+                    self._clean_id(row.get("obligation_id"))
+                    or f"obligation:{index:04d}"
+                )
             anchors = row.get("public_evidence", [])
             projected = {
                 "id": identifier,
@@ -413,15 +425,148 @@ class PersistentTaskWorkspace:
             self.root_ledger_frozen = True
         if changed:
             self.last_internal_turn = turn
-            self._append_event({
+            self.last_state_transaction_id = f"decision:{int(decision_index or 0):04d}"
+            event = {
                 "schema_version": EVENT_SCHEMA_VERSION,
                 "internal_turn": turn,
                 "decision_index": decision_index,
                 "projection": "root_obligation_audit",
                 "changed": changed,
-            })
+            }
             self._persist()
+            self._append_event({
+                **event, "workspace_snapshot_persisted": True,
+            })
         return changed
+
+    def archive_and_reset_root_projection(self) -> None:
+        """Quarantine a pre-identity derived root projection before bootstrap."""
+        root_ids = {
+            identifier for identifier, row in self.objects.items()
+            if row.get("role") == "root_obligation"
+        }
+        if not root_ids:
+            self.root_ledger_frozen = False
+            return
+        if self.artifact_dir:
+            archive = self.artifact_dir / "m1_workspace_pre_identity_migration.json"
+            if not archive.exists():
+                MonitorCheckpointStore.write_json(
+                    archive, self.view(include_inactive=True)
+                )
+        self.objects = {
+            identifier: row for identifier, row in self.objects.items()
+            if identifier not in root_ids
+        }
+        self.relations = {
+            key: row for key, row in self.relations.items()
+            if row.get("source") not in root_ids and row.get("target") not in root_ids
+        }
+        self.pending_invalidations = {
+            key: row for key, row in self.pending_invalidations.items()
+            if key not in root_ids
+        }
+        self.pending_semantic_impacts = {
+            key: row for key, row in self.pending_semantic_impacts.items()
+            if key not in root_ids
+        }
+        self.root_ledger_frozen = False
+        self._persist()
+
+    def transaction_snapshot(self) -> dict[str, Any]:
+        """Capture mutable projection state, excluding immutable paths/config."""
+        fields = (
+            "objects", "relations", "update_count", "last_internal_turn",
+            "root_ledger_frozen", "rejected_root_mutations", "revision_history",
+            "invalidation_history", "pending_invalidations",
+            "semantic_impact_history", "pending_semantic_impacts",
+            "rejected_semantic_impacts", "last_state_transaction_id",
+        )
+        return {name: copy.deepcopy(getattr(self, name)) for name in fields}
+
+    def restore_transaction_snapshot(self, snapshot: Mapping[str, Any]) -> None:
+        """Restore and persist the last committed in-memory projection."""
+        for name, value in snapshot.items():
+            setattr(self, name, copy.deepcopy(value))
+        self._persist()
+        self._append_event({
+            "schema_version": EVENT_SCHEMA_VERSION,
+            "event": "workspace_transaction_rollback",
+            "workspace_snapshot_persisted": True,
+            "update_count": self.update_count,
+            "last_internal_turn": self.last_internal_turn,
+        })
+        if self.transaction_backup_path:
+            self.transaction_backup_path.unlink(missing_ok=True)
+
+    def begin_transaction(self, transaction_id: str) -> None:
+        if self.transaction_backup_path is not None:
+            MonitorCheckpointStore.write_json(self.transaction_backup_path, {
+                "schema_version": "m1-workspace-transaction-backup/1",
+                "pending_transaction_id": transaction_id,
+                "workspace": self.view(include_inactive=True),
+            })
+
+    def finish_transaction(self) -> None:
+        if self.transaction_backup_path:
+            self.transaction_backup_path.unlink(missing_ok=True)
+
+    def recover_incomplete_transaction(self, committed_transaction_id: str) -> bool:
+        path = self.transaction_backup_path
+        if path is None or not path.exists():
+            return False
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        pending_id = str(payload.get("pending_transaction_id", ""))
+        if pending_id and pending_id == committed_transaction_id:
+            path.unlink(missing_ok=True)
+            return False
+        snapshot = payload.get("workspace")
+        if not isinstance(snapshot, Mapping):
+            return False
+        self._restore_from_view(snapshot)
+        self._persist()
+        path.unlink(missing_ok=True)
+        self._append_event({
+            "schema_version": EVENT_SCHEMA_VERSION,
+            "event": "workspace_crash_recovery",
+            "abandoned_transaction_id": pending_id,
+            "committed_transaction_id": committed_transaction_id,
+        })
+        return True
+
+    def _restore_from_view(self, snapshot: Mapping[str, Any]) -> None:
+        self.objects = {
+            str(row["id"]): dict(row) for row in snapshot.get("objects", [])
+            if isinstance(row, Mapping) and row.get("id")
+        }
+        self.relations = {
+            self._relation_key(row): dict(row)
+            for row in snapshot.get("relations", []) if self._valid_relation(row)
+        }
+        self.update_count = int(snapshot.get("update_count", 0) or 0)
+        self.last_internal_turn = snapshot.get("last_internal_turn")
+        self.root_ledger_frozen = bool(snapshot.get("root_ledger_frozen", False))
+        self.rejected_root_mutations = int(snapshot.get("rejected_root_mutations", 0) or 0)
+        self.revision_history = list(snapshot.get("revision_history", []))
+        self.invalidation_history = list(snapshot.get("invalidation_history", []))
+        self.pending_invalidations = {
+            str(row["target_id"]): dict(row)
+            for row in snapshot.get("pending_invalidations", [])
+            if isinstance(row, Mapping) and row.get("target_id")
+        }
+        self.semantic_impact_history = list(snapshot.get("semantic_impact_history", []))
+        self.pending_semantic_impacts = {
+            str(row["target_id"]): dict(row)
+            for row in snapshot.get("pending_semantic_impacts", [])
+            if isinstance(row, Mapping) and row.get("target_id")
+        }
+        self.rejected_semantic_impacts = int(snapshot.get("rejected_semantic_impacts", 0) or 0)
+        self.last_state_transaction_id = str(
+            snapshot.get("last_state_transaction_id", "decision:0000")
+        )
 
     def sync_repair_episode(self, episode: Mapping[str, Any] | None, *, turn: int,
                             decision_index: int) -> int:
@@ -479,14 +624,18 @@ class PersistentTaskWorkspace:
             changed += 1
         if changed:
             self.last_internal_turn = turn
-            self._append_event({
+            self.last_state_transaction_id = f"decision:{int(decision_index):04d}"
+            event = {
                 "schema_version": EVENT_SCHEMA_VERSION,
                 "internal_turn": turn,
                 "decision_index": decision_index,
                 "projection": "open_repair_episode",
                 "changed": changed,
-            })
+            }
             self._persist()
+            self._append_event({
+                **event, "workspace_snapshot_persisted": True,
+            })
         return changed
 
     def apply_delta(self, delta: Any, *, turn: int, decision_index: int) -> dict[str, Any]:
@@ -579,14 +728,18 @@ class PersistentTaskWorkspace:
             result["semantic_revalidations"] = revalidated
         self.update_count += 1
         self.last_internal_turn = turn
-        self._append_event({
+        self.last_state_transaction_id = f"decision:{int(decision_index):04d}"
+        event = {
             "schema_version": EVENT_SCHEMA_VERSION,
             "internal_turn": turn,
             "decision_index": decision_index,
             "delta": dict(delta),
             "result": result,
-        })
+        }
         self._persist()
+        self._append_event({
+            **event, "workspace_snapshot_persisted": True,
+        })
         return result
 
     def active_view(self, *, object_limit: int = 48, relation_limit: int = 64) -> dict[str, Any]:
@@ -712,6 +865,7 @@ class PersistentTaskWorkspace:
             "relations": relations,
             "update_count": self.update_count,
             "last_internal_turn": self.last_internal_turn,
+            "last_state_transaction_id": self.last_state_transaction_id,
             "root_ledger_frozen": self.root_ledger_frozen,
             "rejected_root_mutations": self.rejected_root_mutations,
         }

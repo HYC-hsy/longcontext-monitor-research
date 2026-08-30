@@ -1,10 +1,20 @@
 from types import SimpleNamespace
 
+import json
+
 import llmcore
 from agent_loop import BaseHandler, StepOutcome, agent_runner_loop, exhaust
 from experiment_conditions import BaselineCondition, condition_initial_task
 from manual_completion_boundary import ManualCompletionBoundary
 from research_runtime import CompletionDecision, research_context
+from async_monitor_runtime import AsyncMonitorRuntime
+
+
+def permanently_blocking_monitor_worker(_kwargs, requests, responses, wake_event):
+    import time
+    wake_event.wait()
+    responses.put({"kind": "started", "request_id": "blocked-observation"})
+    while True: time.sleep(10)
 
 
 class SSEStreamResponse:
@@ -34,6 +44,39 @@ class Response:
         self.tool_calls = tool_calls or []
 
 
+def test_claude_stream_emits_one_combined_usage_record():
+    events = [
+        {"type": "message_start", "message": {"usage": {
+            "input_tokens": 120, "cache_read_input_tokens": 80,
+        }}},
+        {"type": "content_block_start", "content_block": {"type": "text"}},
+        {"type": "content_block_delta", "delta": {
+            "type": "text_delta", "text": "done",
+        }},
+        {"type": "content_block_stop"},
+        {"type": "message_delta", "delta": {"stop_reason": "end_turn"},
+         "usage": {"output_tokens": 17}},
+        {"type": "message_stop"},
+    ]
+    captured = []
+    with research_context({}, captured.append):
+        llmcore._register_provider_call({
+            "llm_call_id": "claude-call-1",
+            "provider_request_event_id": "request-1",
+            "call_type": "task_agent",
+        })
+        blocks = exhaust(llmcore._parse_claude_sse(
+            [("data: " + json.dumps(event)).encode() for event in events]
+        ))
+
+    assert blocks == [{"type": "text", "text": "done"}]
+    usage = [event for event in captured if event["event_type"] == "provider_usage"]
+    assert len(usage) == 1
+    assert usage[0]["payload"]["input_tokens"] == 120
+    assert usage[0]["payload"]["output_tokens"] == 17
+    assert usage[0]["payload"]["cache_read_input_tokens"] == 80
+
+
 class Client:
     last_tools = ""
 
@@ -44,6 +87,27 @@ class Client:
         if False:
             yield None
         return self.response
+
+
+class RecordingClient(Client):
+    def __init__(self, response):
+        super().__init__(response)
+        self.messages = []
+
+    def chat(self, messages, tools):
+        self.messages.append([dict(message) for message in messages])
+        return super().chat(messages, tools)
+
+
+class SequenceClient(RecordingClient):
+    def __init__(self, responses):
+        super().__init__(None)
+        self.responses = iter(responses)
+
+    def chat(self, messages, tools):
+        self.messages.append([dict(message) for message in messages])
+        if False: yield None
+        return next(self.responses)
 
 
 class Handler(BaseHandler):
@@ -109,6 +173,70 @@ def test_default_gate_keeps_legacy_completion_and_event_order():
     assert result["result"] == "CURRENT_TASK_DONE"
     kinds = [event["event_type"] for event in events]
     assert kinds == ["completion_proposal", "completion_decision", "termination"]
+
+
+def test_ready_async_monitor_intervention_is_injected_before_llm():
+    class Runtime:
+        def __init__(self): self.used = False
+        def consume_interventions(self):
+            if self.used: return []
+            self.used = True
+            return [{
+                "request_id": "monitor_boundary_1", "internal_turn": 3,
+                "message": "Inspect the test oracle before editing production code.",
+            }]
+
+    handler = Handler()
+    handler.parent.monitor_runtime = Runtime()
+    client = RecordingClient(Response())
+    exhaust(agent_runner_loop(client, "sys", "task", handler, [], max_turns=1, verbose=False))
+
+    prompt = client.messages[0][-1]["content"]
+    assert "PERSISTENT MONITOR" not in prompt
+    assert "test oracle" in prompt
+
+
+def test_announced_tool_intent_is_published_before_tool_execution():
+    class Runtime:
+        def __init__(self): self.packets = []
+        def consume_interventions(self): return []
+        def archive_boundary(self, packet): self.packets.append(packet); return True
+
+    function = SimpleNamespace(name="no_tool", arguments="{}")
+    tool_call = SimpleNamespace(id="call-1", function=function)
+    handler = Handler()
+    runtime = Runtime()
+    handler.parent.monitor_runtime = runtime
+    exhaust(agent_runner_loop(
+        Client(Response(content="I will run the focused check.", tool_calls=[tool_call])),
+        "sys", "task", handler, [], max_turns=1, verbose=False,
+    ))
+
+    assert runtime.packets[0]["boundary"] == "post_model_pre_tool"
+    assert runtime.packets[0]["tool_calls"][0]["tool_name"] == "no_tool"
+    assert runtime.packets[0]["tool_results"] == []
+
+
+def test_actual_task_loop_advances_while_monitor_process_is_blocked(tmp_path):
+    function = SimpleNamespace(name="probe", arguments='{"path":"menu.go"}')
+    first = Response(content="I will inspect the menu.", tool_calls=[
+        SimpleNamespace(id="call-1", function=function),
+    ])
+    client = SequenceClient([first, Response(content="done")])
+    handler = Handler()
+    runtime = AsyncMonitorRuntime(
+        {"artifact_dir": str(tmp_path)}, request_timeout=30,
+        worker_target=permanently_blocking_monitor_worker,
+    )
+    handler.parent.monitor_runtime = runtime
+    try:
+        result = exhaust(agent_runner_loop(
+            client, "sys", "task", handler, [], max_turns=2, verbose=False,
+        ))
+        assert result["result"] == "CURRENT_TASK_DONE"
+        assert len(client.messages) == 2
+    finally:
+        runtime.close()
 
 
 def test_completion_checkpoint_runs_before_gate_decision():

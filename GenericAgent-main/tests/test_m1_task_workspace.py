@@ -28,6 +28,63 @@ def test_different_task_does_not_restore_old_projection(tmp_path):
     assert (tmp_path / "original_public_task.txt").read_text(encoding="utf-8") == "Task B"
 
 
+def test_pre_identity_root_projection_is_archived_and_reset(tmp_path):
+    workspace = PersistentTaskWorkspace(tmp_path, "Implement A and B.")
+    workspace.sync_root_obligations([
+        {"obligation": "Polluted paraphrase A", "status": "supported",
+         "public_evidence": ["legacy evidence"]},
+        {"obligation": "Polluted paraphrase B", "status": "unknown",
+         "public_evidence": []},
+    ], 1, 1)
+
+    workspace.archive_and_reset_root_projection()
+
+    assert not [
+        row for row in workspace.view()["objects"]
+        if row.get("role") == "root_obligation"
+    ]
+    assert workspace.root_ledger_frozen is False
+    archive = tmp_path / "m1_workspace_pre_identity_migration.json"
+    archived = json.loads(archive.read_text(encoding="utf-8"))
+    assert sum(
+        row.get("role") == "root_obligation" for row in archived["objects"]
+    ) == 2
+
+
+def test_workspace_crash_before_checkpoint_restores_write_ahead_backup(tmp_path):
+    workspace = PersistentTaskWorkspace(tmp_path, "Implement A.")
+    workspace.begin_transaction("decision:0001")
+    workspace.apply_delta({
+        "upsert": [{
+            "id": "intent:uncommitted", "role": "local_intent",
+            "summary": "uncommitted state", "source_anchors": ["turn:1"],
+            "root_links": ["root:public-task"],
+        }], "deactivate": [], "relations": [],
+    }, turn=1, decision_index=1)
+
+    restarted = PersistentTaskWorkspace(tmp_path, "Implement A.")
+    assert restarted.recover_incomplete_transaction("decision:0000") is True
+    assert "intent:uncommitted" not in restarted.objects
+    assert not (tmp_path / "m1_workspace_transaction_backup.json").exists()
+
+
+def test_workspace_crash_after_checkpoint_keeps_matching_transaction(tmp_path):
+    workspace = PersistentTaskWorkspace(tmp_path, "Implement A.")
+    workspace.begin_transaction("decision:0001")
+    workspace.apply_delta({
+        "upsert": [{
+            "id": "intent:committed", "role": "local_intent",
+            "summary": "committed state", "source_anchors": ["turn:1"],
+            "root_links": ["root:public-task"],
+        }], "deactivate": [], "relations": [],
+    }, turn=1, decision_index=1)
+
+    restarted = PersistentTaskWorkspace(tmp_path, "Implement A.")
+    assert restarted.recover_incomplete_transaction("decision:0001") is False
+    assert "intent:committed" in restarted.objects
+    assert not (tmp_path / "m1_workspace_transaction_backup.json").exists()
+
+
 def test_apply_open_semantic_delta_and_search(tmp_path):
     workspace = PersistentTaskWorkspace(tmp_path, "Implement A.")
     result = workspace.apply_delta({

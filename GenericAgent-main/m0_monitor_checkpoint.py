@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
-SCHEMA_VERSION = "m0-monitor-checkpoint/1"
+SCHEMA_VERSION = "m0-monitor-checkpoint/2"
+READABLE_SCHEMA_VERSIONS = {"m0-monitor-checkpoint/1", SCHEMA_VERSION}
 
 
 class MonitorCheckpointStore:
@@ -36,7 +37,7 @@ class MonitorCheckpointStore:
             return None
         if not isinstance(value, Mapping):
             return None
-        if value.get("schema_version") != SCHEMA_VERSION:
+        if value.get("schema_version") not in READABLE_SCHEMA_VERSIONS:
             return None
         if value.get("public_task_sha256") != self.public_task_sha256:
             return None

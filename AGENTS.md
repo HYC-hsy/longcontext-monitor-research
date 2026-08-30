@@ -40,6 +40,16 @@
 
 默认架构只有一个具有持续身份的监察者。连续认知由外部可审计的 declarative/procedural state、事件归档、版本历史和 active view 保证，不依赖模型调用之间不可见的隐式记忆。低成本 L0 是确定性归档、索引、delta 和同一状态的增量维护；关键事件才触发同一监察者的较深审议。不得默认拆成“小模型维护、强模型判断”并把跨模型传递损失引入核心方法。
 
+### 并发监察执行硬约束（2026-08-28 用户纠偏）
+
+- 任务 Agent 是默认持续推进的执行主体；监察者必须作为并发观察者消费公开事件、主动检索工作区并维护状态，不得把每轮监察模型调用放进任务 Agent 的同步关键路径。
+- `SILENT` 表示没有用户式输入，不能要求任务 Agent 停下来等待一个 SILENT 判断。严禁恢复“每个工具边界暂停 → 同步调用监察者 → 返回后才能继续”的逐轮审批架构。
+- 监察者只有形成有证据依据的真实纠偏时，才通过高优先级干预队列模拟用户输入；任务 Agent 在下一安全可中断点、下一次模型推理之前消费该输入。危险且可取消的尚未执行动作可以阻止；普通正在执行的工具不得被不安全地中途破坏。
+- 监察者可在后台持续跟踪 repair episode、读取增量轨迹、测试、diff 和产物；这些调查及其 API 延迟、超时、崩溃或重启均不得冻结任务 Agent。监察故障必须被显式记录，不能伪装成正常 SILENT，也不能凭故障生成 HOLD。
+- 主动监察不得被实现成异步 packet reviewer：任务侧只允许把公开事实追加到可检索事件归档，并发出不含语义内容的游标/唤醒信号；不得把每个完整 packet 自动塞给监察模型。监察者必须拥有自己的观察游标和循环，自主决定何时查询增量轨迹、测试、diff、文件与历史、看多少以及何时重新静默。
+- 根任务完成提议可以作为独立的高风险边界接受明确的完成控制，但不得由此把普通执行边界重新串行化。最终方法必须分别报告普通并发监察延迟与完成边界控制成本。
+- 本约束来自真实 M3-B Fyne 2.2 运行暴露的架构偏移：同步 `checkpoint_callback -> monitor.review()` 使一次中转 SSE 卡流冻结整道任务。后续任何实现、重构和实验预检必须有自动测试证明“监察永久阻塞时任务仍推进、形成干预时可在下一安全边界送达”。
+
 ### 无 Checker 边界
 
 - 核心部署方法不得假设可靠在线 checker、gold answer、隐藏测试结果或 native verifier。
@@ -58,12 +68,24 @@
 3. M0-F：冻结 `m0-v1`，修复 timeout/JSON 归档等不改变策略的实验基础设施（已完成，`m0-v1.1`；首个 M1 长任务继续确认两小时外层限制）；
 4. M1：已按用户 2026-08-26 的阶段收束裁决冻结。M2 的父版本为 `6128acc` 的 M1-C 主动重建实现加行为中性的测试契约修复；这表示方法发现进入下一增量，不得夸大为已完成正式论文级充分验证；
 5. M2：已于 2026-08-28 收束。共同真实任务筛选保留 M2-C 的 scoped semantic-impact revision；M2-D 的直接依赖失效通道在 101 个监察边界内触发 0 次且运行超时，未证明相对 C 的独立收益，因此回退 D 并冻结 `m2-c-structural-gate`；详见 `method_discovery/docs/M2_STAGE_CLOSE_AND_M3_ENTRY_20260828.md`；
-6. M3：当前阶段。以冻结的 M2-C 为父版本增加 decision-centered epistemic control，解决调查范围、证据获取价值与停止问题；
+6. M3：当前阶段。以冻结的 M2-C 为父版本增加 decision-centered epistemic control，解决调查范围、证据获取价值与停止问题。普通监察采用正交的可选 `intervention_message` 与 `patrol|focused` 注意模式，不得恢复 HOLD/SILENT/RELEASE 串行动作协议；根 completion 独立使用 `allow_complete|continue_task`；
 7. M4：形式化证据门控边界、typed recovery 和持续 repair/release；
 8. M5：对单一累计方法做可靠性稳定、回滚消融和跨来源复验；
 9. M6：汇总 M1–M5 持续记录的成本证据，在不预设成功的前提下进行系统性 capability-preserving cost reduction、active view 和等预算验证；
 10. M7：未见真实任务、等预算消融与最终最小方法冻结；
 11. Stage 7：冻结后运行多来源正式实验与论文证据。
+
+M3 当前按 `M3.1 基础感知 -> M3.2 自适应观察节奏 -> M3.3 连续语义片段必要性审计（已否决持久实现） ->
+M3.4 自主工具循环能力审计与异步干预协议重构 -> M3.5 跨轮次连续认知` 递增弥补人工监察差距。每一项完成后必须
+停止汇报，不得自动进入下一项。每个实现或验证步骤开始前，必须带着该步骤的具体目标重新
+读取对应的真实人工监察轨迹、当时可见上下文和实际决策，先形成证据锚点再修改；不得凭印象
+或合理化猜测复刻人工策略。当前细化计划与证据门禁见
+`method_discovery/docs/M3_HUMAN_GAP_INCREMENTAL_PLAN_20260829.md`。
+
+2026-08-29 用户进一步裁决：M3.1--M3.5 期间不逐项运行完整真实任务。每项只允许通过代码
+回归、确定性集成检查和既有人工轨迹对齐来确认“工程实现完成”，不得据此声明效果成立、接受
+候选或冻结版本。必须保留逐项独立开关、决策理由和归档，以便累计完成 M3.5 后统一运行真实
+任务并追溯消融。M3.5 完成后首次累计真实运行仍适用独立启动门禁，未经用户确认不得执行。
 
 R0 同时冻结事件级诊断集与 Final120 真实任务协议。离线事件、静态 JSON、轨迹重放、schema 有效率和 LLM judge 只属于工程验证或候选生成，没有核心方法晋级权和淘汰权。M1–M7 的版本接受必须主要依据 `method_discovery/r0_real_tasks/protocol.json` 规定的完整真实 GenericAgent 分支；不得用压缩 packet、模拟事件或模块分数替代真实任务。`final_holdout` 在方法冻结前不得运行 treatment 或用于方法选择。
 
@@ -176,6 +198,15 @@ R0 同时冻结事件级诊断集与 Final120 真实任务协议。离线事件�
 - 比较方法时应保证除目标机制外的其他条件尽量一致，并报告token、调用次数、延迟和可用时的美元成本。
 - 阶段不能因为“代码已写完”而完成；只有其完成条件有测试或产物证明时才算完成。
 - 测试失败时不得静默降低验收标准。应报告失败并判断是实现错误、环境问题、任务能力问题还是研究假设未成立。
+
+### Docker/Harbor 真实任务恢复 SOP
+
+- 本机 Docker Desktop 固定安装在 `E:\Docker\Desktop`；标准批次只要求 Linux Engine 常驻，任务运行期间只使用 Docker CLI/API，不逐题启停 Desktop。
+- 启动前先运行 `docker info --format '{{.ServerVersion}}'`。成功才进入镜像、manifest 和任务预检；不得只根据 `Docker Desktop` 进程存在判断 Engine 可用。
+- Engine 未运行时，优先直接启动 `E:\Docker\Desktop\Docker Desktop.exe` 并等待 `docker info` 成功。首次启动允许出现 Dashboard；Engine 就绪后可关闭窗口而不停止 Engine。不要在受限 Codex shell 中使用 `docker desktop start/restart/stop`：该子命令会写 `C:\Users\hsy\AppData\Local\Docker\log\host`，可能因沙箱权限失败并扰动本来可恢复的 Desktop 会话。
+- `permission denied`、named-pipe 不可达或空 ServerVersion 时，先区分三种情况：Desktop 未启动、Desktop 已启动但 Engine 尚在初始化、当前 shell 对 Desktop 日志/pipe 的权限受限。检查 `docker desktop status` 只作诊断，不以其代替 `docker info`；不得连续混用 GUI 启动、CLI restart 和多进程重复启动。
+- 启动后采用短轮询等待 Engine，单次等待不超过 60 秒并向用户更新；Engine 就绪后立即复用，不再重启。若当前沙箱确实不能访问 pipe，应保留 `prepared_not_executed` manifest 和零 API 污染事实，但在得出阻塞结论前必须完成上述固定路径启动与等待流程。
+- Engine 就绪后按 `long_context_bench/docs/DOCKER_HARBOR_REAL_TASK_SOP.md` 执行镜像身份、已有容器、磁盘、API、源码摘要和 run-id 预检。每题结束只清理该题容器/镜像策略指定的资源，不停止整个 Engine。
 
 ## 8. 方法发现阶段的特别要求
 

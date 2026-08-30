@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import shutil
@@ -12,7 +13,7 @@ import time
 import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +39,44 @@ OTEL_ROOT = WORK_ROOT / "otel"
 COLLECTOR_NAME = "m12-natural-ga-otel"
 COLLECTOR_PORT = 15340
 
+MANIFEST_ENV_KEYS = {"BENCHMARK_CAMPAIGN_ROOT"}
+MANIFEST_CONTROLLED_ENV_KEYS = {
+    "BENCHMARK_CAMPAIGN_ROOT",
+    "GA_BASELINE_CONDITION", "GA_EXPERIMENT_ID", "GA_CONDITION_ID",
+    "GA_LLM_CONFIG_NAME", "GA_MAX_TURNS", "GA_PROVIDER_MAX_RETRIES",
+    "GA_METHOD_EXPECTED_SOURCE_SHA256", "GA_EXPERIMENT_HARNESS_SHA256",
+    "GA_M0_MONITOR_ENABLED", "GA_M0_MONITOR_CONFIG",
+    "GA_M0_MONITOR_EXPECTED_MODEL", "GA_M0_MAX_INSPECTIONS",
+    "GA_M0_RECENT_TRAJECTORY_TURNS", "GA_MONITOR_REQUEST_TIMEOUT_SECONDS",
+    "GA_M1_WORKSPACE_ENABLED", "GA_M1_ACTIVE_RECONSTRUCTION_ENABLED",
+    "GA_M2_VERSIONED_REVISION_ENABLED", "GA_M2_JUSTIFICATION_INVALIDATION_ENABLED",
+    "GA_M2_SEMANTIC_IMPACT_ENABLED", "GA_M3_HUMAN_LOOP_ENABLED",
+    "GA_M3_DECISION_VALUE_ENABLED", "GA_M3_DISCRIMINATIVE_CONTROL_ENABLED",
+    "GA_M3_COMBINED_CONTROL_ENABLED",
+    "GA_M32_ADAPTIVE_OBSERVATION_ENABLED", "GA_M35_CONTINUITY_ENABLED",
+    "GA_M35_HISTORY_COMPACTION_ENABLED", "GA_M35_MINIMAL_FRONTSTAGE_ENABLED",
+    "GA_M35_HISTORY_SOFT_CHAR_LIMIT", "GA_M35_HISTORY_TARGET_CHARACTERS",
+    "GA_MANUAL_COMPLETION_ENABLED", "GA_MANUAL_COMPLETION_TIMEOUT_SECONDS",
+    "GA_TASK_CARD_PATH", "GA_OBLIGATION_LEDGER_CARD_PATH",
+    "GA_STAGE6D_BUNDLE_DIR", "GA_EVIDENCE_STATE_PATH",
+    "GA_COMPLETION_CONTRACT_PATH", "GA_PUBLIC_TASK_PATH",
+    "GA_EVIDENCE_FRONTEND_CONFIG", "GA_EVIDENCE_GATE_MODE",
+    "GA_REPRESENTATION_AUDIT_CARD_PATH", "GA_REPRESENTATION_AUDIT_CONFIG",
+    "GA_COMPLETION_BRANCH_CHECKPOINT",
+    "GA_COMPLETION_BRANCH_BUNDLE", "GA_COMPLETION_BRANCH_POLICY",
+    "GA_COMPLETION_CHECKPOINT_ROOT", "GA_KEEP_HARBOR_ENV",
+}
+EXECUTION_HARNESS_FILES = (
+    "scripts/run_ultralong_m12_proofs.py",
+    "scripts/run_harbor_tb2_m4.py",
+    "scripts/prepare_harbor_lhtb_m12.py",
+    "scripts/prepare_harbor_lhtb_structured_pass_m12.py",
+    "scripts/prepare_harbor_windows_sidecar_m12.py",
+    "scripts/m11_trajectory_validation.py",
+    "adapters/harbor_ga_agent.py",
+    "adapters/harbor_ga_lhtb.py",
+)
+
 SOURCES = {
     "lhtb": {
         "representative_task_id": "grammar-fuzz-coverage-hunt",
@@ -56,6 +95,72 @@ SOURCES = {
         "persistent_session": False,
     },
 }
+
+
+def execution_harness_hash() -> str:
+    digest = hashlib.sha256()
+    for relative in EXECUTION_HARNESS_FILES:
+        data = (ROOT / relative).read_bytes()
+        encoded = relative.encode("utf-8")
+        digest.update(len(encoded).to_bytes(4, "big"))
+        digest.update(encoded)
+        digest.update(len(data).to_bytes(8, "big"))
+        digest.update(data)
+    return digest.hexdigest()
+
+
+def apply_experiment_manifest(path: str | os.PathLike[str], run_id: str) -> dict[str, Any]:
+    """Load one frozen, secret-free run environment without a shell wrapper."""
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if payload.get("secrets_included") is not False:
+        raise ValueError("experiment manifest must explicitly exclude secrets")
+    runs = payload.get("runs")
+    if not isinstance(runs, list):
+        raise ValueError("experiment manifest runs must be a list")
+    matches = [row for row in runs
+               if isinstance(row, Mapping) and row.get("run_id") == run_id]
+    if len(matches) != 1:
+        raise ValueError(f"experiment manifest must contain exactly one run {run_id!r}")
+    selected = dict(matches[0])
+    environment = selected.get("environment")
+    if not isinstance(environment, Mapping):
+        raise ValueError("selected manifest run has no environment mapping")
+    normalized_environment: dict[str, str] = {}
+    for key, value in environment.items():
+        name = str(key)
+        if not (name.startswith("GA_") or name in MANIFEST_ENV_KEYS):
+            raise ValueError(f"manifest environment key is not allowlisted: {name}")
+        upper = name.upper()
+        if any(marker in upper for marker in ("KEY", "TOKEN", "SECRET", "AUTH")):
+            raise ValueError(f"secret-like manifest environment key is forbidden: {name}")
+        normalized_environment[name] = str(value)
+    expected_harness = str(
+        normalized_environment.get("GA_EXPERIMENT_HARNESS_SHA256", "")
+    ).strip().lower()
+    if expected_harness:
+        actual_harness = execution_harness_hash()
+        if expected_harness != actual_harness:
+            raise RuntimeError(
+                "experiment execution harness mismatch: "
+                f"expected {expected_harness}, got {actual_harness}"
+            )
+    # A manifest condition is a complete experimental assignment, not a patch
+    # over whichever candidate happened to run previously in this process.
+    # Validate first, then remove only experiment-owned keys and apply once.
+    for name in MANIFEST_CONTROLLED_ENV_KEYS:
+        os.environ.pop(name, None)
+    os.environ.update(normalized_environment)
+
+    # These roots were initialized at import time. Rebind them after applying
+    # the manifest and before preflight configures the shared Harbor runner.
+    global WORK_ROOT, JOBS_ROOT, RUNS_ROOT, OTEL_ROOT
+    WORK_ROOT = Path(os.environ.get(
+        "BENCHMARK_CAMPAIGN_ROOT", ROOT / "output" / "m12_proofs" / "natural_ga"
+    ))
+    JOBS_ROOT = WORK_ROOT / "jobs"
+    RUNS_ROOT = WORK_ROOT / "runs"
+    OTEL_ROOT = WORK_ROOT / "otel"
+    return selected
 
 
 def stage4_agent_kwargs() -> dict[str, object]:
@@ -99,6 +204,20 @@ def stage4_agent_kwargs() -> dict[str, object]:
             values["m2_semantic_impact_enabled"] = True
         if os.environ.get("GA_M3_HUMAN_LOOP_ENABLED") == "1":
             values["m3_human_loop_enabled"] = True
+        if os.environ.get("GA_M3_DECISION_VALUE_ENABLED") == "1":
+            values["m3_decision_value_enabled"] = True
+        if os.environ.get("GA_M3_DISCRIMINATIVE_CONTROL_ENABLED") == "1":
+            values["m3_discriminative_control_enabled"] = True
+        if os.environ.get("GA_M3_COMBINED_CONTROL_ENABLED") == "1":
+            values["m3_combined_control_enabled"] = True
+        if os.environ.get("GA_M32_ADAPTIVE_OBSERVATION_ENABLED") == "1":
+            values["m32_adaptive_observation_enabled"] = True
+        if os.environ.get("GA_M35_CONTINUITY_ENABLED") == "1":
+            values["m35_continuity_enabled"] = True
+        if os.environ.get("GA_M35_HISTORY_COMPACTION_ENABLED") == "1":
+            values["m35_history_compaction_enabled"] = True
+        if os.environ.get("GA_M35_MINIMAL_FRONTSTAGE_ENABLED") == "1":
+            values["m35_minimal_frontstage_enabled"] = True
     elif os.environ.get("GA_M1_WORKSPACE_ENABLED") == "1":
         raise ValueError("GA_M1_WORKSPACE_ENABLED requires GA_M0_MONITOR_ENABLED")
     card_path = os.environ.get("GA_TASK_CARD_PATH")
@@ -238,6 +357,15 @@ def task_path(source: str, task_id: str) -> Path:
 def online_checker_forbidden() -> bool:
     """Return whether this run must keep native verification strictly post-run."""
     return os.environ.get("GA_M0_MONITOR_ENABLED") == "1"
+
+
+def validate_expected_ga_source(actual_hash: str) -> None:
+    """Fail before launch when the manifest no longer names this GA tree."""
+    expected = os.environ.get("GA_METHOD_EXPECTED_SOURCE_SHA256", "").strip().lower()
+    if expected and actual_hash.lower() != expected:
+        raise RuntimeError(
+            f"GA source mismatch: expected {expected}, got {actual_hash.lower()}"
+        )
 
 
 def materialize_execution_task(
@@ -382,6 +510,7 @@ def preflight(
     if not selected_task_path.is_dir():
         raise RuntimeError(f"task assets are missing: {selected_task_path}")
     ga_hash = m4.tree_hash(m4.GA_ROOT, ga_mode=True)
+    validate_expected_ga_source(ga_hash)
     identity = {
         "schema_version": "ultralong-m12-natural-ga-preflight/1",
         "created_at": now(),
@@ -671,7 +800,12 @@ def main() -> int:
     parser.add_argument("--max-agent-seconds", type=int, default=300)
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument("--finalize-existing", action="store_true")
+    parser.add_argument("--experiment-manifest")
     args = parser.parse_args()
+    if args.experiment_manifest:
+        if not args.run_id:
+            parser.error("--experiment-manifest requires --run-id")
+        apply_experiment_manifest(args.experiment_manifest, args.run_id)
     if args.preflight_only and args.finalize_existing:
         parser.error("--preflight-only and --finalize-existing are mutually exclusive")
     if args.preflight_only:

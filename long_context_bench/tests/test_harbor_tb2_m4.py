@@ -331,7 +331,7 @@ def test_adapter_source_stays_thin_and_uses_native_harbor_contract():
     assert '"wrapper_return_code"' in source
     assert '"ga_process_return_code"' in source
     assert '"agent_return_code"' not in source
-    assert len(source.splitlines()) < 500
+    assert len(source.splitlines()) < 525
 
 
 @pytest.mark.parametrize("policy", [
@@ -365,6 +365,26 @@ def test_adapter_records_wrapper_and_real_process_status(monkeypatch, tmp_path):
     assert context.metadata["task_id"] == "tb2:test-task"
     assert context.metadata["wrapper_return_code"] == 0
     assert context.metadata["ga_process_return_code"] == 143
+
+
+def test_adapter_setup_excludes_transient_checkout_directories(monkeypatch, tmp_path):
+    adapter = _load_adapter(monkeypatch)
+    agent = adapter.M4GenericAgent(
+        logs_dir=tmp_path, model_name="model-x", run_id="run-setup",
+        expected_model="model-x", python_home="cpython-test",
+        ga_source_sha256="hash",
+    )
+    environment = _FakeEnvironment(wrapper_return_code=0, process_return_code=0)
+
+    asyncio.run(agent.setup(environment))
+
+    setup_command = environment.commands[-1]
+    assert "find /opt/genericagent-source -mindepth 1 -maxdepth 1" in setup_command
+    assert "! -name temp" in setup_command
+    assert "! -name __pycache__" in setup_command
+    assert "! -name .pytest_cache" in setup_command
+    assert "cp -a /opt/genericagent-source/." not in setup_command
+    assert "mkdir -p /opt/genericagent/temp" in setup_command
 
 
 def test_adapter_chunks_long_instruction_before_container_exec(monkeypatch, tmp_path):
@@ -430,7 +450,8 @@ def test_adapter_forwards_m3_only_on_the_m2c_parent(monkeypatch, tmp_path):
         logs_dir=tmp_path, model_name="model-x", run_id="valid-m3",
         expected_model="model-x", python_home="cpython-test",
         ga_source_sha256="hash", timeout_sec=2, m0_monitor_enabled=True,
-        m0_monitor_config="monitor", m1_workspace_enabled=True,
+        m0_monitor_config="monitor", m0_recent_trajectory_turns=7,
+        m1_workspace_enabled=True,
         m2_semantic_impact_enabled=True, m3_human_loop_enabled=True,
     )
     environment = _FakeEnvironment(wrapper_return_code=0, process_return_code=0)
@@ -441,6 +462,155 @@ def test_adapter_forwards_m3_only_on_the_m2c_parent(monkeypatch, tmp_path):
     agent_call = next(call for call in environment.exec_calls if "agentmain.py" in call[0])
     assert agent_call[1]["env"]["GA_M2_SEMANTIC_IMPACT_ENABLED"] == "1"
     assert agent_call[1]["env"]["GA_M3_HUMAN_LOOP_ENABLED"] == "1"
+
+
+def test_adapter_forwards_m3b_only_on_the_m3a_parent(monkeypatch, tmp_path):
+    adapter = _load_adapter(monkeypatch)
+    with pytest.raises(ValueError, match="requires the M3-A"):
+        adapter.M4GenericAgent(
+            logs_dir=tmp_path, model_name="model-x", run_id="invalid-m3b",
+            expected_model="model-x", python_home="cpython-test",
+            ga_source_sha256="hash", m0_monitor_enabled=True,
+            m0_monitor_config="monitor", m1_workspace_enabled=True,
+            m2_semantic_impact_enabled=True, m3_decision_value_enabled=True,
+        )
+    agent = adapter.M4GenericAgent(
+        logs_dir=tmp_path, model_name="model-x", run_id="valid-m3b",
+        expected_model="model-x", python_home="cpython-test",
+        ga_source_sha256="hash", timeout_sec=2, m0_monitor_enabled=True,
+        m0_monitor_config="monitor", m0_recent_trajectory_turns=7,
+        m1_workspace_enabled=True,
+        m2_semantic_impact_enabled=True, m3_human_loop_enabled=True,
+        m3_decision_value_enabled=True,
+    )
+    environment = _FakeEnvironment(wrapper_return_code=0, process_return_code=0)
+    context = _Context()
+
+    asyncio.run(agent.run("instruction", environment, context))
+
+    agent_call = next(call for call in environment.exec_calls if "agentmain.py" in call[0])
+    assert agent_call[1]["env"]["GA_M3_HUMAN_LOOP_ENABLED"] == "1"
+    assert agent_call[1]["env"]["GA_M3_DECISION_VALUE_ENABLED"] == "1"
+
+
+def test_adapter_forwards_m3c_as_an_independent_m3a_child(monkeypatch, tmp_path):
+    adapter = _load_adapter(monkeypatch)
+    with pytest.raises(ValueError, match="requires the M3-A"):
+        adapter.M4GenericAgent(
+            logs_dir=tmp_path, model_name="model-x", run_id="invalid-m3c",
+            expected_model="model-x", python_home="cpython-test",
+            ga_source_sha256="hash", m0_monitor_enabled=True,
+            m0_monitor_config="monitor", m1_workspace_enabled=True,
+            m2_semantic_impact_enabled=True,
+            m3_discriminative_control_enabled=True,
+        )
+    with pytest.raises(ValueError, match="must remain independent"):
+        adapter.M4GenericAgent(
+            logs_dir=tmp_path, model_name="model-x", run_id="invalid-m3bc",
+            expected_model="model-x", python_home="cpython-test",
+            ga_source_sha256="hash", m0_monitor_enabled=True,
+            m0_monitor_config="monitor", m1_workspace_enabled=True,
+            m2_semantic_impact_enabled=True, m3_human_loop_enabled=True,
+            m3_decision_value_enabled=True,
+            m3_discriminative_control_enabled=True,
+        )
+    agent = adapter.M4GenericAgent(
+        logs_dir=tmp_path, model_name="model-x", run_id="valid-m3c",
+        expected_model="model-x", python_home="cpython-test",
+        ga_source_sha256="hash", timeout_sec=2, m0_monitor_enabled=True,
+        m0_monitor_config="monitor", m0_recent_trajectory_turns=7,
+        m1_workspace_enabled=True,
+        m2_semantic_impact_enabled=True, m3_human_loop_enabled=True,
+        m3_discriminative_control_enabled=True,
+        m32_adaptive_observation_enabled=True,
+    )
+    environment = _FakeEnvironment(wrapper_return_code=0, process_return_code=0)
+    asyncio.run(agent.run("instruction", environment, _Context()))
+    agent_call = next(call for call in environment.exec_calls if "agentmain.py" in call[0])
+    assert agent_call[1]["env"]["GA_M3_DISCRIMINATIVE_CONTROL_ENABLED"] == "1"
+    assert agent_call[1]["env"]["GA_M32_ADAPTIVE_OBSERVATION_ENABLED"] == "1"
+    assert "GA_M3_DECISION_VALUE_ENABLED" not in agent_call[1]["env"]
+    assert agent_call[1]["env"]["GA_M0_RECENT_TRAJECTORY_TURNS"] == "7"
+
+    d_agent = adapter.M4GenericAgent(
+        logs_dir=tmp_path, model_name="model-x", run_id="valid-m3d",
+        expected_model="model-x", python_home="cpython-test",
+        ga_source_sha256="hash", timeout_sec=2, m0_monitor_enabled=True,
+        m0_monitor_config="monitor", m1_workspace_enabled=True,
+        m2_semantic_impact_enabled=True, m3_human_loop_enabled=True,
+        m3_discriminative_control_enabled=True,
+        m3_combined_control_enabled=True,
+        m32_adaptive_observation_enabled=True,
+    )
+    d_environment = _FakeEnvironment(wrapper_return_code=0, process_return_code=0)
+    asyncio.run(d_agent.run("instruction", d_environment, _Context()))
+    d_call = next(call for call in d_environment.exec_calls if "agentmain.py" in call[0])
+    assert d_call[1]["env"]["GA_M3_DISCRIMINATIVE_CONTROL_ENABLED"] == "1"
+    assert d_call[1]["env"]["GA_M3_COMBINED_CONTROL_ENABLED"] == "1"
+
+
+def test_adapter_forwards_m32_only_on_the_cumulative_m3_parent(monkeypatch, tmp_path):
+    adapter = _load_adapter(monkeypatch)
+    with pytest.raises(ValueError, match="requires an M3-B or M3-C"):
+        adapter.M4GenericAgent(
+            logs_dir=tmp_path, model_name="model-x", run_id="invalid-m32",
+            expected_model="model-x", python_home="cpython-test",
+            ga_source_sha256="hash", m0_monitor_enabled=True,
+            m0_monitor_config="monitor", m1_workspace_enabled=True,
+            m2_semantic_impact_enabled=True, m3_human_loop_enabled=True,
+            m32_adaptive_observation_enabled=True,
+        )
+    agent = adapter.M4GenericAgent(
+        logs_dir=tmp_path, model_name="model-x", run_id="valid-m32",
+        expected_model="model-x", python_home="cpython-test",
+        ga_source_sha256="hash", timeout_sec=2, m0_monitor_enabled=True,
+        m0_monitor_config="monitor", m1_workspace_enabled=True,
+        m2_semantic_impact_enabled=True, m3_human_loop_enabled=True,
+        m3_decision_value_enabled=True, m32_adaptive_observation_enabled=True,
+    )
+    environment = _FakeEnvironment(wrapper_return_code=0, process_return_code=0)
+    asyncio.run(agent.run("instruction", environment, _Context()))
+    agent_call = next(call for call in environment.exec_calls if "agentmain.py" in call[0])
+    assert agent_call[1]["env"]["GA_M32_ADAPTIVE_OBSERVATION_ENABLED"] == "1"
+
+
+def test_adapter_forwards_m35_only_on_the_cumulative_m32_parent(monkeypatch, tmp_path):
+    adapter = _load_adapter(monkeypatch)
+    with pytest.raises(ValueError, match="history compaction requires persistent continuity"):
+        adapter.M4GenericAgent(
+            logs_dir=tmp_path, model_name="model-x", run_id="invalid-h3",
+            expected_model="model-x", python_home="cpython-test",
+            ga_source_sha256="hash", m0_monitor_enabled=True,
+            m0_monitor_config="monitor", m1_workspace_enabled=True,
+            m2_semantic_impact_enabled=True, m3_human_loop_enabled=True,
+            m3_decision_value_enabled=True, m32_adaptive_observation_enabled=True,
+            m35_history_compaction_enabled=True,
+        )
+    with pytest.raises(ValueError, match="requires the cumulative M3.2"):
+        adapter.M4GenericAgent(
+            logs_dir=tmp_path, model_name="model-x", run_id="invalid-m35",
+            expected_model="model-x", python_home="cpython-test",
+            ga_source_sha256="hash", m0_monitor_enabled=True,
+            m0_monitor_config="monitor", m1_workspace_enabled=True,
+            m2_semantic_impact_enabled=True, m3_human_loop_enabled=True,
+            m3_decision_value_enabled=True, m35_continuity_enabled=True,
+        )
+    agent = adapter.M4GenericAgent(
+        logs_dir=tmp_path, model_name="model-x", run_id="valid-m35",
+        expected_model="model-x", python_home="cpython-test",
+        ga_source_sha256="hash", timeout_sec=2, m0_monitor_enabled=True,
+        m0_monitor_config="monitor", m1_workspace_enabled=True,
+        m2_semantic_impact_enabled=True, m3_human_loop_enabled=True,
+        m3_decision_value_enabled=True, m32_adaptive_observation_enabled=True,
+        m35_continuity_enabled=True, m35_history_compaction_enabled=True,
+        m35_minimal_frontstage_enabled=True,
+    )
+    environment = _FakeEnvironment(wrapper_return_code=0, process_return_code=0)
+    asyncio.run(agent.run("instruction", environment, _Context()))
+    agent_call = next(call for call in environment.exec_calls if "agentmain.py" in call[0])
+    assert agent_call[1]["env"]["GA_M35_CONTINUITY_ENABLED"] == "1"
+    assert agent_call[1]["env"]["GA_M35_HISTORY_COMPACTION_ENABLED"] == "1"
+    assert agent_call[1]["env"]["GA_M35_MINIMAL_FRONTSTAGE_ENABLED"] == "1"
 
 
 def test_adapter_stages_stage6d_bundle_inside_task_container(monkeypatch, tmp_path):

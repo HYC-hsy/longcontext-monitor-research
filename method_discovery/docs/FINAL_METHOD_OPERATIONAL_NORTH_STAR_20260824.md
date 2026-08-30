@@ -33,7 +33,7 @@ ORIGINAL PUBLIC TASK
                                              TASK--REASONING--EVIDENCE STATE
 ```
 
-The task Agent owns ordinary task execution. The monitor owns sustained task understanding, evidence discipline, selective investigation, and sparse course correction. The environment and native verifier do not provide a hidden online oracle.
+The task Agent owns ordinary task execution and continues by default. The monitor is a concurrent observer: it consumes archived public deltas, reconstructs evidence on demand, and sends a user-like recovery message only after an intervention is justified. Ordinary monitor inference, inspection, timeout, crash, or restart is never a synchronous per-turn prerequisite for task progress. The environment and native verifier do not provide a hidden online oracle.
 
 The same monitor identity is used throughout the task. Deterministic code may archive events, compute deltas, maintain indexes, and enforce pause/resume mechanics. It may not make hidden semantic judgments on behalf of the monitor.
 
@@ -179,7 +179,7 @@ It may update the external state, create a watch/reopen condition, or schedule a
 
 ### Phase 5B: inspect without intervention
 
-The monitor may pause long enough to read tests, diffs, logs, history, or environment state, yet still return silence. Inspection is not evidence that a fault exists and must not manufacture a HOLD.
+The monitor may independently read tests, diffs, logs, history, or environment state while the task Agent continues. Inspection is not evidence that a fault exists and must not manufacture an intervention. An empty `intervention_message` produces no task-Agent input and therefore cannot impose waiting latency.
 
 ### Phase 5C: intervene with a minimal recovery action
 
@@ -199,11 +199,13 @@ Typed purposes may include:
 - `REPAIR` a confirmed conflict;
 - `REOBSERVE` stale environment evidence;
 - `ROLLBACK/CONTAIN` a harmful or evidence-polluting action;
-- `HOLD_TRANSITION` a risky state change;
-- `HOLD_COMPLETION` unsupported root closure;
-- `ABSTAIN/ESCALATE` when safe progress cannot be supported.
+- `PREVENT_TRANSITION` before a risky state change;
+- `CONTINUE_TASK` when root closure is unsupported and a bounded next action exists;
+- `ESCALATE` when safe autonomous progress cannot be supported.
 
 The type supports audit and control; it must not force templated wording that suppresses monitor intelligence.
+
+The intervention is appended to a high-priority user-input queue and consumed before the task Agent's next model inference at a safe interruptible boundary. The monitor does not synchronously approve every ordinary action. An already running tool is cancelled only when the action is both materially dangerous and safely cancellable; otherwise the message is delivered immediately after that tool returns.
 
 ### Phase 6: persistent repair episode
 
@@ -230,9 +232,9 @@ Within the episode:
 - one requested discriminating probe is allowed to run before another is demanded;
 - local repair is checked against materially affected prior evidence and the root task.
 
-### Phase 7: local release and return to shadowing
+### Phase 7: return from focused attention to patrol
 
-The monitor releases focused control when:
+The monitor returns its own attention to patrol when:
 
 - the Agent's interpretation is again compatible with the public contract;
 - the next actions demonstrate behavioral uptake;
@@ -240,7 +242,7 @@ The monitor releases focused control when:
 - material affected evidence has been revalidated to the degree justified by the decision;
 - no additional bounded check has positive expected decision value.
 
-Release returns autonomy and switches back to shadowing. It does not certify hidden correctness, erase UNKNOWN, or close the root task. Reopen conditions remain in the state.
+Returning to patrol reduces observation density. It does not certify hidden correctness, erase UNKNOWN, or close the root task. Reopen conditions remain in the state.
 
 ### Phase 8: root completion proposal
 
@@ -253,12 +255,10 @@ When the task Agent proposes completion, the monitor reconstructs a fresh root v
 - whether local evidence has been overgeneralized;
 - whether residual UNKNOWN is material evidence debt or merely residual uncertainty.
 
-The monitor then chooses:
+The completion protocol is independent of ordinary communication and attention. The monitor chooses:
 
-- `RELEASE_COMPLETE`: no known repairable material public discrepancy remains;
-- `HOLD_COMPLETION`: one or more explicit material obligations are being closed without normally expected public support and a bounded check/action exists;
-- `REOPEN`: relevant change or conflict invalidates prior closure;
-- `ABSTAIN/ESCALATE`: public evidence cannot support either safe completion or a feasible autonomous repair.
+- `allow_complete`: no known repairable material public discrepancy remains under the best safely obtainable public evidence;
+- `continue_task`: one or more explicit material obligations are being closed without normally expected public support and a bounded executable next action exists. Its non-empty `intervention_message` becomes the next user turn.
 
 The monitor never claims that hidden tests would pass. It judges only whether completion is justified by the best safely obtainable public evidence.
 

@@ -145,6 +145,10 @@ def _parse_claude_sse(resp_lines):
     """Parse Anthropic SSE stream. Yields text chunks, returns list[content_block]."""
     content_blocks = []; current_block = None; tool_json_buf = ""
     stop_reason = None; got_message_stop = False; warn = None
+    # Anthropic streams split usage across message_start (input/cache) and
+    # message_delta (output). Emit one complete usage record per provider call
+    # after the stream ends instead of an input-only record at message_start.
+    start_usage = {}; delta_usage = {}
     for line in resp_lines:
         if not line: continue
         line = line.decode('utf-8') if isinstance(line, bytes) else line
@@ -157,8 +161,7 @@ def _parse_claude_sse(resp_lines):
             continue
         evt_type = evt.get("type", "")
         if evt_type == "message_start":
-            usage = evt.get("message", {}).get("usage", {})
-            _record_usage(usage, "messages")
+            start_usage = dict(evt.get("message", {}).get("usage", {}) or {})
         elif evt_type == "content_block_start":
             block = evt.get("content_block", {})
             if block.get("type") == "text": current_block = {"type": "text", "text": ""}
@@ -188,8 +191,8 @@ def _parse_claude_sse(resp_lines):
         elif evt_type == "message_delta":
             delta = evt.get("delta", {})
             stop_reason = delta.get("stop_reason", stop_reason)
-            out_usage = evt.get("usage", {})
-            out_tokens = out_usage.get("output_tokens", 0)
+            delta_usage = dict(evt.get("usage", {}) or {})
+            out_tokens = delta_usage.get("output_tokens", 0)
             if out_tokens: print(f"[Output] tokens={out_tokens} stop_reason={stop_reason}")
         elif evt_type == "message_stop": got_message_stop = True
         elif evt_type == "error":
@@ -204,6 +207,13 @@ def _parse_claude_sse(resp_lines):
             try: current_block["input"] = json.loads(tool_json_buf) if tool_json_buf else {}
             except: current_block["input"] = {"_raw": tool_json_buf}
         content_blocks.append(current_block); current_block = None
+    combined_usage = dict(start_usage)
+    for key, value in delta_usage.items():
+        # Output counters arrive only at message_delta. Preserve any input and
+        # cache counters that were present only at message_start.
+        if value is not None:
+            combined_usage[key] = value
+    _record_usage(combined_usage, "messages")
     if warn:
         print(f"[WARN] {warn.strip()}")
         insert_at = next((i for i,b in enumerate(content_blocks) if b.get("type") == "tool_use"), len(content_blocks))
@@ -464,6 +474,21 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
         try:
             with requests.post(url, headers=headers, json=payload, stream=sess.stream, 
                                timeout=(sess.connect_timeout, sess.read_timeout), proxies=sess.proxies, verify=sess.verify) as r:
+                # Best-effort in-process deadline. A read timeout only bounds
+                # silence between bytes and cross-thread response.close() is not
+                # a reliable cancellation primitive for blocked SSE reads. The
+                # monitor therefore also runs behind a killable process boundary.
+                response_deadline_hit = threading.Event()
+                response_deadline = None
+                total_timeout = float(getattr(sess, 'total_response_timeout', 0) or 0)
+                if total_timeout > 0:
+                    def _close_stalled_response():
+                        response_deadline_hit.set()
+                        try: r.close()
+                        except Exception: pass
+                    response_deadline = threading.Timer(total_timeout, _close_stalled_response)
+                    response_deadline.daemon = True
+                    response_deadline.start()
                 if r.status_code >= 400:
                     try: body = r.text.strip()[:500]
                     except: body = ""
@@ -477,13 +502,21 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                     err = f"!!!Error: HTTP {r.status_code}" + (f": {body}" if body else "")
                     _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code, 'outcome': 'http_error'}, llm_call_id=llm_call_id)
                     yield err; return [{"type": "text", "text": err}]
-                gen = parse_fn(r)
                 try:
-                    while True: chunk = next(gen); streamed = True; yield chunk
-                except StopIteration as e:
-                    if not e.value and not streamed: raise requests.ConnectionError("empty response")
-                    _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code, 'outcome': 'success'}, llm_call_id=llm_call_id)
-                    return e.value or []
+                    gen = parse_fn(r)
+                    try:
+                        while True: chunk = next(gen); streamed = True; yield chunk
+                    except StopIteration as e:
+                        if response_deadline_hit.is_set():
+                            raise requests.Timeout(
+                                f"provider response exceeded {total_timeout:g}s wall deadline"
+                            )
+                        if not e.value and not streamed: raise requests.ConnectionError("empty response")
+                        _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code, 'outcome': 'success'}, llm_call_id=llm_call_id)
+                        return e.value or []
+                finally:
+                    if response_deadline is not None:
+                        response_deadline.cancel()
         except (_RetryableStreamError, requests.Timeout, requests.ConnectionError,
                 requests.exceptions.ChunkedEncodingError) as e:
             #pathlib.Path(__file__).parent.joinpath('temp','bad_requests.json').write_text(json.dumps({"url":url,"headers":headers,"payload":payload,"err":str(e),"t":time.time()},ensure_ascii=False),encoding='utf-8')
@@ -647,6 +680,9 @@ class BaseSession:
         default_ct, default_rt = (5, 40) if self.stream else (10, 240)
         self.connect_timeout = max(1, int(cfg.get('timeout', default_ct)))
         self.read_timeout = max(5, int(cfg.get('read_timeout', default_rt)))
+        self.total_response_timeout = max(
+            0, float(cfg.get('total_response_timeout', 0) or 0)
+        )
         def _enum(key, valid):
             v = cfg.get(key); v = None if v is None else str(v).strip().lower()
             return v if not v or v in valid else print(f"[WARN] Invalid {key} {v!r}, ignored.")

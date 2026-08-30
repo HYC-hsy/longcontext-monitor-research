@@ -1,7 +1,6 @@
 """Harbor adapter that runs one isolated GenericAgent task-mode turn."""
 
 from __future__ import annotations
-
 import base64
 import json
 import os
@@ -20,6 +19,7 @@ CONTAINER_GA = "/opt/genericagent"
 ROUND_END = "[ROUND END]"
 FORWARDED_ENV_VARS = (
     "GA_PROVIDER_MAX_RETRIES",
+    "GA_MONITOR_REQUEST_TIMEOUT_SECONDS",
     "OPENROUTER_API_KEY",
     "ANTHROPIC_API_KEY",
     "DEEPSEEK_API_KEY",
@@ -74,12 +74,20 @@ class M4GenericAgent(BaseAgent):
         m0_monitor_enabled: bool | str = False,
         m0_monitor_config: str = "",
         m0_max_inspections: int | str = 8,
+        m0_recent_trajectory_turns: int | str = 0,
         m1_workspace_enabled: bool | str = False,
         m1_active_reconstruction_enabled: bool | str = False,
         m2_versioned_revision_enabled: bool | str = False,
         m2_justification_invalidation_enabled: bool | str = False,
         m2_semantic_impact_enabled: bool | str = False,
         m3_human_loop_enabled: bool | str = False,
+        m3_decision_value_enabled: bool | str = False,
+        m3_discriminative_control_enabled: bool | str = False,
+        m3_combined_control_enabled: bool | str = False,
+        m32_adaptive_observation_enabled: bool | str = False,
+        m35_continuity_enabled: bool | str = False,
+        m35_history_compaction_enabled: bool | str = False,
+        m35_minimal_frontstage_enabled: bool | str = False,
         max_turns: int | str = 180,
         task_workspace_dir: str = "/app",
         **kwargs,
@@ -128,6 +136,7 @@ class M4GenericAgent(BaseAgent):
         self.m0_monitor_enabled = str(m0_monitor_enabled).lower() in {"1", "true", "yes"}
         self.m0_monitor_config = m0_monitor_config
         self.m0_max_inspections = int(m0_max_inspections)
+        self.m0_recent_trajectory_turns = int(m0_recent_trajectory_turns)
         self.m1_workspace_enabled = str(m1_workspace_enabled).lower() in {"1", "true", "yes"}
         self.m1_active_reconstruction_enabled = str(
             m1_active_reconstruction_enabled
@@ -143,6 +152,25 @@ class M4GenericAgent(BaseAgent):
         ).lower() in {"1", "true", "yes"}
         self.m3_human_loop_enabled = str(
             m3_human_loop_enabled
+        ).lower() in {"1", "true", "yes"}
+        self.m3_decision_value_enabled = str(
+            m3_decision_value_enabled
+        ).lower() in {"1", "true", "yes"}
+        self.m3_discriminative_control_enabled = str(
+            m3_discriminative_control_enabled
+        ).lower() in {"1", "true", "yes"}
+        self.m3_combined_control_enabled = str(m3_combined_control_enabled).lower() in {"1", "true", "yes"}
+        self.m32_adaptive_observation_enabled = str(
+            m32_adaptive_observation_enabled
+        ).lower() in {"1", "true", "yes"}
+        self.m35_continuity_enabled = str(
+            m35_continuity_enabled
+        ).lower() in {"1", "true", "yes"}
+        self.m35_history_compaction_enabled = str(m35_history_compaction_enabled).lower() in {
+            "1", "true", "yes"
+        }
+        self.m35_minimal_frontstage_enabled = str(
+            m35_minimal_frontstage_enabled
         ).lower() in {"1", "true", "yes"}
         if self.m0_monitor_enabled and not self.m0_monitor_config:
             raise ValueError("M0 monitor config is required when M0 is enabled")
@@ -163,6 +191,27 @@ class M4GenericAgent(BaseAgent):
             raise ValueError("M2 candidates must be evaluated independently")
         if self.m3_human_loop_enabled and not self.m2_semantic_impact_enabled:
             raise ValueError("M3-A requires the frozen M2-C parent")
+        if self.m3_decision_value_enabled and not self.m3_human_loop_enabled:
+            raise ValueError("M3-B requires the M3-A parent")
+        if (self.m3_discriminative_control_enabled
+                and not self.m3_human_loop_enabled):
+            raise ValueError("M3-C requires the M3-A parent")
+        if (self.m3_decision_value_enabled
+                and self.m3_discriminative_control_enabled):
+            raise ValueError("M3-B and M3-C must remain independent candidates")
+        if (self.m3_combined_control_enabled
+                and not self.m3_discriminative_control_enabled):
+            raise ValueError("M3-D requires the M3-C parent")
+        if (self.m32_adaptive_observation_enabled
+                and not (self.m3_decision_value_enabled
+                         or self.m3_discriminative_control_enabled)):
+            raise ValueError("M3.2 requires an M3-B or M3-C control parent")
+        if self.m35_continuity_enabled and not self.m32_adaptive_observation_enabled:
+            raise ValueError("M3.5 requires the cumulative M3.2 parent")
+        if self.m35_history_compaction_enabled and not self.m35_continuity_enabled:
+            raise ValueError("M3.5 history compaction requires persistent continuity")
+        if self.m35_minimal_frontstage_enabled and not self.m35_continuity_enabled:
+            raise ValueError("M3.5 minimal front stage requires persistent continuity")
         self.max_turns = int(max_turns)
         if not task_workspace_dir.startswith("/"):
             raise ValueError("task_workspace_dir must be an absolute container path")
@@ -217,6 +266,14 @@ class M4GenericAgent(BaseAgent):
 
     async def setup(self, environment: BaseEnvironment) -> None:
         python_bin, site_packages = _runtime_paths(self.python_home)
+        # The bind-mounted checkout may contain hundreds of megabytes of prior
+        # run artifacts under temp/.  They are not part of the frozen source
+        # identity and must not be copied into every trial container.
+        copy_runtime = (
+            f"find {_q(CONTAINER_SOURCE)} -mindepth 1 -maxdepth 1 "
+            "! -name temp ! -name __pycache__ ! -name .pytest_cache "
+            f"-exec cp -a -- {{}} {_q(CONTAINER_GA + '/')} \\;"
+        )
         command = " && ".join(
             [
                 f"test -x {_q(python_bin)}",
@@ -224,7 +281,7 @@ class M4GenericAgent(BaseAgent):
                 f"test -f {_q(CONTAINER_SOURCE + '/agentmain.py')}",
                 f"rm -rf {_q(CONTAINER_GA)}",
                 f"mkdir -p {_q(CONTAINER_GA)}",
-                f"cp -a {_q(CONTAINER_SOURCE + '/.')} {_q(CONTAINER_GA + '/')} ",
+                copy_runtime,
                 f"mkdir -p {_q(CONTAINER_GA + '/temp')} /logs/agent",
             ]
         )
@@ -357,19 +414,26 @@ class M4GenericAgent(BaseAgent):
             env["GA_M0_MONITOR_ENABLED"] = "1"
             env["GA_M0_MONITOR_CONFIG"] = self.m0_monitor_config
             env["GA_M0_MAX_INSPECTIONS"] = str(self.m0_max_inspections)
+            env["GA_M0_RECENT_TRAJECTORY_TURNS"] = str(
+                self.m0_recent_trajectory_turns
+            )
             env["GA_M0_MONITOR_ARTIFACT_DIR"] = "/logs/agent/m0_monitor"
-            if self.m1_workspace_enabled:
-                env["GA_M1_WORKSPACE_ENABLED"] = "1"
-            if self.m1_active_reconstruction_enabled:
-                env["GA_M1_ACTIVE_RECONSTRUCTION_ENABLED"] = "1"
-            if self.m2_versioned_revision_enabled:
-                env["GA_M2_VERSIONED_REVISION_ENABLED"] = "1"
-            if self.m2_justification_invalidation_enabled:
-                env["GA_M2_JUSTIFICATION_INVALIDATION_ENABLED"] = "1"
-            if self.m2_semantic_impact_enabled:
-                env["GA_M2_SEMANTIC_IMPACT_ENABLED"] = "1"
-            if self.m3_human_loop_enabled:
-                env["GA_M3_HUMAN_LOOP_ENABLED"] = "1"
+            feature_env = {
+                "GA_M1_WORKSPACE_ENABLED": self.m1_workspace_enabled,
+                "GA_M1_ACTIVE_RECONSTRUCTION_ENABLED": self.m1_active_reconstruction_enabled,
+                "GA_M2_VERSIONED_REVISION_ENABLED": self.m2_versioned_revision_enabled,
+                "GA_M2_JUSTIFICATION_INVALIDATION_ENABLED": self.m2_justification_invalidation_enabled,
+                "GA_M2_SEMANTIC_IMPACT_ENABLED": self.m2_semantic_impact_enabled,
+                "GA_M3_HUMAN_LOOP_ENABLED": self.m3_human_loop_enabled,
+                "GA_M3_DECISION_VALUE_ENABLED": self.m3_decision_value_enabled,
+                "GA_M3_DISCRIMINATIVE_CONTROL_ENABLED": self.m3_discriminative_control_enabled,
+                "GA_M3_COMBINED_CONTROL_ENABLED": self.m3_combined_control_enabled,
+                "GA_M32_ADAPTIVE_OBSERVATION_ENABLED": self.m32_adaptive_observation_enabled,
+                "GA_M35_CONTINUITY_ENABLED": self.m35_continuity_enabled,
+                "GA_M35_HISTORY_COMPACTION_ENABLED": self.m35_history_compaction_enabled,
+                "GA_M35_MINIMAL_FRONTSTAGE_ENABLED": self.m35_minimal_frontstage_enabled,
+            }
+            env.update({name: "1" for name, enabled in feature_env.items() if enabled})
         if os.environ.get("GA_COMPLETION_CHECKPOINT_ROOT"):
             env["GA_COMPLETION_CHECKPOINT_ROOT"] = "/logs/agent/completion_checkpoints"
         for name in FORWARDED_ENV_VARS:

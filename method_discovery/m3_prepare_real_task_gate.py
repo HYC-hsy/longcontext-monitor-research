@@ -15,7 +15,35 @@ from m1_prepare_real_task_batch import ROOT, BENCH, tree_hash
 
 
 R0_TASKS = ROOT / "method_discovery" / "r0_real_tasks" / "tasks.jsonl"
-CONDITIONS = ("m2c_control", "m3a_human_loop")
+EXECUTION_HARNESS_FILES = (
+    "scripts/run_ultralong_m12_proofs.py",
+    "scripts/run_harbor_tb2_m4.py",
+    "scripts/prepare_harbor_lhtb_m12.py",
+    "scripts/prepare_harbor_lhtb_structured_pass_m12.py",
+    "scripts/prepare_harbor_windows_sidecar_m12.py",
+    "scripts/m11_trajectory_validation.py",
+    "adapters/harbor_ga_agent.py",
+    "adapters/harbor_ga_lhtb.py",
+)
+CONDITIONS = (
+    "m2c_control", "m3a_human_loop", "m3b_decision_value",
+    "m3c_discriminative_control", "m3d_decision_sufficient_control",
+    "m31_baseline_perception", "m32_adaptive_observation",
+    "m35_continuity", "m35_h4_minimal_frontstage",
+)
+DEFAULT_CONDITIONS = ("m2c_control", "m3a_human_loop")
+
+
+def execution_harness_hash() -> str:
+    digest = hashlib.sha256()
+    for relative in EXECUTION_HARNESS_FILES:
+        data = (BENCH / relative).read_bytes()
+        encoded = relative.encode("utf-8")
+        digest.update(len(encoded).to_bytes(4, "big"))
+        digest.update(encoded)
+        digest.update(len(data).to_bytes(8, "big"))
+        digest.update(data)
+    return digest.hexdigest()
 
 
 def environment(source_hash: str, condition: str) -> dict[str, str]:
@@ -37,9 +65,28 @@ def environment(source_hash: str, condition: str) -> dict[str, str]:
         "GA_M1_ACTIVE_RECONSTRUCTION_ENABLED": "1",
         "GA_M2_SEMANTIC_IMPACT_ENABLED": "1",
         "GA_METHOD_EXPECTED_SOURCE_SHA256": source_hash,
+        "GA_EXPERIMENT_HARNESS_SHA256": execution_harness_hash(),
     }
-    if condition == "m3a_human_loop":
+    if condition in {"m3c_discriminative_control", "m3d_decision_sufficient_control", "m31_baseline_perception", "m32_adaptive_observation", "m35_continuity",
+                     "m35_h4_minimal_frontstage"}:
+        values["GA_EXPERIMENT_ID"] = "m3-human-gap-v1"
+    if condition in {"m3a_human_loop", "m3b_decision_value", "m3c_discriminative_control", "m3d_decision_sufficient_control", "m31_baseline_perception",
+                     "m32_adaptive_observation", "m35_continuity", "m35_h4_minimal_frontstage"}:
         values["GA_M3_HUMAN_LOOP_ENABLED"] = "1"
+    if condition in {"m3b_decision_value", "m31_baseline_perception",
+                     "m32_adaptive_observation", "m35_continuity", "m35_h4_minimal_frontstage"}:
+        values["GA_M3_DECISION_VALUE_ENABLED"] = "1"
+    if condition in {"m3c_discriminative_control", "m3d_decision_sufficient_control"}:
+        values["GA_M3_DISCRIMINATIVE_CONTROL_ENABLED"] = "1"
+    if condition == "m3d_decision_sufficient_control":
+        values["GA_M3_COMBINED_CONTROL_ENABLED"] = "1"
+    if condition in {"m3c_discriminative_control", "m3d_decision_sufficient_control", "m32_adaptive_observation", "m35_continuity", "m35_h4_minimal_frontstage"}:
+        values["GA_M32_ADAPTIVE_OBSERVATION_ENABLED"] = "1"
+    if condition in {"m3c_discriminative_control", "m3d_decision_sufficient_control", "m35_continuity", "m35_h4_minimal_frontstage"}:
+        values["GA_M35_CONTINUITY_ENABLED"] = "1"
+    if condition in {"m3c_discriminative_control", "m3d_decision_sufficient_control", "m35_h4_minimal_frontstage"}:
+        values["GA_M35_HISTORY_COMPACTION_ENABLED"] = "1"
+        values["GA_M35_MINIMAL_FRONTSTAGE_ENABLED"] = "1"
     return values
 
 
@@ -53,13 +100,17 @@ def _task(task_id: str) -> tuple[dict[str, Any], bytes]:
 
 
 def run_spec(task: dict[str, Any], condition: str, source_hash: str,
-             run_suffix: str = "r1") -> dict[str, Any]:
+             run_suffix: str = "r1", manifest_path: Path | None = None) -> dict[str, Any]:
     source, local_id = task["global_task_id"].split(":", 1)
     slug = local_id.replace(":", "-").replace("/", "-").replace("__", "-")
     run_id = f"m3-{condition}-{slug}-{run_suffix}"
     env = environment(source_hash, condition)
+    stage_root = ("human_gap_increments"
+                  if condition in {"m3c_discriminative_control", "m3d_decision_sufficient_control", "m31_baseline_perception", "m32_adaptive_observation", "m35_continuity",
+                                   "m35_h4_minimal_frontstage"}
+                  else "m3a_first_gate")
     env["BENCHMARK_CAMPAIGN_ROOT"] = str(
-        BENCH / "output" / "m3_real_tasks" / "m3a_first_gate" / condition / slug
+        BENCH / "output" / "m3_real_tasks" / stage_root / condition / slug
     )
     return {
         "task_id": task["global_task_id"],
@@ -70,6 +121,8 @@ def run_spec(task: dict[str, Any], condition: str, source_hash: str,
         "environment": env,
         "argv": [
             sys.executable, "scripts/run_ultralong_m12_proofs.py",
+            *(["--experiment-manifest", str(manifest_path.resolve())]
+              if manifest_path is not None else []),
             "--source", source, "--task-id", local_id,
             "--run-id", run_id, "--llm-no", "0", "--max-agent-seconds", "10000",
         ],
@@ -78,12 +131,13 @@ def run_spec(task: dict[str, Any], condition: str, source_hash: str,
 
 
 def build_manifest(task_id: str, run_suffix: str = "r1",
-                   conditions: tuple[str, ...] = CONDITIONS) -> dict[str, Any]:
+                   conditions: tuple[str, ...] = DEFAULT_CONDITIONS,
+                   manifest_path: Path | None = None) -> dict[str, Any]:
     if not conditions or any(condition not in CONDITIONS for condition in conditions):
         raise ValueError("conditions must be a non-empty subset of registered M3 conditions")
     task, registry_bytes = _task(task_id)
     source_hash = tree_hash(ROOT / "GenericAgent-main")
-    runs = [run_spec(task, condition, source_hash, run_suffix)
+    runs = [run_spec(task, condition, source_hash, run_suffix, manifest_path)
             for condition in conditions]
     return {
         "schema_version": "m3-real-run-manifest/1",
@@ -95,6 +149,7 @@ def build_manifest(task_id: str, run_suffix: str = "r1",
         ),
         "task_registry_sha256": hashlib.sha256(registry_bytes).hexdigest(),
         "generic_agent_source_sha256": source_hash,
+        "execution_harness_sha256": execution_harness_hash(),
         "run_count": len(runs),
         "secrets_included": False,
         "online_native_checker": False,
@@ -111,7 +166,8 @@ def main() -> int:
     parser.add_argument("--condition", action="append", choices=CONDITIONS)
     args = parser.parse_args()
     manifest = build_manifest(
-        args.task_id, args.run_suffix, tuple(args.condition or CONDITIONS)
+        args.task_id, args.run_suffix, tuple(args.condition or CONDITIONS),
+        manifest_path=args.output,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(

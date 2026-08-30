@@ -77,6 +77,7 @@ def test_m0_monitor_is_explicitly_opt_in(monkeypatch):
     assert values["m0_monitor_enabled"] is True
     assert values["m0_monitor_config"] == "native_openai_cc_vibe"
     assert values["m0_max_inspections"] == 12
+    assert values["m0_recent_trajectory_turns"] == 0
     assert values["m1_workspace_enabled"] is True
     assert values["m1_active_reconstruction_enabled"] is True
     assert values["m2_versioned_revision_enabled"] is True
@@ -112,6 +113,193 @@ def test_m3_human_loop_is_explicitly_forwarded(monkeypatch):
     values = m12.stage4_agent_kwargs()
     assert values["m2_semantic_impact_enabled"] is True
     assert values["m3_human_loop_enabled"] is True
+
+
+def test_m3_decision_value_is_explicitly_forwarded(monkeypatch):
+    monkeypatch.setenv("GA_BASELINE_CONDITION", "original")
+    monkeypatch.setenv("GA_M0_MONITOR_ENABLED", "1")
+    monkeypatch.setenv("GA_M0_MONITOR_CONFIG", "native_openai_cc_vibe")
+    monkeypatch.setenv("GA_M1_WORKSPACE_ENABLED", "1")
+    monkeypatch.setenv("GA_M2_SEMANTIC_IMPACT_ENABLED", "1")
+    monkeypatch.setenv("GA_M3_HUMAN_LOOP_ENABLED", "1")
+    monkeypatch.setenv("GA_M3_DECISION_VALUE_ENABLED", "1")
+    values = m12.stage4_agent_kwargs()
+    assert values["m3_human_loop_enabled"] is True
+    assert values["m3_decision_value_enabled"] is True
+
+
+def test_m3_discriminative_control_is_explicitly_forwarded(monkeypatch):
+    monkeypatch.setenv("GA_BASELINE_CONDITION", "original")
+    monkeypatch.setenv("GA_M0_MONITOR_ENABLED", "1")
+    monkeypatch.setenv("GA_M0_MONITOR_CONFIG", "native_openai_cc_vibe")
+    monkeypatch.setenv("GA_M1_WORKSPACE_ENABLED", "1")
+    monkeypatch.setenv("GA_M2_SEMANTIC_IMPACT_ENABLED", "1")
+    monkeypatch.setenv("GA_M3_HUMAN_LOOP_ENABLED", "1")
+    monkeypatch.setenv("GA_M3_DISCRIMINATIVE_CONTROL_ENABLED", "1")
+    values = m12.stage4_agent_kwargs()
+    assert values["m3_discriminative_control_enabled"] is True
+
+
+def test_m3_combined_control_is_explicitly_forwarded(monkeypatch):
+    monkeypatch.setenv("GA_BASELINE_CONDITION", "original")
+    monkeypatch.setenv("GA_M0_MONITOR_ENABLED", "1")
+    monkeypatch.setenv("GA_M0_MONITOR_CONFIG", "native_openai_cc_vibe")
+    monkeypatch.setenv("GA_M1_WORKSPACE_ENABLED", "1")
+    monkeypatch.setenv("GA_M2_SEMANTIC_IMPACT_ENABLED", "1")
+    monkeypatch.setenv("GA_M3_HUMAN_LOOP_ENABLED", "1")
+    monkeypatch.setenv("GA_M3_DISCRIMINATIVE_CONTROL_ENABLED", "1")
+    monkeypatch.setenv("GA_M3_COMBINED_CONTROL_ENABLED", "1")
+
+    values = m12.stage4_agent_kwargs()
+
+    assert values["m3_discriminative_control_enabled"] is True
+    assert values["m3_combined_control_enabled"] is True
+
+
+def test_m32_adaptive_observation_is_explicitly_forwarded(monkeypatch):
+    monkeypatch.setenv("GA_BASELINE_CONDITION", "original")
+    monkeypatch.setenv("GA_M0_MONITOR_ENABLED", "1")
+    monkeypatch.setenv("GA_M0_MONITOR_CONFIG", "native_openai_cc_vibe")
+    monkeypatch.setenv("GA_M1_WORKSPACE_ENABLED", "1")
+    monkeypatch.setenv("GA_M2_SEMANTIC_IMPACT_ENABLED", "1")
+    monkeypatch.setenv("GA_M3_HUMAN_LOOP_ENABLED", "1")
+    monkeypatch.setenv("GA_M3_DECISION_VALUE_ENABLED", "1")
+    monkeypatch.setenv("GA_M32_ADAPTIVE_OBSERVATION_ENABLED", "1")
+    values = m12.stage4_agent_kwargs()
+    assert values["m32_adaptive_observation_enabled"] is True
+
+
+def test_m35_continuity_is_explicitly_forwarded(monkeypatch):
+    monkeypatch.setenv("GA_BASELINE_CONDITION", "original")
+    monkeypatch.setenv("GA_M0_MONITOR_ENABLED", "1")
+    monkeypatch.setenv("GA_M0_MONITOR_CONFIG", "native_openai_cc_vibe")
+    monkeypatch.setenv("GA_M1_WORKSPACE_ENABLED", "1")
+    monkeypatch.setenv("GA_M2_SEMANTIC_IMPACT_ENABLED", "1")
+    monkeypatch.setenv("GA_M3_HUMAN_LOOP_ENABLED", "1")
+    monkeypatch.setenv("GA_M3_DECISION_VALUE_ENABLED", "1")
+    monkeypatch.setenv("GA_M32_ADAPTIVE_OBSERVATION_ENABLED", "1")
+    monkeypatch.setenv("GA_M35_CONTINUITY_ENABLED", "1")
+    monkeypatch.setenv("GA_M35_HISTORY_COMPACTION_ENABLED", "1")
+    monkeypatch.setenv("GA_M35_MINIMAL_FRONTSTAGE_ENABLED", "1")
+    values = m12.stage4_agent_kwargs()
+    assert values["m35_continuity_enabled"] is True
+    assert values["m35_history_compaction_enabled"] is True
+    assert values["m35_minimal_frontstage_enabled"] is True
+
+
+def test_experiment_manifest_applies_allowlisted_secret_free_environment(
+        tmp_path, monkeypatch):
+    campaign = tmp_path / "campaign"
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({
+        "secrets_included": False,
+        "runs": [{
+            "run_id": "run-1",
+            "environment": {
+                "GA_M35_CONTINUITY_ENABLED": "1",
+                "GA_EXPERIMENT_HARNESS_SHA256": m12.execution_harness_hash(),
+                "BENCHMARK_CAMPAIGN_ROOT": str(campaign),
+            },
+        }],
+    }), encoding="utf-8")
+    monkeypatch.delenv("GA_M35_CONTINUITY_ENABLED", raising=False)
+
+    selected = m12.apply_experiment_manifest(manifest, "run-1")
+
+    assert selected["run_id"] == "run-1"
+    assert m12.os.environ["GA_M35_CONTINUITY_ENABLED"] == "1"
+    assert m12.WORK_ROOT == campaign
+    assert m12.JOBS_ROOT == campaign / "jobs"
+
+
+def test_experiment_manifest_rejects_execution_harness_drift(tmp_path):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({
+        "secrets_included": False,
+        "runs": [{
+            "run_id": "run-1",
+            "environment": {"GA_EXPERIMENT_HARNESS_SHA256": "0" * 64},
+        }],
+    }), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="execution harness mismatch"):
+        m12.apply_experiment_manifest(manifest, "run-1")
+
+
+def test_preflight_rejects_generic_agent_source_drift(monkeypatch):
+    monkeypatch.setenv("GA_METHOD_EXPECTED_SOURCE_SHA256", "a" * 64)
+
+    with pytest.raises(RuntimeError, match="GA source mismatch"):
+        m12.validate_expected_ga_source("b" * 64)
+
+    m12.validate_expected_ga_source("a" * 64)
+
+
+def test_experiment_manifest_clears_stale_candidate_switches(tmp_path, monkeypatch):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({
+        "secrets_included": False,
+        "runs": [{
+            "run_id": "run-c",
+            "environment": {
+                "GA_M3_DISCRIMINATIVE_CONTROL_ENABLED": "1",
+                "GA_EXPERIMENT_HARNESS_SHA256": m12.execution_harness_hash(),
+            },
+        }],
+    }), encoding="utf-8")
+    monkeypatch.setenv("GA_M3_DECISION_VALUE_ENABLED", "1")
+    monkeypatch.setenv("GA_M3_COMBINED_CONTROL_ENABLED", "1")
+    monkeypatch.setenv("GA_MANUAL_COMPLETION_ENABLED", "1")
+    monkeypatch.setenv("GA_STAGE6D_BUNDLE_DIR", str(tmp_path / "stale-oracle-bundle"))
+    monkeypatch.setenv("GA_EVIDENCE_FRONTEND_CONFIG", "stale-frontend")
+    monkeypatch.setenv("GA_REPRESENTATION_AUDIT_CONFIG", "stale-auditor")
+
+    m12.apply_experiment_manifest(manifest, "run-c")
+
+    assert "GA_M3_DECISION_VALUE_ENABLED" not in m12.os.environ
+    assert "GA_M3_COMBINED_CONTROL_ENABLED" not in m12.os.environ
+    assert "GA_MANUAL_COMPLETION_ENABLED" not in m12.os.environ
+    assert "GA_STAGE6D_BUNDLE_DIR" not in m12.os.environ
+    assert "GA_EVIDENCE_FRONTEND_CONFIG" not in m12.os.environ
+    assert "GA_REPRESENTATION_AUDIT_CONFIG" not in m12.os.environ
+    assert m12.os.environ["GA_M3_DISCRIMINATIVE_CONTROL_ENABLED"] == "1"
+
+
+def test_invalid_manifest_does_not_partially_mutate_environment(tmp_path, monkeypatch):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({
+        "secrets_included": False,
+        "runs": [{
+            "run_id": "bad",
+            "environment": {
+                "GA_CONDITION_ID": "should-not-leak",
+                "NOT_ALLOWED": "invalid",
+            },
+        }],
+    }), encoding="utf-8")
+    monkeypatch.setenv("GA_CONDITION_ID", "original-value")
+
+    with pytest.raises(ValueError, match="not allowlisted"):
+        m12.apply_experiment_manifest(manifest, "bad")
+
+    assert m12.os.environ["GA_CONDITION_ID"] == "original-value"
+
+
+@pytest.mark.parametrize("payload,match", [
+    ({"secrets_included": True, "runs": []}, "exclude secrets"),
+    ({"secrets_included": False, "runs": [{
+        "run_id": "run-1", "environment": {"ANTHROPIC_AUTH_TOKEN": "x"},
+    }]}, "not allowlisted"),
+    ({"secrets_included": False, "runs": [{
+        "run_id": "run-1", "environment": {"GA_API_KEY": "x"},
+    }]}, "secret-like"),
+])
+def test_experiment_manifest_rejects_secrets_and_unapproved_environment(
+        tmp_path, payload, match):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match=match):
+        m12.apply_experiment_manifest(manifest, "run-1")
 
 
 def test_m1_workspace_cannot_run_without_m0(monkeypatch):

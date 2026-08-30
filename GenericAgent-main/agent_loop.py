@@ -1,7 +1,7 @@
 import inspect, json, re, os
 from dataclasses import dataclass
 from typing import Any, Optional
-from research_runtime import CompletionProposal, decide_completion, emit as _research_emit, telemetry_enabled as _telemetry_enabled, consume_provider_call as _consume_provider_call
+from research_runtime import CompletionProposal, decide_completion, emit as _research_emit, telemetry_enabled as _telemetry_enabled, consume_provider_call as _consume_provider_call, new_id as _research_id, register_pending_intervention as _register_pending_intervention
 from experiment_conditions import condition_initial_task
 try: from plugins.hooks import trigger as _hook
 except ImportError: _hook = lambda *a, **k: None
@@ -57,6 +57,34 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
     _hook('agent_before', locals())
     while local_turn < handler.max_turns:
         local_turn += 1; turn = int(turn_offset) + local_turn
+        monitor_runtime = getattr(handler.parent, 'monitor_runtime', None)
+        if monitor_runtime is not None:
+            ready = monitor_runtime.consume_interventions()
+            if ready:
+                combined = "\n\n".join(item["message"] for item in ready)
+                injection = combined
+                if messages and messages[-1].get("role") == "user":
+                    content = messages[-1].get("content", "")
+                    if isinstance(content, str):
+                        messages[-1]["content"] = content + "\n\n" + injection
+                    else:
+                        messages.append({"role": "user", "content": injection})
+                else:
+                    messages.append({"role": "user", "content": injection})
+                occurrence_id = _research_id("monitor_injection")
+                event = _research_emit("async_monitor_intervention_injected", {
+                    "injection_occurrence_id": occurrence_id,
+                    "source_request_ids": [item["request_id"] for item in ready],
+                    "source_internal_turns": [item.get("internal_turn") for item in ready],
+                    "source_episode_ids": [item.get("episode_id") for item in ready],
+                    "source_episode_revisions": [
+                        item.get("episode_revision") for item in ready
+                    ],
+                    "target_internal_turn": turn,
+                    "message_characters": len(combined),
+                }, internal_turn=turn)
+                if event:
+                    _register_pending_intervention(event, occurrence_id)
         turnstr = f'LLM Running (Turn {turn}) ...'
         if handler.parent.task_dir: turnstr = f'Turn {turn} ...'
         if verbose: turnstr = f'**{turnstr}**'
@@ -86,6 +114,23 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
                 'response_sha256': __import__('hashlib').sha256((response.content or '').encode('utf-8')).hexdigest(),
             }, llm_call_id=provider_link['llm_call_id'], internal_turn=turn,
                parent_event_id=provider_link.get('provider_request_event_id'))
+
+        # Expose an announced intent/tool choice to the concurrent monitor as
+        # soon as it becomes public. Publishing is non-blocking: ordinary tools
+        # continue immediately, while any resulting correction is delivered at
+        # the next safe pre-inference boundary.
+        monitor_runtime = getattr(handler.parent, 'monitor_runtime', None)
+        if monitor_runtime is not None and response.tool_calls:
+            monitor_runtime.archive_boundary({
+                'boundary': 'post_model_pre_tool', 'internal_turn': turn,
+                'response_content': response.content,
+                'tool_calls': [{
+                    'tool_name': call.function.name,
+                    'args': json.loads(call.function.arguments),
+                    'id': call.id,
+                } for call in response.tool_calls],
+                'tool_results': [],
+            })
 
         completion_decision = None
         provider_error_response = _is_provider_error_response(response)

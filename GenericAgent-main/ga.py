@@ -598,15 +598,25 @@ class GenericAgentHandler(BaseHandler):
         next_prompt = apply_condition(
             next_prompt, getattr(self.parent, 'research_condition', None), internal_turn=turn
         )
-        checkpoint_callback = getattr(self.parent, 'research_checkpoint_callback', None)
-        if checkpoint_callback is not None and not exit_reason:
-            monitor_prompt = checkpoint_callback({
+        monitor_runtime = getattr(self.parent, 'monitor_runtime', None)
+        if monitor_runtime is not None and not exit_reason:
+            monitor_runtime.archive_boundary({
                 'boundary': 'post_tool_pre_next_llm', 'internal_turn': turn,
                 'next_prompt': next_prompt, 'tool_calls': tool_calls, 'tool_results': tool_results,
                 'response_content': response.content,
             })
-            if monitor_prompt:
-                next_prompt += f"\n\n[M0 MONITOR - task Agent was paused for this review]\n{monitor_prompt}\n"
+        else:
+            # Retained only for non-M0 research fixtures and historical
+            # conditions. M0 must never install a synchronous callback here.
+            checkpoint_callback = getattr(self.parent, 'research_checkpoint_callback', None)
+            if checkpoint_callback is not None and not exit_reason:
+                monitor_prompt = checkpoint_callback({
+                    'boundary': 'post_tool_pre_next_llm', 'internal_turn': turn,
+                    'next_prompt': next_prompt, 'tool_calls': tool_calls,
+                    'tool_results': tool_results, 'response_content': response.content,
+                })
+                if monitor_prompt:
+                    next_prompt += f"\n\n[RESEARCH CHECKPOINT]\n{monitor_prompt}\n"
         for hook in list(getattr(self.parent, '_turn_end_hooks', {}).values()): hook(locals())  # current readonly
         return next_prompt
 
