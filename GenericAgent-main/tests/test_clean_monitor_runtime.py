@@ -32,6 +32,7 @@ def _runtime(tmp_path, callback):
         task_workspace=str(workspace),
         artifact_dir=str(tmp_path / "artifacts"),
         config_name="unused-in-fixture",
+        model_config={},
         interrupt_callback=callback,
         worker_target=scripted_clean_monitor_worker,
     )
@@ -86,6 +87,7 @@ def test_artifacts_cannot_be_nested_in_supervised_workspace(tmp_path):
         CleanMonitorRuntime(
             public_task="task", task_workspace=str(workspace),
             artifact_dir=str(workspace / "monitor"), config_name="unused",
+            model_config={},
             interrupt_callback=lambda _: None,
             worker_target=scripted_clean_monitor_worker,
         )

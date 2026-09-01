@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
 import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
 from agent_loop import BaseHandler, StepOutcome, agent_runner_loop
-from ga import code_run
+from process_runner import code_run
 from monitor_agent_workspace import MonitorWorkspace
 
 
@@ -46,7 +47,7 @@ MONITOR_TOOLS = [
     }, ["path", "old_text", "new_text"]),
     _tool("code_run", "Run Python or a platform shell for general analysis. CWD is monitor/; task evidence is copied under .task_view/.", {
         "code": {"type": "string"},
-        "type": {"type": "string", "enum": ["python", "powershell", "bash"], "default": "python"},
+        "type": {"type": "string", "enum": ["python", "powershell"] if os.name == "nt" else ["python", "bash"], "default": "python"},
         "timeout": {"type": "integer", "minimum": 1, "maximum": 300, "default": 60},
     }, ["code"]),
     _tool("wait", "End this review without intervention and request a wake after more public task turns.", {
@@ -62,16 +63,26 @@ MONITOR_TOOLS = [
 MONITOR_SYSTEM_PROMPT = """You are the persistent Monitor Agent for a long-running Task Agent.
 Your job is to detect material task drift from public evidence, especially omitted requirements and claims
 of completion supported by inadequate evidence. Remain independent: tests and Agent statements are
-provisional evidence, never ground truth. Inspect original task evidence when a synopsis raises a material
-question. Pay particular attention to the Agent's causal intent and to whether tests actually encode the
-original contract. After intervening, stay close enough to see whether the Agent understood and acted on
-the correction; intervene again if its public intent remains wrong. Return to patrol once the local issue is
-reasonably resolved. Do not verify every unknown or impose code-review perfectionism.
+provisional evidence, never ground truth. At initialization, read the original task and form your own durable
+working understanding; use natural notes when helpful, but do not force the task into a fixed schema.
+
+On an ordinary wake, continue from your existing history, inspect the new chronological synopsis as
+navigation, and retrieve original evidence only where it can change the current decision. A synopsis is not
+proof. Pay particular attention to the Agent's causal intent, changed tests as executable interpretations of
+the contract, and claims that a local success completes the root task. Intervene only for a concrete material
+discrepancy you can explain from public evidence. State the conflicting requirement or evidence and what the
+Agent should re-check; do not take over the whole task.
+
+After intervening, remain engaged across the Agent's next understanding, intent, action, and result. Intervene
+again if the correction is misunderstood or the new evidence still cannot support the intended decision.
+Return to patrol once the local issue is reasonably resolved; local release is not root completion. Do not
+verify every unknown, react to harmless exploration, or impose code-review perfectionism.
 
 The supervised task is read-only under task/. Your own durable notes are writable under monitor/.
 For broad analysis, code_run starts in monitor/ and refreshes a disposable .task_view/ copy first.
 Every review must end with exactly one control action: wait, intervene, or (only for a root-completion
-review) allow_complete. Do not merely describe the action in prose."""
+review) allow_complete. Calling wait is the normal way to remain silent. Do not merely describe the action
+in prose."""
 
 
 @dataclass(frozen=True)

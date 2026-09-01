@@ -5,6 +5,7 @@ import pytest
 
 from agent_loop import exhaust
 from monitor_agent import MONITOR_TOOLS, MonitorAgent, MonitorWorkspace
+from llmcore import NativeToolClient, ToolClient
 
 
 class ToolCall:
@@ -56,6 +57,22 @@ def test_tool_surface_is_small_and_has_no_task_mutation_tool():
         "wait", "intervene", "allow_complete",
     ]
     assert "task_write" not in names
+
+
+def test_monitor_role_does_not_inherit_ga_executor_memory_protocol():
+    backend = SimpleNamespace(name="fake", system="")
+    native = NativeToolClient(backend)
+    native.set_role("monitor")
+    native.set_system("monitor system")
+    assert backend.system == "monitor system"
+    assert "summary" not in backend.system.lower()
+
+    text_client = ToolClient(backend)
+    text_client.set_role("monitor")
+    instruction = text_client._prepare_tool_instruction(MONITOR_TOOLS)
+    assert "long-term working memory" not in instruction
+    assert "<summary>" not in instruction
+    assert "<tool_use>" in instruction
 
 
 def test_monitor_can_inspect_then_intervene_in_one_review(roots):

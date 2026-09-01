@@ -971,10 +971,14 @@ class ToolClient:
         self.name = self.backend.name
         self.total_cd_tokens = 0
         self.log_path = None
+        self.role = "executor"
+
+    def set_role(self, role):
+        self.role = str(role or "executor")
 
     def chat(self, messages, tools=None):
         tools = json.loads(json.dumps(tools, ensure_ascii=False)) if tools else tools
-        for t in tools or []:
+        for t in tools or [] if self.role == "executor" else []:
             f = t.get('function', {})
             if f.get('name') == 'file_write':
                 props = f.get('parameters', {}).get('properties', {})
@@ -997,7 +1001,13 @@ class ToolClient:
         if not tools: return tool_instruction
         tools_json = json.dumps(tools, ensure_ascii=False, separators=(',', ':'))
         _en = os.environ.get('GA_LANG') == 'en'
-        if _en:
+        if self.role != "executor":
+            tool_instruction = """
+### Tool protocol
+Use the available tools when they help you inspect or act. Emit each call as a `<tool_use>` block, then stop
+and wait for its result. Do not invent tool results or describe a tool call without making it.
+"""
+        elif _en:
             tool_instruction = f"""
 ### Interaction Protocol (must follow strictly, always in effect)
 Follow these steps to think and act:
@@ -1211,8 +1221,12 @@ class NativeToolClient:
         self.name = self.backend.name
         self._pending_tool_ids = []
         self.log_path = None
+        self.role = "executor"
+    def set_role(self, role):
+        self.role = str(role or "executor")
     def set_system(self, extra_system):
-        combined = f"{extra_system}\n\n{self._thinking_prompt()}" if extra_system else self._thinking_prompt()
+        protocol = self._thinking_prompt() if self.role == "executor" else ""
+        combined = f"{extra_system}\n\n{protocol}" if extra_system and protocol else (extra_system or protocol)
         if combined != self.backend.system: print(f"[Debug] Updated system prompt, length {len(combined)} chars.")
         self.backend.system = combined
     def chat(self, messages, tools=None):
@@ -1257,9 +1271,22 @@ def resolve_session(cfg_name):
     if 'claude' in cfg_name: return ClaudeSession(cfg=cfg)
     return LLMSession(cfg=cfg) if 'oai' in cfg_name else None
 
+def client_from_config(cfg_name, cfg):
+    """Build a client from explicit configuration without loading mykey."""
+    if 'native' in cfg_name:
+        session = (NativeClaudeSession if 'claude' in cfg_name else NativeOAISession)(cfg=dict(cfg))
+    elif 'claude' in cfg_name:
+        session = ClaudeSession(cfg=dict(cfg))
+    elif 'oai' in cfg_name:
+        session = LLMSession(cfg=dict(cfg))
+    else:
+        return None
+    return NativeToolClient(session) if isinstance(session, (NativeClaudeSession, NativeOAISession)) else ToolClient(session)
+
 def resolve_client(cfg_name):
-    s = resolve_session(cfg_name)
-    return (NativeToolClient(s) if isinstance(s, (NativeClaudeSession, NativeOAISession)) else ToolClient(s)) if s else None
+    cfg = reload_mykeys()[0].get(cfg_name)
+    if not cfg: raise ValueError(f"Config '{cfg_name}' not in mykey")
+    return client_from_config(cfg_name, cfg)
 
 def fast_ask(prompt, cfg_name):
     sess = resolve_session(cfg_name)

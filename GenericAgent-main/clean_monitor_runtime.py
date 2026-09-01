@@ -30,14 +30,15 @@ def _intent_synopsis(packet: Mapping[str, Any]) -> str:
 
 def _monitor_process(config: dict, commands, outputs) -> None:
     from agent_loop import exhaust
-    from llmcore import resolve_client
+    from llmcore import client_from_config
     from monitor_agent import MonitorAgent
     from monitor_agent_workspace import MonitorWorkspace
 
-    client = resolve_client(config["config_name"])
+    client = client_from_config(config["config_name"], config["model_config"])
     if client is None:
         outputs.put({"kind": "failure", "error": "Monitor model configuration is unavailable"})
         return
+    client.set_role("monitor")
     workspace = MonitorWorkspace(
         config["evidence_root"], config["private_root"],
         task_mounts={"workspace": config["task_workspace"]},
@@ -106,7 +107,7 @@ class CleanMonitorRuntime:
     """Task-side archive, IPC, and immediate interruption delivery."""
 
     def __init__(self, *, public_task: str, task_workspace: str, artifact_dir: str,
-                 config_name: str, interrupt_callback, max_review_turns: int = 20,
+                 config_name: str, model_config: dict, interrupt_callback, max_review_turns: int = 20,
                  completion_timeout: float = 300, process_factory=None, worker_target=None):
         self.artifact_dir = Path(artifact_dir).resolve()
         task_workspace = Path(task_workspace).resolve()
@@ -123,13 +124,15 @@ class CleanMonitorRuntime:
         self._sequence = 0
         self._interrupt_callback = interrupt_callback
         self._completion_timeout = max(1.0, float(completion_timeout))
-        self._commands = mp.Queue()
-        self._outputs = mp.Queue()
+        self._mp_context = mp.get_context("spawn")
+        self._commands = self._mp_context.Queue()
+        self._outputs = self._mp_context.Queue()
         self._completion = queue.Queue()
         self._closed = threading.Event()
-        process = process_factory or mp.Process
+        process = process_factory or self._mp_context.Process
         self._process = process(target=worker_target or _monitor_process, args=({
             "config_name": config_name,
+            "model_config": dict(model_config),
             "evidence_root": str(self.evidence_root),
             "private_root": str(self.private_root),
             "task_workspace": str(task_workspace),
