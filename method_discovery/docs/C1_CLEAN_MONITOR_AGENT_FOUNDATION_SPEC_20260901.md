@@ -174,25 +174,33 @@ observation layer.
 Monitor Agent receives a private writable analysis workspace and a read-only view of Layer 2. It never
 writes production files, tests, Task Agent history, or raw evidence.
 
-The initial tool surface is intentionally small:
+The initial tool surface is intentionally small but does not force routine file work through generated code:
 
-1. **analysis code execution**: Python and the platform shell, based on GA's process runner; scripts run from
-   the private monitor workspace and may read the task evidence view. They may create indexes, grep/tail
-   logs, compare files, parse tests, and save intermediate analysis in the monitor workspace.
-2. **wait**: finish the current review without intervention and choose when to inspect again during patrol.
-3. **intervene**: submit one natural user-like correction. The controller invokes the existing Task Agent
+1. **file read**: read a bounded range from either the read-only task evidence view or the private monitor
+   workspace. The same simple interface serves original tasks, logs, code, tests, and monitor-authored notes.
+2. **file write**: create, replace, append, or prepend a file only inside the private monitor workspace.
+3. **file patch**: replace one exact existing text span only inside the private monitor workspace. This is the
+   preferred operation for local cognitive updates because it need not rewrite an entire note.
+4. **analysis code execution**: Python and the platform shell, based on GA's process runner; scripts run from
+   the private monitor workspace and may read the task evidence view. They may list/search many files,
+   grep/tail logs, compare files, parse tests, create temporary indexes, and save intermediate analysis in
+   the monitor workspace.
+5. **wait**: finish the current review without intervention and choose when to inspect again during patrol.
+6. **intervene**: submit one natural user-like correction. The controller invokes the existing Task Agent
    abort primitive, waits for the active generation/tool boundary to unwind, and supplies the correction to
    the same Task Agent session.
-4. **allow completion**: available only while reviewing an explicit root-completion proposal; it cannot end
+7. **allow completion**: available only while reviewing an explicit root-completion proposal; it cannot end
    ordinary execution or a monitor review opened for another reason.
 
-Ordinary file viewing/search can be performed through analysis code execution. Convenience tools may later
-be added only if traces show that the general tool is ergonomically inadequate; they cannot reduce access to
-the original evidence.
+Directory traversal, cross-file search, log following, diff composition, and custom analysis initially remain
+ordinary code-execution tasks rather than separate specialized tools. Convenience tools may later be added
+only if traces show that this general surface is ergonomically inadequate; they cannot reduce access to the
+original evidence or reintroduce a semantic packet/index layer.
 
 Path safety is an engineering invariant. Prompt instructions alone are insufficient: task evidence is
 exposed through an OS- or adapter-enforced read-only view, while generated scripts and analysis outputs are
-confined to Monitor Agent's writable workspace.
+confined to Monitor Agent's writable workspace. `file_write` and `file_patch` reject task-evidence paths in
+the implementation before any filesystem operation; `code_run` receives the same enforced separation.
 
 ## 8. Minimal control-action protocol
 
@@ -276,7 +284,8 @@ a strong baseline against which those mechanisms must improve quality/cost.
 C2 should introduce only the following new implementation components:
 
 1. `MonitorAgent`: owns the monitor role, provider session/history, and one review-at-a-time GA-derived loop;
-2. `MonitorHandler`: exposes analysis execution plus the two terminal control actions;
+2. `MonitorHandler`: exposes bounded file reading, private file writing/patching, analysis execution, and the
+   terminal control actions;
 3. `MonitorWorkspace`: private writable analysis root plus read-only task evidence view;
 4. `MonitorController`: thin lifecycle/IPC shell; semantic-free and nonblocking;
 5. deterministic fixtures covering role isolation, tool permissions, persistent history, and action receipts.
@@ -298,6 +307,7 @@ be strengthened before claiming intent-level intervention latency.
 - [x] ordinary Task Agent execution stays concurrent and nonblocking;
 - [x] observation remains two-layer and active;
 - [x] universal analysis capacity is retained without production write authority;
+- [x] routine file access and private cognitive editing do not require generated code;
 - [x] monitor silence and intervention are minimal action interfaces, not semantic classifiers;
 - [x] compression is explicitly deferred as a measured research problem rather than accidentally frozen;
 - [x] C2 and C3 remain separately testable implementation stages.
