@@ -550,13 +550,13 @@ edit_file with scope=monitor. task/original_task.md is read-only. Files under st
 your revisable cognition, not a fixed schema. Organize or add natural-language files as this task needs.
 Do not maintain backend ids. Exact trajectory, code, tests, and diffs remain authoritative at source.
 
-Before editing an existing monitor file, read it. Pass the returned sha256 as expected_sha256 and use
-exact old_text/new_text edits. A failed or conflicting edit changes nothing: read the current file and
-continue. A successful receipt is durable and versioned. Edit only when understanding materially changes;
-do not perform a fixed read/write ritual. Important progress, invalidated support, a changed repair
-residual, and root-completion understanding must not exist only in a transient final response.
-To create a new state/ or evidence/ file, use one edit with empty old_text and the complete initial
-new_text; no read receipt is required because the path must not already exist.
+Before changing an existing monitor file, read it and pass its returned hash. Use patch for one exact
+local replacement, replace when the file's organization no longer serves your understanding, and
+append/prepend only when position itself is appropriate. Use create for a new file. A failed or conflicting
+edit changes nothing: read the current file and continue. Successful changes are durable and versioned.
+Edit only when understanding materially changes; do not perform a fixed read/write ritual. Important
+progress, invalidated support, a changed repair residual, and root-completion understanding must not
+exist only in a transient final response.
 When new public evidence contradicts or invalidates earlier support, revise the affected understanding
 instead of appending a disconnected note: reopen the claim in ordinary language, retain the source anchor,
 and let the version history preserve what was previously believed. New evidence may restore support later.
@@ -568,7 +568,7 @@ prior monitor history; model-owned monitor files; and a user-like intervention c
 that expose those meanings, never framework-specific internal classes or storage paths.
 
 TOOL LOOP
-To inspect or edit, return exactly this JSON shape:
+To inspect or edit, return one JSON object using one of these compact contracts:
 {self._inspection_schema()}
 After each result, continue the same review: inspect again, repair a failed edit, or make one final
 decision. Tool failure is an observation, never evidence about task correctness.
@@ -1172,23 +1172,25 @@ ORIGINAL PUBLIC TASK:
         return value
 
     def _inspection_schema(self) -> str:
-        operations = (
-            "read_file|list_files|search_text|git_diff|git_status|list_changed_tests|"
-            "read_test_change|search_test_contract|read_original_task|read_recent_delta|"
-            "read_public_trajectory|search_public_trajectory|read_monitor_decisions|"
-            "search_monitor_decisions|read_repair_episode|read_inspection_result|"
-            "list_monitor_history_archives|read_monitor_history_archive"
-        )
-        operations += "|edit_file"
         return (
-            '{"action":"INSPECT","reason":"...","inspection":{"operation":"'
-            + operations
-            + '","scope":"task|monitor (optional)",'
-              '"path":"relative/path","id":"optional semantic object id",'
-              '"pattern":"optional regex","glob":"optional glob",'
-              '"start_line":1,"line_count":400,"start_char":0,'
-              '"char_count":12000,"expected_sha256":"from monitor read_file",'
-              '"edits":[{"old_text":"exact old text","new_text":"replacement"}]}}'
+            '\n- Monitor list: {"action":"INSPECT","reason":"...","inspection":'
+            '{"operation":"list_files","scope":"monitor","path":".","glob":"*","start":0,"limit":200}}'
+            '\n- Monitor read: {"action":"INSPECT","reason":"...","inspection":'
+            '{"operation":"read_file","scope":"monitor","path":"state/file.md","start":1,"limit":800}}'
+            '\n- Monitor search: {"action":"INSPECT","reason":"...","inspection":'
+            '{"operation":"search_text","scope":"monitor","path":".","pattern":"regex","glob":"*",'
+            '"start":0,"limit":100,"before":0,"after":0}}'
+            '\n- Monitor edit: {"action":"INSPECT","reason":"...","inspection":'
+            '{"operation":"edit_file","scope":"monitor","path":"state/file.md",'
+            '"mode":"create|patch|replace|append|prepend","hash":"hash from read_file for existing files",'
+            '"old":"exact text for patch","content":"new content"}}'
+            '\n- Public workspace: use operation read_file, list_files, search_text, git_diff, git_status, '
+            'list_changed_tests, read_test_change, or search_test_contract without scope=monitor; include only '
+            'the path, search, or range fields that operation needs.'
+            '\n- Public history: use operation read_original_task, read_recent_delta, read_public_trajectory, '
+            'search_public_trajectory, read_monitor_decisions, search_monitor_decisions, read_repair_episode, '
+            'read_inspection_result, list_monitor_history_archives, or read_monitor_history_archive; include only '
+            'the range or search fields needed.'
         )
 
 

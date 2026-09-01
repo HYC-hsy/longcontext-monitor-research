@@ -147,11 +147,9 @@ def test_semantic_files_use_generic_scoped_file_operations(monkeypatch, tmp_path
     changed = monitor._inspect_monitor_files({
         "operation": "edit_file", "scope": "monitor",
         "path": "state/working_state.md",
-        "expected_sha256": opened["sha256"],
-        "edits": [{
-            "old_text": "# Working state",
-            "new_text": "# Working state\n\nA is currently supported.",
-        }],
+        "mode": "patch", "hash": opened["hash"],
+        "old": "# Working state",
+        "content": "# Working state\n\nA is currently supported.",
     })
     assert changed["ok"] is True
     searched = monitor._inspect_monitor_files({
@@ -170,6 +168,10 @@ def test_semantic_files_prompt_exposes_capability_not_fixed_ritual(monkeypatch, 
     assert "reopen the claim in ordinary language" in prompt
     assert "version history preserve what was previously believed" in prompt
     assert "scope=monitor" in prompt
+    assert '"mode":"create|patch|replace|append|prepend"' in prompt
+    assert "expected_sha256" not in prompt
+    assert "old_text" not in prompt
+    assert "new_text" not in prompt
     assert "framework-specific internal class" in prompt
     for implementation_label in ("M0", "M1", "M2", "M3-A", "M3-B", "M3-C", "M3-D", "M3.2", "M3.5"):
         assert implementation_label not in prompt
@@ -235,11 +237,9 @@ def test_review_can_read_edit_receive_receipt_then_decide(monkeypatch, tmp_path)
             "inspection": {
                 "operation": "edit_file", "scope": "monitor",
                 "path": "state/working_state.md",
-                "expected_sha256": initial["sha256"],
-                "edits": [{
-                    "old_text": "# Working state",
-                    "new_text": "# Working state\n\nThe current local change is provisional.",
-                }],
+                "mode": "patch", "hash": initial["hash"],
+                "old": "# Working state",
+                "content": "# Working state\n\nThe current local change is provisional.",
             },
         },
         v2_decision(),

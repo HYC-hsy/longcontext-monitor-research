@@ -182,14 +182,16 @@ class MonitorSemanticFiles:
             text = "# Task model\n\n" + body + "\n"
             self._archive_version(path, current, _sha256(current))
             self._atomic_write(path, text)
-            return {"ok": True, "changed": True, "sha256": _sha256(text)}
+            return {"ok": True, "changed": True, "hash": _sha256(text)}
 
     def _list_files(self, request: Mapping[str, Any]) -> dict[str, Any]:
         base = self._path(request.get("path", "."))
         if not base.exists():
             return {"ok": False, "error": "path does not exist"}
+        glob = str(request.get("glob", "*")).strip() or "*"
+        offset = max(0, int(request.get("start", 0)))
         limit = min(500, max(1, int(request.get("limit", 200))))
-        paths = [base] if base.is_file() else base.rglob("*")
+        paths = [base] if base.is_file() else base.rglob(glob)
         files: list[dict[str, Any]] = []
         for path in paths:
             if not path.is_file():
@@ -198,10 +200,16 @@ class MonitorSemanticFiles:
             if (relative.startswith(".versions/")
                     or relative in {".workspace.json", ".edit.lock"}):
                 continue
-            files.append({"path": relative, "characters": path.stat().st_size})
-            if len(files) >= limit:
-                break
-        return {"ok": True, "files": files, "truncated": len(files) >= limit}
+            files.append({"path": relative, "bytes": path.stat().st_size})
+        files.sort(key=lambda row: row["path"])
+        page = files[offset:offset + limit]
+        next_offset = offset + len(page)
+        return {
+            "ok": True,
+            "files": page,
+            "next": next_offset if next_offset < len(files) else None,
+            "total": len(files),
+        }
 
     def _read_file(self, request: Mapping[str, Any]) -> dict[str, Any]:
         path = self._path(request.get("path", ""))
@@ -210,8 +218,8 @@ class MonitorSemanticFiles:
         text = path.read_text(encoding="utf-8-sig", errors="replace")
         if len(text) > MAX_FILE_CHARACTERS:
             return {"ok": False, "error": "semantic file exceeds safe read limit"}
-        start = max(1, int(request.get("start_line", 1)))
-        count = min(4000, max(1, int(request.get("line_count", 800))))
+        start = max(1, int(request.get("start", 1)))
+        count = min(4000, max(1, int(request.get("limit", 800))))
         lines = text.splitlines()
         selected = "\n".join(
             f"{number}: {line}"
@@ -221,9 +229,10 @@ class MonitorSemanticFiles:
             "ok": True,
             "path": path.relative_to(self.root).as_posix(),  # type: ignore[union-attr]
             "content": selected,
-            "sha256": _sha256(text),
-            "line_count": len(lines),
-            "truncated": start - 1 + count < len(lines),
+            "hash": _sha256(text),
+            "next": start + len(lines[start - 1:start - 1 + count])
+                    if start - 1 + count < len(lines) else None,
+            "total_lines": len(lines),
         }
 
     def _search(self, request: Mapping[str, Any]) -> dict[str, Any]:
@@ -232,91 +241,96 @@ class MonitorSemanticFiles:
             str(request.get("pattern", "")),
             re.IGNORECASE if request.get("ignore_case", True) else 0,
         )
+        glob = str(request.get("glob", "*")).strip() or "*"
+        offset = max(0, int(request.get("start", 0)))
         limit = min(500, max(1, int(request.get("limit", 100))))
-        paths = [base] if base.is_file() else base.rglob("*")
+        before = min(20, max(0, int(request.get("before", 0))))
+        after = min(20, max(0, int(request.get("after", 0))))
+        paths = [base] if base.is_file() else base.rglob(glob)
         matches: list[dict[str, Any]] = []
-        for path in paths:
+        for path in sorted(paths, key=lambda item: item.as_posix()):
             if not path.is_file() or ".versions" in path.parts:
                 continue
             if path.stat().st_size > MAX_FILE_CHARACTERS:
                 continue
-            for line_number, line in enumerate(path.read_text(
-                    encoding="utf-8-sig", errors="replace").splitlines(), 1):
+            lines = path.read_text(encoding="utf-8-sig", errors="replace").splitlines()
+            for line_number, line in enumerate(lines, 1):
                 if pattern.search(line):
                     matches.append({
                         "path": path.relative_to(self.root).as_posix(),  # type: ignore[union-attr]
                         "line": line_number,
                         "text": line[:2000],
+                        "context": "\n".join(
+                            f"{number}: {lines[number - 1]}"
+                            for number in range(
+                                max(1, line_number - before),
+                                min(len(lines), line_number + after) + 1,
+                            )
+                        )[:8000],
                     })
-                    if len(matches) >= limit:
-                        return {"ok": True, "matches": matches, "truncated": True}
-        return {"ok": True, "matches": matches, "truncated": False}
+        page = matches[offset:offset + limit]
+        next_offset = offset + len(page)
+        return {
+            "ok": True,
+            "matches": page,
+            "next": next_offset if next_offset < len(matches) else None,
+            "total": len(matches),
+        }
 
     def _edit_file(self, request: Mapping[str, Any]) -> dict[str, Any]:
         path = self._path(request.get("path", ""), writable=True)
-        expected = str(request.get("expected_sha256", "")).strip()
-        edits = request.get("edits")
-        if not isinstance(edits, list) or not edits:
-            return {"ok": False, "error": "edits must be a non-empty list"}
+        mode = str(request.get("mode", "patch")).strip().lower()
+        if mode not in {"create", "patch", "replace", "append", "prepend"}:
+            return {"ok": False, "error": "mode must be create, patch, replace, append, or prepend"}
+        expected = str(request.get("hash", "")).strip()
+        content = str(request.get("content", ""))
         with self._lock, self._process_edit_lock():
             exists = path.exists()
             previous = path.read_text(encoding="utf-8-sig") if exists else ""
             previous_hash = _sha256(previous)
+            if mode == "create" and exists:
+                return {"ok": False, "conflict": True, "error": "file already exists",
+                        "hash": previous_hash}
+            if mode != "create" and not exists:
+                return {"ok": False, "error": "file does not exist; use mode=create"}
             if exists and not expected:
                 return {
                     "ok": False,
                     "conflict": True,
-                    "error": "expected_sha256 from read_file is required",
-                    "current_sha256": previous_hash,
+                    "error": "hash from read_file is required",
+                    "hash": previous_hash,
                 }
             if expected and expected != previous_hash:
                 return {
                     "ok": False,
                     "conflict": True,
                     "error": "file changed since it was read",
-                    "expected_sha256": expected,
-                    "current_sha256": previous_hash,
+                    "expected_hash": expected,
+                    "hash": previous_hash,
                 }
-            updated = previous
-            receipts: list[dict[str, Any]] = []
-            for index, edit in enumerate(edits):
-                if not isinstance(edit, Mapping):
-                    return {"ok": False, "error": f"edit {index} is not an object"}
-                old = str(edit.get("old_text", ""))
-                new = str(edit.get("new_text", ""))
+            if mode == "create" or mode == "replace":
+                updated = content
+            elif mode == "append":
+                updated = previous + content
+            elif mode == "prepend":
+                updated = content + previous
+            else:
+                old = str(request.get("old", ""))
                 if not old:
-                    if exists or len(edits) != 1 or index != 0:
-                        return {
-                            "ok": False,
-                            "error": (
-                                f"edit {index} has empty old_text; this is allowed only "
-                                "for one-step creation of a new file"
-                            ),
-                        }
-                    updated = new
-                    receipts.append({
-                        "edit": index, "created": True,
-                        "removed_characters": 0, "added_characters": len(new),
-                    })
-                    continue
-                occurrences = updated.count(old)
+                    return {"ok": False, "error": "old is required for mode=patch"}
+                occurrences = previous.count(old)
                 if occurrences != 1:
                     return {
                         "ok": False,
                         "conflict": True,
-                        "error": f"edit {index} expected one exact match, found {occurrences}",
-                        "current_sha256": previous_hash,
+                        "error": f"patch expected one exact match, found {occurrences}",
+                        "hash": previous_hash,
                     }
-                updated = updated.replace(old, new, 1)
-                receipts.append({
-                    "edit": index,
-                    "removed_characters": len(old),
-                    "added_characters": len(new),
-                })
+                updated = previous.replace(old, content, 1)
             if len(updated) > MAX_EDIT_CHARACTERS:
                 return {"ok": False, "error": "edited file exceeds semantic state limit"}
             if updated == previous:
-                return {"ok": True, "changed": False, "sha256": previous_hash}
+                return {"ok": True, "changed": False, "hash": previous_hash}
             self._archive_version(path, previous, previous_hash)
             self._atomic_write(path, updated)
             current_hash = _sha256(updated)
@@ -324,9 +338,9 @@ class MonitorSemanticFiles:
                 "ok": True,
                 "changed": True,
                 "path": path.relative_to(self.root).as_posix(),  # type: ignore[union-attr]
-                "previous_sha256": previous_hash,
-                "sha256": current_hash,
-                "edits": receipts,
+                "previous_hash": previous_hash,
+                "hash": current_hash,
+                "mode": mode,
             }
 
     def _archive_version(self, path: Path, previous: str, digest: str) -> None:

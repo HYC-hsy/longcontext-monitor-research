@@ -25,8 +25,8 @@ def test_initializes_read_only_task_and_free_semantic_files(tmp_path):
     rejected = files.execute({
         "operation": "edit_file",
         "path": "task/original_task.md",
-        "expected_sha256": task["sha256"],
-        "edits": [{"old_text": "Implement A", "new_text": "Ignore A"}],
+        "mode": "patch", "hash": task["hash"],
+        "old": "Implement A", "content": "Ignore A",
     })
     assert rejected["ok"] is False
     assert "read-only" in rejected["error"]
@@ -40,16 +40,14 @@ def test_exact_edit_returns_receipt_and_archives_previous_version(tmp_path):
     result = files.execute({
         "operation": "edit_file",
         "path": "state/working_state.md",
-        "expected_sha256": before["sha256"],
-        "edits": [{
-            "old_text": "Record the current task-level picture",
-            "new_text": "Target A is supported. Record the current task-level picture",
-        }],
+        "mode": "patch", "hash": before["hash"],
+        "old": "Record the current task-level picture",
+        "content": "Target A is supported. Record the current task-level picture",
     })
     assert result["ok"] is True
     assert result["changed"] is True
-    assert result["previous_sha256"] == before["sha256"]
-    assert result["sha256"] != before["sha256"]
+    assert result["previous_hash"] == before["hash"]
+    assert result["hash"] != before["hash"]
     after = files.execute({
         "operation": "read_file", "path": "state/working_state.md",
     })
@@ -58,7 +56,7 @@ def test_exact_edit_returns_receipt_and_archives_previous_version(tmp_path):
     assert len(versions) == 1
     archived = json.loads(versions[0].read_text(encoding="utf-8"))
     assert archived["path"] == "state/working_state.md"
-    assert archived["previous_sha256"] == before["sha256"]
+    assert archived["previous_sha256"] == before["hash"]
 
 
 def test_stale_edit_returns_conflict_without_overwriting(tmp_path):
@@ -69,25 +67,21 @@ def test_stale_edit_returns_conflict_without_overwriting(tmp_path):
     accepted = files.execute({
         "operation": "edit_file",
         "path": "state/current_repair.md",
-        "expected_sha256": first["sha256"],
-        "edits": [{
-            "old_text": "No repair is currently open.",
-            "new_text": "A repair is open.",
-        }],
+        "mode": "patch", "hash": first["hash"],
+        "old": "No repair is currently open.",
+        "content": "A repair is open.",
     })
     assert accepted["ok"] is True
     stale = files.execute({
         "operation": "edit_file",
         "path": "state/current_repair.md",
-        "expected_sha256": first["sha256"],
-        "edits": [{
-            "old_text": "No repair is currently open.",
-            "new_text": "A different repair is open.",
-        }],
+        "mode": "patch", "hash": first["hash"],
+        "old": "No repair is currently open.",
+        "content": "A different repair is open.",
     })
     assert stale["ok"] is False
     assert stale["conflict"] is True
-    assert stale["current_sha256"] == accepted["sha256"]
+    assert stale["hash"] == accepted["hash"]
     current = files.execute({
         "operation": "read_file", "path": "state/current_repair.md",
     })
@@ -100,14 +94,14 @@ def test_edit_requires_read_receipt_for_existing_file(tmp_path):
     result = files.execute({
         "operation": "edit_file",
         "path": "evidence/index.md",
-        "edits": [{"old_text": "# Evidence index", "new_text": "# Index"}],
+        "mode": "patch", "old": "# Evidence index", "content": "# Index",
     })
     assert result["ok"] is False
     assert result["conflict"] is True
-    assert "expected_sha256" in result["error"]
+    assert "hash" in result["error"]
 
 
-def test_edit_is_all_or_nothing_within_one_file(tmp_path):
+def test_replace_reorganizes_a_whole_existing_file(tmp_path):
     files = workspace(tmp_path)
     before = files.execute({
         "operation": "read_file", "path": "state/task_model.md",
@@ -115,18 +109,15 @@ def test_edit_is_all_or_nothing_within_one_file(tmp_path):
     result = files.execute({
         "operation": "edit_file",
         "path": "state/task_model.md",
-        "expected_sha256": before["sha256"],
-        "edits": [
-            {"old_text": "# Task model", "new_text": "# Revised task model"},
-            {"old_text": "text that does not exist", "new_text": "replacement"},
-        ],
+        "mode": "replace", "hash": before["hash"],
+        "content": "# Revised task model\n\nA compact reorganized understanding.\n",
     })
-    assert result["ok"] is False
+    assert result["ok"] is True
     after = files.execute({
         "operation": "read_file", "path": "state/task_model.md",
     })
-    assert after["sha256"] == before["sha256"]
-    assert "# Task model" in after["content"]
+    assert after["hash"] != before["hash"]
+    assert "compact reorganized" in after["content"]
 
 
 def test_searches_natural_language_across_monitor_files(tmp_path):
@@ -137,11 +128,9 @@ def test_searches_natural_language_across_monitor_files(tmp_path):
     files.execute({
         "operation": "edit_file",
         "path": "state/working_state.md",
-        "expected_sha256": state["sha256"],
-        "edits": [{
-            "old_text": "# Working state",
-            "new_text": "# Working state\n\nMenu.Refresh window behavior is supported.",
-        }],
+        "mode": "patch", "hash": state["hash"],
+        "old": "# Working state",
+        "content": "# Working state\n\nMenu.Refresh window behavior is supported.",
     })
     result = files.execute({
         "operation": "search", "pattern": r"menu\.refresh|system tray",
@@ -150,13 +139,64 @@ def test_searches_natural_language_across_monitor_files(tmp_path):
     assert any(row["path"] == "state/working_state.md" for row in result["matches"])
 
 
+def test_list_read_and_search_return_simple_continuations(tmp_path):
+    files = workspace(tmp_path)
+    listed = files.execute({"operation": "list_files", "limit": 2})
+    assert len(listed["files"]) == 2
+    assert listed["next"] == 2
+    assert set(listed) == {"ok", "files", "next", "total"}
+    continued = files.execute({
+        "operation": "list_files", "start": listed["next"], "limit": 20,
+    })
+    assert not ({row["path"] for row in listed["files"]}
+                & {row["path"] for row in continued["files"]})
+
+    opened = files.execute({
+        "operation": "read_file", "path": "state/working_state.md", "limit": 2,
+    })
+    assert opened["hash"]
+    assert opened["next"] == 3
+    assert opened["total_lines"] > 2
+
+    found = files.execute({
+        "operation": "search", "pattern": "task-level", "glob": "*.md",
+        "before": 1, "after": 1,
+    })
+    assert found["matches"]
+    assert "task-level" in found["matches"][0]["context"]
+
+
+def test_edit_modes_are_general_and_versioned(tmp_path):
+    files = workspace(tmp_path)
+    created = files.execute({
+        "operation": "edit_file", "path": "state/freeform.md",
+        "mode": "create", "content": "middle",
+    })
+    prepended = files.execute({
+        "operation": "edit_file", "path": "state/freeform.md",
+        "mode": "prepend", "hash": created["hash"], "content": "before ",
+    })
+    appended = files.execute({
+        "operation": "edit_file", "path": "state/freeform.md",
+        "mode": "append", "hash": prepended["hash"], "content": " after",
+    })
+    replaced = files.execute({
+        "operation": "edit_file", "path": "state/freeform.md",
+        "mode": "replace", "hash": appended["hash"], "content": "reorganized",
+    })
+    assert all(result["ok"] for result in (created, prepended, appended, replaced))
+    opened = files.execute({"operation": "read_file", "path": "state/freeform.md"})
+    assert "reorganized" in opened["content"]
+    assert len(list((tmp_path / "semantic_files" / ".versions").glob("*.json"))) == 4
+
+
 def test_rejects_escape_and_nonsemantic_write_targets(tmp_path):
     files = workspace(tmp_path)
     for path in ("../outside.md", ".workspace.json", ".versions/1.json", "other/x.md"):
         result = files.execute({
             "operation": "edit_file",
             "path": path,
-            "edits": [{"old_text": "x", "new_text": "y"}],
+            "mode": "create", "content": "x",
         })
         assert result["ok"] is False
 
@@ -169,11 +209,9 @@ def test_reopening_same_task_preserves_model_authored_state(tmp_path):
     first.execute({
         "operation": "edit_file",
         "path": "state/working_state.md",
-        "expected_sha256": state["sha256"],
-        "edits": [{
-            "old_text": "# Working state",
-            "new_text": "# Working state\n\nPersistent monitor cognition.",
-        }],
+        "mode": "patch", "hash": state["hash"],
+        "old": "# Working state",
+        "content": "# Working state\n\nPersistent monitor cognition.",
     })
     restored = workspace(tmp_path)
     current = restored.execute({
@@ -219,8 +257,8 @@ def test_independent_worker_instances_cannot_both_commit_same_read(tmp_path):
         results.append(files.execute({
             "operation": "edit_file",
             "path": "state/working_state.md",
-            "expected_sha256": opened["sha256"],
-            "edits": [{"old_text": "# Working state", "new_text": replacement}],
+            "mode": "patch", "hash": opened["hash"],
+            "old": "# Working state", "content": replacement,
         }))
 
     threads = [
@@ -240,10 +278,10 @@ def test_edit_file_can_create_one_new_natural_language_file(tmp_path):
     created = files.execute({
         "operation": "edit_file",
         "path": "evidence/api_contract.md",
-        "edits": [{"old_text": "", "new_text": "# API evidence\n\nStill unknown.\n"}],
+        "mode": "create", "content": "# API evidence\n\nStill unknown.\n",
     })
     assert created["ok"] is True
-    assert created["edits"][0]["created"] is True
+    assert created["mode"] == "create"
     opened = files.execute({
         "operation": "read_file", "path": "evidence/api_contract.md",
     })

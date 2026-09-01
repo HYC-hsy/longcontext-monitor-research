@@ -31,13 +31,19 @@ The same persistent monitor now has three complementary forms of state:
 
 The runtime supplies only generic atomic operations:
 
-- list files;
-- read a bounded file view;
-- search text;
-- edit exact text after reading its SHA-256 receipt;
-- create a new natural-language state/evidence file;
+- list files with a stable order, glob, and simple continuation offset;
+- read a bounded line view with a full-file hash and continuation offset;
+- search regular-expression text with glob, bounded context, and continuation;
+- create, patch, replace, append, or prepend one natural-language file operation after
+  reading its hash when the file already exists;
 - inspect the public task, trajectory, workspace, tests, diffs, prior decisions, repair
   state, and externalized history through existing read-only evidence tools.
+
+The model-visible edit contract is deliberately flat: `mode`, `hash`, optional `old`,
+and `content`. It does not expose batched edit objects, runtime ids, or separate
+old/new field vocabularies. Whole-file replacement lets the monitor reorganize its own
+cognition instead of accumulating append-only patches merely because the interface is
+awkward.
 
 The runtime enforces path safety, optimistic concurrency, atomic replacement, and
 append-only versions. It does not interpret task semantics, assign requirement ids,
@@ -72,7 +78,7 @@ bind paraphrases, decide which field a statement belongs in, or infer completion
 
 ## Engineering evidence
 
-- GenericAgent full test suite: 295 passed.
+- GenericAgent full test suite after the atomic-tool simplification: 297 passed.
 - Harbor adapter and active real-task runner regression set: 85 passed.
 - Prompt-surface checks cover stable policy, turn-zero bootstrap, ordinary wake, tool
   continuation, and completion wake; implementation-stage labels, old schemas, framework
