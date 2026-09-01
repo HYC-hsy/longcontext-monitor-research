@@ -13,11 +13,6 @@ class GenericAgentMonitorAdapter:
     def archive_boundary(self, packet):
         return self.runtime.archive_boundary(packet)
 
-    def consume_interventions(self):
-        # The runtime delivers corrections immediately through GA's resumable
-        # interruption callback; no delayed packet is consumed at inference.
-        return []
-
     def review_completion(self, proposal, turn, provider_link=None, response_content=None):
         payload = proposal.as_payload() if hasattr(proposal, "as_payload") else {}
         outcome = self.runtime.request_completion({

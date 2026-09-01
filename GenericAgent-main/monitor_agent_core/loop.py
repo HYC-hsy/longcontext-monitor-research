@@ -32,7 +32,7 @@ def run_review(client, system_prompt: str, wake_context: str, tools: list[dict],
 
         tool_results = []
         next_prompts = []
-        for call in response.tool_calls:
+        for index, call in enumerate(response.tool_calls):
             try:
                 arguments = json.loads(call.arguments or "{}")
             except json.JSONDecodeError as exc:
@@ -40,6 +40,21 @@ def run_review(client, system_prompt: str, wake_context: str, tools: list[dict],
             else:
                 outcome = dispatch(call.name, arguments)
             if outcome.action is not None:
+                completed = tool_results + [{
+                    "tool_use_id": call.id,
+                    "content": json.dumps({
+                        "status": "accepted", "control_action": outcome.action.kind,
+                    }),
+                }]
+                completed.extend({
+                    "tool_use_id": pending.id,
+                    "content": json.dumps({
+                        "status": "not_executed", "reason": "review_control_action_selected",
+                    }),
+                } for pending in response.tool_calls[index + 1:])
+                record = getattr(client, "record_tool_results", None)
+                if record is not None:
+                    record(completed)
                 return outcome.action
             tool_results.append({
                 "tool_use_id": call.id,

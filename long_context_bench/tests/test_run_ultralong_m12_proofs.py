@@ -77,6 +77,17 @@ def test_m0_monitor_is_explicitly_opt_in(monkeypatch):
     assert values["m0_recent_trajectory_turns"] == 0
 
 
+def test_clean_monitor_is_explicitly_opt_in(monkeypatch):
+    monkeypatch.setenv("GA_BASELINE_CONDITION", "original")
+    monkeypatch.setenv("GA_MONITOR_ENABLED", "1")
+    monkeypatch.setenv("GA_MONITOR_CONFIG", "native_oai_cc_vibe_gpt56_sol_high")
+
+    values = m12.stage4_agent_kwargs()
+
+    assert values["monitor_enabled"] is True
+    assert values["monitor_config"] == "native_oai_cc_vibe_gpt56_sol_high"
+
+
 
 
 
@@ -254,7 +265,7 @@ def test_m0_monitor_requires_named_model(monkeypatch):
         m12.stage4_agent_kwargs()
 
 
-def test_m0_lhtb_execution_copy_disables_online_verifier_feedback(
+def test_monitor_lhtb_execution_copy_disables_online_verifier_feedback(
     tmp_path, monkeypatch
 ):
     task = tmp_path / "source" / "task-a"
@@ -266,7 +277,7 @@ def test_m0_lhtb_execution_copy_disables_online_verifier_feedback(
     (task / "instruction.md").write_text("public task", encoding="utf-8")
     monkeypatch.setitem(m12.SOURCES["lhtb"], "task_root", task.parent)
     monkeypatch.setattr(m12, "WORK_ROOT", tmp_path / "runs")
-    monkeypatch.setenv("GA_M0_MONITOR_ENABLED", "1")
+    monkeypatch.setenv("GA_MONITOR_ENABLED", "1")
 
     execution = m12.materialize_execution_task("lhtb", "task-a", "run-1")
 
@@ -280,26 +291,26 @@ def test_m0_lhtb_execution_copy_disables_online_verifier_feedback(
     ).read_text(encoding="utf-8")
 
 
-def test_non_m0_or_non_lhtb_uses_frozen_task_without_copy(tmp_path, monkeypatch):
+def test_non_monitor_or_non_lhtb_uses_frozen_task_without_copy(tmp_path, monkeypatch):
     source = tmp_path / "task-b"
     source.mkdir()
     monkeypatch.setitem(m12.SOURCES["lhtb"], "task_root", tmp_path)
-    monkeypatch.delenv("GA_M0_MONITOR_ENABLED", raising=False)
+    monkeypatch.delenv("GA_MONITOR_ENABLED", raising=False)
     assert m12.materialize_execution_task("lhtb", "task-b", "run-2") == source
 
 
-def test_m0_finalizer_rejects_online_verifier_metadata(monkeypatch):
-    monkeypatch.setenv("GA_M0_MONITOR_ENABLED", "1")
+def test_monitor_finalizer_rejects_online_verifier_metadata(monkeypatch):
+    monkeypatch.setenv("GA_MONITOR_ENABLED", "1")
     errors = m12.no_checker_leakage_errors(
         {"interim_verifier_rewards": [{"reward": 0.25}]}, []
     )
     assert errors == [
-        "online checker metadata leaked into M0: interim_verifier_rewards"
+        "online checker metadata leaked into Monitor: interim_verifier_rewards"
     ]
 
 
-def test_m0_finalizer_rejects_public_verifier_feedback(monkeypatch):
-    monkeypatch.setenv("GA_M0_MONITOR_ENABLED", "1")
+def test_monitor_finalizer_rejects_public_verifier_feedback(monkeypatch):
+    monkeypatch.setenv("GA_MONITOR_ENABLED", "1")
     errors = m12.no_checker_leakage_errors(
         {}, ["Continue working. Interim verifier result: reward=0.25"]
     )
@@ -308,8 +319,8 @@ def test_m0_finalizer_rejects_public_verifier_feedback(monkeypatch):
     ]
 
 
-def test_non_m0_finalizer_does_not_reinterpret_historical_continuation(monkeypatch):
-    monkeypatch.delenv("GA_M0_MONITOR_ENABLED", raising=False)
+def test_non_monitor_finalizer_does_not_reinterpret_historical_continuation(monkeypatch):
+    monkeypatch.delenv("GA_MONITOR_ENABLED", raising=False)
     assert m12.no_checker_leakage_errors(
         {"interim_verifier_rewards": [{"reward": 0.25}]},
         ["Interim verifier result: reward=0.25"],
@@ -317,8 +328,8 @@ def test_non_m0_finalizer_does_not_reinterpret_historical_continuation(monkeypat
 
 
 def test_expected_otel_models_include_preregistered_monitor(monkeypatch):
-    monkeypatch.setenv("GA_M0_MONITOR_ENABLED", "1")
-    monkeypatch.setenv("GA_M0_MONITOR_EXPECTED_MODEL", "GPT-5.6-SOL")
+    monkeypatch.setenv("GA_MONITOR_ENABLED", "1")
+    monkeypatch.setenv("GA_MONITOR_EXPECTED_MODEL", "GPT-5.6-SOL")
 
     assert m12.expected_otel_models("Claude-Opus-4-6") == [
         "claude-opus-4-6", "gpt-5.6-sol"
@@ -326,23 +337,23 @@ def test_expected_otel_models_include_preregistered_monitor(monkeypatch):
 
 
 def test_expected_otel_models_require_monitor_identity(monkeypatch):
-    monkeypatch.setenv("GA_M0_MONITOR_ENABLED", "1")
-    monkeypatch.delenv("GA_M0_MONITOR_EXPECTED_MODEL", raising=False)
+    monkeypatch.setenv("GA_MONITOR_ENABLED", "1")
+    monkeypatch.delenv("GA_MONITOR_EXPECTED_MODEL", raising=False)
 
-    with pytest.raises(ValueError, match="M0_MONITOR_EXPECTED_MODEL"):
+    with pytest.raises(ValueError, match="MONITOR_EXPECTED_MODEL"):
         m12.expected_otel_models("claude-opus-4-6")
 
 
-def test_expected_otel_models_remain_single_for_non_m0(monkeypatch):
-    monkeypatch.delenv("GA_M0_MONITOR_ENABLED", raising=False)
-    monkeypatch.setenv("GA_M0_MONITOR_EXPECTED_MODEL", "ignored")
+def test_expected_otel_models_remain_single_without_monitor(monkeypatch):
+    monkeypatch.delenv("GA_MONITOR_ENABLED", raising=False)
+    monkeypatch.setenv("GA_MONITOR_EXPECTED_MODEL", "ignored")
 
     assert m12.expected_otel_models("Claude-Opus-4-6") == ["claude-opus-4-6"]
 
 
 def test_otel_model_match_allows_uninstrumented_registered_monitor(monkeypatch):
-    monkeypatch.setenv("GA_M0_MONITOR_ENABLED", "1")
-    monkeypatch.setenv("GA_M0_MONITOR_EXPECTED_MODEL", "gpt-5.6-sol")
+    monkeypatch.setenv("GA_MONITOR_ENABLED", "1")
+    monkeypatch.setenv("GA_MONITOR_EXPECTED_MODEL", "gpt-5.6-sol")
 
     assert m12.otel_models_match(["claude-opus-4-6"], "claude-opus-4-6")
     assert m12.otel_models_match(

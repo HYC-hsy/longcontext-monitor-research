@@ -190,27 +190,6 @@ def test_monitor_completion_callback_runs_without_telemetry_or_legacy_gate():
     assert seen == [(1, "done")]
 
 
-def test_ready_async_monitor_intervention_is_injected_before_llm():
-    class Runtime:
-        def __init__(self): self.used = False
-        def consume_interventions(self):
-            if self.used: return []
-            self.used = True
-            return [{
-                "request_id": "monitor_boundary_1", "internal_turn": 3,
-                "message": "Inspect the test oracle before editing production code.",
-            }]
-
-    handler = Handler()
-    handler.parent.monitor_runtime = Runtime()
-    client = RecordingClient(Response())
-    exhaust(agent_runner_loop(client, "sys", "task", handler, [], max_turns=1, verbose=False))
-
-    prompt = client.messages[0][-1]["content"]
-    assert "PERSISTENT MONITOR" not in prompt
-    assert "test oracle" in prompt
-
-
 def test_announced_tool_intent_is_published_before_tool_execution():
     class Runtime:
         def __init__(self): self.packets = []

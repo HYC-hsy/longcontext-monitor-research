@@ -45,6 +45,7 @@ MANIFEST_CONTROLLED_ENV_KEYS = {
     "GA_BASELINE_CONDITION", "GA_EXPERIMENT_ID", "GA_CONDITION_ID",
     "GA_LLM_CONFIG_NAME", "GA_MAX_TURNS", "GA_PROVIDER_MAX_RETRIES",
     "GA_METHOD_EXPECTED_SOURCE_SHA256", "GA_EXPERIMENT_HARNESS_SHA256",
+    "GA_MONITOR_ENABLED", "GA_MONITOR_CONFIG", "GA_MONITOR_EXPECTED_MODEL",
     "GA_M0_MONITOR_ENABLED", "GA_M0_MONITOR_CONFIG",
     "GA_M0_MONITOR_EXPECTED_MODEL", "GA_M0_MAX_INSPECTIONS",
     "GA_M0_RECENT_TRAJECTORY_TURNS", "GA_MONITOR_REQUEST_TIMEOUT_SECONDS",
@@ -178,6 +179,12 @@ def stage4_agent_kwargs() -> dict[str, object]:
         values["manual_completion_timeout_seconds"] = float(
             os.environ.get("GA_MANUAL_COMPLETION_TIMEOUT_SECONDS", "300")
         )
+    if os.environ.get("GA_MONITOR_ENABLED") == "1":
+        monitor_config = os.environ.get("GA_MONITOR_CONFIG", "")
+        if not monitor_config:
+            raise ValueError("GA_MONITOR_CONFIG is required when the clean Monitor is enabled")
+        values["monitor_enabled"] = True
+        values["monitor_config"] = monitor_config
     if os.environ.get("GA_M0_MONITOR_ENABLED") == "1":
         monitor_config = os.environ.get("GA_M0_MONITOR_CONFIG", "")
         if not monitor_config:
@@ -257,11 +264,11 @@ def stage4_agent_kwargs() -> dict[str, object]:
 def expected_otel_models(primary_model: str) -> list[str]:
     """Return the pre-registered allowed model set for this proof condition."""
     models = {primary_model.lower()}
-    if os.environ.get("GA_M0_MONITOR_ENABLED") == "1":
-        monitor_model = os.environ.get("GA_M0_MONITOR_EXPECTED_MODEL", "").strip().lower()
+    if os.environ.get("GA_MONITOR_ENABLED") == "1":
+        monitor_model = os.environ.get("GA_MONITOR_EXPECTED_MODEL", "").strip().lower()
         if not monitor_model:
             raise ValueError(
-                "GA_M0_MONITOR_EXPECTED_MODEL is required for M0 OTel identity validation"
+                "GA_MONITOR_EXPECTED_MODEL is required for Monitor OTel identity validation"
             )
         models.add(monitor_model)
     return sorted(models)
@@ -282,7 +289,7 @@ def otel_models_match(observed: list[str], primary_model: str) -> bool:
 def no_checker_leakage_errors(
     metadata: dict[str, Any], outputs: list[str]
 ) -> list[str]:
-    """Reject M0 evidence containing native-verifier information online."""
+    """Reject Monitor evidence containing native-verifier information online."""
     if not online_checker_forbidden():
         return []
     errors = []
@@ -293,7 +300,7 @@ def no_checker_leakage_errors(
     leaked_keys = sorted(forbidden_metadata & set(metadata))
     if leaked_keys:
         errors.append(
-            "online checker metadata leaked into M0: " + ", ".join(leaked_keys)
+            "online checker metadata leaked into Monitor: " + ", ".join(leaked_keys)
         )
     forbidden_text = (
         "INTERIM VERIFICATION DID NOT PASS",
@@ -332,7 +339,7 @@ def task_path(source: str, task_id: str) -> Path:
 
 def online_checker_forbidden() -> bool:
     """Return whether this run must keep native verification strictly post-run."""
-    return os.environ.get("GA_M0_MONITOR_ENABLED") == "1"
+    return os.environ.get("GA_MONITOR_ENABLED") == "1"
 
 
 def validate_expected_ga_source(actual_hash: str) -> None:
@@ -347,11 +354,11 @@ def validate_expected_ga_source(actual_hash: str) -> None:
 def materialize_execution_task(
     source: str, task_id: str, run_id: str
 ) -> Path:
-    """Create the M0 execution copy that disables LHTB verifier-feedback loops.
+    """Create the Monitor execution copy that disables LHTB verifier-feedback loops.
 
     Harbor still runs the task's native verifier once after the agent phase.  The
     copied task prevents ``continue_until_timeout`` from running that verifier
-    online and feeding its reward back to the task Agent (and thus to M0).
+    online and feeding its reward back to the task Agent and Monitor.
     """
     original = task_path(source, task_id)
     if source != "lhtb" or not online_checker_forbidden():
@@ -366,7 +373,7 @@ def materialize_execution_task(
     enabled = "continue_until_timeout = true"
     if source_text.count(enabled) != 1:
         raise RuntimeError(
-            "M0 no-checker isolation requires exactly one enabled "
+            "Monitor no-checker isolation requires exactly one enabled "
             "continue_until_timeout setting"
         )
     config_path.write_text(

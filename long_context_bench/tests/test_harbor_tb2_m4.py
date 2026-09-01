@@ -365,6 +365,27 @@ def test_adapter_records_wrapper_and_real_process_status(monkeypatch, tmp_path):
     assert context.metadata["ga_process_return_code"] == 143
 
 
+def test_adapter_forwards_clean_monitor_environment(monkeypatch, tmp_path):
+    adapter = _load_adapter(monkeypatch)
+    agent = adapter.M4GenericAgent(
+        logs_dir=tmp_path, model_name="model-x", run_id="clean-monitor",
+        expected_model="model-x", python_home="cpython-test",
+        ga_source_sha256="hash", task_id="tb2:test-task", timeout_sec=2,
+        monitor_enabled=True,
+        monitor_config="native_oai_cc_vibe_gpt56_sol_high",
+    )
+    environment = _FakeEnvironment(wrapper_return_code=0, process_return_code=0)
+
+    asyncio.run(agent.run("instruction", environment, _Context()))
+
+    env = next(kwargs["env"] for command, kwargs in environment.exec_calls
+               if "agentmain.py" in command)
+    assert env["GA_MONITOR_ENABLED"] == "1"
+    assert env["GA_MONITOR_CONFIG"] == "native_oai_cc_vibe_gpt56_sol_high"
+    assert env["GA_MONITOR_ARTIFACT_DIR"] == "/logs/agent/monitor"
+    assert "GA_M0_MONITOR_ENABLED" not in env
+
+
 def test_adapter_setup_excludes_transient_checkout_directories(monkeypatch, tmp_path):
     adapter = _load_adapter(monkeypatch)
     agent = adapter.M4GenericAgent(

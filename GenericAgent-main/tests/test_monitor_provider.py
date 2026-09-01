@@ -80,39 +80,43 @@ def test_large_window_compaction_keeps_initialization_and_recent_repair():
     client = MonitorProviderClient(
         "native_openai", config("gpt-5.6-sol", monitor_history_char_limit=6000)
     )
-    initialization = [
-        {"role": "user", "content": [{"type": "text", "text": "initialize"}]},
-        {"role": "assistant", "content": [{"type": "text", "text": "root model"}]},
-        {"role": "user", "content": [{"type": "text", "text": "first patrol"}]},
-        {"role": "assistant", "content": [{"type": "text", "text": "wait"}]},
-    ]
-    middle = []
-    for index in range(12):
-        middle.extend([
-            {"role": "user", "content": [{
-                "type": "tool_result", "tool_use_id": f"old-{index}",
-                "content": "x" * 1500,
+    def review(label, result_size):
+        return [
+            {"role": "user", "content": [{"type": "text", "text": f"wake-{label}"}]},
+            {"role": "assistant", "content": [{
+                "type": "tool_use", "id": f"read-{label}", "name": "file_read", "input": {},
             }]},
-            {"role": "assistant", "content": [{"type": "text", "text": f"old-{index}"}]},
-        ])
-    recent = []
-    for index in range(8):
-        recent.extend([
-            {"role": "user", "content": [{"type": "text", "text": f"repair-{index}"}]},
-            {"role": "assistant", "content": [{"type": "text", "text": f"observe-{index}"}]},
-        ])
+            {"role": "user", "content": [{
+                "type": "tool_result", "tool_use_id": f"read-{label}",
+                "content": "x" * result_size,
+            }]},
+            {"role": "assistant", "content": [{
+                "type": "tool_use", "id": f"wait-{label}", "name": "wait",
+                "input": {"after_turns": 2},
+            }]},
+            {"role": "user", "content": [{
+                "type": "tool_result", "tool_use_id": f"wait-{label}",
+                "content": '{"status":"accepted"}',
+            }]},
+        ]
+
+    initialization = review("init", 20)
+    middle = sum((review(f"old-{index}", 1500) for index in range(8)), start=[])
+    recent = sum((review(f"repair-{index}", 20) for index in range(4)), start=[])
     client.history = initialization + middle + recent
 
     client._compact_history()
 
-    assert client.history[:4] == initialization
-    assert client.history[-16:] == recent
-    assert [item["role"] for item in client.history] == [
-        "user" if index % 2 == 0 else "assistant"
-        for index in range(len(client.history))
-    ]
+    assert client.history[:len(initialization)] == initialization
+    assert client.history[-len(recent):] == recent
     assert client.history_transforms[-1]["removed_messages"] > 0
     assert client.history_measure()["characters"] <= client.history_char_limit
+    rebuilt = client._responses_history()
+    calls = {item["call_id"] for item in rebuilt if item.get("type") == "function_call"}
+    outputs = {
+        item["call_id"] for item in rebuilt if item.get("type") == "function_call_output"
+    }
+    assert calls == outputs
 
 
 def test_gpt56_default_monitor_budget_is_wider_than_ga_baseline():
@@ -133,3 +137,27 @@ def test_telemetry_drain_is_incremental():
     assert first["usage"] == [{"input_tokens": 30, "output_tokens": 4}]
     assert first["history_transforms"] == [{"kind": "monitor_history_compaction"}]
     assert second == {"usage": [], "history_transforms": []}
+
+
+def test_control_tool_result_closes_call_before_next_wake():
+    client = MonitorProviderClient("native_openai", config("gpt-5.6-sol"))
+    client.history = [
+        {"role": "user", "content": [{"type": "text", "text": "wake"}]},
+        {"role": "assistant", "content": [{
+            "type": "tool_use", "id": "wait-1", "name": "wait",
+            "input": {"after_turns": 3},
+        }]},
+    ]
+    client.record_tool_results([{
+        "tool_use_id": "wait-1", "content": '{"status":"accepted"}',
+    }])
+    client.history.append({
+        "role": "user", "content": [{"type": "text", "text": "next wake"}],
+    })
+
+    rebuilt = client._responses_history()
+
+    assert [item.get("type") for item in rebuilt if "type" in item] == [
+        "function_call", "function_call_output",
+    ]
+    assert rebuilt[-1] == {"role": "user", "content": "next wake"}

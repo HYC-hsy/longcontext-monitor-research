@@ -57,6 +57,8 @@ def _openai_tools(tools, responses_api):
 class MonitorProviderClient:
     """Persistent provider history for one Monitor identity."""
 
+    CONTROL_ACTIONS = {"wait", "intervene", "allow_complete"}
+
     def __init__(self, config_name: str, config: dict):
         self.config_name = config_name
         self.config = dict(config)
@@ -117,6 +119,16 @@ class MonitorProviderClient:
     def restore_history(self, history: list[dict]) -> None:
         self.history = json.loads(json.dumps(history, ensure_ascii=False))
 
+    def record_tool_results(self, results: list[dict]) -> None:
+        """Close tool calls in canonical history without starting another model turn."""
+        if not results:
+            return
+        self.history.append({"role": "user", "content": [{
+            "type": "tool_result",
+            "tool_use_id": str(result.get("tool_use_id") or ""),
+            "content": str(result.get("content") or ""),
+        } for result in results]})
+
     @staticmethod
     def _bounded_block(value, limit=6000):
         if not isinstance(value, str) or len(value) <= limit:
@@ -129,9 +141,32 @@ class MonitorProviderClient:
             self.history, ensure_ascii=False, default=str
         ).encode("utf-8"))
 
-    def _compact_old_tool_results(self, protected_head=4, protected_recent=16):
-        stop = max(protected_head, len(self.history) - protected_recent)
-        for message in self.history[protected_head:stop]:
+    def _review_boundaries(self):
+        """Return indexes after fully closed Monitor control-action reviews."""
+        boundaries = []
+        outstanding = set()
+        terminal_pending = False
+        for index, message in enumerate(self.history):
+            if message.get("role") == "assistant":
+                for block in message.get("content") or []:
+                    if block.get("type") != "tool_use":
+                        continue
+                    call_id = str(block.get("id") or "")
+                    if call_id:
+                        outstanding.add(call_id)
+                    if block.get("name") in self.CONTROL_ACTIONS:
+                        terminal_pending = True
+            elif message.get("role") == "user":
+                for block in message.get("content") or []:
+                    if block.get("type") == "tool_result":
+                        outstanding.discard(str(block.get("tool_use_id") or ""))
+                if terminal_pending and not outstanding:
+                    boundaries.append(index + 1)
+                    terminal_pending = False
+        return boundaries
+
+    def _compact_old_tool_results(self, start, stop):
+        for message in self.history[start:stop]:
             if message.get("role") != "user":
                 continue
             for block in message.get("content") or []:
@@ -143,24 +178,36 @@ class MonitorProviderClient:
         if before["characters"] <= self.history_char_limit:
             return
 
-        # Keep the initialization exchange and the recent active investigation
-        # verbatim. Older tool evidence remains recoverable from task/ archives.
-        self._compact_old_tool_results()
+        # Review boundaries are defined by acknowledged control actions, not by
+        # a fixed number of messages. Never split a tool call from its result.
+        boundaries = self._review_boundaries()
+        head_end = boundaries[0] if boundaries else 0
+        recent_floor = max(head_end, len(self.history) - 16)
+        old_end = max((value for value in boundaries if value <= recent_floor), default=head_end)
+        self._compact_old_tool_results(head_end, old_end)
         removed = 0
-        protected_head, protected_recent = min(4, len(self.history)), 16
-        while (self._history_characters() > self.history_target_chars and
-               len(self.history) > protected_head + protected_recent):
-            end = min(protected_head + 2, len(self.history) - protected_recent)
-            if end <= protected_head:
+        while self._history_characters() > self.history_target_chars:
+            boundaries = self._review_boundaries()
+            if not boundaries:
                 break
-            del self.history[protected_head:end]
-            removed += end - protected_head
+            head_end = boundaries[0]
+            removable = [
+                value for value in boundaries[1:]
+                if len(self.history) - value >= 16
+            ]
+            if not removable:
+                break
+            end = removable[0]
+            del self.history[head_end:end]
+            removed += end - head_end
 
         # An unusually large recent inspection result can itself exceed the
         # budget. Bound tool outputs outside the latest request without
         # rewriting signed thinking or provider reasoning items.
         if self._history_characters() > self.history_char_limit:
-            for message in self.history[:-2]:
+            boundaries = self._review_boundaries()
+            head_end = boundaries[0] if boundaries else 0
+            for message in self.history[head_end:-2]:
                 if message.get("role") != "user":
                     continue
                 for block in message.get("content") or []:

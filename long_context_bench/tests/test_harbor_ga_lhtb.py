@@ -146,6 +146,24 @@ def test_lhtb_forwards_research_and_manual_completion_environment(monkeypatch):
     assert env["GA_PROVIDER_MAX_RETRIES"] == "8"
 
 
+def test_lhtb_forwards_clean_monitor_environment(monkeypatch):
+    module = load_adapter(monkeypatch)
+    agent = module.HarborLHTBGenericAgent(
+        model_name="claude-opus-4-6", llm_no=0, run_id="clean-monitor",
+        expected_model="claude-opus-4-6", python_home="python-home",
+        ga_source_sha256="abc", timeout_sec=60, task_id="lhtb:task",
+        monitor_enabled=True,
+        monitor_config="native_oai_cc_vibe_gpt56_sol_high",
+    )
+
+    env = agent._agent_env("/site-packages")
+
+    assert env["GA_MONITOR_ENABLED"] == "1"
+    assert env["GA_MONITOR_CONFIG"] == "native_oai_cc_vibe_gpt56_sol_high"
+    assert env["GA_MONITOR_ARTIFACT_DIR"] == "/logs/agent/monitor"
+    assert "GA_M0_MONITOR_ENABLED" not in env
+
+
 
 
 

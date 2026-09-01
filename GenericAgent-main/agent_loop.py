@@ -1,7 +1,7 @@
 import inspect, json, re, os
 from dataclasses import dataclass
 from typing import Any, Optional
-from research_runtime import CompletionProposal, decide_completion, emit as _research_emit, telemetry_enabled as _telemetry_enabled, consume_provider_call as _consume_provider_call, new_id as _research_id, register_pending_intervention as _register_pending_intervention
+from research_runtime import CompletionProposal, decide_completion, emit as _research_emit, telemetry_enabled as _telemetry_enabled, consume_provider_call as _consume_provider_call
 from experiment_conditions import condition_initial_task
 from llmcore import ProviderResponseCancelled
 try: from plugins.hooks import trigger as _hook
@@ -74,34 +74,6 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
                 else:
                     messages.append({"role": "user", "content": injection})
                 handler.code_stop_signal.clear()
-        monitor_runtime = getattr(handler.parent, 'monitor_runtime', None)
-        if monitor_runtime is not None:
-            ready = monitor_runtime.consume_interventions()
-            if ready:
-                combined = "\n\n".join(item["message"] for item in ready)
-                injection = combined
-                if messages and messages[-1].get("role") == "user":
-                    content = messages[-1].get("content", "")
-                    if isinstance(content, str):
-                        messages[-1]["content"] = content + "\n\n" + injection
-                    else:
-                        messages.append({"role": "user", "content": injection})
-                else:
-                    messages.append({"role": "user", "content": injection})
-                occurrence_id = _research_id("monitor_injection")
-                event = _research_emit("async_monitor_intervention_injected", {
-                    "injection_occurrence_id": occurrence_id,
-                    "source_request_ids": [item["request_id"] for item in ready],
-                    "source_internal_turns": [item.get("internal_turn") for item in ready],
-                    "source_episode_ids": [item.get("episode_id") for item in ready],
-                    "source_episode_revisions": [
-                        item.get("episode_revision") for item in ready
-                    ],
-                    "target_internal_turn": turn,
-                    "message_characters": len(combined),
-                }, internal_turn=turn)
-                if event:
-                    _register_pending_intervention(event, occurrence_id)
         turnstr = f'LLM Running (Turn {turn}) ...'
         if handler.parent.task_dir: turnstr = f'Turn {turn} ...'
         if verbose: turnstr = f'**{turnstr}**'

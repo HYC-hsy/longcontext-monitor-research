@@ -71,6 +71,8 @@ class M4GenericAgent(BaseAgent):
         completion_branch_policy: str = "",
         manual_completion_dir: str = "",
         manual_completion_timeout_seconds: float | str = 300,
+        monitor_enabled: bool | str = False,
+        monitor_config: str = "",
         m0_monitor_enabled: bool | str = False,
         m0_monitor_config: str = "",
         m0_max_inspections: int | str = 8,
@@ -124,6 +126,8 @@ class M4GenericAgent(BaseAgent):
         self.completion_branch_policy = completion_branch_policy
         self.manual_completion_dir = manual_completion_dir
         self.manual_completion_timeout_seconds = float(manual_completion_timeout_seconds)
+        self.monitor_enabled = str(monitor_enabled).lower() in {"1", "true", "yes"}
+        self.monitor_config = monitor_config
         self.m0_monitor_enabled = str(m0_monitor_enabled).lower() in {"1", "true", "yes"}
         self.m0_monitor_config = m0_monitor_config
         self.m0_max_inspections = int(m0_max_inspections)
@@ -138,6 +142,10 @@ class M4GenericAgent(BaseAgent):
             m3_discriminative_control_enabled
         ).lower() in {"1", "true", "yes"}
         self.m3_combined_control_enabled = str(m3_combined_control_enabled).lower() in {"1", "true", "yes"}
+        if self.monitor_enabled and not self.monitor_config:
+            raise ValueError("Clean monitor config is required when the Monitor is enabled")
+        if self.monitor_enabled and self.m0_monitor_enabled:
+            raise ValueError("Clean and historical Monitor runtimes cannot be combined")
         if self.m0_monitor_enabled and not self.m0_monitor_config:
             raise ValueError("M0 monitor config is required when M0 is enabled")
         if self.m3_decision_value_enabled and not self.m3_human_loop_enabled:
@@ -349,6 +357,10 @@ class M4GenericAgent(BaseAgent):
             env["GA_MANUAL_COMPLETION_TIMEOUT_SECONDS"] = str(
                 self.manual_completion_timeout_seconds
             )
+        if self.monitor_enabled:
+            env["GA_MONITOR_ENABLED"] = "1"
+            env["GA_MONITOR_CONFIG"] = self.monitor_config
+            env["GA_MONITOR_ARTIFACT_DIR"] = "/logs/agent/monitor"
         if self.m0_monitor_enabled:
             env["GA_M0_MONITOR_ENABLED"] = "1"
             env["GA_M0_MONITOR_CONFIG"] = self.m0_monitor_config

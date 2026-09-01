@@ -69,6 +69,10 @@ class HarborLHTBGenericAgent(HarborGenericAgent):
             env["GA_MANUAL_COMPLETION_TIMEOUT_SECONDS"] = str(
                 self.manual_completion_timeout_seconds
             )
+        if self.monitor_enabled:
+            env["GA_MONITOR_ENABLED"] = "1"
+            env["GA_MONITOR_CONFIG"] = self.monitor_config
+            env["GA_MONITOR_ARTIFACT_DIR"] = "/logs/agent/monitor"
         if self.m0_monitor_enabled:
             env["GA_M0_MONITOR_ENABLED"] = "1"
             env["GA_M0_MONITOR_CONFIG"] = self.m0_monitor_config

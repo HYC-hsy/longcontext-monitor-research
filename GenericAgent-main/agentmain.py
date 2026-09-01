@@ -321,9 +321,12 @@ class GenericAgent:
                 raw_query, self.task_dir,
                 inline_long=os.environ.get('GA_INLINE_LONG_PROMPT') == '1',
             )
+            if os.environ.get('GA_M0_MONITOR_ENABLED') == '1':
+                raise RuntimeError(
+                    'GA_M0_MONITOR_ENABLED is a retired historical runtime. '
+                    'Use the clean GA_MONITOR_ENABLED path.'
+                )
             if os.environ.get('GA_MONITOR_ENABLED') == '1' and self.monitor_runtime is None:
-                if os.environ.get('GA_M0_MONITOR_ENABLED') == '1':
-                    raise RuntimeError('Clean and historical monitor runtimes cannot run together')
                 from ga_monitor_adapter import GenericAgentMonitorAdapter
                 monitor_config_name = os.environ.get(
                     'GA_MONITOR_CONFIG', 'native_oai_cc_vibe_gpt56_sol_high'
@@ -345,56 +348,6 @@ class GenericAgent:
                     max_review_turns=int(os.environ.get('GA_MONITOR_MAX_REVIEW_TURNS', '20')),
                     completion_timeout=float(os.environ.get('GA_MONITOR_COMPLETION_TIMEOUT_SECONDS', '300')),
                 )
-                self.research_checkpoint_callback = None
-                self.completion_decision_callback = self.monitor_runtime.review_completion
-            elif os.environ.get('GA_M0_MONITOR_ENABLED') == '1' and self.monitor_runtime is None:
-                from async_monitor_runtime import AsyncMonitorRuntime
-                monitor_kwargs = dict(
-                    public_task=raw_query,
-                    workspace=handler_cwd,
-                    config_name=os.environ.get('GA_M0_MONITOR_CONFIG', 'native_claude_cc_vibe'),
-                    artifact_dir=os.environ.get('GA_M0_MONITOR_ARTIFACT_DIR'),
-                    max_inspections=int(os.environ.get('GA_M0_MAX_INSPECTIONS', '8')),
-                    recent_trajectory_turns=int(os.environ.get('GA_M0_RECENT_TRAJECTORY_TURNS', '0')),
-                    m3_human_loop_enabled=(
-                        os.environ.get('GA_M3_HUMAN_LOOP_ENABLED') == '1'
-                    ),
-                    m3_decision_value_enabled=(
-                        os.environ.get('GA_M3_DECISION_VALUE_ENABLED') == '1'
-                    ),
-                    m3_discriminative_control_enabled=(
-                        os.environ.get('GA_M3_DISCRIMINATIVE_CONTROL_ENABLED') == '1'
-                    ),
-                    m3_combined_control_enabled=(
-                        os.environ.get('GA_M3_COMBINED_CONTROL_ENABLED') == '1'
-                    ),
-                    history_soft_char_limit=int(
-                        os.environ.get('GA_MONITOR_HISTORY_SOFT_CHAR_LIMIT', '128000')
-                    ),
-                    history_target_characters=int(
-                        os.environ.get('GA_MONITOR_HISTORY_TARGET_CHARACTERS', '88000')
-                    ),
-                )
-                monitor_kwargs["_runtime_event_path"] = (
-                    getattr(self, 'research_event_path', None)
-                    or os.environ.get('GA_RESEARCH_EVENT_PATH')
-                )
-                monitor_kwargs["_runtime_identity"] = {
-                    "experiment_id": os.environ.get('GA_EXPERIMENT_ID') or 'interactive',
-                    "condition_id": os.environ.get('GA_CONDITION_ID') or 'original',
-                    "run_id": os.environ.get('GA_BENCH_RUN_ID') or 'interactive',
-                    "branch_id": 'original',
-                    "task_id": os.environ.get('GA_BENCH_TASK_ID') or
-                    (os.path.basename(self.task_dir) if self.task_dir else 'interactive'),
-                }
-                if self.completion_decision_callback is not None:
-                    raise RuntimeError("M0 cannot share the completion boundary with another controller")
-                self.monitor_runtime = AsyncMonitorRuntime(
-                    monitor_kwargs,
-                    request_timeout=float(os.environ.get('GA_MONITOR_REQUEST_TIMEOUT_SECONDS', '300')),
-                )
-                # Ordinary task boundaries are published asynchronously. The
-                # legacy synchronous callback must remain unset.
                 self.research_checkpoint_callback = None
                 self.completion_decision_callback = self.monitor_runtime.review_completion
             rquery = smart_format(raw_query.replace('\n', ' '), max_str_len=200)

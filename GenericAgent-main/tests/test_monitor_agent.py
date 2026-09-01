@@ -119,3 +119,28 @@ def test_review_persists_provider_usage_and_history_transform(roots):
     transform = json.loads((private / "audit" / "history_transforms.jsonl").read_text(encoding="utf-8"))
     assert usage == {"input_tokens": 12, "output_tokens": 3}
     assert transform["kind"] == "monitor_history_compaction"
+
+
+def test_terminal_action_closes_every_tool_call_in_same_response(roots):
+    evidence, private = roots
+
+    class RecordingSequenceClient(SequenceClient):
+        def __init__(self, responses):
+            super().__init__(responses)
+            self.recorded = []
+
+        def record_tool_results(self, results):
+            self.recorded.extend(results)
+
+    client = RecordingSequenceClient([ModelResponse("", [
+        ToolCall("read-1", "file_read", json.dumps({"path": "task/original_task.txt"})),
+        ToolCall("wait-1", "wait", json.dumps({"after_turns": 2})),
+        ToolCall("late-1", "file_read", json.dumps({"path": "task/original_task.txt"})),
+    ], {})])
+    action = MonitorAgent(client, MonitorWorkspace(evidence, private)).review("Initialize.")
+
+    assert action.kind == "wait"
+    assert [result["tool_use_id"] for result in client.recorded] == [
+        "read-1", "wait-1", "late-1",
+    ]
+    assert "not_executed" in client.recorded[-1]["content"]
