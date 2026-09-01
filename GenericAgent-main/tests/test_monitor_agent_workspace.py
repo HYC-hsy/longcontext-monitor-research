@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from monitor_agent_workspace import MonitorPathError, MonitorWorkspace
+from monitor_agent_core.workspace import MonitorPathError, MonitorWorkspace
 
 
 @pytest.fixture
@@ -63,7 +63,7 @@ def test_analysis_snapshot_is_disposable_and_does_not_follow_symlinks(workspace)
     except OSError:
         link = None
 
-    snapshot = ws.refresh_analysis_snapshot()
+    snapshot = ws.refresh_snapshot()
     (snapshot / "src" / "app.py").write_text("VALUE = 99\n", encoding="utf-8")
     (snapshot / "scratch.txt").write_text("analysis", encoding="utf-8")
 
@@ -72,7 +72,7 @@ def test_analysis_snapshot_is_disposable_and_does_not_follow_symlinks(workspace)
     if link is not None:
         assert not (snapshot / "external-link.txt").exists()
 
-    refreshed = ws.refresh_analysis_snapshot()
+    refreshed = ws.refresh_snapshot()
     assert (refreshed / "src" / "app.py").read_text(encoding="utf-8") == "VALUE = 1\n"
     assert not (refreshed / "scratch.txt").exists()
 
@@ -97,5 +97,5 @@ def test_named_task_mount_is_read_only_and_available_in_analysis_snapshot(tmp_pa
     assert ws.read_text("task/workspace/test_app.py")["content"] == "assert True"
     with pytest.raises(MonitorPathError):
         ws.write_text("task/workspace/test_app.py", "assert False")
-    snapshot = ws.refresh_analysis_snapshot()
+    snapshot = ws.refresh_snapshot()
     assert (snapshot / "workspace" / "test_app.py").read_text(encoding="utf-8") == "assert True"

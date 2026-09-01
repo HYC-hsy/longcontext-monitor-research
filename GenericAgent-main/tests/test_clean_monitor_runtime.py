@@ -4,7 +4,9 @@ import time
 
 import pytest
 
-from clean_monitor_runtime import CleanMonitorRuntime
+from monitor_agent_core.runtime import MonitorRuntime
+from monitor_agent_core.runtime import CompletionOutcome
+from ga_monitor_adapter import GenericAgentMonitorAdapter
 
 
 def scripted_clean_monitor_worker(config, commands, outputs):
@@ -27,7 +29,7 @@ def scripted_clean_monitor_worker(config, commands, outputs):
 def _runtime(tmp_path, callback):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    return CleanMonitorRuntime(
+    return MonitorRuntime(
         public_task="Keep the literal wildcard.",
         task_workspace=str(workspace),
         artifact_dir=str(tmp_path / "artifacts"),
@@ -68,26 +70,35 @@ def test_boundary_creates_two_layer_archive_and_delivers_immediate_correction(tm
     }
     assert raw["tool_calls"][0]["args"]["path"] == "cors.py"
     assert delivered == ["Preserve the literal wildcard."]
-    assert runtime.consume_interventions() == []
 
 
 def test_root_completion_uses_distinct_control_boundary(tmp_path):
     runtime = _runtime(tmp_path, lambda _: None)
-    decision = runtime.review_completion(None, turn=9)
+    decision = runtime.request_completion()
     runtime.close()
 
-    assert decision.decision == "ALLOW_COMPLETE"
-    assert decision.reason_codes == ("MONITOR_ALLOWED",)
+    assert decision.allow is True
+    assert decision.reason == "monitor_allowed"
 
 
 def test_artifacts_cannot_be_nested_in_supervised_workspace(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     with pytest.raises(ValueError, match="outside"):
-        CleanMonitorRuntime(
+        MonitorRuntime(
             public_task="task", task_workspace=str(workspace),
             artifact_dir=str(workspace / "monitor"), config_name="unused",
             model_config={},
             interrupt_callback=lambda _: None,
             worker_target=scripted_clean_monitor_worker,
         )
+
+
+def test_ga_adapter_is_only_completion_type_conversion_boundary():
+    adapter = object.__new__(GenericAgentMonitorAdapter)
+    adapter.runtime = type("Runtime", (), {
+        "request_completion": lambda self: CompletionOutcome(False, "Inspect the missing test.", "monitor_correction")
+    })()
+    decision = adapter.review_completion(None, 3)
+    assert decision.decision == "CONTINUE"
+    assert decision.next_prompt == "Inspect the missing test."

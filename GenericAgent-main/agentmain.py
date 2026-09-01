@@ -324,7 +324,7 @@ class GenericAgent:
             if os.environ.get('GA_MONITOR_ENABLED') == '1' and self.monitor_runtime is None:
                 if os.environ.get('GA_M0_MONITOR_ENABLED') == '1':
                     raise RuntimeError('Clean and historical monitor runtimes cannot run together')
-                from clean_monitor_runtime import CleanMonitorRuntime
+                from ga_monitor_adapter import GenericAgentMonitorAdapter
                 monitor_config_name = os.environ.get('GA_MONITOR_CONFIG', 'native_claude_cc_vibe')
                 monitor_model_config = reload_mykeys()[0].get(monitor_config_name)
                 if not monitor_model_config:
@@ -333,7 +333,7 @@ class GenericAgent:
                     script_dir, 'temp', 'clean_monitor',
                     os.environ.get('GA_BENCH_RUN_ID') or research_id('monitor_run')
                 )
-                self.monitor_runtime = CleanMonitorRuntime(
+                self.monitor_runtime = GenericAgentMonitorAdapter(
                     public_task=raw_query,
                     task_workspace=handler_cwd,
                     artifact_dir=artifact_dir,
