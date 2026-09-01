@@ -714,6 +714,9 @@ class BaseSession:
         mode = str(cfg.get('api_mode', 'chat_completions')).strip().lower().replace('-', '_')
         self.api_mode = 'responses' if mode in ('responses', 'response') else 'chat_completions'
         self.temperature = cfg.get('temperature', 1)
+        self.max_tokens = cfg.get('max_tokens')
+        self.default_ua = "claude-cli/2.1.152 (external, cli)"
+        self.user_agent = cfg.get("user_agent", self.default_ua)
 
     def cancel_active_response(self):
         """Best-effort cancellation used by user stop and monitor correction."""
@@ -740,9 +743,6 @@ class BaseSession:
             return False
         self._cancel_response.clear()
         return True
-        self.max_tokens = cfg.get('max_tokens')
-        self.default_ua = "claude-cli/2.1.152 (external, cli)"
-        self.user_agent = cfg.get("user_agent", self.default_ua)
     def _apply_claude_thinking(self, payload):
         if self.thinking_type:
             thinking = {"type": self.thinking_type}

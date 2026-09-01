@@ -153,6 +153,17 @@ def test_cancel_outside_provider_call_does_not_poison_next_response(monkeypatch)
     )) == ["valid next response"]
 
 
+def test_base_session_initializes_provider_identity_and_output_budget():
+    session = llmcore.BaseSession({
+        "apikey": "test", "apibase": "https://example.test",
+        "max_tokens": 4096, "user_agent": "monitor-test/1",
+    })
+
+    assert session.max_tokens == 4096
+    assert session.default_ua == "claude-cli/2.1.152 (external, cli)"
+    assert session.user_agent == "monitor-test/1"
+
+
 def test_interruption_after_public_intent_prevents_announced_tool_execution():
     parent = Parent()
 
