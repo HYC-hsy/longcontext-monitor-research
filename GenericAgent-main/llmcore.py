@@ -537,6 +537,16 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
             raise
         except (_RetryableStreamError, requests.Timeout, requests.ConnectionError,
                 requests.exceptions.ChunkedEncodingError) as e:
+            consume_cancel = getattr(sess, '_consume_cancel_request', None)
+            if consume_cancel is not None and consume_cancel():
+                _research_emit('provider_response', {
+                    'attempt': attempt + 1, 'outcome': 'cancelled',
+                    'streamed_before_cancel': streamed,
+                    'transport_error_type': type(e).__name__,
+                }, llm_call_id=llm_call_id)
+                raise ProviderResponseCancelled(
+                    "provider response cancelled"
+                ) from e
             #pathlib.Path(__file__).parent.joinpath('temp','bad_requests.json').write_text(json.dumps({"url":url,"headers":headers,"payload":payload,"err":str(e),"t":time.time()},ensure_ascii=False),encoding='utf-8')
             err = f"!!!Error: {type(e).__name__}: {e}" if str(e) else f"!!!Error: {type(e).__name__}"
             if attempt < sess.max_retries and not streamed:
@@ -548,6 +558,19 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                 time.sleep(d); continue
             yield err; return [{"type": "text", "text": err}]
         except Exception as e:
+            # Cross-thread response.close() can surface from requests/urllib3
+            # as an implementation-specific iterator failure. Reinterpret it
+            # only when an explicit cancellation request is still pending.
+            consume_cancel = getattr(sess, '_consume_cancel_request', None)
+            if consume_cancel is not None and consume_cancel():
+                _research_emit('provider_response', {
+                    'attempt': attempt + 1, 'outcome': 'cancelled',
+                    'streamed_before_cancel': streamed,
+                    'transport_error_type': type(e).__name__,
+                }, llm_call_id=llm_call_id)
+                raise ProviderResponseCancelled(
+                    "provider response cancelled"
+                ) from e
             err = f"\n\n[!!! 流异常中断 {type(e).__name__}: {e} !!!]" if streamed else f"!!!Error: {type(e).__name__}: {e}"
             yield err; return [{"type": "text", "text": err}]
 

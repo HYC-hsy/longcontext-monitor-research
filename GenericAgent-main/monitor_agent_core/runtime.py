@@ -31,6 +31,23 @@ def _synopsis(packet):
     return (matches[-1].strip() if matches else content.strip())[:600]
 
 
+def _coalesce_wake_command(commands, first):
+    """Keep the newest patrol wake while preserving control-boundary priority."""
+    selected = first
+    while True:
+        try:
+            candidate = commands.get_nowait()
+        except queue.Empty:
+            return selected
+        kind = candidate.get("kind")
+        if kind == "close":
+            return candidate
+        if kind == "completion":
+            selected = candidate
+        elif kind == "boundary" and selected.get("kind") != "completion":
+            selected = candidate
+
+
 def _worker(config, commands, outputs):
     from .agent import MonitorAgent
     from .provider import MonitorProviderClient
@@ -88,7 +105,7 @@ def _worker(config, commands, outputs):
     )
     outputs.put({"kind": "ready"})
     while True:
-        command = commands.get()
+        command = _coalesce_wake_command(commands, commands.get())
         kind = command.get("kind")
         if kind == "close": return
         cursor = int(command.get("cursor") or cursor)

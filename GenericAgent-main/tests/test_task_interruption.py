@@ -132,6 +132,37 @@ def test_provider_cancel_closes_active_response_and_does_not_retry(monkeypatch):
         next(stream)
 
 
+@pytest.mark.parametrize("failure", [
+    AttributeError("'NoneType' object has no attribute 'read'"),
+    llmcore.requests.exceptions.ChunkedEncodingError("response closed"),
+])
+def test_provider_cancel_normalizes_iterator_failure_after_response_close(monkeypatch, failure):
+    class HttpResponse:
+        status_code = 200
+        headers = {}
+        def close(self): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+
+    response = HttpResponse()
+    monkeypatch.setattr(llmcore.requests, "post", lambda *a, **k: response)
+    session = llmcore.BaseSession({
+        "apikey": "test", "apibase": "https://example.test", "max_retries": 3,
+    })
+
+    def parser(_response):
+        yield "first chunk"
+        session.cancel_active_response()
+        raise failure
+
+    stream = llmcore._stream_with_retry(
+        session, "https://example.test/messages", {}, {}, parser
+    )
+    assert next(stream) == "first chunk"
+    with pytest.raises(llmcore.ProviderResponseCancelled):
+        next(stream)
+
+
 def test_cancel_outside_provider_call_does_not_poison_next_response(monkeypatch):
     class HttpResponse:
         status_code = 200

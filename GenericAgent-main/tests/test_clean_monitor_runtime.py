@@ -1,10 +1,11 @@
 import json
+import queue
 import threading
 import time
 
 import pytest
 
-from monitor_agent_core.runtime import MonitorRuntime
+from monitor_agent_core.runtime import MonitorRuntime, _coalesce_wake_command
 from monitor_agent_core.runtime import CompletionOutcome
 from ga_monitor_adapter import GenericAgentMonitorAdapter
 
@@ -113,3 +114,28 @@ def test_ga_adapter_is_only_completion_type_conversion_boundary():
     decision = adapter.review_completion(None, 3)
     assert decision.decision == "CONTINUE"
     assert decision.next_prompt == "Inspect the missing test."
+
+
+def test_patrol_wake_backlog_coalesces_to_latest_cursor():
+    commands = queue.Queue()
+    commands.put({"kind": "boundary", "cursor": 8, "task_turn": 4})
+    commands.put({"kind": "boundary", "cursor": 112, "task_turn": 55})
+
+    selected = _coalesce_wake_command(
+        commands, {"kind": "boundary", "cursor": 7, "task_turn": 4}
+    )
+
+    assert selected == {"kind": "boundary", "cursor": 112, "task_turn": 55}
+
+
+def test_completion_preempts_stale_patrol_backlog():
+    commands = queue.Queue()
+    commands.put({"kind": "boundary", "cursor": 112, "task_turn": 55})
+    commands.put({"kind": "completion", "cursor": 113})
+    commands.put({"kind": "boundary", "cursor": 114, "task_turn": 56})
+
+    selected = _coalesce_wake_command(
+        commands, {"kind": "boundary", "cursor": 7, "task_turn": 4}
+    )
+
+    assert selected == {"kind": "completion", "cursor": 113}
