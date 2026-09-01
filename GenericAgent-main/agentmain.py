@@ -23,6 +23,7 @@ from evidence_completion_kernel import EvidenceCompletionKernel
 from online_evidence_gate import OnlineEvidenceCompletionGate
 from completion_checkpoint import FirstCompletionCheckpoint, checkpoint_identity_from_environment
 from manual_completion_boundary import ManualCompletionBoundary
+from task_interruption import ResumableInterruption
 from candidate_online_gate import CandidateOnlineEvidenceGate
 from recovery_presentation_gate import RecoveryPresentationGate
 from priority_residual_gate import POLICIES as PRIORITY_RESIDUAL_POLICIES, PriorityResidualRecoveryGate
@@ -97,6 +98,7 @@ class GenericAgent:
         self.history = []; self.handler = None; 
         self.task_queue = queue.Queue() 
         self.is_running = False; self.stop_sig = False; self.llm_no = 0;  
+        self.resumable_interruption = ResumableInterruption()
         self.inc_out = False; self.verbose = True
         self.peer_hint = True
         self.force_non_stream = False
@@ -270,6 +272,19 @@ class GenericAgent:
         print('Abort current task...')
         self.stop_sig = True
         if self.handler is not None: self.handler.code_stop_signal.append(1)
+        cancel = getattr(getattr(self.llmclient, 'backend', None), 'cancel_active_response', None)
+        if cancel is not None: cancel()
+
+    def request_monitor_interruption(self, message):
+        """Cancel the current action and resume this task with a monitor message."""
+        request = self.resumable_interruption.request(message, source="monitor")
+        if self.handler is not None: self.handler.code_stop_signal.append(1)
+        cancel = getattr(getattr(self.llmclient, 'backend', None), 'cancel_active_response', None)
+        if cancel is not None: cancel()
+        return request
+
+    def consume_resumable_interruption(self):
+        return self.resumable_interruption.consume()
             
     def put_task(self, query, source="user", images=None):
         display_queue = queue.Queue()
@@ -306,7 +321,26 @@ class GenericAgent:
                 raw_query, self.task_dir,
                 inline_long=os.environ.get('GA_INLINE_LONG_PROMPT') == '1',
             )
-            if os.environ.get('GA_M0_MONITOR_ENABLED') == '1' and self.monitor_runtime is None:
+            if os.environ.get('GA_MONITOR_ENABLED') == '1' and self.monitor_runtime is None:
+                if os.environ.get('GA_M0_MONITOR_ENABLED') == '1':
+                    raise RuntimeError('Clean and historical monitor runtimes cannot run together')
+                from clean_monitor_runtime import CleanMonitorRuntime
+                artifact_dir = os.environ.get('GA_MONITOR_ARTIFACT_DIR') or os.path.join(
+                    script_dir, 'temp', 'clean_monitor',
+                    os.environ.get('GA_BENCH_RUN_ID') or research_id('monitor_run')
+                )
+                self.monitor_runtime = CleanMonitorRuntime(
+                    public_task=raw_query,
+                    task_workspace=handler_cwd,
+                    artifact_dir=artifact_dir,
+                    config_name=os.environ.get('GA_MONITOR_CONFIG', 'native_claude_cc_vibe'),
+                    interrupt_callback=self.request_monitor_interruption,
+                    max_review_turns=int(os.environ.get('GA_MONITOR_MAX_REVIEW_TURNS', '20')),
+                    completion_timeout=float(os.environ.get('GA_MONITOR_COMPLETION_TIMEOUT_SECONDS', '300')),
+                )
+                self.research_checkpoint_callback = None
+                self.completion_decision_callback = self.monitor_runtime.review_completion
+            elif os.environ.get('GA_M0_MONITOR_ENABLED') == '1' and self.monitor_runtime is None:
                 from async_monitor_runtime import AsyncMonitorRuntime
                 monitor_kwargs = dict(
                     public_task=raw_query,

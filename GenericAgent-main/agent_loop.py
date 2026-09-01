@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 from research_runtime import CompletionProposal, decide_completion, emit as _research_emit, telemetry_enabled as _telemetry_enabled, consume_provider_call as _consume_provider_call, new_id as _research_id, register_pending_intervention as _register_pending_intervention
 from experiment_conditions import condition_initial_task
+from llmcore import ProviderResponseCancelled
 try: from plugins.hooks import trigger as _hook
 except ImportError: _hook = lambda *a, **k: None
 @dataclass
@@ -57,6 +58,22 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
     _hook('agent_before', locals())
     while local_turn < handler.max_turns:
         local_turn += 1; turn = int(turn_offset) + local_turn
+        consume_resume = getattr(handler.parent, 'consume_resumable_interruption', None)
+        if consume_resume is not None:
+            resumed = consume_resume()
+            if resumed:
+                injection = "\n\n".join(
+                    f"[MONITOR CORRECTION]\n{item['message']}" for item in resumed
+                )
+                if messages and messages[-1].get("role") == "user":
+                    content = messages[-1].get("content", "")
+                    if isinstance(content, str):
+                        messages[-1]["content"] = content + "\n\n" + injection
+                    else:
+                        messages.append({"role": "user", "content": injection})
+                else:
+                    messages.append({"role": "user", "content": injection})
+                handler.code_stop_signal.clear()
         monitor_runtime = getattr(handler.parent, 'monitor_runtime', None)
         if monitor_runtime is not None:
             ready = monitor_runtime.consume_interventions()
@@ -94,13 +111,23 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
         _hook('turn_before', locals())
         _hook('llm_before', locals())
         response_gen = client.chat(messages=messages, tools=tools_schema)
-        if verbose:
-            response = yield from response_gen
-            yield '\n\n'
-        else:
-            response = exhaust(response_gen)
-            cleaned = _clean_content(response.content)
-            if cleaned: yield cleaned + '\n'
+        try:
+            if verbose:
+                response = yield from response_gen
+                yield '\n\n'
+            else:
+                response = exhaust(response_gen)
+                cleaned = _clean_content(response.content)
+                if cleaned: yield cleaned + '\n'
+        except ProviderResponseCancelled:
+            try: response_gen.close()
+            except Exception: pass
+            yield "\n[Task Agent response interrupted for monitor correction.]\n"
+            messages = [{
+                "role": "user",
+                "content": "The previous response was interrupted before it became an accepted action.",
+            }]
+            continue
         _hook('llm_after', locals())
 
         provider_link = _consume_provider_call() if _telemetry_enabled() else None
@@ -171,6 +198,17 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
         tool_results = []; next_prompts = set(); exit_reason = {}
         for ii, tc in enumerate(tool_calls):
             tool_name, args, tid = tc['tool_name'], tc['args'], tc.get('id', '')
+            interruption = getattr(handler.parent, 'resumable_interruption', None)
+            if interruption is not None and interruption.is_requested():
+                for pending in tool_calls[ii:]:
+                    pending_id = pending.get('id', '')
+                    if pending_id:
+                        tool_results.append({
+                            'tool_use_id': pending_id,
+                            'content': '[Cancelled before execution for monitor correction]',
+                        })
+                next_prompts.add('[Current action cancelled for monitor correction]')
+                break
             if tool_name == 'no_tool': pass
             else: 
                 if verbose: yield f"🛠️ Tool: `{tool_name}`  📥 args:\n````text\n{get_pretty_json(args)}\n````\n"

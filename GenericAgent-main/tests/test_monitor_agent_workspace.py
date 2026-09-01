@@ -81,3 +81,21 @@ def test_snapshot_directory_is_runtime_owned(workspace):
     ws, _, _ = workspace
     with pytest.raises(MonitorPathError, match="runtime-owned"):
         ws.write_text("monitor/.task_view/tamper.txt", "bad")
+
+
+def test_named_task_mount_is_read_only_and_available_in_analysis_snapshot(tmp_path):
+    evidence = tmp_path / "evidence"
+    live_workspace = tmp_path / "live-workspace"
+    evidence.mkdir()
+    live_workspace.mkdir()
+    (evidence / "original_task.txt").write_text("contract", encoding="utf-8")
+    (live_workspace / "test_app.py").write_text("assert True", encoding="utf-8")
+    ws = MonitorWorkspace(
+        evidence, tmp_path / "private", task_mounts={"workspace": live_workspace}
+    )
+
+    assert ws.read_text("task/workspace/test_app.py")["content"] == "assert True"
+    with pytest.raises(MonitorPathError):
+        ws.write_text("task/workspace/test_app.py", "assert False")
+    snapshot = ws.refresh_analysis_snapshot()
+    assert (snapshot / "workspace" / "test_app.py").read_text(encoding="utf-8") == "assert True"

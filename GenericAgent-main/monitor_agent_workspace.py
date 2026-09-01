@@ -25,13 +25,22 @@ class MonitorWorkspace:
     PRIVATE_PREFIX = "monitor"
     SNAPSHOT_NAME = ".task_view"
 
-    def __init__(self, task_root: str | os.PathLike, private_root: str | os.PathLike):
+    def __init__(self, task_root: str | os.PathLike, private_root: str | os.PathLike,
+                 task_mounts: dict[str, str | os.PathLike] | None = None):
         self.task_root = Path(task_root).resolve(strict=True)
         self.private_root = Path(private_root).resolve()
         if not self.task_root.is_dir():
             raise MonitorPathError(f"Task evidence root is not a directory: {self.task_root}")
         self.private_root.mkdir(parents=True, exist_ok=True)
         self.snapshot_root = self.private_root / self.SNAPSHOT_NAME
+        self.task_mounts = {}
+        for name, value in (task_mounts or {}).items():
+            if not name or "/" in name or "\\" in name or name in {".", ".."}:
+                raise MonitorPathError(f"Invalid task mount name: {name!r}")
+            root = Path(value).resolve(strict=True)
+            if not root.is_dir():
+                raise MonitorPathError(f"Task mount is not a directory: {root}")
+            self.task_mounts[name] = root
 
     @staticmethod
     def _relative_parts(path: str) -> tuple[str, tuple[str, ...]]:
@@ -55,6 +64,9 @@ class MonitorWorkspace:
     def resolve_read(self, virtual_path: str) -> Path:
         namespace, parts = self._relative_parts(virtual_path)
         root = self.task_root if namespace == self.TASK_PREFIX else self.private_root
+        if namespace == self.TASK_PREFIX and parts and parts[0] in self.task_mounts:
+            root = self.task_mounts[parts[0]]
+            parts = parts[1:]
         path = self._contained(root, root.joinpath(*parts))
         if not path.is_file():
             raise FileNotFoundError(virtual_path)
@@ -135,6 +147,8 @@ class MonitorWorkspace:
                     if source.is_symlink():
                         continue
                     shutil.copy2(source, target_dir / name)
+            for name, mount_root in self.task_mounts.items():
+                self._copy_tree_without_links(mount_root, temp_root / name)
             if self.snapshot_root.exists():
                 shutil.rmtree(self.snapshot_root)
             temp_root.replace(self.snapshot_root)
@@ -142,3 +156,16 @@ class MonitorWorkspace:
         except Exception:
             shutil.rmtree(temp_root, ignore_errors=True)
             raise
+
+    @staticmethod
+    def _copy_tree_without_links(source_root: Path, target_root: Path) -> None:
+        for source_dir, dir_names, file_names in os.walk(source_root, followlinks=False):
+            source_dir = Path(source_dir)
+            relative = source_dir.relative_to(source_root)
+            target_dir = target_root / relative
+            target_dir.mkdir(parents=True, exist_ok=True)
+            dir_names[:] = [name for name in dir_names if not (source_dir / name).is_symlink()]
+            for name in file_names:
+                source = source_dir / name
+                if not source.is_symlink():
+                    shutil.copy2(source, target_dir / name)

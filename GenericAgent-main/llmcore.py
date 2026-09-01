@@ -446,6 +446,10 @@ def _retryable_stream_error(error):
         "overloaded", "gateway timeout",
     ))
 
+class ProviderResponseCancelled(Exception):
+    """The caller intentionally cancelled an in-flight provider response."""
+
+
 def _stream_with_retry(sess, url, headers, payload, parse_fn):
     observing = _telemetry_enabled()
     llm_call_id = _research_id('llm') if observing else None
@@ -474,6 +478,8 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
         try:
             with requests.post(url, headers=headers, json=payload, stream=sess.stream, 
                                timeout=(sess.connect_timeout, sess.read_timeout), proxies=sess.proxies, verify=sess.verify) as r:
+                set_active = getattr(sess, '_set_active_response', None)
+                if set_active is not None: set_active(r)
                 # Best-effort in-process deadline. A read timeout only bounds
                 # silence between bytes and cross-thread response.close() is not
                 # a reliable cancellation primitive for blocked SSE reads. The
@@ -505,7 +511,11 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                 try:
                     gen = parse_fn(r)
                     try:
-                        while True: chunk = next(gen); streamed = True; yield chunk
+                        while True:
+                            consume_cancel = getattr(sess, '_consume_cancel_request', None)
+                            if consume_cancel is not None and consume_cancel():
+                                raise ProviderResponseCancelled("provider response cancelled")
+                            chunk = next(gen); streamed = True; yield chunk
                     except StopIteration as e:
                         if response_deadline_hit.is_set():
                             raise requests.Timeout(
@@ -515,8 +525,16 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                         _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code, 'outcome': 'success'}, llm_call_id=llm_call_id)
                         return e.value or []
                 finally:
+                    clear_active = getattr(sess, '_clear_active_response', None)
+                    if clear_active is not None: clear_active(r)
                     if response_deadline is not None:
                         response_deadline.cancel()
+        except ProviderResponseCancelled:
+            _research_emit('provider_response', {
+                'attempt': attempt + 1, 'outcome': 'cancelled',
+                'streamed_before_cancel': streamed,
+            }, llm_call_id=llm_call_id)
+            raise
         except (_RetryableStreamError, requests.Timeout, requests.ConnectionError,
                 requests.exceptions.ChunkedEncodingError) as e:
             #pathlib.Path(__file__).parent.joinpath('temp','bad_requests.json').write_text(json.dumps({"url":url,"headers":headers,"payload":payload,"err":str(e),"t":time.time()},ensure_ascii=False),encoding='utf-8')
@@ -667,6 +685,9 @@ class BaseSession:
             default_context_win = 70000; self.cut_msg_interval = 25; self.trim_keep_rate = 0.3
         self.context_win = cfg.get('context_win', default_context_win)
         self.history = []; self.lock = threading.Lock(); self.system = ""
+        self._cancel_response = threading.Event()
+        self._active_response = None
+        self._active_response_lock = threading.Lock()
         self.name = cfg.get('name', self.model)
         proxy = cfg.get('proxy'); 
         self.proxies = {"http": proxy, "https": proxy} if proxy else None
@@ -693,6 +714,32 @@ class BaseSession:
         mode = str(cfg.get('api_mode', 'chat_completions')).strip().lower().replace('-', '_')
         self.api_mode = 'responses' if mode in ('responses', 'response') else 'chat_completions'
         self.temperature = cfg.get('temperature', 1)
+
+    def cancel_active_response(self):
+        """Best-effort cancellation used by user stop and monitor correction."""
+        with self._active_response_lock:
+            response = self._active_response
+        if response is None:
+            return False
+        self._cancel_response.set()
+        try: response.close()
+        except Exception: pass
+        return True
+
+    def _set_active_response(self, response):
+        with self._active_response_lock:
+            self._active_response = response
+
+    def _clear_active_response(self, response):
+        with self._active_response_lock:
+            if self._active_response is response:
+                self._active_response = None
+
+    def _consume_cancel_request(self):
+        if not self._cancel_response.is_set():
+            return False
+        self._cancel_response.clear()
+        return True
         self.max_tokens = cfg.get('max_tokens')
         self.default_ua = "claude-cli/2.1.152 (external, cli)"
         self.user_agent = cfg.get("user_agent", self.default_ua)
