@@ -89,6 +89,15 @@ context、同一监察者持续 history、模型自主管理的自然语言 `sta
 ID、`workspace_delta` 或旧 M1/M2/M3.2/M3.5 开关。该实现尚未获得完整真实任务效果验收，不得据
 工程测试声明 M3.5 候选已接受或冻结。
 
+2026-09-01 用户确认进入 clean Monitor Agent foundation reset。当前实现顺序以
+`method_discovery/docs/C1_CLEAN_MONITOR_AGENT_FOUNDATION_SPEC_20260901.md` 为最高优先级工程规格：
+GenericAgent 只提供 provider session、Agent/tool loop、通用代码执行、history/log/telemetry 和 abort
+等可复用运行原语；新 Monitor Agent 仍是独立研究产物，拥有自己的身份、权限、观察、记忆和控制
+机制。旧 M0--M3.5 实现保留为行为证据与回归对照，不再作为继续叠加兼容逻辑的代码母体。先完成
+C2 独立 Monitor Agent 内核，再完成 C3 并发观察与强制纠偏闭环，之后才允许进入 wiki/非线性语义
+记忆、证据修订和成本机制发现。该重置不改变研究问题、创新 A--D、无 checker 边界、真实任务门禁
+或旧阶段结果；两层任务观察固定为“逐轮公开 synopsis + 原始公开证据”，不得新增确定性语义中间层。
+
 2026-08-29 用户进一步裁决：M3.1--M3.5 期间不逐项运行完整真实任务。每项只允许通过代码
 回归、确定性集成检查和既有人工轨迹对齐来确认“工程实现完成”，不得据此声明效果成立、接受
 候选或冻结版本。必须保留逐项独立开关、决策理由和归档，以便累计完成 M3.5 后统一运行真实
