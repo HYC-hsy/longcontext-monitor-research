@@ -175,6 +175,21 @@ def test_default_gate_keeps_legacy_completion_and_event_order():
     assert kinds == ["completion_proposal", "completion_decision", "termination"]
 
 
+def test_monitor_completion_callback_runs_without_telemetry_or_legacy_gate():
+    handler = Handler()
+    seen = []
+
+    def decide(proposal, turn, provider_link, response_content):
+        seen.append((turn, response_content))
+        return CompletionDecision("ALLOW_COMPLETE", ("MONITOR_ALLOWED",))
+
+    handler.parent.completion_decision_callback = decide
+    result = run_loop(handler)
+
+    assert result["result"] == "CURRENT_TASK_DONE"
+    assert seen == [(1, "done")]
+
+
 def test_ready_async_monitor_intervention_is_injected_before_llm():
     class Runtime:
         def __init__(self): self.used = False

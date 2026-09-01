@@ -139,7 +139,7 @@ class MonitorRuntime:
         self._pump = threading.Thread(target=self._pump_outputs, daemon=True, name="monitor-output")
         self._pump.start()
 
-    def archive_boundary(self, packet):
+    def _archive(self, packet):
         with self._archive_lock:
             self._sequence += 1
             sequence = self._sequence
@@ -153,6 +153,10 @@ class MonitorRuntime:
                 "outcome_available": bool(raw.get("tool_results")),
                 "raw_event": f"public_events.jsonl#{sequence}",
             })
+        return sequence
+
+    def archive_boundary(self, packet):
+        sequence = self._archive(packet)
         self._commands.put({
             "kind": "boundary", "cursor": sequence,
             "task_turn": int(packet.get("internal_turn") or 0),
@@ -169,10 +173,11 @@ class MonitorRuntime:
                 self._completion.put(value)
             _append(self.artifact_dir / "runtime_receipts.jsonl", value)
 
-    def request_completion(self) -> CompletionOutcome:
+    def request_completion(self, public_event=None) -> CompletionOutcome:
         if not self._process.is_alive():
             return CompletionOutcome(False, "The completion monitor is unavailable. Continue the task.", "unavailable")
-        self._commands.put({"kind": "completion", "cursor": self._sequence})
+        cursor = self._archive(public_event) if public_event else self._sequence
+        self._commands.put({"kind": "completion", "cursor": cursor})
         try: value = self._completion.get(timeout=self._completion_timeout)
         except queue.Empty:
             return CompletionOutcome(False, "The completion audit timed out. Continue the task.", "timeout")

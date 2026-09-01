@@ -162,7 +162,8 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
         completion_decision = None
         provider_error_response = _is_provider_error_response(response)
         if not response.tool_calls and not provider_error_response:
-            if _telemetry_enabled() or hasattr(handler, 'completion_gate'):
+            if (_telemetry_enabled() or hasattr(handler, 'completion_gate') or
+                    getattr(handler.parent, 'completion_decision_callback', None) is not None):
                 completion_proposal = CompletionProposal.from_response(response, turn)
                 _research_emit('completion_proposal', completion_proposal.as_payload(), internal_turn=turn)
                 completion_gate = getattr(handler, 'completion_gate', None)

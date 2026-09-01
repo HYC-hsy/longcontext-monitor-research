@@ -24,8 +24,8 @@ def run_review(client, system_prompt: str, wake_context: str, tools: list[dict],
             messages = [{
                 "role": "user",
                 "content": (
-                    "A monitor review must finish by calling wait, intervene, or—only at a pending "
-                    "root-completion boundary—allow_complete. Continue your review and call one action."
+                    "A monitor review must finish by calling wait, intervene, or allow_complete "
+                    "(only at a pending root-completion boundary). Continue your review and call one action."
                 ),
             }]
             continue

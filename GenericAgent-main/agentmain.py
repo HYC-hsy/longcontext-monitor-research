@@ -325,7 +325,9 @@ class GenericAgent:
                 if os.environ.get('GA_M0_MONITOR_ENABLED') == '1':
                     raise RuntimeError('Clean and historical monitor runtimes cannot run together')
                 from ga_monitor_adapter import GenericAgentMonitorAdapter
-                monitor_config_name = os.environ.get('GA_MONITOR_CONFIG', 'native_claude_cc_vibe')
+                monitor_config_name = os.environ.get(
+                    'GA_MONITOR_CONFIG', 'native_oai_cc_vibe_gpt56_sol_high'
+                )
                 monitor_model_config = reload_mykeys()[0].get(monitor_config_name)
                 if not monitor_model_config:
                     raise ValueError(f'Unknown GA_MONITOR_CONFIG: {monitor_config_name}')

@@ -19,7 +19,16 @@ class GenericAgentMonitorAdapter:
         return []
 
     def review_completion(self, proposal, turn, provider_link=None, response_content=None):
-        outcome = self.runtime.request_completion()
+        payload = proposal.as_payload() if hasattr(proposal, "as_payload") else {}
+        outcome = self.runtime.request_completion({
+            "boundary": "root_completion_proposal",
+            "internal_turn": turn,
+            "response_content": response_content or "",
+            "completion_proposal": payload,
+            "provider_link": provider_link,
+            "tool_calls": [],
+            "tool_results": [],
+        })
         if outcome.allow:
             return CompletionDecision(
                 decision="ALLOW_COMPLETE", reason_codes=("MONITOR_ALLOWED",)

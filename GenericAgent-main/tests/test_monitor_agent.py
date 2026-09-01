@@ -97,3 +97,25 @@ def test_analysis_code_mutates_only_disposable_snapshot(roots):
     monitor.review("Analyze evidence.")
     assert (evidence / "original_task.txt").read_text(encoding="utf-8") == "Preserve the literal wildcard.\n"
     assert (private / ".task_view" / "original_task.txt").read_text(encoding="utf-8") == "changed"
+
+
+def test_review_persists_provider_usage_and_history_transform(roots):
+    evidence, private = roots
+
+    class TelemetryClient(SequenceClient):
+        def drain_telemetry(self):
+            return {
+                "usage": [{"input_tokens": 12, "output_tokens": 3}],
+                "history_transforms": [{"kind": "monitor_history_compaction"}],
+            }
+
+    monitor = MonitorAgent(
+        TelemetryClient([response("wait", {"after_turns": 2})]),
+        MonitorWorkspace(evidence, private),
+    )
+    monitor.review("Patrol.")
+
+    usage = json.loads((private / "audit" / "provider_usage.jsonl").read_text(encoding="utf-8"))
+    transform = json.loads((private / "audit" / "history_transforms.jsonl").read_text(encoding="utf-8"))
+    assert usage == {"input_tokens": 12, "output_tokens": 3}
+    assert transform["kind"] == "monitor_history_compaction"

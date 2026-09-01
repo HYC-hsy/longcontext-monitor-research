@@ -130,6 +130,7 @@ class MonitorAgent:
             )
             return action
         finally:
+            telemetry = self.client.drain_telemetry() if hasattr(self.client, "drain_telemetry") else {}
             self.workspace.write_text(
                 "monitor/audit/reviews.jsonl",
                 json.dumps({
@@ -142,3 +143,13 @@ class MonitorAgent:
                 "monitor/audit/provider_history.json",
                 json.dumps(self.client.export_history(), ensure_ascii=False), mode="replace",
             )
+            for usage in telemetry.get("usage", []):
+                self.workspace.write_text(
+                    "monitor/audit/provider_usage.jsonl",
+                    json.dumps(usage, ensure_ascii=False) + "\n", mode="append",
+                )
+            for transform in telemetry.get("history_transforms", []):
+                self.workspace.write_text(
+                    "monitor/audit/history_transforms.jsonl",
+                    json.dumps(transform, ensure_ascii=False) + "\n", mode="append",
+                )

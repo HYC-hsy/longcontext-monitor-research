@@ -74,11 +74,20 @@ def test_boundary_creates_two_layer_archive_and_delivers_immediate_correction(tm
 
 def test_root_completion_uses_distinct_control_boundary(tmp_path):
     runtime = _runtime(tmp_path, lambda _: None)
-    decision = runtime.request_completion()
+    decision = runtime.request_completion({
+        "boundary": "root_completion_proposal", "internal_turn": 9,
+        "response_content": "Implemented the index and all tests pass.",
+        "completion_proposal": {"proposal_id": "proposal-1"},
+        "tool_calls": [], "tool_results": [],
+    })
     runtime.close()
 
     assert decision.allow is True
     assert decision.reason == "monitor_allowed"
+    raw = json.loads(runtime.events_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert raw["boundary"] == "root_completion_proposal"
+    assert raw["response_content"] == "Implemented the index and all tests pass."
+    assert raw["completion_proposal"]["proposal_id"] == "proposal-1"
 
 
 def test_artifacts_cannot_be_nested_in_supervised_workspace(tmp_path):
@@ -97,7 +106,9 @@ def test_artifacts_cannot_be_nested_in_supervised_workspace(tmp_path):
 def test_ga_adapter_is_only_completion_type_conversion_boundary():
     adapter = object.__new__(GenericAgentMonitorAdapter)
     adapter.runtime = type("Runtime", (), {
-        "request_completion": lambda self: CompletionOutcome(False, "Inspect the missing test.", "monitor_correction")
+        "request_completion": lambda self, event: CompletionOutcome(
+            False, "Inspect the missing test.", "monitor_correction"
+        )
     })()
     decision = adapter.review_completion(None, 3)
     assert decision.decision == "CONTINUE"

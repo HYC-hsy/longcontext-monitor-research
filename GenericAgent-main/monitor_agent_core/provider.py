@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import threading
 import time
@@ -65,6 +66,11 @@ class MonitorProviderClient:
         self.provider = self._provider_kind(config_name, self.config)
         self.api_mode = str(self.config.get("api_mode", "responses" if self.provider == "openai" else "messages"))
         self.max_tokens = int(self.config.get("max_tokens") or 8192)
+        self.context_window = int(self.config.get("context_win") or 200000)
+        self.history_char_limit = int(
+            self.config.get("monitor_history_char_limit") or self.context_window * 3.5
+        )
+        self.history_target_chars = int(self.history_char_limit * 0.82)
         self.reasoning_effort = self.config.get("reasoning_effort")
         self.thinking_type = str(self.config.get("thinking_type") or "").lower()
         self.temperature = self.config.get("temperature", 1)
@@ -77,6 +83,7 @@ class MonitorProviderClient:
         self.system = ""
         self.history = []
         self.usage_records = []
+        self.history_transforms = []
         self._active_lock = threading.Lock()
         self._active_response = None
 
@@ -99,7 +106,6 @@ class MonitorProviderClient:
 
     def history_measure(self) -> dict:
         encoded = json.dumps(self.history, ensure_ascii=False, default=str).encode("utf-8")
-        import hashlib
         return {
             "items": len(self.history), "characters": len(encoded),
             "sha256": hashlib.sha256(encoded).hexdigest(),
@@ -110,6 +116,75 @@ class MonitorProviderClient:
 
     def restore_history(self, history: list[dict]) -> None:
         self.history = json.loads(json.dumps(history, ensure_ascii=False))
+
+    @staticmethod
+    def _bounded_block(value, limit=6000):
+        if not isinstance(value, str) or len(value) <= limit:
+            return value
+        half = limit // 2
+        return value[:half] + "\n[older tool output compacted]\n" + value[-half:]
+
+    def _history_characters(self):
+        return len(json.dumps(
+            self.history, ensure_ascii=False, default=str
+        ).encode("utf-8"))
+
+    def _compact_old_tool_results(self, protected_head=4, protected_recent=16):
+        stop = max(protected_head, len(self.history) - protected_recent)
+        for message in self.history[protected_head:stop]:
+            if message.get("role") != "user":
+                continue
+            for block in message.get("content") or []:
+                if block.get("type") == "tool_result":
+                    block["content"] = self._bounded_block(block.get("content", ""))
+
+    def _compact_history(self):
+        before = self.history_measure()
+        if before["characters"] <= self.history_char_limit:
+            return
+
+        # Keep the initialization exchange and the recent active investigation
+        # verbatim. Older tool evidence remains recoverable from task/ archives.
+        self._compact_old_tool_results()
+        removed = 0
+        protected_head, protected_recent = min(4, len(self.history)), 16
+        while (self._history_characters() > self.history_target_chars and
+               len(self.history) > protected_head + protected_recent):
+            end = min(protected_head + 2, len(self.history) - protected_recent)
+            if end <= protected_head:
+                break
+            del self.history[protected_head:end]
+            removed += end - protected_head
+
+        # An unusually large recent inspection result can itself exceed the
+        # budget. Bound tool outputs outside the latest request without
+        # rewriting signed thinking or provider reasoning items.
+        if self._history_characters() > self.history_char_limit:
+            for message in self.history[:-2]:
+                if message.get("role") != "user":
+                    continue
+                for block in message.get("content") or []:
+                    if block.get("type") == "tool_result":
+                        block["content"] = self._bounded_block(block.get("content", ""), 12000)
+
+        after = self.history_measure()
+        self.history_transforms.append({
+            "kind": "monitor_history_compaction",
+            "before": before,
+            "after": after,
+            "removed_messages": removed,
+            "char_limit": self.history_char_limit,
+            "target_chars": self.history_target_chars,
+        })
+
+    def drain_telemetry(self):
+        value = {
+            "usage": list(self.usage_records),
+            "history_transforms": list(self.history_transforms),
+        }
+        self.usage_records.clear()
+        self.history_transforms.clear()
+        return value
 
     def complete(self, messages: list[dict], tools: list[dict]) -> ModelResponse:
         user_blocks = []
@@ -128,6 +203,7 @@ class MonitorProviderClient:
         if not user_blocks:
             user_blocks = [{"type": "text", "text": "."}]
         self.history.append({"role": "user", "content": user_blocks})
+        self._compact_history()
         blocks, usage = self._request(tools)
         if blocks:
             self.history.append({"role": "assistant", "content": blocks})
