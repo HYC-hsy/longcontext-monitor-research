@@ -347,6 +347,7 @@ class GenericAgent:
                     config_name=monitor_config_name,
                     model_config=monitor_model_config,
                     interrupt_callback=self.request_monitor_interruption,
+                    interrupt_pending=self.resumable_interruption.is_requested,
                     max_review_turns=int(os.environ.get('GA_MONITOR_MAX_REVIEW_TURNS', '20')),
                     completion_timeout=float(os.environ.get('GA_MONITOR_COMPLETION_TIMEOUT_SECONDS', '300')),
                 )

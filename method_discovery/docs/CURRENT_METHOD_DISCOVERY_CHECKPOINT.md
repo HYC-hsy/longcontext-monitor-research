@@ -1,5 +1,52 @@
 # 当前方法发现恢复入口
 
+2026-09-08 incremental-audit Fyne R1 已真实启动并由观察者停止，详见 `PHASE1_INCREMENTAL_AUDIT_FYNE_R1_LIVE_20260908.md`。
+约66分钟/262轮；runner 97207 已退出，Docker 无活动容器。增量归档正常，四次 completion 均被真实干预立即恢复，无 TIMEOUT。
+停止原因不是网络重试：续接 working.md 中的 no-partial-mutation 检查被后续纠偏升格成原任务要求，任务254轮接受；原题无明确后续setter失败时全量回滚要求。
+此为待审计的自生约束/任务依据污染，不可直接断言压缩因果；停止前尚未证明任务实现了该额外要求。还需分析托盘设计反复与有效纠偏。
+本轮外部停止，无完整成绩；未修改策略/代码，不自动重跑。模型保持 Claude Opus4.8 + GPT-5.6-sol high。
+
+2026-09-08 增量审议归档已实现，见PHASE1_INCREMENTAL_AUDIT_AND_STOP_POLICY_20260908.md；90项联合测试通过。
+dialogue.jsonl逐步记录模型输入/公开输出/工具参数/结果，未完成review中途退出仍可审计；不增加模型输入，不是自动续跑机制。
+下一实验不因单次内部重试/一次completion超时立即停止，需看恢复；严重偏移、不可恢复故障、无进展循环或预算到期仍停止。300秒运行时语义未改。
+上述为启动前补丁状态；其后真实运行结果以上方 incremental-audit R1 记录为准。
+
+2026-09-08 completion-lifecycle R1审计已完成，见PHASE1_COMPLETION_LIFECYCLE_FYNE_R1_AUDIT_20260908.md。
+第二等待300秒中请求/重试299.65秒、工具0.31秒；无第二纠偏、无审议崩溃，和旧消息被挡不同。恢复提示无语义新信息后任务再次宣称完成。
+未结束review完整history仅在finally落盘，主动终止导致第二审议参数/结果不可重建。当前不能判候选失败，停止规则需区分可恢复状态与真正失败。
+17项现有测试复跑通过；只审计未改执行代码/模型/预算，无新运行。
+
+2026-09-08 16:40 completion-lifecycle Fyne R1已主动停止，37轮约18分钟；session38796退出1，Docker ps为空。
+首个等待已由纠偏即时解除INTERRUPTED且任务采纳，修复有真实证据；第二等待内无新纠偏，慢请求+重试耗时超过完成等待，TIMEOUT后再次完成提议。
+见PHASE1_COMPLETION_LIFECYCLE_FYNE_R1_LIVE_20260908.md顶部。无完整效果结论，不自动重跑，不换模型；下面启动状态是历史。
+
+2026-09-08 16:22已获用户确认启动completion-lifecycle Fyne R1，session38796，trial f7DBnyo；正在运行，勿重复启动。
+入口PHASE1_COMPLETION_LIFECYCLE_FYNE_R1_LIVE_20260908.md；同Opus4.8/GPT5.6-sol high、500轮10000秒。
+持续监督每10分钟报告，重大失败停止；无人工纠偏、无在线native评价。下面的停止状态均属于旧run。
+
+2026-09-08 完成等待/普通纠偏衔接已修，见PHASE1_COMPLETION_INTERRUPT_LIFECYCLE_FIX_20260908.md。
+真实_worker交叉时序与联合87项工程测试通过：纠偏成功解除等待、旧完成代次作废、过期命令跳过、新提议独立、无重复消息。
+未改判断prompt/记忆/模型；因果强断言与认识滞后仍未解决。无API/真实运行，停在启动前，旧manifest源码hash过期。
+
+2026-09-08 即时干预R1审计完成，见PHASE1_LIVE_INTERVENTION_FYNE_R1_AUDIT_20260908.md。
+确定性内存诊断复现：普通纠偏已提交但completion仍等到timeout；12项现有测试通过但缺交叉时序覆盖。
+发现另一个方法缺口：未查清queueItem链就断言同步死锁，任务确实据此删锁；不能全归因high或工程。
+保留非终结即时发送/同history/通用工具；本轮只审计与落盘，没有修改执行代码、API调用或真实启动。
+
+2026-09-08 15:55即时干预Fyne J3ab7G4已主动停止，123轮约22分钟；session9658退出1，Docker ps为空。
+明确问题：114轮completion等待300秒超时继续，随后正式completion纠偏late/unmatched；普通intervene已可即时发出并继续同会话，任务有部分采纳。
+详见PHASE1_LIVE_INTERVENTION_FYNE_R1_LIVE_20260908.md顶部。无完整效果结论，不自动重跑；先审计completion排队与普通干预衔接。
+用户提出high可能慢、medium是否够用；本轮保持high，未授权切换。成功请求平均41.91秒且含服务/网络延迟，不能归因纯推理等级。
+以下“已启动”等均为历史记录。
+
+2026-09-08 即时干预候选已授权启动，session9658，trial J3ab7G4，详见PHASE1_LIVE_INTERVENTION_FYNE_R1_LIVE_20260908.md。
+Opus4.8/GPT5.6-sol high，500轮10000秒。GPT探针一次超时后成功；运行期间分清接口与机制问题。
+当前勿重复启动；只监督不人工纠偏，重大偏移/失败按用户授权停止。
+
+2026-09-08 已Git保存基线674fa58，之后实现live-intervention候选，95项联合测试通过。
+见 `PHASE1_LIVE_INTERVENTION_CANDIDATE_20260908.md`。发送后继续同一工具循环，completion消费保护；尚未真实验证。
+不自动启动；新manifest待准备，旧hash失效。初始化/尚未处理completion排队仍是已知限制。
+
 2026-09-08 限流/Responses结束保护已修，90项联合测试通过；无新API/运行。
 见 `PHASE1_TRANSPORT_FIX_AND_INTERACTION_DECISION_20260908.md`。两次实际无工具回答均有response.completed，不能归因断流。
 当前停在“intervene是否非终结地即时送达并继续调查”的机制决策；未改控制语义，旧manifest源码hash已过期。

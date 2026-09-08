@@ -107,6 +107,8 @@ class MonitorAgent:
         self.stop_event = threading.Event()
         self.review_id = None
         self._progress_warning = False
+        self.intervention_callback = None
+        self._sent_messages = set()
         self.client.progress_callback = self._progress
         self.semantic_continuity = getattr(client, "config", {}).get("monitor_semantic_continuity", True)
         if self.semantic_continuity:
@@ -129,6 +131,15 @@ class MonitorAgent:
         relative = "audit/history/" + uuid.uuid4().hex + ".json"
         self._atomic_private_text(relative, json.dumps(history, ensure_ascii=False))
         return "monitor/" + relative
+
+    def _audit_dialogue(self, event, **payload):
+        """Persist completed observations immediately, independently of model input."""
+        path = self.workspace.private_root / 'audit' / 'dialogue.jsonl'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = dict(timestamp=time.time(), review_id=self.review_id, event=event, **payload)
+        with path.open('a', encoding='utf-8') as stream:
+            stream.write(json.dumps(record, ensure_ascii=False, default=str) + '\n')
+            stream.flush()
 
     def _prepare_continuation(self):
         """Same model, existing history, no tool actions during pre-compaction handoff."""
@@ -214,6 +225,15 @@ class MonitorAgent:
             elif name == "intervene":
                 message = str(arguments.get("message", "")).strip()
                 if not message: raise ValueError("message must not be empty")
+                if self.intervention_callback is not None:
+                    if message in self._sent_messages:
+                        return ToolOutcome({"status": "already_submitted",
+                                            "message": "Observe subsequent behavior before repeating the same input."})
+                    receipt = self.intervention_callback(message)
+                    self._sent_messages.add(message)
+                    self.completion_pending = False
+                    return ToolOutcome({"status": "submitted", "receipt": receipt,
+                                        "note": "Submission is not proof of delivery or uptake. Continue observing; wait when appropriate."})
                 return ToolOutcome(None, False, MonitorAction("intervene", {"message": message}))
             elif name == "allow_complete":
                 if not self.completion_pending: raise ValueError("No root completion is pending")
@@ -230,6 +250,7 @@ class MonitorAgent:
         self._progress('review_started', completion_pending=bool(completion_pending))
         before = self.client.history_measure()
         self.completion_pending = bool(completion_pending)
+        self._sent_messages.clear()
         action = None
         try:
             wake_context += "\nLive environment map (read task sources, write only private cognition): " + json.dumps({
@@ -237,9 +258,19 @@ class MonitorAgent:
                 **{f"task/{name}/": str(path) for name, path in self.workspace.task_mounts.items()},
                 "monitor/": str(self.workspace.private_root),
             }, ensure_ascii=False)
+            mode = REVIEW_MODE_PROMPT
+            if self.intervention_callback is not None:
+                mode = ("You may call intervene as soon as public evidence supports a useful correction, "
+                        "then continue this same investigation. It sends input without ending your review. "
+                        "You need not finish unrelated checks before sending, nor send merely because you can. "
+                        "Delivery feedback is available at monitor/delivery_feedback.jsonl; it may arrive after submission. "
+                        "Read subsequent public behavior to assess uptake. End with wait when ready to be silent, "
+                        "or allow_complete only for a still-pending, justified root completion. "
+                        "After an intervention that completion proposal is no longer pending.")
             action = run_review(
-                self.client, MONITOR_SYSTEM_PROMPT + "\n\n" + REVIEW_MODE_PROMPT, wake_context, MONITOR_TOOLS,
+                self.client, MONITOR_SYSTEM_PROMPT + "\n\n" + mode, wake_context, MONITOR_TOOLS,
                 self.dispatch, self.max_review_turns,
+                audit=self._audit_dialogue,
             )
             return action
         finally:
