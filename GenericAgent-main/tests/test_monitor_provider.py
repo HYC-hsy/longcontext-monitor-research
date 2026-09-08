@@ -1,6 +1,8 @@
 import json
+import pytest
 
 from monitor_agent_core.provider import MonitorProviderClient
+from monitor_agent_core.provider import ProviderError, RetryableProviderError, _remote_error
 
 
 def config(model="claude-test", **overrides):
@@ -8,6 +10,87 @@ def config(model="claude-test", **overrides):
         "apikey": "test", "apibase": "https://example.test", "model": model,
         **overrides,
     }
+
+
+@pytest.mark.parametrize('code', ['upstream_error', 'server_error', 'stream_read_error'])
+def test_temporary_stream_error_classification(code):
+    assert isinstance(_remote_error({'type': code}), RetryableProviderError)
+
+
+@pytest.mark.parametrize('code', ['insufficient_quota', 'authentication_error', 'invalid_request_error'])
+def test_permanent_error_takes_priority(code):
+    error = _remote_error({'type': 'upstream_error', 'code': code})
+    assert type(error) is ProviderError
+
+
+def test_stream_failure_retries_same_history_and_discards_partial_tool(monkeypatch):
+    client = MonitorProviderClient('openai', config('gpt-test', max_retries=2))
+    monkeypatch.setattr(client._cancelled, 'wait', lambda delay: False)
+    snapshots = []
+    def request(tools):
+        snapshots.append(client.export_history())
+        events = [
+            {'type': 'response.output_item.added', 'output_index': 0,
+             'item': {'type': 'function_call', 'call_id': 'bad', 'name': 'file_write'}},
+            {'type': 'error', 'error': {'type': 'upstream_error'}},
+        ] if len(snapshots) == 1 else [
+            {'type': 'response.output_text.delta', 'delta': 'recovered'},
+            {'type': 'response.completed', 'response': {'usage': {}}},
+        ]
+        return client._parse_openai_responses(['data: ' + json.dumps(e) for e in events])
+    monkeypatch.setattr(client, '_request_once', request)
+    response = client.complete([{'role': 'user', 'content': 'continue'}], [])
+    assert snapshots[0] == snapshots[1]
+    assert response.content == 'recovered' and not response.tool_calls
+    assert len(client.history) == 2
+    assert 'bad' not in json.dumps(client.history)
+    assert [r['outcome'] for r in client.drain_telemetry()['request_attempts']] == ['retryable_error', 'success']
+
+
+def test_retry_exhaustion_is_bounded(monkeypatch):
+    client = MonitorProviderClient('openai', config('gpt-test', max_retries=2))
+    monkeypatch.setattr(client._cancelled, 'wait', lambda delay: False)
+    def fail(tools): raise RetryableProviderError('temporary')
+    monkeypatch.setattr(client, '_request_once', fail)
+    with pytest.raises(ProviderError):
+        client.complete([{'role': 'user', 'content': 'continue'}], [])
+    assert len(client.request_attempts) == 3
+    assert client.request_attempts[-1]['outcome'] == 'retries_exhausted'
+    assert len(client.history) == 1
+
+
+def test_cancel_does_not_restart_request(monkeypatch):
+    client = MonitorProviderClient('openai', config('gpt-test', max_retries=2))
+    def fail(tools):
+        client._cancelled.set()
+        raise RetryableProviderError('cancelled stream')
+    monkeypatch.setattr(client, '_request_once', fail)
+    with pytest.raises(ProviderError, match='cancelled'):
+        client._request([])
+    assert len(client.request_attempts) == 1
+    assert client.request_attempts[0]['outcome'] == 'cancelled'
+
+
+@pytest.mark.parametrize('status,error,retry', [
+    (503, {}, True), (429, {'code': 'insufficient_quota'}, False),
+    (401, {}, False), (400, {'type': 'invalid_request_error'}, False),
+])
+def test_http_error_routing(monkeypatch, status, error, retry):
+    client = MonitorProviderClient('openai', config('gpt-test', max_retries=1))
+    monkeypatch.setattr(client._cancelled, 'wait', lambda delay: False)
+    calls = []
+    class HTTPResponse:
+        status_code = status
+        text = json.dumps({'error': error})
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def json(self): return {'error': error}
+    def post(*args, **kwargs):
+        calls.append(1)
+        return HTTPResponse()
+    monkeypatch.setattr('monitor_agent_core.provider.requests.post', post)
+    with pytest.raises(ProviderError): client._request([])
+    assert len(calls) == (2 if retry else 1)
 
 
 def test_provider_kind_comes_from_explicit_config_or_model():
@@ -74,6 +157,28 @@ def test_history_export_and_restore_are_independent_copies():
     second.restore_history(exported)
     exported[0]["content"][0]["text"] = "mutated"
     assert second.history[0]["content"][0]["text"] == "state"
+
+
+def test_reasoning_status_is_removed_only_from_wire_copy():
+    client = MonitorProviderClient('openai', config('gpt-test'))
+    original = {
+        'id': 'rs-final', 'type': 'reasoning', 'status': 'completed',
+        'summary': [{'type': 'summary_text', 'text': 'Inspect the evidence'}],
+        'encrypted_content': 'opaque-context',
+    }
+    client.history = [{'role': 'assistant', 'content': [
+        {'type': 'openai_item', 'item': original},
+        {'type': 'tool_use', 'id': 'call-1', 'name': 'intervene',
+         'input': {'message': 'Check the test', 'status': 'meaningful-argument'}},
+    ]}]
+    before = client.export_history()
+    wire = client._responses_history()
+    assert wire[0] == {key: value for key, value in original.items() if key != 'status'}
+    assert json.loads(wire[1]['arguments'])['status'] == 'meaningful-argument'
+    assert client.export_history() == before
+    restored = MonitorProviderClient('openai', config('gpt-test'))
+    restored.restore_history(before)
+    assert restored._responses_history() == wire
 
 
 def test_large_window_compaction_keeps_initialization_and_recent_repair():

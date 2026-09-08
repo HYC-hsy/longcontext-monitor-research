@@ -473,6 +473,9 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
         except: ra = None
         return max(0.5, ra if ra is not None else min(30.0, 1.5 * (2 ** attempt)))
     for attempt in range(sess.max_retries + 1):
+        consume_cancel = getattr(sess, '_consume_cancel_request', None)
+        if consume_cancel is not None and consume_cancel():
+            raise ProviderResponseCancelled("provider response cancelled before retry")
         streamed = False
         _research_emit('provider_request_attempt', {'attempt': attempt + 1}, llm_call_id=llm_call_id)
         try:
@@ -549,13 +552,23 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                 ) from e
             #pathlib.Path(__file__).parent.joinpath('temp','bad_requests.json').write_text(json.dumps({"url":url,"headers":headers,"payload":payload,"err":str(e),"t":time.time()},ensure_ascii=False),encoding='utf-8')
             err = f"!!!Error: {type(e).__name__}: {e}" if str(e) else f"!!!Error: {type(e).__name__}"
-            if attempt < sess.max_retries and not streamed:
+            # Native sessions commit parse_fn's return value, not the displayed
+            # deltas. Each attempt has a fresh parser; failed tool fragments
+            # therefore never enter history or reach the execution loop.
+            partial_retry_safe = getattr(sess, 'transactional_response', False)
+            if attempt < sess.max_retries and (not streamed or partial_retry_safe):
                 d = _delay(None, attempt)
                 _research_emit('provider_response', {'attempt': attempt + 1, 'outcome': 'retryable_transport_error',
                                'error_type': type(e).__name__, 'retry_delay_seconds': d,
                                'streamed_before_error': streamed}, llm_call_id=llm_call_id)
                 print(f"[LLM Retry] {type(e).__name__}, retry in {d:.1f}s ({attempt+1}/{sess.max_retries+1})")
+                if streamed:
+                    yield "\n[Transport interrupted: partial response discarded; retrying.]\n"
                 time.sleep(d); continue
+            _research_emit('provider_response', {
+                'attempt': attempt + 1, 'outcome': 'transport_error',
+                'error_type': type(e).__name__, 'streamed_before_error': streamed,
+            }, llm_call_id=llm_call_id)
             yield err; return [{"type": "text", "text": err}]
         except Exception as e:
             # Cross-thread response.close() can surface from requests/urllib3
@@ -875,6 +888,7 @@ def _fix_messages(messages):
     return merged
 
 class NativeClaudeSession(BaseSession):
+    transactional_response = True
     native_ua = "claude-cli/2.1.152 (native, cli)"
     def __init__(self, cfg):
         super().__init__(cfg)

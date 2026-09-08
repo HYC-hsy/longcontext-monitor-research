@@ -86,17 +86,59 @@ def test_allow_complete_is_guarded_by_root_boundary(roots):
     assert monitor.review("Root completion.", completion_pending=True).kind == "allow_complete"
 
 
-def test_analysis_code_mutates_only_disposable_snapshot(roots):
+def test_analysis_reads_live_sources_without_copy(roots):
     evidence, private = roots
-    script = "from pathlib import Path\np=Path('.task_view/original_task.txt')\np.write_text('changed')"
+    script = f"from pathlib import Path\nprint(Path({str(evidence / 'original_task.txt')!r}).read_text())"
     client = SequenceClient([
         response("code_run", {"code": script, "type": "python"}),
         response("wait", {"after_turns": 1}),
     ])
     monitor = MonitorAgent(client, MonitorWorkspace(evidence, private))
-    monitor.review("Analyze evidence.")
+    action = monitor.review("Analyze evidence.")
+    assert action.kind == "wait"
     assert (evidence / "original_task.txt").read_text(encoding="utf-8") == "Preserve the literal wildcard.\n"
-    assert (private / ".task_view" / "original_task.txt").read_text(encoding="utf-8") == "changed"
+    assert not (private / ".task_view").exists()
+    assert json.dumps(str(evidence)) in client.history[1]["content"]
+    result = monitor.dispatch("code_run", {"code": script}).data
+    assert result["exit_code"] == 0
+    assert "literal wildcard" in result["stdout"]
+    (evidence / "original_task.txt").write_text("New public progress", encoding="utf-8")
+    assert "New public progress" in monitor.dispatch("code_run", {"code": script}).data["stdout"]
+
+
+def test_handoff_preserves_semantics_and_accounts_for_usage(roots, monkeypatch):
+    from monitor_agent_core.provider import MonitorProviderClient
+    evidence, private = roots
+    client = MonitorProviderClient("openai", {"apikey": "test", "apibase": "https://example.test",
+                                            "model": "gpt-test", "monitor_history_char_limit": 100})
+    monitor = MonitorAgent(client, MonitorWorkspace(evidence, private))
+    client.history = [{"role": "user", "content": [{"type": "text", "text": "evidence " * 100}]}]
+    seen = []
+    def request(tools):
+        seen.append(json.dumps(client.history))
+        assert tools == []
+        return [{"type": "text", "text": "Cause remains uncertain; wait for the accepted control experiment."}], {"input_tokens": 20}
+    monkeypatch.setattr(client, "_request", request)
+    note = monitor._prepare_continuation()
+    assert "evidence" in seen[0]
+    assert "Cause remains uncertain" in (private / "working.md").read_text()
+    assert "Cause remains uncertain" in note
+    assert client.usage_records[-1]["purpose"] == "pre_compaction_continuation"
+    assert len(client.history) == 1  # no temporary maintenance instruction left in history
+
+
+def test_failed_continuation_never_discards_history(roots, monkeypatch):
+    from monitor_agent_core.provider import MonitorProviderClient
+    evidence, private = roots
+    client = MonitorProviderClient("openai", {"apikey": "test", "apibase": "https://example.test",
+                                            "model": "gpt-test", "monitor_history_char_limit": 100})
+    monitor = MonitorAgent(client, MonitorWorkspace(evidence, private))
+    client.history = [{"role": "user", "content": [{"type": "text", "text": "still open " * 100}]}]
+    original = client.export_history()
+    monkeypatch.setattr(client, "_request", lambda _: ([], {}))
+    with pytest.raises(ValueError, match="Empty continuation"):
+        monitor._prepare_continuation()
+    assert client.export_history() == original
 
 
 def test_review_persists_provider_usage_and_history_transform(roots):

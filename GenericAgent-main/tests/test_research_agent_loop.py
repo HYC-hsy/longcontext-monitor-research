@@ -305,7 +305,8 @@ def test_provider_error_is_not_a_completion_proposal():
             Client(Response(content="!!!Error: ReadTimeout: timed out")),
             "system", "task", handler, [], max_turns=1, verbose=False,
         ))
-    assert result["result"] == "MAX_TURNS_EXCEEDED"
+    assert result["result"] == "PROVIDER_FAILURE"
+    assert events[-1]["payload"]["result"] == "PROVIDER_FAILURE"
     assert not [event for event in events if event["event_type"] == "completion_proposal"]
 
 

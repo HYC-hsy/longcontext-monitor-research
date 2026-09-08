@@ -71,13 +71,27 @@ def _worker(config, commands, outputs):
     close_watch = False
     cursor = 0
     task_turn = 0
+    receipt_offset = 0
 
-    def review(context, completion=False):
-        nonlocal next_wake_turn, close_watch
+    def review(context, completion=False, request_id=None):
+        nonlocal next_wake_turn, close_watch, receipt_offset
         try:
+            next_receipt_offset = receipt_offset
+            receipt_path = Path(config["private_root"]) / "delivery_feedback.jsonl"
+            if receipt_path.exists():
+                with receipt_path.open("rb") as stream:
+                    stream.seek(receipt_offset)
+                    feedback = stream.read()
+                # The pump writes complete lines; retry a partial trailing line next wake.
+                complete = feedback.rfind(b"\n") + 1
+                if complete:
+                    context += "\nRuntime feedback on prior actions (handoff is not proof of uptake):\n" + feedback[:complete].decode("utf-8")
+                    next_receipt_offset += complete
             action = monitor.review(context, completion_pending=completion)
+            receipt_offset = next_receipt_offset
         except Exception as exc:
-            outputs.put({"kind": "failure", "error": repr(exc), "completion": completion})
+            outputs.put({"kind": "failure", "error": repr(exc), "completion": completion,
+                         "request_id": request_id})
             return
         if action.kind == "wait":
             close_watch = False
@@ -91,17 +105,22 @@ def _worker(config, commands, outputs):
                     "cursor": cursor, "request_id": uuid.uuid4().hex,
                 })
         elif action.kind == "allow_complete":
-            outputs.put({"kind": "completion", "decision": "allow", "cursor": cursor})
+            outputs.put({"kind": "completion", "decision": "allow", "cursor": cursor,
+                         "request_id": request_id})
         if completion and action.kind != "allow_complete":
             outputs.put({
                 "kind": "completion", "decision": "continue", "cursor": cursor,
-                "message": action.payload.get("message", "Continue; completion is not yet supported."),
+                "request_id": request_id,
+                "message": action.payload.get("message", "Continue the task; no completion approval was issued."),
             })
 
     review(
         "Turn-zero initialization. Read task/original_task.txt. Use task/synopsis.jsonl for chronological "
         "navigation, task/public_events.jsonl for original public events, and task/workspace/ for live tests, "
-        "code, diffs, and artifacts. Orient yourself, then choose wait(after_turns)."
+        "code, diffs, and artifacts. The Task Agent can read its original task copy at "
+        f"{config['task_original_path']}. task/ paths are your virtual paths, not its filesystem paths. "
+        "Establish your task understanding, inspect available progress, and choose your next action. "
+        "Initialization does not require silence if a material discrepancy is already supported."
     )
     outputs.put({"kind": "ready"})
     while True:
@@ -117,8 +136,12 @@ def _worker(config, commands, outputs):
             )
         elif kind == "completion":
             review(
-                f"The Task Agent proposes root completion at cursor {cursor}. Reconstruct root coverage from "
-                "the original task and public evidence, then intervene or allow_complete.", completion=True,
+                f"The Task Agent yielded control without a tool call at cursor {cursor}. Read its actual "
+                "message in the public evidence: it may claim completion, ask for clarification, or report "
+                "a blocker. Judge its meaning yourself. Answer missing information or correct drift with "
+                "intervene; use allow_complete only if the task is actually complete. A clarification "
+                "request is not itself a false completion claim.", completion=True,
+                request_id=command["request_id"],
             )
 
 
@@ -135,6 +158,9 @@ class MonitorRuntime:
         self.evidence_root.mkdir(parents=True, exist_ok=True)
         self.private_root.mkdir(parents=True, exist_ok=True)
         (self.evidence_root / "original_task.txt").write_text(public_task, encoding="utf-8")
+        self.task_original_path = task_workspace / f".monitor_original_task_{uuid.uuid4().hex}.txt"
+        with self.task_original_path.open("x", encoding="utf-8") as stream:
+            stream.write(public_task)
         self.synopsis_path = self.evidence_root / "synopsis.jsonl"
         self.events_path = self.evidence_root / "public_events.jsonl"
         self._archive_lock = threading.Lock()
@@ -144,13 +170,15 @@ class MonitorRuntime:
         self._context = mp.get_context("spawn")
         self._commands = self._context.Queue()
         self._outputs = self._context.Queue()
-        self._completion = queue.Queue()
+        self._pending = {}
+        self._pending_lock = threading.Lock()
         self._closed = threading.Event()
         process = process_factory or self._context.Process
         self._process = process(target=worker_target or _worker, args=({
             "config_name": config_name, "model_config": dict(model_config),
             "evidence_root": str(self.evidence_root), "private_root": str(self.private_root),
             "task_workspace": str(task_workspace), "max_review_turns": int(max_review_turns),
+            "task_original_path": str(self.task_original_path),
         }, self._commands, self._outputs), daemon=True)
         self._process.start()
         self._pump = threading.Thread(target=self._pump_outputs, daemon=True, name="monitor-output")
@@ -184,20 +212,45 @@ class MonitorRuntime:
         while not self._closed.is_set():
             try: value = self._outputs.get(timeout=0.1)
             except queue.Empty: continue
+            except (OSError, EOFError):
+                if self._closed.is_set():
+                    return
+                raise
             kind = value.get("kind")
-            if kind == "intervention": self._interrupt_callback(value["message"])
+            if kind == "intervention":
+                try:
+                    receipt = self._interrupt_callback(value["message"])
+                    value = dict(value, delivery="handed_to_task_interrupt_interface", receipt=str(receipt))
+                except Exception as exc:
+                    value = dict(value, delivery="failed", error=repr(exc))
             elif kind == "completion" or (kind == "failure" and value.get("completion") is True):
-                self._completion.put(value)
+                with self._pending_lock:
+                    pending = self._pending.get(value.get("request_id"))
+                    if pending is not None:
+                        pending.put(value)
+                        value = dict(value, delivery="handed_to_completion_boundary")
+                    else:
+                        value = dict(value, delivery="archived_late_or_unmatched")
             _append(self.artifact_dir / "runtime_receipts.jsonl", value)
+            if kind in {"intervention", "completion"}:
+                _append(self.private_root / "delivery_feedback.jsonl", value)
 
     def request_completion(self, public_event=None) -> CompletionOutcome:
         if not self._process.is_alive():
             return CompletionOutcome(False, "The completion monitor is unavailable. Continue the task.", "unavailable")
         cursor = self._archive(public_event) if public_event else self._sequence
-        self._commands.put({"kind": "completion", "cursor": cursor})
-        try: value = self._completion.get(timeout=self._completion_timeout)
+        request_id = uuid.uuid4().hex
+        pending = queue.Queue()
+        with self._pending_lock:
+            self._pending[request_id] = pending
+        self._commands.put({"kind": "completion", "cursor": cursor, "request_id": request_id,
+                            "task_turn": int((public_event or {}).get("internal_turn") or 0)})
+        try: value = pending.get(timeout=self._completion_timeout)
         except queue.Empty:
             return CompletionOutcome(False, "The completion audit timed out. Continue the task.", "timeout")
+        finally:
+            with self._pending_lock:
+                self._pending.pop(request_id, None)
         if value.get("decision") == "allow": return CompletionOutcome(True, reason="monitor_allowed")
         return CompletionOutcome(False, value.get("message") or "Continue the task.", "monitor_correction")
 
@@ -207,3 +260,4 @@ class MonitorRuntime:
         self._process.join(timeout=3)
         if self._process.is_alive():
             self._process.terminate(); self._process.join(timeout=1)
+        self._pump.join(timeout=1)

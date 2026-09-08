@@ -55,6 +55,7 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
         {"role": "user", "content": initial_content}
     ]
     local_turn = 0; turn = int(turn_offset); handler.max_turns = max_turns
+    exit_reason = {}; response = None
     _hook('agent_before', locals())
     while local_turn < handler.max_turns:
         local_turn += 1; turn = int(turn_offset) + local_turn
@@ -219,6 +220,8 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
         messages = [{"role": "user", "content": next_prompt, "tool_results": tool_results}]   # just new message, history is kept in *Session
     if exit_reason: handler.turn_end_callback(response, tool_calls, tool_results, turn, '', exit_reason)
     final_outcome = exit_reason or {'result': 'MAX_TURNS_EXCEEDED'}
+    if response is not None and _is_provider_error_response(response):
+        final_outcome = {'result': 'PROVIDER_FAILURE', 'error': response.content}
     _research_emit('termination', final_outcome, internal_turn=turn)
     _hook('agent_after', locals())
     return final_outcome

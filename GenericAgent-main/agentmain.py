@@ -210,6 +210,8 @@ class GenericAgent:
             )
         manual_completion_root = os.environ.get('GA_MANUAL_COMPLETION_DIR')
         if manual_completion_root:
+            if os.environ.get('GA_MONITOR_ENABLED') == '1':
+                raise ValueError('Choose manual supervision or automatic Monitor, not both')
             self.completion_decision_callback = ManualCompletionBoundary(
                 manual_completion_root,
                 timeout_seconds=float(os.environ.get('GA_MANUAL_COMPLETION_TIMEOUT_SECONDS', '300')),
@@ -383,8 +385,16 @@ class GenericAgent:
                 identity.setdefault('task_id', os.environ.get('GA_BENCH_TASK_ID') or
                                     (os.path.basename(self.task_dir) if self.task_dir else 'interactive'))
                 gen = wrap_generator(gen, identity, JsonlEventSink(event_path) if event_path else None)
+            manual_inbox = None
             try:
                 full_resp = ""; last_pos = 0; curr_turn = 0; turn_resps = []
+                manual_root = os.environ.get('GA_MANUAL_COMPLETION_DIR')
+                if manual_root:
+                    from manual_completion_boundary import ManualInterventionInbox
+                    manual_inbox = ManualInterventionInbox(
+                        os.path.join(manual_root, 'interventions'),
+                        self.request_monitor_interruption,
+                    ).start()
                 for chunk in gen:
                     if consume_file(self.task_dir, '_stop'): self.abort() 
                     if self.stop_sig: break
@@ -404,6 +414,8 @@ class GenericAgent:
                 print(f"Backend Error: {format_error(e)}")
                 display_queue.put({'done': full_resp + f'\n```\n{format_error(e)}\n```', 'source': source, 'turn': curr_turn, 'outputs': turn_resps.copy()})
             finally:
+                if manual_inbox is not None:
+                    manual_inbox.close()
                 if self.stop_sig: print('User aborted the task.')
                 if self.monitor_runtime is not None:
                     self.monitor_runtime.close()

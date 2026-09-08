@@ -20,6 +20,21 @@ m4 = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(m4)
 
 
+@pytest.mark.parametrize('config', ['', 'native_claude_cc_vibe_opus48'])
+def test_model_preflight_forwards_named_config(monkeypatch, config):
+    monkeypatch.setenv('GA_LLM_CONFIG_NAME', config)
+    monkeypatch.setattr(m4, 'python_home', lambda: Path('python-test'))
+    commands = []
+
+    def checked(argv, timeout):
+        commands.append(argv)
+        return 'M4_IDENTITY={"model":"probe"}'
+
+    monkeypatch.setattr(m4, 'checked', checked)
+    assert m4.resolve_model(0)['model'] == 'probe'
+    assert f'GA_LLM_CONFIG_NAME={config}' in commands[0]
+
+
 def _load_adapter(monkeypatch):
     class StubBaseAgent:
         def __init__(self, logs_dir, model_name=None, extra_env=None, **kwargs):

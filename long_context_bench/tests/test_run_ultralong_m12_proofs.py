@@ -16,6 +16,20 @@ m12 = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(m12)
 
 
+def test_host_preflight_forwards_named_config(monkeypatch):
+    monkeypatch.setenv('GA_LLM_CONFIG_NAME', 'native_claude_cc_vibe_opus48')
+    monkeypatch.setattr(m12.m4, 'python_home', lambda: Path('python-test'))
+    commands = []
+
+    def checked(argv, timeout):
+        commands.append(argv)
+        return 'M12_HOSTS=["cc-vibe.com"]'
+
+    monkeypatch.setattr(m12.m4, 'checked', checked)
+    assert m12.resolve_agent_hosts(0) == ['cc-vibe.com']
+    assert 'GA_LLM_CONFIG_NAME=native_claude_cc_vibe_opus48' in commands[0]
+
+
 def test_representatives_are_in_approved_proposals():
     for source in m12.SOURCES:
         row = m12.proposal_row(source)

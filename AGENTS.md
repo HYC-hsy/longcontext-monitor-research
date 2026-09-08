@@ -6,6 +6,16 @@
 
 ### 权威文档
 
+- 2026-09-08 系统性优化的设计入口：`method_discovery/docs/PHASE1_COHERENT_MONITOR_OPTIMIZATION_DESIGN_20260908.md`。
+  当前完成 S0 设计，未修改执行代码或启动新实验；S1 连续认知底座与 S2 可修订判断依据须分开验收。
+  保留通用工具、同会话、两层观察与并发，不通过重复提示原则或领域规则替代机制判别；不覆盖五阶段研究路线。
+
+- 2026-09-07 人工 Fyne 复盘后，用户授权基础观察/回执修复与最小认识续接候选实现；真实启动仍需单独确认。
+  复用人工经验时先读 `method_discovery/docs/PHASE1_MANUAL_FYNE_REFERENCE_AND_CONTINUITY_CHANGE_20260907.md`，
+  再按其中原始轨迹与干预锚点核对；不得把人工结果视为自动候选或非线性记忆的有效性证明。
+
+- 2026-09-06 用户确认的后续方法发现路线：`method_discovery/docs/METHOD_DISCOVERY_HYPOTHESIS_DRIVEN_PLAN_20260906.md`。以 Clean Monitor 为主体，按关键原因发现、最小机制、长程持久性、收束解释、冻结正式实验五阶段推进，覆盖旧路线冲突的后续执行顺序；聊天 N0–N9 不作为执行规格。当前仅授权阶段 1 历史调查。研究问题 A–D、无 checker、两层观察、单一持续监察者、真实启动门禁和 600 行限制保留；成本贯穿全程。阶段 1 首批证据见 `method_discovery/docs/PHASE1_CAUSAL_EXPLORATION_INITIAL_FINDINGS_20260906.md`，尚未完成因果判别。
+
 - 论文主规格：`some_research/12_updated_paper_thesis_and_method_candidates.md`。
 - 实证依据：`some_research/11_final120_empirical_pivot.md`。
 - 形成脉络：`some_research/13_research_genealogy_to_evidence_carrying_state.md`。

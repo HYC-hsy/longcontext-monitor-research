@@ -436,6 +436,8 @@ def resolve_agent_hosts(llm_no: int) -> list[str]:
             "-e",
             f"M12_LLM_NO={llm_no}",
             "-e",
+            f"GA_LLM_CONFIG_NAME={os.environ.get('GA_LLM_CONFIG_NAME', '')}",
+            "-e",
             f"PYTHONPATH={site}:/opt/genericagent",
             "debian:bookworm-slim",
             python_bin,

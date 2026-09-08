@@ -205,6 +205,7 @@ def resolve_model(llm_no: int) -> dict[str, Any]:
     output = checked([
         "docker", "run", "--rm", "-v", f"{GA_RUNTIME.resolve()}:/opt/m4-runtime:ro",
         "-v", f"{GA_ROOT.resolve()}:/opt/genericagent:ro", "-e", f"M4_LLM_NO={llm_no}",
+        "-e", f"GA_LLM_CONFIG_NAME={os.environ.get('GA_LLM_CONFIG_NAME', '')}",
         "-e", f"PYTHONPATH={site}:/opt/genericagent", "debian:bookworm-slim",
         python_bin, "-c", resolver,
     ], 180)

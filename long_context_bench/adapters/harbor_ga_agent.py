@@ -385,8 +385,35 @@ class M4GenericAgent(BaseAgent):
 
         iterations = max(1, self.timeout_sec // 2)
         output = f"{task_dir}/output.txt"
+        # Establish identity before the long await: Harbor can cancel it at its
+        # outer deadline before the normal result/metadata path is reached.
+        partial_metadata = {
+            "schema_version": self.metadata_schema_version,
+            "run_id": self.run_id, "task_id": self.task_id,
+            "llm_no": self.llm_no, "expected_model": self.expected_model,
+            "ga_source_sha256": self.ga_source_sha256,
+            "round_end_seen": False, "wrapper_return_code": None,
+            "ga_process_return_code": None, "archive_status": "running_partial",
+            "experiment_id": self.experiment_id, "condition_id": self.condition_id,
+            "baseline_condition": self.baseline_condition,
+            "task_workspace_dir": self.task_workspace_dir,
+            "inline_long_prompt": True,
+        }
+        context.metadata = partial_metadata
+        await environment.exec(
+            "printf %s "
+            + _q(base64.b64encode(json.dumps(partial_metadata, sort_keys=True).encode()).decode())
+            + " | base64 -d > /logs/agent/m4_agent_identity.json",
+            timeout_sec=30, user="root",
+        )
         command = f"""
 set +e
+archive_output() {{
+  if [ -f {_q(output)} ]; then
+    cp {_q(output)} /logs/agent/output.txt.pending && mv /logs/agent/output.txt.pending /logs/agent/output.txt
+  fi
+}}
+trap archive_output EXIT
 {_q(python_bin)} {_q(CONTAINER_GA + '/agentmain.py')} --task {_q(agent_id)} \
   {('--history ' + _q(self.completion_branch_checkpoint + '/state/session.json')) if self.completion_branch_checkpoint else ''} \
   --llm_no {_q(self.llm_no)} --nobg --verbose --no-user-tools \
@@ -395,6 +422,7 @@ pid=$!
 found=0
 timed_out=1
 for i in $(seq 1 {iterations}); do
+  archive_output
   if grep -Fxq {_q(ROUND_END)} {_q(output)} 2>/dev/null; then found=1; timed_out=0; break; fi
   if ! kill -0 "$pid" 2>/dev/null; then timed_out=0; break; fi
   sleep 2
@@ -440,6 +468,7 @@ exit 125
             "baseline_condition": self.baseline_condition,
             "task_workspace_dir": self.task_workspace_dir,
             "inline_long_prompt": True,
+            "archive_status": "finished" if result.return_code == 0 else "failed",
         }
         context.metadata = metadata
         await environment.exec(

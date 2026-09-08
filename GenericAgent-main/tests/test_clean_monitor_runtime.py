@@ -24,6 +24,7 @@ def scripted_clean_monitor_worker(config, commands, outputs):
         elif command["kind"] == "completion":
             outputs.put({
                 "kind": "completion", "decision": "allow", "cursor": command["cursor"],
+                "request_id": command["request_id"],
             })
 
 
@@ -71,6 +72,25 @@ def test_boundary_creates_two_layer_archive_and_delivers_immediate_correction(tm
     }
     assert raw["tool_calls"][0]["args"]["path"] == "cors.py"
     assert delivered == ["Preserve the literal wildcard."]
+    feedback = (runtime.private_root / 'delivery_feedback.jsonl').read_text(encoding='utf-8')
+    assert 'handed_to_task_interrupt_interface' in feedback
+
+
+def test_failed_interrupt_is_recorded_and_pump_survives(tmp_path):
+    def fail(_):
+        raise RuntimeError('fixture delivery failure')
+    runtime = _runtime(tmp_path, fail)
+    try:
+        runtime.archive_boundary({'internal_turn': 1, 'response_content': 'test'})
+        path = runtime.private_root / 'delivery_feedback.jsonl'
+        deadline = time.monotonic() + 3
+        while not path.exists() and time.monotonic() < deadline:
+            time.sleep(.02)
+        assert '"delivery": "failed"' in path.read_text(encoding='utf-8')
+        assert runtime._pump.is_alive()
+        assert runtime.request_completion({'internal_turn': 2}).allow
+    finally:
+        runtime.close()
 
 
 def test_root_completion_uses_distinct_control_boundary(tmp_path):

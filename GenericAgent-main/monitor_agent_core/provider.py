@@ -31,6 +31,23 @@ class ProviderError(RuntimeError):
     pass
 
 
+class RetryableProviderError(ProviderError):
+    """Explicit temporary remote failure, not a model/tool decision."""
+
+
+def _remote_error(error):
+    fields = error if isinstance(error, dict) else {}
+    codes = {str(fields.get(key, '')).lower() for key in ('type', 'code')}
+    permanent = {'authentication_error', 'permission_error', 'invalid_request_error',
+                 'insufficient_quota', 'quota_exceeded', 'subscription_not_found',
+                 'context_length_exceeded', 'billing_error'}
+    temporary = {'upstream_error', 'server_error', 'stream_read_error',
+                 'overloaded_error', 'temporarily_unavailable', 'rate_limit_error',
+                 'rate_limit_exceeded'}
+    cls = RetryableProviderError if codes & temporary and not codes & permanent else ProviderError
+    return cls(str(error))
+
+
 def _url(base: str, path: str) -> str:
     base, path = base.rstrip("/"), path.strip("/")
     if base.endswith("$"):
@@ -86,8 +103,16 @@ class MonitorProviderClient:
         self.history = []
         self.usage_records = []
         self.history_transforms = []
+        self.request_attempts = []
+        self._cancelled = threading.Event()
         self._active_lock = threading.Lock()
         self._active_response = None
+        self.progress_callback = None
+
+    def _progress(self, event, **fields):
+        callback = getattr(self, 'progress_callback', None)
+        if callback is not None:
+            callback(event, **fields)
 
     @staticmethod
     def _provider_kind(name, config):
@@ -102,6 +127,7 @@ class MonitorProviderClient:
             response = self._active_response
         if response is None:
             return False
+        self._cancelled.set()
         try: response.close()
         except Exception: pass
         return True
@@ -177,6 +203,23 @@ class MonitorProviderClient:
         before = self.history_measure()
         if before["characters"] <= self.history_char_limit:
             return
+        if getattr(self, "prepare_continuation", None) is not None:
+            self._relieve_tool_result_pressure()
+            before = self.history_measure()
+            if before["characters"] <= self.history_target_chars:
+                return
+            self._compact_with_continuation(before)
+            if self.history_measure()["characters"] > self.history_char_limit:
+                raise ProviderError(
+                    "Monitor history remains over capacity after lossless evidence archival; "
+                    "retained dialogue cannot be retired safely. History preserved."
+                )
+            return
+        continuation = None
+        prepare = getattr(self, "prepare_continuation", None)
+        if prepare is not None:
+            # Save semantic continuity before destructive trimming. Failure leaves history intact.
+            continuation = prepare()
 
         # Review boundaries are defined by acknowledged control actions, not by
         # a fixed number of messages. Never split a tool call from its result.
@@ -214,6 +257,12 @@ class MonitorProviderClient:
                     if block.get("type") == "tool_result":
                         block["content"] = self._bounded_block(block.get("content", ""), 12000)
 
+        if continuation:
+            boundaries = self._review_boundaries()
+            position = boundaries[0] if boundaries else 0
+            self.history.insert(position, {"role": "user", "content": [{
+                "type": "text", "text": "Your working understanding carried forward before history compaction:\n" + continuation,
+            }]})
         after = self.history_measure()
         self.history_transforms.append({
             "kind": "monitor_history_compaction",
@@ -224,11 +273,99 @@ class MonitorProviderClient:
             "target_chars": self.history_target_chars,
         })
 
+    def _relieve_tool_result_pressure(self):
+        """Move oversized payloads, not decisions, to exact retrievable storage."""
+        before = self.history_measure()
+        archive = getattr(self, "archive_continuation_history", None)
+        if archive is None:
+            raise ProviderError("Semantic compaction requires a retrievable history archive")
+        candidates = []
+        for mi, message in enumerate(self.history):
+            for bi, block in enumerate(message.get("content") or []):
+                if not isinstance(block, dict) or block.get("type") != "tool_result":
+                    continue
+                value = block.get("content")
+                if isinstance(value, str) and len(value.encode("utf-8")) > 12000:
+                    candidates.append((mi, bi))
+        if not candidates:
+            return
+        location = archive(self.export_history())
+        changed = 0
+        for mi, bi in candidates:
+            if self.history_measure()["characters"] <= self.history_target_chars:
+                break
+            block = self.history[mi]["content"][bi]
+            value = block["content"]
+            block["content"] = (
+                "Large tool result: only beginning/end excerpts are in this context, not the full evidence. "
+                "Use file_read/code_run to inspect the full JSON string at " + location
+                + f", JSON location [{mi}].content[{bi}].content (zero-based). "
+                "The omitted middle may contain relevant evidence; excerpts alone cannot establish absence.\n"
+                + value[:2000] + "\n[Middle archived, not shown]\n" + value[-2000:]
+            )
+            changed += 1
+        self.history_transforms.append({
+            "kind": "monitor_tool_payload_archival", "before": before,
+            "after": self.history_measure(), "archive": location, "results_archived": changed,
+        })
+
+    def _compact_with_continuation(self, before):
+        """Retire a protocol-complete prefix, after planning and durable archival.
+
+        Recent dialogue is retained verbatim. A control boundary is a transport
+        boundary, not a claim that its semantic investigation has been resolved.
+        """
+        boundaries = self._review_boundaries()
+        # Keep the two newest completed reviews and all current investigation.
+        candidates = boundaries[:-2]
+        if not candidates:
+            # No safe prefix can be retired. Do not repeatedly ask for a note
+            # while leaving exactly the same oversized conversation in place.
+            self._progress("compaction_deferred", reason="no_retirable_review_prefix",
+                           history_characters=before["characters"])
+            return
+        cut = candidates[-1]
+        for candidate in candidates:
+            tail = self.history[candidate:]
+            size = len(json.dumps(tail, ensure_ascii=False).encode("utf-8"))
+            if size <= self.history_target_chars:
+                cut = candidate
+                break
+        tail_bytes = len(json.dumps(self.history[cut:], ensure_ascii=False).encode("utf-8"))
+        if before["characters"] - tail_bytes < self.history_char_limit - self.history_target_chars:
+            self._progress("compaction_deferred", reason="insufficient_reclaimable_history",
+                           history_characters=before["characters"])
+            return
+        archive = getattr(self, "archive_continuation_history", None)
+        if archive is None:
+            raise ProviderError("Semantic compaction requires a retrievable history archive")
+        # Archive first: no evidence is silently discarded if maintenance fails.
+        location = archive(self.export_history())
+        note = self.prepare_continuation()
+        carried = {
+            "role": "user", "content": [{"type": "text", "text":
+                "Current working understanding, written after reviewing the retained dialogue below. "
+                "It is revisable, not a new task instruction. Full pre-compaction history: "
+                + location + "\n" + note}],
+        }
+        # A previous carried note is in the retired prefix, not duplicated.
+        self.history = [carried] + self.history[cut:]
+        after = self.history_measure()
+        self.history_transforms.append({
+            "kind": "monitor_history_compaction", "before": before, "after": after,
+            "removed_messages": cut, "char_limit": self.history_char_limit,
+            "target_chars": self.history_target_chars, "archive": location,
+            "target_reached": after["characters"] <= self.history_target_chars,
+        })
+
     def drain_telemetry(self):
         value = {
             "usage": list(self.usage_records),
             "history_transforms": list(self.history_transforms),
         }
+        if self.request_attempts:
+            value['request_attempts'] = list(self.request_attempts)
+        self.request_attempts.clear()
         self.usage_records.clear()
         self.history_transforms.clear()
         return value
@@ -264,14 +401,44 @@ class MonitorProviderClient:
 
     def _request(self, tools):
         last_error = None
+        self._cancelled.clear()
         for attempt in range(self.max_retries + 1):
+            started = time.monotonic()
+            request_id = uuid.uuid4().hex
+            self._progress_request_id = request_id
+            record = {'attempt': attempt + 1, 'started_at': time.time(),
+                      'history_characters': self.history_measure()['characters']}
+            self._progress('request_started', request_id=request_id, **record)
             try:
-                return self._request_once(tools)
-            except (requests.Timeout, requests.ConnectionError, requests.exceptions.ChunkedEncodingError) as exc:
+                result = self._request_once(tools)
+                if self._cancelled.is_set():
+                    raise ProviderError('Provider request cancelled')
+                record['outcome'] = 'success'
+                self._progress('request_usage', request_id=request_id, usage=result[1])
+                return result
+            except (RetryableProviderError, requests.Timeout, requests.ConnectionError,
+                    requests.exceptions.ChunkedEncodingError) as exc:
                 last_error = exc
+                record.update(outcome='retryable_error', error_type=type(exc).__name__)
+                if self._cancelled.is_set():
+                    raise ProviderError('Provider request cancelled') from exc
                 if attempt >= self.max_retries:
+                    record['outcome'] = 'retries_exhausted'
                     break
-                time.sleep(min(8, 1.5 * (2 ** attempt)))
+                delay = min(8, 1.5 * (2 ** attempt))
+                record['retry_delay_seconds'] = delay
+                self._progress('request_retry_wait', request_id=request_id, seconds=delay,
+                               error_type=type(exc).__name__)
+                if self._cancelled.wait(delay):
+                    raise ProviderError('Provider request cancelled') from exc
+            except Exception as exc:
+                record.update(outcome='error', error_type=type(exc).__name__)
+                raise
+            finally:
+                if self._cancelled.is_set(): record['outcome'] = 'cancelled'
+                record['duration_seconds'] = time.monotonic() - started
+                self.request_attempts.append(record)
+                self._progress('request_finished', request_id=request_id, **record)
         raise ProviderError(f"Provider request failed: {last_error}")
 
     def _request_once(self, tools):
@@ -285,16 +452,40 @@ class MonitorProviderClient:
             url, headers=headers, json=payload, stream=True,
             timeout=(self.connect_timeout, self.read_timeout), proxies=self.proxies, verify=self.verify,
         ) as response:
+            self._progress('response_headers', request_id=self._progress_request_id,
+                           status_code=response.status_code)
             with self._active_lock: self._active_response = response
             try:
                 if response.status_code >= 400:
                     try: body = response.text[:500]
                     except Exception: body = ""
+                    if response.status_code in {408, 429, 500, 502, 503, 504}:
+                        try: error = response.json().get('error', {})
+                        except (ValueError, AttributeError): error = {}
+                        classified = _remote_error(error)
+                        # Explicit permanent errors override a transient HTTP status.
+                        if error and not isinstance(classified, RetryableProviderError):
+                            raise classified
+                        raise RetryableProviderError(f"HTTP {response.status_code}: {body}")
                     raise ProviderError(f"HTTP {response.status_code}: {body}")
-                return parser(response.iter_lines())
+                return parser(self._progress_lines(response.iter_lines()))
             finally:
                 with self._active_lock:
                     if self._active_response is response: self._active_response = None
+
+    def _progress_lines(self, lines):
+        last = 0.0
+        count = 0
+        size = 0
+        for line in lines:
+            count += 1
+            size += len(line)
+            now = time.monotonic()
+            if count == 1 or now - last >= 5:
+                self._progress('stream_activity', request_id=self._progress_request_id,
+                               lines=count, bytes_or_characters=size)
+                last = now
+            yield line
 
     def _anthropic_request(self, tools):
         headers = {
@@ -364,7 +555,14 @@ class MonitorProviderClient:
                 text = "\n".join(x.get("text", "") for x in message["content"] if x.get("type") == "text")
                 if text: result.append({"role": "assistant", "content": text})
                 for block in message["content"]:
-                    if block.get("type") == "openai_item": result.append(dict(block["item"]))
+                    if block.get("type") == "openai_item":
+                        item = dict(block["item"])
+                        # Relay may return reasoning.status but reject it on
+                        # input. Normalize only wire metadata; keep the archived
+                        # item and all reasoning/context contents unchanged.
+                        if item.get("type") == "reasoning":
+                            item.pop("status", None)
+                        result.append(item)
                     elif block.get("type") == "tool_use": result.append({
                         "type": "function_call", "call_id": block["id"], "name": block["name"],
                         "arguments": json.dumps(block.get("input") or {}),
@@ -414,12 +612,13 @@ class MonitorProviderClient:
                     except json.JSONDecodeError: current["input"] = {"_raw": tool_json}
                 blocks.append(current); current = None
             elif kind == "message_delta": usage.update(event.get("usage", {}) or {})
-            elif kind == "error": raise ProviderError(str(event.get("error")))
+            elif kind == "error": raise _remote_error(event.get("error"))
         if current: blocks.append(current)
         return blocks, usage
 
     def _parse_openai_responses(self, lines):
         text, calls, usage, provider_items = "", {}, {}, {}
+        completed = False
         for event in self._events(lines):
             kind = event.get("type")
             if kind == "response.output_text.delta": text += event.get("delta", "")
@@ -440,14 +639,36 @@ class MonitorProviderClient:
             elif kind == "response.function_call_arguments.done":
                 index = event.get("output_index", 0)
                 if index in calls: calls[index]["_args"] = event.get("arguments", calls[index]["_args"])
-            elif kind == "response.completed": usage = event.get("response", {}).get("usage", {}) or {}
-            elif kind == "error": raise ProviderError(str(event.get("error")))
+            elif kind == "response.completed":
+                completed = True
+                usage = event.get("response", {}).get("usage", {}) or {}
+                self._progress('response_completed',
+                               request_id=getattr(self, '_progress_request_id', None))
+                break
+            elif kind == "error": raise _remote_error(event.get("error"))
+            elif kind == "response.failed":
+                raise _remote_error((event.get('response') or {}).get('error'))
+            elif kind == "response.incomplete":
+                details = (event.get('response') or {}).get('incomplete_details') or {}
+                self._progress('response_incomplete', reason=details.get('reason'),
+                               request_id=getattr(self, '_progress_request_id', None))
+                # A declared output limit is not fixed by blindly repeating the
+                # same request. Never execute partially generated tool arguments.
+                raise ProviderError(f"Monitor response explicitly incomplete: {details}")
+        if not completed:
+            self._progress('response_truncated',
+                           request_id=getattr(self, '_progress_request_id', None))
+            raise RetryableProviderError("Responses stream ended without response.completed")
         blocks = [{"type": "openai_item", "item": provider_items[index]} for index in sorted(provider_items)]
         if text: blocks.append({"type": "text", "text": text})
         for index in sorted(calls):
             call = calls[index]
-            try: call["input"] = json.loads(call.pop("_args") or "{}")
-            except json.JSONDecodeError: call["input"] = {"_raw": call.pop("_args")}
+            raw = call.pop("_args")
+            try: call["input"] = json.loads(raw or "{}")
+            except json.JSONDecodeError:
+                raise RetryableProviderError("Completed response contains invalid tool argument JSON")
+            if not isinstance(call["input"], dict):
+                raise RetryableProviderError("Tool arguments must be a JSON object")
             blocks.append(call)
         return blocks, usage
 
