@@ -1,5 +1,10 @@
 # 当前方法发现恢复入口
 
+2026-09-08 用户授权保存工程基线并开始机制研究：commit `f2ac266`，tag `clean-monitor-foundation-20260908`。
+首轮研究见 `PHASE1_GROUNDED_JUDGMENT_RESEARCH_20260908.md`：W交接校验、U决策时依据重建、R可撤回纠偏，均未实现/未验证，不预先叠加。
+新确认直接近邻MemIR（2605.25869）与MAGE的来源组织/写入校验可直接借鉴，不因已有工作而人为绕开；继承与新增须分别说明。用户明确认可基于已有方法继续创新。
+当前13项相关回归通过；无新真实任务。下一步讨论候选实现差异及门禁，不再无依据重建并发底座，不把研究主问题改成单纯来源分类或memory poisoning。
+
 2026-09-08 incremental-audit Fyne R1 已真实启动并由观察者停止，详见 `PHASE1_INCREMENTAL_AUDIT_FYNE_R1_LIVE_20260908.md`。
 约66分钟/262轮；runner 97207 已退出，Docker 无活动容器。增量归档正常，四次 completion 均被真实干预立即恢复，无 TIMEOUT。
 停止原因不是网络重试：续接 working.md 中的 no-partial-mutation 检查被后续纠偏升格成原任务要求，任务254轮接受；原题无明确后续setter失败时全量回滚要求。
