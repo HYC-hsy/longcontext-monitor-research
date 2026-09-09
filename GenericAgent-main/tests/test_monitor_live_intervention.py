@@ -26,6 +26,61 @@ class Client:
         return ModelResponse('', [ToolCall(str(self.steps), name, json.dumps(args))], {})
 
 
+def test_completion_arrives_inside_same_review(tmp_path):
+    evidence = tmp_path / 'evidence'
+    evidence.mkdir()
+    (evidence / 'fact.txt').write_text('public fact')
+    state = [None]
+
+    class ArrivingClient(Client):
+        def complete(self, messages, tools):
+            self.steps += 1
+            if self.steps == 1:
+                state[0] = {'generation': 1, 'request_id': 'completion-1', 'cursor': 9}
+                return ModelResponse('', [ToolCall('1', 'file_read', '{"path":"task/fact.txt"}')], {})
+            assert any('line 9' in str(m.get('content')) for m in messages)
+            return ModelResponse('', [ToolCall('2', 'allow_complete', '{}')], {})
+
+    client = ArrivingClient([], [])
+    monitor = MonitorAgent(client, MonitorWorkspace(evidence, tmp_path / 'private'))
+    monitor.completion_state = lambda: state[0]
+    result = monitor.review('Ordinary progress', completion_pending=False)
+    assert result.payload == {'request_id': 'completion-1'}
+    assert client.steps == 2
+
+
+def test_approval_cannot_rebind_to_unseen_proposal(tmp_path):
+    evidence = tmp_path / 'evidence'
+    evidence.mkdir()
+    monitor = MonitorAgent(Client([], []), MonitorWorkspace(evidence, tmp_path / 'private'))
+    state = [{'generation': 1, 'request_id': 'completion-1', 'cursor': 9}]
+    monitor.completion_state = lambda: state[0]
+    monitor._refresh_completion()
+    state[0] = {'generation': 2, 'request_id': 'completion-2', 'cursor': 19}
+    assert monitor.dispatch('allow_complete', {}).data['status'] == 'error'
+    monitor._refresh_completion()
+    assert monitor.dispatch('allow_complete', {}).action.payload['request_id'] == 'completion-2'
+    monitor.intervention_callback = lambda message: {'delivery': 'queued'}
+    monitor.dispatch('intervene', {'message': 'A concrete conflict'})
+    # The parent pump may not yet have invalidated shared state.
+    monitor._refresh_completion()
+    assert monitor.dispatch('allow_complete', {}).action is None
+
+
+def test_pending_wait_keeps_investigation_open_without_task_input(tmp_path):
+    evidence = tmp_path / 'evidence'
+    evidence.mkdir()
+    monitor = MonitorAgent(Client([], []), MonitorWorkspace(evidence, tmp_path / 'private'))
+    state = [{'generation': 1, 'request_id': 'completion-1', 'cursor': 9}]
+    monitor.completion_state = lambda: state[0]
+    # A proposal arriving after the model request also prevents a turn-based deadlock.
+    result = monitor.dispatch('wait', {'after_turns': 1})
+    assert result.action is None
+    assert result.data['status'] == 'handoff_pending'
+    state[0] = None
+    assert monitor.dispatch('wait', {'after_turns': 1}).action.kind == 'wait'
+
+
 def test_intervention_delivers_before_followup_tools_and_wait(tmp_path):
     evidence = tmp_path / 'evidence'
     evidence.mkdir()

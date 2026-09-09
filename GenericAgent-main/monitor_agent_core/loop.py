@@ -12,7 +12,7 @@ class MonitorLoopError(RuntimeError):
 
 
 def run_review(client, system_prompt: str, wake_context: str, tools: list[dict],
-               dispatch, max_turns: int = 20, audit=None) -> MonitorAction:
+               dispatch, max_turns: int = 20, audit=None, before_model=None) -> MonitorAction:
     """Run one wake while the provider client preserves history across wakes."""
     messages = [
         {"role": "system", "content": system_prompt},
@@ -24,6 +24,10 @@ def run_review(client, system_prompt: str, wake_context: str, tools: list[dict],
 
     record('review_context', system_prompt=system_prompt, wake_context=wake_context, tools=tools)
     for _turn in range(1, max_turns + 1):
+        if before_model is not None:
+            update = before_model()
+            if update:
+                messages.append({"role": "user", "content": update})
         # Record deltas, not a second copy of the entire growing provider history.
         record('model_input', turn=_turn, messages=messages)
         try:

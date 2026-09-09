@@ -266,3 +266,19 @@ def test_control_tool_result_closes_call_before_next_wake():
         "function_call", "function_call_output",
     ]
     assert rebuilt[-1] == {"role": "user", "content": "next wake"}
+
+
+def test_pending_wait_is_not_a_completed_review_for_compaction():
+    client = MonitorProviderClient('native_openai', config('gpt-5.6-sol'))
+    client.history = [
+        {'role': 'assistant', 'content': [{'type': 'tool_use', 'id': 'w', 'name': 'wait', 'input': {}}]},
+        {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'w',
+                                     'content': '{"status":"handoff_pending"}'}]},
+    ]
+    assert client._review_boundaries() == []
+    client.history += [
+        {'role': 'assistant', 'content': [{'type': 'tool_use', 'id': 'a', 'name': 'allow_complete', 'input': {}}]},
+        {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'a',
+                                     'content': '{"status":"accepted"}'}]},
+    ]
+    assert client._review_boundaries() == [4]

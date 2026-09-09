@@ -7,6 +7,7 @@ import multiprocessing as mp
 import queue
 import re
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,7 @@ class CompletionOutcome:
     allow: bool
     message: str = ""
     reason: str = ""
+    incomplete: bool = False
 
 
 def _append(path: Path, value: Mapping[str, Any]):
@@ -79,6 +81,17 @@ def _worker(config, commands, outputs):
         active = config.get("active_completion")
         return active is None or active.value == command.get("generation")
 
+    def current_completion():
+        active = config["active_completion"]
+        with active.get_lock():
+            generation = active.value
+            if not generation:
+                return None
+            return {"generation": generation, "request_id": f"completion-{generation}",
+                    "cursor": config["completion_cursor"].value}
+
+    monitor.completion_state = current_completion
+
     def review(context, completion=False, request_id=None):
         nonlocal next_wake_turn, close_watch, receipt_offset
         submitted = False
@@ -133,12 +146,12 @@ def _worker(config, commands, outputs):
                 })
         elif action.kind == "allow_complete":
             outputs.put({"kind": "completion", "decision": "allow", "cursor": cursor,
-                         "request_id": request_id})
-        if completion and not submitted and action.kind != "allow_complete":
+                         "request_id": action.payload.get("request_id", request_id)})
+        if completion and not submitted and action.kind == "intervene":
             outputs.put({
                 "kind": "completion", "decision": "continue", "cursor": cursor,
                 "request_id": request_id,
-                "message": action.payload.get("message", "Continue the task; no completion approval was issued."),
+                "message": action.payload["message"],
             })
 
     review(
@@ -178,7 +191,7 @@ class MonitorRuntime:
     def __init__(self, *, public_task, task_workspace, artifact_dir, config_name,
                  model_config, interrupt_callback, max_review_turns=20,
                  completion_timeout=300, process_factory=None, worker_target=None,
-                 interrupt_pending=None):
+                 interrupt_pending=None, run_timeout_seconds=10000, run_deadline_epoch=None):
         self.artifact_dir = Path(artifact_dir).resolve()
         task_workspace = Path(task_workspace).resolve()
         if self.artifact_dir == task_workspace or task_workspace in self.artifact_dir.parents:
@@ -198,6 +211,9 @@ class MonitorRuntime:
         self._interrupt_callback = interrupt_callback
         self._interrupt_pending = interrupt_pending or (lambda: False)
         self._completion_timeout = max(1.0, float(completion_timeout))
+        remaining = (float(run_deadline_epoch) - time.time() if run_deadline_epoch is not None
+                     else float(run_timeout_seconds))
+        self._run_deadline = time.monotonic() + max(0.0, remaining)
         self._context = mp.get_context("spawn")
         self._commands = self._context.Queue()
         self._outputs = self._context.Queue()
@@ -205,6 +221,7 @@ class MonitorRuntime:
         self._pending_lock = threading.Lock()
         self._completion_generation = 0
         self._active_completion = self._context.Value('q', 0)
+        self._completion_cursor = self._context.Value('q', 0)
         self._closed = threading.Event()
         process = process_factory or self._context.Process
         self._process = process(target=worker_target or _worker, args=({
@@ -213,6 +230,7 @@ class MonitorRuntime:
             "task_workspace": str(task_workspace), "max_review_turns": int(max_review_turns),
             "task_original_path": str(self.task_original_path),
             "active_completion": self._active_completion,
+            "completion_cursor": self._completion_cursor,
         }, self._commands, self._outputs), daemon=True)
         self._process.start()
         self._pump = threading.Thread(target=self._pump_outputs, daemon=True, name="monitor-output")
@@ -277,15 +295,22 @@ class MonitorRuntime:
                         value = dict(value, delivery="handed_to_completion_boundary")
                     else:
                         value = dict(value, delivery="archived_late_or_unmatched")
+            elif kind == "failure":
+                # An ordinary review may fail while a root handoff is waiting.
+                with self._pending_lock:
+                    for pending in self._pending.values():
+                        pending.put(value)
+                    if self._pending:
+                        self._pending.clear()
+                        self._active_completion.value = 0
             _append(self.artifact_dir / "runtime_receipts.jsonl", value)
             if kind in {"intervention", "completion"}:
                 _append(self.private_root / "delivery_feedback.jsonl", value)
 
     def request_completion(self, public_event=None) -> CompletionOutcome:
         if not self._process.is_alive():
-            return CompletionOutcome(False, "The completion monitor is unavailable. Continue the task.", "unavailable")
+            return self._incomplete("unavailable")
         cursor = self._archive(public_event) if public_event else self._sequence
-        request_id = uuid.uuid4().hex
         pending = queue.Queue()
         with self._pending_lock:
             # Covers an interrupt delivered immediately before registration as well
@@ -296,22 +321,54 @@ class MonitorRuntime:
                 raise RuntimeError("Only one Task Agent completion may be pending")
             self._completion_generation += 1
             generation = self._completion_generation
-            self._active_completion.value = generation
+            request_id = f"completion-{generation}"
+            with self._active_completion.get_lock():
+                self._completion_cursor.value = cursor
+                self._active_completion.value = generation
             self._pending[request_id] = pending
         self._commands.put({"kind": "completion", "cursor": cursor, "request_id": request_id,
                             "generation": generation,
                             "task_turn": int((public_event or {}).get("internal_turn") or 0)})
-        try: value = pending.get(timeout=self._completion_timeout)
-        except queue.Empty:
-            return CompletionOutcome(False, "The completion audit timed out. Continue the task.", "timeout")
+        delayed = False
+        warning_at = time.monotonic() + self._completion_timeout
+        try:
+            while True:
+                remaining = self._run_deadline - time.monotonic()
+                if remaining <= 0:
+                    return self._incomplete("run_budget_exhausted", request_id)
+                if self._closed.is_set() or not self._process.is_alive():
+                    return self._incomplete("unavailable", request_id)
+                try:
+                    value = pending.get(timeout=min(0.2, remaining))
+                    break
+                except queue.Empty:
+                    if not delayed and time.monotonic() >= warning_at:
+                        _append(self.artifact_dir / "runtime_receipts.jsonl", {
+                            "kind": "completion_delayed", "request_id": request_id,
+                            "timestamp": time.time(), "action": "keep_same_review_pending"})
+                        delayed = True
         finally:
             with self._pending_lock:
                 self._pending.pop(request_id, None)
                 if self._active_completion.value == generation:
                     self._active_completion.value = 0
         if value.get("decision") == "allow": return CompletionOutcome(True, reason="monitor_allowed")
-        return CompletionOutcome(False, value.get("message") or "Continue the task.",
-                                 value.get("reason") or "monitor_correction")
+        if value.get("decision") == "continue" and value.get("message"):
+            return CompletionOutcome(False, value["message"],
+                                     value.get("reason") or "monitor_correction")
+        return self._incomplete("review_failed", request_id)
+
+    def _incomplete(self, reason, request_id=None):
+        record = {
+            "kind": "completion_incomplete", "reason": reason,
+            "request_id": request_id, "timestamp": time.time()}
+        _append(self.artifact_dir / "runtime_receipts.jsonl", record)
+        marker = self.artifact_dir / "completion_incomplete.json"
+        temporary = marker.with_suffix('.pending')
+        temporary.write_text(json.dumps(record), encoding='utf-8')
+        temporary.replace(marker)
+        return CompletionOutcome(False, "Completion review unfinished: " + reason,
+                                 reason, incomplete=True)
 
     def close(self):
         self._closed.set()

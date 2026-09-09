@@ -163,8 +163,10 @@ def test_expired_completion_reply_cannot_approve_next_proposal(tmp_path):
     try:
         first.start()
         old = runtime._commands.get(timeout=2)
+        runtime._outputs.put({'kind': 'intervention', 'message': 'Revise the actual conflict.',
+                              'request_id': 'interrupt-old'})
         first.join(2)
-        assert results[0].reason == 'timeout'
+        assert results[0].reason == 'interrupted'
         assert runtime._active_completion.value == 0
         second = threading.Thread(target=lambda: results.append(runtime.request_completion()))
         second.start()
@@ -172,7 +174,7 @@ def test_expired_completion_reply_cannot_approve_next_proposal(tmp_path):
         runtime._outputs.put({'kind': 'completion', 'decision': 'allow', 'request_id': old['request_id']})
         feedback = runtime.private_root / 'delivery_feedback.jsonl'
         await_condition(feedback.exists)
-        assert json.loads(feedback.read_text().splitlines()[0])['delivery'] == 'archived_late_or_unmatched'
+        await_condition(lambda: 'archived_late_or_unmatched' in feedback.read_text())
         assert second.is_alive()
         assert runtime._active_completion.value == new['generation']
         runtime._outputs.put({'kind': 'completion', 'decision': 'allow', 'request_id': new['request_id']})
@@ -191,3 +193,55 @@ def test_expired_completion_does_not_swallow_new_patrol_progress():
     selected = _coalesce_wake_command(commands, expired, lambda c: False)
     assert selected == {'kind': 'boundary', 'cursor': 250}
     assert _coalesce_wake_command(commands, expired, lambda c: False) is None
+
+
+def test_delay_keeps_same_proposal_and_can_still_approve(tmp_path):
+    runtime = idle_runtime(tmp_path, lambda _: None)
+    results = []
+    thread = threading.Thread(target=lambda: results.append(runtime.request_completion()))
+    try:
+        thread.start()
+        command = runtime._commands.get(timeout=2)
+        receipt = runtime.artifact_dir / 'runtime_receipts.jsonl'
+        await_condition(lambda: receipt.exists() and 'completion_delayed' in receipt.read_text())
+        assert thread.is_alive()
+        assert runtime._active_completion.value == command['generation']
+        assert runtime._commands.empty()  # no replacement review
+        runtime._outputs.put({'kind': 'completion', 'decision': 'allow',
+                              'request_id': command['request_id']})
+        thread.join(2)
+        assert results[0].allow
+    finally:
+        runtime.close()
+        thread.join(2)
+
+
+def test_total_budget_stops_without_fake_correction(tmp_path):
+    runtime = idle_runtime(tmp_path, lambda _: None)
+    runtime._run_deadline = time.monotonic() + .1
+    try:
+        outcome = runtime.request_completion()
+        assert outcome.incomplete and not outcome.allow
+        assert outcome.reason == 'run_budget_exhausted'
+        marker = json.loads((runtime.artifact_dir / 'completion_incomplete.json').read_text())
+        assert marker['reason'] == 'run_budget_exhausted'
+        assert 'Continue the task' not in outcome.message
+        assert not runtime._pending
+    finally:
+        runtime.close()
+
+
+def test_ordinary_review_failure_during_completion_is_not_continue(tmp_path):
+    runtime = idle_runtime(tmp_path, lambda _: None)
+    result = []
+    thread = threading.Thread(target=lambda: result.append(runtime.request_completion()))
+    try:
+        thread.start()
+        runtime._commands.get(timeout=2)
+        runtime._outputs.put({'kind': 'failure', 'completion': False, 'error': 'review exhausted'})
+        thread.join(2)
+        assert result[0].incomplete
+        assert result[0].reason == 'review_failed'
+    finally:
+        runtime.close()
+        thread.join(2)

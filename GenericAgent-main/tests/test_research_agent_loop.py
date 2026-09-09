@@ -289,6 +289,23 @@ def test_abstain_is_distinct_exit():
     assert result["result"] == "EXITED"
 
 
+def test_monitor_incomplete_exits_without_another_task_model_turn():
+    from ga_monitor_adapter import GenericAgentMonitorAdapter
+    from monitor_agent_core.runtime import CompletionOutcome
+    adapter = object.__new__(GenericAgentMonitorAdapter)
+    adapter.runtime = SimpleNamespace(request_completion=lambda event: CompletionOutcome(
+        False, 'Completion review unfinished', 'run_budget_exhausted', incomplete=True))
+    handler = Handler()
+    handler.parent.completion_decision_callback = adapter.review_completion
+    events = []
+    with research_context({}, events.append):
+        result = run_loop(handler, max_turns=2)
+    assert result['result'] == 'EXITED'
+    decisions = [e['payload'] for e in events if e['event_type'] == 'completion_decision']
+    assert len(decisions) == 1
+    assert decisions[0]['decision'] == 'ERROR_FAIL_CLOSED'
+
+
 def test_provider_error_is_not_a_completion_proposal():
     class ErrorAwareHandler(Handler):
         def do_no_tool(self, args, response):

@@ -26,6 +26,8 @@ class ThreadProcess:
 
 def late_worker(config, commands, outputs):
     first = commands.get()
+    outputs.put(dict(kind='intervention', message='Correct the actual discrepancy',
+                     request_id='first-correction'))
     second = commands.get()
     # The expired approval must never approve the second request.
     outputs.put(dict(kind='completion', decision='allow', cursor=first['cursor'],
@@ -47,7 +49,7 @@ def test_late_approval_is_archived_not_delivered_to_next_request(tmp_path):
     )
     try:
         first = runtime.request_completion({'internal_turn': 57})
-        assert first.reason == 'timeout'
+        assert first.reason == 'interrupted'
         second = runtime.request_completion({'internal_turn': 59})
         assert not second.allow
         assert second.message == 'Current correction'
@@ -58,7 +60,7 @@ def test_late_approval_is_archived_not_delivered_to_next_request(tmp_path):
         runtime.close()
     receipts = [json.loads(x) for x in
                 (tmp_path / 'audit/runtime_receipts.jsonl').read_text().splitlines()]
-    assert receipts[0]['delivery'] == 'archived_late_or_unmatched'
+    assert any(r.get('delivery') == 'archived_late_or_unmatched' for r in receipts)
 
 
 def test_worker_handoff_does_not_prejudge_question_and_echoes_request(monkeypatch, tmp_path):

@@ -399,6 +399,24 @@ def test_adapter_forwards_clean_monitor_environment(monkeypatch, tmp_path):
     assert env["GA_MONITOR_CONFIG"] == "native_oai_cc_vibe_gpt56_sol_high"
     assert env["GA_MONITOR_ARTIFACT_DIR"] == "/logs/agent/monitor"
     assert "GA_M0_MONITOR_ENABLED" not in env
+    command = next(command for command, _ in environment.exec_calls if "agentmain.py" in command)
+    assert "export GA_MONITOR_RUN_DEADLINE_EPOCH=$(( $(date +%s) + 2 ))" in command
+    assert command.index('completion_incomplete.json') < command.index('if [ "$found" -eq 1 ]; then exit 0; fi')
+
+
+def test_clean_monitor_unfinished_review_is_not_successful_archive(monkeypatch, tmp_path):
+    adapter = _load_adapter(monkeypatch)
+    agent = adapter.M4GenericAgent(
+        logs_dir=tmp_path, model_name='model-x', run_id='incomplete',
+        expected_model='model-x', python_home='cpython-test', ga_source_sha256='hash',
+        timeout_sec=2, monitor_enabled=True, monitor_config='fixture',
+    )
+    environment = _FakeEnvironment(wrapper_return_code=126, process_return_code=0)
+    context = _Context()
+    with pytest.raises(RuntimeError, match='did not complete'):
+        asyncio.run(agent.run('instruction', environment, context))
+    assert context.metadata['archive_status'] == 'monitor_review_incomplete'
+    assert context.metadata['round_end_seen'] is False
 
 
 def test_adapter_setup_excludes_transient_checkout_directories(monkeypatch, tmp_path):

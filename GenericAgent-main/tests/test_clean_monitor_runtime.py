@@ -136,6 +136,26 @@ def test_ga_adapter_is_only_completion_type_conversion_boundary():
     assert decision.next_prompt == "Inspect the missing test."
 
 
+def test_ga_adapter_does_not_turn_incomplete_review_into_more_work():
+    adapter = object.__new__(GenericAgentMonitorAdapter)
+    adapter.runtime = type("Runtime", (), {
+        "request_completion": lambda self, event: CompletionOutcome(
+            False, "Completion review unfinished", "run_budget_exhausted", incomplete=True
+        )
+    })()
+    decision = adapter.review_completion(None, 3)
+    assert decision.decision == "ERROR_FAIL_CLOSED"
+    assert "MONITOR_REVIEW_INCOMPLETE" in decision.reason_codes
+
+
+def test_ga_adapter_passes_launcher_deadline(monkeypatch):
+    captured = {}
+    monkeypatch.setenv('GA_MONITOR_RUN_DEADLINE_EPOCH', '2000000000')
+    monkeypatch.setattr('ga_monitor_adapter.MonitorRuntime', lambda **kw: captured.update(kw))
+    GenericAgentMonitorAdapter()
+    assert captured['run_deadline_epoch'] == 2000000000
+
+
 def test_patrol_wake_backlog_coalesces_to_latest_cursor():
     commands = queue.Queue()
     commands.put({"kind": "boundary", "cursor": 8, "task_turn": 4})

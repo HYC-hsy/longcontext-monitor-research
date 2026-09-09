@@ -18,6 +18,7 @@ CONTAINER_SOURCE = "/opt/genericagent-source"
 CONTAINER_GA = "/opt/genericagent"
 ROUND_END = "[ROUND END]"
 FORWARDED_ENV_VARS = (
+    "GA_MONITOR_GROUNDED_CONTEXT",
     "GA_PROVIDER_MAX_RETRIES",
     "GA_MONITOR_REQUEST_TIMEOUT_SECONDS",
     "OPENROUTER_API_KEY",
@@ -414,6 +415,7 @@ archive_output() {{
   fi
 }}
 trap archive_output EXIT
+{('export GA_MONITOR_RUN_DEADLINE_EPOCH=$(( $(date +%s) + ' + str(iterations * 2) + ' ))') if self.monitor_enabled else ''}
 {_q(python_bin)} {_q(CONTAINER_GA + '/agentmain.py')} --task {_q(agent_id)} \
   {('--history ' + _q(self.completion_branch_checkpoint + '/state/session.json')) if self.completion_branch_checkpoint else ''} \
   --llm_no {_q(self.llm_no)} --nobg --verbose --no-user-tools \
@@ -432,6 +434,7 @@ wait "$pid" 2>/dev/null
 agent_rc=$?
 cp {_q(output)} /logs/agent/output.txt 2>/dev/null || true
 printf '%s\n' "$agent_rc" > /logs/agent/agent_process_return_code.txt
+{('if [ -f /logs/agent/monitor/completion_incomplete.json ]; then exit 126; fi') if self.monitor_enabled else ''}
 if [ "$found" -eq 1 ]; then exit 0; fi
 if [ "$timed_out" -eq 1 ]; then exit 124; fi
 # A clean child exit is not a completed turn without the protocol sentinel.
@@ -468,7 +471,8 @@ exit 125
             "baseline_condition": self.baseline_condition,
             "task_workspace_dir": self.task_workspace_dir,
             "inline_long_prompt": True,
-            "archive_status": "finished" if result.return_code == 0 else "failed",
+            "archive_status": ("monitor_review_incomplete" if self.monitor_enabled and result.return_code == 126
+                               else "finished" if result.return_code == 0 else "failed"),
         }
         context.metadata = metadata
         await environment.exec(

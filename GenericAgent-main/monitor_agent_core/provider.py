@@ -171,6 +171,7 @@ class MonitorProviderClient:
         """Return indexes after fully closed Monitor control-action reviews."""
         boundaries = []
         outstanding = set()
+        control_calls = set()
         terminal_pending = False
         for index, message in enumerate(self.history):
             if message.get("role") == "assistant":
@@ -181,11 +182,20 @@ class MonitorProviderClient:
                     if call_id:
                         outstanding.add(call_id)
                     if block.get("name") in self.CONTROL_ACTIONS:
-                        terminal_pending = True
+                        control_calls.add(call_id)
             elif message.get("role") == "user":
                 for block in message.get("content") or []:
                     if block.get("type") == "tool_result":
-                        outstanding.discard(str(block.get("tool_use_id") or ""))
+                        call_id = str(block.get("tool_use_id") or "")
+                        outstanding.discard(call_id)
+                        if call_id in control_calls:
+                            control_calls.discard(call_id)
+                            try:
+                                result = json.loads(block.get("content", ""))
+                            except (ValueError, TypeError):
+                                result = {}
+                            if isinstance(result, dict) and result.get("status") == "accepted":
+                                terminal_pending = True
                 if terminal_pending and not outstanding:
                     boundaries.append(index + 1)
                     terminal_pending = False

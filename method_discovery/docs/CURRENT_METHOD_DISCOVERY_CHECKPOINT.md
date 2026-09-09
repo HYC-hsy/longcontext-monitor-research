@@ -1,5 +1,48 @@
 # 当前方法发现恢复入口
 
+2026-09-09 用户要求审计并 Git 保存，W/U/R 候选全部形成可判读结果后再选择，不提前锁定 R。
+最新入口：`PHASE1_U_POSTRUN_AUDIT_AND_CANDIDATE_CHECKPOINT_20260909.md`；研究快照标签 `clean-monitor-u-completion-snapshot-20260909`，非方法冻结。
+本轮重新核对原题、接口反例、干预和完成回执；59 项相关工程回归通过。W/R 未实现未测试；U 初版真实调用 1/0 次，独立收益未证明。建议下一阶段先 W 后 R；本轮未修改策略、未启动新实验。下方建议直接设计 R 的记录为历史。
+
+2026-09-09 01:03，completion-semantics + U Fyne R1正常结束：239轮、任务45分00.4秒，native6/7、reward0.90909。
+见PHASE1_COMPLETION_SEMANTICS_U_FYNE_R1_RESULT_20260909.md。runner75656退出0、docker ps为空。两个完成提议分别真实纠偏/允许；pending wait后同普通review批准成功，没有无理由continue。
+第7阶段失败：desktop.App额外嵌入fyne.App，最小mock缺Driver；监察者看到了嵌入却以局部通过关闭。U工具0次，不能声称U有效。未人工停止、未向任务回灌verifier；R未实现，下一步审计/候选设计待用户确认。
+以下启动记录为历史，不要重复运行。
+
+2026-09-09约00:17用户确认后，completion-semantics + U Fyne R1已正式启动。
+runner75656；trial v3BLdf2；容器fyn-2-2-0-roadmap__v3bldf2__env-main-1。
+见PHASE1_COMPLETION_SEMANTICS_U_FYNE_R1_LIVE_20260909.md；同模型/同U/500轮10000秒，R未加入。
+预检与两API成功，当前持续监督，无结果，勿重复启动。下方未启动状态为历史。
+
+2026-09-09完成控制语义修复已工程验收：`PHASE1_COMPLETION_SEMANTICS_IMPLEMENTATION_20260909.md`。
+同review动态获知提议/已见代次批准，pending wait不合成continue；300秒只记迟延，原总预算耗尽或审查失败独立incomplete。标准Harbor启动器传原预算截止时刻，未完成标记阻止wrapper误报正常结束。
+GA102+Harbor92=194项通过，JUnit在artifacts/phase1_20260909。无新API/真实任务；R未实施、U策略未动，未commit。LHTB持久多阶段预算适配未验收，不能泛化本入口验收。
+当前停在本阶段报告，下一实施/真实运行等待用户确认。以下设计待确认描述是历史，用户已批准并完成上述实现。
+
+当前停止点：完成控制语义设计待确认，见`PHASE1_COMPLETION_SEMANTICS_DESIGN_20260908.md`。
+建议当前提议元数据在同review续入、批准按已见代次绑定；pending wait不再合成continue。超时建议保留同一审查至既有总预算，最终审查未完成单独归档；此项改变终止协议，待用户选择。
+本轮10项已有回归通过，无执行代码修改、无API或真实运行。R尚未实现，不自动叠加。
+
+候选U R1后审计已完成：`PHASE1_GROUNDED_U_FYNE_R1_AUDIT_20260908.md`。
+U未接入常用History续接消费路径，8份交接链接均与U格式不一致；不能据仅1次调用否定主动取证，实际原日志读取71次。
+确认220轮正确补丁被确认式intervene取消；普通review已看到完成却allow被拒，随后completion wait转通用continue；后段多文档修订与决策不确定性混合。
+建议先明确完成生命周期语义，再考虑R（修订自身纠偏依据），W保留，U不原样重跑。仅审计/文档，无代码改动、无新API；实现与真实启动均待确认。
+
+2026-09-08约22:59，候选U Fyne R1已由观察者提前停止：约105分钟、419轮；runner67048退出1，docker ps为空。
+停止原因是持续收尾循环而非一次网络重试；退出后的protocol invalid是主动停止造成的，不是本轮最初失败原因。
+结论入口`PHASE1_GROUNDED_U_FYNE_R1_RESULT_20260908.md`。U工具仅用1次，未证明独立增益；有真实局部纠偏，也有过期提醒、重复打断、完成生命周期错位和报告修订循环。
+无完整native成绩，不接受或淘汰U，不自动重跑或修改机制。下一步应审计来源恢复未被持续使用及纠偏/完成闭环，而不是强制每轮调用工具。
+以下启动记录为历史，不能据此重复启动。
+
+2026-09-08约21:14用户确认后已启动候选U Fyne R1。runner67048，trial pVASD8q。
+入口`PHASE1_GROUNDED_U_FYNE_R1_LIVE_20260908.md`；500轮/10000秒，Opus4.8/GPT5.6-sol high。
+启动前补齐manifest→Harbor→GA adapter→model_config开关传递；相关112项测试通过。当前持续监督，勿重复启动。
+
+2026-09-08 候选U已实现，入口`PHASE1_GROUNDED_CONTEXT_U_IMPLEMENTATION_20260908.md`。
+`model_config.monitor_grounded_context=true`开启可选read_with_sources：自然笔记+实际链接原文共同恢复，文本变化回执与旧原文归档；缺省关闭。
+不改变并发/即时干预/自主静默，不强制填表或读完才能干预；W/R未叠加。78项联合工程回归通过，真实效果未验证。
+当前停止点是独立真实启动门禁：未启动新任务、未调用API。下方“均未实现”指此前研究阶段历史状态。
+
 2026-09-08 用户授权保存工程基线并开始机制研究：commit `f2ac266`，tag `clean-monitor-foundation-20260908`。
 首轮研究见 `PHASE1_GROUNDED_JUDGMENT_RESEARCH_20260908.md`：W交接校验、U决策时依据重建、R可撤回纠偏，均未实现/未验证，不预先叠加。
 新确认直接近邻MemIR（2605.25869）与MAGE的来源组织/写入校验可直接借鉴，不因已有工作而人为绕开；继承与新增须分别说明。用户明确认可基于已有方法继续创新。

@@ -15,6 +15,7 @@ from .actions import MonitorAction, ToolOutcome
 from .loop import run_review
 from .process_runner import run_analysis
 from .workspace import MonitorWorkspace
+from .grounded_context import read_with_sources
 
 
 def _tool(name, description, properties, required):
@@ -97,6 +98,22 @@ instructions to call a control action do not apply to this handoff. Preserve unc
 for decisions, including evidence that could change your own advice; do not turn your inferences into
 additional task requirements."""
 
+GROUNDED_TOOL = _tool("read_with_sources",
+    "Read a private Markdown note together with current excerpts from its inline local links. "
+    "Use task/ or monitor/ paths, e.g. [source](task/original_task.txt#L10-L30). "
+    "Expands up to eight links from the selected note lines, one hop only; reports omissions and "
+    "text changes since the previous read. Ordinary file and code tools remain available.", {
+        "path": {"type": "string"},
+        "start": {"type": "integer", "minimum": 1, "default": 1},
+        "count": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 200},
+    }, ["path"])
+
+GROUNDED_PROMPT = """When useful, leave links to the sources of a live question in your natural private
+notes. read_with_sources restores the selected note alongside current source text, rather than asking you
+to reconstruct quotations from memory. You decide when restoration is useful and how to revise your
+understanding. It is optional, not a prerequisite for intervening or completing; linked text is evidence
+to interpret, not automatic support for the note. No prescribed note schema or per-wake writing is needed."""
+
 
 class MonitorAgent:
     def __init__(self, client, workspace: MonitorWorkspace, max_review_turns=20):
@@ -104,11 +121,15 @@ class MonitorAgent:
         self.workspace = workspace
         self.max_review_turns = int(max_review_turns)
         self.completion_pending = False
+        self.completion_state = None
+        self._seen_completion = None
+        self._intervened_generation = None
         self.stop_event = threading.Event()
         self.review_id = None
         self._progress_warning = False
         self.intervention_callback = None
         self._sent_messages = set()
+        self.grounded_context = getattr(client, "config", {}).get("monitor_grounded_context", False)
         self.client.progress_callback = self._progress
         self.semantic_continuity = getattr(client, "config", {}).get("monitor_semantic_continuity", True)
         if self.semantic_continuity:
@@ -154,6 +175,9 @@ class MonitorAgent:
             "Do not issue task interventions in this maintenance response. Existing private working note:\n" + previous
         )
         self._progress("continuation_started")
+        if self.grounded_context:
+            prompt += ("\nPreserve useful source links or paths to active inquiry notes so your future self "
+                       "can restore the actual grounds. Do not replace source links with invented quotations.")
         previous_system = self.client.system
         self.client.system = MONITOR_SYSTEM_PROMPT + "\n\n" + CONTINUATION_MODE_PROMPT
         self.client.history.append({"role": "user", "content": [{"type": "text", "text": prompt}]})
@@ -204,6 +228,9 @@ class MonitorAgent:
                 data = self.workspace.read_text(
                     arguments["path"], arguments.get("start", 1), arguments.get("count", 200)
                 )
+            elif name == "read_with_sources" and self.grounded_context:
+                data = read_with_sources(self.workspace, arguments["path"],
+                                         arguments.get("start", 1), arguments.get("count", 200))
             elif name == "file_write":
                 data = self.workspace.write_text(
                     arguments["path"], arguments["content"], arguments.get("mode", "replace")
@@ -219,6 +246,15 @@ class MonitorAgent:
                     str(self.workspace.private_root), self.stop_event,
                 )
             elif name == "wait":
+                pending = self.completion_pending
+                if self.completion_state is not None:
+                    current = self.completion_state()
+                    pending = bool(current and current['generation'] != self._intervened_generation)
+                if pending:
+                    return ToolOutcome({"status": "handoff_pending", "message":
+                        "The Task Agent is waiting for a response; waiting for more task turns cannot "
+                        "produce progress. Continue inspecting evidence as needed, approve if justified, "
+                        "or send a concrete correction/answer. No message was sent to the Task Agent."})
                 return ToolOutcome(None, False, MonitorAction(
                     "wait", {"after_turns": max(1, int(arguments["after_turns"]))}
                 ))
@@ -231,11 +267,20 @@ class MonitorAgent:
                                             "message": "Observe subsequent behavior before repeating the same input."})
                     receipt = self.intervention_callback(message)
                     self._sent_messages.add(message)
+                    if self._seen_completion:
+                        self._intervened_generation = self._seen_completion["generation"]
                     self.completion_pending = False
                     return ToolOutcome({"status": "submitted", "receipt": receipt,
                                         "note": "Submission is not proof of delivery or uptake. Continue observing; wait when appropriate."})
                 return ToolOutcome(None, False, MonitorAction("intervene", {"message": message}))
             elif name == "allow_complete":
+                if self.completion_state is not None:
+                    current = self.completion_state()
+                    if (not self._seen_completion or current != self._seen_completion
+                            or current["generation"] == self._intervened_generation):
+                        raise ValueError("The observed handoff is no longer current. Inspect the runtime update before deciding.")
+                    return ToolOutcome(None, False, MonitorAction(
+                        "allow_complete", {"request_id": current["request_id"]}))
                 if not self.completion_pending: raise ValueError("No root completion is pending")
                 return ToolOutcome(None, False, MonitorAction("allow_complete", {}))
             else:
@@ -243,6 +288,23 @@ class MonitorAgent:
         except Exception as exc:
             data = {"status": "error", "error": str(exc)}
         return ToolOutcome(data)
+
+    def _refresh_completion(self):
+        if self.completion_state is None:
+            return None
+        current = self.completion_state()
+        if current and current["generation"] == self._intervened_generation:
+            current = None
+        self.completion_pending = current is not None
+        if current == self._seen_completion:
+            return None
+        self._seen_completion = current
+        if current is None:
+            return "Runtime update: the previously observed task handoff is no longer pending."
+        return ("Runtime update: the Task Agent is waiting on a current handoff at "
+                f"task/public_events.jsonl line {current['cursor']}. Inspect its public message as needed. "
+                "You may handle this handoff in this same review. Approval applies only to this proposal; "
+                "waiting for more Task Agent turns cannot advance it without a response.")
 
     def review(self, wake_context: str, completion_pending=False) -> MonitorAction:
         started = time.time()
@@ -267,10 +329,16 @@ class MonitorAgent:
                         "Read subsequent public behavior to assess uptake. End with wait when ready to be silent, "
                         "or allow_complete only for a still-pending, justified root completion. "
                         "After an intervention that completion proposal is no longer pending.")
+            system = MONITOR_SYSTEM_PROMPT + "\n\n" + mode
+            tools = MONITOR_TOOLS
+            if self.grounded_context:
+                system += "\n\n" + GROUNDED_PROMPT
+                tools = [*MONITOR_TOOLS, GROUNDED_TOOL]
             action = run_review(
-                self.client, MONITOR_SYSTEM_PROMPT + "\n\n" + mode, wake_context, MONITOR_TOOLS,
+                self.client, system, wake_context, tools,
                 self.dispatch, self.max_review_turns,
                 audit=self._audit_dialogue,
+                before_model=self._refresh_completion,
             )
             return action
         finally:

@@ -50,7 +50,7 @@ def review(index, size=1200):
         {"role": "assistant", "content": [{"type": "tool_use", "id": f"w{index}",
                                                "name": "wait", "input": {"after_turns": 1}}]},
         {"role": "user", "content": [{"type": "tool_result", "tool_use_id": f"w{index}",
-                                         "content": "accepted"}]},
+                                         "content": '{"status":"accepted","control_action":"wait"}'}]},
     ]
 
 
