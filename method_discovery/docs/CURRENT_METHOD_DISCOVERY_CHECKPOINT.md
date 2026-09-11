@@ -1,5 +1,7 @@
 # 当前方法发现恢复入口
 
+2026-09-12 P1静态子阶段3完成：PAPER_P1_ARCHIVE_AND_FREEZE_PLAN_20260912.md与PAPER_ARCHIVE_COVERAGE_20260912.json。固定三条Fyne旧日志作兼容夹具：request完整用量95/101、77/79、20/29；两份已知用量一致但未知费用不计0；16条接口交接无timestamp，不能直接算精确投递/采纳。只读工具新增5测试，合计14通过。完整运行保存范围已列，未提交积压生产源码。发现isolated_run_bundle按扩展名复制memory顶层材料，包含global_mem类文件名；内容尚未核查，不能断言泄露，也不能先称干净SOP。下一步核查实际副本材料和完整源保存清单，影响在线知识的改变需报告。无API/Docker/生产修改，无候选效果结论。
+
 2026-09-12 P1静态子阶段2完成：见PAPER_P1_SCORE_LOG_AUDIT_20260912.md及PAPER_P1_SCORING_SOURCE_SNAPSHOT_20260912.json。6题原生加权阶段分已核；全阶段通过是明确派生二元指标，wrapper exit0不等于成功。usage成功记录可能漏空响应/失败费用，交给中断接口不等于采纳，不能伪称端到端指标齐备。新增离线评分/源码指纹脚本与4测试，合计9通过。上一阶段commit72713a4；当前生产改动仍是历史积压未提交，指纹不是完整可回退源码冻结。无API/Docker/生产改动。下一离线工作是旧归档指标导入/覆盖率和完整基线保存清单；旧污染数据仅作日志夹具，PMA接入与真实运行仍未完成。用户要求以后每阶段独立Git保存，已写AGENTS。
 
 2026-09-11/12 最新：完成无API P1静态子阶段，不是整个P1或方法发现完成。新增 `PAPER_P1_EXECUTABLE_RESEARCH_CONTRACT_20260911.md`、`PAPER_STATIC_INVENTORY_20260911.json`；`paper_protocol_audit.py` 可重算盘点和描述性配对，5项测试通过。拟议6题为pyg2.3/fbr2.43/ktx0.13/rat0.22/opt4.4（旧Roadmap pilot全部5题）+Fyne2.2（连续性诊断），均method_dev，不按效果选、不称跨题源或未见。原60/30/30、16pilot、12validation、正式门禁保留。发现Roadmap部分项目前缀跨split，原lineage字段不能证明仓库独立。无API/Docker/真实运行，未改生产代码。下一步先做原生评分与日志字段映射/源码身份清单；PMA并发适配尚待明确选择，不能称已复现或自动重启旧Fyne队列。整批预算、模型和真实启动仍须独立确认。文档日期沿用本轮开始的20260911。
