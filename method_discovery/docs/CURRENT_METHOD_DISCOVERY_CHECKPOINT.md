@@ -1,5 +1,7 @@
 # 当前方法发现恢复入口
 
+2026-09-12 P1静态子阶段2完成：见PAPER_P1_SCORE_LOG_AUDIT_20260912.md及PAPER_P1_SCORING_SOURCE_SNAPSHOT_20260912.json。6题原生加权阶段分已核；全阶段通过是明确派生二元指标，wrapper exit0不等于成功。usage成功记录可能漏空响应/失败费用，交给中断接口不等于采纳，不能伪称端到端指标齐备。新增离线评分/源码指纹脚本与4测试，合计9通过。上一阶段commit72713a4；当前生产改动仍是历史积压未提交，指纹不是完整可回退源码冻结。无API/Docker/生产改动。下一离线工作是旧归档指标导入/覆盖率和完整基线保存清单；旧污染数据仅作日志夹具，PMA接入与真实运行仍未完成。用户要求以后每阶段独立Git保存，已写AGENTS。
+
 2026-09-11/12 最新：完成无API P1静态子阶段，不是整个P1或方法发现完成。新增 `PAPER_P1_EXECUTABLE_RESEARCH_CONTRACT_20260911.md`、`PAPER_STATIC_INVENTORY_20260911.json`；`paper_protocol_audit.py` 可重算盘点和描述性配对，5项测试通过。拟议6题为pyg2.3/fbr2.43/ktx0.13/rat0.22/opt4.4（旧Roadmap pilot全部5题）+Fyne2.2（连续性诊断），均method_dev，不按效果选、不称跨题源或未见。原60/30/30、16pilot、12validation、正式门禁保留。发现Roadmap部分项目前缀跨split，原lineage字段不能证明仓库独立。无API/Docker/真实运行，未改生产代码。下一步先做原生评分与日志字段映射/源码身份清单；PMA并发适配尚待明确选择，不能称已复现或自动重启旧Fyne队列。整批预算、模型和真实启动仍须独立确认。文档日期沿用本轮开始的20260911。
 
 2026-09-11 全局研究纠偏（最新恢复入口）：用户不满局部补丁和单题无限探索，确认先做不依赖API的论文实验骨架/复现路线。完成三份文件：PAPER_EXPERIMENT_EVIDENCE_AUDIT_20260911.md、PAPER_EXPERIMENT_BLUEPRINT_20260911.md、REPRODUCTION_READINESS_CARDS_20260911.md。Final120为10源/60dev/30validation/30holdout，历史完成评价可用标志75题、其余45需核验；不是统一评分或全部已就绪。优先建议Roadmap为主问题场、Terminal公共对照、τ文本域/AppWorld最多一个非代码扩展；TB2.1已修28/89题，τ仓库有版本变化，未批准换版本/扩题。PMA为优先外部机制适配，tool-feedback是强简单指导基线而非CRITIC复现；ACE需先定位增量维护损失。任何新实验先对齐G0/G1/G2及预算/信息边界，API恢复不自动重启旧队列。此次无API、Docker、生产代码变更；没有认定任何新机制有效。路线草案不覆盖旧protocol的holdout规模门禁，需确认后版本化修改。下一建议是静态基线/数据准备，不是再修Fyne提示。
