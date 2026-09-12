@@ -6,6 +6,8 @@
 
 ### 权威文档
 
+- 2026-09-13 R1真实适配诊断后，用户要求把机制使用方式也纳入优化。R2入口`method_discovery/docs/LITERATURE_TRANSFER_ADAPTATION_R2_DESIGN_20260913.md`：decision_context开启时，正常模型请求临时可见已有第一层synopsis小窗口与上次纠偏，详细原始证据仍主动查询；不增加第三层、不逐事件唤醒、不把全文packet自动注入、不强制用工具或暂停。轻量可见面与有界检索同属本候选，未证明独立效果。R1已停止，禁止复用其run-id重跑；R2真实启动仍须确认。
+
 - 2026-09-13 用户批准补齐文献机制迁移，并允许部分暂停、部分并行；执行入口 `method_discovery/docs/LITERATURE_TRANSFER_PLAN_20260913.md`。`GA_MONITOR_HYBRID_CONTROL` 是默认关闭的选择性有限暂停候选，不是逐轮审批；正常监察仍并发、只有同一监察者自主请求才暂停，纠偏/静默/故障/租约到期恢复。`GA_MONITOR_DECISION_CONTEXT` 独立控制按需原任务、记忆与原始行为视图。不得据工程通过宣称有效或替换原研究问题；真实启动仍须确认。原live-awareness准备分支暂停，不自动启动。
 
 - 2026-09-12 用户批准PMA保留原同步维护—提醒调度作为独立外部基线；此例外仅用于GA_PMA_ENABLED，不改变Clean主体并发硬约束。实现见`method_discovery/docs/PMA_SYNC_IMPLEMENTATION_20260912.md`；称PMA同步GA机制适配，不称原论文原样复现。两者互斥，PMA仍无在线checker且真实启动独立确认；工程通过不表示效果成立。

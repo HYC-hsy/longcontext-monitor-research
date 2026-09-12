@@ -1,5 +1,7 @@
 # 当前方法发现恢复入口
 
+2026-09-13 用户授权R1后适配优化已完成，入口LITERATURE_TRANSFER_ADAPTATION_R2_READY_20260913.md。decision_context启用时正常请求临时可见既有synopsis最新小窗口+上次纠偏；详细视图检索题干/笔记、有界原始事件预览、默认纠偏后；不强制工具/暂停，不改并发及根完成。297监察+64隔离回归通过，同R1窗口返回降至1.4万~1.9万字符，仅工程证据。provider工具型纯空白容错+保留矛盾检测；R1实际字符未知，不能说所有异常已修。新fyne_r2_manifest.json仅准备，零API零启动，需独立确认；不复用R1 run-id。回退tag pre-literature-adaptation-r2-20260913。
+
 2026-09-13 literature-transfer Fyne R1已批准并跑约31分钟，task65/cursor117，因监察流式文本1字符与最终空文本冲突反复RetryableProviderError而停止；详见LITERATURE_TRANSFER_FYNE_R1_OBSERVATION_20260913.md。review_context成功4次但返回4.7万至14.3万字符，after_correction和模型task_control均未使用；9次纠偏有部分修复响应，Set no-op/Fonts Icons缺失仍在。未完成native评分，未证明新机制增益或暂停无效。runner及本条main/gateway/OTel均停止、未删，其他PMA容器未动；派生统计和关键公开源码已保存。下一先审计协议及视图/行动的适配，不自动修复重跑；之前prepared_not_executed描述为历史，禁止同run-id再启动。
 
 2026-09-13 文献机制迁移补齐，最新入口LITERATURE_TRANSFER_READY_20260913.md及LITERATURE_TRANSFER_RESEARCH_AND_IMPLEMENTATION_20260913.md。上轮live-awareness不作为下一实验。保留771bc85回退tag，复用PMA BM25与LivePlan类型/格式化代码；新增按需决策视图、模型自主有限暂停、纠偏后并发恢复，开关独立。288监察/中断+64隔离入口测试及Fyne断网导入/runner预检通过，零API/零真实任务。下一仅拟启动literature-transfer-20260913-r1，使用fyne_r1_ready_manifest.json；Opus4.8/sol high、500turn/10000秒。未证明效果、未声称完整复现Wink/COCO/LivePlan/PMA。用户批准前不运行，旧manifest不启动。
