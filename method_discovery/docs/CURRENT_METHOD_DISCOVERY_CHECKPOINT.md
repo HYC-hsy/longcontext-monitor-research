@@ -1,5 +1,7 @@
 # 当前方法发现恢复入口
 
+2026-09-12 PMA→Clean行为对齐只读审计完成：PMA_TO_CLEAN_MONITOR_ALIGNMENT_AUDIT_20260912.md。保留独立Clean主线，PMA不作母体。重读PMA R2、公共base/B原始片段与人工Fyne011/014/015。确定已有主动工具/多轮纠偏，不是缺日志；base当前笔记仅早期3次显式写改，PMA更新后bank直接用于提醒，但也会固化错误。建议先设计“自主维护的当前认识被实际用于后续判断”这一借鉴增强，先核对working/压缩/U/A重叠，不加新schema/双模型/同步审批；丰富观察另作独立候选。不是已证明主因，不以异题分数选冠军。本轮未改代码/跑API，下一实现与真实启动均未获授权。
+
 2026-09-12 PMA FBR R2 已完整结束并审计：PMA_NATIVE_FBR_R2_AUDIT_20260912.md / AUDIT_DATA。42分43秒，6/7阶段、加权0.875；48task/94memory、11/11提醒送达。PATH和事后评价前/app归档均在真实运行生效。唯一失败CORS：原要求仍保留，Step28却提醒加入credentials例外，Step30以gofmt后状态标完成，最终实现与测试冲突；并非提醒丢失。存在有用局部纠错，但无同配置无PMA对照不能归因净收益。用量估算约$10.241非账单。当前未改代码/重跑/清理；建议准备原生无PMA配对，真实启动另行确认。
 
 2026-09-12 19:07 PMA FBR R2 已获本轮批准并后台启动，详见 PMA_NATIVE_FBR_R2_LIVE_20260912.md。源码 7c02a7b，r2 PATH 依赖镜像与事后评价前工作区归档；原 Sonnet4.5/Opus4.6、50turn/7200秒不变。controller=pma-native-fbr-20260912-r2，task=pma-native-49acaec7cf17-main-1；首条 memory 调用已返回。按用户要求确认启动后不持续轮询，后续查 native_fbr_20260912_r2/work/trial/native_result.json 再审计。当前无最终成绩，不视为方法有效或原论文效果复现。
