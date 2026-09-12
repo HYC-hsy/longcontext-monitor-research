@@ -39,6 +39,10 @@ class ProviderRecoveryExhausted(ProviderError):
     """Bounded transport recovery ended; do not start another review to retry."""
 
 
+class HistoryCapacityError(ProviderRecoveryExhausted):
+    """Preserved history cannot fit; new wakes cannot repair this failure."""
+
+
 def is_reasoning_echo(text, blocks):
     """Detect a transport-level duplicate, not the quality/style of a note."""
     summaries = [part.get("text", "") for block in blocks
@@ -224,18 +228,51 @@ class MonitorProviderClient:
                 if block.get("type") == "tool_result":
                     block["content"] = self._bounded_block(block.get("content", ""))
 
+    def _exchange_boundaries(self):
+        """Protocol-complete cuts, independent of whether a concern is resolved.
+
+        Reuse the canonical tool-use/result pairing used by review boundaries.
+        A parallel batch is indivisible, including signed reasoning in its
+        assistant message. The current unfinished exchange is never retired.
+        """
+        boundaries, outstanding = [], set()
+        for index, message in enumerate(self.history):
+            blocks = message.get("content") or []
+            if message.get("role") == "assistant":
+                calls = [str(block.get("id") or "") for block in blocks
+                         if block.get("type") == "tool_use"]
+                outstanding.update(calls)
+                if not calls and not outstanding:
+                    boundaries.append(index + 1)
+            elif message.get("role") == "user":
+                results = [block for block in blocks if block.get("type") == "tool_result"]
+                for block in results:
+                    outstanding.discard(str(block.get("tool_use_id") or ""))
+                if results and not outstanding:
+                    boundaries.append(index + 1)
+        return boundaries
+
     def _compact_history(self):
         before = self.history_measure()
         if before["characters"] <= self.history_char_limit:
             return
         if getattr(self, "prepare_continuation", None) is not None:
-            self._relieve_tool_result_pressure()
-            before = self.history_measure()
-            if before["characters"] <= self.history_target_chars:
-                return
-            self._compact_with_continuation(before)
+            try:
+                self._relieve_tool_result_pressure()
+                before = self.history_measure()
+                if before["characters"] <= self.history_target_chars:
+                    return
+                self._compact_with_continuation(before)
+            except ProviderRecoveryExhausted:
+                raise
+            except Exception as exc:
+                # Evidence remains in history/archives. Retrying via a new wake
+                # would only append more input; expose a terminal monitor fault.
+                raise HistoryCapacityError(
+                    "Monitor continuation failed; history preserved: " + type(exc).__name__
+                ) from exc
             if self.history_measure()["characters"] > self.history_char_limit:
-                raise ProviderError(
+                raise HistoryCapacityError(
                     "Monitor history remains over capacity after lossless evidence archival; "
                     "retained dialogue cannot be retired safely. History preserved."
                 )
@@ -337,30 +374,26 @@ class MonitorProviderClient:
     def _compact_with_continuation(self, before):
         """Retire a protocol-complete prefix, after planning and durable archival.
 
-        Recent dialogue is retained verbatim. A control boundary is a transport
-        boundary, not a claim that its semantic investigation has been resolved.
+        Retain recent exchanges, not arbitrarily long review lifetimes. The
+        same-model continuation carries unresolved concerns across this cut.
         """
-        boundaries = self._review_boundaries()
-        # Keep the two newest completed reviews and all current investigation.
-        candidates = boundaries[:-2]
+        boundaries = self._exchange_boundaries()
+        # Keep at least the latest exchange plus any pending one. Reserve room
+        # for the handoff; do not require a semantic issue to close to compact.
+        candidates = [cut for cut in boundaries[:-1] if cut < len(self.history)]
         if not candidates:
             # No safe prefix can be retired. Do not repeatedly ask for a note
             # while leaving exactly the same oversized conversation in place.
-            self._progress("compaction_deferred", reason="no_retirable_review_prefix",
+            self._progress("compaction_deferred", reason="no_retirable_exchange_prefix",
                            history_characters=before["characters"])
             return
         cut = candidates[-1]
         for candidate in candidates:
             tail = self.history[candidate:]
             size = len(json.dumps(tail, ensure_ascii=False).encode("utf-8"))
-            if size <= self.history_target_chars:
+            if size <= self.history_target_chars * 0.75:
                 cut = candidate
                 break
-        tail_bytes = len(json.dumps(self.history[cut:], ensure_ascii=False).encode("utf-8"))
-        if before["characters"] - tail_bytes < self.history_char_limit - self.history_target_chars:
-            self._progress("compaction_deferred", reason="insufficient_reclaimable_history",
-                           history_characters=before["characters"])
-            return
         archive = getattr(self, "archive_continuation_history", None)
         if archive is None:
             raise ProviderError("Semantic compaction requires a retrievable history archive")
@@ -379,13 +412,20 @@ class MonitorProviderClient:
                 + location + "\n" + note}],
         }
         # A previous carried note is in the retired prefix, not duplicated.
-        self.history = [carried] + self.history[cut:]
+        replacement = [carried] + self.history[cut:]
+        replacement_size = len(json.dumps(replacement, ensure_ascii=False).encode("utf-8"))
+        if replacement_size > self.history_char_limit:
+            raise HistoryCapacityError(
+                "Monitor handoff and latest exchange exceed capacity; original history preserved."
+            )
+        self.history = replacement
         after = self.history_measure()
         self.history_transforms.append({
             "kind": "monitor_history_compaction", "before": before, "after": after,
             "removed_messages": cut, "char_limit": self.history_char_limit,
             "target_chars": self.history_target_chars, "archive": location,
             "target_reached": after["characters"] <= self.history_target_chars,
+            "boundary_kind": "protocol_exchange", "size_unit": "utf8_bytes",
         })
 
     def drain_telemetry(self):

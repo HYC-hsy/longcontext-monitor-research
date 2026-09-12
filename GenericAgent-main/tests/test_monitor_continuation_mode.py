@@ -3,7 +3,7 @@ import pytest
 import json
 
 from monitor_agent_core.agent import MonitorAgent, MONITOR_SYSTEM_PROMPT, REVIEW_MODE_PROMPT
-from monitor_agent_core.provider import MonitorProviderClient
+from monitor_agent_core.provider import HistoryCapacityError, MonitorProviderClient
 from monitor_agent_core.workspace import MonitorWorkspace
 
 
@@ -69,7 +69,7 @@ def test_planned_compaction_archives_full_evidence_and_keeps_recent_dialogue(tmp
     client, monitor = setup_monitor(tmp_path)
     client.history = sum((review(i) for i in range(6)), [])
     before = client.export_history()
-    recent = before[-10:]
+    recent = before[-2:]  # latest complete exchange, not two unbounded reviews
     calls = []
     def request(tools):
         calls.append(1)
@@ -77,8 +77,9 @@ def test_planned_compaction_archives_full_evidence_and_keeps_recent_dialogue(tmp
         return [{"type": "text", "text": "Uncertain cause; compare original semantics."}], {}
     monkeypatch.setattr(client, "_request", request)
     client._compact_history()
-    assert client.history[-10:] == recent
+    assert client.history[-2:] == recent
     transform = client.history_transforms[-1]
+    assert client.history[1:] == before[transform['removed_messages']:]
     archived = monitor.workspace.private_root / transform["archive"].removeprefix("monitor/")
     assert json.loads(archived.read_text(encoding="utf-8")) == before
     assert transform["target_reached"]
@@ -113,8 +114,10 @@ def test_failed_planned_handoff_keeps_history_and_previous_note(tmp_path, monkey
     client.history = sum((review(i) for i in range(6)), [])
     before = client.export_history()
     monkeypatch.setattr(client, "_request", lambda _: ([], {}))
-    with pytest.raises(ValueError, match="Empty continuation"):
+    with pytest.raises(HistoryCapacityError) as error:
         client._compact_history()
+    assert isinstance(error.value.__cause__, ValueError)
+    assert 'Empty continuation' in str(error.value.__cause__)
     assert client.history == before
     assert (monitor.workspace.private_root / "working.md").read_text() == "Previous understanding"
     assert not client.history_transforms
@@ -140,8 +143,9 @@ def test_archive_failure_prevents_model_call_and_history_loss(tmp_path, monkeypa
         raise OSError("archive unavailable")
     monkeypatch.setattr(client, "archive_continuation_history", archive_failure)
     monkeypatch.setattr(client, "_request", lambda _: pytest.fail("must archive before paying"))
-    with pytest.raises(OSError, match="archive unavailable"):
+    with pytest.raises(HistoryCapacityError) as error:
         client._compact_history()
+    assert isinstance(error.value.__cause__, OSError)
     assert client.history == before
 
 
