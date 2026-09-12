@@ -24,6 +24,18 @@ def test_clean_launch_refuses_legacy_public_network(monkeypatch):
         m12.run_proof('roadmapbench', 'not-launched', 0, 10000)
 
 
+def test_active_working_context_reaches_container_and_is_reset_between_conditions():
+    import ast
+    tree = ast.parse((ROOT / 'adapters/harbor_ga_agent.py').read_text(encoding='utf-8'))
+    forwarded = next(ast.literal_eval(node.value) for node in tree.body
+                     if isinstance(node, ast.Assign)
+                     and any(isinstance(target, ast.Name) and target.id == 'FORWARDED_ENV_VARS'
+                             for target in node.targets))
+    flag = 'GA_MONITOR_ACTIVE_WORKING_CONTEXT'
+    assert flag in forwarded
+    assert flag in m12.MANIFEST_CONTROLLED_ENV_KEYS
+
+
 def test_isolation_refuses_old_branch_mounts(monkeypatch):
     monkeypatch.setenv('GA_RUN_ISOLATION', m12.ISOLATION_PROFILE)
     monkeypatch.setenv('GA_COMPLETION_BRANCH_CHECKPOINT', 'old-run')
