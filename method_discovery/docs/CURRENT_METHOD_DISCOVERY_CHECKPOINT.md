@@ -1,5 +1,7 @@
 # 当前方法发现恢复入口
 
+2026-09-12 19:07 PMA FBR R2 已获本轮批准并后台启动，详见 PMA_NATIVE_FBR_R2_LIVE_20260912.md。源码 7c02a7b，r2 PATH 依赖镜像与事后评价前工作区归档；原 Sonnet4.5/Opus4.6、50turn/7200秒不变。controller=pma-native-fbr-20260912-r2，task=pma-native-49acaec7cf17-main-1；首条 memory 调用已返回。按用户要求确认启动后不持续轮询，后续查 native_fbr_20260912_r2/work/trial/native_result.json 再审计。当前无最终成绩，不视为方法有效或原论文效果复现。
+
 2026-09-12 PMA R1工程修复完成：PMA_NATIVE_PATH_ARCHIVE_REPAIR_20260912.md。r2依赖镜像保留基础镜像PATH，原版实际tmux/asciinema终端内go version和公开utils编译检查通过；新归档在Agent结束、隐藏Verifier之前保存完整/app tar+SHA，失败则跳过评分并停止保留容器。12回归通过，断网真实终端+归档边界夹具通过（约25.6MB）。作者PMA/Harbor源码和研究机制不改，无API/真实重跑；后续准备脚本指向r2镜像，新建运行包，不能复用R1快照或把R1的0分改掉。
 
 2026-09-12 PMA FBR R1完成并审计：见PMA_NATIVE_FBR_R1_AUDIT_20260912.md及AUDIT_DATA。30分13秒、47task/92memory、14/14提醒送达、无记录API失败，最终0/7（mime变量遮蔽阻断编译）。关键修正：Terminus2用bash --login导致/etc/profile丢失/usr/local/go/bin；episode15唯一go build报command not found，故本次存在环境混杂，不能拿0分定PMA优劣。另有独立行为证据：PMA见未验证状态仍写compiles properly、CORS原要求仍存但新解释漂移。终局工作区未归档是证据保存缺口。建议先修实际终端PATH及终局归档，再同题原版复验/无PMA配对；本轮只审计，未修改或重跑模型，不自动启动。
