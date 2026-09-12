@@ -7,7 +7,7 @@ Memory types:
 """
 
 import json
-import uuid
+import shortuuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -110,7 +110,7 @@ class UniversalMemory:
     
     def _generate_id(self) -> str:
         """Generate a short unique ID for memory entries."""
-        return uuid.uuid4().hex[:8]
+        return shortuuid.uuid()[:8]
     
     def _invalidate_indices(self, memory_type: str) -> None:
         """Invalidate BM25 index after modification."""

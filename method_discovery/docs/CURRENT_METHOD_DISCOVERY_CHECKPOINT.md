@@ -1,5 +1,7 @@
 # 当前方法发现恢复入口
 
+2026-09-12 PMA原样复用修正：PMA_UPSTREAM_PARITY_REPAIR_20260912.md。恢复shortuuid原ID，宿主ga_bench安装1.0.13；三核心文件与原仓库文本一致。轨迹标题/空字段/段落/Step2起始恢复，直接对比原格式函数通过。20测试+3源码子项通过，无模型API/真实任务/生产Clean修改。隔离容器shortuuid仍未验证，启动前需可信离线依赖准备，不许联网回退或UUID替代。原LiteLLM调用无history参数，本地Harbor缓存支持独立调用，但未宣称底层传输原样复现。下一步是依赖预检，不自动真实启动。
+
 2026-09-12 PMA同步GA适配工程阶段完成：见PMA_SYNC_IMPLEMENTATION_20260912.md。新增独立pma_baseline三原模块/许可与runtime，两phase、8步、task-local bank、一次性软提醒；agent_loop显式同步外部基线分支，Clean并发不变，两者互斥。Harbor/隔离/无checker/准备提案已接线。77项pytest通过，无API/Docker/真实任务。ID依赖改为uuid4前8hex差异已记NOTICE；不可冒称论文原样复现。下一停在真实启动门禁，不自动批量运行；0aef4b8是改动前工程回退点。
 
 2026-09-12 PMA适配设计停在用户决策：PMA_BASELINE_ADAPTATION_DECISION_20260912.md。已核初始化先触发、每步await、最近8步含公开分析/计划/命令/输出、两phase更新后选择、一次性软提醒；runner每题新实例，不能误读reset选项为跨题泄露。建议独立同步PMA机制保真GA适配，Clean主体保持并发；不自动实施该同步对照例外。共同母体异步PMA会改变观察机会，应单独命名而非原样复现。无API/生产修改/启动；下一步须用户确认对照调度后才实施。

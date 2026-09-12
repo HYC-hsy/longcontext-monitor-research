@@ -48,20 +48,34 @@ class PMABaseline:
         self.archive = Path(archive) if archive else None
         self.records = []
 
-    def observe(self, analysis='', commands=(), observation=''):
+    def observe(self, analysis='', commands=(), observation='', plan=None):
         self.step += 1
-        self.steps.append({'step': self.step, 'analysis': analysis,
-                           'commands': list(commands), 'observation': observation})
+        self.steps.append({'step': self.step + 1, 'analysis': analysis, 'plan': plan,
+                           'commands': [str(c) for c in commands], 'observation': observation})
 
     def context(self):
-        parts = ['[Task Description]\n' + self.task]
+        parts = ['[Task Description]\n' + self.task] if self.task else []
+        if self.steps:
+            parts.append('[Recent Trajectory (last {} steps)]'.format(len(self.steps)))
         for entry in self.steps:
-            parts.append(f"[Step {entry['step']}]\nAgent Analysis: {entry['analysis']}")
-            commands = entry['commands']
-            parts.append('Commands Executed: ' + '; '.join(commands[:5]) +
-                         (f' (+{len(commands)-5} more)' if len(commands) > 5 else ''))
-            parts.append('Terminal Output: ' + entry['observation'])
+            parts.append(self._format_step_entry(entry))
         return '\n\n'.join(parts)
+
+    @staticmethod
+    def _format_step_entry(entry):
+        sections = [f"[Step {entry['step']}]"]
+        if entry.get('analysis'):
+            sections.append(f"Agent Analysis: {entry['analysis']}")
+        if entry.get('plan'):
+            sections.append(f"Agent Plan: {entry['plan']}")
+        if entry.get('commands'):
+            commands = entry['commands']
+            text = '; '.join(commands[:5])
+            if len(commands) > 5:
+                text += f' (+{len(commands)-5} more)'
+            sections.append('Commands Executed: ' + text)
+        sections.append('Terminal Output: ' + entry.get('observation', ''))
+        return '\n'.join(sections)
 
     def review(self):
         started = time.time()
