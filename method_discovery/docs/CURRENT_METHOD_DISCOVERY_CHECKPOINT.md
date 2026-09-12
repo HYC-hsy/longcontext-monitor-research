@@ -1,5 +1,7 @@
 # 当前方法发现恢复入口
 
+2026-09-12 23:02 active-working Fyne R1已明确批准并真实启动：ACTIVE_WORKING_FYNE_R1_LIVE_20260912.md。runner PID492，trial gmZxpLe，task network none、新模块存在、源码/镜像身份预检通过；任务模型已推进实施，监察auto探针通过且初始化请求HTTP200。按后台方式运行，当前无终局效果。下次查该trial/result.json和dialogue，注意job/result.json可能启动时就存在。未启动其他分支。
+
 2026-09-12 active working真实入口检查完成：ACTIVE_WORKING_REAL_GATE_20260912.md。发现Harbor漏转发新开关，已补转发和manifest条件清理，相关94测试通过。prepare_active_working_run.py生成artifacts/active_working_20260912/fyne_r1_manifest.json，prepared_not_executed；Fyne/Opus4.8+sol high/500轮10000秒，其他候选关闭，隔离保留。当前无API/真实运行，待具体启动确认及Docker/API实时预检；历史base仅诊断非公平配对。
 
 2026-09-12 用户批准PMA借鉴增强的检查改造，已实现请求级active working context，见ACTIVE_WORKING_CONTEXT_IMPLEMENTATION_20260912.md。默认关；monitor_active_working_context / GA_MONITOR_ACTIVE_WORKING_CONTEXT开启。复用working.md，每次正常请求读取有界最新认识，临时入请求、不堆进History，压缩后读取、异常恢复、审计留痕；不强制写、不加模型调用、不改并发/工具/观察。151工程测试通过，未调用API/启动任务/证明效果。下一真实准备及启动仍需确认；不能把这一候选当PMA母体或既定创新。
