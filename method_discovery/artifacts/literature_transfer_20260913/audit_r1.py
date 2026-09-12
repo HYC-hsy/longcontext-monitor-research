@@ -1,11 +1,18 @@
 """Read-only run audit; writes derived metrics beside this script, no API calls."""
 import collections
+import argparse
 import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-RUN = 'clean-monitor-fyn-2.2.0-roadmap-literature-transfer-20260913-r1'
-AGENT = ROOT / 'long_context_bench/output/clean_monitor_real_tasks/fyn-2.2.0-roadmap/jobs' / RUN / 'fyn-2.2.0-roadmap__moZMPPE/agent'
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--run', default='clean-monitor-fyn-2.2.0-roadmap-literature-transfer-20260913-r1')
+parser.add_argument('--trial', default='fyn-2.2.0-roadmap__moZMPPE')
+parser.add_argument('--stop', default='2026-09-12T18:48:14Z')
+parser.add_argument('--output', default='r1_observation_metrics.json')
+args = parser.parse_args()
+RUN = args.run
+AGENT = ROOT / 'long_context_bench/output/clean_monitor_real_tasks/fyn-2.2.0-roadmap/jobs' / RUN / args.trial / 'agent'
 
 
 def rows(path):
@@ -40,7 +47,7 @@ def sum_usage(items, keys):
 
 report = {
     'run_id': RUN, 'status': 'stopped_diagnostic_protocol_failure',
-    'stop_utc': '2026-09-12T18:48:14Z', 'native_score': None,
+    'stop_utc': args.stop, 'native_score': None,
     'last_task_turn': max(r.get('task_turn', 0) for r in synopsis),
     'tool_counts': dict(collections.Counter(r['name'] for r in calls)),
     'review_context_calls': contexts,
@@ -50,11 +57,14 @@ report = {
     'monitor_visible_completed_usage_including_rejected': sum_usage(visible.values(), ['input_tokens', 'output_tokens']),
     'task_usage': sum_usage(task_usage, ['input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens', 'output_tokens']),
     'text_mismatches': [r for r in progress if r['event'] == 'response_text_contract' and r.get('mismatch')],
+    'ignored_tool_only_whitespace_count': sum(r['event'] == 'response_text_contract' and bool(r.get('ignored_tool_only_whitespace')) for r in progress),
+    'decision_attention_count': sum(r['event'] == 'decision_attention' for r in dialogue),
+    'runtime_failures': [r for r in rows(AGENT / 'monitor/runtime_receipts.jsonl') if r.get('kind') == 'failure'],
     'unsuccessful_requests': [r for r in progress if r['event'] == 'request_finished' and r['outcome'] != 'success'],
     'limits': ['No final native evaluation; early diagnostic stop.',
                'Visible usage is not a complete provider bill; aborted/unreported calls may be missing.',
                'Two candidates enabled together; no independent causal attribution.'],
 }
-destination = Path(__file__).with_name('r1_observation_metrics.json')
+destination = Path(__file__).with_name(args.output)
 destination.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 print(json.dumps({k: v for k, v in report.items() if k not in ('interventions', 'text_mismatches', 'unsuccessful_requests')}, ensure_ascii=False, indent=2))
