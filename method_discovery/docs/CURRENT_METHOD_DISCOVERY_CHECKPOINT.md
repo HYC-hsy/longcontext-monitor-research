@@ -1,5 +1,7 @@
 # 当前方法发现恢复入口
 
+2026-09-13 active-working Fyne R1持续监视至约00:32后因监察容量故障停止，见ACTIVE_WORKING_FYNE_R1_STOP_20260913.md。task263轮、9intervene、2主动笔记写入、1交接；无allow。History压缩可回收量不足连续失败，wake继续追加历史；新临时context在压缩后加入，不能直接归因它。先tar保存/app约84MB再定向stop，原轨迹保留，无完整效果裁决。用户再次明确Clean实验每10分钟持续监视、讨论不打断；及时纠偏不能以持续调查冒充。下一只审计，不自动重跑。
+
 2026-09-12 23:02 active-working Fyne R1已明确批准并真实启动：ACTIVE_WORKING_FYNE_R1_LIVE_20260912.md。runner PID492，trial gmZxpLe，task network none、新模块存在、源码/镜像身份预检通过；任务模型已推进实施，监察auto探针通过且初始化请求HTTP200。按后台方式运行，当前无终局效果。下次查该trial/result.json和dialogue，注意job/result.json可能启动时就存在。未启动其他分支。
 
 2026-09-12 active working真实入口检查完成：ACTIVE_WORKING_REAL_GATE_20260912.md。发现Harbor漏转发新开关，已补转发和manifest条件清理，相关94测试通过。prepare_active_working_run.py生成artifacts/active_working_20260912/fyne_r1_manifest.json，prepared_not_executed；Fyne/Opus4.8+sol high/500轮10000秒，其他候选关闭，隔离保留。当前无API/真实运行，待具体启动确认及Docker/API实时预检；历史base仅诊断非公平配对。
