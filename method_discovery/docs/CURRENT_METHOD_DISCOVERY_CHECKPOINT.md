@@ -1,5 +1,7 @@
 # 当前方法发现恢复入口
 
+2026-09-13 PMA/Clean容量、时机、内容只读对照完成：PMA_CLEAN_CAPACITY_TIMING_CONTENT_AUDIT_20260913.md。PMA实际主要以原任务+8步+bank重建输入，两phase未传持续message_history；同步await换取边界新鲜度，不是并发意图纠偏。Clean短wait仍有长调查/重试，容量保护整个当前review且失败wake继续append是确定故障；临时working副本不是直接堆积原因。PMA亦有CORS错误闭合，不能照搬当成功答案。未改代码/调用API/重跑，未确定新机制；下一先设计容量续接修复与独立时效候选，保留主体、工具、两层、并发。
+
 2026-09-13 active-working Fyne R1持续监视至约00:32后因监察容量故障停止，见ACTIVE_WORKING_FYNE_R1_STOP_20260913.md。task263轮、9intervene、2主动笔记写入、1交接；无allow。History压缩可回收量不足连续失败，wake继续追加历史；新临时context在压缩后加入，不能直接归因它。先tar保存/app约84MB再定向stop，原轨迹保留，无完整效果裁决。用户再次明确Clean实验每10分钟持续监视、讨论不打断；及时纠偏不能以持续调查冒充。下一只审计，不自动重跑。
 
 2026-09-12 23:02 active-working Fyne R1已明确批准并真实启动：ACTIVE_WORKING_FYNE_R1_LIVE_20260912.md。runner PID492，trial gmZxpLe，task network none、新模块存在、源码/镜像身份预检通过；任务模型已推进实施，监察auto探针通过且初始化请求HTTP200。按后台方式运行，当前无终局效果。下次查该trial/result.json和dialogue，注意job/result.json可能启动时就存在。未启动其他分支。
