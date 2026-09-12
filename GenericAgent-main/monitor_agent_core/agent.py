@@ -207,7 +207,7 @@ class MonitorAgent:
             raise ValueError('monitor_hybrid_control must be boolean')
         self.task_control_callback = None
         self.active_context_enabled = active_context
-        if live_awareness or active_context:
+        if live_awareness or active_context or decision_context:
             self.client.prepare_active_context = self._active_working_context
         if active_context:
             self.system_prompt += (
@@ -239,6 +239,10 @@ class MonitorAgent:
         if self.live_awareness is not None:
             text, metadata = self.live_awareness.context()
             self._audit_dialogue('live_awareness', content=text, **metadata)
+            parts.append(text)
+        if self.decision_context is not None:
+            text = self.decision_context.attention()
+            self._audit_dialogue('decision_attention', content=text)
             parts.append(text)
         return '\n\n'.join(parts) or None
 
@@ -509,18 +513,19 @@ class MonitorAgent:
                     }, ['operation'])]
             if self.decision_context is not None:
                 system += (
-                    '\n\nYou can reconstruct the grounds for a decision with review_context: the original '
-                    'task, your current working note, query-relevant private Markdown and recent public '
-                    'actions together. After sending input, after_correction selects subsequent behavior '
-                    'alongside that input. You decide when this helps; inspect actual tests and files where '
-                    'needed. Store useful understanding in natural Markdown using existing tools; no fixed '
-                    'entry schema. A prior diagnosis, including your own, remains open to contrary evidence.'
+                    '\n\nA small current synopsis and your last correction are available during reasoning. '
+                    'Use them to decide whether the next useful move is investigation, correction, or waiting; '
+                    'more reading is useful only if it can change that choice. review_context retrieves '
+                    'source-linked task excerpts and private notes with bounded recent behavior, by default '
+                    'after your last correction. It is optional navigation, not proof: inspect actual tests '
+                    'or files where needed. A prior diagnosis, including your own, remains revisable.'
                 )
                 tools = [*tools, _tool('review_context',
-                    'Reconstruct task, private understanding and original recent behavior; optional lexical '
-                    'query retrieves relevant private Markdown. Does not judge, update memory or send input.', {
+                    'Get bounded previews: lexical task/private-note matches and recent public behavior. '
+                    'Defaults to behavior after your last correction; false includes earlier recent events. '
+                    'Use original files for full evidence. Does not judge, update memory or send input.', {
                         'query': {'type': 'string', 'default': ''},
-                        'after_correction': {'type': 'boolean', 'default': False},
+                        'after_correction': {'type': 'boolean', 'default': True},
                         'steps': {'type': 'integer', 'minimum': 1, 'maximum': 32, 'default': 8},
                     }, [])]
             if self.live_awareness is not None:

@@ -54,6 +54,60 @@ def test_no_new_evidence_is_explicit_not_recovery(view):
     assert 'Submission does not prove uptake' in result['limits']
 
 
+def test_default_followup_can_be_overridden(view):
+    append(view, 1, 'earlier evidence')
+    view.record_input('Reconsider')
+    assert view.read()['sources'] == []
+    assert view.read(after_correction=False)['sources'] == ['task/public_events.jsonl#L1']
+
+
+def test_large_actions_are_previews_and_originals_survive(view):
+    for n in range(1, 33):
+        path = view.workspace.evidence_root / 'public_events.jsonl'
+        with path.open('a', encoding='utf-8') as stream:
+            stream.write(json.dumps({'archive_sequence': n, 'tool_calls': ['x' * 50000],
+                                     'tool_results': ['y' * 50000]}) + '\n')
+    result = view.read(steps=32)
+    assert len(result['context']) < 20000
+    assert 'Preview clipped' in result['context']
+    assert path.stat().st_size > 3000000
+
+
+def test_query_retrieves_late_task_clause_without_duplicate_working(view):
+    task = ('Irrelevant preamble.\n' * 200) + '\nUnique quasar contract requires reflection.\n'
+    (view.workspace.evidence_root / 'original_task.txt').write_text(task)
+    result = view.read(query='quasar reflection')
+    assert 'Unique quasar contract' in result['context']
+    assert 'task/original_task.txt#L' in result['context']
+    assert result['context'].count('Current uncertainty') == 1
+
+
+def test_attention_is_current_first_layer_not_original_packets(view):
+    path = view.workspace.evidence_root / 'synopsis.jsonl'
+    path.write_text('\n'.join(json.dumps({'cursor': n, 'intent': f'intent{n}'}) for n in range(1, 7)) + '\n{partial')
+    text = view.attention()
+    assert 'intent6' in text and 'intent1' not in text
+    assert len(text) < 6500
+    assert 'not proof' in text
+    path.write_text(json.dumps({'cursor': 7, 'intent': 'changed course'}) + '\n')
+    assert 'changed course' in view.attention()
+
+
+def test_attention_does_not_accumulate_in_session(view):
+    from monitor_agent_core.agent import MonitorAgent
+    from monitor_agent_core.provider import MonitorProviderClient
+    client = MonitorProviderClient('openai', {'apikey': 'fixture', 'apibase': 'https://example.test',
+                                            'monitor_decision_context': True})
+    MonitorAgent(client, view.workspace)
+    before = list(client.history)
+    seen = []
+    client._request_with_recovery = lambda tools: seen.append(client.history[-1]['content'][0]['text'])
+    for _ in range(3):
+        client._request([{}])
+    assert len(seen) == 3 and all('Current first-layer synopsis' in text for text in seen)
+    assert client.history == before
+
+
 def test_query_retrieval_preserves_source_and_excludes_audit(view):
     view.workspace.write_text('monitor/notes/alpha.md', 'listener notification contradicts earlier assumption')
     view.workspace.write_text('monitor/notes/beta.md', 'unrelated build setting')
