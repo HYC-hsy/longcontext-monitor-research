@@ -8,13 +8,19 @@ from harbor.models.task.config import EnvironmentConfig
 
 
 class LifecycleTests(unittest.TestCase):
-    def run_fixture(self, evaluation_fails=False):
+    def run_fixture(self, evaluation_fails=False, archive_fails=False):
         events = []
         class Env:
             def __init__(self, **kwargs):
                 assert not kwargs['task_env_config'].allow_internet
             async def start(self, **kwargs): events.append('start')
-            async def exec(self, *args, **kwargs): return NS(return_code=0)
+            async def exec(self, command, **kwargs):
+                if command.startswith('tar '):
+                    events.append('workspace_archive')
+                    return NS(return_code=1 if archive_fails else 0)
+                return NS(return_code=0)
+            async def download_file(self, remote, local):
+                Path(local).write_bytes(b'fixture archive')
             async def stop(self, **kwargs): events.append('stop')
         class Agent:
             async def setup(self, env): events.append('setup')
@@ -24,6 +30,7 @@ class LifecycleTests(unittest.TestCase):
             def __init__(self, **kwargs): pass
             async def verify(self):
                 assert 'agent_finished' in events
+                assert 'workspace_archive' in events
                 events.append('hidden_tests')
                 if evaluation_fails: raise FileNotFoundError('missing reward')
                 return NS(model_dump=lambda **kwargs: {'rewards': {'reward': 1.0}})
@@ -45,6 +52,12 @@ class LifecycleTests(unittest.TestCase):
         report = self.run_fixture(True)
         self.assertIsNone(report['reward'])
         self.assertEqual(report['evaluation_status'], 'failed')
+
+    def test_archive_failure_preserves_container_and_skips_verifier(self):
+        report = self.run_fixture(archive_fails=True)
+        self.assertEqual(report['evaluation_status'], 'skipped_archive_failure')
+        self.assertTrue(report['container_preserved'])
+        self.assertIsNone(report['reward'])
 
     def test_start_requires_separate_approval(self):
         with self.assertRaises(PermissionError):

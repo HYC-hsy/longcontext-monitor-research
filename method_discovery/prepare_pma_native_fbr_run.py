@@ -38,7 +38,7 @@ def stage(output):
         'purpose': 'native runtime and behavior smoke; not a controlled GA comparison',
         'source_commit': revision, 'runtime_sha256': identity['runtime_sha256'],
         'task_files_sha256': inventory,
-        'task_image': 'sha256:7a6ac7b01515e4ecf96a666f6b8471669eb00d9a9cfdc7e5b765adae63f3f323',
+        'task_image': 'sha256:a6fa79e2dd6cf93c27ebae40cf35852b7aca0e61c3305600c1b41dfa75a24de0',
         'controller_image': identity['controller_image'],
         'task_model': 'anthropic/claude-sonnet-4-5-20250929',
         'memory_model': 'anthropic/claude-opus-4-6',

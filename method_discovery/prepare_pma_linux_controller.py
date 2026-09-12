@@ -10,7 +10,8 @@ REFERENCE = ROOT/'some_research/research_library/02_direct_methods/repositories/
 SCRIPTS = ('pma_native_trial.py','preflight_pma_native.py',
            'test_pma_native_contract.py','test_pma_native_trial.py',
            'pma_native_support.py', 'test_pma_native_support.py',
-           'test_pma_native_wire.py', 'probe_pma_native_models.py')
+           'test_pma_native_wire.py', 'probe_pma_native_models.py',
+           'pma_native_archive.py', 'test_pma_native_archive.py')
 
 
 def prepare(output):

@@ -12,7 +12,8 @@ import uuid
 
 
 async def execute_trial(task, config, output, time_limit, *, approved=False,
-                        environment_factory=None, agent_factory=None, verifier_factory=None):
+                        environment_factory=None, agent_factory=None, verifier_factory=None,
+                        workspace='/app'):
     if not approved:
         raise PermissionError('Native PMA requires its own real-start approval')
     if os.name == 'nt' and agent_factory is None:
@@ -47,8 +48,24 @@ async def execute_trial(task, config, output, time_limit, *, approved=False,
               'deployment': 'native-host-controller-offline-docker',
               'upstream_agent_unchanged': True, 'task_network': 'none'}
     agent = None
+    environment_started = False
+    archive_attempted = False
+    preserve_container = False
+    async def snapshot():
+        nonlocal archive_attempted, preserve_container
+        archive_attempted = True
+        try:
+            from pma_native_archive import archive_workspace
+            report['workspace_archive'] = await archive_workspace(environment, output, workspace)
+        except Exception as exc:
+            preserve_container = True
+            report['workspace_archive'] = {'status': 'failed', 'error_type': type(exc).__name__}
+            # Preserve recoverability without leaving a runnable task behind.
+            environment._keep_containers = True
+            report['recovery_session'] = environment.session_id if hasattr(environment, 'session_id') else 'see compose logs'
     try:
         await environment.start(force_build=False)
+        environment_started = True
         check = await environment.exec(
             "test \"$(ls /sys/class/net)\" = lo && test ! -e /var/run/docker.sock && test ! -e /tests/test.sh",
             timeout_sec=30)
@@ -70,6 +87,10 @@ async def execute_trial(task, config, output, time_limit, *, approved=False,
         report['task_usage'] = context.model_dump(mode='json')
         if hasattr(agent, 'save_memory'):
             agent.save_memory(str(output / 'memory.json'))
+        await snapshot()
+        if preserve_container:
+            report['evaluation_status'] = 'skipped_archive_failure'
+            return report
         # Only now upload hidden tests. No agent can run after this point.
         try:
             verdict = await asyncio.wait_for((verifier_factory or Verifier)(
@@ -83,6 +104,8 @@ async def execute_trial(task, config, output, time_limit, *, approved=False,
         report.update(status='engineering_failed', error_type=type(exc).__name__)
         raise
     finally:
+        if environment_started and not archive_attempted:
+            await snapshot()
         try:
             if agent is not None and hasattr(agent, 'save_memory'):
                 agent.save_memory(str(output / 'memory.json'))
@@ -91,6 +114,7 @@ async def execute_trial(task, config, output, time_limit, *, approved=False,
                 # Upstream delete=True also removes shared task images (--rmi all).
                 # Ordinary down removes this fixture's containers, not cached images.
                 await environment.stop(delete=False)
+                report['container_preserved'] = preserve_container
             except Exception as exc:
                 report['cleanup_error_type'] = type(exc).__name__
             (output / 'native_result.json').write_text(json.dumps(report, indent=2), encoding='utf-8')

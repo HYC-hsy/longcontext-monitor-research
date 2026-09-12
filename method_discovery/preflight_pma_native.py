@@ -45,14 +45,16 @@ async def docker_probe(output, terminal_setup_image=None):
         f'[environment]\ndocker_image={json.dumps(task_image)}\nallow_internet=false\n', encoding='utf-8')
     # The original Verifier uploads this script only after the fake agent stops.
     (task_dir/'tests/test.sh').write_text(
-        '#!/bin/sh\nmkdir -p /logs/verifier\n'
+        '#!/bin/sh\nmkdir -p /logs/verifier\ntouch /app/hidden-evaluation-fixture\n'
         'if test -f /tmp/public-fixture; then echo 1 > /logs/verifier/reward.txt; '
         'else echo 0 > /logs/verifier/reward.txt; fi\n', encoding='utf-8')
     class FakeAgent:
-        async def setup(self, environment):pass
+        async def setup(self, environment):
+            result = await environment.exec('mkdir -p /app', timeout_sec=10)
+            assert result.return_code == 0
         async def run(self, instruction, environment, context):
             result = await environment.exec(
-                'test ! -e /tests/test.sh && touch /tmp/public-fixture', timeout_sec=10)
+                'test ! -e /tests/test.sh && touch /tmp/public-fixture && touch /app/public-archive-fixture', timeout_sec=10)
             assert result.return_code == 0
     config = None
     factory = lambda *args: FakeAgent()
@@ -64,10 +66,28 @@ async def docker_probe(output, terminal_setup_image=None):
             agent = create_agent(config, logs)
             # Run author's real terminal setup, then only a synthetic file check.
             # Never invoke the author's model-running agent.run in this fixture.
-            agent.run = FakeAgent().run
+            async def check_terminal(instruction, environment, context):
+                # Crucially use the actual tmux + asciinema shell, not env.exec.
+                await agent._session.send_keys(
+                    "command -v go && go version && go test ./utils -run '^$' -count=1"
+                    " && touch /app/public-toolchain-fixture\n", block=True, max_timeout_sec=120)
+                check = await environment.exec('test -f /app/public-toolchain-fixture', timeout_sec=10)
+                assert check.return_code == 0, 'Actual agent terminal cannot use Go'
+                await FakeAgent().run(instruction, environment, context)
+            agent.run = check_terminal
             return agent
-    return await execute_trial(Task(task_dir), config, output/'trial', 30, approved=True,
-                               agent_factory=factory)
+    report = await execute_trial(Task(task_dir), config, output/'trial', 150, approved=True,
+                                 agent_factory=factory)
+    import tarfile
+    with tarfile.open(output/'trial/workspace.before-verifier.tar.gz') as archive:
+        names = archive.getnames()
+        assert './public-archive-fixture' in names
+        assert './hidden-evaluation-fixture' not in names
+        assert not any('test_01_query_parsers_test.go' in n for n in names)
+        if terminal_setup_image:
+            assert './public-toolchain-fixture' in names
+    report['archived_public_fixture_verified'] = True
+    return report
 
 
 def main():
