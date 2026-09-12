@@ -1,5 +1,7 @@
 # 当前方法发现恢复入口
 
+2026-09-13 用户允许自主完成到实验前：本轮研究、容量修复和可关闭时效候选已完成，入口 LIVE_AWARENESS_READY_20260913.md。研究 d77b992，容量 ba1fe69，候选 aed4328；最终256监察测试+62隔离/启动测试通过，真实runner仅preflight通过。Fyne live-awareness-20260913-r1 manifest已准备，Opus4.8/sol high、500turn/10000秒、断网Unix推理、旧候选/PMA关闭；零API零真实启动，等待用户批准这条分支。不是混合同步控制或新语义记忆已有效；容量共同修复与候选收益仍需分开归因。勿重启旧active-working-r1，勿继续无界静态补丁。
+
 2026-09-13 PMA/Clean容量、时机、内容只读对照完成：PMA_CLEAN_CAPACITY_TIMING_CONTENT_AUDIT_20260913.md。PMA实际主要以原任务+8步+bank重建输入，两phase未传持续message_history；同步await换取边界新鲜度，不是并发意图纠偏。Clean短wait仍有长调查/重试，容量保护整个当前review且失败wake继续append是确定故障；临时working副本不是直接堆积原因。PMA亦有CORS错误闭合，不能照搬当成功答案。未改代码/调用API/重跑，未确定新机制；下一先设计容量续接修复与独立时效候选，保留主体、工具、两层、并发。
 
 2026-09-13 active-working Fyne R1持续监视至约00:32后因监察容量故障停止，见ACTIVE_WORKING_FYNE_R1_STOP_20260913.md。task263轮、9intervene、2主动笔记写入、1交接；无allow。History压缩可回收量不足连续失败，wake继续追加历史；新临时context在压缩后加入，不能直接归因它。先tar保存/app约84MB再定向stop，原轨迹保留，无完整效果裁决。用户再次明确Clean实验每10分钟持续监视、讨论不打断；及时纠偏不能以持续调查冒充。下一只审计，不自动重跑。
