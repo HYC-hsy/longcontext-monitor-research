@@ -33,6 +33,11 @@ async def execute_trial(task, config, output, time_limit, *, approved=False,
     output.mkdir(parents=True, exist_ok=False)
     paths = TrialPaths(trial_dir=output)
     paths.mkdir()
+    if config is not None:
+        declared = config.model_dump(mode='json')
+        for side in ('model', 'memory'):
+            declared[side].pop('api_key', None)
+        (output / 'effective_config.json').write_text(json.dumps(declared, indent=2), encoding='utf-8')
     env_config = task.config.environment.model_copy(update={'allow_internet': False})
     environment = (environment_factory or DockerEnvironment)(
         environment_dir=task.paths.environment_dir, environment_name=task.name,
@@ -50,6 +55,10 @@ async def execute_trial(task, config, output, time_limit, *, approved=False,
         if check.return_code:
             raise RuntimeError('Task network/hidden-tests preflight failed')
         agent = (agent_factory or create_agent)(config, paths.agent_dir)
+        from pma_native_support import attach_usage
+        attach_usage(agent, output)
+        report['model_call_log'] = 'model_calls.jsonl'
+        report['usage_scope'] = 'returned logical calls; internal retry usage may be unavailable'
         await agent.setup(environment)
         context = AgentContext()
         try:

@@ -8,7 +8,9 @@ import shutil
 ROOT = Path(__file__).resolve().parents[1]
 REFERENCE = ROOT/'some_research/research_library/02_direct_methods/repositories/yifannnwu__proactive-memory-agent'
 SCRIPTS = ('pma_native_trial.py','preflight_pma_native.py',
-           'test_pma_native_contract.py','test_pma_native_trial.py')
+           'test_pma_native_contract.py','test_pma_native_trial.py',
+           'pma_native_support.py', 'test_pma_native_support.py',
+           'test_pma_native_wire.py', 'probe_pma_native_models.py')
 
 
 def prepare(output):
@@ -20,6 +22,8 @@ def prepare(output):
     (output/'scripts').mkdir()
     for name in SCRIPTS:
         shutil.copy2(ROOT/'method_discovery'/name,output/'scripts'/name)
+    shutil.copy2(ROOT/'long_context_bench/adapters/isolated_transport.py',
+                 output/'scripts/isolated_transport.py')
     inventory = {p.relative_to(output).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
                  for p in output.rglob('*') if p.is_file()}
     (output/'build_identity.json').write_text(json.dumps(inventory,indent=2),encoding='utf-8')

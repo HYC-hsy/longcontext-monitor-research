@@ -33,15 +33,16 @@ def installed_parity():
     return results
 
 
-async def docker_probe(output):
+async def docker_probe(output, terminal_setup_image=None):
     from harbor.models.task.task import Task
     task_dir = output/'fixture'
     (task_dir/'environment').mkdir(parents=True)
     (task_dir/'tests').mkdir()
     (task_dir/'environment/Dockerfile').write_text('FROM debian:bookworm-slim\n', encoding='utf-8')
     (task_dir/'instruction.md').write_text('Offline fixture only.', encoding='utf-8')
+    task_image = terminal_setup_image or 'debian:bookworm-slim'
     (task_dir/'task.toml').write_text(
-        '[environment]\ndocker_image="debian:bookworm-slim"\nallow_internet=false\n', encoding='utf-8')
+        f'[environment]\ndocker_image={json.dumps(task_image)}\nallow_internet=false\n', encoding='utf-8')
     # The original Verifier uploads this script only after the fake agent stops.
     (task_dir/'tests/test.sh').write_text(
         '#!/bin/sh\nmkdir -p /logs/verifier\n'
@@ -53,14 +54,27 @@ async def docker_probe(output):
             result = await environment.exec(
                 'test ! -e /tests/test.sh && touch /tmp/public-fixture', timeout_sec=10)
             assert result.return_code == 0
-    return await execute_trial(Task(task_dir), None, output/'trial', 30, approved=True,
-                               agent_factory=lambda *args: FakeAgent())
+    config = None
+    factory = lambda *args: FakeAgent()
+    if terminal_setup_image:
+        from pma_native_support import original_config
+        from memory_agent.runner import create_agent
+        config = original_config(REFERENCE)
+        def factory(config, logs):
+            agent = create_agent(config, logs)
+            # Run author's real terminal setup, then only a synthetic file check.
+            # Never invoke the author's model-running agent.run in this fixture.
+            agent.run = FakeAgent().run
+            return agent
+    return await execute_trial(Task(task_dir), config, output/'trial', 30, approved=True,
+                               agent_factory=factory)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True)
     parser.add_argument('--docker', action='store_true')
+    parser.add_argument('--terminal-setup-image')
     args = parser.parse_args()
     output = Path(args.output).resolve()
     output.mkdir(parents=True, exist_ok=False)
@@ -72,7 +86,8 @@ def main():
         report['reference_configs'] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                                       for p in (REFERENCE/'configs').glob('*.yaml')}
         if args.docker:
-            report['docker'] = asyncio.run(docker_probe(output))
+            report['docker'] = asyncio.run(docker_probe(output, args.terminal_setup_image))
+            report['real_terminal_setup'] = bool(args.terminal_setup_image)
             assert report['docker']['evaluation_status'] == 'completed'
             assert report['docker']['reward'] == {'reward': 1.0}
         report['status'] = 'passed'
