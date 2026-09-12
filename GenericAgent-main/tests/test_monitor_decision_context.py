@@ -104,3 +104,40 @@ def test_upstream_text_identity_and_behavior():
 def test_invalid_arguments(view, kwargs):
     with pytest.raises(ValueError):
         view.read(**kwargs)
+
+
+def test_same_monitor_reconstructs_pauses_corrects_then_observes_reaction(view, monkeypatch):
+    from monitor_agent_core.agent import MonitorAgent
+    from monitor_agent_core.provider import MonitorProviderClient
+    append(view, 1, 'Initial mistaken interpretation')
+    client = MonitorProviderClient('openai', {'apikey': 'fixture', 'apibase': 'https://example.test',
+        'monitor_decision_context': True, 'monitor_hybrid_control': True})
+    monitor = MonitorAgent(client, view.workspace)
+    controls, messages = [], []
+    monitor.task_control_callback = lambda op, **kw: controls.append(op) or {'status': 'queued'}
+    monitor.intervention_callback = lambda text: messages.append(text) or {'status': 'queued'}
+    actions = iter([
+        ('review_context', {}),
+        ('task_control', {'operation': 'pause', 'reason': 'Check this specific premise'}),
+        ('file_write', {'path': 'monitor/working.md', 'content': 'A test oracle can be wrong; check the original.'}),
+        ('intervene', {'message': 'Compare the test with the original requirement.'}),
+        ('review_context', {'after_correction': True}),
+        ('wait', {'after_turns': 1}),
+    ])
+    calls = []
+    def request(tools):
+        name, args = next(actions)
+        if name == 'review_context' and args:
+            append(view, 2, 'I will correct the mistaken test, not the production contract.')
+        calls.append(name)
+        return [{'type': 'tool_use', 'id': str(len(calls)), 'name': name, 'input': args}], {}
+    monkeypatch.setattr(client, '_request_once', request)
+    result = monitor.review('Inspect public progress')
+    assert result.kind == 'wait'
+    assert controls == ['pause'] and len(messages) == 1
+    assert len(calls) == 6  # no hidden maintenance or classifier calls
+    history = json.dumps(client.export_history())
+    assert 'correct the mistaken test' in history and 'A test oracle can be wrong' in history
+    wire = client._responses_history()
+    assert {r['call_id'] for r in wire if r.get('type') == 'function_call'} == {
+        r['call_id'] for r in wire if r.get('type') == 'function_call_output'}
