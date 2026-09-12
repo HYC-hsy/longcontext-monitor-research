@@ -10,7 +10,7 @@ import re
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-DIRECTORIES = ('assets', 'memory', 'plugins', 'monitor_agent_core',
+DIRECTORIES = ('assets', 'memory', 'plugins', 'monitor_agent_core', 'pma_baseline',
                'reflect', 'ga_cli', 'frontends')
 IGNORED = {'__pycache__', 'tests', '.git', 'file_access_stats.json'}
 

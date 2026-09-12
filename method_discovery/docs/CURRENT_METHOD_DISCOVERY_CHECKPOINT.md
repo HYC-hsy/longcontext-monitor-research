@@ -1,5 +1,7 @@
 # 当前方法发现恢复入口
 
+2026-09-12 PMA同步GA适配工程阶段完成：见PMA_SYNC_IMPLEMENTATION_20260912.md。新增独立pma_baseline三原模块/许可与runtime，两phase、8步、task-local bank、一次性软提醒；agent_loop显式同步外部基线分支，Clean并发不变，两者互斥。Harbor/隔离/无checker/准备提案已接线。77项pytest通过，无API/Docker/真实任务。ID依赖改为uuid4前8hex差异已记NOTICE；不可冒称论文原样复现。下一停在真实启动门禁，不自动批量运行；0aef4b8是改动前工程回退点。
+
 2026-09-12 PMA适配设计停在用户决策：PMA_BASELINE_ADAPTATION_DECISION_20260912.md。已核初始化先触发、每步await、最近8步含公开分析/计划/命令/输出、两phase更新后选择、一次性软提醒；runner每题新实例，不能误读reset选项为跨题泄露。建议独立同步PMA机制保真GA适配，Clean主体保持并发；不自动实施该同步对照例外。共同母体异步PMA会改变观察机会，应单独命名而非原样复现。无API/生产修改/启动；下一步须用户确认对照调度后才实施。
 
 2026-09-12 源码保存阶段收束：ENGINEERING_CHECKPOINT_20260912.md与ENGINEERING_CHECKPOINT_FILES_20260912.json列287文件，历史运行源码/通用材料/静态本地依赖/相关测试原样入本阶段Git；不是新增287文件机制。AST全部通过，16paper测试通过，暂存blob需逐项匹配；无API/Docker/生产修改，排除真实密钥、运行日志、隐藏测试、镜像/安装环境。快照是本地内容回退点，不是方法接受/公开发布/一键环境认证。保存到此收束，不再无限审计；下一项PMA强基线适配设计，调度比较含义需明确，真实启动仍单独门禁。

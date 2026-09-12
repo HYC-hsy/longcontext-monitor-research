@@ -33,7 +33,7 @@ def build_bundle(root, source, runtime, python_home, task_config, monitor_config
             raise ValueError('Runtime source must not contain symbolic links')
         if not p.name.startswith('mykey'):
             shutil.copy2(p, copied / p.name)
-    for name in ('assets', 'memory', 'plugins', 'monitor_agent_core', 'reflect',
+    for name in ('assets', 'memory', 'plugins', 'monitor_agent_core', 'pma_baseline', 'reflect',
                  'ga_cli', 'frontends'):
         p = source / name
         if p.exists():

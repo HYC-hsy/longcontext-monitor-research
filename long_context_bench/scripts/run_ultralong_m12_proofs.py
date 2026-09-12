@@ -42,6 +42,7 @@ COLLECTOR_PORT = 15340
 
 MANIFEST_ENV_KEYS = {"BENCHMARK_CAMPAIGN_ROOT"}
 MANIFEST_CONTROLLED_ENV_KEYS = {
+    "GA_PMA_ENABLED", "GA_PMA_CONFIG", "GA_PMA_ARTIFACT_DIR",
     "GA_RUN_ISOLATION",
     "GA_MONITOR_GROUNDED_CONTEXT",
     "GA_MONITOR_HANDOFF_VALIDATION",
@@ -349,7 +350,8 @@ def task_path(source: str, task_id: str) -> Path:
 
 def online_checker_forbidden() -> bool:
     """Return whether this run must keep native verification strictly post-run."""
-    return os.environ.get("GA_MONITOR_ENABLED") == "1"
+    return (os.environ.get("GA_MONITOR_ENABLED") == "1"
+            or os.environ.get("GA_PMA_ENABLED") == "1")
 
 
 def validate_expected_ga_source(actual_hash: str) -> None:
@@ -697,7 +699,8 @@ def run_proof(
         source_mount, isolation_compose = build_bundle(
             WORK_ROOT / 'isolated_bundles' / run_id, m4.GA_ROOT, m4.GA_RUNTIME,
             identity['runtime']['python_home'], os.environ['GA_LLM_CONFIG_NAME'],
-            os.environ['GA_MONITOR_CONFIG'], COLLECTOR_PORT)
+            os.environ['GA_PMA_CONFIG'] if os.environ.get('GA_PMA_ENABLED') == '1'
+            else os.environ['GA_MONITOR_CONFIG'], COLLECTOR_PORT)
         identity['isolation'] = json.loads(
             (isolation_compose.parent / 'isolation_identity.json').read_text(encoding='utf-8'))
     mounts = [

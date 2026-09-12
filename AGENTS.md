@@ -6,6 +6,8 @@
 
 ### 权威文档
 
+- 2026-09-12 用户批准PMA保留原同步维护—提醒调度作为独立外部基线；此例外仅用于GA_PMA_ENABLED，不改变Clean主体并发硬约束。实现见`method_discovery/docs/PMA_SYNC_IMPLEMENTATION_20260912.md`；称PMA同步GA机制适配，不称原论文原样复现。两者互斥，PMA仍无在线checker且真实启动独立确认；工程通过不表示效果成立。
+
 - 2026-09-11/12 无API静态准备子阶段：`method_discovery/docs/PAPER_P1_EXECUTABLE_RESEARCH_CONTRACT_20260911.md` 与 `PAPER_STATIC_INVENTORY_20260911.json` 给出拟议6题面板、G0/G1/G2/G3差异、指标分母和验收出口。六题是5道旧Roadmap dev_pilot加Fyne诊断题，不替代原跨来源/holdout门禁，未批准整批运行；PMA并发适配选择、原生评分映射、完整源码身份和资源门禁尚未完成。静态脚本/5项工程测试不是方法效果证据，生产监察机制未改。
 
 - 2026-09-11 用户要求按论文最终实验倒推研究，暂停局部补丁式扩张；当前获授权的是不调用模型的调查与规划。新入口：`method_discovery/docs/PAPER_EXPERIMENT_EVIDENCE_AUDIT_20260911.md`、`PAPER_EXPERIMENT_BLUEPRINT_20260911.md`、`REPRODUCTION_READINESS_CARDS_20260911.md`。已核对文献实验设计、Final120元数据和部分复现入口；未完成原论文效果复现。后续先固定强基线、题源/预算/比较协议，再选择最小机制；不以API恢复自动重启旧候选队列。新增题源、TB版本、规模和投稿倒排均为待确认建议，不改变现有划分/真实启动门禁，不默认为批准实施全部阶段。

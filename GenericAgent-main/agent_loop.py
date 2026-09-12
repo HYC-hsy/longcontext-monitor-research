@@ -57,6 +57,10 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
     local_turn = 0; turn = int(turn_offset); handler.max_turns = max_turns
     exit_reason = {}; response = None
     _hook('agent_before', locals())
+    pma = None
+    if os.environ.get('GA_PMA_ENABLED') == '1':
+        from pma_baseline.runtime import from_environment
+        pma = from_environment(initial_content)
     while local_turn < handler.max_turns:
         local_turn += 1; turn = int(turn_offset) + local_turn
         consume_resume = getattr(handler.parent, 'consume_resumable_interruption', None)
@@ -82,6 +86,11 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
         yield f"\n\n{turnstr}\n\n"
         if turn%10 == 0: client.last_tools = ''  # 每10轮重置一次工具描述
         _hook('turn_before', locals())
+        if pma is not None:
+            pma.review()
+            reminder = pma.take_reminder()
+            if reminder:
+                messages.append({'role': 'user', 'content': reminder})
         _hook('llm_before', locals())
         response_gen = client.chat(messages=messages, tools=tools_schema)
         try:
@@ -217,6 +226,10 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             next_prompts.add(handler._done_hooks.pop(0))
         next_prompt = handler.turn_end_callback(response, tool_calls, tool_results, turn, '\n'.join(next_prompts), exit_reason)
         _hook('turn_after', locals())
+        if pma is not None:
+            pma.observe(response.content or '',
+                        [json.dumps(call, ensure_ascii=False, default=json_default) for call in tool_calls],
+                        json.dumps(tool_results, ensure_ascii=False, default=json_default))
         messages = [{"role": "user", "content": next_prompt, "tool_results": tool_results}]   # just new message, history is kept in *Session
     if exit_reason: handler.turn_end_callback(response, tool_calls, tool_results, turn, '', exit_reason)
     final_outcome = exit_reason or {'result': 'MAX_TURNS_EXCEEDED'}
