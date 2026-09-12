@@ -1,5 +1,7 @@
 # 当前方法发现恢复入口
 
+2026-09-12 原生PMA FBR R1已获批准并于16:07正式启动，见PMA_NATIVE_FBR_R1_LIVE_20260912.md。50turn/7200秒，原Sonnet4.5+Opus4.6；全新native_fbr_20260912_r1包，controller=pma-native-fbr-20260912-r1。用户随后要求后台运行、不持续盯日志、完成后再审计，当前按此停止轮询而不停止任务。下次先查bench_runtime/pma_linux_controller/native_fbr_20260912_r1/work/trial/native_result.json及容器状态；此入口不表示已有成绩。原生trial正常结束后自动清理任务容器，controller/gateway残留另行清理；保留全部绑定日志。禁止把本次当作旧GA的严格配对或TB2.0成绩复现。
+
 2026-09-12 原配置PMA启动准备完成：PMA_NATIVE_ORIGINAL_CONFIG_READY_20260912.md。Sonnet4.5/Opus4.6、0.7/0.3、50turn等原策略保留；声明OpenRouter→CC-VIBE Anthropic、Enroot→Docker差异。9原生测试+1bundle边界测试通过；FBR仅预装asciinema依赖，原作者断网终端setup及事后合成评分通过；原生LiteLLM经Unix网关3次真实API（含Opus工具调用）均通过，约5–6秒/短请求。计量为logical-call返回usage，非完整失败重试账单。未跑真实题/未证明方法效果。新增独立准备与显式运行入口，默认只测不跑；下一需具体任务和预算，建议FBR原生smoke，不和旧GA结果严格混比。
 
 2026-09-12 原版PMA启动准备审计：见PMA_NATIVE_START_READINESS_20260912.md。Engine可用；现有FBR/Fyne镜像均有tmux、无asciinema，原录像开启时需运行前预装，不能在线恢复公网。原生LiteLLM受控推理接线与task+memory完整计量仍待实现。零API、零真实任务，镜像只读检查容器已退出。停在原版模型/50轮检查与共同GA/500轮比较的轨道选择；不得自行混用模型、题源或预算，不宣称已完整复现。
