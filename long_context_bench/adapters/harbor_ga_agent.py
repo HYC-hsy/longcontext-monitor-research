@@ -7,6 +7,8 @@ import os
 import posixpath
 import shlex
 from pathlib import Path
+from adapters.failure_snapshot import preserve_failed_workspace
+from adapters.isolated_setup import start_isolated_transport, ENVIRONMENT_NOTE
 
 from harbor.agents.base import BaseAgent
 from harbor.environments.base import BaseEnvironment
@@ -18,7 +20,13 @@ CONTAINER_SOURCE = "/opt/genericagent-source"
 CONTAINER_GA = "/opt/genericagent"
 ROUND_END = "[ROUND END]"
 FORWARDED_ENV_VARS = (
+    "GA_RUN_ISOLATION",
     "GA_MONITOR_GROUNDED_CONTEXT",
+    "GA_MONITOR_HANDOFF_VALIDATION",
+    "GA_MONITOR_ADVICE_REVISION",
+    "GA_MONITOR_FEEDBACK_FOCUS",
+    "GA_MONITOR_INQUIRY",
+    "GA_MONITOR_TOOL_FEEDBACK",
     "GA_PROVIDER_MAX_RETRIES",
     "GA_MONITOR_REQUEST_TIMEOUT_SECONDS",
     "OPENROUTER_API_KEY",
@@ -236,6 +244,8 @@ class M4GenericAgent(BaseAgent):
         result = await environment.exec(command, timeout_sec=180, user="root")
         if result.return_code:
             raise RuntimeError(f"GA setup failed: {result.stderr or result.stdout}")
+        if os.environ.get('GA_RUN_ISOLATION') == 'no-network-unix-inference-v1':
+            await start_isolated_transport(environment, python_bin, CONTAINER_GA)
 
     async def run(
         self,
@@ -246,6 +256,8 @@ class M4GenericAgent(BaseAgent):
         agent_id = self.run_id.replace(":", "_").replace("/", "_")
         task_dir = f"{CONTAINER_GA}/temp/{agent_id}"
         python_bin, site_packages = _runtime_paths(self.python_home)
+        if os.environ.get('GA_RUN_ISOLATION') == 'no-network-unix-inference-v1':
+            instruction += ENVIRONMENT_NOTE
         await self._stage_text(environment, task_dir + "/input.txt", instruction)
         if self.completion_branch_checkpoint:
             restored = await environment.exec(
@@ -380,6 +392,8 @@ class M4GenericAgent(BaseAgent):
         if os.environ.get("GA_COMPLETION_CHECKPOINT_ROOT"):
             env["GA_COMPLETION_CHECKPOINT_ROOT"] = "/logs/agent/completion_checkpoints"
         for name in FORWARDED_ENV_VARS:
+            if os.environ.get('GA_RUN_ISOLATION') == 'no-network-unix-inference-v1' and name.endswith('_API_KEY'):
+                continue
             value = os.environ.get(name)
             if value:
                 env[name] = value
@@ -440,13 +454,19 @@ if [ "$timed_out" -eq 1 ]; then exit 124; fi
 # A clean child exit is not a completed turn without the protocol sentinel.
 exit 125
 """.strip()
-        result = await environment.exec(
-            command,
-            cwd="/app",
-            env=env,
-            timeout_sec=self.timeout_sec + 90,
-            user="root",
-        )
+        try:
+            result = await environment.exec(
+                command, cwd="/app", env=env,
+                timeout_sec=self.timeout_sec + 90, user="root",
+            )
+        except BaseException:
+            # Preserve the original cancellation/transport error, even if cleanup fails.
+            await preserve_failed_workspace(environment, python_bin, self.task_workspace_dir, context.metadata)
+            raise
+        failure_snapshot = None
+        if result.return_code:
+            failure_snapshot = await preserve_failed_workspace(
+                environment, python_bin, self.task_workspace_dir, context.metadata)
         process_result = await environment.exec(
             "cat /logs/agent/agent_process_return_code.txt",
             timeout_sec=30,
@@ -474,6 +494,8 @@ exit 125
             "archive_status": ("monitor_review_incomplete" if self.monitor_enabled and result.return_code == 126
                                else "finished" if result.return_code == 0 else "failed"),
         }
+        if failure_snapshot is not None:
+            metadata['failure_workspace_snapshot'] = failure_snapshot
         context.metadata = metadata
         await environment.exec(
             "printf %s "
@@ -483,7 +505,9 @@ exit 125
             user="root",
         )
         if result.return_code:
-            detail = result.stderr or result.stdout or "no process output"
+            detail = result.stderr or result.stdout or (
+                f"wrapper_exit={result.return_code}, child_exit={process_return_code}; "
+                "see archived output.txt, monitor/completion_incomplete.json and failure_workspace/report.json")
             raise RuntimeError(f"GenericAgent did not complete one task turn: {detail}")
 
 

@@ -18,6 +18,7 @@ from m3_prepare_real_task_gate import R0_TASKS, execution_harness_hash
 
 def environment(source_hash: str) -> dict[str, str]:
     return {
+        "GA_RUN_ISOLATION": "no-network-unix-inference-v1",
         "GA_BASELINE_CONDITION": "original",
         "GA_EXPERIMENT_ID": "clean-monitor-foundation-v1",
         "GA_CONDITION_ID": "clean-monitor",

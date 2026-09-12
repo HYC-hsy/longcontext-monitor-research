@@ -35,6 +35,21 @@ class RetryableProviderError(ProviderError):
     """Explicit temporary remote failure, not a model/tool decision."""
 
 
+class ProviderRecoveryExhausted(ProviderError):
+    """Bounded transport recovery ended; do not start another review to retry."""
+
+
+def is_reasoning_echo(text, blocks):
+    """Detect a transport-level duplicate, not the quality/style of a note."""
+    summaries = [part.get("text", "") for block in blocks
+                 if block.get("type") == "openai_item"
+                 and block.get("item", {}).get("type") == "reasoning"
+                 for part in block["item"].get("summary", [])]
+    normalize = lambda value: "".join(value.split())
+    return bool(text.strip() and summaries and
+                normalize(text) == normalize("".join(summaries)))
+
+
 def _remote_error(error):
     fields = error if isinstance(error, dict) else {}
     codes = {str(fields.get(key, '')).lower() for key in ('type', 'code')}
@@ -43,7 +58,7 @@ def _remote_error(error):
                  'context_length_exceeded', 'billing_error'}
     temporary = {'upstream_error', 'server_error', 'stream_read_error',
                  'overloaded_error', 'temporarily_unavailable', 'rate_limit_error',
-                 'rate_limit_exceeded'}
+                 'rate_limit_exceeded', 'gateway_queue_full'}
     cls = RetryableProviderError if codes & temporary and not codes & permanent else ProviderError
     return cls(str(error))
 
@@ -351,7 +366,12 @@ class MonitorProviderClient:
             raise ProviderError("Semantic compaction requires a retrievable history archive")
         # Archive first: no evidence is silently discarded if maintenance fails.
         location = archive(self.export_history())
-        note = self.prepare_continuation()
+        previous_context = getattr(self, "continuation_context", None)
+        self.continuation_context = {"archive": location, "retired_messages": cut}
+        try:
+            note = self.prepare_continuation()
+        finally:
+            self.continuation_context = previous_context
         carried = {
             "role": "user", "content": [{"type": "text", "text":
                 "Current working understanding, written after reviewing the retained dialogue below. "
@@ -410,9 +430,33 @@ class MonitorProviderClient:
         return ModelResponse(text, calls, usage)
 
     def _request(self, tools):
+        # Runtime-owned recovery stays inside this request: no new wake, tool
+        # replay, history append, or synthetic completion decision.
+        deadline = getattr(self, 'recovery_deadline', None)
+        if deadline is None:
+            return self._request_batch(tools)
+        stop = self.recovery_stop
+        for batch in range(2):
+            if stop.is_set() or time.monotonic() >= deadline:
+                raise ProviderRecoveryExhausted('Monitor stopped or task budget exhausted')
+            try:
+                return self._request_batch(tools)
+            except RetryableProviderError as exc:
+                if batch == 1:
+                    raise ProviderRecoveryExhausted(str(exc)) from exc
+                delay = min(30.0, max(0.0, deadline - time.monotonic()))
+                self._progress('transport_recovery_wait', seconds=delay,
+                               next_batch=2, error_type=type(exc).__name__)
+                if stop.wait(delay) or time.monotonic() >= deadline:
+                    raise ProviderRecoveryExhausted('Monitor stopped or task budget exhausted') from exc
+
+    def _request_batch(self, tools):
         last_error = None
         self._cancelled.clear()
         for attempt in range(self.max_retries + 1):
+            deadline = getattr(self, 'recovery_deadline', None)
+            if deadline is not None and (self.recovery_stop.is_set() or time.monotonic() >= deadline):
+                raise ProviderRecoveryExhausted('Monitor stopped or task budget exhausted')
             started = time.monotonic()
             request_id = uuid.uuid4().hex
             self._progress_request_id = request_id
@@ -423,8 +467,17 @@ class MonitorProviderClient:
                 result = self._request_once(tools)
                 if self._cancelled.is_set():
                     raise ProviderError('Provider request cancelled')
-                record['outcome'] = 'success'
                 self._progress('request_usage', request_id=request_id, usage=result[1])
+                # Completed transport is not necessarily a usable agent response.
+                # Retry before committing history or consuming a review turn.
+                if not any(
+                    (block.get('type') == 'text' and str(block.get('text') or '').strip())
+                    or (block.get('type') == 'tool_use' and str(block.get('name') or '').strip())
+                    for block in result[0]
+                ):
+                    self._progress('response_empty', request_id=request_id)
+                    raise RetryableProviderError('Empty model response: no text or tool call')
+                record['outcome'] = 'success'
                 return result
             except (RetryableProviderError, requests.Timeout, requests.ConnectionError,
                     requests.exceptions.ChunkedEncodingError) as exc:
@@ -449,7 +502,7 @@ class MonitorProviderClient:
                 record['duration_seconds'] = time.monotonic() - started
                 self.request_attempts.append(record)
                 self._progress('request_finished', request_id=request_id, **record)
-        raise ProviderError(f"Provider request failed: {last_error}")
+        raise RetryableProviderError(f"Provider request failed: {last_error}") from last_error
 
     def _request_once(self, tools):
         if self.provider == "anthropic":
@@ -627,7 +680,10 @@ class MonitorProviderClient:
         return blocks, usage
 
     def _parse_openai_responses(self, lines):
-        text, calls, usage, provider_items = "", {}, {}, {}
+        text, usage, provider_items = "", {}, {}
+        tool_snapshots, argument_deltas = {}, {}
+        messages = {}
+        final_output = None
         completed = False
         for event in self._events(lines):
             kind = event.get("type")
@@ -636,22 +692,32 @@ class MonitorProviderClient:
                 item = event.get("item", {})
                 if item.get("type") == "function_call":
                     index = event.get("output_index", 0)
-                    calls[index] = {"type": "tool_use", "id": item.get("call_id", item.get("id", "")), "name": item.get("name", ""), "input": {}, "_args": ""}
+                    tool_snapshots.setdefault(index, []).append(('added', dict(item)))
                 elif item.get("type") == "reasoning":
                     provider_items[event.get("output_index", 0)] = dict(item)
             elif kind == "response.output_item.done":
                 item = event.get("item", {})
                 if item.get("type") == "reasoning":
                     provider_items[event.get("output_index", 0)] = dict(item)
+                elif item.get("type") == "message":
+                    messages[event.get("output_index", 0)] = dict(item)
+                elif item.get("type") == "function_call":
+                    tool_snapshots.setdefault(event.get('output_index', 0), []).append(('item_done', dict(item)))
             elif kind == "response.function_call_arguments.delta":
                 index = event.get("output_index", 0)
-                if index in calls: calls[index]["_args"] += event.get("delta", "")
+                argument_deltas[index] = argument_deltas.get(index, '') + event.get('delta', '')
             elif kind == "response.function_call_arguments.done":
                 index = event.get("output_index", 0)
-                if index in calls: calls[index]["_args"] = event.get("arguments", calls[index]["_args"])
+                tool_snapshots.setdefault(index, []).append(('arguments_done', dict(event)))
             elif kind == "response.completed":
                 completed = True
                 usage = event.get("response", {}).get("usage", {}) or {}
+                output = event.get("response", {}).get("output")
+                if isinstance(output, list):
+                    final_output = output
+                    for index, item in enumerate(output):
+                        if item.get("type") == "reasoning":
+                            provider_items[index] = dict(item)
                 self._progress('response_completed',
                                request_id=getattr(self, '_progress_request_id', None))
                 break
@@ -670,16 +736,90 @@ class MonitorProviderClient:
                            request_id=getattr(self, '_progress_request_id', None))
             raise RetryableProviderError("Responses stream ended without response.completed")
         blocks = [{"type": "openai_item", "item": provider_items[index]} for index in sorted(provider_items)]
+        final_items = final_output if final_output is not None else [messages[i] for i in sorted(messages)]
+        has_final = final_output is not None or bool(messages)
+        final_text = "".join(part.get("text", "") for item in final_items
+                             if item.get("type") == "message" and item.get("role", "assistant") == "assistant"
+                             for part in item.get("content", []) if part.get("type") == "output_text")
+        # Final message bodies can recover a missing/truncated delta stream.
+        # Contradictory bodies are not silently merged or promoted to memory.
+        mismatch = has_final and bool(text) and not final_text.startswith(text)
+        selected = final_text if has_final else text
+        echo = is_reasoning_echo(selected, blocks)
+        self._progress("response_text_contract", request_id=getattr(self, "_progress_request_id", None),
+                       source="completed_output" if final_output is not None else "item_done" if messages else "delta",
+                       delta_characters=len(text), final_characters=len(final_text),
+                       reasoning_echo=echo, mismatch=mismatch,
+                       final_item_types=[item.get("type") for item in final_items],
+                       usage={key: usage[key] for key in ("input_tokens", "output_tokens", "total_tokens")
+                              if key in usage})
+        if mismatch or echo:
+            raise RetryableProviderError("Response body conflicts with final output or duplicates reasoning summary")
+        text = selected
         if text: blocks.append({"type": "text", "text": text})
-        for index in sorted(calls):
-            call = calls[index]
-            raw = call.pop("_args")
-            try: call["input"] = json.loads(raw or "{}")
-            except json.JSONDecodeError:
-                raise RetryableProviderError("Completed response contains invalid tool argument JSON")
-            if not isinstance(call["input"], dict):
-                raise RetryableProviderError("Tool arguments must be a JSON object")
-            blocks.append(call)
+        final_calls = ({i: item for i, item in enumerate(final_output)
+                        if item.get('type') == 'function_call'} if final_output is not None else None)
+        indices = set(tool_snapshots) | set(argument_deltas) | set(final_calls or {})
+        for index in sorted(indices):
+            snapshots = list(tool_snapshots.get(index, []))
+            if final_calls is not None and index in final_calls:
+                snapshots.append(('completed', final_calls[index]))
+            try:
+                if final_calls is not None and index not in final_calls:
+                    raise ValueError('streamed call absent from final output')
+                identities = {'call_id': set(), 'name': set(), 'item_id': set()}
+                full_arguments = []
+                for source, item in snapshots:
+                    for field in identities:
+                        # Some relays repackage final output items. call_id links
+                        # tool results; the final object's id is not that link.
+                        # Still require identity consistency within the stream.
+                        if field == 'item_id' and source == 'completed':
+                            continue
+                        value = item.get('id' if field == 'item_id' and source != 'arguments_done' else field)
+                        if value:
+                            identities[field].add(value)
+                    raw = item.get('arguments')
+                    if raw is not None and (source != 'added' or raw):
+                        parsed = json.loads(raw)
+                        if not isinstance(parsed, dict):
+                            raise ValueError('arguments must be an object')
+                        full_arguments.append((raw, parsed))
+                if any(len(values) > 1 for values in identities.values()):
+                    raise ValueError('tool identity changed across events')
+                delta = argument_deltas.get(index, '')
+                if full_arguments:
+                    raw, arguments = full_arguments[-1]
+                    if any(value != arguments for _, value in full_arguments):
+                        raise ValueError('final argument objects disagree')
+                    if delta:
+                        try:
+                            delta_matches = json.loads(delta) == arguments
+                        except json.JSONDecodeError:
+                            delta_matches = raw.startswith(delta)
+                        if not delta_matches:
+                            raise ValueError('argument delta contradicts final arguments')
+                else:
+                    arguments = json.loads(delta or '{}')
+                if not isinstance(arguments, dict):
+                    raise ValueError('arguments must be an object')
+                if not identities['call_id'] or not identities['name']:
+                    raise ValueError('missing callable identity')
+            except (ValueError, TypeError) as exc:
+                self._progress('response_tool_contract', output_index=index, mismatch=True,
+                               sources=[source for source, _ in snapshots], reason=str(exc),
+                               request_id=getattr(self, '_progress_request_id', None))
+                raise RetryableProviderError('Tool stream contract mismatch: ' + str(exc)) from exc
+            self._progress('response_tool_contract', output_index=index, mismatch=False,
+                           sources=[source for source, _ in snapshots],
+                           final_item_id_rewritten=bool(final_calls and index in final_calls
+                               and identities['item_id'] and final_calls[index].get('id')
+                               and final_calls[index]['id'] not in identities['item_id']),
+                           arguments_sha256=hashlib.sha256(json.dumps(arguments, sort_keys=True,
+                               ensure_ascii=False).encode('utf-8')).hexdigest(),
+                           request_id=getattr(self, '_progress_request_id', None))
+            blocks.append({'type': 'tool_use', 'id': next(iter(identities['call_id'])),
+                           'name': next(iter(identities['name'])), 'input': arguments})
         return blocks, usage
 
     def _parse_openai_chat(self, lines):

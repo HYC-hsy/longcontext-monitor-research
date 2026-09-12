@@ -76,6 +76,35 @@ def test_boundary_creates_two_layer_archive_and_delivers_immediate_correction(tm
     assert 'handed_to_task_interrupt_interface' in feedback
 
 
+def test_receipt_writers_serialize_without_locking_task_archive(tmp_path, monkeypatch):
+    import monitor_agent_core.runtime as module
+    runtime = MonitorRuntime.__new__(MonitorRuntime)
+    runtime.artifact_dir = tmp_path
+    runtime._receipt_lock = threading.Lock()
+    active = 0
+    maximum = 0
+    original = module._append
+
+    def slow_append(path, value):
+        nonlocal active, maximum
+        active += 1
+        maximum = max(maximum, active)
+        time.sleep(.001)
+        original(path, value)
+        active -= 1
+
+    monkeypatch.setattr(module, '_append', slow_append)
+    threads = [threading.Thread(target=lambda n=n: [runtime._append_receipt(
+        {'writer': n, 'text': '证据' * 1000}) for _ in range(8)]) for n in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    rows = [json.loads(line) for line in (tmp_path / 'runtime_receipts.jsonl').read_text(
+        encoding='utf-8').splitlines()]
+    assert len(rows) == 16 and maximum == 1
+
+
 def test_failed_interrupt_is_recorded_and_pump_survives(tmp_path):
     def fail(_):
         raise RuntimeError('fixture delivery failure')

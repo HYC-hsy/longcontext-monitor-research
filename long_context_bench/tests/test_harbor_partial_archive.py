@@ -32,3 +32,5 @@ def test_outer_cancellation_keeps_partial_identity_and_installs_live_archive(mon
         asyncio.run(agent.run('public task', Environment(), context))
     assert context.metadata['round_end_seen'] is False
     assert any('m4_agent_identity.json' in c for c in calls[:-1])
+    assert any('snapshot_workspace' in c for c in calls)
+    assert context.metadata['failure_workspace_snapshot']['status'] == 'unavailable'

@@ -22,10 +22,22 @@ def run_review(client, system_prompt: str, wake_context: str, tools: list[dict],
         if audit is not None:
             audit(event, **payload)
 
+    def preserve_results(results, reason):
+        if results:
+            # Persist receipts without another model request or a control decision.
+            client.record_tool_results(results)
+            record('exit_tool_results', reason=reason, results=results)
+
     record('review_context', system_prompt=system_prompt, wake_context=wake_context, tools=tools)
     for _turn in range(1, max_turns + 1):
         if before_model is not None:
-            update = before_model()
+            try:
+                update = before_model()
+            except Exception:
+                preserve_results([result for message in messages
+                                  for result in message.get('tool_results', [])],
+                                 'before_model_failed')
+                raise
             if update:
                 messages.append({"role": "user", "content": update})
         # Record deltas, not a second copy of the entire growing provider history.
@@ -60,6 +72,23 @@ def run_review(client, system_prompt: str, wake_context: str, tools: list[dict],
                 try:
                     outcome = dispatch(call.name, arguments)
                 except Exception as exc:
+                    # The tool may have acted before failing. Do not call it a
+                    # success, a rollback, or an unexecuted action; keep uncertainty.
+                    failed = tool_results + [{
+                        "tool_use_id": call.id,
+                        "content": json.dumps({
+                            "status": "execution_unconfirmed",
+                            "error_type": type(exc).__name__,
+                            "reason": "tool_dispatch_raised; inspect evidence before retrying",
+                        }),
+                    }]
+                    failed.extend({
+                        "tool_use_id": pending.id,
+                        "content": json.dumps({
+                            "status": "not_executed", "reason": "preceding_tool_dispatch_failed",
+                        }),
+                    } for pending in response.tool_calls[index + 1:])
+                    preserve_results(failed, 'tool_dispatch_failed')
                     record('tool_error', turn=_turn, tool_id=call.id, error_type=type(exc).__name__)
                     raise
             record('tool_result', turn=_turn, tool_id=call.id, data=outcome.data,
@@ -94,4 +123,8 @@ def run_review(client, system_prompt: str, wake_context: str, tools: list[dict],
             "content": "\n".join(next_prompts) or "Continue.",
             "tool_results": tool_results,
         }]
+    # Ordinary receipts normally enter history in the next complete(). At the
+    # budget boundary there is no next iteration, but the next wake reuses history.
+    preserve_results([result for message in messages
+                      for result in message.get('tool_results', [])], 'review_turn_limit')
     raise MonitorLoopError(f"Monitor review exceeded {max_turns} turns without a control action")

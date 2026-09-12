@@ -16,6 +16,22 @@ m12 = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(m12)
 
 
+def test_clean_launch_refuses_legacy_public_network(monkeypatch):
+    monkeypatch.setenv('GA_MONITOR_ENABLED', '1')
+    monkeypatch.delenv('GA_RUN_ISOLATION', raising=False)
+    monkeypatch.setattr(m12, 'preflight', lambda *args: pytest.fail('must fail before preflight'))
+    with pytest.raises(RuntimeError, match='isolated inference profile'):
+        m12.run_proof('roadmapbench', 'not-launched', 0, 10000)
+
+
+def test_isolation_refuses_old_branch_mounts(monkeypatch):
+    monkeypatch.setenv('GA_RUN_ISOLATION', m12.ISOLATION_PROFILE)
+    monkeypatch.setenv('GA_COMPLETION_BRANCH_CHECKPOINT', 'old-run')
+    monkeypatch.setattr(m12, 'preflight', lambda *args: pytest.fail('must fail before preflight'))
+    with pytest.raises(RuntimeError, match='Historical branch mounts'):
+        m12.run_proof('roadmapbench', 'not-launched', 0, 10000)
+
+
 def test_host_preflight_forwards_named_config(monkeypatch):
     monkeypatch.setenv('GA_LLM_CONFIG_NAME', 'native_claude_cc_vibe_opus48')
     monkeypatch.setattr(m12.m4, 'python_home', lambda: Path('python-test'))
@@ -164,6 +180,8 @@ def test_experiment_manifest_applies_allowlisted_secret_free_environment(
             "run_id": "run-1",
             "environment": {
                 "GA_M3_HUMAN_LOOP_ENABLED": "1",
+                "GA_MONITOR_HANDOFF_VALIDATION": "1",
+                "GA_MONITOR_ADVICE_REVISION": "1",
                 "GA_EXPERIMENT_HARNESS_SHA256": m12.execution_harness_hash(),
                 "BENCHMARK_CAMPAIGN_ROOT": str(campaign),
             },
@@ -175,6 +193,8 @@ def test_experiment_manifest_applies_allowlisted_secret_free_environment(
 
     assert selected["run_id"] == "run-1"
     assert m12.os.environ["GA_M3_HUMAN_LOOP_ENABLED"] == "1"
+    assert m12.os.environ["GA_MONITOR_HANDOFF_VALIDATION"] == "1"
+    assert m12.os.environ["GA_MONITOR_ADVICE_REVISION"] == "1"
     assert m12.WORK_ROOT == campaign
     assert m12.JOBS_ROOT == campaign / "jobs"
 
@@ -216,6 +236,8 @@ def test_experiment_manifest_clears_stale_candidate_switches(tmp_path, monkeypat
     }), encoding="utf-8")
     monkeypatch.setenv("GA_M3_DECISION_VALUE_ENABLED", "1")
     monkeypatch.setenv("GA_M3_COMBINED_CONTROL_ENABLED", "1")
+    monkeypatch.setenv("GA_MONITOR_HANDOFF_VALIDATION", "1")
+    monkeypatch.setenv("GA_MONITOR_ADVICE_REVISION", "1")
     monkeypatch.setenv("GA_MANUAL_COMPLETION_ENABLED", "1")
     monkeypatch.setenv("GA_STAGE6D_BUNDLE_DIR", str(tmp_path / "stale-oracle-bundle"))
     monkeypatch.setenv("GA_EVIDENCE_FRONTEND_CONFIG", "stale-frontend")
@@ -225,6 +247,8 @@ def test_experiment_manifest_clears_stale_candidate_switches(tmp_path, monkeypat
 
     assert "GA_M3_DECISION_VALUE_ENABLED" not in m12.os.environ
     assert "GA_M3_COMBINED_CONTROL_ENABLED" not in m12.os.environ
+    assert "GA_MONITOR_HANDOFF_VALIDATION" not in m12.os.environ
+    assert "GA_MONITOR_ADVICE_REVISION" not in m12.os.environ
     assert "GA_MANUAL_COMPLETION_ENABLED" not in m12.os.environ
     assert "GA_STAGE6D_BUNDLE_DIR" not in m12.os.environ
     assert "GA_EVIDENCE_FRONTEND_CONFIG" not in m12.os.environ

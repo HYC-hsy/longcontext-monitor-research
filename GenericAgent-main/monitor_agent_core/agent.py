@@ -16,6 +16,10 @@ from .loop import run_review
 from .process_runner import run_analysis
 from .workspace import MonitorWorkspace
 from .grounded_context import read_with_sources
+from .handoff_validation import validate_handoff, note_text
+from .advice_basis import AdviceBasis, ADVICE_PROMPT, advice_tools
+from .feedback_focus import FeedbackFocus, FOCUS_PROMPT
+from .inquiry import Inquiry, INQUIRY_PROMPT
 
 
 def _tool(name, description, properties, required):
@@ -87,6 +91,26 @@ Task evidence is read-only by role under task/. Private cognition is writable un
 starts in monitor/ and can read the live absolute paths in the environment map; do not modify task sources.
 This local execution tool is not a filesystem sandbox."""
 
+TOOL_FEEDBACK_GUIDANCE = """On an ordinary wake, continue from your existing history and use the chronological synopsis as navigation,
+not proof. When an uncertain judgment would change whether you intervene, what you advise, or whether you
+end an investigation, use existing tools to check its key grounds. Compare the actual observations with
+the original requirement, then retain or revise your judgment, including your own earlier advice. External
+feedback can itself come from a flawed test. Pay particular attention to causal intent, changed tests as
+executable interpretations of the contract, and local success being mistaken for root completion.
+If evidence is already sufficient, act without a ceremonial extra check. If investigation makes no material
+progress, you may retain uncertainty and let the task proceed instead of repeating the same checks.
+Intervene only for a concrete material discrepancy supported by public evidence. Explain the conflicting
+requirement or evidence and what should be re-checked; do not take over the whole task."""
+
+
+def monitor_system_prompt(tool_feedback=False):
+    if not tool_feedback:
+        return MONITOR_SYSTEM_PROMPT
+    start = MONITOR_SYSTEM_PROMPT.index('On an ordinary wake,')
+    end = MONITOR_SYSTEM_PROMPT.index('\n\nA tool-free Task Agent message', start)
+    return MONITOR_SYSTEM_PROMPT[:start] + TOOL_FEEDBACK_GUIDANCE + MONITOR_SYSTEM_PROMPT[end:]
+
+
 REVIEW_MODE_PROMPT = """You are conducting an active review. Every review must end by calling exactly one
 control action: wait, intervene, or allow_complete (only for a pending root completion).
 Calling wait is normal silence."""
@@ -114,10 +138,41 @@ to reconstruct quotations from memory. You decide when restoration is useful and
 understanding. It is optional, not a prerequisite for intervening or completing; linked text is evidence
 to interpret, not automatic support for the note. No prescribed note schema or per-wake writing is needed."""
 
+FOCUS_TOOL = _tool('feedback_focus',
+    'Open, read or close one private follow-up view. Reads original public progress and delivery receipts '
+    'incrementally, only when requested. begin replaces an existing focus, preserving it in the archive. '
+    'Without after_event, begin starts at the current archive end. Ordinary tools can read earlier history.', {
+        'action': {'type': 'string', 'enum': ['begin', 'read', 'close']},
+        'note': {'type': 'string', 'description': 'For begin: your freely phrased concern or intended recovery.'},
+        'after_event': {'type': 'integer', 'minimum': 0,
+                        'description': 'For begin: start after this public event; 0 includes all history.'},
+        'limit': {'type': 'integer', 'minimum': 256, 'maximum': 64000, 'default': 12000,
+                  'description': 'Maximum UTF-8 bytes per stream on read; large records continue next read.'},
+    }, ['action'])
+
+
+INQUIRY_TOOL = _tool('inquiry',
+    'Select or replace one current investigation: your question and original source ranges. '
+    'Returns them now and restores current passages once at later wakes until closed. '
+    'Does not send input, judge correctness, schedule wakes or limit ordinary tools.', {
+        'action': {'type': 'string', 'enum': ['open', 'close']},
+        'question': {'type': 'string', 'description': 'For open: the decision you are investigating.'},
+        'sources': {'type': 'array', 'minItems': 1, 'maxItems': 8, 'items': {
+            'type': 'object', 'properties': {
+                'path': {'type': 'string'},
+                'start': {'type': 'integer', 'minimum': 1, 'default': 1},
+                'count': {'type': 'integer', 'minimum': 1, 'maximum': 1000, 'default': 80},
+            }, 'required': ['path'], 'additionalProperties': False}},
+    }, ['action'])
+
 
 class MonitorAgent:
     def __init__(self, client, workspace: MonitorWorkspace, max_review_turns=20):
         self.client = client
+        tool_feedback = getattr(client, 'config', {}).get('monitor_tool_feedback', False)
+        if type(tool_feedback) is not bool:
+            raise ValueError('monitor_tool_feedback must be a boolean')
+        self.system_prompt = monitor_system_prompt(tool_feedback)
         self.workspace = workspace
         self.max_review_turns = int(max_review_turns)
         self.completion_pending = False
@@ -132,6 +187,15 @@ class MonitorAgent:
         self.grounded_context = getattr(client, "config", {}).get("monitor_grounded_context", False)
         self.client.progress_callback = self._progress
         self.semantic_continuity = getattr(client, "config", {}).get("monitor_semantic_continuity", True)
+        self.handoff_validation = getattr(client, "config", {}).get("monitor_handoff_validation", False)
+        self.advice_basis = (AdviceBasis(workspace, self._atomic_private_text)
+                            if getattr(client, "config", {}).get("monitor_advice_revision", False) else None)
+        self.feedback_focus = (FeedbackFocus(workspace, self._atomic_private_text)
+                               if getattr(client, 'config', {}).get('monitor_feedback_focus', False) else None)
+        self.inquiry = (Inquiry(workspace, self._atomic_private_text)
+                        if getattr(client, 'config', {}).get('monitor_inquiry', False) else None)
+        if self.handoff_validation and not self.semantic_continuity:
+            raise ValueError("Handoff validation requires semantic continuity")
         if self.semantic_continuity:
             self.client.prepare_continuation = self._prepare_continuation
             self.client.archive_continuation_history = self._archive_continuation_history
@@ -179,16 +243,14 @@ class MonitorAgent:
             prompt += ("\nPreserve useful source links or paths to active inquiry notes so your future self "
                        "can restore the actual grounds. Do not replace source links with invented quotations.")
         previous_system = self.client.system
-        self.client.system = MONITOR_SYSTEM_PROMPT + "\n\n" + CONTINUATION_MODE_PROMPT
+        self.client.system = self.system_prompt + "\n\n" + CONTINUATION_MODE_PROMPT
         self.client.history.append({"role": "user", "content": [{"type": "text", "text": prompt}]})
         try:
             blocks, usage = self.client._request([])
             self.client.usage_records.append(dict(usage, purpose="pre_compaction_continuation"))
-            if any(block.get("type") == "tool_use" for block in blocks):
-                raise ValueError("Continuation unexpectedly requested a tool")
-            note = "\n".join(block.get("text", "") for block in blocks if block.get("type") == "text").strip()
-            if not note:
-                raise ValueError("Empty continuation; keeping original history")
+            note = note_text(blocks)
+            if self.handoff_validation:
+                note = validate_handoff(self, note, previous)
             self.workspace.write_text("monitor/audit/continuations.jsonl", json.dumps({
                 "timestamp": time.time(), "review_id": self.review_id, "note": note,
             }, ensure_ascii=False) + "\n", mode="append")
@@ -222,6 +284,16 @@ class MonitorAgent:
             self._progress('tool_finished', tool_id=tool_id, name=name,
                            duration_seconds=time.monotonic() - started)
 
+    def _remember_advice(self, message, arguments):
+        if self.advice_basis is None:
+            return {}
+        try:
+            return {"private_advice": self.advice_basis.record(message, str(arguments.get("basis") or ""))}
+        except Exception as exc:
+            # The message has already been submitted: never report it as unsent.
+            self._progress("advice_storage_failed", error_type=type(exc).__name__)
+            return {"private_advice_error": str(exc), "note": "Input was submitted; private storage failed."}
+
     def _dispatch(self, name: str, arguments: dict) -> ToolOutcome:
         try:
             if name == "file_read":
@@ -231,6 +303,10 @@ class MonitorAgent:
             elif name == "read_with_sources" and self.grounded_context:
                 data = read_with_sources(self.workspace, arguments["path"],
                                          arguments.get("start", 1), arguments.get("count", 200))
+            elif name == 'feedback_focus' and self.feedback_focus is not None:
+                data = self.feedback_focus.call(**arguments)
+            elif name == 'inquiry' and self.inquiry is not None:
+                data = self.inquiry.call(**arguments)
             elif name == "file_write":
                 data = self.workspace.write_text(
                     arguments["path"], arguments["content"], arguments.get("mode", "replace")
@@ -271,7 +347,9 @@ class MonitorAgent:
                         self._intervened_generation = self._seen_completion["generation"]
                     self.completion_pending = False
                     return ToolOutcome({"status": "submitted", "receipt": receipt,
-                                        "note": "Submission is not proof of delivery or uptake. Continue observing; wait when appropriate."})
+                                        "note": "Submission is not proof of delivery or uptake. Continue observing; wait when appropriate.",
+                                        **self._remember_advice(message, arguments)})
+                self._remember_advice(message, arguments)
                 return ToolOutcome(None, False, MonitorAction("intervene", {"message": message}))
             elif name == "allow_complete":
                 if self.completion_state is not None:
@@ -306,6 +384,17 @@ class MonitorAgent:
                 "You may handle this handoff in this same review. Approval applies only to this proposal; "
                 "waiting for more Task Agent turns cannot advance it without a response.")
 
+    def _refresh_review_context(self):
+        updates = [self._refresh_completion()]
+        if self.advice_basis is not None:
+            try:
+                updates.append(self.advice_basis.refresh())
+            except Exception as exc:
+                self._progress("advice_read_failed", error_type=type(exc).__name__)
+                updates.append("Private advice note unavailable; use existing history and original evidence. "
+                               + type(exc).__name__)
+        return "\n\n".join(update for update in updates if update) or None
+
     def review(self, wake_context: str, completion_pending=False) -> MonitorAction:
         started = time.time()
         self.review_id = uuid.uuid4().hex
@@ -329,16 +418,33 @@ class MonitorAgent:
                         "Read subsequent public behavior to assess uptake. End with wait when ready to be silent, "
                         "or allow_complete only for a still-pending, justified root completion. "
                         "After an intervention that completion proposal is no longer pending.")
-            system = MONITOR_SYSTEM_PROMPT + "\n\n" + mode
+            system = self.system_prompt + "\n\n" + mode
             tools = MONITOR_TOOLS
             if self.grounded_context:
                 system += "\n\n" + GROUNDED_PROMPT
                 tools = [*MONITOR_TOOLS, GROUNDED_TOOL]
+            if self.advice_basis is not None:
+                self.advice_basis.begin_review()
+                system += "\n\n" + ADVICE_PROMPT
+                tools = advice_tools(tools)
+            if self.feedback_focus is not None:
+                system += '\n\n' + FOCUS_PROMPT
+                tools = [*tools, FOCUS_TOOL]
+            if self.inquiry is not None:
+                system += '\n\n' + INQUIRY_PROMPT
+                tools = [*tools, INQUIRY_TOOL]
+                try:
+                    view = self.inquiry.restore()
+                    if view:
+                        wake_context += '\nYour selected investigation:\n' + json.dumps(view, ensure_ascii=False)
+                except (OSError, ValueError) as exc:
+                    self._progress('inquiry_restore_failed', error_type=type(exc).__name__)
+                    wake_context += '\nSelected inquiry unavailable; original history and tools remain available.'
             action = run_review(
                 self.client, system, wake_context, tools,
                 self.dispatch, self.max_review_turns,
                 audit=self._audit_dialogue,
-                before_model=self._refresh_completion,
+                before_model=self._refresh_review_context,
             )
             return action
         finally:

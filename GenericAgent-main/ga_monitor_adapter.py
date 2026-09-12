@@ -13,12 +13,20 @@ class GenericAgentMonitorAdapter:
         deadline = os.environ.get("GA_MONITOR_RUN_DEADLINE_EPOCH")
         if deadline is not None:
             runtime_options["run_deadline_epoch"] = float(deadline)
-        grounded = os.environ.get("GA_MONITOR_GROUNDED_CONTEXT")
-        if grounded is not None:
-            if grounded not in {"0", "1"}:
-                raise ValueError("GA_MONITOR_GROUNDED_CONTEXT must be 0 or 1")
-            runtime_options["model_config"] = dict(runtime_options["model_config"],
-                                                   monitor_grounded_context=grounded == "1")
+        for environment, setting in (
+            ("GA_MONITOR_GROUNDED_CONTEXT", "monitor_grounded_context"),
+            ("GA_MONITOR_HANDOFF_VALIDATION", "monitor_handoff_validation"),
+            ("GA_MONITOR_ADVICE_REVISION", "monitor_advice_revision"),
+            ("GA_MONITOR_FEEDBACK_FOCUS", "monitor_feedback_focus"),
+            ("GA_MONITOR_INQUIRY", "monitor_inquiry"),
+            ("GA_MONITOR_TOOL_FEEDBACK", "monitor_tool_feedback"),
+        ):
+            value = os.environ.get(environment)
+            if value is not None:
+                if value not in {"0", "1"}:
+                    raise ValueError(environment + " must be 0 or 1")
+                runtime_options["model_config"] = dict(runtime_options["model_config"],
+                                                       **{setting: value == "1"})
         self.runtime = MonitorRuntime(**runtime_options)
 
     def archive_boundary(self, packet):

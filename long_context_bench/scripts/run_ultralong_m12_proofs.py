@@ -23,6 +23,7 @@ from scripts import prepare_harbor_lhtb_m12 as continuation_patch  # noqa: E402
 from scripts import prepare_harbor_lhtb_structured_pass_m12 as pass_patch  # noqa: E402
 from scripts import prepare_harbor_windows_sidecar_m12 as sidecar_patch  # noqa: E402
 from scripts import run_harbor_tb2_m4 as m4  # noqa: E402
+from scripts.isolated_run_bundle import build_bundle, PROFILE as ISOLATION_PROFILE
 from scripts.m11_trajectory_validation import (  # noqa: E402
     fatal_agent_output,
     terminal_agent_error,
@@ -41,7 +42,11 @@ COLLECTOR_PORT = 15340
 
 MANIFEST_ENV_KEYS = {"BENCHMARK_CAMPAIGN_ROOT"}
 MANIFEST_CONTROLLED_ENV_KEYS = {
+    "GA_RUN_ISOLATION",
     "GA_MONITOR_GROUNDED_CONTEXT",
+    "GA_MONITOR_HANDOFF_VALIDATION",
+    "GA_MONITOR_ADVICE_REVISION",
+    "GA_MONITOR_FEEDBACK_FOCUS",
     "BENCHMARK_CAMPAIGN_ROOT",
     "GA_BASELINE_CONDITION", "GA_EXPERIMENT_ID", "GA_CONDITION_ID",
     "GA_LLM_CONFIG_NAME", "GA_MAX_TURNS", "GA_PROVIDER_MAX_RETRIES",
@@ -65,6 +70,9 @@ MANIFEST_CONTROLLED_ENV_KEYS = {
     "GA_COMPLETION_CHECKPOINT_ROOT", "GA_KEEP_HARBOR_ENV",
 }
 EXECUTION_HARNESS_FILES = (
+    "scripts/isolated_run_bundle.py",
+    "adapters/isolated_transport.py",
+    "adapters/isolated_setup.py",
     "scripts/run_ultralong_m12_proofs.py",
     "scripts/run_harbor_tb2_m4.py",
     "scripts/prepare_harbor_lhtb_m12.py",
@@ -72,6 +80,7 @@ EXECUTION_HARNESS_FILES = (
     "scripts/prepare_harbor_windows_sidecar_m12.py",
     "scripts/m11_trajectory_validation.py",
     "adapters/harbor_ga_agent.py",
+    "adapters/failure_snapshot.py",
     "adapters/harbor_ga_lhtb.py",
 )
 
@@ -662,6 +671,12 @@ def run_proof(
     task_id: str | None = None,
 ) -> dict[str, Any]:
     config = SOURCES[source]
+    isolated = os.environ.get('GA_RUN_ISOLATION') == ISOLATION_PROFILE
+    if online_checker_forbidden() and not isolated:
+        raise RuntimeError('Clean Monitor real runs require the isolated inference profile; rebuild manifest')
+    if isolated and any(os.environ.get(k) for k in (
+        'GA_STAGE6D_BUNDLE_DIR', 'GA_COMPLETION_BRANCH_CHECKPOINT')):
+        raise RuntimeError('Historical branch mounts are not permitted in isolated fresh runs')
     selected = task_id or config["representative_task_id"]
     identity = preflight(source, llm_no, selected)
     job_dir = JOBS_ROOT / run_id
@@ -676,6 +691,15 @@ def run_proof(
     )
     timeout_multiplier = max_agent_seconds / task_timeout
     model = identity["model"]
+    source_mount = m4.GA_ROOT.resolve()
+    isolation_compose = None
+    if isolated:
+        source_mount, isolation_compose = build_bundle(
+            WORK_ROOT / 'isolated_bundles' / run_id, m4.GA_ROOT, m4.GA_RUNTIME,
+            identity['runtime']['python_home'], os.environ['GA_LLM_CONFIG_NAME'],
+            os.environ['GA_MONITOR_CONFIG'], COLLECTOR_PORT)
+        identity['isolation'] = json.loads(
+            (isolation_compose.parent / 'isolation_identity.json').read_text(encoding='utf-8'))
     mounts = [
         {
             "type": "bind",
@@ -685,7 +709,7 @@ def run_proof(
         },
         {
             "type": "bind",
-            "source": str(m4.GA_ROOT.resolve()),
+            "source": str(source_mount),
             "target": "/opt/genericagent-source",
             "read_only": True,
         },
@@ -732,7 +756,9 @@ def run_proof(
     ]
     if os.environ.get("GA_KEEP_HARBOR_ENV") != "1":
         command.append("--delete")
-    for host in identity["agent_phase_allowed_hosts"]:
+    if isolation_compose:
+        command += ['--extra-docker-compose', str(isolation_compose)]
+    for host in ([] if isolated else identity["agent_phase_allowed_hosts"]):
         command += ["--allow-agent-host", host]
     kwargs = {
         "llm_no": model["effective_llm_no"],
@@ -742,6 +768,7 @@ def run_proof(
         "ga_source_sha256": identity["generic_agent"]["source_sha256"],
         "task_id": f"{source}:{selected}",
         "collector_endpoint": (
+            'http://127.0.0.1:18765/v1/traces' if isolated else
             f"http://host.docker.internal:{COLLECTOR_PORT}/v1/traces"
         ),
         "timeout_sec": max_agent_seconds,

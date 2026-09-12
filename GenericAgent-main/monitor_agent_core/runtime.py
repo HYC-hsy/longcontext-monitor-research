@@ -54,11 +54,15 @@ def _coalesce_wake_command(commands, first, completion_is_active=None):
 
 def _worker(config, commands, outputs):
     from .agent import MonitorAgent
-    from .provider import MonitorProviderClient
+    from .provider import MonitorProviderClient, ProviderRecoveryExhausted
     from .workspace import MonitorWorkspace
 
     try:
         client = MonitorProviderClient(config["config_name"], config["model_config"])
+        if 'run_deadline_epoch' in config:
+            client.recovery_deadline = time.monotonic() + max(
+                0.0, config['run_deadline_epoch'] - time.time())
+            client.recovery_stop = config['stop_event']
         workspace = MonitorWorkspace(
             config["evidence_root"], config["private_root"],
             task_mounts={"workspace": config["task_workspace"]},
@@ -132,7 +136,9 @@ def _worker(config, commands, outputs):
         except Exception as exc:
             outputs.put({"kind": "failure", "error": repr(exc), "completion": completion and not submitted,
                          "request_id": request_id})
-            return
+            # A terminal transport recovery must not silently restart via the
+            # queued patrol/completion commands after the parent has failed it.
+            return not isinstance(exc, ProviderRecoveryExhausted)
         if action.kind == "wait":
             close_watch = False
             next_wake_turn = task_turn + max(1, int(action.payload["after_turns"]))
@@ -145,23 +151,42 @@ def _worker(config, commands, outputs):
                     "cursor": cursor, "request_id": uuid.uuid4().hex,
                 })
         elif action.kind == "allow_complete":
+            approval_id = action.payload.get("request_id", request_id)
             outputs.put({"kind": "completion", "decision": "allow", "cursor": cursor,
-                         "request_id": action.payload.get("request_id", request_id)})
+                         "request_id": approval_id})
+            # Delivery, not the model's proposal, determines whether this task ended.
+            # Do not consume patrol backlog while the parent resolves this approval.
+            while not config['stop_event'].is_set():
+                try:
+                    receipt = config['completion_receipts'].get(timeout=0.1)
+                except queue.Empty:
+                    continue
+                if receipt['request_id'] != approval_id:
+                    continue
+                if not receipt['accepted']:
+                    return True  # A stale approval must not disable a live monitor.
+                # Stay alive until normal close so the completion waiter does not
+                # mistake an immediately exited worker for an unavailable monitor.
+                config['stop_event'].wait()
+                return False
+            return False
         if completion and not submitted and action.kind == "intervene":
             outputs.put({
                 "kind": "completion", "decision": "continue", "cursor": cursor,
                 "request_id": request_id,
                 "message": action.payload["message"],
             })
+        return True
 
-    review(
+    if not review(
         "Turn-zero initialization. Read task/original_task.txt. Use task/synopsis.jsonl for chronological "
         "navigation, task/public_events.jsonl for original public events, and task/workspace/ for live tests, "
         "code, diffs, and artifacts. The Task Agent can read its original task copy at "
         f"{config['task_original_path']}. task/ paths are your virtual paths, not its filesystem paths. "
         "Establish your task understanding, inspect available progress, and choose your next action. "
         "Initialization does not require silence if a material discrepancy is already supported."
-    )
+    ):
+        return
     outputs.put({"kind": "ready"})
     while True:
         command = _coalesce_wake_command(commands, commands.get(), completion_is_active)
@@ -172,19 +197,21 @@ def _worker(config, commands, outputs):
         cursor = int(command.get("cursor") or cursor)
         task_turn = int(command.get("task_turn") or task_turn)
         if kind == "boundary" and (close_watch or task_turn >= next_wake_turn):
-            review(
+            if not review(
                 f"Public task cursor advanced through {cursor}. Continue from your existing history, inspect "
                 "new synopsis rows, and retrieve original evidence wherever it can change your decision."
-            )
+            ):
+                return
         elif kind == "completion" and completion_is_active(command):
-            review(
+            if not review(
                 f"The Task Agent yielded control without a tool call at cursor {cursor}. Read its actual "
                 "message in the public evidence: it may claim completion, ask for clarification, or report "
                 "a blocker. Judge its meaning yourself. Answer missing information or correct drift with "
                 "intervene; use allow_complete only if the task is actually complete. A clarification "
                 "request is not itself a false completion claim.", completion=True,
                 request_id=command["request_id"],
-            )
+            ):
+                return
 
 
 class MonitorRuntime:
@@ -207,6 +234,7 @@ class MonitorRuntime:
         self.synopsis_path = self.evidence_root / "synopsis.jsonl"
         self.events_path = self.evidence_root / "public_events.jsonl"
         self._archive_lock = threading.Lock()
+        self._receipt_lock = threading.Lock()
         self._sequence = 0
         self._interrupt_callback = interrupt_callback
         self._interrupt_pending = interrupt_pending or (lambda: False)
@@ -215,8 +243,10 @@ class MonitorRuntime:
                      else float(run_timeout_seconds))
         self._run_deadline = time.monotonic() + max(0.0, remaining)
         self._context = mp.get_context("spawn")
+        self._stop_event = self._context.Event()
         self._commands = self._context.Queue()
         self._outputs = self._context.Queue()
+        self._completion_receipts = self._context.Queue()
         self._pending = {}
         self._pending_lock = threading.Lock()
         self._completion_generation = 0
@@ -231,6 +261,9 @@ class MonitorRuntime:
             "task_original_path": str(self.task_original_path),
             "active_completion": self._active_completion,
             "completion_cursor": self._completion_cursor,
+            "run_deadline_epoch": time.time() + max(0.0, self._run_deadline - time.monotonic()),
+            "stop_event": self._stop_event,
+            "completion_receipts": self._completion_receipts,
         }, self._commands, self._outputs), daemon=True)
         self._process.start()
         self._pump = threading.Thread(target=self._pump_outputs, daemon=True, name="monitor-output")
@@ -295,6 +328,11 @@ class MonitorRuntime:
                         value = dict(value, delivery="handed_to_completion_boundary")
                     else:
                         value = dict(value, delivery="archived_late_or_unmatched")
+                if kind == 'completion' and value.get('decision') == 'allow':
+                    self._completion_receipts.put({
+                        'request_id': value.get('request_id'),
+                        'accepted': pending is not None,
+                    })
             elif kind == "failure":
                 # An ordinary review may fail while a root handoff is waiting.
                 with self._pending_lock:
@@ -303,7 +341,7 @@ class MonitorRuntime:
                     if self._pending:
                         self._pending.clear()
                         self._active_completion.value = 0
-            _append(self.artifact_dir / "runtime_receipts.jsonl", value)
+            self._append_receipt(value)
             if kind in {"intervention", "completion"}:
                 _append(self.private_root / "delivery_feedback.jsonl", value)
 
@@ -343,7 +381,7 @@ class MonitorRuntime:
                     break
                 except queue.Empty:
                     if not delayed and time.monotonic() >= warning_at:
-                        _append(self.artifact_dir / "runtime_receipts.jsonl", {
+                        self._append_receipt({
                             "kind": "completion_delayed", "request_id": request_id,
                             "timestamp": time.time(), "action": "keep_same_review_pending"})
                         delayed = True
@@ -362,7 +400,7 @@ class MonitorRuntime:
         record = {
             "kind": "completion_incomplete", "reason": reason,
             "request_id": request_id, "timestamp": time.time()}
-        _append(self.artifact_dir / "runtime_receipts.jsonl", record)
+        self._append_receipt(record)
         marker = self.artifact_dir / "completion_incomplete.json"
         temporary = marker.with_suffix('.pending')
         temporary.write_text(json.dumps(record), encoding='utf-8')
@@ -370,8 +408,14 @@ class MonitorRuntime:
         return CompletionOutcome(False, "Completion review unfinished: " + reason,
                                  reason, incomplete=True)
 
+    def _append_receipt(self, record):
+        # Pump and completion waiter share this file, not the task event writer.
+        with self._receipt_lock:
+            _append(self.artifact_dir / 'runtime_receipts.jsonl', record)
+
     def close(self):
         self._closed.set()
+        self._stop_event.set()
         self._commands.put({"kind": "close"})
         self._process.join(timeout=3)
         if self._process.is_alive():

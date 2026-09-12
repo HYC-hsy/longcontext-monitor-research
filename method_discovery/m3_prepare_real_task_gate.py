@@ -16,6 +16,9 @@ from m1_prepare_real_task_batch import ROOT, BENCH, tree_hash
 
 R0_TASKS = ROOT / "method_discovery" / "r0_real_tasks" / "tasks.jsonl"
 EXECUTION_HARNESS_FILES = (
+    "scripts/isolated_run_bundle.py",
+    "adapters/isolated_transport.py",
+    "adapters/isolated_setup.py",
     "scripts/run_ultralong_m12_proofs.py",
     "scripts/run_harbor_tb2_m4.py",
     "scripts/prepare_harbor_lhtb_m12.py",
@@ -23,6 +26,7 @@ EXECUTION_HARNESS_FILES = (
     "scripts/prepare_harbor_windows_sidecar_m12.py",
     "scripts/m11_trajectory_validation.py",
     "adapters/harbor_ga_agent.py",
+    "adapters/failure_snapshot.py",
     "adapters/harbor_ga_lhtb.py",
 )
 CONDITIONS = (
