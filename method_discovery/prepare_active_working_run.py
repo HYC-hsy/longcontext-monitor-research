@@ -6,18 +6,19 @@ from pathlib import Path
 from clean_monitor_prepare_real_task_gate import build_manifest
 
 
-def prepare(output, suffix):
+def prepare(output, suffix, live_awareness=False):
     output = Path(output)
     if output.exists():
         raise FileExistsError(output)
     data = build_manifest('roadmapbench:fyn-2.2.0-roadmap', suffix, output)
-    data['candidate'] = 'active-working-context'
+    data['candidate'] = 'live-awareness' if live_awareness else 'active-working-context'
     data['runs'][0]['environment'].update(
         GA_LLM_CONFIG_NAME='native_claude_cc_vibe_opus48',
         GA_PMA_ENABLED='0', GA_MONITOR_GROUNDED_CONTEXT='0',
         GA_MONITOR_HANDOFF_VALIDATION='0', GA_MONITOR_ADVICE_REVISION='0',
         GA_MONITOR_FEEDBACK_FOCUS='0', GA_MONITOR_INQUIRY='0',
         GA_MONITOR_TOOL_FEEDBACK='0', GA_MONITOR_ACTIVE_WORKING_CONTEXT='1',
+        GA_MONITOR_LIVE_AWARENESS='1' if live_awareness else '0',
     )
     data['comparison_limits'] = (
         'Historical common-base Fyne is a diagnostic reference, not a same-environment '
@@ -33,6 +34,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True)
     parser.add_argument('--run-suffix', required=True)
+    parser.add_argument('--live-awareness', action='store_true')
     args = parser.parse_args()
-    prepare(args.output, args.run_suffix)
+    prepare(args.output, args.run_suffix, args.live_awareness)
     print('prepared_not_executed: ' + args.output)

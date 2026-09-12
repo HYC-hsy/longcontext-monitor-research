@@ -6,6 +6,7 @@ import hashlib
 import os
 import shutil
 import tempfile
+from collections import deque
 from pathlib import Path
 
 
@@ -66,19 +67,23 @@ class MonitorWorkspace:
             raise MonitorPathError("The analysis snapshot is runtime-owned")
         return path
 
-    def read_text(self, virtual_path: str, start=1, count=200) -> dict:
+    def read_text(self, virtual_path: str, start=1, count=200, tail=False) -> dict:
         start, count = int(start), int(count)
         if start < 1 or not 1 <= count <= 1000:
             raise ValueError("start >= 1 and 1 <= count <= 1000 are required")
+        if type(tail) is not bool or (tail and start != 1):
+            raise ValueError("tail must be boolean; with tail=true omit start")
         path = self.resolve_read(virtual_path)
-        selected, total = [], 0
+        selected, total = deque(maxlen=count) if tail else [], 0
         digest = hashlib.sha256()
         with path.open("rb") as stream:
             for raw in stream:
                 total += 1
                 digest.update(raw)
-                if start <= total < start + count:
+                if tail or start <= total < start + count:
                     selected.append(raw.decode("utf-8", errors="replace").replace("\r\n", "\n"))
+        if tail:
+            start = max(1, total - len(selected) + 1)
         return {
             "path": virtual_path, "start": start, "lines": len(selected),
             "total_lines": total, "content": "".join(selected), "sha256": digest.hexdigest(),

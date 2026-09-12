@@ -68,7 +68,7 @@ def test_explicit_incomplete_is_not_blindly_retryable():
 
 
 def test_invalid_completed_tool_arguments_report_protocol_error():
-    with pytest.raises(RetryableProviderError, match='JSON'):
+    with pytest.raises(RetryableProviderError, match='Tool stream contract mismatch'):
         client()._parse_openai_responses(lines([
             {'type': 'response.output_item.added', 'output_index': 0,
              'item': {'type': 'function_call', 'call_id': 'x', 'name': 'wait'}},

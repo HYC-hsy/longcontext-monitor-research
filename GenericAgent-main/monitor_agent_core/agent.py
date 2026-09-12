@@ -9,6 +9,7 @@ import threading
 import time
 import uuid
 import warnings
+from copy import deepcopy
 from dataclasses import asdict
 
 from .actions import MonitorAction, ToolOutcome
@@ -21,6 +22,7 @@ from .advice_basis import AdviceBasis, ADVICE_PROMPT, advice_tools
 from .feedback_focus import FeedbackFocus, FOCUS_PROMPT
 from .inquiry import Inquiry, INQUIRY_PROMPT
 from .working_context import current_working_context
+from .live_awareness import LiveAwareness
 
 
 def _tool(name, description, properties, required):
@@ -191,8 +193,14 @@ class MonitorAgent:
         active_context = getattr(client, "config", {}).get("monitor_active_working_context", False)
         if type(active_context) is not bool:
             raise ValueError("monitor_active_working_context must be a boolean")
-        if active_context:
+        live_awareness = getattr(client, "config", {}).get("monitor_live_awareness", False)
+        if type(live_awareness) is not bool:
+            raise ValueError("monitor_live_awareness must be a boolean")
+        self.live_awareness = LiveAwareness(workspace) if live_awareness else None
+        self.active_context_enabled = active_context
+        if live_awareness or active_context:
             self.client.prepare_active_context = self._active_working_context
+        if active_context:
             self.system_prompt += (
                 "\nYour current monitor/working.md is made available during normal reasoning without "
                 "a separate read. Use it for the understanding you want available next time, not a log. "
@@ -213,9 +221,17 @@ class MonitorAgent:
             self.client.archive_continuation_history = self._archive_continuation_history
 
     def _active_working_context(self):
-        text = current_working_context(self.workspace)
-        self._audit_dialogue('active_working_context', content=text)
-        return text
+        parts = []
+        if self.active_context_enabled:
+            text = current_working_context(self.workspace)
+            self._audit_dialogue('active_working_context', content=text)
+            if text:
+                parts.append(text)
+        if self.live_awareness is not None:
+            text, metadata = self.live_awareness.context()
+            self._audit_dialogue('live_awareness', content=text, **metadata)
+            parts.append(text)
+        return '\n\n'.join(parts) or None
 
     def _atomic_private_text(self, relative_path, text):
         path = self.workspace.private_root / relative_path
@@ -315,7 +331,8 @@ class MonitorAgent:
         try:
             if name == "file_read":
                 data = self.workspace.read_text(
-                    arguments["path"], arguments.get("start", 1), arguments.get("count", 200)
+                    arguments["path"], arguments.get("start", 1), arguments.get("count", 200),
+                    tail=arguments.get("tail", False),
                 )
             elif name == "read_with_sources" and self.grounded_context:
                 data = read_with_sources(self.workspace, arguments["path"],
@@ -437,9 +454,22 @@ class MonitorAgent:
                         "After an intervention that completion proposal is no longer pending.")
             system = self.system_prompt + "\n\n" + mode
             tools = MONITOR_TOOLS
+            if self.live_awareness is not None:
+                system += (
+                    "\n\nFile activity is sampled before normal requests, not monitored semantically for you. "
+                    "While following a correction, distinguish investigating its grounds from checking "
+                    "the Task Agent's latest response; choose which now matters. Existing file_read can "
+                    "use tail=true with count to read the latest lines of any permitted file. "
+                    "You can still inspect any earlier range or use code_run; no mandatory reread is imposed."
+                )
+                tools = deepcopy(tools)
+                tools[0]['function']['description'] += ' With tail=true, read the latest count lines; omit start.'
+                tools[0]['function']['parameters']['properties']['tail'] = {
+                    'type': 'boolean', 'default': False,
+                }
             if self.grounded_context:
                 system += "\n\n" + GROUNDED_PROMPT
-                tools = [*MONITOR_TOOLS, GROUNDED_TOOL]
+                tools = [*tools, GROUNDED_TOOL]
             if self.advice_basis is not None:
                 self.advice_basis.begin_review()
                 system += "\n\n" + ADVICE_PROMPT

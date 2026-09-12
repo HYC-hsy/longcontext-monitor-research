@@ -21,6 +21,7 @@ class GenericAgentMonitorAdapter:
             ("GA_MONITOR_INQUIRY", "monitor_inquiry"),
             ("GA_MONITOR_TOOL_FEEDBACK", "monitor_tool_feedback"),
             ("GA_MONITOR_ACTIVE_WORKING_CONTEXT", "monitor_active_working_context"),
+            ("GA_MONITOR_LIVE_AWARENESS", "monitor_live_awareness"),
         ):
             value = os.environ.get(environment)
             if value is not None:

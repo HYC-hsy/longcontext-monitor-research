@@ -108,3 +108,34 @@ def test_successive_continuations_do_not_accumulate_previous_handoff():
         assert json.dumps(client.history).count('Current working understanding') == 1
         assert client.history_measure()['characters'] <= client.history_char_limit
     assert len(archives) == 4
+
+
+def test_worker_capacity_failure_does_not_consume_another_wake(tmp_path, monkeypatch):
+    import queue
+    from monitor_agent_core.runtime import _worker
+    import monitor_agent_core.agent as module
+    calls = []
+
+    class FailedMonitor:
+        def __init__(self, *args):
+            pass
+
+        def review(self, *args, **kwargs):
+            calls.append(1)
+            raise HistoryCapacityError('fixture capacity failure')
+
+    monkeypatch.setattr(module, 'MonitorAgent', FailedMonitor)
+    evidence = tmp_path / 'evidence'
+    evidence.mkdir()
+    commands, outputs = queue.Queue(), queue.Queue()
+    commands.put({'kind': 'boundary', 'cursor': 10, 'task_turn': 5})
+    _worker(dict(config_name='openai', model_config={'apikey': 'fixture',
+                 'apibase': 'https://example.test', 'model': 'fixture'},
+                 evidence_root=evidence, private_root=tmp_path / 'private',
+                 task_workspace=tmp_path, max_review_turns=20,
+                 task_original_path='original_task.txt'), commands, outputs)
+    failure = outputs.get_nowait()
+    assert calls == [1], failure
+    assert commands.qsize() == 1
+    assert failure['kind'] == 'failure' and 'HistoryCapacityError' in failure['error']
+    assert outputs.empty()

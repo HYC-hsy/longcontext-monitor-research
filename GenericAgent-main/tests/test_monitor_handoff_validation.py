@@ -47,7 +47,11 @@ def test_only_validated_note_is_consumed_and_feature_off_is_unchanged(tmp_path, 
         assert "Unverified draft" not in json.dumps(client.history)
         assert len(list((monitor.workspace.private_root / "audit/handoff_validation").glob("*/draft.md"))) == 1
         assert client.usage_records[-1]["purpose"] == "handoff_validation"
-    assert client.history[-10:] == original[-10:]
+    # Capacity retirement protects complete exchanges, not entire long reviews.
+    retained = client.history[1:]
+    assert retained == original[-len(retained):]
+    assert retained[-2:] == original[-2:]
+    assert client.history_measure()['characters'] <= client.history_char_limit
     assert (monitor.workspace.private_root / "working.md").read_text() == expected
     assert client.continuation_context is None
     wire = client._responses_history()
