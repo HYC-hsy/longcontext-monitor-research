@@ -90,7 +90,9 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             pma.review()
             reminder = pma.take_reminder()
             if reminder:
-                messages.append({'role': 'user', 'content': reminder})
+                # Upstream user_turn appends to the current input, not a new turn.
+                from pma_baseline.runtime import append_reminder
+                messages[-1] = append_reminder(messages[-1], reminder)
         _hook('llm_before', locals())
         response_gen = client.chat(messages=messages, tools=tools_schema)
         try:
@@ -229,7 +231,8 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
         if pma is not None:
             pma.observe(response.content or '',
                         [json.dumps(call, ensure_ascii=False, default=json_default) for call in tool_calls],
-                        json.dumps(tool_results, ensure_ascii=False, default=json_default))
+                        json.dumps({'content': next_prompt, 'tool_results': tool_results},
+                                   ensure_ascii=False, default=json_default))
         messages = [{"role": "user", "content": next_prompt, "tool_results": tool_results}]   # just new message, history is kept in *Session
     if exit_reason: handler.turn_end_callback(response, tool_calls, tool_results, turn, '', exit_reason)
     final_outcome = exit_reason or {'result': 'MAX_TURNS_EXCEEDED'}

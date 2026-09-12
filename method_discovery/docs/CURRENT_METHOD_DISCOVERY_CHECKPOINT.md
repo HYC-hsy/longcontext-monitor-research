@@ -1,5 +1,7 @@
 # 当前方法发现恢复入口
 
+2026-09-12 PMA接线保真修补：见PMA_REPRODUCTION_ACCEPTANCE_20260912.md。补齐PMA所见next_prompt/callback公开反馈；提醒改为同一user内容追加并保留tool_results，直接对照原提醒函数。核心源码不改。官方原配置复现与共同GA适配比较分轨验收；两者效果均未成立。参考Harbor应为作者external/harbor，而非其他缓存。当前模型/采样/完成流程差异必须披露，未自动更换模型或启动任务。
+
 2026-09-12 PMA隔离依赖预检完成：见PMA_OFFLINE_PREFLIGHT_20260912.md。shortuuid 1.0.13已离线装入Linux运行环境；无网容器PMA两轮假provider流程及Unix隔离夹具通过，20测试+3子项和18传输测试通过。零模型API、零真实任务。首轮镜像查询失败根因未定，R2通过；保留失败证据。实际任务镜像/预算/当前模型往返等单次启动门禁仍未完成。两个未跟踪历史隔离脚本本轮原样归档，不算新机制；依赖wheel和运行环境仍是本地外部产物。
 
 2026-09-12 PMA原样复用修正：PMA_UPSTREAM_PARITY_REPAIR_20260912.md。恢复shortuuid原ID，宿主ga_bench安装1.0.13；三核心文件与原仓库文本一致。轨迹标题/空字段/段落/Step2起始恢复，直接对比原格式函数通过。20测试+3源码子项通过，无模型API/真实任务/生产Clean修改。隔离容器shortuuid仍未验证，启动前需可信离线依赖准备，不许联网回退或UUID替代。原LiteLLM调用无history参数，本地Harbor缓存支持独立调用，但未宣称底层传输原样复现。下一步是依赖预检，不自动真实启动。

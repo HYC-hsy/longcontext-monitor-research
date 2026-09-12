@@ -15,3 +15,8 @@ two-phase calls and one-shot memory notes. It does not use Clean Monitor's activ
 inspection, interruptions, persistent dialogue or completion approval.
 GA has no separately parsed plan field: its public response is supplied as analysis.
 The memory bank is task-local; no old run data is imported.
+GA observation includes the next user content (including public callback feedback)
+and tool results, serialized together. The reminder is appended to that user input,
+matching the released user_turn setting rather than creating an extra message.
+This preserves GA's structured tool-result envelope; it is not a Terminus2 terminal
+transcript. Original completion/parser/summarization behavior remains framework-specific.

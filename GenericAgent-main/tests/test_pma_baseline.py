@@ -30,7 +30,9 @@ class PMATests(unittest.TestCase):
             parent = NS(task_dir=None, research_condition=None)
             _done_hooks = []
             def do_work(self, args, response):
-                return StepOutcome('public result', next_prompt='continue')
+                return StepOutcome('public result', next_prompt='NEXT_PROMPT_SENTINEL')
+            def turn_end_callback(self, response, tool_calls, tool_results, turn, next_prompt, exit_reason):
+                return next_prompt + '\nCALLBACK_PUBLIC_FEEDBACK'
             def do_no_tool(self, args, response):
                 return StepOutcome(None)
         class Actor:
@@ -48,8 +50,28 @@ class PMATests(unittest.TestCase):
             exhaust(agent_runner_loop(Actor(), 'system', 'task', Handler(), [], max_turns=3, verbose=False))
         self.assertEqual([n for n, _ in seen], [2, 4])
         self.assertEqual(len(baseline.steps), 1)
+        self.assertIn('NEXT_PROMPT_SENTINEL', baseline.context())
+        self.assertIn('CALLBACK_PUBLIC_FEEDBACK', baseline.context())
+        self.assertIn('public result', baseline.context())
+        self.assertIn('NEXT_PROMPT_SENTINEL', fake.prompts[2]['prompt'])
+        self.assertIn('CALLBACK_PUBLIC_FEEDBACK', fake.prompts[3]['prompt'])
+        self.assertEqual(len(seen[0][1]), 2)  # system + original task with note
+        self.assertEqual(len(seen[1][1]), 1)  # feedback + note in the same user turn
+        self.assertEqual(seen[1][1][0]['tool_results'],
+                         [{'tool_use_id': 'a', 'content': 'public result'}])
         for _, messages in seen:
             self.assertEqual(sum('<memory_context>' in str(m.get('content')) for m in messages), 1)
+
+    def test_reminder_preserves_multimodal_input_and_tool_results(self):
+        from pma_baseline.runtime import append_reminder
+        original = {'role': 'user', 'content': [{'type': 'text', 'text': 'feedback'},
+                     {'type': 'image', 'source': {'type': 'base64', 'data': 'fixture'}}],
+                    'tool_results': [{'tool_use_id': 'x', 'content': 'result'}]}
+        result = append_reminder(original, 'note')
+        self.assertEqual(result['content'][:-1], original['content'])
+        self.assertEqual(result['content'][-1]['text'], '\n\nnote')
+        self.assertEqual(result['tool_results'], original['tool_results'])
+        self.assertEqual(len(original['content']), 2)
 
     def test_disabled_path_does_not_construct_pma(self):
         import ast

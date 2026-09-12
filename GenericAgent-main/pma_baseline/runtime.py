@@ -10,6 +10,20 @@ from types import SimpleNamespace
 from .memory_agent import MemoryAgent
 
 
+def append_reminder(message, reminder):
+    """Preserve the GA user envelope and tool results; append one-shot context."""
+    if message.get('role') != 'user':
+        raise ValueError('PMA reminder requires the current user input')
+    content = message.get('content', '')
+    if isinstance(content, str):
+        content = content + '\n\n' + reminder
+    elif isinstance(content, list):
+        content = [*content, {'type': 'text', 'text': '\n\n' + reminder}]
+    else:
+        raise TypeError('Unsupported GA user content for PMA reminder')
+    return {**message, 'content': content}
+
+
 class PhaseClient:
     def __init__(self, factory):
         self.factory = factory

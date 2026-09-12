@@ -12,6 +12,26 @@ VENDORED = ROOT / 'GenericAgent-main/pma_baseline'
 
 
 class ParityTests(unittest.TestCase):
+    def test_reminder_text_and_consumption_match_original_function(self):
+        from pma_baseline.runtime import append_reminder
+        tree = ast.parse((UPSTREAM / 'memory_enabled_agent.py').read_text(encoding='utf-8'))
+        cls = next(n for n in tree.body if isinstance(n, ast.ClassDef))
+        function = next(n for n in cls.body if isinstance(n, ast.FunctionDef)
+                        and n.name == '_get_memory_system_prompt')
+        scope = {}
+        exec(compile(ast.Module(body=[function], type_ignores=[]),
+                     'upstream_reminder_only', 'exec'), scope)
+        original = SimpleNamespace(_pending_injection='Keep the interface.', _injection_used=False)
+        expected = scope['_get_memory_system_prompt'](original)
+        ours = PMABaseline('task', None)
+        ours.pending = 'Keep the interface.'
+        actual = ours.take_reminder()
+        self.assertEqual(actual, expected)
+        self.assertEqual(append_reminder({'role': 'user', 'content': 'observation'}, actual),
+                         {'role': 'user', 'content': 'observation\n\n' + expected})
+        self.assertIsNone(ours.take_reminder())
+        self.assertIsNone(scope['_get_memory_system_prompt'](original))
+
     def test_three_core_files_match_upstream(self):
         for name in ('memory_agent.py', 'universal_memory.py', 'bm25_search.py'):
             with self.subTest(file=name):
