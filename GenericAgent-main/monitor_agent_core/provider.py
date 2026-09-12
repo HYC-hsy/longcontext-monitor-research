@@ -798,12 +798,19 @@ class MonitorProviderClient:
                              for part in item.get("content", []) if part.get("type") == "output_text")
         # Final message bodies can recover a missing/truncated delta stream.
         # Contradictory bodies are not silently merged or promoted to memory.
-        mismatch = has_final and bool(text) and not final_text.startswith(text)
+        # A relay may emit whitespace before a tool-only final response. It has
+        # no semantic body to preserve; the tools still pass the checks below.
+        tool_only_padding = (final_output is not None and bool(text) and text.isspace()
+                             and any(item.get('type') == 'function_call' for item in final_items)
+                             and all(item.get('type') in ('function_call', 'reasoning') for item in final_items))
+        mismatch = has_final and bool(text) and not final_text.startswith(text) and not tool_only_padding
         selected = final_text if has_final else text
         echo = is_reasoning_echo(selected, blocks)
         self._progress("response_text_contract", request_id=getattr(self, "_progress_request_id", None),
                        source="completed_output" if final_output is not None else "item_done" if messages else "delta",
                        delta_characters=len(text), final_characters=len(final_text),
+                       ignored_tool_only_whitespace=tool_only_padding,
+                       delta_codepoints=[ord(c) for c in text] if len(text) <= 8 else None,
                        reasoning_echo=echo, mismatch=mismatch,
                        final_item_types=[item.get("type") for item in final_items],
                        usage={key: usage[key] for key in ("input_tokens", "output_tokens", "total_tokens")

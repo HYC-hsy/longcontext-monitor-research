@@ -74,6 +74,37 @@ def test_delta_disagreeing_with_final_output_is_not_accepted(output):
         ])
 
 
+@pytest.mark.parametrize('delta', [' ', '\n', '\r\n\t'])
+def test_tool_only_padding_is_not_promoted_but_valid_tool_survives(delta):
+    client = MonitorProviderClient('openai', config('gpt-test'))
+    call = {'type': 'function_call', 'id': 'fc1', 'call_id': 'call1',
+            'name': 'file_read', 'arguments': '{"path":"task/original_task.txt"}'}
+    blocks, _ = parse_events(client, [
+        {'type': 'response.output_text.delta', 'delta': delta},
+        {'type': 'response.completed', 'response': {'output': [call]}},
+    ])
+    assert not any(b['type'] == 'text' for b in blocks)
+    assert any(b['type'] == 'tool_use' and b['name'] == 'file_read' for b in blocks)
+
+
+def test_nonwhitespace_or_contradictory_tool_is_still_rejected():
+    call = {'type': 'function_call', 'id': 'fc1', 'call_id': 'call1',
+            'name': 'file_read', 'arguments': '{"path":"task/original_task.txt"}'}
+    client = MonitorProviderClient('openai', config('gpt-test'))
+    with pytest.raises(RetryableProviderError):
+        parse_events(client, [
+            {'type': 'response.output_text.delta', 'delta': '.'},
+            {'type': 'response.completed', 'response': {'output': [call]}},
+        ])
+    with pytest.raises(RetryableProviderError):
+        parse_events(client, [
+            {'type': 'response.output_text.delta', 'delta': '\n'},
+            {'type': 'response.output_item.done', 'output_index': 0,
+             'item': {**call, 'arguments': '{"path":"different"}'}},
+            {'type': 'response.completed', 'response': {'output': [call]}},
+        ])
+
+
 @pytest.mark.parametrize('exhaust', [False, True])
 def test_reasoning_echo_retries_same_history_without_committing(exhaust, monkeypatch):
     client = MonitorProviderClient('openai', config('gpt-test', max_retries=1))
