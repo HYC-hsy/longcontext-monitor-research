@@ -23,6 +23,7 @@ from .feedback_focus import FeedbackFocus, FOCUS_PROMPT
 from .inquiry import Inquiry, INQUIRY_PROMPT
 from .working_context import current_working_context
 from .live_awareness import LiveAwareness
+from .decision_context import DecisionContext
 
 
 def _tool(name, description, properties, required):
@@ -197,6 +198,10 @@ class MonitorAgent:
         if type(live_awareness) is not bool:
             raise ValueError("monitor_live_awareness must be a boolean")
         self.live_awareness = LiveAwareness(workspace) if live_awareness else None
+        decision_context = getattr(client, 'config', {}).get('monitor_decision_context', False)
+        if type(decision_context) is not bool:
+            raise ValueError('monitor_decision_context must be a boolean')
+        self.decision_context = DecisionContext(workspace) if decision_context else None
         self.active_context_enabled = active_context
         if live_awareness or active_context:
             self.client.prepare_active_context = self._active_working_context
@@ -337,6 +342,8 @@ class MonitorAgent:
             elif name == "read_with_sources" and self.grounded_context:
                 data = read_with_sources(self.workspace, arguments["path"],
                                          arguments.get("start", 1), arguments.get("count", 200))
+            elif name == 'review_context' and self.decision_context is not None:
+                data = self.decision_context.read(**arguments)
             elif name == 'feedback_focus' and self.feedback_focus is not None:
                 data = self.feedback_focus.call(**arguments)
             elif name == 'inquiry' and self.inquiry is not None:
@@ -376,6 +383,11 @@ class MonitorAgent:
                         return ToolOutcome({"status": "already_submitted",
                                             "message": "Observe subsequent behavior before repeating the same input."})
                     receipt = self.intervention_callback(message)
+                    if self.decision_context is not None:
+                        try:
+                            self.decision_context.record_input(message)
+                        except Exception as exc:
+                            self._progress('decision_context_receipt_failed', error_type=type(exc).__name__)
                     self._sent_messages.add(message)
                     if self._seen_completion:
                         self._intervened_generation = self._seen_completion["generation"]
@@ -454,6 +466,22 @@ class MonitorAgent:
                         "After an intervention that completion proposal is no longer pending.")
             system = self.system_prompt + "\n\n" + mode
             tools = MONITOR_TOOLS
+            if self.decision_context is not None:
+                system += (
+                    '\n\nYou can reconstruct the grounds for a decision with review_context: the original '
+                    'task, your current working note, query-relevant private Markdown and recent public '
+                    'actions together. After sending input, after_correction selects subsequent behavior '
+                    'alongside that input. You decide when this helps; inspect actual tests and files where '
+                    'needed. Store useful understanding in natural Markdown using existing tools; no fixed '
+                    'entry schema. A prior diagnosis, including your own, remains open to contrary evidence.'
+                )
+                tools = [*tools, _tool('review_context',
+                    'Reconstruct task, private understanding and original recent behavior; optional lexical '
+                    'query retrieves relevant private Markdown. Does not judge, update memory or send input.', {
+                        'query': {'type': 'string', 'default': ''},
+                        'after_correction': {'type': 'boolean', 'default': False},
+                        'steps': {'type': 'integer', 'minimum': 1, 'maximum': 32, 'default': 8},
+                    }, [])]
             if self.live_awareness is not None:
                 system += (
                     "\n\nFile activity is sampled before normal requests, not monitored semantically for you. "
