@@ -1,5 +1,7 @@
 # 当前方法发现恢复入口
 
+2026-09-12 Linux控制环境获资源授权后已建成：见PMA_LINUX_CONTROLLER_SOP_20260912.md。镜像longcontext-pma-native:20260912-r1，完整依赖pip check通过、183源码资源一致、5离线测试通过，Linux真实Docker+事后Verifier夹具通过，解决Windows路径阻塞。零API/零真实题；2CPU/2GB上限，轻夹具峰值63.5MiB非真实长任务峰值。工作及Docker数据在E盘。native推理通道、task依赖/预算/模型门禁仍待单次启动准备，不宣称官方效果复现或已统一Clean部署。
+
 2026-09-12 官方PMA完整入口准备停在环境门禁：见PMA_NATIVE_PORTABILITY_CHECKPOINT_20260912.md。安装的官方源码/资源16+167项一致，官方真实循环假模型测试2项通过、事后评价生命周期3项通过。实际Docker夹具R2暴露Windows Path把容器/tests/test.sh变成错误命令，评价失败而非得0；不能宣称完整入口就绪。需独立Linux控制环境及隔离部署确认，不允许在Windows逐处补原源码路径或启动native真实题。GA适配未改；零模型API。独立venv继承system site且云SDK未全部安装，不是完整依赖锁。
 
 2026-09-12 PMA接线保真修补：见PMA_REPRODUCTION_ACCEPTANCE_20260912.md。补齐PMA所见next_prompt/callback公开反馈；提醒改为同一user内容追加并保留tool_results，直接对照原提醒函数。核心源码不改。官方原配置复现与共同GA适配比较分轨验收；两者效果均未成立。参考Harbor应为作者external/harbor，而非其他缓存。当前模型/采样/完成流程差异必须披露，未自动更换模型或启动任务。

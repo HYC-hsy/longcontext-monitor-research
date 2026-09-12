@@ -76,6 +76,9 @@ def main():
             assert report['docker']['evaluation_status'] == 'completed'
             assert report['docker']['reward'] == {'reward': 1.0}
         report['status'] = 'passed'
+        peak = Path('/sys/fs/cgroup/memory.peak')
+        if peak.is_file():
+            report['controller_cgroup_peak_bytes'] = int(peak.read_text().strip())
     except Exception as exc:
         report.update(status='failed',error=str(exc))
         raise
