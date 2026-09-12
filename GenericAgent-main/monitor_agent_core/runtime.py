@@ -95,6 +95,14 @@ def _worker(config, commands, outputs):
                     "cursor": config["completion_cursor"].value}
 
     monitor.completion_state = current_completion
+    hybrid_control = bool(config['model_config'].get('monitor_hybrid_control', False))
+    if hybrid_control:
+        def task_control(operation, **arguments):
+            outputs.put({'kind': 'task_control', 'operation': operation, **arguments})
+            return {'status': 'queued', 'operation': operation,
+                    'receipt_path': 'monitor/task_control.json',
+                    'note': 'Requested, not proof the task has stopped. Lease expiry resumes execution.'}
+        monitor.task_control_callback = task_control
 
     def review(context, completion=False, request_id=None):
         nonlocal next_wake_turn, close_watch, receipt_offset
@@ -134,12 +142,16 @@ def _worker(config, commands, outputs):
             action = monitor.review(context, completion_pending=completion)
             receipt_offset = next_receipt_offset
         except Exception as exc:
+            if hybrid_control:
+                outputs.put({'kind': 'task_control', 'operation': 'resume', 'cause': 'review_failure'})
             outputs.put({"kind": "failure", "error": repr(exc), "completion": completion and not submitted,
                          "request_id": request_id})
             # A terminal transport recovery must not silently restart via the
             # queued patrol/completion commands after the parent has failed it.
             return not isinstance(exc, ProviderRecoveryExhausted)
         if action.kind == "wait":
+            if hybrid_control:
+                outputs.put({'kind': 'task_control', 'operation': 'resume', 'cause': 'monitor_wait'})
             close_watch = False
             next_wake_turn = task_turn + max(1, int(action.payload["after_turns"]))
         elif action.kind == "intervene":
@@ -218,7 +230,14 @@ class MonitorRuntime:
     def __init__(self, *, public_task, task_workspace, artifact_dir, config_name,
                  model_config, interrupt_callback, max_review_turns=20,
                  completion_timeout=300, process_factory=None, worker_target=None,
-                 interrupt_pending=None, run_timeout_seconds=10000, run_deadline_epoch=None):
+                 interrupt_pending=None, run_timeout_seconds=10000, run_deadline_epoch=None,
+                 pause_callback=None, resume_callback=None):
+        self._hybrid_control = model_config.get('monitor_hybrid_control', False)
+        if type(self._hybrid_control) is not bool:
+            raise ValueError('monitor_hybrid_control must be boolean')
+        if self._hybrid_control and (pause_callback is None or resume_callback is None):
+            raise ValueError('Hybrid control requires host pause and resume callbacks')
+        self._pause_callback, self._resume_callback = pause_callback, resume_callback
         self.artifact_dir = Path(artifact_dir).resolve()
         task_workspace = Path(task_workspace).resolve()
         if self.artifact_dir == task_workspace or task_workspace in self.artifact_dir.parents:
@@ -302,9 +321,29 @@ class MonitorRuntime:
                     return
                 raise
             kind = value.get("kind")
-            if kind == "intervention":
+            if kind == 'task_control':
+                try:
+                    if not self._hybrid_control:
+                        raise ValueError('Hybrid control is disabled')
+                    if value.get('operation') == 'pause':
+                        receipt = self._pause_callback(value['reason'], value.get('seconds', 120))
+                    elif value.get('operation') == 'resume':
+                        receipt = self._resume_callback()
+                    else:
+                        raise ValueError('Unknown control operation')
+                    value = dict(value, receipt=receipt, delivery='handed_to_host', timestamp=time.time())
+                except Exception as exc:
+                    value = dict(value, delivery='failed', error=repr(exc), timestamp=time.time())
+                _append(self.private_root / 'delivery_feedback.jsonl', value)
+                target = self.private_root / 'task_control.json'
+                temporary = target.with_suffix('.pending')
+                temporary.write_text(json.dumps(value, ensure_ascii=False), encoding='utf-8')
+                temporary.replace(target)
+            elif kind == "intervention":
                 try:
                     receipt = self._interrupt_callback(value["message"])
+                    if self._hybrid_control:
+                        self._resume_callback()
                     value = dict(value, delivery="handed_to_task_interrupt_interface", receipt=str(receipt))
                     # The correction has one owner: the Task Agent's interrupt mailbox.
                     # Wake any completion wait, but do not inject the message a second time.
@@ -320,6 +359,8 @@ class MonitorRuntime:
                 except Exception as exc:
                     value = dict(value, delivery="failed", error=repr(exc))
             elif kind == "completion" or (kind == "failure" and value.get("completion") is True):
+                if self._hybrid_control:
+                    self._resume_callback()
                 with self._pending_lock:
                     pending = self._pending.pop(value.get("request_id"), None)
                     if pending is not None:
@@ -334,6 +375,8 @@ class MonitorRuntime:
                         'accepted': pending is not None,
                     })
             elif kind == "failure":
+                if self._hybrid_control:
+                    self._resume_callback()
                 # An ordinary review may fail while a root handoff is waiting.
                 with self._pending_lock:
                     for pending in self._pending.values():
@@ -415,9 +458,13 @@ class MonitorRuntime:
 
     def close(self):
         self._closed.set()
+        if self._hybrid_control:
+            self._resume_callback()
         self._stop_event.set()
         self._commands.put({"kind": "close"})
         self._process.join(timeout=3)
         if self._process.is_alive():
             self._process.terminate(); self._process.join(timeout=1)
         self._pump.join(timeout=1)
+        if self._hybrid_control:
+            self._resume_callback()
