@@ -1,5 +1,7 @@
 # 当前方法发现恢复入口
 
+2026-09-12 原版PMA启动准备审计：见PMA_NATIVE_START_READINESS_20260912.md。Engine可用；现有FBR/Fyne镜像均有tmux、无asciinema，原录像开启时需运行前预装，不能在线恢复公网。原生LiteLLM受控推理接线与task+memory完整计量仍待实现。零API、零真实任务，镜像只读检查容器已退出。停在原版模型/50轮检查与共同GA/500轮比较的轨道选择；不得自行混用模型、题源或预算，不宣称已完整复现。
+
 2026-09-12 Linux控制环境获资源授权后已建成：见PMA_LINUX_CONTROLLER_SOP_20260912.md。镜像longcontext-pma-native:20260912-r1，完整依赖pip check通过、183源码资源一致、5离线测试通过，Linux真实Docker+事后Verifier夹具通过，解决Windows路径阻塞。零API/零真实题；2CPU/2GB上限，轻夹具峰值63.5MiB非真实长任务峰值。工作及Docker数据在E盘。native推理通道、task依赖/预算/模型门禁仍待单次启动准备，不宣称官方效果复现或已统一Clean部署。
 
 2026-09-12 官方PMA完整入口准备停在环境门禁：见PMA_NATIVE_PORTABILITY_CHECKPOINT_20260912.md。安装的官方源码/资源16+167项一致，官方真实循环假模型测试2项通过、事后评价生命周期3项通过。实际Docker夹具R2暴露Windows Path把容器/tests/test.sh变成错误命令，评价失败而非得0；不能宣称完整入口就绪。需独立Linux控制环境及隔离部署确认，不允许在Windows逐处补原源码路径或启动native真实题。GA适配未改；零模型API。独立venv继承system site且云SDK未全部安装，不是完整依赖锁。
