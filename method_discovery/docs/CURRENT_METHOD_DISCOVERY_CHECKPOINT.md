@@ -1,5 +1,7 @@
 # 当前方法发现恢复入口
 
+2026-09-12 PMA FBR R2 已完整结束并审计：PMA_NATIVE_FBR_R2_AUDIT_20260912.md / AUDIT_DATA。42分43秒，6/7阶段、加权0.875；48task/94memory、11/11提醒送达。PATH和事后评价前/app归档均在真实运行生效。唯一失败CORS：原要求仍保留，Step28却提醒加入credentials例外，Step30以gofmt后状态标完成，最终实现与测试冲突；并非提醒丢失。存在有用局部纠错，但无同配置无PMA对照不能归因净收益。用量估算约$10.241非账单。当前未改代码/重跑/清理；建议准备原生无PMA配对，真实启动另行确认。
+
 2026-09-12 19:07 PMA FBR R2 已获本轮批准并后台启动，详见 PMA_NATIVE_FBR_R2_LIVE_20260912.md。源码 7c02a7b，r2 PATH 依赖镜像与事后评价前工作区归档；原 Sonnet4.5/Opus4.6、50turn/7200秒不变。controller=pma-native-fbr-20260912-r2，task=pma-native-49acaec7cf17-main-1；首条 memory 调用已返回。按用户要求确认启动后不持续轮询，后续查 native_fbr_20260912_r2/work/trial/native_result.json 再审计。当前无最终成绩，不视为方法有效或原论文效果复现。
 
 2026-09-12 PMA R1工程修复完成：PMA_NATIVE_PATH_ARCHIVE_REPAIR_20260912.md。r2依赖镜像保留基础镜像PATH，原版实际tmux/asciinema终端内go version和公开utils编译检查通过；新归档在Agent结束、隐藏Verifier之前保存完整/app tar+SHA，失败则跳过评分并停止保留容器。12回归通过，断网真实终端+归档边界夹具通过（约25.6MB）。作者PMA/Harbor源码和研究机制不改，无API/真实重跑；后续准备脚本指向r2镜像，新建运行包，不能复用R1快照或把R1的0分改掉。
