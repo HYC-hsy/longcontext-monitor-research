@@ -20,6 +20,7 @@ from .handoff_validation import validate_handoff, note_text
 from .advice_basis import AdviceBasis, ADVICE_PROMPT, advice_tools
 from .feedback_focus import FeedbackFocus, FOCUS_PROMPT
 from .inquiry import Inquiry, INQUIRY_PROMPT
+from .working_context import current_working_context
 
 
 def _tool(name, description, properties, required):
@@ -187,6 +188,17 @@ class MonitorAgent:
         self.grounded_context = getattr(client, "config", {}).get("monitor_grounded_context", False)
         self.client.progress_callback = self._progress
         self.semantic_continuity = getattr(client, "config", {}).get("monitor_semantic_continuity", True)
+        active_context = getattr(client, "config", {}).get("monitor_active_working_context", False)
+        if type(active_context) is not bool:
+            raise ValueError("monitor_active_working_context must be a boolean")
+        if active_context:
+            self.client.prepare_active_context = self._active_working_context
+            self.system_prompt += (
+                "\nYour current monitor/working.md is made available during normal reasoning without "
+                "a separate read. Use it for the understanding you want available next time, not a log. "
+                "You decide its content and when revision is useful; no per-wake update is required. "
+                "It does not replace original evidence or your ongoing dialogue."
+            )
         self.handoff_validation = getattr(client, "config", {}).get("monitor_handoff_validation", False)
         self.advice_basis = (AdviceBasis(workspace, self._atomic_private_text)
                             if getattr(client, "config", {}).get("monitor_advice_revision", False) else None)
@@ -199,6 +211,11 @@ class MonitorAgent:
         if self.semantic_continuity:
             self.client.prepare_continuation = self._prepare_continuation
             self.client.archive_continuation_history = self._archive_continuation_history
+
+    def _active_working_context(self):
+        text = current_working_context(self.workspace)
+        self._audit_dialogue('active_working_context', content=text)
+        return text
 
     def _atomic_private_text(self, relative_path, text):
         path = self.workspace.private_root / relative_path

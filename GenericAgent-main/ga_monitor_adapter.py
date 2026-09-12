@@ -20,6 +20,7 @@ class GenericAgentMonitorAdapter:
             ("GA_MONITOR_FEEDBACK_FOCUS", "monitor_feedback_focus"),
             ("GA_MONITOR_INQUIRY", "monitor_inquiry"),
             ("GA_MONITOR_TOOL_FEEDBACK", "monitor_tool_feedback"),
+            ("GA_MONITOR_ACTIVE_WORKING_CONTEXT", "monitor_active_working_context"),
         ):
             value = os.environ.get(environment)
             if value is not None:

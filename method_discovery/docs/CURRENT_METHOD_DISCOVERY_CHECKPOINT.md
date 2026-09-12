@@ -1,5 +1,7 @@
 # 当前方法发现恢复入口
 
+2026-09-12 用户批准PMA借鉴增强的检查改造，已实现请求级active working context，见ACTIVE_WORKING_CONTEXT_IMPLEMENTATION_20260912.md。默认关；monitor_active_working_context / GA_MONITOR_ACTIVE_WORKING_CONTEXT开启。复用working.md，每次正常请求读取有界最新认识，临时入请求、不堆进History，压缩后读取、异常恢复、审计留痕；不强制写、不加模型调用、不改并发/工具/观察。151工程测试通过，未调用API/启动任务/证明效果。下一真实准备及启动仍需确认；不能把这一候选当PMA母体或既定创新。
+
 2026-09-12 PMA→Clean行为对齐只读审计完成：PMA_TO_CLEAN_MONITOR_ALIGNMENT_AUDIT_20260912.md。保留独立Clean主线，PMA不作母体。重读PMA R2、公共base/B原始片段与人工Fyne011/014/015。确定已有主动工具/多轮纠偏，不是缺日志；base当前笔记仅早期3次显式写改，PMA更新后bank直接用于提醒，但也会固化错误。建议先设计“自主维护的当前认识被实际用于后续判断”这一借鉴增强，先核对working/压缩/U/A重叠，不加新schema/双模型/同步审批；丰富观察另作独立候选。不是已证明主因，不以异题分数选冠军。本轮未改代码/跑API，下一实现与真实启动均未获授权。
 
 2026-09-12 PMA FBR R2 已完整结束并审计：PMA_NATIVE_FBR_R2_AUDIT_20260912.md / AUDIT_DATA。42分43秒，6/7阶段、加权0.875；48task/94memory、11/11提醒送达。PATH和事后评价前/app归档均在真实运行生效。唯一失败CORS：原要求仍保留，Step28却提醒加入credentials例外，Step30以gofmt后状态标完成，最终实现与测试冲突；并非提醒丢失。存在有用局部纠错，但无同配置无PMA对照不能归因净收益。用量估算约$10.241非账单。当前未改代码/重跑/清理；建议准备原生无PMA配对，真实启动另行确认。

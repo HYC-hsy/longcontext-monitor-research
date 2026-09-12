@@ -430,6 +430,21 @@ class MonitorProviderClient:
         return ModelResponse(text, calls, usage)
 
     def _request(self, tools):
+        # Request-local context never becomes another permanent history copy.
+        # Read after compaction, so a newly written handoff is visible immediately.
+        prepare = getattr(self, 'prepare_active_context', None)
+        context = prepare() if tools and prepare is not None else None
+        entry = {"role": "user", "content": [{"type": "text", "text": context}]} if context else None
+        if entry is not None:
+            self.history.append(entry)
+        try:
+            return self._request_with_recovery(tools)
+        finally:
+            if entry is not None:
+                assert self.history[-1] is entry
+                self.history.pop()
+
+    def _request_with_recovery(self, tools):
         # Runtime-owned recovery stays inside this request: no new wake, tool
         # replay, history append, or synthetic completion decision.
         deadline = getattr(self, 'recovery_deadline', None)
