@@ -302,7 +302,13 @@ class GenericAgent:
         return receipt
 
     def wait_monitor_pause(self):
-        return self.monitor_pause.wait(lambda: self.stop_sig)
+        started = time.monotonic()
+        allowed = self.monitor_pause.wait(lambda: self.stop_sig)
+        duration = time.monotonic() - started
+        if duration > 0.01 and telemetry_enabled():
+            from research_runtime import emit
+            emit('monitor_pause_wait', {'duration_seconds': duration, 'resumed': allowed})
+        return allowed
             
     def put_task(self, query, source="user", images=None):
         display_queue = queue.Queue()

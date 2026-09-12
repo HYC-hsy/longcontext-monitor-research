@@ -24,7 +24,8 @@ def test_clean_launch_refuses_legacy_public_network(monkeypatch):
         m12.run_proof('roadmapbench', 'not-launched', 0, 10000)
 
 
-@pytest.mark.parametrize('flag', ['GA_MONITOR_ACTIVE_WORKING_CONTEXT', 'GA_MONITOR_LIVE_AWARENESS'])
+@pytest.mark.parametrize('flag', ['GA_MONITOR_ACTIVE_WORKING_CONTEXT', 'GA_MONITOR_LIVE_AWARENESS',
+                                 'GA_MONITOR_DECISION_CONTEXT', 'GA_MONITOR_HYBRID_CONTROL'])
 def test_active_working_context_reaches_container_and_is_reset_between_conditions(flag):
     import ast
     tree = ast.parse((ROOT / 'adapters/harbor_ga_agent.py').read_text(encoding='utf-8'))

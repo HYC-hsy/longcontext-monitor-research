@@ -6,6 +6,8 @@
 
 ### 权威文档
 
+- 2026-09-13 用户批准补齐文献机制迁移，并允许部分暂停、部分并行；执行入口 `method_discovery/docs/LITERATURE_TRANSFER_PLAN_20260913.md`。`GA_MONITOR_HYBRID_CONTROL` 是默认关闭的选择性有限暂停候选，不是逐轮审批；正常监察仍并发、只有同一监察者自主请求才暂停，纠偏/静默/故障/租约到期恢复。`GA_MONITOR_DECISION_CONTEXT` 独立控制按需原任务、记忆与原始行为视图。不得据工程通过宣称有效或替换原研究问题；真实启动仍须确认。原live-awareness准备分支暂停，不自动启动。
+
 - 2026-09-12 用户批准PMA保留原同步维护—提醒调度作为独立外部基线；此例外仅用于GA_PMA_ENABLED，不改变Clean主体并发硬约束。实现见`method_discovery/docs/PMA_SYNC_IMPLEMENTATION_20260912.md`；称PMA同步GA机制适配，不称原论文原样复现。两者互斥，PMA仍无在线checker且真实启动独立确认；工程通过不表示效果成立。
 
 - 2026-09-11/12 无API静态准备子阶段：`method_discovery/docs/PAPER_P1_EXECUTABLE_RESEARCH_CONTRACT_20260911.md` 与 `PAPER_STATIC_INVENTORY_20260911.json` 给出拟议6题面板、G0/G1/G2/G3差异、指标分母和验收出口。六题是5道旧Roadmap dev_pilot加Fyne诊断题，不替代原跨来源/holdout门禁，未批准整批运行；PMA并发适配选择、原生评分映射、完整源码身份和资源门禁尚未完成。静态脚本/5项工程测试不是方法效果证据，生产监察机制未改。
