@@ -1,5 +1,6 @@
 """Prepare only: same wake-control candidate, independent Claude monitor profile."""
 import json
+import argparse
 from pathlib import Path
 from clean_monitor_prepare_real_task_gate import build_manifest
 
@@ -7,11 +8,15 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'method_discovery/artifacts/claude_monitor_20260913'
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--independent', action='store_true')
+    args = parser.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
-    path = OUT / 'fyne_r1_manifest.json'
+    path = OUT / ('fyne_independent_r1_manifest.json' if args.independent else 'fyne_r1_manifest.json')
     if path.exists():
         raise SystemExit('Manifest exists; do not overwrite run identity')
-    manifest = build_manifest('roadmapbench:fyn-2.2.0-roadmap', 'claude-monitor-20260913-r1', path)
+    suffix = 'claude-independent-20260913-r1' if args.independent else 'claude-monitor-20260913-r1'
+    manifest = build_manifest('roadmapbench:fyn-2.2.0-roadmap', suffix, path)
     manifest['candidate'] = 'wake-owned-stop-concurrent-followup-claude-monitor'
     env = manifest['runs'][0]['environment']
     env.update({

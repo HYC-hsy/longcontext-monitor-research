@@ -130,7 +130,7 @@ def test_tool_surface_optional_and_live_intervention_unchanged(tmp_path, enabled
 
 
 @pytest.mark.parametrize('value', ['0', '1', 'bad'])
-def test_adapter_b_switch_is_validated(monkeypatch, value):
+def test_adapter_b_switch_is_validated(tmp_path, monkeypatch, value):
     import ga_monitor_adapter as adapter
     monkeypatch.setenv('GA_MONITOR_FEEDBACK_FOCUS', value)
     captured = {}
@@ -138,9 +138,9 @@ def test_adapter_b_switch_is_validated(monkeypatch, value):
     original = {'model': 'fixture'}
     if value == 'bad':
         with pytest.raises(ValueError):
-            adapter.GenericAgentMonitorAdapter(model_config=original)
+            adapter.GenericAgentMonitorAdapter(task_workspace=tmp_path, public_task='Task', model_config=original)
     else:
-        adapter.GenericAgentMonitorAdapter(model_config=original)
+        adapter.GenericAgentMonitorAdapter(task_workspace=tmp_path, public_task='Task', model_config=original)
         assert captured['model_config']['monitor_feedback_focus'] == (value == '1')
     assert original == {'model': 'fixture'}
 

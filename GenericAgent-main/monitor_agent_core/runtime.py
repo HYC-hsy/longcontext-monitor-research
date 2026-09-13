@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import multiprocessing as mp
 import queue
-import re
+import hashlib
 import threading
 import time
 import uuid
@@ -25,12 +25,6 @@ class CompletionOutcome:
 def _append(path: Path, value: Mapping[str, Any]):
     with path.open("a", encoding="utf-8") as stream:
         stream.write(json.dumps(dict(value), ensure_ascii=False, default=str) + "\n")
-
-
-def _synopsis(packet):
-    content = str(packet.get("response_content") or "")
-    matches = re.findall(r"<summary[^>]*>(.*?)</summary>", content, re.I | re.S)
-    return (matches[-1].strip() if matches else content.strip())[:600]
 
 
 def _coalesce_wake_command(commands, first, completion_is_active=None):
@@ -200,8 +194,9 @@ def _worker(config, commands, outputs):
     if not review(
         "Turn-zero initialization. Read task/original_task.txt. Use task/synopsis.jsonl for chronological "
         "navigation, task/public_events.jsonl for original public events, and task/workspace/ for live tests, "
-        "code, diffs, and artifacts. The Task Agent can read its original task copy at "
-        f"{config['task_original_path']}. task/ paths are your virtual paths, not its filesystem paths. "
+        "code, diffs, and artifacts. "
+        f"Task-side original requirements location: {config.get('task_original_path') or 'not supplied by the host'}. "
+        "task/ paths are your virtual paths, not its filesystem paths. "
         "Establish your task understanding, inspect available progress, and choose your next action. "
         "Initialization does not require silence if a material discrepancy is already supported."
     ):
@@ -223,7 +218,7 @@ def _worker(config, commands, outputs):
                 return
         elif kind == "completion" and completion_is_active(command):
             if not review(
-                f"The Task Agent yielded control without a tool call at cursor {cursor}. Read its actual "
+                f"The host requested a root handoff review at cursor {cursor}. Read the Task Agent's actual "
                 "message in the public evidence: it may claim completion, ask for clarification, or report "
                 "a blocker. Judge its meaning yourself. Answer missing information or correct drift with "
                 "intervene; use allow_complete only if the task is actually complete. A clarification "
@@ -238,26 +233,42 @@ class MonitorRuntime:
                  model_config, interrupt_callback, max_review_turns=20,
                  completion_timeout=300, process_factory=None, worker_target=None,
                  interrupt_pending=None, run_timeout_seconds=10000, run_deadline_epoch=None,
-                 correction_begin=None, correction_end=None):
+                 correction_begin=None, correction_end=None, task_original_path=None, task_id):
         if model_config.get('monitor_hybrid_control', False):
             raise ValueError('Model-requested hybrid pause is retired')
         self.artifact_dir = Path(artifact_dir).resolve()
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise ValueError('An explicit non-empty task_id is required')
         task_workspace = Path(task_workspace).resolve()
         if self.artifact_dir == task_workspace or task_workspace in self.artifact_dir.parents:
             raise ValueError("Monitor artifacts must be outside the supervised task workspace")
+        self.artifact_dir.mkdir(parents=True, exist_ok=True)
+        identity = {'task_id': task_id, 'workspace': str(task_workspace),
+                    'task_sha256': hashlib.sha256(public_task.encode('utf-8')).hexdigest()}
+        identity_path = self.artifact_dir / 'task_identity.json'
+        if identity_path.exists():
+            if json.loads(identity_path.read_text(encoding='utf-8')) != identity:
+                raise ValueError('Monitor history belongs to a different task or workspace')
+        else:
+            if any(self.artifact_dir.iterdir()):
+                raise ValueError('Existing monitor artifacts have no verified task identity')
+            with identity_path.open('x', encoding='utf-8') as stream:
+                json.dump(identity, stream)
         self.evidence_root = self.artifact_dir / "task_evidence"
         self.private_root = self.artifact_dir / "monitor_private"
         self.evidence_root.mkdir(parents=True, exist_ok=True)
         self.private_root.mkdir(parents=True, exist_ok=True)
         (self.evidence_root / "original_task.txt").write_text(public_task, encoding="utf-8")
-        self.task_original_path = task_workspace / f".monitor_original_task_{uuid.uuid4().hex}.txt"
-        with self.task_original_path.open("x", encoding="utf-8") as stream:
-            stream.write(public_task)
+        self.task_original_path = task_original_path
         self.synopsis_path = self.evidence_root / "synopsis.jsonl"
         self.events_path = self.evidence_root / "public_events.jsonl"
         self._archive_lock = threading.Lock()
         self._receipt_lock = threading.Lock()
         self._sequence = 0
+        if self.events_path.exists():
+            with self.events_path.open(encoding='utf-8') as stream:
+                for line in stream:
+                    self._sequence = max(self._sequence, int(json.loads(line)['archive_sequence']))
         self._interrupt_callback = interrupt_callback
         if (correction_begin is None) != (correction_end is None):
             raise ValueError('Correction lifecycle requires both host callbacks')
@@ -287,7 +298,7 @@ class MonitorRuntime:
             "config_name": config_name, "model_config": dict(model_config),
             "evidence_root": str(self.evidence_root), "private_root": str(self.private_root),
             "task_workspace": str(task_workspace), "max_review_turns": int(max_review_turns),
-            "task_original_path": str(self.task_original_path),
+            "task_original_path": self.task_original_path,
             "active_completion": self._active_completion,
             "completion_cursor": self._completion_cursor,
             "run_deadline_epoch": time.time() + max(0.0, self._run_deadline - time.monotonic()),
@@ -315,9 +326,9 @@ class MonitorRuntime:
             _append(self.events_path, raw)
             calls = raw.get("tool_calls") or []
             _append(self.synopsis_path, {
-                "cursor": sequence, "task_turn": raw.get("internal_turn"),
-                "boundary": raw.get("boundary"), "intent": _synopsis(raw),
-                "tool_names": [str(call.get("tool_name") or "") for call in calls],
+                "cursor": sequence, "task_turn": raw.get("task_turn"),
+                "boundary": raw.get("boundary"), "intent": raw.get('synopsis', raw.get('text', '')),
+                "tool_names": [str(call.get("name") or "") for call in calls],
                 "outcome_available": bool(raw.get("tool_results")),
                 "raw_event": f"public_events.jsonl#{sequence}",
             })
@@ -327,7 +338,7 @@ class MonitorRuntime:
         sequence = self._archive(packet)
         self._commands.put({
             "kind": "boundary", "cursor": sequence,
-            "task_turn": int(packet.get("internal_turn") or 0),
+            "task_turn": int(packet.get("task_turn") or 0),
         })
         return True
 
@@ -433,7 +444,7 @@ class MonitorRuntime:
             self._pending[request_id] = pending
         self._commands.put({"kind": "completion", "cursor": cursor, "request_id": request_id,
                             "generation": generation,
-                            "task_turn": int((public_event or {}).get("internal_turn") or 0)})
+                            "task_turn": int((public_event or {}).get("task_turn") or 0)})
         delayed = False
         warning_at = time.monotonic() + self._completion_timeout
         try:

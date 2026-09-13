@@ -355,8 +355,8 @@ class GenericAgent:
                 monitor_config_name = os.environ.get(
                     'GA_MONITOR_CONFIG', 'claude_monitor_opus48'
                 )
-                from monitor_agent_core.configuration import load_profile
-                monitor_model_config = load_profile(monitor_config_name)
+                from ga_monitor_adapter import monitor_profile
+                monitor_model_config = monitor_profile(monitor_config_name)
                 artifact_dir = os.environ.get('GA_MONITOR_ARTIFACT_DIR') or os.path.join(
                     script_dir, 'temp', 'clean_monitor',
                     os.environ.get('GA_BENCH_RUN_ID') or research_id('monitor_run')

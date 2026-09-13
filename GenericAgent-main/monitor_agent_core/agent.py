@@ -344,6 +344,10 @@ class MonitorAgent:
 
     def _dispatch(self, name: str, arguments: dict) -> ToolOutcome:
         try:
+            if name == 'allow_complete':
+                if arguments and set(arguments) != {'_noargs'}:
+                    raise ValueError('allow_complete accepts no arguments')
+                arguments = {}
             if name == "file_read":
                 data = self.workspace.read_text(
                     arguments["path"], arguments.get("start", 1), arguments.get("count", 200),

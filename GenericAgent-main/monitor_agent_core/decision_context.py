@@ -143,7 +143,7 @@ class DecisionContext:
         field_budget = max(60, 7500 // (max(1, len(rows)) * 3))
         trajectory = [RefinerTrajectoryStep(
             step_index=int(event.get('archive_sequence') or line),
-            thought=self._preview(event.get('response_content') or '', field_budget),
+            thought=self._preview(event.get('text') or '', field_budget),
             action=self._preview(json.dumps(event.get('tool_calls') or [], ensure_ascii=False), field_budget),
             observation=self._preview(json.dumps(event.get('tool_results') or [], ensure_ascii=False), field_budget),
         ) for line, event in rows]

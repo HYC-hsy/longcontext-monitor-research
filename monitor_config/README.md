@@ -6,9 +6,10 @@ The file maps profile names to provider configurations. Current selected profile
 8192 output tokens, 200000 context window. These budgets are local configuration,
 not claims about upstream model limits.
 
-The Monitor core reads this file through `monitor_agent_core.configuration` and
-does not import GA's mykey or llmcore. `MONITOR_CONFIG_FILE` can select another
-file for direct use. Never put real credentials into committed examples.
+The Monitor core requires an explicit file argument or `MONITOR_CONFIG_FILE`;
+it does not infer paths from GA's directory layout or import mykey/llmcore.
+The GA adapter resolves this project's host/container locations and passes the
+path to the independent loader. Never put real credentials into committed examples.
 
 The isolated experiment builder reads the task profile from GA and the monitor
 profile from this directory separately. Real credentials remain in the external

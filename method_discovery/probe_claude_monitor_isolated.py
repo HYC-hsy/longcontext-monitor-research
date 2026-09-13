@@ -14,7 +14,7 @@ PROFILE = 'claude_monitor_opus48'
 def worker():
     from monitor_agent_core.configuration import load_profile
     from monitor_agent_core.provider import MonitorProviderClient
-    cfg = load_profile(PROFILE)
+    cfg = load_profile(PROFILE, Path(__file__).parent / 'monitor_agent_core/models.local.json')
     cfg.update(max_retries=0, read_timeout=180)
     client = MonitorProviderClient(PROFILE, cfg)
     tool = {'type': 'function', 'function': {'name': 'read_sample',

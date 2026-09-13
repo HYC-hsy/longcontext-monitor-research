@@ -52,7 +52,7 @@ def test_actual_worker_correction_resumes_wait_and_skips_stale_review(tmp_path, 
         return _coalesce_wake_command(commands, first, checked)
     monkeypatch.setattr('monitor_agent_core.runtime._coalesce_wake_command', observe_coalescing)
     (tmp_path / 'workspace').mkdir()
-    runtime = MonitorRuntime(
+    runtime = MonitorRuntime(task_id='fixture',
         public_task='Implement the behavior.', task_workspace=tmp_path / 'workspace',
         artifact_dir=tmp_path / 'monitor', config_name='fake', model_config={},
         interrupt_callback=mailbox.request, interrupt_pending=mailbox.is_requested,
@@ -64,10 +64,10 @@ def test_actual_worker_correction_resumes_wait_and_skips_stale_review(tmp_path, 
         assert entered.wait(2)
         # Publication remains nonblocking while the monitor is blocked.
         started = time.monotonic()
-        runtime.archive_boundary({'internal_turn': 1, 'response_content': 'Working'})
+        runtime.archive_boundary({'task_turn': 1, 'text': 'Working'})
         assert time.monotonic() - started < .2
         waiter = threading.Thread(target=lambda: results.append(runtime.request_completion(
-            {'internal_turn': 2, 'response_content': 'Complete'})))
+            {'task_turn': 2, 'text': 'Complete'})))
         waiter.start()
         await_condition(lambda: bool(runtime._pending))
         send.set()
@@ -84,7 +84,7 @@ def test_actual_worker_correction_resumes_wait_and_skips_stale_review(tmp_path, 
         assert stale_skipped.wait(2)
         assert calls == [False]
         # Only a fresh completion may cause another completion review.
-        fresh = runtime.request_completion({'internal_turn': 3, 'response_content': 'Repaired'})
+        fresh = runtime.request_completion({'task_turn': 3, 'text': 'Repaired'})
         assert fresh.allow
         assert calls == [False, True]
         await_condition(lambda: (runtime.private_root / 'delivery_feedback.jsonl').exists())
@@ -110,7 +110,7 @@ class IdleProcess:
 
 def idle_runtime(tmp_path, callback, pending=lambda: False):
     (tmp_path / 'workspace').mkdir()
-    return MonitorRuntime(
+    return MonitorRuntime(task_id='fixture',
         public_task='task', task_workspace=tmp_path / 'workspace',
         artifact_dir=tmp_path / 'monitor', config_name='fake', model_config={},
         interrupt_callback=callback, interrupt_pending=pending,
@@ -123,7 +123,7 @@ def test_already_delivered_correction_does_not_start_completion_wait(tmp_path):
     mailbox.request('A correction arrived immediately before the handoff.')
     runtime = idle_runtime(tmp_path, mailbox.request, mailbox.is_requested)
     try:
-        result = runtime.request_completion({'internal_turn': 2})
+        result = runtime.request_completion({'task_turn': 2})
         assert result.reason == 'interrupted'
         assert not runtime._pending
         assert runtime._active_completion.value == 0

@@ -3,9 +3,35 @@
 from __future__ import annotations
 
 import os
+import re
+import uuid
+from pathlib import Path
 
 from monitor_agent_core.runtime import MonitorRuntime
+from monitor_agent_core.configuration import load_profile
 from research_runtime import CompletionDecision
+
+
+def monitor_profile(name):
+    bundled = Path(__file__).parent / 'monitor_agent_core' / 'models.local.json'
+    path = os.environ.get('MONITOR_CONFIG_FILE') or (
+        bundled if bundled.exists() else Path(__file__).parent.parent / 'monitor_config' / 'models.local.json')
+    return load_profile(name, path)
+
+
+def public_observation(packet):
+    event = dict(packet)
+    event['task_turn'] = int(event.pop('internal_turn', 0) or 0)
+    event['text'] = str(event.pop('response_content', '') or '')
+    summaries = re.findall(r'<summary[^>]*>(.*?)</summary>', event['text'], re.I | re.S)
+    event['synopsis'] = (summaries[-1].strip() if summaries else event['text'].strip())[:600]
+    calls = []
+    for original in event.get('tool_calls') or []:
+        call = dict(original)
+        call['name'] = call.pop('tool_name', call.get('name', ''))
+        calls.append(call)
+    event['tool_calls'] = calls
+    return event
 
 
 class GenericAgentMonitorAdapter:
@@ -32,14 +58,23 @@ class GenericAgentMonitorAdapter:
                     raise ValueError(environment + " must be 0 or 1")
                 runtime_options["model_config"] = dict(runtime_options["model_config"],
                                                        **{setting: value == "1"})
-        self.runtime = MonitorRuntime(**runtime_options)
+        original = Path(runtime_options['task_workspace']) / f'.monitor_original_task_{uuid.uuid4().hex}.txt'
+        with original.open('x', encoding='utf-8') as stream:
+            stream.write(runtime_options['public_task'])
+        runtime_options['task_original_path'] = str(original)
+        runtime_options.setdefault('task_id', os.environ.get('GA_BENCH_RUN_ID') or uuid.uuid4().hex)
+        try:
+            self.runtime = MonitorRuntime(**runtime_options)
+        except Exception:
+            original.unlink(missing_ok=True)
+            raise
 
     def archive_boundary(self, packet):
-        return self.runtime.archive_boundary(packet)
+        return self.runtime.archive_boundary(public_observation(packet))
 
     def review_completion(self, proposal, turn, provider_link=None, response_content=None):
         payload = proposal.as_payload() if hasattr(proposal, "as_payload") else {}
-        outcome = self.runtime.request_completion({
+        outcome = self.runtime.request_completion(public_observation({
             "boundary": "task_control_handoff",
             "internal_turn": turn,
             "response_content": response_content or "",
@@ -47,7 +82,7 @@ class GenericAgentMonitorAdapter:
             "provider_link": provider_link,
             "tool_calls": [],
             "tool_results": [],
-        })
+        }))
         if outcome.allow:
             return CompletionDecision(
                 decision="ALLOW_COMPLETE", reason_codes=("MONITOR_ALLOWED",)

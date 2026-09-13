@@ -34,7 +34,7 @@ def imported_roots(path):
 
 def test_monitor_core_has_no_generic_agent_source_dependencies():
     violations = {}
-    for path in CORE_ROOT.glob("*.py"):
+    for path in CORE_ROOT.rglob("*.py"):
         forbidden = imported_roots(path) & FORBIDDEN_ROOTS
         if forbidden:
             violations[path.name] = sorted(forbidden)

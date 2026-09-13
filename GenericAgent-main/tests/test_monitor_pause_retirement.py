@@ -12,7 +12,7 @@ def test_old_manifest_cannot_silently_enable_removed_pause(monkeypatch):
 
 def test_direct_runtime_rejects_retired_configuration(tmp_path):
     with pytest.raises(ValueError, match='retired'):
-        MonitorRuntime(public_task='Task', task_workspace=tmp_path / 'workspace',
+        MonitorRuntime(task_id='fixture', public_task='Task', task_workspace=tmp_path / 'workspace',
                        artifact_dir=tmp_path / 'artifacts', config_name='fixture',
                        model_config={'monitor_hybrid_control': True},
                        interrupt_callback=lambda _: None)

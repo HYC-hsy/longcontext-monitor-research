@@ -21,7 +21,7 @@ def view(tmp_path):
 def append(view, number, content='public reasoning'):
     path = view.workspace.evidence_root / 'public_events.jsonl'
     with path.open('a', encoding='utf-8') as stream:
-        stream.write(json.dumps(dict(archive_sequence=number, response_content=content,
+        stream.write(json.dumps(dict(archive_sequence=number, text=content,
                      tool_calls=[{'name': 'any_tool'}], tool_results=['observed']), ensure_ascii=False) + '\n')
 
 

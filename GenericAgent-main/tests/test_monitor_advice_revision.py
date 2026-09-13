@@ -126,7 +126,7 @@ def test_persistent_file_survives_fresh_monitor_history(tmp_path):
 
 
 @pytest.mark.parametrize('value', ['0', '1', 'bad', None])
-def test_adapter_validates_r_switch_without_mutating_provider_config(monkeypatch, value):
+def test_adapter_validates_r_switch_without_mutating_provider_config(tmp_path, monkeypatch, value):
     import ga_monitor_adapter as adapter
     for name in ['GA_MONITOR_ADVICE_REVISION', 'GA_MONITOR_HANDOFF_VALIDATION', 'GA_MONITOR_GROUNDED_CONTEXT']:
         monkeypatch.delenv(name, raising=False)
@@ -137,9 +137,9 @@ def test_adapter_validates_r_switch_without_mutating_provider_config(monkeypatch
     original = {'model': 'fixture'}
     if value == 'bad':
         with pytest.raises(ValueError):
-            adapter.GenericAgentMonitorAdapter(model_config=original)
+            adapter.GenericAgentMonitorAdapter(task_workspace=tmp_path, public_task='Task', model_config=original)
     else:
-        adapter.GenericAgentMonitorAdapter(model_config=original)
+        adapter.GenericAgentMonitorAdapter(task_workspace=tmp_path, public_task='Task', model_config=original)
         assert captured['model_config'].get('monitor_advice_revision') == (None if value is None else value == '1')
     assert original == {'model': 'fixture'}
 

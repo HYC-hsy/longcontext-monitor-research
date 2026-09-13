@@ -34,16 +34,16 @@ def test_real_review_prompt_tools_and_direct_intervention(tmp_path, enabled):
 
 
 @pytest.mark.parametrize('value', ['0', '1', 'invalid'])
-def test_adapter_flag(monkeypatch, value):
+def test_adapter_flag(tmp_path, monkeypatch, value):
     import ga_monitor_adapter as adapter
     captured = {}
     monkeypatch.setenv('GA_MONITOR_TOOL_FEEDBACK', value)
     monkeypatch.setattr(adapter, 'MonitorRuntime', lambda **kw: captured.update(kw))
     if value == 'invalid':
         with pytest.raises(ValueError):
-            adapter.GenericAgentMonitorAdapter(model_config={})
+            adapter.GenericAgentMonitorAdapter(task_workspace=tmp_path, public_task='Task', model_config={})
     else:
-        adapter.GenericAgentMonitorAdapter(model_config={})
+        adapter.GenericAgentMonitorAdapter(task_workspace=tmp_path, public_task='Task', model_config={})
         assert captured['model_config']['monitor_tool_feedback'] == (value == '1')
 
 

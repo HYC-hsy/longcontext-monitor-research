@@ -39,14 +39,14 @@ def test_approval_settlement_preserves_or_ends_observation(tmp_path, monkeypatch
     monkeypatch.setattr(agent, 'MonitorAgent', Monitor)
     workspace = tmp_path / 'workspace'
     workspace.mkdir()
-    runtime = MonitorRuntime(
+    runtime = MonitorRuntime(task_id='fixture',
         public_task='Complete the public task', task_workspace=workspace,
         artifact_dir=tmp_path / 'audit', config_name='fixture', model_config={},
         interrupt_callback=lambda message: None, process_factory=ThreadProcess,
     )
     outcomes = []
     waiter = threading.Thread(target=lambda: outcomes.append(
-        runtime.request_completion({'internal_turn': 2})))
+        runtime.request_completion({'task_turn': 2})))
     try:
         # Wait for initialization, then let completion review retain a stale cursor
         # while ordinary boundary messages accumulate (the observed production race).
@@ -55,8 +55,8 @@ def test_approval_settlement_preserves_or_ends_observation(tmp_path, monkeypatch
             time.sleep(.01)
         waiter.start()
         assert entered.wait(3)
-        runtime.archive_boundary({'internal_turn': 3})
-        runtime.archive_boundary({'internal_turn': 4})
+        runtime.archive_boundary({'task_turn': 3})
+        runtime.archive_boundary({'task_turn': 4})
         if stale:
             runtime._outputs.put({'kind': 'intervention', 'message': 'New correction',
                                   'request_id': 'correction', 'cursor': 3})

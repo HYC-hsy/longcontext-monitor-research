@@ -87,7 +87,7 @@ def test_invalid_selection_preserves_previous_and_tasks_do_not_share_state(tmp_p
 
 
 @pytest.mark.parametrize('value', ['0', '1', 'invalid'])
-def test_adapter_switch(monkeypatch, value):
+def test_adapter_switch(tmp_path, monkeypatch, value):
     import ga_monitor_adapter as adapter
     monkeypatch.setenv('GA_MONITOR_INQUIRY', value)
     captured = {}
@@ -95,9 +95,9 @@ def test_adapter_switch(monkeypatch, value):
     config = {'model': 'fixture'}
     if value == 'invalid':
         with pytest.raises(ValueError):
-            adapter.GenericAgentMonitorAdapter(model_config=config)
+            adapter.GenericAgentMonitorAdapter(task_workspace=tmp_path, public_task='Task', model_config=config)
     else:
-        adapter.GenericAgentMonitorAdapter(model_config=config)
+        adapter.GenericAgentMonitorAdapter(task_workspace=tmp_path, public_task='Task', model_config=config)
         assert captured['model_config']['monitor_inquiry'] == (value == '1')
     assert config == {'model': 'fixture'}
 

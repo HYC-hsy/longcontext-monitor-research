@@ -112,7 +112,7 @@ def test_invalid_combination_fails_explicitly(tmp_path):
 
 
 @pytest.mark.parametrize("value", ["0", "1", "bad", None])
-def test_adapter_copies_config_and_validates_switch(monkeypatch, value):
+def test_adapter_copies_config_and_validates_switch(tmp_path, monkeypatch, value):
     import ga_monitor_adapter as adapter
     monkeypatch.delenv("GA_MONITOR_HANDOFF_VALIDATION", raising=False)
     monkeypatch.delenv("GA_MONITOR_GROUNDED_CONTEXT", raising=False)
@@ -123,9 +123,9 @@ def test_adapter_copies_config_and_validates_switch(monkeypatch, value):
     original = {"model": "fixture"}
     if value == "bad":
         with pytest.raises(ValueError):
-            adapter.GenericAgentMonitorAdapter(model_config=original)
+            adapter.GenericAgentMonitorAdapter(task_workspace=tmp_path, public_task='Task', model_config=original)
     else:
-        adapter.GenericAgentMonitorAdapter(model_config=original)
+        adapter.GenericAgentMonitorAdapter(task_workspace=tmp_path, public_task='Task', model_config=original)
         assert captured['model_config'].get('monitor_handoff_validation') == (
             None if value is None else value == "1")
     assert original == {"model": "fixture"}

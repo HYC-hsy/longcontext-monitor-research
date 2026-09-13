@@ -41,21 +41,21 @@ def late_worker(config, commands, outputs):
 def test_late_approval_is_archived_not_delivered_to_next_request(tmp_path):
     workspace = tmp_path / 'workspace'
     workspace.mkdir()
-    runtime = MonitorRuntime(
+    runtime = MonitorRuntime(task_id='fixture',
         public_task='Original requirements', task_workspace=workspace,
         artifact_dir=tmp_path / 'audit', config_name='fixture', model_config={},
         interrupt_callback=lambda _: None, worker_target=late_worker,
         process_factory=ThreadProcess, completion_timeout=1,
     )
     try:
-        first = runtime.request_completion({'internal_turn': 57})
+        first = runtime.request_completion({'task_turn': 57})
         assert first.reason == 'interrupted'
-        second = runtime.request_completion({'internal_turn': 59})
+        second = runtime.request_completion({'task_turn': 59})
         assert not second.allow
         assert second.message == 'Current correction'
         assert not runtime._pending
-        assert runtime.task_original_path.parent == workspace
-        assert runtime.task_original_path.read_text(encoding='utf-8') == 'Original requirements'
+        assert runtime.task_original_path is None
+        assert list(workspace.iterdir()) == []
     finally:
         runtime.close()
     receipts = [json.loads(x) for x in
@@ -124,7 +124,7 @@ def test_adapter_preserves_question_as_neutral_handoff():
     adapter.runtime = Runtime()
     result = adapter.review_completion(None, 293, response_content='What were the seven targets?')
     assert captured[0]['boundary'] == 'task_control_handoff'
-    assert captured[0]['response_content'] == 'What were the seven targets?'
+    assert captured[0]['text'] == 'What were the seven targets?'
     assert result.next_prompt == 'Original requirements are ...'
 
 
@@ -139,7 +139,7 @@ def test_clean_monitor_blocked_review_does_not_block_publication(tmp_path):
 
     workspace = tmp_path / 'workspace'
     workspace.mkdir()
-    runtime = MonitorRuntime(
+    runtime = MonitorRuntime(task_id='fixture',
         public_task='task', task_workspace=workspace, artifact_dir=tmp_path / 'audit',
         config_name='fixture', model_config={}, interrupt_callback=lambda _: None,
         worker_target=blocked_worker, process_factory=ThreadProcess,
@@ -148,7 +148,7 @@ def test_clean_monitor_blocked_review_does_not_block_publication(tmp_path):
 
     def publish():
         for turn in range(10):
-            runtime.archive_boundary({'internal_turn': turn, 'response_content': 'Working'})
+            runtime.archive_boundary({'task_turn': turn, 'text': 'Working'})
         published.set()
 
     publisher = threading.Thread(target=publish)

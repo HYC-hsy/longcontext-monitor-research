@@ -29,7 +29,7 @@ def test_first_stop_then_parallel_followup_and_next_episode(tmp_path):
         arrived.set()
     def end(identity):
         gate.end(identity)
-    runtime = MonitorRuntime(public_task='Task', task_workspace=workspace,
+    runtime = MonitorRuntime(task_id='fixture', public_task='Task', task_workspace=workspace,
         artifact_dir=tmp_path / 'artifacts', config_name='fixture', model_config={},
         interrupt_callback=deliver, correction_begin=begin, correction_end=end,
         worker_target=forwarding_worker)
@@ -145,4 +145,3 @@ def test_task_loop_waits_only_for_announced_correction():
     finally:
         gate.end()
         thread.join(3)
-

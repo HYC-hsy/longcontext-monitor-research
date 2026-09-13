@@ -78,7 +78,7 @@ def test_no_links_is_valid_and_task_note_cannot_be_written(ws):
 
 
 @pytest.mark.parametrize("value,expected", [("1", True), ("0", False), (None, None)])
-def test_launch_adapter_preserves_and_forwards_candidate_without_mutating_config(monkeypatch, value, expected):
+def test_launch_adapter_preserves_and_forwards_candidate_without_mutating_config(tmp_path, monkeypatch, value, expected):
     import ga_monitor_adapter as adapter
     monkeypatch.delenv("GA_MONITOR_GROUNDED_CONTEXT", raising=False)
     if value is not None:
@@ -86,7 +86,7 @@ def test_launch_adapter_preserves_and_forwards_candidate_without_mutating_config
     captured = {}
     monkeypatch.setattr(adapter, "MonitorRuntime", lambda **kwargs: captured.update(kwargs))
     config = {"model": "fixture"}
-    adapter.GenericAgentMonitorAdapter(model_config=config)
+    adapter.GenericAgentMonitorAdapter(task_workspace=tmp_path, public_task='Task', model_config=config)
     assert captured["model_config"].get("monitor_grounded_context") is expected
     assert config == {"model": "fixture"}
 

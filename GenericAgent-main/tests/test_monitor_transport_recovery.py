@@ -197,7 +197,7 @@ def test_pending_completion_survives_recovery_without_tool_replay(tmp_path, monk
     workspace = tmp_path / 'workspace'
     workspace.mkdir()
     delivered = []
-    runtime = MonitorRuntime(
+    runtime = MonitorRuntime(task_id='fixture',
         public_task='Keep required behavior', task_workspace=workspace,
         artifact_dir=tmp_path / 'audit', config_name='fixture', model_config={},
         interrupt_callback=delivered.append, process_factory=ThreadProcess,
@@ -206,17 +206,17 @@ def test_pending_completion_survives_recovery_without_tool_replay(tmp_path, monk
     waiter = None
     try:
         # Ordinary review starts, then completion arrives during recovery (R3 ordering).
-        runtime.archive_boundary({'internal_turn': 1})
+        runtime.archive_boundary({'task_turn': 1})
         assert entered.wait(3)
         waiter = threading.Thread(target=lambda: result.append(
-            runtime.request_completion({'internal_turn': 2})))
+            runtime.request_completion({'task_turn': 2})))
         waiter.start()
         limit = time.monotonic() + 2
         while not runtime._pending and time.monotonic() < limit:
             time.sleep(.01)
         assert runtime._pending and waiter.is_alive()
         started = time.monotonic()
-        runtime.archive_boundary({'internal_turn': 3})
+        runtime.archive_boundary({'task_turn': 3})
         assert time.monotonic() - started < .2  # No synchronous review on task path.
         assert not (runtime.artifact_dir / 'completion_incomplete.json').exists()
         release.set()
