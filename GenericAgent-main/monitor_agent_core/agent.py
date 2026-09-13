@@ -230,8 +230,15 @@ class MonitorAgent:
         if type(decision_context) is not bool:
             raise ValueError('monitor_decision_context must be a boolean')
         self.decision_context = DecisionContext(workspace) if decision_context else None
+        pma_memory = getattr(client, 'config', {}).get('monitor_pma_memory', False)
+        if type(pma_memory) is not bool:
+            raise ValueError('monitor_pma_memory must be a boolean')
+        self.pma_memory = None
+        if pma_memory:
+            from .pma_memory import PMAMemoryMaintenance
+            self.pma_memory = PMAMemoryMaintenance(workspace, self._atomic_private_text, self._audit_dialogue)
         self.active_context_enabled = active_context
-        if live_awareness or active_context or decision_context:
+        if live_awareness or active_context or decision_context or pma_memory:
             self.client.prepare_active_context = self._active_working_context
         if active_context:
             self.system_prompt += (
@@ -255,6 +262,8 @@ class MonitorAgent:
 
     def _active_working_context(self):
         parts = []
+        if self.pma_memory is not None:
+            parts.append(self.pma_memory.context())
         if self.active_context_enabled:
             text = current_working_context(self.workspace)
             self._audit_dialogue('active_working_context', content=text)
@@ -493,6 +502,8 @@ class MonitorAgent:
         self._sent_messages.clear()
         action = None
         try:
+            if self.pma_memory is not None:
+                self.pma_memory.update(self.client, wake_context, self.review_id)
             wake_context += "\nLive environment map (read task sources, write only private cognition): " + json.dumps({
                 "task/": str(self.workspace.evidence_root),
                 **{f"task/{name}/": str(path) for name, path in self.workspace.task_mounts.items()},

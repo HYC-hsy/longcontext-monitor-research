@@ -5,3 +5,19 @@
 
 
 No upstream prompts, providers, rule classifiers, datasets or benchmark answers are bundled. The wrappers outside vendor translate public events and natural private notes. Reusing these components is not a reproduction of either full paper.
+# PMA memory-maintenance candidate (2026-09-13)
+
+`pma_memory/memory_agent.py`, `pma_memory/universal_memory.py`, and
+`pma_memory/bm25_search.py` are unmodified (apart from line endings) copies from
+https://github.com/yifannnwu/proactive-memory-agent at
+89e5c0d6aadfe531a1aee42fd290d48be89973dd, `src/memory_agent/memory/`.
+License: Apache-2.0; retained in `PMA_LICENSE`.
+Author docstrings describe shared conversation, but actual process calls are
+separate phase requests; those comments are retained for source fidelity.
+
+Our `../pma_memory.py` reuses phase-one prompt construction, BANK_TOOLS,
+operation execution, UniversalMemory and bank formatting/retrieval. It adapts
+transport, bounded public inputs and atomic persistence. Our existing persistent
+tool-using monitor replaces the original text-only phase two. We do not reuse
+`MemoryAgent.process` or the author's synchronous task scheduler here, and do
+not claim full PMA reproduction. The independent PMA baseline is unchanged.

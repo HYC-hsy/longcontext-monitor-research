@@ -6,6 +6,8 @@
 
 ### 权威文档
 
+- 2026-09-13 用户批准PMA第一阶段维护机制接入独立监察者候选，入口`method_discovery/docs/PMA_MEMORY_MAINTENANCE_ADAPTATION_20260913.md`。`GA_MONITOR_PMA_MEMORY`默认关闭，复用作者记忆操作/提示/检索代码，第二阶段仍为现有持续有工具监察者，不称完整PMA复现。每wake增加一次同模型维护调用并记录成本；不改已确认控制顺序、两层观察或在线信息边界。工程验收不表示效果成立，真实启动另确认。
+
 - 2026-09-13 独立性补齐：`method_discovery/docs/MONITOR_HOST_INDEPENDENCE_COMPLETION_20260913.md`。内核配置必须显式传入路径，不得推断GA目录或回退mykey；GA事件字段/summary解析和任务侧原要求文件由ga_monitor_adapter负责。独立包可单独安装；运行归档绑定task_id、任务摘要和工作区。当前Claude监察profile为claude_monitor_opus48，真实密钥只在忽略的monitor_config/models.local.json。框架独立不等于共享容器下的OS权限隔离，不得混称。
 
 - 2026-09-13 用户纠正首次停止点并授权实现：停止由“静默→唤醒”触发，而非流式intervene选择。初始化与静默后的首次审议先安装宿主屏障，收到确认后调用监察模型；首条纠偏送达或wait后恢复任务，活跃局部跟进中的模型调用继续并行，不重复安装屏障。新实现见`method_discovery/docs/WAKE_OWNED_CONTROL_IMPLEMENTATION_20260913.md`，覆盖下方冲突的“发现问题后才停止”措辞。无pause工具，不改变无checker边界；异常显式释放。PMA等待位置已核对，但其完整维护逻辑不作为Clean母体。

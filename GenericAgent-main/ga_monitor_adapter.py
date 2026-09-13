@@ -51,6 +51,7 @@ class GenericAgentMonitorAdapter:
             ("GA_MONITOR_ACTIVE_WORKING_CONTEXT", "monitor_active_working_context"),
             ("GA_MONITOR_LIVE_AWARENESS", "monitor_live_awareness"),
             ("GA_MONITOR_DECISION_CONTEXT", "monitor_decision_context"),
+            ("GA_MONITOR_PMA_MEMORY", "monitor_pma_memory"),
         ):
             value = os.environ.get(environment)
             if value is not None:
