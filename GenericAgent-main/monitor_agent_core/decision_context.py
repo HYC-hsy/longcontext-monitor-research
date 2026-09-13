@@ -6,8 +6,9 @@ from datetime import datetime, timezone
 
 class DecisionContext:
     # Existing candidate configuration name, not the retired tool API.
-    def __init__(self, workspace):
+    def __init__(self, workspace, bank_owned=False):
         self.workspace = workspace
+        self.bank_owned = bank_owned
         self.receipt_path = 'monitor/audit/decision_context_last_input.json'
 
     def _receipt(self):
@@ -75,10 +76,16 @@ class DecisionContext:
                 text += json.dumps(record, ensure_ascii=False, indent=2) + '\n'
             if not rows:
                 text += '\nNo complete synopsis record available yet.\n'
+            if self.bank_owned:
+                text = text.replace('Read and maintain monitor/working.md with ordinary file tools.',
+                                    'Current memory: monitor/pma_memory.json; update it with memory operations.')
+                text = text.replace('Edit working.md, not this automatically refreshed navigation file.',
+                                    'This automatically refreshed file is navigation, not a second memory.')
             self.workspace.write_text('monitor/overview.md', text)
-            return ('Observation entry refreshed: monitor/overview.md. Your continuing understanding is '
+            notice = ('Observation entry refreshed: monitor/overview.md. Your continuing understanding is '
                     'in monitor/working.md and this conversation. Use ordinary file/code tools to regain '
                     'your bearings and inspect original materials as needed; the entry is navigation, not proof.')
+            return notice.replace('monitor/working.md', 'the memory bank') if self.bank_owned else notice
         except (OSError, ValueError) as exc:
             return ('Observation entry refresh failed: ' + type(exc).__name__ +
                     '. Any existing overview may be stale. Original task/, monitor/working.md and history remain available.')

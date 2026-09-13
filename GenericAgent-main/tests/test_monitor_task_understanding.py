@@ -1,6 +1,8 @@
 from dataclasses import replace
 import pytest
 
+pytestmark = pytest.mark.skip(reason='Separate task_model candidate retired; original tests retained for pre-pma-agent-fusion tag. Fused candidate uses bank.')
+
 from test_monitor_pma_memory import Client, comparison, response, workspace
 from monitor_agent_core.agent import MonitorAgent
 from monitor_agent_core.task_understanding import TaskUnderstanding

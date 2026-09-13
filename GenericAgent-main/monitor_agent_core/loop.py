@@ -12,7 +12,8 @@ class MonitorLoopError(RuntimeError):
 
 
 def run_review(client, system_prompt: str, wake_context: str, tools: list[dict],
-               dispatch, max_turns: int = 20, audit=None, before_model=None) -> MonitorAction:
+               dispatch, max_turns: int = 20, audit=None, before_model=None,
+               on_text=None) -> MonitorAction:
     """Run one wake while the provider client preserves history across wakes."""
     messages = [
         {"role": "system", "content": system_prompt},
@@ -51,6 +52,13 @@ def run_review(client, system_prompt: str, wake_context: str, tools: list[dict],
                tool_calls=[{'id': c.id, 'name': c.name, 'arguments': c.arguments}
                            for c in response.tool_calls], usage=response.usage)
         if not response.tool_calls:
+            if on_text is not None:
+                outcome = on_text(response.content or '')
+                if outcome is not None:
+                    if outcome.action is not None:
+                        return outcome.action
+                    messages = [{'role': 'user', 'content': json.dumps(outcome.data, ensure_ascii=False)}]
+                    continue
             messages = [{
                 "role": "user",
                 "content": (

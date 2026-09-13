@@ -23,11 +23,14 @@ def prepare(attempt=1):
         'GA_EXPERIMENT_HARNESS_SHA256': fresh['GA_EXPERIMENT_HARNESS_SHA256'],
         'GA_MONITOR_PMA_MEMORY': '1',
     }
-    manifest['candidate'] = 'author-pma-process-plus-persistent-investigation'
+    manifest['runs'][0]['environment']['GA_MONITOR_TASK_MODEL'] = '0'
+    manifest['candidate'] = 'tool-enabled-pma-maintenance-and-comparison'
     manifest['comparison_baseline'] = str(BASE.relative_to(ROOT))
-    manifest['comparison_limits'] = ('Discovery comparison, not original task-harness reproduction. '
-        'Runs author phase two AND changes observation mapping; no isolated causal attribution. '
-        'Two same-model PMA calls per wake plus existing investigation; record separate cost/latency.')
+    manifest['comparison_baseline'] = 'method_discovery/artifacts/pma_two_phase_20260913/fyne_r6_manifest.json'
+    manifest['comparison_limits'] = ('Tool-enabled author maintenance/comparison, without a third review. '
+        'Author bank operations/prompts/process retained; local tool loops, persistent history and control '
+        'are adaptations, not original PMA reproduction. Separate task_model disabled. '
+        'Joint architecture candidate; not isolated causal attribution. Real launch requires confirmation.')
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
     return output

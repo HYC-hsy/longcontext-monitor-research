@@ -10,6 +10,7 @@ from monitor_agent_core.pma_observation import observation
 from monitor_agent_core.vendor.pma_memory.memory_agent import MemoryAgent, PHASE1_SYSTEM, PHASE2_SYSTEM
 
 
+@pytest.mark.skip(reason='Old prompt adaptation retired; fused path uses author prompts')
 def test_author_process_runs_both_adapted_prompts(workspace, monkeypatch):
     called = []
     original = MemoryAgent.process
@@ -38,6 +39,7 @@ def test_author_process_runs_both_adapted_prompts(workspace, monkeypatch):
 
 @pytest.mark.parametrize('second', [RuntimeError('service failure'), comparison('unrecognized'),
                                    comparison('<think><no_intervention/></think>')])
+@pytest.mark.skip(reason='Old one-shot comparison contract; fused failure propagation tested separately')
 def test_comparison_failure_does_not_become_silence_or_pollute_history(workspace, second):
     client = Client([response('memory_save_knowledge', content='attempt'), second])
     initial = client.export_history()

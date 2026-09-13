@@ -27,7 +27,7 @@ def clock_label(value):
     return datetime.fromtimestamp(value, timezone.utc).isoformat(timespec='milliseconds')
 
 
-def observation(workspace, wake):
+def observation(workspace, wake, *, include_monitor_receipts=True):
     # Group pre/post boundaries into real task turns, not eight event records.
     turns = OrderedDict()
     for line, event in records(workspace.evidence_root / 'public_events.jsonl'):
@@ -56,6 +56,8 @@ def observation(workspace, wake):
     context += ('\n[Task boundary times and sources; archival times, not exact execution times. '
                 'Latest turn may still be in progress.]\n') + '\n'.join(
         f"Step {entry['step']}:\n{entry['source']}" for entry in turns.values())
+    if not include_monitor_receipts:
+        return context
     # Retain selected actual inspection receipts, not the monitor's full repeated
     # conclusions. One serialization layer; already bounded tool results stay so.
     recent = deque(maxlen=4)

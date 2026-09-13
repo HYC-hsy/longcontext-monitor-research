@@ -244,24 +244,16 @@ class MonitorAgent:
         if type(task_model) is not bool:
             raise ValueError('monitor_task_model must be a boolean')
         if task_model:
-            if not pma_memory:
-                raise ValueError('monitor_task_model initialization requires the existing PMA maintenance stage')
-            from .task_understanding import TaskUnderstanding
-            self.task_understanding = TaskUnderstanding(workspace)
-            self.system_prompt += (
-                '\nKeep monitor/task_model.md as your revisable understanding of required behavior, '
-                'subordinate to task/original_task.txt. Use monitor/working.md for the current inquiry '
-                'and its grounds, not another task specification. Revise task understanding with ordinary '
-                'file tools when interpretation changes; do not replace it with progress. A correction '
-                'addresses a local gap; do not promise global completion merely upon satisfying that advice.')
+            raise ValueError('monitor_task_model is retired for fused execution; use the PMA bank and original task')
         if pma_memory:
-            from .pma_memory import PMAMemoryMaintenance
-            self.pma_memory = PMAMemoryMaintenance(workspace, self._atomic_private_text, self._audit_dialogue,
-                                                   self.task_understanding)
+            from .pma_fused import FusedPMA
+            self.pma_memory = FusedPMA(workspace, self._atomic_private_text, self._audit_dialogue)
+            if self.decision_context is not None:
+                self.decision_context.bank_owned = True
         self.active_context_enabled = active_context
         if live_awareness or active_context or decision_context or pma_memory:
             self.client.prepare_active_context = self._active_working_context
-        if active_context and not decision_context:
+        if active_context and not decision_context and not pma_memory:
             self.system_prompt += (
                 "\nYour current monitor/working.md is made available during normal reasoning without "
                 "a separate read. Use it for the understanding you want available next time, not a log. "
@@ -287,7 +279,7 @@ class MonitorAgent:
             parts.append(self.task_understanding.context())
         if self.pma_memory is not None:
             parts.append(self.pma_memory.context())
-        if self.active_context_enabled and self.decision_context is None:
+        if self.active_context_enabled and self.decision_context is None and self.pma_memory is None:
             text = current_working_context(self.workspace)
             self._audit_dialogue('active_working_context', content=text)
             if text:
@@ -331,7 +323,8 @@ class MonitorAgent:
     def _prepare_continuation(self):
         """Same model, existing history, no tool actions during pre-compaction handoff."""
         note_path = self.workspace.private_root / "working.md"
-        previous = note_path.read_text(encoding="utf-8") if note_path.exists() else ""
+        previous = (self.pma_memory.context() if self.pma_memory is not None else
+                    note_path.read_text(encoding="utf-8") if note_path.exists() else "")
         prompt = (
             "Before older dialogue is compacted, write a concise natural-language working understanding "
             "for yourself to continue this same task. Preserve unresolved reasoning and corrections, their "
@@ -356,7 +349,8 @@ class MonitorAgent:
             self.workspace.write_text("monitor/audit/continuations.jsonl", json.dumps({
                 "timestamp": time.time(), "review_id": self.review_id, "note": note,
             }, ensure_ascii=False) + "\n", mode="append")
-            self._atomic_private_text("working.md", note)
+            if self.pma_memory is None:
+                self._atomic_private_text("working.md", note)
             self._progress("continuation_saved")
             return note
         finally:
@@ -505,7 +499,9 @@ class MonitorAgent:
                 f"task/public_events.jsonl line {current['cursor']}. Inspect its public message as needed. "
                 "You may handle this handoff in this same review. Approval applies only to this proposal; "
                 "waiting for more Task Agent turns cannot advance it without a response."
-                + (self.task_understanding.completion_context() if self.task_understanding is not None else ''))
+                + ('\nOriginal whole task for this handoff:\n' +
+                   self.workspace.resolve_read('task/original_task.txt').read_text(encoding='utf-8')
+                   if self.pma_memory is not None else ''))
 
     def _refresh_review_context(self):
         updates = [self._refresh_completion()]
@@ -528,8 +524,8 @@ class MonitorAgent:
         action = None
         try:
             if self.pma_memory is not None:
-                lead = self.pma_memory.update(self.client, wake_context, self.review_id)
-                wake_context += '\n\n' + lead
+                action = self.pma_memory.review(self, wake_context, MONITOR_TOOLS)
+                return action
             if completion_pending and self.completion_state is None and self.task_understanding is not None:
                 wake_context += self.task_understanding.completion_context()
             wake_context += "\nLive environment map (read task sources, write only private cognition): " + json.dumps({

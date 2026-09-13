@@ -57,6 +57,7 @@ def workspace(tmp_path):
     return MonitorWorkspace(evidence, tmp_path / 'private')
 
 
+@pytest.mark.skip(reason='Retired three-stage contract; replaced by test_monitor_pma_fused')
 def test_maintenance_reaches_existing_review_without_replacing_tools_or_history(workspace):
     client = Client([response('memory_save_knowledge', content='Short forms remain required.'),
                      comparison(),
@@ -80,6 +81,7 @@ def test_maintenance_reaches_existing_review_without_replacing_tools_or_history(
     assert 'Short forms remain required.' in restored.context()
 
 
+@pytest.mark.skip(reason='Fresh phase history restoration retired; fused failure tested separately')
 def test_failure_restores_history_hooks_and_bank(workspace):
     client = Client([RuntimeError('offline')])
     monitor = MonitorAgent(client, workspace)
@@ -93,6 +95,7 @@ def test_failure_restores_history_hooks_and_bank(workspace):
     assert not (workspace.private_root / 'pma_memory.json').exists()
 
 
+@pytest.mark.skip(reason='Retired one-shot phase protocol; fused bank receipts tested separately')
 def test_delete_then_save_revises_and_preserves_audit(workspace):
     client = Client([])
     monitor = MonitorAgent(client, workspace)
@@ -116,6 +119,7 @@ def test_author_sources_unchanged():
             root / 'monitor_agent_core/vendor/pma_memory' / name).read_text(encoding='utf-8')
 
 
+@pytest.mark.skip(reason='Retired one-shot protocol; fused isolation and failure tests replace this')
 def test_bank_is_task_local_and_failure_is_not_silent(workspace, tmp_path):
     client = Client([response('memory_delete', memory_id='missing'), comparison()])
     monitor = MonitorAgent(client, workspace)
@@ -125,6 +129,7 @@ def test_bank_is_task_local_and_failure_is_not_silent(workspace, tmp_path):
     assert not PMAMemoryMaintenance(other, lambda *a: None, lambda *a, **k: None).memory.knowledge
 
 
+@pytest.mark.skip(reason='History is now continuous across phases, not restored to pre-maintenance')
 def test_actual_provider_history_is_restored_after_maintenance(workspace, monkeypatch):
     from monitor_agent_core.provider import MonitorProviderClient
     client = MonitorProviderClient('fixture', {'apikey': 'fake', 'apibase': 'http://invalid',
@@ -146,6 +151,7 @@ def test_actual_provider_history_is_restored_after_maintenance(workspace, monkey
     assert 'Requirement remains open' in client.prepare_active_context()
 
 
+@pytest.mark.skip(reason='Replaced by fused direct intervention and follow-up test')
 def test_followup_after_intervention_does_not_repeat_maintenance(workspace):
     client = Client([response('memory_save_knowledge', content='Check intended behavior.'),
                      comparison('<context_for_action>Check intended behavior.</context_for_action>'),
