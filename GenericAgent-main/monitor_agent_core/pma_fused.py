@@ -1,6 +1,7 @@
 """Tool-enabled execution INSIDE the author's maintenance/comparison process.
 
-Upstream owns prompts, bank schemas/operations, formatting and reminder parsing.
+Upstream owns phase sequencing, input construction and bank schemas/operations.
+The monitor owns decision output: intervene, wait and allow_complete tools.
 This adapter expands each model call into an investigation loop. It does not
 run a third reviewer or clear the persistent monitor conversation between phases.
 """
@@ -32,14 +33,34 @@ adviser to a third reviewer. Investigate with ordinary tools whenever needed.
 If investigation changes your grounds, use the same memory operations to revise
 the bank here before continuing judgment. This is a return to maintenance within
 the same investigation, not a second memory representation.
-Your <context_for_action> text is sent directly to the Task Agent as user input.
-After sending it, keep observing understanding, intent and actions in this conversation;
+Use intervene to send a correction directly to the Task Agent.
+After its submission receipt, keep observing understanding, intent and actions in this conversation;
 correct further material drift when justified. Do not repeat an old correction blindly.
-<no_intervention/> sends nothing; then choose when to observe next with wait.
+When no input is needed now, call wait with your chosen observation interval and mode.
+That call ends this review immediately, not your history or the whole task.
+There is no separate textual decision to emit before calling a control tool.
 Use allow_complete only for a currently pending, justified root handoff, not merely
 because no reminder is needed. Your checks must support the required behavior, not
 just the presence of a similarly named artifact. Original requirements outrank memory.
 '''
+
+
+def decision_prompts(system, prompt):
+    """Retain author comparison guidance; replace its text-output contract once."""
+    start, end = system.index('## OUTPUT FORMAT:'), system.index('## GUIDELINES:')
+    system = (system[:start] + '## OUTPUT FORMAT:\n'
+              'Use the available control tools: intervene sends input without ending investigation; '
+              'wait ends this review and schedules observation; allow_complete handles a justified '
+              'pending root completion. Plain text alone does not send input or end the review.\n\n'
+              + system[end:])
+    system = system.replace('<context_for_action>', 'intervene').replace('<no_intervention/>', 'wait')
+    prompt = prompt.replace(
+        'If yes, write a <context_for_action> note with the relevant context.\n'
+        'If no, write <no_intervention/>.',
+        'If yes, use intervene with the relevant context. If no input is needed now, use wait '
+        'with your chosen interval and mode. For a pending root handoff, investigate and respond '
+        'with intervene or allow_complete; absence of a reminder is not completion approval.')
+    return system, prompt
 
 
 class FusedPMA:
@@ -88,6 +109,7 @@ class FusedPMA:
         if transport.action is None:
             raise MonitorLoopError('Fused comparison ended without a monitor control action')
         self.audit('pma_fused_cycle', result=asdict(result), model_calls=transport.calls,
+                   author_result_is_control_projection=True, interventions=transport.interventions,
                    action=asdict(transport.action))
         return transport.action
 
@@ -99,6 +121,7 @@ class FusedTransport:
         self.failure = None
         self.action = None
         self.calls = 0
+        self.interventions = []
 
     async def call(self, *, prompt, system, tools=None):
         if self.failure is not None:
@@ -106,9 +129,11 @@ class FusedTransport:
         maintenance = tools is not None
         monitor, owner = self.monitor, self.owner
         phase = 'maintenance' if maintenance else 'comparison'
+        if not maintenance:
+            system, prompt = decision_prompts(system, prompt)
         bank_names = {t['function']['name'] for t in BANK_TOOLS}
         ordinary = [t for t in self.tools if t['function']['name'] not in
-                    ({'wait', 'allow_complete', 'intervene'} if maintenance else {'intervene'})]
+                    ({'wait', 'allow_complete', 'intervene'} if maintenance else set())]
         allowed = {t['function']['name'] for t in ordinary} | bank_names
 
         def dispatch(name, args):
@@ -116,20 +141,29 @@ class FusedTransport:
                 return ToolOutcome({'status': 'error', 'error': 'Tool unavailable in this phase'})
             if name in bank_names:
                 return owner.bank_call(name, args)
-            return monitor.dispatch(name, args)
+            outcome = monitor.dispatch(name, args)
+            if name == 'intervene':
+                submitted = ((outcome.data or {}).get('status') == 'submitted' or
+                             (outcome.action is not None and outcome.action.kind == 'intervene'))
+                if submitted:
+                    self.interventions.append(args['message'])
+                owner.audit('pma_direct_intervention', message=args.get('message'),
+                            receipt=outcome.data, submitted=submitted,
+                            action=asdict(outcome.action) if outcome.action else None)
+            return outcome
 
         def text_result(text):
             if maintenance:
                 if text.strip() == '<maintenance_complete/>':
                     return ToolOutcome(None, False, MonitorAction('maintenance_complete', {}))
-                return ToolOutcome({'next': 'Investigate or update memory as needed; finish with <maintenance_complete/>.'})
-            reminder = owner.author._parse_phase2_response(text)
-            if reminder:
-                outcome = monitor.dispatch('intervene', {'message': reminder})
-                owner.audit('pma_direct_intervention', message=reminder, receipt=outcome.data,
-                            action=asdict(outcome.action) if outcome.action else None)
-                return outcome
-            return ToolOutcome({'next': 'No input sent. Continue investigating or use wait; assess a pending handoff explicitly.'})
+                return ToolOutcome({'status': 'no_control_action', 'input_sent': False,
+                                    'next': 'This is maintenance. No correction or silence was executed. '
+                                    'Finish with <maintenance_complete/> to enter judgment; '
+                                    'keep any concern in memory, not a claim of delivered intervention.'})
+            return ToolOutcome({'status': 'no_control_action', 'input_sent': False,
+                                'next': 'Use one control tool for your decision: intervene to send input; '
+                                'wait to end this review; allow_complete for justified pending completion. '
+                                'No extra investigation is required merely to restate a decision in the tool.'})
 
         def before():
             self.calls += 1
@@ -142,7 +176,6 @@ class FusedTransport:
         identity = monitor.system_prompt
         identity = identity.replace('Keep monitor/working.md as your revisable understanding',
                                     'Use the memory bank as your revisable understanding')
-        identity = identity.replace('Use intervene\ndirectly', 'Send <context_for_action>\ndirectly')
         system = system.replace('Track progress internally (not shown to action agent)',
                                 'Maintain internal progress and its grounds')
         system = identity + '\n\n' + system + (PHASE_ONE if maintenance else PHASE_TWO)
@@ -156,7 +189,9 @@ class FusedTransport:
                 self.action = action
             # Operations were already executed through the author's executor and
             # receipts returned to the same model; never execute them twice.
-            return ModelResponse('<maintenance_complete/>' if maintenance else '<no_intervention/>', [], {})
+            projection = ('<context_for_action>' + '\n\n'.join(self.interventions) + '</context_for_action>'
+                          if self.interventions else '<no_intervention/>')
+            return ModelResponse('<maintenance_complete/>' if maintenance else projection, [], {})
         except Exception as exc:
             self.failure = exc
             raise

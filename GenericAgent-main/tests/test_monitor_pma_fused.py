@@ -12,7 +12,7 @@ def test_maintenance_investigates_then_comparison_acts_without_third_reviewer(wo
         response('file_read', path='task/original_task.txt'),
         response('memory_save_knowledge', content='Both forms required, neither yet tested.'),
         comparison('<maintenance_complete/>'),
-        comparison('<context_for_action>Check both forms, not just one.</context_for_action>'),
+        response('intervene', message='Check both forms, not just one.'),
         response('file_read', path='task/original_task.txt'),
         response('memory_update_status', content='Correction sent; uptake not yet established.'),
         response('wait', after_turns=1, mode='follow'),
@@ -136,3 +136,61 @@ def test_bank_navigation_does_not_require_parallel_working_note(workspace):
     assert 'Read and maintain monitor/working.md' not in overview
     assert 'monitor/pma_memory.json' in overview
     assert all('Keep monitor/working.md' not in str(x[0]) for x in client.inputs)
+
+
+def test_comparison_has_one_output_protocol_and_wait_returns_immediately(workspace):
+    client = Client([comparison('<maintenance_complete/>'), response('wait', after_turns=4, mode='patrol')])
+    monitor = MonitorAgent(client, workspace)
+    action = monitor.review('wake')
+    assert action.payload == {'after_turns': 4, 'mode': 'patrol'}
+    assert len(client.inputs) == 2  # no model confirmation or third review
+    messages, tools, _ = client.inputs[1]
+    text = json.dumps(messages)
+    assert '<context_for_action>' not in text and '<no_intervention/>' not in text
+    assert {'intervene', 'wait', 'allow_complete'} <= {t['function']['name'] for t in tools}
+
+
+def test_maintenance_misplaced_reminder_explicitly_reports_not_sent(workspace):
+    client = Client([comparison('<context_for_action>Concern</context_for_action>'),
+                     comparison('<maintenance_complete/>'), response('intervene', message='Concern'),
+                     response('wait', after_turns=1)])
+    sent = []
+    monitor = MonitorAgent(client, workspace)
+    monitor.intervention_callback = sent.append
+    monitor.review('wake')
+    assert sent == ['Concern']
+    feedback = json.loads(client.inputs[1][0][0]['content'])
+    assert feedback['input_sent'] is False
+    assert 'maintenance' in feedback['next']
+
+
+def test_legacy_text_is_not_a_second_control_protocol(workspace):
+    client = Client([comparison('<maintenance_complete/>'), comparison('<no_intervention/>'),
+                     response('wait', after_turns=3)])
+    monitor = MonitorAgent(client, workspace)
+    assert monitor.review('wake').payload['after_turns'] == 3
+    feedback = json.loads(client.inputs[2][0][0]['content'])
+    assert 'No extra investigation' in feedback['next']
+
+
+def test_no_reminder_cannot_approve_pending_completion(workspace):
+    client = Client([comparison('<maintenance_complete/>'), response('wait', after_turns=2),
+                     response('allow_complete')])
+    monitor = MonitorAgent(client, workspace)
+    assert monitor.review('handoff', completion_pending=True).kind == 'allow_complete'
+    assert 'handoff_pending' in client.inputs[2][0][0]['tool_results'][0]['content']
+
+
+def test_two_interventions_share_comparison_and_bank_receipts(workspace):
+    client = Client([comparison('<maintenance_complete/>'), response('intervene', message='First'),
+                     response('memory_update_status', content='First advice misunderstood; new evidence.'),
+                     response('intervene', message='Clarification'), response('wait', after_turns=1)])
+    sent = []
+    monitor = MonitorAgent(client, workspace)
+    monitor.intervention_callback = sent.append
+    monitor.review('wake')
+    assert sent == ['First', 'Clarification']
+    records = [json.loads(x) for x in (workspace.private_root / 'audit/dialogue.jsonl').read_text(encoding='utf-8').splitlines()]
+    assert len([r for r in records if r['event'] == 'pma_fused_phase_started']) == 2
+    cycle = next(r for r in records if r['event'] == 'pma_fused_cycle')
+    assert cycle['interventions'] == sent and cycle['result']['should_inject']

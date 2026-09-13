@@ -6,6 +6,8 @@
 
 ### 权威文档
 
+- 2026-09-14 R7输出协议审计后，第二阶段以监察者基线工具协议为唯一主体：intervene直接提交且继续观察，wait结束当前review并选择节奏，allow_complete只处理有效根提议。PMA仍保留阶段顺序、bank与比较输入，但原XML结论不再是运行中的控制入口。见 `method_discovery/docs/PMA_FUSED_R7_OUTPUT_AUDIT_AND_REPAIR_20260914.md`。维护阶段误写建议必须明确告知未发送；不能把草稿当投递。134项回归通过、19旧候选历史测试跳过；真实启动仍须确认。
+
 - 2026-09-14 用户确认 PMA 与自主监察内部融合，工程入口 `method_discovery/docs/PMA_AGENT_FUSION_IMPLEMENTATION_20260914.md`。开启 `GA_MONITOR_PMA_MEMORY` 时采用作者 process 内部的维护/判断工具循环，不再前置 PMA 后追加第三层 review。复用作者原提示构造、bank 操作与提醒解析；判断阶段可用同一操作修订 bank，提醒直接投递并续接观察。独立 task_model 候选退役并显式拒绝旧开启配置；保留原任务、连续 History、原始工具和 follow/patrol 控制。旧实现保存在 `pre-pma-agent-fusion-20260914` 标签；不恢复兼容串接。真实效果未验证，启动需独立确认。
 
 - 2026-09-13 用户批准任务理解与局部修复分离候选，入口 `method_discovery/docs/TASK_UNDERSTANDING_SEPARATION_20260913.md`。`GA_MONITOR_TASK_MODEL=1`（默认关闭，需PMA维护）在已有首次维护调用生成自然 task_model.md，原任务保留完整权威原文并由模型文件引用；后续进度不自动覆盖任务理解，根完成/交接重新提供原文。无新调用阶段、不改控制链，121项工程检查通过，真实效果未验证，启动须另确认。
