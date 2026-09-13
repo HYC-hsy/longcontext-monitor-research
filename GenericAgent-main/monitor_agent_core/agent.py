@@ -13,7 +13,7 @@ from dataclasses import asdict
 
 from .actions import MonitorAction, ToolOutcome
 from .loop import run_review
-from .process_runner import run_analysis
+from .process_runner import AnalysisSessions
 from .workspace import MonitorWorkspace
 from .grounded_context import read_with_sources
 from .handoff_validation import validate_handoff, note_text
@@ -51,11 +51,18 @@ MONITOR_TOOLS = [
     _tool("file_patch", "Replace one exact text span in a monitor/ private file.", {
         "path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"},
     }, ["path", "old_text", "new_text"]),
-    _tool("code_run", "Run general analysis in monitor/. Live source paths are provided in the environment map. Output returns when the script ends; use short reads for timely observation.", {
+    _tool("code_run", "Run general analysis in monitor/. Supply code to start, or session_id to read new output. "
+          "Short commands finish directly; long commands return a session and archived output path. "
+          "Use cancel=true with session_id to stop that analysis, not the Task Agent. "
+          "Live source paths are in the environment map. Sessions survive reviews, not process restarts. "
+          "Returning a session does not release an existing task pause; normal wait/intervene still controls that.", {
         "code": {"type": "string"},
+        "session_id": {"type": "string"},
+        "cancel": {"type": "boolean", "default": False},
+        "wait_seconds": {"type": "number", "minimum": 0, "maximum": 5, "default": 1},
         "type": {"type": "string", "enum": ["python", "powershell"] if os.name == "nt" else ["python", "bash"], "default": "python"},
         "timeout": {"type": "integer", "minimum": 1, "maximum": 300, "default": 60},
-    }, ["code"]),
+    }, []),
     _tool("wait", "Remain silent and wake after more public Task Agent turns.", {
         "after_turns": {"type": "integer", "minimum": 1},
     }, ["after_turns"]),
@@ -182,7 +189,7 @@ INQUIRY_TOOL = _tool('inquiry',
 
 
 class MonitorAgent:
-    def __init__(self, client, workspace: MonitorWorkspace, max_review_turns=20):
+    def __init__(self, client, workspace: MonitorWorkspace, max_review_turns=20, *, stop_event=None):
         self.client = client
         tool_feedback = getattr(client, 'config', {}).get('monitor_tool_feedback', False)
         if type(tool_feedback) is not bool:
@@ -194,7 +201,8 @@ class MonitorAgent:
         self.completion_state = None
         self._seen_completion = None
         self._intervened_generation = None
-        self.stop_event = threading.Event()
+        self.stop_event = stop_event if stop_event is not None else threading.Event()
+        self.analysis = AnalysisSessions(workspace.private_root, self.stop_event)
         self.review_id = None
         self._progress_warning = False
         self.intervention_callback = None
@@ -377,11 +385,17 @@ class MonitorAgent:
                     arguments["path"], arguments["old_text"], arguments["new_text"]
                 )
             elif name == "code_run":
-                data = run_analysis(
-                    arguments["code"], arguments.get("type", "python"),
-                    min(300, max(1, int(arguments.get("timeout", 60)))),
-                    str(self.workspace.private_root), self.stop_event,
-                )
+                session_id = arguments.get('session_id')
+                if session_id:
+                    if any(k in arguments for k in ('code', 'type', 'timeout')):
+                        raise ValueError('Use session_id alone to read/cancel; do not submit new code with it')
+                    data = self.analysis.read(session_id, arguments.get('wait_seconds', 1),
+                                              arguments.get('cancel', False))
+                else:
+                    if arguments.get('cancel'):
+                        raise ValueError('cancel requires session_id')
+                    data = self.analysis.start(arguments.get('code'), arguments.get('type', 'python'),
+                                               arguments.get('timeout', 60), arguments.get('wait_seconds', 1))
             elif name == "wait":
                 pending = self.completion_pending
                 if self.completion_state is not None:

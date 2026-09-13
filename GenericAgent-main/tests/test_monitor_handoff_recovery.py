@@ -72,7 +72,7 @@ def test_worker_handoff_does_not_prejudge_question_and_echoes_request(monkeypatc
             pass
 
     class Monitor:
-        def __init__(self, *args):
+        def __init__(self, *args, **kwargs):
             pass
 
         def review(self, context, completion_pending=False):
@@ -91,6 +91,7 @@ def test_worker_handoff_does_not_prejudge_question_and_echoes_request(monkeypatc
         'config_name': 'fixture', 'model_config': {}, 'evidence_root': str(evidence),
         'private_root': str(private), 'task_workspace': str(workspace),
         'task_original_path': str(workspace / 'original.txt'), 'max_review_turns': 20,
+        'stop_event': threading.Event(),
     }, commands, outputs))
     thread.start()
     try:

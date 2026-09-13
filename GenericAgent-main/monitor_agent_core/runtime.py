@@ -64,7 +64,7 @@ def _worker(config, commands, outputs):
         history_path = Path(config["private_root"]) / "audit" / "provider_history.json"
         if history_path.is_file():
             client.restore_history(json.loads(history_path.read_text(encoding="utf-8")))
-        monitor = MonitorAgent(client, workspace, config["max_review_turns"])
+        monitor = MonitorAgent(client, workspace, config["max_review_turns"], stop_event=config['stop_event'])
     except Exception as exc:
         outputs.put({"kind": "failure", "error": repr(exc), "phase": "startup"})
         return

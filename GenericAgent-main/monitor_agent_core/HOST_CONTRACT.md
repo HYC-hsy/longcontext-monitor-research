@@ -40,3 +40,16 @@ The monitor's subprocess and history are independent of the task model, but its
 life is managed by the host. Shared-container deployment is not a security boundary:
 general code execution has the process's OS permissions. Stronger OS isolation
 is separate from framework independence and must not be claimed here.
+
+## Analysis tool sessions
+
+code_run starts a short or long analysis, then the same tool reads incremental output
+using session_id or cancels that analysis with cancel=true. It never changes the
+task wake barrier. Output and submitted scripts live in monitor/audit/commands/;
+the full output is readable with file_read even after a process restart. Live
+session handles are local to one monitor process and are not restored from history.
+The worker passes its existing stop event to the agent so host shutdown cancels
+active analysis. Linux execution uses separate process groups for child cleanup;
+Windows cancellation uses taskkill /T while the parent is live. Detached Windows
+descendants after a parent exits are not a hard containment guarantee. Experiments
+use the Linux runtime. General execution remains unrestricted by filesystem sandbox.

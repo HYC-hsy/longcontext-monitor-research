@@ -20,7 +20,7 @@ def test_approval_settlement_preserves_or_ends_observation(tmp_path, monkeypatch
             pass
 
     class Monitor:
-        def __init__(self, *args):
+        def __init__(self, *args, **kwargs):
             pass
 
         def review(self, context, completion_pending=False):

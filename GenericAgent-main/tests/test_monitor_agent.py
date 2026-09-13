@@ -86,6 +86,27 @@ def test_allow_complete_is_guarded_by_root_boundary(roots):
     assert monitor.review("Root completion.", completion_pending=True).kind == "allow_complete"
 
 
+def test_analysis_session_survives_review_and_does_not_control_task(roots):
+    import threading
+    evidence, private = roots
+    stop = threading.Event()
+    monitor = MonitorAgent(SequenceClient([response('wait', {'after_turns': 1})]),
+                           MonitorWorkspace(evidence, private), stop_event=stop)
+    try:
+        first = monitor.dispatch('code_run', {'code': "import time\nprint('start')\ntime.sleep(30)",
+                                               'wait_seconds': 0}).data
+        assert first['status'] == 'running'
+        assert monitor.review('Same task').kind == 'wait'
+        assert monitor.dispatch('code_run', {'session_id': first['session_id'],
+                                             'wait_seconds': 0}).data['status'] == 'running'
+        stop.set()
+        final = monitor.dispatch('code_run', {'session_id': first['session_id']}).data
+        assert final['reason'] == 'cancelled'
+        assert final['status'] == 'error'
+    finally:
+        monitor.analysis.close()
+
+
 def test_analysis_reads_live_sources_without_copy(roots):
     evidence, private = roots
     script = f"from pathlib import Path\nprint(Path({str(evidence / 'original_task.txt')!r}).read_text())"

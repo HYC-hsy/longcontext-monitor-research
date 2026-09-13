@@ -1,4 +1,5 @@
 import json
+import threading
 
 import pytest
 
@@ -117,7 +118,7 @@ def test_worker_capacity_failure_does_not_consume_another_wake(tmp_path, monkeyp
     calls = []
 
     class FailedMonitor:
-        def __init__(self, *args):
+        def __init__(self, *args, **kwargs):
             pass
 
         def review(self, *args, **kwargs):
@@ -132,7 +133,7 @@ def test_worker_capacity_failure_does_not_consume_another_wake(tmp_path, monkeyp
     _worker(dict(config_name='openai', model_config={'apikey': 'fixture',
                  'apibase': 'https://example.test', 'model': 'fixture'},
                  evidence_root=evidence, private_root=tmp_path / 'private',
-                 task_workspace=tmp_path, max_review_turns=20,
+                 task_workspace=tmp_path, max_review_turns=20, stop_event=threading.Event(),
                  task_original_path='original_task.txt'), commands, outputs)
     failure = outputs.get_nowait()
     assert calls == [1], failure

@@ -139,7 +139,7 @@ def test_worker_submits_while_same_review_is_still_running(tmp_path, monkeypatch
         def __init__(self, *args): pass
 
     class Monitor:
-        def __init__(self, *args): self.calls = 0
+        def __init__(self, *args, **kwargs): self.calls = 0
         def review(self, context, completion_pending=False):
             self.calls += 1
             if at_completion and self.calls == 1:
@@ -155,7 +155,8 @@ def test_worker_submits_while_same_review_is_still_running(tmp_path, monkeypatch
         (tmp_path / name).mkdir()
     config = dict(config_name='fake', model_config={}, max_review_turns=20,
                   evidence_root=str(tmp_path / 'evidence'), private_root=str(tmp_path / 'private'),
-                  task_workspace=str(tmp_path / 'workspace'), task_original_path='/app/input.txt')
+                      task_workspace=str(tmp_path / 'workspace'), task_original_path='/app/input.txt',
+                      stop_event=threading.Event())
     if at_completion:
         commands.put({'kind': 'completion', 'cursor': 5, 'task_turn': 3, 'request_id': 'pending-1'})
     worker = threading.Thread(target=_worker, args=(config, commands, outputs))

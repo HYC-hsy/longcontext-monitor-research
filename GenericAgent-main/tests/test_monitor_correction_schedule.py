@@ -66,7 +66,7 @@ def test_worker_waits_for_host_before_first_model_and_releases_on_silence(tmp_pa
     class Client:
         def __init__(self, *args): pass
     class Monitor:
-        def __init__(self, *args): pass
+        def __init__(self, *args, **kwargs): pass
         def review(self, *args, **kwargs):
             calls.append('model')
             return MonitorAction('wait', {'after_turns': 1})

@@ -175,7 +175,7 @@ def test_pending_completion_survives_recovery_without_tool_replay(tmp_path, monk
             return [{'type': 'text', 'text': 'recovered'}], {}
 
     class Monitor:
-        def __init__(self, c, *args):
+        def __init__(self, c, *args, **kwargs):
             self.client = c
 
         def review(self, context, completion_pending=False):

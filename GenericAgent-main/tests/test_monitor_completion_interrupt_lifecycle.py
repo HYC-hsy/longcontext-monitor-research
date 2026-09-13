@@ -27,7 +27,7 @@ def test_actual_worker_correction_resumes_wait_and_skips_stale_review(tmp_path, 
         def __init__(self, *args): pass
 
     class Monitor:
-        def __init__(self, *args): pass
+        def __init__(self, *args, **kwargs): pass
 
         def review(self, context, completion_pending=False):
             calls.append(completion_pending)
