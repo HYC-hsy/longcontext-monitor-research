@@ -1,6 +1,6 @@
-"""Host-owned stop while an announced correction is being delivered.
+"""Host-owned stop for a review waking from silence.
 
-No model-facing pause action. Normal observation never acquires this barrier.
+No model-facing pause action. Concurrent followup does not acquire this barrier.
 """
 import threading
 import time

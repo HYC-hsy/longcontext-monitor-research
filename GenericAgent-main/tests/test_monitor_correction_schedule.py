@@ -1,16 +1,9 @@
-import ast
-import inspect
-import json
+import queue
 import threading
-from pathlib import Path
 
-import pytest
 
 from monitor_agent_core.correction_barrier import CorrectionBarrier
-from monitor_agent_core.provider import MonitorProviderClient, ProviderError
-from monitor_agent_core.runtime import MonitorRuntime
-from monitor_agent_core.vendor.liveplan_blocking import BlockingDecision
-from test_monitor_provider import config
+from monitor_agent_core.runtime import MonitorRuntime, _worker
 
 
 def forwarding_worker(config, commands, outputs):
@@ -43,7 +36,6 @@ def test_first_stop_then_parallel_followup_and_next_episode(tmp_path):
     def send(value):
         runtime._commands.put(value)
     try:
-        send({'kind': 'correction_begin', 'identity': 'a'})
         assert arrived.wait(3)
         assert gate.is_active()
         arrived.clear()
@@ -52,14 +44,13 @@ def test_first_stop_then_parallel_followup_and_next_episode(tmp_path):
         assert gate.wait()
         assert order[:2] == ['stop', ('deliver', 'first', True)]
         arrived.clear()
-        send({'kind': 'correction_begin', 'identity': 'b'})
         send({'kind': 'intervention', 'message': 'followup'})
         assert arrived.wait(3)
         assert ('deliver', 'followup', False) in order
         assert order.count('stop') == 1
         arrived.clear()
         send({'kind': 'review_silent'})
-        send({'kind': 'correction_begin', 'identity': 'c'})
+        send({'kind': 'review_wake', 'identity': 'c'})
         assert arrived.wait(3)
         assert gate.is_active() and order.count('stop') == 2
         send({'kind': 'failure', 'error': 'stream failed'})
@@ -69,34 +60,46 @@ def test_first_stop_then_parallel_followup_and_next_episode(tmp_path):
     assert not gate.is_active()
 
 
-def test_stream_stops_before_arguments_and_failure_releases(monkeypatch):
-    client = MonitorProviderClient('openai', config('fixture'))
-    events = []
-    client.correction_event = lambda kind, identity: events.append((kind, identity))
-    def lines():
-        yield 'data: ' + json.dumps({'type': 'response.output_item.added',
-            'output_index': 0, 'item': {'type': 'function_call', 'name': 'intervene',
-                                     'call_id': 'x', 'id': 'fc-x', 'arguments': ''}})
-        assert events[0][0] == 'begin'  # before any correction text exists
-        raise ProviderError('test stream failure')
-    monkeypatch.setattr(client, '_request_with_recovery',
-                        lambda _: client._parse_openai_responses(lines()))
-    with pytest.raises(ProviderError, match='test stream failure'):
-        client._request([])
-    assert [e[0] for e in events] == ['begin', 'end']
-    assert events[0][1] == events[1][1]
-
-
-def test_only_explicit_tool_choice_signals_stop():
-    client = MonitorProviderClient('openai', config('fixture'))
-    events = []
-    client.correction_event = lambda *args: events.append(args)
-    for name in ['file_read', 'wait', 'review_context', 'maybe intervene', 'allow_complete']:
-        client._announce_correction(name)
-    assert not events
-    client._announce_correction('intervene')
-    client._announce_correction('intervene')
-    assert len(events) == 1
+def test_worker_waits_for_host_before_first_model_and_releases_on_silence(tmp_path, monkeypatch):
+    from monitor_agent_core.actions import MonitorAction
+    calls = []
+    class Client:
+        def __init__(self, *args): pass
+    class Monitor:
+        def __init__(self, *args): pass
+        def review(self, *args, **kwargs):
+            calls.append('model')
+            return MonitorAction('wait', {'after_turns': 1})
+    monkeypatch.setattr('monitor_agent_core.provider.MonitorProviderClient', Client)
+    monkeypatch.setattr('monitor_agent_core.agent.MonitorAgent', Monitor)
+    evidence = tmp_path / 'evidence'
+    evidence.mkdir()
+    commands, outputs, acknowledgments = queue.Queue(), queue.Queue(), queue.Queue()
+    stop = threading.Event()
+    cfg = dict(config_name='fixture', model_config={}, evidence_root=evidence,
+               private_root=tmp_path / 'private', task_workspace=tmp_path,
+               task_original_path='original', max_review_turns=20,
+               wake_receipts=acknowledgments, stop_event=stop)
+    thread = threading.Thread(target=_worker, args=(cfg, commands, outputs))
+    thread.start()
+    try:
+        wake = outputs.get(timeout=2)
+        assert wake['kind'] == 'review_wake' and not calls
+        acknowledgments.put({'identity': wake['identity'], 'accepted': True})
+        assert outputs.get(timeout=2)['kind'] == 'review_silent'
+        assert calls == ['model']
+        assert outputs.get(timeout=2)['kind'] == 'ready'
+        commands.put({'kind': 'boundary', 'cursor': 2, 'task_turn': 1})
+        wake = outputs.get(timeout=2)
+        assert wake['kind'] == 'review_wake' and len(calls) == 1
+        acknowledgments.put({'identity': wake['identity'], 'accepted': True})
+        assert outputs.get(timeout=2)['kind'] == 'review_silent'
+        assert len(calls) == 2
+    finally:
+        stop.set()
+        commands.put({'kind': 'close'})
+        thread.join(3)
+    assert not thread.is_alive()
 
 
 def test_stale_release_cannot_release_new_correction():
@@ -143,16 +146,3 @@ def test_task_loop_waits_only_for_announced_correction():
         gate.end()
         thread.join(3)
 
-
-def test_upstream_blocking_method_body_is_unchanged():
-    root = Path(__file__).resolve().parents[2]
-    source = root / ('some_research/research_library/05_safety_and_monitoring/repositories/'
-                     'Intelligent-CAT-Lab__Agent-Planner/plan_monitor/phases.py')
-    tree = ast.parse(source.read_text(encoding='utf-8'))
-    original = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
-                    and n.name == 'should_block_and_refine')
-    local = ast.parse(inspect.getsource(__import__(
-        'monitor_agent_core.vendor.liveplan_blocking', fromlist=['BlockingDecision'])))
-    copied = next(n for n in ast.walk(local) if isinstance(n, ast.FunctionDef)
-                  and n.name == 'should_block_and_refine')
-    assert ast.dump(original) == ast.dump(copied)

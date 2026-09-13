@@ -12,8 +12,6 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
-from types import SimpleNamespace
-from .vendor.liveplan_blocking import BlockingDecision
 
 
 @dataclass(frozen=True)
@@ -98,14 +96,26 @@ def _worker(config, commands, outputs):
 
     monitor.completion_state = current_completion
 
-    # The existing correction choice, not another model tool, owns this signal.
-    def correction_event(event, identity):
-        outputs.put({'kind': 'correction_' + event, 'identity': identity})
-    client.correction_event = correction_event
-
     def review(context, completion=False, request_id=None):
         nonlocal next_wake_turn, close_watch, receipt_offset
         submitted = False
+        wake_receipts = config.get('wake_receipts')
+        if not close_watch and not completion and wake_receipts is not None:
+            identity = uuid.uuid4().hex
+            outputs.put({'kind': 'review_wake', 'identity': identity})
+            # The host installs the execution barrier before any review LLM.
+            while not config['stop_event'].is_set():
+                try:
+                    receipt = wake_receipts.get(timeout=.1)
+                except queue.Empty:
+                    continue
+                if receipt['identity'] == identity:
+                    if not receipt['accepted']:
+                        outputs.put({'kind': 'failure', 'error': 'Wake barrier failed'})
+                        return False
+                    break
+            else:
+                return False
 
         def send_now(message):
             nonlocal submitted, close_watch, next_wake_turn
@@ -147,8 +157,7 @@ def _worker(config, commands, outputs):
             # queued patrol/completion commands after the parent has failed it.
             return not isinstance(exc, ProviderRecoveryExhausted)
         if action.kind == "wait":
-            if close_watch or getattr(client, '_correction_identity', None):
-                outputs.put({'kind': 'correction_end', 'identity': None})
+            if close_watch or wake_receipts is not None:
                 outputs.put({'kind': 'review_silent'})
             close_watch = False
             next_wake_turn = task_turn + max(1, int(action.payload["after_turns"]))
@@ -255,7 +264,6 @@ class MonitorRuntime:
         self._correction_begin = correction_begin
         self._correction_end = correction_end
         self._correction_identity = None
-        self._correction_focused = False
         self._correction_deadline = 0.0
         self._interrupt_pending = interrupt_pending or (lambda: False)
         self._completion_timeout = max(1.0, float(completion_timeout))
@@ -267,6 +275,7 @@ class MonitorRuntime:
         self._commands = self._context.Queue()
         self._outputs = self._context.Queue()
         self._completion_receipts = self._context.Queue()
+        self._wake_receipts = self._context.Queue() if correction_begin is not None else None
         self._pending = {}
         self._pending_lock = threading.Lock()
         self._completion_generation = 0
@@ -284,8 +293,17 @@ class MonitorRuntime:
             "run_deadline_epoch": time.time() + max(0.0, self._run_deadline - time.monotonic()),
             "stop_event": self._stop_event,
             "completion_receipts": self._completion_receipts,
+            "wake_receipts": self._wake_receipts,
         }, self._commands, self._outputs), daemon=True)
-        self._process.start()
+        try:
+            if self._correction_begin:
+                self._correction_identity = 'initialization'
+                self._correction_deadline = time.monotonic() + 300
+                self._correction_begin('initialization')
+            self._process.start()
+        except Exception:
+            self._finish_correction()
+            raise
         self._pump = threading.Thread(target=self._pump_outputs, daemon=True, name="monitor-output")
         self._pump.start()
 
@@ -317,9 +335,10 @@ class MonitorRuntime:
         while not self._closed.is_set():
             if (self._correction_identity is not None and
                     time.monotonic() >= self._correction_deadline):
-                self._append_receipt({'kind': 'correction_delivery_timeout',
+                self._append_receipt({'kind': 'wake_review_timeout',
                                       'identity': self._correction_identity})
                 self._finish_correction()
+                self._stop_event.set()
             try: value = self._outputs.get(timeout=0.1)
             except queue.Empty:
                 if not self._process.is_alive():
@@ -330,33 +349,25 @@ class MonitorRuntime:
                     return
                 raise
             kind = value.get("kind")
-            if kind == 'correction_begin':
-                # Preserve the author's predicate; our adapter supplies an
-                # explicit correction choice instead of SWE phase rules.
-                decision = BlockingDecision([
-                    SimpleNamespace(block_execution=not self._correction_focused)])
+            if kind == 'review_wake':
+                accepted = False
                 try:
-                    if decision.should_block_and_refine() and self._correction_begin:
+                    if self._correction_begin:
                         self._correction_identity = value['identity']
                         self._correction_deadline = time.monotonic() + 300
                         value = dict(value, receipt=self._correction_begin(value['identity']))
+                    accepted = True
                 except Exception as exc:
                     self._finish_correction()
                     value = dict(value, error=repr(exc))
-            elif kind == 'correction_end':
-                self._finish_correction(value.get('identity'))
+                finally:
+                    if self._wake_receipts is not None:
+                        self._wake_receipts.put({'identity': value['identity'], 'accepted': accepted})
             elif kind == 'review_silent':
-                self._correction_focused = False
+                self._finish_correction()
             elif kind == "intervention":
                 try:
-                    # Fallback for a provider that omitted early stream headers.
-                    if (not self._correction_focused and self._correction_identity is None
-                            and self._correction_begin):
-                        self._correction_identity = value.get('request_id') or uuid.uuid4().hex
-                        self._correction_deadline = time.monotonic() + 300
-                        self._correction_begin(self._correction_identity)
                     receipt = self._interrupt_callback(value["message"])
-                    self._correction_focused = True
                     value = dict(value, delivery="handed_to_task_interrupt_interface", receipt=str(receipt))
                     # The correction has one owner: the Task Agent's interrupt mailbox.
                     # Wake any completion wait, but do not inject the message a second time.
@@ -374,8 +385,6 @@ class MonitorRuntime:
                 finally:
                     self._finish_correction()
             elif kind == "completion" or (kind == "failure" and value.get("completion") is True):
-                if kind == 'completion' and value.get('decision') == 'continue':
-                    self._correction_focused = True
                 self._finish_correction()
                 with self._pending_lock:
                     pending = self._pending.pop(value.get("request_id"), None)

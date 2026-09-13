@@ -91,8 +91,9 @@ if the correction is misunderstood or evidence still cannot support the decision
 local issue is reasonably resolved; local release is not root completion. Do not verify every unknown, react
 to harmless exploration, or impose code-review perfectionism.
 
-Use intervene directly when a correction is warranted; do not arrange pauses with scripts. The host stops
-execution while delivering the first correction, then resumes it. Follow-up observation is concurrent:
+On waking from silence, the host stops task execution while you assess the situation. Use intervene
+directly when a correction is warranted, or wait to resume without correction; do not arrange pauses
+with scripts. Sending the first correction resumes execution. Follow-up observation is concurrent:
 attend to the latest public response and send a further correction when needed, without waiting for a
 finished artifact if the mistaken intent is already clear. Actual model and tool latency still applies.
 
