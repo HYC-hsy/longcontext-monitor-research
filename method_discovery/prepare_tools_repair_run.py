@@ -1,5 +1,6 @@
 """Prepare one approved same-task repair comparison; never overwrite a run."""
 import json
+import argparse
 from pathlib import Path
 from clean_monitor_prepare_real_task_gate import build_manifest
 
@@ -8,10 +9,17 @@ OUT = ROOT / 'method_discovery/artifacts/tools_repair_20260913/fyne_r1_manifest.
 BASE = ROOT / 'method_discovery/artifacts/tools_t23_20260913/fyne_r1_manifest.json'
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--attempt', type=int, default=1)
+    args = parser.parse_args()
+    if args.attempt < 1:
+        parser.error('attempt must be positive')
+    OUT = OUT.with_name(f'fyne_r{args.attempt}_manifest.json')
     if OUT.exists():
         raise SystemExit('Manifest already exists; do not reuse run identity')
     previous = json.loads(BASE.read_text(encoding='utf-8'))
-    manifest = build_manifest('roadmapbench:fyn-2.2.0-roadmap', 'tools-repair-20260913-r1', OUT)
+    manifest = build_manifest('roadmapbench:fyn-2.2.0-roadmap',
+                              f'tools-repair-20260913-r{args.attempt}', OUT)
     fresh = manifest['runs'][0]['environment']
     manifest['runs'][0]['environment'] = {
         **previous['runs'][0]['environment'],
