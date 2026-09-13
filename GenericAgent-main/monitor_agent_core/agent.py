@@ -245,7 +245,7 @@ class MonitorAgent:
         self.active_context_enabled = active_context
         if live_awareness or active_context or decision_context or pma_memory:
             self.client.prepare_active_context = self._active_working_context
-        if active_context:
+        if active_context and not decision_context:
             self.system_prompt += (
                 "\nYour current monitor/working.md is made available during normal reasoning without "
                 "a separate read. Use it for the understanding you want available next time, not a log. "
@@ -269,7 +269,7 @@ class MonitorAgent:
         parts = []
         if self.pma_memory is not None:
             parts.append(self.pma_memory.context())
-        if self.active_context_enabled:
+        if self.active_context_enabled and self.decision_context is None:
             text = current_working_context(self.workspace)
             self._audit_dialogue('active_working_context', content=text)
             if text:
@@ -393,8 +393,6 @@ class MonitorAgent:
             elif name == "read_with_sources" and self.grounded_context:
                 data = read_with_sources(self.workspace, arguments["path"],
                                          arguments.get("start", 1), arguments.get("count", 200))
-            elif name == 'review_context' and self.decision_context is not None:
-                data = self.decision_context.read(**arguments)
             elif name == 'feedback_focus' and self.feedback_focus is not None:
                 data = self.feedback_focus.call(**arguments)
             elif name == 'inquiry' and self.inquiry is not None:
@@ -531,28 +529,16 @@ class MonitorAgent:
             tools = MONITOR_TOOLS
             if self.decision_context is not None:
                 system += (
-                    '\n\nA small current synopsis and your last correction are available during reasoning. '
-                    'Use them to decide whether the next useful move is investigation, correction, or waiting; '
-                    'more reading is useful only if it can change that choice. review_context retrieves '
-                    'source-linked task excerpts and private notes with bounded recent behavior, by default '
-                    'after your last correction. It is optional navigation, not proof: inspect actual tests '
-                    'or files where needed. A prior diagnosis, including your own, remains revisable.'
+                    '\n\nmonitor/overview.md is a refreshed file entry to ongoing work and original materials, '
+                    'not an evidence summary. Read it with ordinary tools when useful. Keep your own '
+                    'understanding in monitor/working.md: what you are trying to determine, why, and what '
+                    'observation would resolve it. Organize this naturally; no required fields or per-wake rewrite. '
+                    'A sound local repair can finish while other task requirements remain unresolved. '
+                    'When the decision changes to whole-task completion, reconsider the original scope and '
+                    'the support actually obtained, rather than extending a local success to everything. '
+                    'Choose the original code, tests or observations that can settle the question; navigation '
+                    'and your previous conclusions do not settle it. You need not inspect every unknown.'
                 )
-                tools = [*tools, _tool('review_context',
-                    'Get bounded previews: lexical task/private-note matches and recent public behavior. '
-                    'Defaults to behavior after your last correction; false includes earlier recent events. '
-                    'order=latest gives the newest window; order=forward starts at the beginning of that range. '
-                    'Use returned next_read arguments to continue; include_context=false returns only behavior. '
-                    'query matches task/notes, not behavior. Use original files for full evidence. '
-                    'Does not judge, update memory or send input.', {
-                        'query': {'type': 'string', 'default': ''},
-                        'after_correction': {'type': 'boolean', 'default': True},
-                        'steps': {'type': 'integer', 'minimum': 1, 'maximum': 32, 'default': 8},
-                        'after_cursor': {'type': 'integer', 'minimum': 0,
-                                         'description': 'Optional explicit event cursor; overrides after_correction.'},
-                        'order': {'type': 'string', 'enum': ['latest', 'forward'], 'default': 'latest'},
-                        'include_context': {'type': 'boolean', 'default': True},
-                    }, [])]
             if self.live_awareness is not None:
                 system += (
                     "\n\nFile activity is sampled before normal requests, not monitored semantically for you. "
