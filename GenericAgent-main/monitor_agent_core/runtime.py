@@ -331,7 +331,7 @@ class MonitorRuntime:
         with self._archive_lock:
             self._sequence += 1
             sequence = self._sequence
-            raw = dict(packet, archive_sequence=sequence)
+            raw = dict(packet, archive_sequence=sequence, archived_at=time.time())
             _append(self.events_path, raw)
             with self._latest_task_turn.get_lock():
                 self._latest_task_turn.value = max(

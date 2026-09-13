@@ -6,6 +6,8 @@
 
 ### 权威文档
 
+- 2026-09-13 R2后最小原要求优先候选，入口`method_discovery/docs/PMA_REQUIREMENT_FIRST_TIMED_EVIDENCE_20260913.md`。PMA适配层维护要求/声明/带时序观察，不提前裁决完成；比较先从原要求确定支持尺度再看记忆。任务公开归档新增时间元数据，监察输入展示调用/返回时间，旧/重叠观察不当作写入失败。作者process/bank不变，follow/patrol不变；仅工程验证，真实启动另确认。
+
 - 2026-09-13 用户批准最小判断依据适配与等待修复，入口`method_discovery/docs/PMA_JUDGMENT_BASIS_AND_FOLLOW_REPAIR_20260913.md`。wait默认follow保持并发观察且不重复取消；显式patrol离开局部调查，后续醒来仍先停止。PMA保留作者两阶段执行，仅适配判断依据提示及命令—输出来源；不称原提示复现，不以工程通过证明效果，真实启动另确认。
 
 - 2026-09-13 用户批准完整PMA记忆执行链候选，入口`method_discovery/docs/PMA_TWO_PHASE_INTEGRATION_20260913.md`。现`GA_MONITOR_PMA_MEMORY`调用作者原MemoryAgent.process两阶段并将提醒交给现有持续监察者；no_intervention不代表完成或自动静默。近期输入按真实task_turn映射作者窗口，保留原始证据边界；不是原论文完整实验复现，不改任务控制顺序。每wake两次额外同模型调用，分别归档成本。旧第一阶段版本保存在Git；真实启动另确认。

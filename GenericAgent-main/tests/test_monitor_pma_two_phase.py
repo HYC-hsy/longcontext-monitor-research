@@ -28,7 +28,7 @@ def test_author_process_runs_both_adapted_prompts(workspace, monkeypatch):
     from monitor_agent_core.pma_judgment import adapt
     from monitor_agent_core.vendor.pma_memory.memory_agent import BANK_TOOLS
     assert client.inputs[0][0][0]['content'] == adapt(PHASE1_SYSTEM, BANK_TOOLS)[0]
-    assert 'basis for judgment' in client.inputs[0][0][0]['content']
+    assert 'Organize evidence for the next judgment' in client.inputs[0][0][0]['content']
     assert client.inputs[1][0][0]['content'] == adapt(PHASE2_SYSTEM, None)[0]
     assert 'discriminating observation' in client.inputs[1][0][0]['content']
     assert client.inputs[1][1] == []
@@ -118,3 +118,63 @@ def test_adaptation_does_not_mutate_author_tools():
     system, adapted = adapt(PHASE1_SYSTEM, BANK_TOOLS)
     assert BANK_TOOLS == before and adapted != before
     assert 'Printed assertions' in system
+
+
+def test_judgment_context_precedes_bank_and_process_is_inherited():
+    from monitor_agent_core.pma_judgment import JudgmentMemoryAgent
+    from monitor_agent_core.vendor.pma_memory.universal_memory import UniversalMemory
+    agent = JudgmentMemoryAgent(llm=None, memory=UniversalMemory())
+    assert JudgmentMemoryAgent.process is MemoryAgent.process
+    for build in (agent._build_phase1_prompt, agent._build_phase2_prompt):
+        prompt = build('ORIGINAL_REQUIREMENT', 1)
+        assert prompt.index('ORIGINAL_REQUIREMENT') < prompt.index(agent._format_memory_bank('ORIGINAL_REQUIREMENT'))
+    assert 'do not pre-decide completion' in agent._build_phase1_prompt('task', 1)
+    assert '<no_intervention/>' in agent._build_phase2_prompt('task', 1)
+
+
+def test_timed_old_inspection_is_distinct_from_later_write(workspace):
+    # R2 pattern: an earlier inspection must not look like post-write verification.
+    events = [
+        {'task_turn': 74, 'boundary': 'post_model_pre_tool', 'archived_at': 200,
+         'text': 'rewrite file', 'tool_calls': [{'name': 'file_write'}]},
+        {'task_turn': 74, 'boundary': 'post_tool_pre_next_llm', 'archived_at': 202,
+         'tool_results': [{'content': 'success'}]},
+        {'task_turn': 75, 'boundary': 'post_model_pre_tool', 'text': 'next action'},
+    ]
+    (workspace.evidence_root / 'public_events.jsonl').write_text(
+        ''.join(json.dumps(x) + '\n' for x in events), encoding='utf-8')
+    audit = workspace.private_root / 'audit'
+    audit.mkdir()
+    rows = [
+        {'event': 'tool_call', 'review_id': 'r', 'tool_id': 't', 'timestamp': 100,
+         'name': 'code_run', 'arguments': 'read old file'},
+        {'event': 'tool_result', 'review_id': 'r', 'tool_id': 't', 'timestamp': 101,
+         'data': {'stdout': 'old contents'}},
+    ]
+    (audit / 'dialogue.jsonl').write_text(''.join(json.dumps(x) + '\n' for x in rows), encoding='utf-8')
+    text = observation(workspace, 'wake')
+    for stamp in ('00:01:40.000+00:00', '00:01:41.000+00:00',
+                  '00:03:20.000+00:00', '00:03:22.000+00:00'):
+        assert stamp in text
+    assert 'archived UTC unknown' in text
+    assert 'not execution completion' in text
+
+
+def test_runtime_archives_timestamp_without_changing_packet(tmp_path):
+    import multiprocessing as mp
+    import threading
+    import time
+    from monitor_agent_core.runtime import MonitorRuntime
+    runtime = object.__new__(MonitorRuntime)
+    runtime._archive_lock = threading.Lock()
+    runtime._sequence = 0
+    runtime._latest_task_turn = mp.Value('i', 0)
+    runtime.events_path = tmp_path / 'events.jsonl'
+    runtime.synopsis_path = tmp_path / 'synopsis.jsonl'
+    packet = {'task_turn': 1, 'boundary': 'post_model_pre_tool', 'text': 'intent'}
+    before = time.time()
+    runtime._archive(packet)
+    event = json.loads(runtime.events_path.read_text(encoding='utf-8'))
+    assert before <= event['archived_at'] <= time.time()
+    assert 'archived_at' not in packet
+    assert event['text'] == 'intent'

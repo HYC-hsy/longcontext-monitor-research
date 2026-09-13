@@ -8,10 +8,9 @@ from dataclasses import asdict
 import json
 import time
 
-from .vendor.pma_memory.memory_agent import MemoryAgent
 from .vendor.pma_memory.universal_memory import UniversalMemory
 from .pma_observation import observation
-from .pma_judgment import adapt
+from .pma_judgment import adapt, JudgmentMemoryAgent
 
 
 class PhaseTransport:
@@ -73,7 +72,7 @@ class PMAMemoryMaintenance:
         self.path = workspace.private_root / 'pma_memory.json'
         self.memory = (UniversalMemory.from_dict(json.loads(self.path.read_text(encoding='utf-8')))
                        if self.path.exists() else UniversalMemory())
-        self.author = MemoryAgent(llm=None, memory=self.memory)
+        self.author = JudgmentMemoryAgent(llm=None, memory=self.memory)
         self.query = ''
         self.cycle = 0
 

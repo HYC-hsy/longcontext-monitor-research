@@ -1,5 +1,6 @@
 """Map public host events into the author's task + recent-step context."""
 from collections import OrderedDict, deque
+from datetime import datetime, timezone
 import json
 
 from .vendor.pma_memory.context import AuthorContext
@@ -20,6 +21,12 @@ def records(path):
             yield number, json.loads(line)
 
 
+def clock_label(value):
+    if not isinstance(value, (int, float)):
+        return 'unknown'
+    return datetime.fromtimestamp(value, timezone.utc).isoformat(timespec='milliseconds')
+
+
 def observation(workspace, wake):
     # Group pre/post boundaries into real task turns, not eight event records.
     turns = OrderedDict()
@@ -34,7 +41,10 @@ def observation(workspace, wake):
             entry['commands'] = [preview(c, 2000) for c in event['tool_calls']]
         if event.get('tool_results') is not None:
             entry['observation'] = preview(event['tool_results'], 10000)
-        entry['source'] = f'task/public_events.jsonl#L{line}'
+        timing = (f"{event.get('boundary', 'boundary unspecified')} archived UTC "
+                  f"{clock_label(event.get('archived_at'))} task/public_events.jsonl#L{line}")
+        entry.setdefault('timing', []).append(timing)
+        entry['source'] = '\n'.join(entry['timing'])
         while len(turns) > 8:
             turns.popitem(last=False)
     author = AuthorContext()
@@ -43,8 +53,9 @@ def observation(workspace, wake):
     author._accumulated_observations = [{}] + list(turns.values())
     context = author._get_memory_agent_context()
     context += '\n[Wake metadata, not a verdict]\n' + wake
-    context += '\n[Public source locations; latest turn may still be in progress]\n' + '\n'.join(
-        entry['source'] for entry in turns.values())
+    context += ('\n[Task boundary times and sources; archival times, not exact execution times. '
+                'Latest turn may still be in progress.]\n') + '\n'.join(
+        f"Step {entry['step']}:\n{entry['source']}" for entry in turns.values())
     # Retain selected actual inspection receipts, not the monitor's full repeated
     # conclusions. One serialization layer; already bounded tool results stay so.
     recent = deque(maxlen=4)
@@ -52,8 +63,10 @@ def observation(workspace, wake):
     for line, record in records(workspace.private_root / 'audit/dialogue.jsonl'):
         key = (record.get('review_id'), record.get('tool_id'))
         if record.get('event') == 'tool_call' and record.get('tool_id'):
-            calls[key] = {'name': record.get('name'), 'arguments': record.get('arguments'),
-                          'source': f'monitor/audit/dialogue.jsonl#L{line}'}
+            calls[key] = {'name': record.get('name'),
+                          'call_logged_utc': clock_label(record.get('timestamp')),
+                          'source': f'monitor/audit/dialogue.jsonl#L{line}',
+                          'arguments': record.get('arguments')}
         if record.get('event') == 'tool_result' and record.get('data'):
             data = record['data']
             if 'content' in data or 'stdout' in data:
@@ -61,6 +74,8 @@ def observation(workspace, wake):
                 # Separate bounds keep long command text from erasing the output.
                 recent.append('Producing tool call: ' + preview(call or
                     {'source': 'unmatched; do not infer the producing command'}, 3000)
+                    + f'\nResult received UTC {clock_label(record.get("timestamp"))}; '
+                    'a running session result is not execution completion.'
                     + f'\nTool result source: monitor/audit/dialogue.jsonl#L{line}\n'
                     + preview(data, 3000))
     if recent:
