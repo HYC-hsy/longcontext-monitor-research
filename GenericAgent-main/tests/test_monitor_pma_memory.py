@@ -13,6 +13,10 @@ def response(name, **arguments):
     return ModelResponse('', [ToolCall('call', name, json.dumps(arguments))], {'input_tokens': 11})
 
 
+def comparison(text='<no_intervention/>'):
+    return ModelResponse(text, [], {'input_tokens': 7})
+
+
 class Client:
     config = {'monitor_pma_memory': True}
 
@@ -55,19 +59,23 @@ def workspace(tmp_path):
 
 def test_maintenance_reaches_existing_review_without_replacing_tools_or_history(workspace):
     client = Client([response('memory_save_knowledge', content='Short forms remain required.'),
+                     comparison(),
                      response('wait', after_turns=2)])
     monitor = MonitorAgent(client, workspace)
     action = monitor.review('Initialization')
     assert action.kind == 'wait'
-    assert 'Short forms remain required.' in client.inputs[1][2]
+    assert 'Short forms remain required.' in client.inputs[2][2]
+    assert 'Short forms remain required.' in client.inputs[1][0][1]['content']
     assert client.inputs[0][2] is None
-    assert client.inputs[1][1] == MONITOR_TOOLS
+    assert client.inputs[1][2] is None
+    assert client.inputs[2][1] == MONITOR_TOOLS
     assert client.history[0]['content'] == 'Previous investigation remains available.'
     assert not any('Current Memory Bank' in str(item) for item in client.history)
     records = [json.loads(line) for line in (workspace.private_root / 'audit/dialogue.jsonl').read_text(encoding='utf-8').splitlines()]
-    maintenance = next(r for r in records if r['event'] == 'pma_maintenance')
-    assert maintenance['status'] == 'updated'
-    assert maintenance['usage']['input_tokens'] == 11
+    maintenance = next(r for r in records if r['event'] == 'pma_two_phase')
+    assert maintenance['status'] == 'no_intervention'
+    assert maintenance['phases'][0]['usage']['input_tokens'] == 11
+    assert maintenance['phases'][1]['usage']['input_tokens'] == 7
     restored = PMAMemoryMaintenance(workspace, monitor._atomic_private_text, monitor._audit_dialogue)
     assert 'Short forms remain required.' in restored.context()
 
@@ -93,7 +101,7 @@ def test_delete_then_save_revises_and_preserves_audit(workspace):
     client.responses = iter([ModelResponse('', [
         ToolCall('a', 'memory_delete', json.dumps({'memory_id': old})),
         ToolCall('b', 'memory_save_knowledge', json.dumps({'content': 'Short forms not checked'})),
-    ], {})])
+    ], {}), comparison()])
     bank.update(client, 'New evidence', 'test')
     assert 'Everything complete' not in bank.context()
     assert 'Short forms not checked' in bank.context()
@@ -109,7 +117,7 @@ def test_author_sources_unchanged():
 
 
 def test_bank_is_task_local_and_failure_is_not_silent(workspace, tmp_path):
-    client = Client([response('memory_delete', memory_id='missing')])
+    client = Client([response('memory_delete', memory_id='missing'), comparison()])
     monitor = MonitorAgent(client, workspace)
     with pytest.raises(RuntimeError, match='operation failed'):
         monitor.review('wake')
@@ -127,6 +135,8 @@ def test_actual_provider_history_is_restored_after_maintenance(workspace, monkey
     calls = []
     def request(tools):
         calls.append(tools)
+        if not tools:
+            return [{'type': 'text', 'text': '<no_intervention/>'}], {'input_tokens': 7}
         return [{'type': 'tool_use', 'id': 'bank', 'name': 'memory_save_knowledge',
                  'input': {'content': 'Requirement remains open'}}], {'input_tokens': 12}
     monkeypatch.setattr(client, '_request', request)
@@ -138,6 +148,7 @@ def test_actual_provider_history_is_restored_after_maintenance(workspace, monkey
 
 def test_followup_after_intervention_does_not_repeat_maintenance(workspace):
     client = Client([response('memory_save_knowledge', content='Check intended behavior.'),
+                     comparison('<context_for_action>Check intended behavior.</context_for_action>'),
                      response('intervene', message='The test does not check the required behavior.'),
                      response('wait', after_turns=1)])
     monitor = MonitorAgent(client, workspace)
@@ -145,8 +156,9 @@ def test_followup_after_intervention_does_not_repeat_maintenance(workspace):
     monitor.intervention_callback = lambda message: delivered.append(message)
     assert monitor.review('wake').kind == 'wait'
     assert len(delivered) == 1
-    assert len(client.inputs) == 3
-    assert client.inputs[2][1] == MONITOR_TOOLS
+    assert len(client.inputs) == 4
+    assert client.inputs[3][1] == MONITOR_TOOLS
+    assert 'Check intended behavior.' in str(client.inputs[2][0])
 
 
 def test_new_switch_reaches_container():

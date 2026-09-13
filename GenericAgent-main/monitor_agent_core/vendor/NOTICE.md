@@ -5,7 +5,20 @@
 
 
 No upstream prompts, providers, rule classifiers, datasets or benchmark answers are bundled. The wrappers outside vendor translate public events and natural private notes. Reusing these components is not a reproduction of either full paper.
-# PMA memory-maintenance candidate (2026-09-13)
+# PMA two-phase candidate (2026-09-13, supersedes first-phase integration below)
+
+The adapter now calls the unmodified `MemoryAgent.process` execution entry,
+including both phase prompts, bank operations and reminder parsing. `context.py`
+extracts `_get_memory_agent_context` and `_format_step_entry` verbatim from the
+same revision's `src/memory_agent/memory_enabled_agent.py` into a dependency-free
+class. Tests compare both method ASTs. Public host events are mapped to eight
+task turns, bounded at the adapter, with separately labeled inspection receipts.
+The existing monitor consumes reminders as leads, not automatic task input or
+completion permission. The author's task scheduler/Terminus2 harness is NOT
+copied; this is full memory-process reuse, not full original experiment reproduction.
+Our transport reports swallowed phase failures and restores persistent history.
+
+# Historical PMA first-phase candidate (2026-09-13)
 
 `pma_memory/memory_agent.py`, `pma_memory/universal_memory.py`, and
 `pma_memory/bm25_search.py` are unmodified (apart from line endings) copies from

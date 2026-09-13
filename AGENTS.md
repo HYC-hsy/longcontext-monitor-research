@@ -6,6 +6,8 @@
 
 ### 权威文档
 
+- 2026-09-13 用户批准完整PMA记忆执行链候选，入口`method_discovery/docs/PMA_TWO_PHASE_INTEGRATION_20260913.md`。现`GA_MONITOR_PMA_MEMORY`调用作者原MemoryAgent.process两阶段并将提醒交给现有持续监察者；no_intervention不代表完成或自动静默。近期输入按真实task_turn映射作者窗口，保留原始证据边界；不是原论文完整实验复现，不改任务控制顺序。每wake两次额外同模型调用，分别归档成本。旧第一阶段版本保存在Git；真实启动另确认。
+
 - 2026-09-13 用户批准PMA第一阶段维护机制接入独立监察者候选，入口`method_discovery/docs/PMA_MEMORY_MAINTENANCE_ADAPTATION_20260913.md`。`GA_MONITOR_PMA_MEMORY`默认关闭，复用作者记忆操作/提示/检索代码，第二阶段仍为现有持续有工具监察者，不称完整PMA复现。每wake增加一次同模型维护调用并记录成本；不改已确认控制顺序、两层观察或在线信息边界。工程验收不表示效果成立，真实启动另确认。
 
 - 2026-09-13 独立性补齐：`method_discovery/docs/MONITOR_HOST_INDEPENDENCE_COMPLETION_20260913.md`。内核配置必须显式传入路径，不得推断GA目录或回退mykey；GA事件字段/summary解析和任务侧原要求文件由ga_monitor_adapter负责。独立包可单独安装；运行归档绑定task_id、任务摘要和工作区。当前Claude监察profile为claude_monitor_opus48，真实密钥只在忽略的monitor_config/models.local.json。框架独立不等于共享容器下的OS权限隔离，不得混称。

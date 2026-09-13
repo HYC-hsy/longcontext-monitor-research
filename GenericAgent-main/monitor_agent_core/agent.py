@@ -503,7 +503,8 @@ class MonitorAgent:
         action = None
         try:
             if self.pma_memory is not None:
-                self.pma_memory.update(self.client, wake_context, self.review_id)
+                lead = self.pma_memory.update(self.client, wake_context, self.review_id)
+                wake_context += '\n\n' + lead
             wake_context += "\nLive environment map (read task sources, write only private cognition): " + json.dumps({
                 "task/": str(self.workspace.evidence_root),
                 **{f"task/{name}/": str(path) for name, path in self.workspace.task_mounts.items()},
