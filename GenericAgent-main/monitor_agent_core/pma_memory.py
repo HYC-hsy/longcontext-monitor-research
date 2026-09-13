@@ -11,6 +11,7 @@ import time
 from .vendor.pma_memory.memory_agent import MemoryAgent
 from .vendor.pma_memory.universal_memory import UniversalMemory
 from .pma_observation import observation
+from .pma_judgment import adapt
 
 
 class PhaseTransport:
@@ -35,9 +36,10 @@ class PhaseTransport:
             client.restore_history([])
             for name in hooks:
                 setattr(client, name, None)
+            adapted_system, adapted_tools = adapt(system, tools)
             response = client.complete([
-                {'role': 'system', 'content': system},
-                {'role': 'user', 'content': prompt}], tools or [])
+                {'role': 'system', 'content': adapted_system},
+                {'role': 'user', 'content': prompt}], adapted_tools or [])
             record['usage'] = response.usage
             record['calls'] = [dict(name=c.name, arguments=c.arguments) for c in response.tool_calls]
             allowed = {t['function']['name'] for t in tools or []}

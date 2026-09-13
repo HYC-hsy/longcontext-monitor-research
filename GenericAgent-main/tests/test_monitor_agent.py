@@ -68,9 +68,9 @@ def test_same_client_history_continues_across_wakes(roots):
         response("wait", {"after_turns": 4}), response("wait", {"after_turns": 1}),
     ])
     monitor = MonitorAgent(client, MonitorWorkspace(evidence, private))
-    assert monitor.review("Initialize.").payload == {"after_turns": 4}
+    assert monitor.review("Initialize.").payload == {"after_turns": 4, "mode": "follow"}
     first_size = len(client.history)
-    assert monitor.review("Cursor advanced.").payload == {"after_turns": 1}
+    assert monitor.review("Cursor advanced.").payload == {"after_turns": 1, "mode": "follow"}
     assert len(client.history) > first_size
     assert len((private / "audit" / "reviews.jsonl").read_text(encoding="utf-8").splitlines()) == 2
 

@@ -69,7 +69,7 @@ def test_worker_waits_for_host_before_first_model_and_releases_on_silence(tmp_pa
         def __init__(self, *args, **kwargs): pass
         def review(self, *args, **kwargs):
             calls.append('model')
-            return MonitorAction('wait', {'after_turns': 1})
+            return MonitorAction('wait', {'after_turns': 1, 'mode': 'patrol'})
     monkeypatch.setattr('monitor_agent_core.provider.MonitorProviderClient', Client)
     monkeypatch.setattr('monitor_agent_core.agent.MonitorAgent', Monitor)
     evidence = tmp_path / 'evidence'
@@ -124,7 +124,7 @@ def test_wait_counts_from_live_progress_not_review_start(tmp_path, monkeypatch):
             calls.append('model')
             # Task advances while the monitor is doing concurrent investigation.
             clock.value = 10
-            return MonitorAction('wait', {'after_turns': 2})
+            return MonitorAction('wait', {'after_turns': 2, 'mode': 'patrol'})
     monkeypatch.setattr('monitor_agent_core.provider.MonitorProviderClient', Client)
     monkeypatch.setattr('monitor_agent_core.agent.MonitorAgent', Monitor)
     evidence = tmp_path / 'evidence'

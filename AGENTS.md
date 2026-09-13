@@ -6,6 +6,8 @@
 
 ### 权威文档
 
+- 2026-09-13 用户批准最小判断依据适配与等待修复，入口`method_discovery/docs/PMA_JUDGMENT_BASIS_AND_FOLLOW_REPAIR_20260913.md`。wait默认follow保持并发观察且不重复取消；显式patrol离开局部调查，后续醒来仍先停止。PMA保留作者两阶段执行，仅适配判断依据提示及命令—输出来源；不称原提示复现，不以工程通过证明效果，真实启动另确认。
+
 - 2026-09-13 用户批准完整PMA记忆执行链候选，入口`method_discovery/docs/PMA_TWO_PHASE_INTEGRATION_20260913.md`。现`GA_MONITOR_PMA_MEMORY`调用作者原MemoryAgent.process两阶段并将提醒交给现有持续监察者；no_intervention不代表完成或自动静默。近期输入按真实task_turn映射作者窗口，保留原始证据边界；不是原论文完整实验复现，不改任务控制顺序。每wake两次额外同模型调用，分别归档成本。旧第一阶段版本保存在Git；真实启动另确认。
 
 - 2026-09-13 用户批准PMA第一阶段维护机制接入独立监察者候选，入口`method_discovery/docs/PMA_MEMORY_MAINTENANCE_ADAPTATION_20260913.md`。`GA_MONITOR_PMA_MEMORY`默认关闭，复用作者记忆操作/提示/检索代码，第二阶段仍为现有持续有工具监察者，不称完整PMA复现。每wake增加一次同模型维护调用并记录成本；不改已确认控制顺序、两层观察或在线信息边界。工程验收不表示效果成立，真实启动另确认。

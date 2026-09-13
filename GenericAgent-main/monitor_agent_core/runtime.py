@@ -152,7 +152,7 @@ def _worker(config, commands, outputs):
             return not isinstance(exc, ProviderRecoveryExhausted)
         if action.kind == "wait":
             release_wake = close_watch or wake_receipts is not None
-            close_watch = False
+            close_watch = action.payload.get('mode', 'follow') == 'follow'
             # Silence starts now, not when this potentially long review began.
             # This clock conveys progress only; it does not mark evidence read.
             clock = config.get('latest_task_turn')
@@ -160,7 +160,8 @@ def _worker(config, commands, outputs):
             next_wake_turn = current_turn + max(1, int(action.payload["after_turns"]))
             if release_wake:
                 outputs.put({'kind': 'review_silent', 'from_turn': current_turn,
-                             'next_wake_turn': next_wake_turn})
+                             'next_wake_turn': next_wake_turn,
+                             'mode': 'follow' if close_watch else 'patrol'})
         elif action.kind == "intervene":
             close_watch = True
             next_wake_turn = task_turn + 1
@@ -216,7 +217,7 @@ def _worker(config, commands, outputs):
         if kind == "close": return
         cursor = int(command.get("cursor") or cursor)
         task_turn = int(command.get("task_turn") or task_turn)
-        if kind == "boundary" and (close_watch or task_turn >= next_wake_turn):
+        if kind == "boundary" and task_turn >= next_wake_turn:
             if not review(
                 f"Public task cursor advanced through {cursor}. Continue from your existing history, inspect "
                 "new synopsis rows, and retrieve original evidence wherever it can change your decision."

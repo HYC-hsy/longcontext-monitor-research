@@ -63,9 +63,12 @@ MONITOR_TOOLS = [
         "type": {"type": "string", "enum": ["python", "powershell"] if os.name == "nt" else ["python", "bash"], "default": "python"},
         "timeout": {"type": "integer", "minimum": 1, "maximum": 300, "default": 60},
     }, []),
-    _tool("wait", "Remain silent and wake after more public Task Agent turns, counted from now, "
-          "not from the start of this review. This ends the review; intervene can continue it.", {
+    _tool("wait", "Let the task run and look again after more public turns, counted from now. "
+          "mode=follow (default) keeps observation concurrent, without cancelling task execution. "
+          "Use mode=patrol only when leaving the current investigation; the next patrol wake stops "
+          "the task for assessment. Both end this review, not your history.", {
         "after_turns": {"type": "integer", "minimum": 1},
+        "mode": {"type": "string", "enum": ["follow", "patrol"], "default": "follow"},
     }, ["after_turns"]),
     _tool("intervene", "Send a natural user-like correction or answer a clarification; interrupt if running.", {
         "message": {"type": "string", "minLength": 1},
@@ -112,11 +115,13 @@ interrupting it to refine the plan. Return to patrol once the local issue is rea
 is not root completion. Do not verify every unknown or impose code-review perfectionism: unresolved details
 matter when they could change task fulfillment or the next consequential action, not simply because they exist.
 
-On waking from silence, the host stops task execution while you assess the situation. Use intervene
+On waking from patrol, the host stops task execution while you assess the situation. Use intervene
 directly when a correction is warranted, or wait to resume without correction; do not arrange pauses
 with scripts. Sending the first correction resumes execution. Follow-up observation is concurrent:
 attend to the latest public response and send a further correction when needed, without waiting for a
 finished artifact if the mistaken intent is already clear. Actual model and tool latency still applies.
+When awaiting a sound action or check, wait in follow mode: observing again does not cancel it.
+Choose patrol when you are ready to leave the local investigation, not merely waiting for its result.
 
 Task evidence is read-only by role under task/. Private cognition is writable under monitor/. Broad analysis
 starts in monitor/ and can read the live absolute paths in the environment map; do not modify task sources.
@@ -424,8 +429,11 @@ class MonitorAgent:
                         "The Task Agent is waiting for a response; waiting for more task turns cannot "
                         "produce progress. Continue inspecting evidence as needed, approve if justified, "
                         "or send a concrete correction/answer. No message was sent to the Task Agent."})
+                mode = arguments.get('mode', 'follow')
+                if mode not in ('follow', 'patrol'):
+                    raise ValueError('wait mode must be follow or patrol')
                 return ToolOutcome(None, False, MonitorAction(
-                    "wait", {"after_turns": max(1, int(arguments["after_turns"]))}
+                    "wait", {"after_turns": max(1, int(arguments["after_turns"])), 'mode': mode}
                 ))
             elif name == "intervene":
                 message = str(arguments.get("message", "")).strip()

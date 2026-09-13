@@ -10,7 +10,7 @@ from monitor_agent_core.pma_observation import observation
 from monitor_agent_core.vendor.pma_memory.memory_agent import MemoryAgent, PHASE1_SYSTEM, PHASE2_SYSTEM
 
 
-def test_author_process_runs_both_original_prompts(workspace, monkeypatch):
+def test_author_process_runs_both_adapted_prompts(workspace, monkeypatch):
     called = []
     original = MemoryAgent.process
     async def spy(self, *args, **kwargs):
@@ -25,8 +25,12 @@ def test_author_process_runs_both_original_prompts(workspace, monkeypatch):
     monitor.intervention_callback = lambda m: delivered.append(m)
     assert monitor.review('wake').kind == 'wait'
     assert called == [True]
-    assert client.inputs[0][0][0]['content'] == PHASE1_SYSTEM
-    assert client.inputs[1][0][0]['content'] == PHASE2_SYSTEM
+    from monitor_agent_core.pma_judgment import adapt
+    from monitor_agent_core.vendor.pma_memory.memory_agent import BANK_TOOLS
+    assert client.inputs[0][0][0]['content'] == adapt(PHASE1_SYSTEM, BANK_TOOLS)[0]
+    assert 'basis for judgment' in client.inputs[0][0][0]['content']
+    assert client.inputs[1][0][0]['content'] == adapt(PHASE2_SYSTEM, None)[0]
+    assert 'discriminating observation' in client.inputs[1][0][0]['content']
     assert client.inputs[1][1] == []
     assert 'Potential missing contract' in str(client.inputs[2][0])
     assert not delivered  # A lead is not an automatic intervention.
@@ -84,3 +88,33 @@ def test_extracted_author_context_methods_are_unchanged():
                 for node in ast.walk(ast.parse(source)) if isinstance(node, ast.FunctionDef)
                 and node.name in {'_get_memory_agent_context', '_format_step_entry'}}
     assert methods(upstream) == methods(local)
+
+
+def test_inspection_output_carries_matching_command_and_source(workspace):
+    audit = workspace.private_root / 'audit'
+    audit.mkdir()
+    rows = [
+        {'event': 'tool_call', 'review_id': 'old', 'tool_id': 'same',
+         'name': 'code_run', 'arguments': 'unrelated-command'},
+        {'event': 'tool_call', 'review_id': 'new', 'tool_id': 'same',
+         'name': 'code_run', 'arguments': 'echo ALL COMPLETE'},
+        {'event': 'tool_result', 'review_id': 'new', 'tool_id': 'same',
+         'data': {'stdout': 'ALL COMPLETE', 'exit_code': 0}},
+        {'event': 'tool_result', 'review_id': 'new', 'tool_id': 'missing',
+         'data': {'stdout': 'unmatched output'}},
+    ]
+    (audit / 'dialogue.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in rows), encoding='utf-8')
+    text = observation(workspace, 'wake')
+    assert 'echo ALL COMPLETE' in text and 'unrelated-command' not in text
+    assert '#L2' in text and '#L3' in text
+    assert 'unmatched; do not infer' in text
+
+
+def test_adaptation_does_not_mutate_author_tools():
+    import copy
+    from monitor_agent_core.pma_judgment import adapt
+    from monitor_agent_core.vendor.pma_memory.memory_agent import BANK_TOOLS
+    before = copy.deepcopy(BANK_TOOLS)
+    system, adapted = adapt(PHASE1_SYSTEM, BANK_TOOLS)
+    assert BANK_TOOLS == before and adapted != before
+    assert 'Printed assertions' in system

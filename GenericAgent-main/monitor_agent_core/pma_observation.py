@@ -48,11 +48,21 @@ def observation(workspace, wake):
     # Retain selected actual inspection receipts, not the monitor's full repeated
     # conclusions. One serialization layer; already bounded tool results stay so.
     recent = deque(maxlen=4)
+    calls = {}
     for line, record in records(workspace.private_root / 'audit/dialogue.jsonl'):
+        key = (record.get('review_id'), record.get('tool_id'))
+        if record.get('event') == 'tool_call' and record.get('tool_id'):
+            calls[key] = {'name': record.get('name'), 'arguments': record.get('arguments'),
+                          'source': f'monitor/audit/dialogue.jsonl#L{line}'}
         if record.get('event') == 'tool_result' and record.get('data'):
             data = record['data']
             if 'content' in data or 'stdout' in data:
-                recent.append(f'monitor/audit/dialogue.jsonl#L{line}\n' + preview(data, 3000))
+                call = calls.get(key)
+                # Separate bounds keep long command text from erasing the output.
+                recent.append('Producing tool call: ' + preview(call or
+                    {'source': 'unmatched; do not infer the producing command'}, 3000)
+                    + f'\nTool result source: monitor/audit/dialogue.jsonl#L{line}\n'
+                    + preview(data, 3000))
     if recent:
         context += '\n[Recent inspection results; not proof of whole-task completion]\n' + '\n'.join(recent)
     receipt = workspace.private_root / 'audit/decision_context_last_input.json'
