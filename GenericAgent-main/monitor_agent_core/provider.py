@@ -459,6 +459,9 @@ class MonitorProviderClient:
         self.history.append({"role": "user", "content": user_blocks})
         self._compact_history()
         blocks, usage = self._request(tools)
+        for block in blocks:
+            if block.get('type') == 'tool_use':
+                self._announce_correction(block.get('name'))
         if blocks:
             self.history.append({"role": "assistant", "content": blocks})
         text = "\n".join(block.get("text", "") for block in blocks if block.get("type") == "text")
@@ -469,7 +472,24 @@ class MonitorProviderClient:
         self.usage_records.append(dict(usage))
         return ModelResponse(text, calls, usage)
 
+    def _announce_correction(self, name):
+        callback = getattr(self, 'correction_event', None)
+        if name != 'intervene' or callback is None:
+            return
+        if getattr(self, '_correction_identity', None) is None:
+            self._correction_identity = uuid.uuid4().hex
+            callback('begin', self._correction_identity)
+
+    def _finish_announced_correction(self):
+        identity = getattr(self, '_correction_identity', None)
+        if identity is not None:
+            self.correction_event('end', identity)
+            self._correction_identity = None
+
     def _request(self, tools):
+        # Previous response has been dispatched. A malformed/nonexecuted call
+        # must not keep the task stopped while we perform another investigation.
+        self._finish_announced_correction()
         # Request-local context never becomes another permanent history copy.
         # Read after compaction, so a newly written handoff is visible immediately.
         prepare = getattr(self, 'prepare_active_context', None)
@@ -478,7 +498,11 @@ class MonitorProviderClient:
         if entry is not None:
             self.history.append(entry)
         try:
-            return self._request_with_recovery(tools)
+            result = self._request_with_recovery(tools)
+            return result
+        except Exception:
+            self._finish_announced_correction()
+            raise
         finally:
             if entry is not None:
                 assert self.history[-1] is entry
@@ -536,6 +560,7 @@ class MonitorProviderClient:
                 return result
             except (RetryableProviderError, requests.Timeout, requests.ConnectionError,
                     requests.exceptions.ChunkedEncodingError) as exc:
+                self._finish_announced_correction()
                 last_error = exc
                 record.update(outcome='retryable_error', error_type=type(exc).__name__)
                 if self._cancelled.is_set():
@@ -716,6 +741,7 @@ class MonitorProviderClient:
                 if block.get("type") == "text": current = {"type": "text", "text": ""}
                 elif block.get("type") == "thinking": current = {"type": "thinking", "thinking": "", "signature": ""}
                 elif block.get("type") == "tool_use":
+                    self._announce_correction(block.get('name'))
                     current = {"type": "tool_use", "id": block.get("id", ""), "name": block.get("name", ""), "input": {}}
                     tool_json = ""
             elif kind == "content_block_delta" and current:
@@ -746,6 +772,7 @@ class MonitorProviderClient:
             elif kind == "response.output_item.added":
                 item = event.get("item", {})
                 if item.get("type") == "function_call":
+                    self._announce_correction(item.get('name'))
                     index = event.get("output_index", 0)
                     tool_snapshots.setdefault(index, []).append(('added', dict(item)))
                 elif item.get("type") == "reasoning":
@@ -757,6 +784,7 @@ class MonitorProviderClient:
                 elif item.get("type") == "message":
                     messages[event.get("output_index", 0)] = dict(item)
                 elif item.get("type") == "function_call":
+                    self._announce_correction(item.get('name'))
                     tool_snapshots.setdefault(event.get('output_index', 0), []).append(('item_done', dict(item)))
             elif kind == "response.function_call_arguments.delta":
                 index = event.get("output_index", 0)
@@ -897,6 +925,7 @@ class MonitorProviderClient:
                 call["id"] = item.get("id") or call["id"]
                 function = item.get("function") or {}
                 call["name"] += function.get("name") or ""
+                self._announce_correction(call['name'])
                 call["args"] += function.get("arguments") or ""
         blocks = [{"type": "text", "text": text}] if text else []
         for index in sorted(calls):

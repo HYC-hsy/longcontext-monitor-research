@@ -62,6 +62,9 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
         from pma_baseline.runtime import from_environment
         pma = from_environment(initial_content)
     while local_turn < handler.max_turns:
+        wait_correction = getattr(handler.parent, 'wait_monitor_correction', None)
+        if wait_correction is not None and not wait_correction():
+            break
         local_turn += 1; turn = int(turn_offset) + local_turn
         consume_resume = getattr(handler.parent, 'consume_resumable_interruption', None)
         if consume_resume is not None:
@@ -184,7 +187,9 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
         for ii, tc in enumerate(tool_calls):
             tool_name, args, tid = tc['tool_name'], tc['args'], tc.get('id', '')
             interruption = getattr(handler.parent, 'resumable_interruption', None)
-            if interruption is not None and interruption.is_requested():
+            barrier = getattr(handler.parent, 'monitor_correction_barrier', None)
+            if ((interruption is not None and interruption.is_requested()) or
+                    (barrier is not None and barrier.is_active())):
                 for pending in tool_calls[ii:]:
                     pending_id = pending.get('id', '')
                     if pending_id:

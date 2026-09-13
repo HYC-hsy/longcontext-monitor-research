@@ -91,6 +91,11 @@ if the correction is misunderstood or evidence still cannot support the decision
 local issue is reasonably resolved; local release is not root completion. Do not verify every unknown, react
 to harmless exploration, or impose code-review perfectionism.
 
+Use intervene directly when a correction is warranted; do not arrange pauses with scripts. The host stops
+execution while delivering the first correction, then resumes it. Follow-up observation is concurrent:
+attend to the latest public response and send a further correction when needed, without waiting for a
+finished artifact if the mistaken intent is already clear. Actual model and tool latency still applies.
+
 Task evidence is read-only by role under task/. Private cognition is writable under monitor/. Broad analysis
 starts in monitor/ and can read the live absolute paths in the environment map; do not modify task sources.
 This local execution tool is not a filesystem sandbox."""

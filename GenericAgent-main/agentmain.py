@@ -24,6 +24,7 @@ from online_evidence_gate import OnlineEvidenceCompletionGate
 from completion_checkpoint import FirstCompletionCheckpoint, checkpoint_identity_from_environment
 from manual_completion_boundary import ManualCompletionBoundary
 from task_interruption import ResumableInterruption
+from monitor_agent_core.correction_barrier import CorrectionBarrier
 from candidate_online_gate import CandidateOnlineEvidenceGate
 from recovery_presentation_gate import RecoveryPresentationGate
 from priority_residual_gate import POLICIES as PRIORITY_RESIDUAL_POLICIES, PriorityResidualRecoveryGate
@@ -99,6 +100,7 @@ class GenericAgent:
         self.task_queue = queue.Queue() 
         self.is_running = False; self.stop_sig = False; self.llm_no = 0;  
         self.resumable_interruption = ResumableInterruption()
+        self.monitor_correction_barrier = CorrectionBarrier()
         self.inc_out = False; self.verbose = True
         self.peer_hint = True
         self.force_non_stream = False
@@ -287,6 +289,26 @@ class GenericAgent:
 
     def consume_resumable_interruption(self):
         return self.resumable_interruption.consume()
+
+    def begin_monitor_correction(self, identity):
+        self.monitor_correction_barrier.begin(identity)
+        try:
+            if self.handler is not None: self.handler.code_stop_signal.append(1)
+            cancel = getattr(getattr(self.llmclient, 'backend', None), 'cancel_active_response', None)
+            if cancel is not None: cancel()
+        except Exception:
+            self.monitor_correction_barrier.end(identity)
+            raise
+        return {'status': 'cancellation_requested', 'identity': identity}
+
+    def end_monitor_correction(self, identity=None):
+        self.monitor_correction_barrier.end(identity)
+
+    def wait_monitor_correction(self):
+        allowed = self.monitor_correction_barrier.wait(lambda: self.stop_sig)
+        if allowed and not self.resumable_interruption.is_requested() and self.handler is not None:
+            self.handler.code_stop_signal.clear()
+        return allowed
             
     def put_task(self, query, source="user", images=None):
         display_queue = queue.Queue()
@@ -348,6 +370,8 @@ class GenericAgent:
                     model_config=monitor_model_config,
                     interrupt_callback=self.request_monitor_interruption,
                     interrupt_pending=self.resumable_interruption.is_requested,
+                    correction_begin=self.begin_monitor_correction,
+                    correction_end=self.end_monitor_correction,
                     max_review_turns=int(os.environ.get('GA_MONITOR_MAX_REVIEW_TURNS', '20')),
                     completion_timeout=float(os.environ.get('GA_MONITOR_COMPLETION_TIMEOUT_SECONDS', '300')),
                 )
