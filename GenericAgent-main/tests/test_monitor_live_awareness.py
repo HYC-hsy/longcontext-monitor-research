@@ -86,7 +86,7 @@ def test_permission_failure_is_not_silently_missing(workspace, monkeypatch):
     assert 'unavailable (PermissionError)' in LiveAwareness(workspace).context()[0]
 
 
-def test_tool_schema_only_extended_when_enabled(workspace, monkeypatch):
+def test_tail_tool_available_independently_of_awareness(workspace, monkeypatch):
     import monitor_agent_core.agent as module
     from monitor_agent_core.actions import MonitorAction
     captured = []
@@ -98,7 +98,7 @@ def test_tool_schema_only_extended_when_enabled(workspace, monkeypatch):
         monitor = MonitorAgent(make_client(monitor_live_awareness=enabled), workspace)
         monitor.review('fixture')
     assert 'tail' in captured[0][0]['function']['parameters']['properties']
-    assert 'tail' not in captured[1][0]['function']['parameters']['properties']
+    assert 'tail' in captured[1][0]['function']['parameters']['properties']
     assert [t['function']['name'] for t in captured[0]] == [t['function']['name'] for t in captured[1]]
 
 

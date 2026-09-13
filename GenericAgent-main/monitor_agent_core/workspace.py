@@ -55,7 +55,10 @@ class MonitorWorkspace:
             root, parts = self.task_mounts[parts[0]], parts[1:]
         path = self._within(root, root.joinpath(*parts))
         if not path.is_file():
-            raise FileNotFoundError(virtual_path)
+            raise FileNotFoundError(
+                f"No readable file at {virtual_path}. It may not have been created yet; "
+                "this is not evidence that the corresponding task behavior is absent."
+            )
         return path
 
     def resolve_private(self, virtual_path: str) -> Path:
@@ -67,12 +70,17 @@ class MonitorWorkspace:
             raise MonitorPathError("The analysis snapshot is runtime-owned")
         return path
 
-    def read_text(self, virtual_path: str, start=1, count=200, tail=False) -> dict:
+    def read_text(self, virtual_path: str, start=1, count=200, tail=False,
+                  offset=0, max_chars=20000) -> dict:
         start, count = int(start), int(count)
         if start < 1 or not 1 <= count <= 1000:
             raise ValueError("start >= 1 and 1 <= count <= 1000 are required")
         if type(tail) is not bool or (tail and start != 1):
             raise ValueError("tail must be boolean; with tail=true omit start")
+        if type(offset) is not int or offset < 0 or (tail and offset):
+            raise ValueError("offset must be a nonnegative character offset; omit it with tail=true")
+        if type(max_chars) is not int or not 1 <= max_chars <= 200000:
+            raise ValueError("max_chars must be between 1 and 200000")
         path = self.resolve_read(virtual_path)
         selected, total = deque(maxlen=count) if tail else [], 0
         digest = hashlib.sha256()
@@ -84,9 +92,33 @@ class MonitorWorkspace:
                     selected.append(raw.decode("utf-8", errors="replace").replace("\r\n", "\n"))
         if tail:
             start = max(1, total - len(selected) + 1)
+        selected = list(selected)
+        if offset and (not selected or offset > len(selected[0])):
+            raise ValueError("offset exceeds the current first line; the file may have changed, reread the line")
+        chunks, remaining, next_read = [], max_chars, None
+        for index, line in enumerate(selected):
+            position = offset if index == 0 else 0
+            available = line[position:]
+            take = min(remaining, len(available))
+            chunks.append(available[:take])
+            remaining -= take
+            if take < len(available):
+                next_read = {"path": virtual_path, "start": start + index,
+                             "count": len(selected) - index, "offset": position + take,
+                             "max_chars": max_chars}
+                break
+            if remaining == 0 and index + 1 < len(selected):
+                next_read = {"path": virtual_path, "start": start + index + 1,
+                             "count": len(selected) - index - 1, "max_chars": max_chars}
+                break
         return {
-            "path": virtual_path, "start": start, "lines": len(selected),
-            "total_lines": total, "content": "".join(selected), "sha256": digest.hexdigest(),
+            "path": virtual_path, "start": start, "lines": len(chunks), "offset": offset,
+            "total_lines": total, "content": "".join(chunks), "sha256": digest.hexdigest(),
+            "truncated": next_read is not None, "next_read": next_read,
+            "more_lines_after_range": start + len(selected) <= total,
+            "note": "Live file, not a frozen snapshot. next_read continues this requested range; "
+                    "offset counts decoded characters within its first line. If earlier content changed, "
+                    "reread the affected range. Other ranges remain accessible.",
         }
 
     def write_text(self, virtual_path: str, content: str, mode="replace") -> dict:

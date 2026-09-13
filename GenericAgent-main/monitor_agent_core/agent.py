@@ -9,7 +9,6 @@ import threading
 import time
 import uuid
 import warnings
-from copy import deepcopy
 from dataclasses import asdict
 
 from .actions import MonitorAction, ToolOutcome
@@ -35,9 +34,15 @@ def _tool(name, description, properties, required):
 
 
 MONITOR_TOOLS = [
-    _tool("file_read", "Read a bounded range from task/ evidence or monitor/ private files.", {
+    _tool("file_read", "Read task/ evidence or monitor/ private files. Use tail=true for the latest count lines "
+          "(omit start). Large ranges return next_read arguments for continuation, including within long lines. "
+          "Full evidence remains accessible; this tool does not summarize or select relevant content.", {
         "path": {"type": "string"}, "start": {"type": "integer", "minimum": 1, "default": 1},
         "count": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 200},
+        "tail": {"type": "boolean", "default": False},
+        "offset": {"type": "integer", "minimum": 0, "default": 0,
+                   "description": "Normally omit; use the character offset returned in next_read."},
+        "max_chars": {"type": "integer", "minimum": 1, "maximum": 200000, "default": 20000},
     }, ["path"]),
     _tool("file_write", "Write only a monitor/ private file.", {
         "path": {"type": "string"}, "content": {"type": "string"},
@@ -352,6 +357,7 @@ class MonitorAgent:
                 data = self.workspace.read_text(
                     arguments["path"], arguments.get("start", 1), arguments.get("count", 200),
                     tail=arguments.get("tail", False),
+                    offset=arguments.get("offset", 0), max_chars=arguments.get("max_chars", 20000),
                 )
             elif name == "read_with_sources" and self.grounded_context:
                 data = read_with_sources(self.workspace, arguments["path"],
@@ -505,11 +511,6 @@ class MonitorAgent:
                     "use tail=true with count to read the latest lines of any permitted file. "
                     "You can still inspect any earlier range or use code_run; no mandatory reread is imposed."
                 )
-                tools = deepcopy(tools)
-                tools[0]['function']['description'] += ' With tail=true, read the latest count lines; omit start.'
-                tools[0]['function']['parameters']['properties']['tail'] = {
-                    'type': 'boolean', 'default': False,
-                }
             if self.grounded_context:
                 system += "\n\n" + GROUNDED_PROMPT
                 tools = [*tools, GROUNDED_TOOL]
