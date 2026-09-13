@@ -498,10 +498,17 @@ class MonitorAgent:
                 tools = [*tools, _tool('review_context',
                     'Get bounded previews: lexical task/private-note matches and recent public behavior. '
                     'Defaults to behavior after your last correction; false includes earlier recent events. '
-                    'Use original files for full evidence. Does not judge, update memory or send input.', {
+                    'order=latest gives the newest window; order=forward starts at the beginning of that range. '
+                    'Use returned next_read arguments to continue; include_context=false returns only behavior. '
+                    'query matches task/notes, not behavior. Use original files for full evidence. '
+                    'Does not judge, update memory or send input.', {
                         'query': {'type': 'string', 'default': ''},
                         'after_correction': {'type': 'boolean', 'default': True},
                         'steps': {'type': 'integer', 'minimum': 1, 'maximum': 32, 'default': 8},
+                        'after_cursor': {'type': 'integer', 'minimum': 0,
+                                         'description': 'Optional explicit event cursor; overrides after_correction.'},
+                        'order': {'type': 'string', 'enum': ['latest', 'forward'], 'default': 'latest'},
+                        'include_context': {'type': 'boolean', 'default': True},
                     }, [])]
             if self.live_awareness is not None:
                 system += (

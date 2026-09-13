@@ -138,6 +138,41 @@ def test_empty_and_different_task(view, tmp_path):
     assert 'Current uncertainty' not in result['context']
 
 
+def test_forward_followup_covers_first_reactions_and_continues(view):
+    append(view, 1)
+    view.record_input('Correction')
+    for n in range(2, 10):
+        append(view, n)
+    page = view.read(order='forward', steps=3, include_context=False)
+    assert page['sources'] == [f'task/public_events.jsonl#L{n}' for n in range(2, 5)]
+    assert page['remaining_later_records'] == 5
+    assert 'Current uncertainty' not in page['context']
+    seen = list(page['sources'])
+    while page['remaining_later_records']:
+        page = view.read(**page['next_read'])
+        seen.extend(page['sources'])
+    assert seen == [f'task/public_events.jsonl#L{n}' for n in range(2, 10)]
+    append(view, 10)
+    assert view.read(**page['next_read'])['last_cursor'] == 10
+
+
+def test_latest_reports_skipped_reactions_and_recovery(view):
+    for n in range(1, 9):
+        append(view, n)
+    page = view.read(steps=2)
+    assert page['skipped_earlier_records'] == 6
+    first = view.read(**page['read_from_start'])
+    assert first['sources'] == ['task/public_events.jsonl#L1', 'task/public_events.jsonl#L2']
+
+
+def test_explicit_cursor_survives_new_correction(view):
+    append(view, 1)
+    page = view.read(order='forward')
+    append(view, 2)
+    view.record_input('New correction must not move an explicit read cursor')
+    assert view.read(**page['next_read'])['last_cursor'] == 2
+
+
 def test_upstream_text_identity_and_behavior():
     root = Path(__file__).resolve().parents[2]
     vendor = root / 'GenericAgent-main/monitor_agent_core/vendor'

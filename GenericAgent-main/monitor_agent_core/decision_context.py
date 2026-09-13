@@ -88,12 +88,12 @@ class DecisionContext:
             remaining -= len(excerpt)
         return result
 
-    def _events(self, steps, after=0):
-        selected, skipped = deque(maxlen=steps), 0
+    def _event_page(self, steps, after=0, order='latest'):
+        selected, skipped, eligible = deque(maxlen=steps), 0, 0
         try:
             path = self.workspace.resolve_read('task/public_events.jsonl')
         except FileNotFoundError:
-            return [], 0
+            return [], 0, 0
         with path.open(encoding='utf-8') as stream:
             for line_no, line in enumerate(stream, 1):
                 try:
@@ -105,8 +105,14 @@ class DecisionContext:
                     skipped += 1
                     continue
                 if int(event.get('archive_sequence') or line_no) > after:
-                    selected.append((line_no, event))
-        return list(selected), skipped
+                    eligible += 1
+                    if order == 'latest' or len(selected) < steps:
+                        selected.append((line_no, event))
+        return list(selected), skipped, eligible
+
+    def _events(self, steps, after=0):
+        rows, skipped, _ = self._event_page(steps, after)
+        return rows, skipped
 
     def record_input(self, message):
         events, _ = self._events(1)
@@ -127,11 +133,16 @@ class DecisionContext:
             passages.extend(self._passages(resolved.read_text(encoding='utf-8', errors='replace'), virtual))
         return self._rank(passages, query, 2000)
 
-    def read(self, query='', after_correction=True, steps=8):
+    def read(self, query='', after_correction=True, steps=8, after_cursor=None,
+             order='latest', include_context=True):
         if not isinstance(query, str) or type(after_correction) is not bool:
             raise ValueError('query must be text and after_correction boolean')
         if type(steps) is not int or not 1 <= steps <= 32:
             raise ValueError('steps must be between 1 and 32')
+        if after_cursor is not None and (type(after_cursor) is not int or after_cursor < 0):
+            raise ValueError('after_cursor must be a nonnegative event cursor')
+        if order not in ('latest', 'forward') or type(include_context) is not bool:
+            raise ValueError('order must be latest or forward; include_context must be boolean')
         task = self.workspace.resolve_read('task/original_task.txt').read_text(encoding='utf-8')
         try:
             working = self.workspace.resolve_read('monitor/working.md').read_text(encoding='utf-8')
@@ -139,7 +150,9 @@ class DecisionContext:
             working = ''
         receipt = self._receipt()
         after = int(receipt.get('cursor_at_submission', 0)) if after_correction else 0
-        rows, malformed = self._events(steps, after)
+        if after_cursor is not None:
+            after = after_cursor
+        rows, malformed, eligible = self._event_page(steps, after, order)
         field_budget = max(60, 7500 // (max(1, len(rows)) * 3))
         trajectory = [RefinerTrajectoryStep(
             step_index=int(event.get('archive_sequence') or line),
@@ -162,14 +175,28 @@ class DecisionContext:
             '<latest_guidance>{{LATEST_GUIDANCE}}</latest_guidance>\n'
             'Recent public evidence:\n{{RECENT_TRAJECTORY}}')})
         _, context = builder.build_prompt(task_view, rendered, state, self._preview(receipt.get('message', ''), 1500))
+        if not include_context:
+            context = rendered
+        last_cursor = int(rows[-1][1].get('archive_sequence') or rows[-1][0]) if rows else after
+        remaining = eligible - len(rows)
         return {
             'context': context,
             'query': query, 'after_submission_cursor': after,
             'sources': [f'task/public_events.jsonl#L{line}' for line, _ in rows],
-            'last_cursor': int(rows[-1][1].get('archive_sequence') or rows[-1][0]) if rows else after,
+            'last_cursor': last_cursor,
+            'order': order,
+            'skipped_earlier_records': remaining if order == 'latest' else 0,
+            'remaining_later_records': remaining if order == 'forward' else 0,
+            'next_read': {'after_cursor': last_cursor, 'order': 'forward', 'steps': steps,
+                          'include_context': include_context, 'query': query},
+            'read_from_start': ({'after_cursor': after, 'order': 'forward', 'steps': steps,
+                                 'include_context': include_context, 'query': query}
+                                if order == 'latest' and remaining else None),
             'malformed_records_skipped': malformed,
             'limits': (
-                f'Latest at most {steps} public event records, not necessarily complete Agent turns. '
+                f'At most {steps} public event records in {order} order, not necessarily complete Agent turns. '
+                'next_read continues after the returned window; in latest mode use read_from_start '
+                'to recover skipped earlier reactions. Forward mode preserves chronological coverage. '
                 'Earlier events remain in the original archive; missing evidence is not absence. '
                 'Task excerpts and private note matches are lexical, not verified facts or exhaustive coverage. '
                 'Actions, observations and notes are explicitly clipped previews, not complete evidence. Read original '

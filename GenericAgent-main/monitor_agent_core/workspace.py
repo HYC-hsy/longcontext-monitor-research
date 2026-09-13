@@ -128,7 +128,7 @@ class MonitorWorkspace:
         path.parent.mkdir(parents=True, exist_ok=True)
         old = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
         updated = content if mode == "replace" else old + content if mode == "append" else content + old
-        path.write_text(updated, encoding="utf-8")
+        self._atomic_write(path, updated)
         return self._receipt(virtual_path, path, len(updated))
 
     def patch_text(self, virtual_path: str, old_text: str, new_text: str) -> dict:
@@ -140,8 +140,23 @@ class MonitorWorkspace:
         if matches != 1:
             raise ValueError(f"old_text must match exactly once; found {matches}")
         updated = content.replace(old_text, new_text, 1)
-        path.write_text(updated, encoding="utf-8")
+        self._atomic_write(path, updated)
         return self._receipt(virtual_path, path, len(updated))
+
+    @staticmethod
+    def _atomic_write(path, content):
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', newline='',
+                                             dir=path.parent, delete=False) as stream:
+                temporary = Path(stream.name)
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
     @staticmethod
     def _receipt(virtual_path, path, characters):
