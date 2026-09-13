@@ -24,7 +24,6 @@ from online_evidence_gate import OnlineEvidenceCompletionGate
 from completion_checkpoint import FirstCompletionCheckpoint, checkpoint_identity_from_environment
 from manual_completion_boundary import ManualCompletionBoundary
 from task_interruption import ResumableInterruption
-from monitor_agent_core.pause_lease import PauseLease
 from candidate_online_gate import CandidateOnlineEvidenceGate
 from recovery_presentation_gate import RecoveryPresentationGate
 from priority_residual_gate import POLICIES as PRIORITY_RESIDUAL_POLICIES, PriorityResidualRecoveryGate
@@ -100,7 +99,6 @@ class GenericAgent:
         self.task_queue = queue.Queue() 
         self.is_running = False; self.stop_sig = False; self.llm_no = 0;  
         self.resumable_interruption = ResumableInterruption()
-        self.monitor_pause = PauseLease()
         self.inc_out = False; self.verbose = True
         self.peer_hint = True
         self.force_non_stream = False
@@ -289,26 +287,6 @@ class GenericAgent:
 
     def consume_resumable_interruption(self):
         return self.resumable_interruption.consume()
-
-    def pause_monitor_task(self, reason, seconds):
-        receipt = self.monitor_pause.request(reason, seconds)
-        try:
-            self.request_monitor_interruption(
-                'The monitor temporarily paused execution to investigate: ' + reason +
-                '\nThe runtime manages resumption; this historical notice is not a request to pause again.')
-        except Exception:
-            self.monitor_pause.release()
-            raise
-        return receipt
-
-    def wait_monitor_pause(self):
-        started = time.monotonic()
-        allowed = self.monitor_pause.wait(lambda: self.stop_sig)
-        duration = time.monotonic() - started
-        if duration > 0.01 and telemetry_enabled():
-            from research_runtime import emit
-            emit('monitor_pause_wait', {'duration_seconds': duration, 'resumed': allowed})
-        return allowed
             
     def put_task(self, query, source="user", images=None):
         display_queue = queue.Queue()
@@ -370,8 +348,6 @@ class GenericAgent:
                     model_config=monitor_model_config,
                     interrupt_callback=self.request_monitor_interruption,
                     interrupt_pending=self.resumable_interruption.is_requested,
-                    pause_callback=self.pause_monitor_task,
-                    resume_callback=self.monitor_pause.release,
                     max_review_turns=int(os.environ.get('GA_MONITOR_MAX_REVIEW_TURNS', '20')),
                     completion_timeout=float(os.environ.get('GA_MONITOR_COMPLETION_TIMEOUT_SECONDS', '300')),
                 )

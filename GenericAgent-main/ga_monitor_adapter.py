@@ -10,6 +10,8 @@ from research_runtime import CompletionDecision
 
 class GenericAgentMonitorAdapter:
     def __init__(self, **runtime_options):
+        if os.environ.get('GA_MONITOR_HYBRID_CONTROL', '0') != '0':
+            raise ValueError('GA_MONITOR_HYBRID_CONTROL retired: model-requested pause was removed')
         deadline = os.environ.get("GA_MONITOR_RUN_DEADLINE_EPOCH")
         if deadline is not None:
             runtime_options["run_deadline_epoch"] = float(deadline)
@@ -23,7 +25,6 @@ class GenericAgentMonitorAdapter:
             ("GA_MONITOR_ACTIVE_WORKING_CONTEXT", "monitor_active_working_context"),
             ("GA_MONITOR_LIVE_AWARENESS", "monitor_live_awareness"),
             ("GA_MONITOR_DECISION_CONTEXT", "monitor_decision_context"),
-            ("GA_MONITOR_HYBRID_CONTROL", "monitor_hybrid_control"),
         ):
             value = os.environ.get(environment)
             if value is not None:

@@ -6,6 +6,8 @@
 
 ### 权威文档
 
+- 2026-09-13 R2后用户否决模型调用task_control申请暂停，要求确定的控制行为由工程保证。已撤销该工具、提示与租约路径，旧HYBRID_CONTROL=1启动显式报错；即时纠偏和根完成控制保留。来源纠正：LivePlan的blocking/non-blocking是执行前阻断/执行后建议，已读源码为同步调用，不能称后台并行。新工程调度尚未实现，不能未经确认引入其领域规则或恢复逐轮LLM审批。当前清单见`method_discovery/docs/MONITOR_CONTROL_ROLLBACK_AND_INVENTORY_20260913.md`。此条覆盖下方旧主动暂停裁决；历史manifest不修改、不重用。
+
 - 2026-09-13 R1真实适配诊断后，用户要求把机制使用方式也纳入优化。R2入口`method_discovery/docs/LITERATURE_TRANSFER_ADAPTATION_R2_DESIGN_20260913.md`：decision_context开启时，正常模型请求临时可见已有第一层synopsis小窗口与上次纠偏，详细原始证据仍主动查询；不增加第三层、不逐事件唤醒、不把全文packet自动注入、不强制用工具或暂停。轻量可见面与有界检索同属本候选，未证明独立效果。R1已停止，禁止复用其run-id重跑；R2真实启动仍须确认。
 
 - 2026-09-13 用户批准补齐文献机制迁移，并允许部分暂停、部分并行；执行入口 `method_discovery/docs/LITERATURE_TRANSFER_PLAN_20260913.md`。`GA_MONITOR_HYBRID_CONTROL` 是默认关闭的选择性有限暂停候选，不是逐轮审批；正常监察仍并发、只有同一监察者自主请求才暂停，纠偏/静默/故障/租约到期恢复。`GA_MONITOR_DECISION_CONTEXT` 独立控制按需原任务、记忆与原始行为视图。不得据工程通过宣称有效或替换原研究问题；真实启动仍须确认。原live-awareness准备分支暂停，不自动启动。

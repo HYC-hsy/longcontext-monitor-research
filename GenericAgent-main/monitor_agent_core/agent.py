@@ -202,10 +202,6 @@ class MonitorAgent:
         if type(decision_context) is not bool:
             raise ValueError('monitor_decision_context must be a boolean')
         self.decision_context = DecisionContext(workspace) if decision_context else None
-        self.hybrid_control = getattr(client, 'config', {}).get('monitor_hybrid_control', False)
-        if type(self.hybrid_control) is not bool:
-            raise ValueError('monitor_hybrid_control must be boolean')
-        self.task_control_callback = None
         self.active_context_enabled = active_context
         if live_awareness or active_context or decision_context:
             self.client.prepare_active_context = self._active_working_context
@@ -352,24 +348,6 @@ class MonitorAgent:
                                          arguments.get("start", 1), arguments.get("count", 200))
             elif name == 'review_context' and self.decision_context is not None:
                 data = self.decision_context.read(**arguments)
-            elif name == 'task_control' and self.hybrid_control:
-                if self.task_control_callback is None:
-                    raise ValueError('Host task control is not connected')
-                operation = arguments.get('operation')
-                if operation == 'pause':
-                    if self.completion_pending:
-                        return ToolOutcome({'status': 'already_waiting',
-                            'note': 'The Task Agent has yielded control; investigate or answer this handoff directly.'})
-                    reason, seconds = arguments.get('reason'), arguments.get('seconds', 120)
-                    if not isinstance(reason, str) or not reason.strip():
-                        raise ValueError('Explain the concrete risk of allowing work to continue')
-                    if type(seconds) is not int or not 1 <= seconds <= 300:
-                        raise ValueError('seconds must be an integer from 1 to 300')
-                    data = self.task_control_callback('pause', reason=reason, seconds=seconds)
-                elif operation == 'resume':
-                    data = self.task_control_callback('resume')
-                else:
-                    raise ValueError('operation must be pause or resume')
             elif name == 'feedback_focus' and self.feedback_focus is not None:
                 data = self.feedback_focus.call(**arguments)
             elif name == 'inquiry' and self.inquiry is not None:
@@ -492,25 +470,6 @@ class MonitorAgent:
                         "After an intervention that completion proposal is no longer pending.")
             system = self.system_prompt + "\n\n" + mode
             tools = MONITOR_TOOLS
-            if self.hybrid_control:
-                system += (
-                    '\n\nOrdinary task execution is concurrent. If continuing a concrete mistaken premise '
-                    'would compound damage while you investigate, task_control can request a temporary '
-                    'pause. This is optional, not a per-step approval protocol. Inspect the actual evidence, '
-                    'including evidence against your diagnosis. Send a focused correction with intervene '
-                    'when ready; it resumes the task. Or resume without correction if the concern is '
-                    'unsupported. Observe the subsequent response concurrently. While paused, waiting for '
-                    'the task to produce new intent cannot help: finish the current investigation or resume. '
-                    'Pauses expire automatically and wait also releases them; do not assume a task remains '
-                    'paused throughout a slow model request. The host cannot undo prior tool side effects.'
-                )
-                tools = [*tools, _tool('task_control',
-                    'Request a finite pause or resume concurrent task execution. No rollback. '
-                    'intervene sends a correction and resumes; wait releases a pause.', {
-                        'operation': {'type': 'string', 'enum': ['pause', 'resume']},
-                        'reason': {'type': 'string'},
-                        'seconds': {'type': 'integer', 'minimum': 1, 'maximum': 300, 'default': 120},
-                    }, ['operation'])]
             if self.decision_context is not None:
                 system += (
                     '\n\nA small current synopsis and your last correction are available during reasoning. '
