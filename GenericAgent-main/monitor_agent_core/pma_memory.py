@@ -15,8 +15,9 @@ from .pma_judgment import adapt, JudgmentMemoryAgent
 
 class PhaseTransport:
     """Fresh author phase calls using the same provider and cancellation handle."""
-    def __init__(self, client):
+    def __init__(self, client, understanding=None):
         self.client = client
+        self.understanding = understanding
         self.records = []
         self.failure = None
 
@@ -36,6 +37,14 @@ class PhaseTransport:
             for name in hooks:
                 setattr(client, name, None)
             adapted_system, adapted_tools = adapt(system, tools)
+            initializing = bool(tools and self.understanding is not None and not self.understanding.read())
+            if self.understanding is not None:
+                adapted_system += ('\nKeep unresolved material grounds distinct from the latest repair. '
+                                   'A monitor suggestion is local advice, not a replacement for the task. '
+                                   'Do not turn compliance with it into proof of whole-task fulfillment.')
+                prompt += '\n' + self.understanding.context()
+                if initializing:
+                    adapted_system += self.understanding.initialization_instruction()
             response = client.complete([
                 {'role': 'system', 'content': adapted_system},
                 {'role': 'user', 'content': prompt}], adapted_tools or [])
@@ -47,6 +56,9 @@ class PhaseTransport:
             for call in response.tool_calls:
                 if not isinstance(json.loads(call.arguments or '{}'), dict):
                     raise RuntimeError('PMA tool arguments must be an object')
+            if initializing:
+                self.understanding.capture(response.content)
+                record['initial_task_model'] = self.understanding.draft
             record['status'] = 'ok'
             return response
         except Exception as exc:
@@ -67,8 +79,9 @@ class PhaseTransport:
 
 
 class PMAMemoryMaintenance:
-    def __init__(self, workspace, atomic_write, audit):
+    def __init__(self, workspace, atomic_write, audit, understanding=None):
         self.workspace, self.atomic_write, self.audit = workspace, atomic_write, audit
+        self.understanding = understanding
         self.path = workspace.private_root / 'pma_memory.json'
         self.memory = (UniversalMemory.from_dict(json.loads(self.path.read_text(encoding='utf-8')))
                        if self.path.exists() else UniversalMemory())
@@ -82,7 +95,7 @@ class PMAMemoryMaintenance:
         self.cycle += 1
         before = self.memory.to_dict()
         record = dict(maintenance_id=review_id, started_at=started, before=before, status='failed')
-        transport = PhaseTransport(client)
+        transport = PhaseTransport(client, self.understanding)
         self.author.llm = transport
         try:
             # Exact author execution entry: both prompts, operations, updated-bank
@@ -96,6 +109,8 @@ class PMAMemoryMaintenance:
             raw = self.author._strip_thinking(result.raw_response_phase2 or '')
             if not result.should_inject and '<no_intervention' not in raw:
                 raise RuntimeError('Unrecognized PMA comparison response')
+            if self.understanding is not None:
+                self.understanding.commit()
             self.atomic_write('pma_memory.json', json.dumps(self.memory.to_dict(), ensure_ascii=False))
             record['status'] = 'reminder' if result.should_inject else 'no_intervention'
             if result.should_inject:
@@ -108,6 +123,8 @@ class PMAMemoryMaintenance:
             record['error_type'] = type(exc).__name__
             self.memory = UniversalMemory.from_dict(before)
             self.author.memory = self.memory
+            if self.understanding is not None:
+                self.understanding.draft = None
             raise
         finally:
             record['phases'] = transport.records

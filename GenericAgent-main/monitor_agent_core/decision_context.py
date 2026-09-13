@@ -61,6 +61,8 @@ class DecisionContext:
                     '- Intervention delivery: monitor/delivery_feedback.jsonl\n'
                     'Live code, tests and other mounted sources:\n')
             text += ''.join(f'- task/{name}/: {path}\n' for name, path in self.workspace.task_mounts.items())
+            if (self.workspace.private_root / 'task_model.md').exists():
+                text += '\nTask interpretation: monitor/task_model.md (original task remains authoritative).\n'
             text += ('\n## Last submitted correction\n'
                      + json.dumps(receipt, ensure_ascii=False, indent=2)
                      + '\nSubmission is not proof of uptake. Earlier reactions remain in the full chronology.\n'

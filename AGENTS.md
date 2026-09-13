@@ -6,6 +6,8 @@
 
 ### 权威文档
 
+- 2026-09-13 用户批准任务理解与局部修复分离候选，入口 `method_discovery/docs/TASK_UNDERSTANDING_SEPARATION_20260913.md`。`GA_MONITOR_TASK_MODEL=1`（默认关闭，需PMA维护）在已有首次维护调用生成自然 task_model.md，原任务保留完整权威原文并由模型文件引用；后续进度不自动覆盖任务理解，根完成/交接重新提供原文。无新调用阶段、不改控制链，121项工程检查通过，真实效果未验证，启动须另确认。
+
 - 2026-09-13 用户批准小幅文件入口修订，见 `method_discovery/docs/MONITOR_FILE_OVERVIEW_IMPLEMENTATION_20260913.md`。已移除模型工具 review_context；原 decision-context 开关现选择自动更新的 monitor/overview.md 文件入口，模型用通用读文件/代码工具查看。working.md 仍由同一模型自然维护，不重复自动注入其正文；概览只导航，不判定完成。PMA 两阶段、持续 History 与 follow/patrol 本轮不改。尚未真实验证，不得据工程测试认定效果。
 
 - 2026-09-13 R2后最小原要求优先候选，入口`method_discovery/docs/PMA_REQUIREMENT_FIRST_TIMED_EVIDENCE_20260913.md`。PMA适配层维护要求/声明/带时序观察，不提前裁决完成；比较先从原要求确定支持尺度再看记忆。任务公开归档新增时间元数据，监察输入展示调用/返回时间，旧/重叠观察不当作写入失败。作者process/bank不变，follow/patrol不变；仅工程验证，真实启动另确认。

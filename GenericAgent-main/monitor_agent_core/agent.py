@@ -239,9 +239,25 @@ class MonitorAgent:
         if type(pma_memory) is not bool:
             raise ValueError('monitor_pma_memory must be a boolean')
         self.pma_memory = None
+        self.task_understanding = None
+        task_model = getattr(client, 'config', {}).get('monitor_task_model', False)
+        if type(task_model) is not bool:
+            raise ValueError('monitor_task_model must be a boolean')
+        if task_model:
+            if not pma_memory:
+                raise ValueError('monitor_task_model initialization requires the existing PMA maintenance stage')
+            from .task_understanding import TaskUnderstanding
+            self.task_understanding = TaskUnderstanding(workspace)
+            self.system_prompt += (
+                '\nKeep monitor/task_model.md as your revisable understanding of required behavior, '
+                'subordinate to task/original_task.txt. Use monitor/working.md for the current inquiry '
+                'and its grounds, not another task specification. Revise task understanding with ordinary '
+                'file tools when interpretation changes; do not replace it with progress. A correction '
+                'addresses a local gap; do not promise global completion merely upon satisfying that advice.')
         if pma_memory:
             from .pma_memory import PMAMemoryMaintenance
-            self.pma_memory = PMAMemoryMaintenance(workspace, self._atomic_private_text, self._audit_dialogue)
+            self.pma_memory = PMAMemoryMaintenance(workspace, self._atomic_private_text, self._audit_dialogue,
+                                                   self.task_understanding)
         self.active_context_enabled = active_context
         if live_awareness or active_context or decision_context or pma_memory:
             self.client.prepare_active_context = self._active_working_context
@@ -267,6 +283,8 @@ class MonitorAgent:
 
     def _active_working_context(self):
         parts = []
+        if self.task_understanding is not None:
+            parts.append(self.task_understanding.context())
         if self.pma_memory is not None:
             parts.append(self.pma_memory.context())
         if self.active_context_enabled and self.decision_context is None:
@@ -486,7 +504,8 @@ class MonitorAgent:
         return ("Runtime update: the Task Agent is waiting on a current handoff at "
                 f"task/public_events.jsonl line {current['cursor']}. Inspect its public message as needed. "
                 "You may handle this handoff in this same review. Approval applies only to this proposal; "
-                "waiting for more Task Agent turns cannot advance it without a response.")
+                "waiting for more Task Agent turns cannot advance it without a response."
+                + (self.task_understanding.completion_context() if self.task_understanding is not None else ''))
 
     def _refresh_review_context(self):
         updates = [self._refresh_completion()]
@@ -511,6 +530,8 @@ class MonitorAgent:
             if self.pma_memory is not None:
                 lead = self.pma_memory.update(self.client, wake_context, self.review_id)
                 wake_context += '\n\n' + lead
+            if completion_pending and self.completion_state is None and self.task_understanding is not None:
+                wake_context += self.task_understanding.completion_context()
             wake_context += "\nLive environment map (read task sources, write only private cognition): " + json.dumps({
                 "task/": str(self.workspace.evidence_root),
                 **{f"task/{name}/": str(path) for name, path in self.workspace.task_mounts.items()},
