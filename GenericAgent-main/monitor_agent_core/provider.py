@@ -566,6 +566,8 @@ class MonitorProviderClient:
         else:
             url, headers, payload = self._openai_request(tools)
             parser = self._parse_openai_responses if self.api_mode.startswith("response") else self._parse_openai_chat
+        if self.config.get('transport_route'):
+            headers['x-model-route'] = self.config['transport_route']
         with requests.post(
             url, headers=headers, json=payload, stream=True,
             timeout=(self.connect_timeout, self.read_timeout), proxies=self.proxies, verify=self.verify,
@@ -708,13 +710,16 @@ class MonitorProviderClient:
 
     def _parse_anthropic(self, lines):
         blocks, current, tool_json, usage = [], None, "", {}
+        completed = False
         for event in self._events(lines):
             kind = event.get("type")
             if kind == "message_start": usage.update(event.get("message", {}).get("usage", {}) or {})
             elif kind == "content_block_start":
                 block = event.get("content_block", {})
+                current = None
                 if block.get("type") == "text": current = {"type": "text", "text": ""}
                 elif block.get("type") == "thinking": current = {"type": "thinking", "thinking": "", "signature": ""}
+                elif block.get("type") == "redacted_thinking": current = dict(block)
                 elif block.get("type") == "tool_use":
                     current = {"type": "tool_use", "id": block.get("id", ""), "name": block.get("name", ""), "input": {}}
                     tool_json = ""
@@ -731,7 +736,11 @@ class MonitorProviderClient:
                 blocks.append(current); current = None
             elif kind == "message_delta": usage.update(event.get("usage", {}) or {})
             elif kind == "error": raise _remote_error(event.get("error"))
-        if current: blocks.append(current)
+            elif kind == "message_stop":
+                completed = True
+                break
+        if not completed or current is not None:
+            raise RetryableProviderError('Anthropic stream ended before a complete message_stop')
         return blocks, usage
 
     def _parse_openai_responses(self, lines):

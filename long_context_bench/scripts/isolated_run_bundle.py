@@ -21,7 +21,7 @@ def digest_tree(root):
 
 
 def build_bundle(root, source, runtime, python_home, task_config, monitor_config,
-                 collector_port):
+                 collector_port, monitor_profile_path=None):
     """No Docker/API calls. Output includes a private gateway credential file."""
     root, source, runtime = Path(root), Path(source), Path(runtime)
     root.mkdir(parents=True, exist_ok=False)
@@ -49,28 +49,37 @@ def build_bundle(root, source, runtime, python_home, task_config, monitor_config
             if any(x.is_symlink() for x in p.rglob('*')):
                 raise ValueError('Runtime snapshot must not contain symbolic links')
             shutil.copytree(p, copied / name, ignore=shutil.ignore_patterns(
-                '__pycache__', 'tests', '.git', '*.pyc', 'file_access_stats.json'))
+                '__pycache__', 'tests', '.git', '*.pyc', '*.local.json', 'file_access_stats.json'))
     configs = runpy.run_path(str(source / 'mykey.py'))
     gateway = {'models': {}, 'telemetry': f'http://host.docker.internal:{collector_port}/v1/traces'}
     client_configs = {}
-    for name in dict.fromkeys([task_config, monitor_config]):
-        cfg = dict(configs[name])
+    independent = json.loads(Path(monitor_profile_path).read_text(encoding='utf-8')) if monitor_profile_path else None
+    monitor_clients = {}
+    for role, name in [('task', task_config), ('monitor', monitor_config)]:
+        cfg = dict(independent[name] if role == 'monitor' and independent is not None else configs[name])
         endpoint = urlsplit(cfg['apibase'])
         if endpoint.scheme != 'https' or not endpoint.hostname or endpoint.query or endpoint.fragment:
             raise ValueError('Gateway requires a fixed HTTPS inference base')
         if cfg.get('proxy'):
             raise ValueError('External provider proxies need explicit isolation review')
         model = cfg['model']
-        if model in gateway['models']:
+        route_id = 'monitor' if role == 'monitor' and independent is not None else model
+        if route_id in gateway['models']:
             raise ValueError('Ambiguous duplicate model route')
         key = cfg['apikey']
         headers = {'x-api-key': key} if key.startswith('sk-ant-') else {'Authorization': 'Bearer ' + key}
         paths = ['/v1/messages'] if 'claude' in model.lower() else ['/v1/responses']
-        gateway['models'][model] = {'base': cfg['apibase'], 'headers': headers, 'paths': paths}
+        gateway['models'][route_id] = {'base': cfg['apibase'], 'headers': headers, 'paths': paths, 'model': model}
         cfg.update(apikey='isolated-local-channel', apibase=f'http://127.0.0.1:{PORT}')
         cfg.pop('proxy', None)
-        client_configs[name] = cfg
+        if role == 'monitor' and independent is not None:
+            cfg['transport_route'] = route_id
+            monitor_clients[name] = cfg
+        else:
+            client_configs[name] = cfg
     (copied / 'mykey.json').write_text(json.dumps(client_configs), encoding='utf-8')
+    if monitor_clients:
+        (copied / 'monitor_agent_core' / 'models.local.json').write_text(json.dumps(monitor_clients), encoding='utf-8')
     private = root / 'gateway'
     private.mkdir()
     (private / 'config.json').write_text(json.dumps(gateway), encoding='utf-8')

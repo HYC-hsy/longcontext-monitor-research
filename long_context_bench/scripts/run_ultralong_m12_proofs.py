@@ -704,7 +704,9 @@ def run_proof(
             WORK_ROOT / 'isolated_bundles' / run_id, m4.GA_ROOT, m4.GA_RUNTIME,
             identity['runtime']['python_home'], os.environ['GA_LLM_CONFIG_NAME'],
             os.environ['GA_PMA_CONFIG'] if os.environ.get('GA_PMA_ENABLED') == '1'
-            else os.environ['GA_MONITOR_CONFIG'], COLLECTOR_PORT)
+            else os.environ['GA_MONITOR_CONFIG'], COLLECTOR_PORT,
+            monitor_profile_path=(m4.GA_ROOT.parent / 'monitor_config' / 'models.local.json')
+            if os.environ.get('GA_MONITOR_ENABLED') == '1' else None)
         identity['isolation'] = json.loads(
             (isolation_compose.parent / 'isolation_identity.json').read_text(encoding='utf-8'))
     mounts = [

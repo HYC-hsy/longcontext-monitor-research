@@ -36,6 +36,16 @@ def test_route_is_fixed_and_session_local(config):
     assert json.loads(body)['store'] is False
 
 
+def test_same_model_distinct_monitor_credentials(config):
+    config['models']['monitor'] = dict(config['models']['test-model'],
+        model='test-model', headers={'Authorization': 'Bearer MONITOR'})
+    body = b'{"model":"test-model","input":"hello"}'
+    assert t.resolve_request('/v1/responses', body, config)[1]['Authorization'] == 'Bearer PRIVATE'
+    assert t.resolve_request('/v1/responses', body, config, 'monitor')[1]['Authorization'] == 'Bearer MONITOR'
+    with pytest.raises(ValueError):
+        t.resolve_request('/v1/responses', b'{"model":"wrong"}', config, 'monitor')
+
+
 @pytest.mark.parametrize('path', ['https://github.com/x', '//github.com/x',
     '/v1/responses?url=https://github.com', '/v1/../files', '/v1/files', '/'])
 def test_no_arbitrary_fetch(config, path):
@@ -152,3 +162,23 @@ def test_bundle_has_no_source_checkout_or_credentials_in_task(tmp_path):
     with pytest.raises(FileExistsError):
         b.build_bundle(tmp_path / 'bundle', source, tmp_path / 'runtime',
                        'python', 'task', 'monitor', 15340)
+
+
+def test_independent_monitor_bundle_same_model(tmp_path):
+    source = tmp_path / 'src'
+    (source / 'monitor_agent_core').mkdir(parents=True)
+    (source / 'mykey.py').write_text("task={'model':'claude-test','apikey':'TASKSECRET','apibase':'https://example.invalid'}")
+    private = tmp_path / 'models.local.json'
+    private.write_text(json.dumps({'monitor': {'provider': 'anthropic', 'model': 'claude-test',
+        'apikey': 'MONITORSECRET', 'apibase': 'https://example.invalid'}}))
+    copied, compose = b.build_bundle(tmp_path / 'bundle', source, tmp_path / 'runtime',
+        'python', 'task', 'monitor', 15340, monitor_profile_path=private)
+    task = json.loads((copied / 'mykey.json').read_text())
+    monitor = json.loads((copied / 'monitor_agent_core/models.local.json').read_text())
+    gateway = json.loads((compose.parent / 'gateway/config.json').read_text())
+    assert list(task) == ['task']
+    assert monitor['monitor']['transport_route'] == 'monitor'
+    assert monitor['monitor']['apikey'] == 'isolated-local-channel'
+    assert gateway['models']['monitor']['headers']['Authorization'] == 'Bearer MONITORSECRET'
+    assert gateway['models']['claude-test']['headers']['Authorization'] == 'Bearer TASKSECRET'
+    assert 'MONITORSECRET' not in ''.join(p.read_text() for p in copied.rglob('*.json'))

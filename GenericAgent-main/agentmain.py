@@ -353,11 +353,10 @@ class GenericAgent:
             if os.environ.get('GA_MONITOR_ENABLED') == '1' and self.monitor_runtime is None:
                 from ga_monitor_adapter import GenericAgentMonitorAdapter
                 monitor_config_name = os.environ.get(
-                    'GA_MONITOR_CONFIG', 'native_oai_cc_vibe_gpt56_sol_high'
+                    'GA_MONITOR_CONFIG', 'claude_monitor_opus48'
                 )
-                monitor_model_config = reload_mykeys()[0].get(monitor_config_name)
-                if not monitor_model_config:
-                    raise ValueError(f'Unknown GA_MONITOR_CONFIG: {monitor_config_name}')
+                from monitor_agent_core.configuration import load_profile
+                monitor_model_config = load_profile(monitor_config_name)
                 artifact_dir = os.environ.get('GA_MONITOR_ARTIFACT_DIR') or os.path.join(
                     script_dir, 'temp', 'clean_monitor',
                     os.environ.get('GA_BENCH_RUN_ID') or research_id('monitor_run')

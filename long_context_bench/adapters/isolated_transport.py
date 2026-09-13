@@ -18,7 +18,7 @@ MAX_BODY = 32 * 1024 * 1024
 PATHS = {'/v1/messages', '/v1/messages?beta=true', '/v1/responses',
          '/v1/chat/completions', '/v1/traces'}
 FORWARD_HEADERS = {'content-type', 'accept', 'anthropic-version', 'anthropic-beta',
-                   'content-encoding'}
+                   'content-encoding', 'x-model-route'}
 
 
 def reject_remote_media(value):
@@ -40,7 +40,7 @@ def reject_remote_media(value):
             reject_remote_media(item)
 
 
-def resolve_request(path, body, config):
+def resolve_request(path, body, config, route_id=None):
     if path not in PATHS:
         raise ValueError('Only fixed inference endpoints and trace ingestion are available')
     if path == '/v1/traces':
@@ -48,9 +48,11 @@ def resolve_request(path, body, config):
     payload = json.loads(body)
     reject_remote_media(payload.get('input', payload.get('messages', [])))
     model = payload.get('model')
-    route = config['models'].get(model)
+    route = config['models'].get(route_id or model)
     if not route or path.split('?')[0] not in route['paths']:
         raise ValueError('Model/endpoint is not configured for this run')
+    if route.get('model', model) != model:
+        raise ValueError('Model does not match the configured route')
     # Providers must not obtain external data through hosted search/fetch tools.
     if any(t.get('type', 'function') != 'function' for t in payload.get('tools', [])):
         raise ValueError('Only client-executed function tools are permitted')
@@ -103,7 +105,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 conn = UnixHTTPConnection(self.server.socket_path)
                 target = self.path
             else:
-                url, credentials, body = resolve_request(self.path, body, self.server.config)
+                route_id = headers.pop('x-model-route', None)
+                url, credentials, body = resolve_request(self.path, body, self.server.config, route_id)
                 parsed = urlsplit(url)
                 headers.update(credentials)
                 if parsed.scheme == 'https':
