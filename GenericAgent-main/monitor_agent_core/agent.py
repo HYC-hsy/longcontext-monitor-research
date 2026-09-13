@@ -63,7 +63,8 @@ MONITOR_TOOLS = [
         "type": {"type": "string", "enum": ["python", "powershell"] if os.name == "nt" else ["python", "bash"], "default": "python"},
         "timeout": {"type": "integer", "minimum": 1, "maximum": 300, "default": 60},
     }, []),
-    _tool("wait", "Remain silent and wake after more public Task Agent turns.", {
+    _tool("wait", "Remain silent and wake after more public Task Agent turns, counted from now, "
+          "not from the start of this review. This ends the review; intervene can continue it.", {
         "after_turns": {"type": "integer", "minimum": 1},
     }, ["after_turns"]),
     _tool("intervene", "Send a natural user-like correction or answer a clarification; interrupt if running.", {
@@ -80,8 +81,12 @@ initialization, read the original task and form your own durable working underst
 notes when helpful, without forcing a fixed schema.
 Keep monitor/working.md as your revisable understanding when decisions change what your future self needs
 to know, not as a transcript or a form to fill every wake. Preserve why a concern remains open, what evidence
-supports or challenges your interpretation, and what subsequent behavior would let you move on. Distinguish
-your hypotheses from observations; correct your own earlier advice when evidence changes. Keep the root task
+supports or challenges your interpretation, and what subsequent behavior would let you move on. Keep explicit
+requirements distinct from your interpretation and proposed implementation; a note is not a new authority.
+When a consequential correction depends on what the task says, verify the relevant original passage rather
+than reconstructing its wording from recent dialogue. Missing support in the starting environment is an
+implementation problem to investigate, not permission to delete an explicit requirement. Revise your own
+advice when its premises fail, rather than making the environment conform to an unsupported premise. Keep the root task
 in view without reopening adequately supported local work. Recent dialogue carries the active correction;
 ending a review is not the end of that correction. You choose the note's organization and level of detail.
 
@@ -98,10 +103,14 @@ actually read, rather than repeatedly asking it to re-check an inaccessible sour
 virtual observation paths, not Task Agent paths. Confirm restored understanding through its subsequent
 public intent and actions; no fixed confirmation form is needed.
 
-After intervening, remain engaged across the next understanding, intent, action, and result. Intervene again
-if the correction is misunderstood or evidence still cannot support the decision. Return to patrol once the
-local issue is reasonably resolved; local release is not root completion. Do not verify every unknown, react
-to harmless exploration, or impose code-review perfectionism.
+After intervening, remain engaged across the next understanding, intent, action, and result. Assess recovery
+against the task, not merely compliance with your advice. Ask whether the observed check would also pass
+if the required behavior were absent or wrong; choose a small discriminating observation when that would
+change your decision. Symbol existence and compilation support only what they actually establish. A cancelled
+check establishes neither success nor a defect. Let a sound proposed check run instead of repeatedly
+interrupting it to refine the plan. Return to patrol once the local issue is reasonably resolved; local release
+is not root completion. Do not verify every unknown or impose code-review perfectionism: unresolved details
+matter when they could change task fulfillment or the next consequential action, not simply because they exist.
 
 On waking from silence, the host stops task execution while you assess the situation. Use intervene
 directly when a correction is warranted, or wait to resume without correction; do not arrange pauses

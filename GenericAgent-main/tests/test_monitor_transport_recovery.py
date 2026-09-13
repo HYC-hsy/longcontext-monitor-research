@@ -205,6 +205,20 @@ def test_pending_completion_survives_recovery_without_tool_replay(tmp_path, monk
     result = []
     waiter = None
     try:
+        # A model call starting is not initialization finishing. Wait for the
+        # worker's committed schedule before generating new task progress.
+        receipt_path = runtime.artifact_dir / 'runtime_receipts.jsonl'
+        deadline = time.monotonic() + 3
+        ready = False
+        while time.monotonic() < deadline:
+            if receipt_path.exists():
+                ready = any(json.loads(line).get('kind') == 'ready'
+                            for line in receipt_path.read_text().splitlines()
+                            if line.endswith('}'))
+                if ready:
+                    break
+            time.sleep(.01)
+        assert ready
         # Ordinary review starts, then completion arrives during recovery (R3 ordering).
         runtime.archive_boundary({'task_turn': 1})
         assert entered.wait(3)

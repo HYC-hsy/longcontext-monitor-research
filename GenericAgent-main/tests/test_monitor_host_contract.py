@@ -80,7 +80,7 @@ def test_installed_package_runs_without_ga(tmp_path):
     subprocess.run([sys.executable, '-m', 'pip', 'install', '--no-deps', '--no-index',
                     '--target', str(target), str(next(wheel_dir.glob('*.whl')))], check=True, capture_output=True)
     code = '''
-import sys, threading, time
+import sys, threading, time, json
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 from monitor_agent_core.runtime import MonitorRuntime
@@ -102,7 +102,13 @@ runtime=MonitorRuntime(task_id='standalone',public_task='Inspect public tests',t
     interrupt_callback=lambda text:None,process_factory=Process)
 try:
     deadline=time.monotonic()+5
-    while not calls and time.monotonic()<deadline:time.sleep(.02)
+    receipt_path=runtime.artifact_dir/'runtime_receipts.jsonl'
+    def ready():
+        if not receipt_path.exists():return False
+        return any(json.loads(line).get('kind')=='ready'
+                   for line in receipt_path.read_text().splitlines() if line.endswith('}'))
+    while not ready() and time.monotonic()<deadline:time.sleep(.02)
+    assert ready()
     assert calls
     runtime.archive_boundary({'task_turn':1,'text':'I will inspect tests','synopsis':'Inspect tests','tool_calls':[],'tool_results':[]})
     while len(calls)<2 and time.monotonic()<deadline:time.sleep(.02)

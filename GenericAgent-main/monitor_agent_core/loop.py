@@ -117,7 +117,7 @@ def run_review(client, system_prompt: str, wake_context: str, tools: list[dict],
                 "content": json.dumps(outcome.data, ensure_ascii=False, default=str),
             })
             if outcome.continue_review:
-                next_prompts.append("Continue the same review and finish with one control action.")
+                next_prompts.append("Continue the same review under the active review's control instructions.")
         messages = [{
             "role": "user",
             "content": "\n".join(next_prompts) or "Continue.",

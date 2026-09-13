@@ -151,10 +151,16 @@ def _worker(config, commands, outputs):
             # queued patrol/completion commands after the parent has failed it.
             return not isinstance(exc, ProviderRecoveryExhausted)
         if action.kind == "wait":
-            if close_watch or wake_receipts is not None:
-                outputs.put({'kind': 'review_silent'})
+            release_wake = close_watch or wake_receipts is not None
             close_watch = False
-            next_wake_turn = task_turn + max(1, int(action.payload["after_turns"]))
+            # Silence starts now, not when this potentially long review began.
+            # This clock conveys progress only; it does not mark evidence read.
+            clock = config.get('latest_task_turn')
+            current_turn = max(task_turn, clock.value) if clock is not None else task_turn
+            next_wake_turn = current_turn + max(1, int(action.payload["after_turns"]))
+            if release_wake:
+                outputs.put({'kind': 'review_silent', 'from_turn': current_turn,
+                             'next_wake_turn': next_wake_turn})
         elif action.kind == "intervene":
             close_watch = True
             next_wake_turn = task_turn + 1
@@ -292,6 +298,7 @@ class MonitorRuntime:
         self._completion_generation = 0
         self._active_completion = self._context.Value('q', 0)
         self._completion_cursor = self._context.Value('q', 0)
+        self._latest_task_turn = self._context.Value('q', 0)
         self._closed = threading.Event()
         process = process_factory or self._context.Process
         self._process = process(target=worker_target or _worker, args=({
@@ -301,6 +308,7 @@ class MonitorRuntime:
             "task_original_path": self.task_original_path,
             "active_completion": self._active_completion,
             "completion_cursor": self._completion_cursor,
+            "latest_task_turn": self._latest_task_turn,
             "run_deadline_epoch": time.time() + max(0.0, self._run_deadline - time.monotonic()),
             "stop_event": self._stop_event,
             "completion_receipts": self._completion_receipts,
@@ -324,6 +332,9 @@ class MonitorRuntime:
             sequence = self._sequence
             raw = dict(packet, archive_sequence=sequence)
             _append(self.events_path, raw)
+            with self._latest_task_turn.get_lock():
+                self._latest_task_turn.value = max(
+                    self._latest_task_turn.value, int(raw.get('task_turn') or 0))
             calls = raw.get("tool_calls") or []
             _append(self.synopsis_path, {
                 "cursor": sequence, "task_turn": raw.get("task_turn"),
