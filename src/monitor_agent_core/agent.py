@@ -238,6 +238,17 @@ class MonitorAgent:
         pma_memory = getattr(client, 'config', {}).get('monitor_pma_memory', False)
         if type(pma_memory) is not bool:
             raise ValueError('monitor_pma_memory must be a boolean')
+        self.root_decision_contract = getattr(client, 'config', {}).get(
+            'monitor_root_decision_contract', False)
+        if type(self.root_decision_contract) is not bool:
+            raise ValueError('monitor_root_decision_contract must be a boolean')
+        if self.root_decision_contract and not pma_memory:
+            raise ValueError('monitor_root_decision_contract requires monitor_pma_memory')
+        self.root_simple_check = getattr(client, 'config', {}).get('monitor_root_simple_check', False)
+        if type(self.root_simple_check) is not bool:
+            raise ValueError('monitor_root_simple_check must be a boolean')
+        if self.root_simple_check and (not pma_memory or self.root_decision_contract):
+            raise ValueError('root_simple_check requires PMA and is exclusive with root_decision_contract')
         self.pma_memory = None
         self.task_understanding = None
         task_model = getattr(client, 'config', {}).get('monitor_task_model', False)

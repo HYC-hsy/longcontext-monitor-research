@@ -52,6 +52,8 @@ class GenericAgentMonitorAdapter:
             ("GA_MONITOR_LIVE_AWARENESS", "monitor_live_awareness"),
             ("GA_MONITOR_DECISION_CONTEXT", "monitor_decision_context"),
             ("GA_MONITOR_PMA_MEMORY", "monitor_pma_memory"),
+            ("GA_MONITOR_ROOT_DECISION_CONTRACT", "monitor_root_decision_contract"),
+            ("GA_MONITOR_ROOT_SIMPLE_CHECK", "monitor_root_simple_check"),
             ("GA_MONITOR_TASK_MODEL", "monitor_task_model"),
         ):
             value = os.environ.get(environment)

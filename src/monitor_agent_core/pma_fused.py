@@ -6,6 +6,7 @@ This adapter expands each model call into an investigation loop. It does not
 run a third reviewer or clear the persistent monitor conversation between phases.
 """
 import asyncio
+import hashlib
 from copy import deepcopy
 from dataclasses import asdict
 import json
@@ -47,6 +48,38 @@ There is no separate textual decision to emit before calling a control tool.
 Use allow_complete only for a currently pending, justified root handoff, not merely
 because no reminder is needed. Your checks must support the required behavior, not
 just the presence of a similarly named artifact. Original requirements outrank memory.
+'''
+
+ROOT_DECISION = '''
+You are deciding how to handle a current whole-task handoff, not whether a memory
+reminder would be useful. Earlier reminder-selection questions do not govern this
+decision. First interpret the actual handoff: a clarification or blocker is not
+itself a claim of success.
+For a completion claim, consider the original task as a whole. What must be true
+to approve it, and what do the available observations actually establish?
+Distinguish the agent's reports, your earlier beliefs, and observations with their
+sources. A fixed local concern is not evidence that unrelated requirements hold.
+If a material uncertainty could change this decision, briefly identify the concrete
+question and seek the smallest useful observation with your existing tools. Ask
+whether a plausible incorrect implementation would pass the same check. Choose
+what to inspect yourself; neither a checklist nor a mandatory test command is needed.
+Uncertainty can justify investigation without already proving an agent mistake.
+Correct an evidenced deviation, or ask for needed clarification, without adding
+requirements. Revise the same bank if your grounds change. Approve when evidence
+is sufficient; do not chase every unknown or repeat checks ceremonially. If tools
+cannot resolve a material gap, preserve it explicitly; exhaustion is not success.
+Use the existing control tools and phase rules. This instruction neither grants
+extra budget nor executes or approves a handoff on your behalf.
+'''
+
+ROOT_SIMPLE_CHECK = '''
+You are handling a current whole-task handoff. Interpret the actual message first;
+it may ask for clarification or report a blocker rather than claim completion.
+Before approving a completion claim, review the available public build and relevant
+test evidence. If it is missing or no longer applies to the current work, choose
+an appropriate public check with your existing tools. Do not use hidden evaluation
+or reference answers. Report unresolved failures accurately, and avoid unnecessary
+repetition when the available checks are sufficient. Use the existing control tools.
 '''
 
 
@@ -211,12 +244,33 @@ class FusedTransport:
         system = system.replace('Track progress internally (not shown to action agent)',
                                 'Maintain internal progress and its grounds')
         system = identity + '\n\n' + system + (PHASE_ONE if maintenance else PHASE_TWO)
+        last_contract = None
+
+        def current_system():
+            nonlocal last_contract
+            active = bool(monitor.completion_pending)
+            proposal = getattr(monitor, '_seen_completion', None)
+            generation = proposal.get('generation') if proposal else None
+            contract = ('root' if active else 'ordinary', generation)
+            policy = ROOT_SIMPLE_CHECK if monitor.root_simple_check else ROOT_DECISION
+            selected = identity + '\n\n' + policy + PHASE_TWO if active else system
+            if contract != last_contract:
+                owner.audit('root_decision_contract_selected', mode=contract[0],
+                            candidate='simple_check' if monitor.root_simple_check else 'decision_contract',
+                            generation=generation, phase=phase,
+                            system_sha256=hashlib.sha256(selected.encode('utf-8')).hexdigest())
+                last_contract = contract
+            return selected
+
+        dynamic_system = (current_system if (monitor.root_decision_contract or monitor.root_simple_check)
+                          and not maintenance else None)
         usage_start = len(getattr(monitor.client, 'usage_records', []))
         try:
             owner.audit('pma_fused_phase_started', phase=phase)
             action = run_review(monitor.client, system, prompt, ordinary + BANK_TOOLS,
                                 dispatch, monitor.max_review_turns, audit=owner.audit,
-                                before_model=before, on_text=text_result)
+                                before_model=before, on_text=text_result,
+                                system_for_model=dynamic_system)
             if not maintenance:
                 self.action = action
             # Operations were already executed through the author's executor and

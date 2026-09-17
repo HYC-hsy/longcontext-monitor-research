@@ -4,6 +4,14 @@
 
 ## 阅读顺序
 
+### 最新：根判断候选 R1（异常终止，无有效评分）
+
+请先读 [本次审阅入口](docs/archive/ROOT_DECISION_R1_EXPERT_REVIEW_20260917.md)，
+再看 [轨迹与失败回执](evidence/root_decision_fyne_r1)。执行版本为 eb6d7cd。
+根判断合同尚未触发，监察者在普通 review 的续接阶段失败；不能据此评价候选效果。
+同题简单公共检查对照已准备但未启动，计划排查共享工程故障后继续比较。
+下方 R9 内容是前一轮历史，不是本次结果。
+
 ### 2026-09-17 更新：R9
 
 优先阅读 [R9审计](docs/archive/PMA_PHASE_HANDOFF_R9_AUDIT_20260917.md) 和 [交接修复](docs/archive/PMA_PHASE_HANDOFF_REPAIR_20260917.md)。源码更新到本地46ba27f；R8保留作对照。

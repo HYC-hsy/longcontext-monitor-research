@@ -213,7 +213,13 @@ class MonitorProviderClient:
                                 result = json.loads(block.get("content", ""))
                             except (ValueError, TypeError):
                                 result = {}
-                            if isinstance(result, dict) and result.get("status") == "accepted":
+                            # A phase handoff closes a tool exchange, not a review.
+                            # Older archives lack the typed action; keep their
+                            # acknowledged control-call boundary semantics.
+                            if (isinstance(result, dict)
+                                    and result.get("status") == "accepted"
+                                    and result.get("control_action", "legacy")
+                                    in self.CONTROL_ACTIONS | {"legacy"}):
                                 terminal_pending = True
                 if terminal_pending and not outstanding:
                     boundaries.append(index + 1)

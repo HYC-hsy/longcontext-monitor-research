@@ -13,7 +13,7 @@ class MonitorLoopError(RuntimeError):
 
 def run_review(client, system_prompt: str, wake_context: str, tools: list[dict],
                dispatch, max_turns: int = 20, audit=None, before_model=None,
-               on_text=None) -> MonitorAction:
+               on_text=None, system_for_model=None) -> MonitorAction:
     """Run one wake while the provider client preserves history across wakes."""
     messages = [
         {"role": "system", "content": system_prompt},
@@ -41,6 +41,18 @@ def run_review(client, system_prompt: str, wake_context: str, tools: list[dict],
                 raise
             if update:
                 messages.append({"role": "user", "content": update})
+        if system_for_model is not None:
+            # Resolve after refreshing host state, including mid-review handoffs.
+            # Provider replaces its system context; conversation is not reset.
+            try:
+                current_system = system_for_model()
+            except Exception:
+                preserve_results([result for message in messages
+                                  for result in message.get('tool_results', [])],
+                                 'system_refresh_failed')
+                raise
+            messages = [{"role": "system", "content": current_system}] + [
+                message for message in messages if message['role'] != 'system']
         # Record deltas, not a second copy of the entire growing provider history.
         record('model_input', turn=_turn, messages=messages)
         try:
