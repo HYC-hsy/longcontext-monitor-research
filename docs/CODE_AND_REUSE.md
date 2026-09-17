@@ -1,6 +1,6 @@
 # 源码、许可与复现边界
 
-本包复制现有实现，不在整理过程中修复它的研究或工程缺陷。核心源自本地 d95ed58 工作树，R8 使用 2a2cc9e；逐文件 hash 见 manifest。历史可选模块仍保留，不能仅凭文件存在判断机制启用。
+本包复制现有实现，不在整理过程中修复它的研究或工程缺陷。当前核心源自本地46ba27f，R9使用该版本；R8使用2a2cc9e，旧源码可在本共享仓库历史提交查看。逐文件hash见manifest。历史可选模块仍保留，不能仅凭文件存在判断机制启用。
 
 阅读入口：agent.py → pma_fused.py → vendor/pma_memory/memory_agent.py；runtime.py 管理生命周期；provider.py 管理模型协议与 History；workspace.py 和 process_runner.py 提供观察/执行能力。
 

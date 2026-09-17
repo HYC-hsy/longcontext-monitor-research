@@ -103,11 +103,14 @@ def run_review(client, system_prompt: str, wake_context: str, tools: list[dict],
                    action=({'kind': outcome.action.kind, 'payload': outcome.action.payload}
                            if outcome.action is not None else None))
             if outcome.action is not None:
+                receipt = {"status": "accepted", "control_action": outcome.action.kind}
+                if outcome.data is not None:
+                    # Preserve explicit non-execution/transfer receipts as well as
+                    # the loop transition. A phase exit is not task control.
+                    receipt['result'] = outcome.data
                 completed = tool_results + [{
                     "tool_use_id": call.id,
-                    "content": json.dumps({
-                        "status": "accepted", "control_action": outcome.action.kind,
-                    }),
+                    "content": json.dumps(receipt, ensure_ascii=False),
                 }]
                 completed.extend({
                     "tool_use_id": pending.id,

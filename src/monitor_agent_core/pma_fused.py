@@ -6,6 +6,7 @@ This adapter expands each model call into an investigation loop. It does not
 run a third reviewer or clear the persistent monitor conversation between phases.
 """
 import asyncio
+from copy import deepcopy
 from dataclasses import asdict
 import json
 
@@ -24,7 +25,11 @@ Update the bank with the provided memory operations. Distinguish requirements, c
 observations and their scope; saved conclusions remain revisable. The bank is your
 durable cognition; private files are optional supporting material, not required parallel
 progress reports. When maintenance is sufficient, respond <maintenance_complete/>.
-Do not send task input or decide root completion in this phase.
+If ready to propose intervene, wait or allow_complete, call that tool instead to
+finish maintenance and carry the proposed action into judgment. Save needed bank
+updates before this call. In this phase it only transfers intent: no task input,
+waiting schedule or completion approval is executed. Judgment can confirm, revise
+or discard the proposal using the updated bank and current evidence.
 '''
 
 PHASE_TWO = '''
@@ -122,6 +127,7 @@ class FusedTransport:
         self.action = None
         self.calls = 0
         self.interventions = []
+        self.pending_intent = None
 
     async def call(self, *, prompt, system, tools=None):
         if self.failure is not None:
@@ -131,14 +137,40 @@ class FusedTransport:
         phase = 'maintenance' if maintenance else 'comparison'
         if not maintenance:
             system, prompt = decision_prompts(system, prompt)
+            if self.pending_intent is not None:
+                prompt += ('\n\nMaintenance handed over the following proposed control action. '
+                           'It has NOT been executed: no input sent, wait scheduled or completion approved. '
+                           'Use the updated bank and current evidence to confirm, revise or discard it. '
+                           'You may act now if its grounds still hold; no repeat investigation is required '
+                           'just to change phases. Only a control tool in this phase executes the decision.\n'
+                           + json.dumps(self.pending_intent, ensure_ascii=False))
+                owner.audit('pma_control_intent_received', intent=self.pending_intent,
+                            executed=False)
         bank_names = {t['function']['name'] for t in BANK_TOOLS}
-        ordinary = [t for t in self.tools if t['function']['name'] not in
-                    ({'wait', 'allow_complete', 'intervene'} if maintenance else set())]
+        control_names = {'wait', 'allow_complete', 'intervene'}
+        ordinary = deepcopy(self.tools)
+        if maintenance:
+            for tool in ordinary:
+                function = tool['function']
+                if function['name'] in control_names:
+                    function['description'] = (
+                        'Finish maintenance and hand this proposed action to judgment. '
+                        'NOT executed here; judgment must confirm, revise or discard it. '
+                        'Save memory updates before calling. In judgment this tool will: '
+                        + function['description'])
         allowed = {t['function']['name'] for t in ordinary} | bank_names
 
         def dispatch(name, args):
             if name not in allowed:
                 return ToolOutcome({'status': 'error', 'error': 'Tool unavailable in this phase'})
+            if maintenance and name in control_names:
+                if not isinstance(args, dict):
+                    return ToolOutcome({'status': 'error', 'error': 'Tool arguments must be an object'})
+                self.pending_intent = {'name': name, 'arguments': deepcopy(args)}
+                receipt = {'status': 'intent_transferred', 'executed': False, 'input_sent': False,
+                           'next': 'Judgment must confirm, revise or discard this proposal.'}
+                owner.audit('pma_control_intent_handoff', intent=self.pending_intent, **receipt)
+                return ToolOutcome(receipt, False, MonitorAction('maintenance_complete', {}))
             if name in bank_names:
                 return owner.bank_call(name, args)
             outcome = monitor.dispatch(name, args)

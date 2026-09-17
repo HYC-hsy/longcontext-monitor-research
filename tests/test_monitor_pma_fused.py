@@ -44,7 +44,6 @@ def test_bad_bank_operation_returns_error_then_model_can_repair(workspace):
 
 def test_maintenance_cannot_send_or_approve(workspace):
     client = Client([response('intervene', message='must not send'),
-                     comparison('<maintenance_complete/>'),
                      response('wait', after_turns=1)])
     sent = []
     monitor = MonitorAgent(client, workspace)
@@ -52,7 +51,9 @@ def test_maintenance_cannot_send_or_approve(workspace):
     monitor.review('wake')
     assert not sent
     names = {t['function']['name'] for t in client.inputs[0][1]}
-    assert not names.intersection({'intervene', 'allow_complete', 'wait'})
+    assert {'intervene', 'allow_complete', 'wait'} <= names
+    assert 'must not send' in client.inputs[1][0][1]['content']
+    assert 'NOT been executed' in client.inputs[1][0][1]['content']
 
 
 def test_failure_does_not_continue_to_comparison(workspace):
@@ -194,3 +195,130 @@ def test_two_interventions_share_comparison_and_bank_receipts(workspace):
     assert len([r for r in records if r['event'] == 'pma_fused_phase_started']) == 2
     cycle = next(r for r in records if r['event'] == 'pma_fused_cycle')
     assert cycle['interventions'] == sent and cycle['result']['should_inject']
+
+
+def test_pending_intent_transfers_updated_bank_and_only_confirmed_message_is_sent(workspace):
+    client = Client([
+        response('memory_save_knowledge', content='Both forms still required.'),
+        response('intervene', message='Draft correction'),
+        response('intervene', message='Revised correction'),
+        response('wait', after_turns=1, mode='follow'),
+    ])
+    sent = []
+    monitor = MonitorAgent(client, workspace)
+    monitor.intervention_callback = sent.append
+    assert monitor.review('wake').kind == 'wait'
+    assert sent == ['Revised correction']
+    assert len(client.inputs) == 4
+    prompt = client.inputs[2][0][1]['content']
+    assert 'Draft correction' in prompt and 'Both forms still required.' in prompt
+    results = [json.loads(r['content']) for m in client.history
+               for r in m.get('tool_results', [])]
+    transferred = next(r for r in results if r.get('result', {}).get('status') == 'intent_transferred')
+    assert transferred['control_action'] == 'maintenance_complete'
+    assert transferred['result']['input_sent'] is False
+    records = [json.loads(x) for x in (workspace.private_root / 'audit/dialogue.jsonl')
+               .read_text(encoding='utf-8').splitlines()]
+    assert len([r for r in records if r['event'] == 'pma_control_intent_handoff']) == 1
+    assert len([r for r in records if r['event'] == 'pma_control_intent_received']) == 1
+    assert next(r for r in records if r['event'] == 'pma_fused_cycle')['interventions'] == sent
+
+
+@pytest.mark.parametrize('name,args', [('wait', {'after_turns': 9, 'mode': 'patrol'}),
+                                     ('allow_complete', {})])
+def test_maintenance_control_never_calls_host_and_judgment_can_revise(workspace, name, args):
+    client = Client([response(name, **args), response('wait', after_turns=2, mode='follow')])
+    monitor = MonitorAgent(client, workspace)
+    host_calls = []
+    original = monitor.dispatch
+
+    def dispatch(tool, arguments):
+        host_calls.append((tool, arguments))
+        return original(tool, arguments)
+
+    monitor.dispatch = dispatch
+    action = monitor.review('wake')
+    assert action.kind == 'wait' and action.payload == {'after_turns': 2, 'mode': 'follow'}
+    assert host_calls == [('wait', {'after_turns': 2, 'mode': 'follow'})]
+
+
+def test_confirmed_completion_still_requires_valid_root_request(workspace):
+    client = Client([response('allow_complete'), response('allow_complete'),
+                     response('wait', after_turns=1)])
+    monitor = MonitorAgent(client, workspace)
+    assert monitor.review('not a root request').kind == 'wait'
+    assert 'No root completion is pending' in str(client.inputs[2][0])
+
+
+def test_confirmed_completion_for_valid_root_request(workspace):
+    client = Client([response('allow_complete'), response('allow_complete')])
+    monitor = MonitorAgent(client, workspace)
+    assert monitor.review('root', completion_pending=True).kind == 'allow_complete'
+    assert len(client.inputs) == 2
+
+
+def test_handoff_failure_does_not_send_or_leak_proposal_into_next_review(workspace):
+    client = Client([response('intervene', message='Obsolete draft'), RuntimeError('offline'),
+                     comparison('<maintenance_complete/>'), response('wait', after_turns=1)])
+    sent = []
+    monitor = MonitorAgent(client, workspace)
+    monitor.intervention_callback = sent.append
+    with pytest.raises(RuntimeError, match='offline'):
+        monitor.review('first')
+    assert not sent
+    monitor.review('second')
+    assert 'Obsolete draft' not in client.inputs[-1][0][1]['content']
+    # Historical failed intent remains auditable, but is not a new pending proposal.
+    assert 'Obsolete draft' in json.dumps(client.history)
+
+
+def test_handoff_batch_retains_receipts_without_executing_later_calls(workspace):
+    from monitor_agent_core.provider import ModelResponse, ToolCall
+    client = Client([ModelResponse('', [
+        ToolCall('save', 'memory_save_knowledge', json.dumps({'content': 'Saved before handoff'})),
+        ToolCall('draft', 'intervene', json.dumps({'message': 'Draft'})),
+        ToolCall('late', 'memory_update_status', json.dumps({'content': 'Must not execute'})),
+    ], {}), response('wait', after_turns=1)])
+    monitor = MonitorAgent(client, workspace)
+    assert monitor.review('wake').kind == 'wait'
+    assert 'Saved before handoff' in monitor.pma_memory.context()
+    assert monitor.pma_memory.memory.status == ''
+    receipts = next(m['tool_results'] for m in client.history if 'tool_results' in m)
+    assert [r['tool_use_id'] for r in receipts] == ['save', 'draft', 'late']
+    assert json.loads(receipts[-1]['content'])['status'] == 'not_executed'
+
+
+def test_transfer_respects_shared_budget_without_dispatch(workspace):
+    client = Client([response('intervene', message='Unconfirmed')])
+    monitor = MonitorAgent(client, workspace, max_review_turns=1)
+    sent = []
+    monitor.intervention_callback = sent.append
+    with pytest.raises(MonitorLoopError, match='shared model-call budget'):
+        monitor.review('wake')
+    assert not sent and len(client.inputs) == 1
+
+
+def test_real_provider_phase_handoff_has_complete_tool_receipt(workspace, monkeypatch):
+    from monitor_agent_core.provider import MonitorProviderClient
+    client = MonitorProviderClient('fixture', {'apikey': 'fake', 'apibase': 'http://invalid',
+                                             'provider': 'anthropic', 'monitor_pma_memory': True})
+    requests = []
+    replies = iter([
+        [{'type': 'tool_use', 'id': 'draft', 'name': 'intervene', 'input': {'message': 'Draft'}}],
+        [{'type': 'tool_use', 'id': 'decision', 'name': 'wait', 'input': {'after_turns': 1}}],
+    ])
+
+    def request(tools):
+        requests.append(json.loads(json.dumps(client.export_history())))
+        return next(replies), {'input_tokens': 7}
+
+    monkeypatch.setattr(client, '_request', request)
+    monitor = MonitorAgent(client, workspace)
+    assert monitor.review('wake').kind == 'wait'
+    blocks = [b for m in requests[1] for b in m.get('content', []) if isinstance(b, dict)]
+    receipt = next(b for b in blocks if b.get('tool_use_id') == 'draft')
+    assert json.loads(receipt['content'])['result']['executed'] is False
+    assert 'Draft' in str(requests[1])
+    # Phase-specific descriptions must not mutate shared tool definitions.
+    from monitor_agent_core.agent import MONITOR_TOOLS
+    assert all('Finish maintenance' not in t['function']['description'] for t in MONITOR_TOOLS)
