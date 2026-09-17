@@ -49,7 +49,7 @@ def test_rejected_response_archived_without_tool_execution(tmp_path, monkeypatch
         client._compact_history()
     assert failure_chain(caught.value)[-1] == {
         'type': 'ContinuationContractError', 'code': 'unexpected_tool'}
-    assert len(calls) == 1  # No recovery yet.
+    assert len(calls) == 2  # One bounded repair, never a new review.
     assert client.history == old
     response = next((monitor.workspace.private_root / 'audit/continuation_responses').glob('*.json'))
     assert json.loads(response.read_text(encoding='utf-8'))['blocks'] == blocks

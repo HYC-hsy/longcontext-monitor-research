@@ -50,7 +50,8 @@ def failure_chain(exc):
         seen.add(id(exc))
         code = getattr(exc, 'code', None)
         chain.append({'type': type(exc).__name__, 'code': code if code in {
-            'unexpected_tool', 'empty_note', 'reasoning_echo'} else None})
+            'unexpected_tool', 'empty_note', 'reasoning_echo', 'truncated_note',
+            'incomplete_stream', 'abnormal_stop'} else None})
         exc = exc.__cause__
     return chain
 
@@ -541,7 +542,7 @@ class MonitorProviderClient:
                       'history_characters': self.history_measure()['characters'],
                       'purpose': getattr(self, 'request_purpose', 'review'),
                       'transaction_id': (getattr(self, 'continuation_transaction_id', None)
-                                         if getattr(self, 'request_purpose', 'review') == 'continuation'
+                                         if getattr(self, 'request_purpose', 'review') in ('continuation', 'format_repair')
                                          else None)}
             self._progress('request_started', request_id=request_id, **record)
             try:

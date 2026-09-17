@@ -6,6 +6,8 @@
 
 ### 权威文档
 
+- 2026-09-17 续接修复B见 `method_discovery/docs/CONTINUATION_BOUNDED_REPAIR_B_20260917.md`：在诊断A之上按停止原因校验笔记，主续接仅对明确格式错误最多恢复一次，deadline/取消有效，失败工具不执行，耗尽不批准。137项确定性回归通过，无真实API；decision/simple不变，后续须同底座新manifest、新run-id及启动确认。覆盖下方A中“尚未加入截断拒绝/恢复”的实现状态。
+
 - 2026-09-17 续接诊断 A 见 `method_discovery/docs/CONTINUATION_DIAGNOSTICS_A_20260917.md`：保存校验前本地响应、独立停止元数据、事务/请求关联和跨进程固定原因码，区分笔记保存与压缩提交。仅诊断，尚未加入截断拒绝或有限恢复；不得据此称R1根因已复现/故障已解决。116项离线回归通过，无真实运行；根合同/simple与调度不变。
 
 - 2026-09-17 根完成判断合同候选见 `method_discovery/docs/ROOT_DECISION_CONTRACT_CANDIDATE_20260917.md`。`GA_MONITOR_ROOT_DECISION_CONTRACT=1` 默认关闭且要求 PMA；仅判断阶段依当前有效交接切换 system 指导，维护、bank、History、调度和预算不变。101项工程测试通过，不代表效果；简单公共检查对照与真实运行仍待后续准备和启动确认，Judgment Record 未实施。

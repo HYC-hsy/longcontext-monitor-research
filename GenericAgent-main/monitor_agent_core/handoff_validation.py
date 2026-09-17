@@ -30,7 +30,17 @@ class ContinuationContractError(ValueError):
         super().__init__(message)
 
 
-def note_text(blocks):
+def note_text(blocks, metadata=None):
+    metadata = metadata or {}
+    reason = metadata.get('stop_reason')
+    if metadata.get('stream_complete') is False:
+        raise ContinuationContractError('incomplete_stream', 'Continuation stream is incomplete')
+    if reason == 'max_tokens':
+        raise ContinuationContractError('truncated_note', 'Continuation reached output limit')
+    if reason == 'tool_use':
+        raise ContinuationContractError('unexpected_tool', 'Continuation requested a tool')
+    if reason not in (None, 'end_turn'):
+        raise ContinuationContractError('abnormal_stop', 'Continuation ended with a non-normal stop reason')
     if any(block.get("type") == "tool_use" for block in blocks):
         raise ContinuationContractError('unexpected_tool', "Continuation unexpectedly requested a tool")
     text = "\n".join(block.get("text", "") for block in blocks
@@ -76,7 +86,7 @@ def validate_handoff(monitor, draft, previous):
         blocks, usage = client._request([])
         client.usage_records.append(dict(usage, purpose="handoff_validation", transaction=transaction))
         monitor._atomic_private_text(root + "/response.json", json.dumps(blocks, ensure_ascii=False))
-        result = note_text(blocks)
+        result = note_text(blocks, getattr(client, 'last_response_metadata', {}))
         monitor._atomic_private_text(root + "/validated.md", result)
         monitor._progress("handoff_validation_finished", transaction=transaction,
                           changed=result != draft, duration_seconds=time.time() - started)
