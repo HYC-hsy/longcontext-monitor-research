@@ -494,3 +494,26 @@ def test_pending_wait_is_not_a_completed_review_for_compaction():
                                      'content': '{"status":"accepted"}'}]},
     ]
     assert client._review_boundaries() == [4]
+
+
+@pytest.mark.parametrize('name', ['wait', 'allow_complete', 'intervene'])
+def test_maintenance_transfer_is_exchange_not_review_boundary(name):
+    client = MonitorProviderClient('native_openai', config('gpt-5.6-sol'))
+    def exchange(call_id, tool, receipt):
+        return [
+            {'role': 'assistant', 'content': [{'type': 'tool_use',
+             'id': call_id, 'name': tool, 'input': {}}]},
+            {'role': 'user', 'content': [{'type': 'tool_result',
+             'tool_use_id': call_id, 'content': json.dumps(receipt)}]},
+        ]
+    client.history = exchange('proposal', name, {
+        'status': 'accepted', 'control_action': 'maintenance_complete',
+        'result': {'status': 'intent_transferred', 'executed': False, 'input_sent': False},
+    })
+    assert client._review_boundaries() == []
+    assert client._exchange_boundaries() == [2]
+    client.history += exchange('actual', 'wait', {
+        'status': 'accepted', 'control_action': 'wait',
+    })
+    assert client._review_boundaries() == [4]
+    assert client._exchange_boundaries() == [2, 4]
