@@ -145,8 +145,10 @@ def _worker(config, commands, outputs):
             action = monitor.review(context, completion_pending=completion)
             receipt_offset = next_receipt_offset
         except Exception as exc:
+            from .provider import failure_chain
             outputs.put({"kind": "failure", "error": repr(exc), "completion": completion and not submitted,
-                         "request_id": request_id})
+                         "request_id": request_id, "cause_chain": failure_chain(exc),
+                         "failed_at": time.time()})
             # A terminal transport recovery must not silently restart via the
             # queued patrol/completion commands after the parent has failed it.
             return not isinstance(exc, ProviderRecoveryExhausted)

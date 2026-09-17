@@ -43,6 +43,18 @@ class HistoryCapacityError(ProviderRecoveryExhausted):
     """Preserved history cannot fit; new wakes cannot repair this failure."""
 
 
+def failure_chain(exc):
+    """Never propagate arbitrary exception messages or response text as metadata."""
+    chain, seen = [], set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        code = getattr(exc, 'code', None)
+        chain.append({'type': type(exc).__name__, 'code': code if code in {
+            'unexpected_tool', 'empty_note', 'reasoning_echo'} else None})
+        exc = exc.__cause__
+    return chain
+
+
 def is_reasoning_echo(text, blocks):
     """Detect a transport-level duplicate, not the quality/style of a note."""
     summaries = [part.get("text", "") for block in blocks
@@ -425,6 +437,9 @@ class MonitorProviderClient:
                 "Monitor handoff and latest exchange exceed capacity; original history preserved."
             )
         self.history = replacement
+        self._progress('compaction_committed',
+                       transaction_id=getattr(self, 'continuation_transaction_id', None),
+                       removed_messages=cut, archive=location)
         after = self.history_measure()
         self.history_transforms.append({
             "kind": "monitor_history_compaction", "before": before, "after": after,
@@ -521,11 +536,18 @@ class MonitorProviderClient:
             started = time.monotonic()
             request_id = uuid.uuid4().hex
             self._progress_request_id = request_id
+            self.last_response_metadata = {}
             record = {'attempt': attempt + 1, 'started_at': time.time(),
-                      'history_characters': self.history_measure()['characters']}
+                      'history_characters': self.history_measure()['characters'],
+                      'purpose': getattr(self, 'request_purpose', 'review'),
+                      'transaction_id': (getattr(self, 'continuation_transaction_id', None)
+                                         if getattr(self, 'request_purpose', 'review') == 'continuation'
+                                         else None)}
             self._progress('request_started', request_id=request_id, **record)
             try:
                 result = self._request_once(tools)
+                self._progress('response_metadata', request_id=request_id,
+                               metadata=getattr(self, 'last_response_metadata', {}))
                 if self._cancelled.is_set():
                     raise ProviderError('Provider request cancelled')
                 self._progress('request_usage', request_id=request_id, usage=result[1])
@@ -716,10 +738,15 @@ class MonitorProviderClient:
 
     def _parse_anthropic(self, lines):
         blocks, current, tool_json, usage = [], None, "", {}
+        metadata = {'provider': 'anthropic', 'stream_complete': False,
+                    'stop_reason': None, 'provider_message_id': None}
+        self.last_response_metadata = metadata
         completed = False
         for event in self._events(lines):
             kind = event.get("type")
-            if kind == "message_start": usage.update(event.get("message", {}).get("usage", {}) or {})
+            if kind == "message_start":
+                usage.update(event.get("message", {}).get("usage", {}) or {})
+                metadata['provider_message_id'] = event.get('message', {}).get('id')
             elif kind == "content_block_start":
                 block = event.get("content_block", {})
                 current = None
@@ -740,13 +767,17 @@ class MonitorProviderClient:
                     try: current["input"] = json.loads(tool_json or "{}")
                     except json.JSONDecodeError: current["input"] = {"_raw": tool_json}
                 blocks.append(current); current = None
-            elif kind == "message_delta": usage.update(event.get("usage", {}) or {})
+            elif kind == "message_delta":
+                usage.update(event.get("usage", {}) or {})
+                if 'stop_reason' in event.get('delta', {}):
+                    metadata['stop_reason'] = event['delta']['stop_reason']
             elif kind == "error": raise _remote_error(event.get("error"))
             elif kind == "message_stop":
                 completed = True
                 break
         if not completed or current is not None:
             raise RetryableProviderError('Anthropic stream ended before a complete message_stop')
+        metadata.update(stream_complete=True, response_block_types=[b['type'] for b in blocks])
         return blocks, usage
 
     def _parse_openai_responses(self, lines):

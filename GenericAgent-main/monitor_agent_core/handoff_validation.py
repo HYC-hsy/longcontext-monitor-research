@@ -23,15 +23,22 @@ If available material cannot settle something, preserve the uncertainty and its 
 """
 
 
+class ContinuationContractError(ValueError):
+    """Stable, content-free reason suitable for diagnostic telemetry."""
+    def __init__(self, code, message):
+        self.code = code
+        super().__init__(message)
+
+
 def note_text(blocks):
     if any(block.get("type") == "tool_use" for block in blocks):
-        raise ValueError("Continuation unexpectedly requested a tool")
+        raise ContinuationContractError('unexpected_tool', "Continuation unexpectedly requested a tool")
     text = "\n".join(block.get("text", "") for block in blocks
                      if block.get("type") == "text").strip()
     if not text:
-        raise ValueError("Empty continuation; keeping original history")
+        raise ContinuationContractError('empty_note', "Empty continuation; keeping original history")
     if is_reasoning_echo(text, blocks):
-        raise ValueError("Continuation duplicates reasoning summary; keeping original history")
+        raise ContinuationContractError('reasoning_echo', "Continuation duplicates reasoning summary; keeping original history")
     return text
 
 

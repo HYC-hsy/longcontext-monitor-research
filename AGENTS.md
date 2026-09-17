@@ -6,6 +6,8 @@
 
 ### 权威文档
 
+- 2026-09-17 续接诊断 A 见 `method_discovery/docs/CONTINUATION_DIAGNOSTICS_A_20260917.md`：保存校验前本地响应、独立停止元数据、事务/请求关联和跨进程固定原因码，区分笔记保存与压缩提交。仅诊断，尚未加入截断拒绝或有限恢复；不得据此称R1根因已复现/故障已解决。116项离线回归通过，无真实运行；根合同/simple与调度不变。
+
 - 2026-09-17 根完成判断合同候选见 `method_discovery/docs/ROOT_DECISION_CONTRACT_CANDIDATE_20260917.md`。`GA_MONITOR_ROOT_DECISION_CONTRACT=1` 默认关闭且要求 PMA；仅判断阶段依当前有效交接切换 system 指导，维护、bank、History、调度和预算不变。101项工程测试通过，不代表效果；简单公共检查对照与真实运行仍待后续准备和启动确认，Judgment Record 未实施。
 
 - 2026-09-17 协议摩擦独立修复：`method_discovery/docs/PMA_PHASE_HANDOFF_REPAIR_20260917.md`。PMA维护阶段调用intervene/wait/allow_complete仅保存未执行意图并结束维护，由作者process进入判断阶段，使用更新bank和该意图自主确认/修订/放弃；仅判断阶段才执行任务控制。回执必须保留executed=false/input_sent=false，不把交接当投递。未改压缩、记忆表示或宿主调度，未实施Judgment Record候选；工程验证不代表真实效果，真实启动仍需确认。此条覆盖下方维护阶段控制调用一律拒绝的旧接线说明。
