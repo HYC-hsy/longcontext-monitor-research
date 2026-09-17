@@ -1,4 +1,5 @@
 """Prepare same-task comparison manifests; never starts Docker or calls a model."""
+import argparse
 import json
 from pathlib import Path
 
@@ -9,13 +10,15 @@ OUT = ROOT / 'method_discovery/artifacts/root_decision_20260917'
 BASE = ROOT / 'method_discovery/artifacts/pma_two_phase_20260913/fyne_r9_manifest.json'
 
 
-def prepare():
+def prepare(run_suffix='r2'):
     previous = json.loads(BASE.read_text(encoding='utf-8'))
     manifests = {}
     for name in ('decision', 'simple'):
-        path = OUT / f'fyne_{name}_manifest.json'
+        path = OUT / f'fyne_{name}_{run_suffix}_manifest.json'
+        if path.exists():
+            raise FileExistsError(f'Comparison manifest already exists: {path}')
         manifest = build_manifest('roadmapbench:fyn-2.2.0-roadmap',
-                                  f'root-{name}-20260917-r1', path)
+                                  f'root-{name}-20260917-{run_suffix}', path)
         env = manifest['runs'][0]['environment']
         identity = {key: env[key] for key in (
             'GA_METHOD_EXPECTED_SOURCE_SHA256', 'GA_EXPERIMENT_HARNESS_SHA256')}
@@ -42,4 +45,6 @@ def prepare():
 
 
 if __name__ == '__main__':
-    prepare()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--run-suffix', default='r2')
+    prepare(parser.parse_args().run_suffix)

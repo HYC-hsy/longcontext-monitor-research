@@ -6,6 +6,8 @@
 
 ### 权威文档
 
+- 2026-09-17 续接用途边界修复见 `method_discovery/docs/CONTINUATION_PURPOSE_BOUNDARY_REPAIR_20260917.md`：完整解析的 continuation/format_repair 空正文响应交由续接层归档、分类与有限恢复；普通 review 和不完整流规则不变。142项相关回归通过；decision/simple 同底座 r2 清单已准备、未启动，真实效果仍待验证。此条补齐下方修复B未覆盖的 provider 空响应接缝。
+
 - 2026-09-17 续接修复B见 `method_discovery/docs/CONTINUATION_BOUNDED_REPAIR_B_20260917.md`：在诊断A之上按停止原因校验笔记，主续接仅对明确格式错误最多恢复一次，deadline/取消有效，失败工具不执行，耗尽不批准。137项确定性回归通过，无真实API；decision/simple不变，后续须同底座新manifest、新run-id及启动确认。覆盖下方A中“尚未加入截断拒绝/恢复”的实现状态。
 
 - 2026-09-17 续接诊断 A 见 `method_discovery/docs/CONTINUATION_DIAGNOSTICS_A_20260917.md`：保存校验前本地响应、独立停止元数据、事务/请求关联和跨进程固定原因码，区分笔记保存与压缩提交。仅诊断，尚未加入截断拒绝或有限恢复；不得据此称R1根因已复现/故障已解决。116项离线回归通过，无真实运行；根合同/simple与调度不变。
