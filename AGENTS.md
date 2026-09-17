@@ -6,6 +6,8 @@
 
 ### 权威文档
 
+- 2026-09-17 根完成判断合同候选见 `method_discovery/docs/ROOT_DECISION_CONTRACT_CANDIDATE_20260917.md`。`GA_MONITOR_ROOT_DECISION_CONTRACT=1` 默认关闭且要求 PMA；仅判断阶段依当前有效交接切换 system 指导，维护、bank、History、调度和预算不变。101项工程测试通过，不代表效果；简单公共检查对照与真实运行仍待后续准备和启动确认，Judgment Record 未实施。
+
 - 2026-09-17 协议摩擦独立修复：`method_discovery/docs/PMA_PHASE_HANDOFF_REPAIR_20260917.md`。PMA维护阶段调用intervene/wait/allow_complete仅保存未执行意图并结束维护，由作者process进入判断阶段，使用更新bank和该意图自主确认/修订/放弃；仅判断阶段才执行任务控制。回执必须保留executed=false/input_sent=false，不把交接当投递。未改压缩、记忆表示或宿主调度，未实施Judgment Record候选；工程验证不代表真实效果，真实启动仍需确认。此条覆盖下方维护阶段控制调用一律拒绝的旧接线说明。
 
 - 2026-09-14 R7输出协议审计后，第二阶段以监察者基线工具协议为唯一主体：intervene直接提交且继续观察，wait结束当前review并选择节奏，allow_complete只处理有效根提议。PMA仍保留阶段顺序、bank与比较输入，但原XML结论不再是运行中的控制入口。见 `method_discovery/docs/PMA_FUSED_R7_OUTPUT_AUDIT_AND_REPAIR_20260914.md`。维护阶段误写建议必须明确告知未发送；不能把草稿当投递。134项回归通过、19旧候选历史测试跳过；真实启动仍须确认。
