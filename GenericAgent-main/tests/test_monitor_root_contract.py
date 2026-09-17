@@ -1,4 +1,6 @@
 import json
+import ast
+from pathlib import Path
 
 import pytest
 
@@ -124,3 +126,35 @@ def test_real_provider_replaces_system_without_resetting_history(workspace, monk
     assert 'Selective Attention module' in seen[2][0]
     assert 'tool_result' in seen[2][1]
     assert 'Support both short and long forms.' in seen[2][1]
+
+
+def test_simple_control_uses_same_tools_and_call_count(workspace):
+    from monitor_agent_core.pma_fused import ROOT_SIMPLE_CHECK
+    client = configured([comparison('<maintenance_complete/>'), response('allow_complete')], False)
+    client.config['monitor_root_simple_check'] = True
+    monitor = MonitorAgent(client, workspace)
+    monitor.completion_state = lambda: {'generation': 1, 'cursor': 8, 'request_id': 'root-1'}
+    assert monitor.review('root', completion_pending=True).kind == 'allow_complete'
+    assert ROOT_SIMPLE_CHECK in system_at(client, 1)
+    assert ROOT_DECISION not in system_at(client, 1)
+    assert len(client.inputs) == 2
+
+
+def test_controls_cannot_be_enabled_together(workspace):
+    client = configured([])
+    client.config['monitor_root_simple_check'] = True
+    with pytest.raises(ValueError, match='exclusive'):
+        MonitorAgent(client, workspace)
+
+
+def test_candidate_flags_reach_manifest_and_container():
+    root = Path(__file__).resolve().parents[2]
+    for path, variable in [
+        ('long_context_bench/scripts/run_ultralong_m12_proofs.py', 'MANIFEST_CONTROLLED_ENV_KEYS'),
+        ('long_context_bench/adapters/harbor_ga_agent.py', 'FORWARDED_ENV_VARS'),
+    ]:
+        tree = ast.parse((root / path).read_text(encoding='utf-8'))
+        assignment = next(n for n in tree.body if isinstance(n, ast.Assign)
+                          and any(isinstance(t, ast.Name) and t.id == variable for t in n.targets))
+        assert {'GA_MONITOR_ROOT_DECISION_CONTRACT', 'GA_MONITOR_ROOT_SIMPLE_CHECK'} <= set(
+            ast.literal_eval(assignment.value))

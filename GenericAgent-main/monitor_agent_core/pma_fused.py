@@ -72,6 +72,16 @@ Use the existing control tools and phase rules. This instruction neither grants
 extra budget nor executes or approves a handoff on your behalf.
 '''
 
+ROOT_SIMPLE_CHECK = '''
+You are handling a current whole-task handoff. Interpret the actual message first;
+it may ask for clarification or report a blocker rather than claim completion.
+Before approving a completion claim, review the available public build and relevant
+test evidence. If it is missing or no longer applies to the current work, choose
+an appropriate public check with your existing tools. Do not use hidden evaluation
+or reference answers. Report unresolved failures accurately, and avoid unnecessary
+repetition when the available checks are sufficient. Use the existing control tools.
+'''
+
 
 def decision_prompts(system, prompt):
     """Retain author comparison guidance; replace its text-output contract once."""
@@ -242,15 +252,17 @@ class FusedTransport:
             proposal = getattr(monitor, '_seen_completion', None)
             generation = proposal.get('generation') if proposal else None
             contract = ('root' if active else 'ordinary', generation)
-            selected = identity + '\n\n' + ROOT_DECISION + PHASE_TWO if active else system
+            policy = ROOT_SIMPLE_CHECK if monitor.root_simple_check else ROOT_DECISION
+            selected = identity + '\n\n' + policy + PHASE_TWO if active else system
             if contract != last_contract:
                 owner.audit('root_decision_contract_selected', mode=contract[0],
+                            candidate='simple_check' if monitor.root_simple_check else 'decision_contract',
                             generation=generation, phase=phase,
                             system_sha256=hashlib.sha256(selected.encode('utf-8')).hexdigest())
                 last_contract = contract
             return selected
 
-        dynamic_system = (current_system if monitor.root_decision_contract
+        dynamic_system = (current_system if (monitor.root_decision_contract or monitor.root_simple_check)
                           and not maintenance else None)
         usage_start = len(getattr(monitor.client, 'usage_records', []))
         try:
