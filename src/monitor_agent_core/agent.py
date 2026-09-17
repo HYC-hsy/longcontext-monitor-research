@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import tempfile
 import threading
@@ -16,7 +17,7 @@ from .loop import run_review
 from .process_runner import AnalysisSessions
 from .workspace import MonitorWorkspace
 from .grounded_context import read_with_sources
-from .handoff_validation import validate_handoff, note_text
+from .handoff_validation import validate_handoff, note_text, ContinuationContractError
 from .advice_basis import AdviceBasis, ADVICE_PROMPT, advice_tools
 from .feedback_focus import FeedbackFocus, FOCUS_PROMPT
 from .inquiry import Inquiry, INQUIRY_PROMPT
@@ -349,24 +350,82 @@ class MonitorAgent:
             prompt += ("\nPreserve useful source links or paths to active inquiry notes so your future self "
                        "can restore the actual grounds. Do not replace source links with invented quotations.")
         previous_system = self.client.system
+        previous_purpose = getattr(self.client, 'request_purpose', 'review')
+        transaction = uuid.uuid4().hex
+        self.client.continuation_transaction_id = transaction
+        self.client.request_purpose = 'continuation'
         self.client.system = self.system_prompt + "\n\n" + CONTINUATION_MODE_PROMPT
         self.client.history.append({"role": "user", "content": [{"type": "text", "text": prompt}]})
+        stage = 'request'
         try:
-            blocks, usage = self.client._request([])
-            self.client.usage_records.append(dict(usage, purpose="pre_compaction_continuation"))
-            note = note_text(blocks)
+            for attempt in range(2):
+                stage = 'request'
+                self.client.last_response_metadata = {}
+                blocks, usage = self.client._request([])
+                self.client.usage_records.append(dict(usage,
+                    purpose='continuation_format_repair' if attempt else 'pre_compaction_continuation'))
+                stage = 'response_archive'
+                location = f'audit/continuation_responses/{transaction}-{attempt + 1}.json'
+                raw = json.dumps({'blocks': blocks, 'metadata': self.client.last_response_metadata,
+                                  'request_id': getattr(self.client, '_progress_request_id', None)},
+                                 ensure_ascii=False)
+                self._atomic_private_text(location, raw)
+                self._progress('continuation_response_archived', transaction_id=transaction,
+                               attempt=attempt + 1,
+                               request_id=getattr(self.client, '_progress_request_id', None),
+                               archive='monitor/' + location,
+                               sha256=hashlib.sha256(raw.encode('utf-8')).hexdigest(),
+                               system_sha256=hashlib.sha256(self.client.system.encode('utf-8')).hexdigest(),
+                               tools_sha256=hashlib.sha256(b'[]').hexdigest(),
+                               expected_output_kind='continuation_note',
+                               metadata=self.client.last_response_metadata)
+                stage = 'note_validation'
+                try:
+                    note = note_text(blocks, self.client.last_response_metadata)
+                    break
+                except ContinuationContractError as exc:
+                    self._progress('continuation_rejected', transaction_id=transaction,
+                                   attempt=attempt + 1, code=exc.code)
+                    if attempt or exc.code not in {
+                            'unexpected_tool', 'empty_note', 'reasoning_echo', 'truncated_note'}:
+                        raise
+                    from .provider import ProviderRecoveryExhausted
+                    deadline = getattr(self.client, 'recovery_deadline', None)
+                    stopped = any(flag is not None and flag.is_set() for flag in (
+                        getattr(self.client, '_cancelled', None),
+                        getattr(self.client, 'recovery_stop', None)))
+                    if stopped or (deadline is not None and time.monotonic() >= deadline):
+                        raise ProviderRecoveryExhausted('Continuation repair cancelled or budget exhausted') from exc
+                    # Replace only our temporary instruction. Rejected blocks never
+                    # enter live History and no tool or phase operation is replayed.
+                    self.client.history[-1]['content'][0]['text'] = prompt + (
+                        '\nYour previous response did not satisfy the note-only output contract ('
+                        + exc.code + '). Return only a concise complete continuation note. '
+                        'Do not call tools or decide task control. Keep essential unresolved grounds '
+                        'and source references; fit the note within the existing output limit.')
+                    self.client.request_purpose = 'format_repair'
+                    self._progress('continuation_format_repair', transaction_id=transaction)
+            self._progress('continuation_note_validated', transaction_id=transaction)
             if self.handoff_validation:
+                stage = 'optional_handoff_validation'
                 note = validate_handoff(self, note, previous)
+            stage = 'note_storage'
             self.workspace.write_text("monitor/audit/continuations.jsonl", json.dumps({
                 "timestamp": time.time(), "review_id": self.review_id, "note": note,
             }, ensure_ascii=False) + "\n", mode="append")
             if self.pma_memory is None:
                 self._atomic_private_text("working.md", note)
-            self._progress("continuation_saved")
+            self._progress("continuation_saved", transaction_id=transaction)
             return note
+        except Exception as exc:
+            self._progress('continuation_failed', transaction_id=transaction, stage=stage,
+                           error_type=type(exc).__name__,
+                           code=exc.code if isinstance(exc, ContinuationContractError) else None)
+            raise
         finally:
             self.client.history.pop()
             self.client.system = previous_system
+            self.client.request_purpose = previous_purpose
 
     def _progress(self, event, **fields):
         # Metadata only: never put credentials, prompts, code or reasoning here.
