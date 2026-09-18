@@ -1,0 +1,79 @@
+{
+  "case": "validator_after_correction",
+  "group": "D_expectation_first_isolated",
+  "status": "completed",
+  "outcome": "supported_in_scope",
+  "expectation": "The `validation.NewAllStrings` function must:\n\n1. Accept variadic `fyne.StringValidator` parameters and return a `fyne.StringValidator`\n2. Execute validators in the order they are provided as arguments\n3. Return the first error encountered from any validator\n4. Return nil only if all validators pass\n5. Stop execution upon encountering the first error (short-circuit behavior)\n\nObservable verification checks:\n- Given validators V1 (rejects \"a\"), V2 (rejects \"b\"), V3 (rejects \"c\"), calling NewAllStrings(V1, V2, V3).Validate(\"a\") should return V1's error, not V2's or V3's error\n- Calling NewAllStrings(V1, V2, V3).Validate(\"b\") should return V2's error (V1 passed, V2 failed first)\n- Calling NewAllStrings(V1, V2, V3).Validate(\"xyz\") where all validators pass should return nil\n- The order matters: NewAllStrings(V1, V2) and NewAllStrings(V2, V1) should return different errors for the same input that violates both validators\n\nA superficial implementation that only checks the last validator or aggregates all errors would fail these checks.",
+  "expectation_revision": null,
+  "conclusion": "The implementation in `data/validation/allstrings.go` fully satisfies the committed expectation.\n\n**Verification against requirements:**\n\n1. ✓ Function signature matches: `NewAllStrings(validators ...fyne.StringValidator) fyne.StringValidator`\n\n2. ✓ Executes validators in order: Uses `for _, validator := range validators` which preserves argument order\n\n3. ✓ Returns first error: The code `if err := validator(text); err != nil { return err }` immediately returns upon encountering the first error\n\n4. ✓ Returns nil only if all pass: The final `return nil` is only reached after all validators have been checked without errors\n\n5. ✓ Short-circuit behavior: The immediate `return err` on line 18 stops execution when an error is found\n\n**Observable behavior verification:**\n- Given V1 (rejects \"a\"), V2 (rejects \"b\"), V3 (rejects \"c\"):\n  - Input \"a\" → V1 fails first, returns V1's error ✓\n  - Input \"b\" → V1 passes, V2 fails, returns V2's error ✓\n  - Input \"xyz\" (all pass) → returns nil ✓\n  - Order sensitivity: NewAllStrings(V1, V2) vs NewAllStrings(V2, V1) will return different first errors for input that violates both ✓\n\nThe implementation also includes defensive nil-checking for individual validators and appropriate documentation. The validator combinator correctly implements the \"run in order, return first error\" pattern as required.",
+  "limitation": null,
+  "phases": [
+    "expectation",
+    "evidence"
+  ],
+  "requests": 4,
+  "history_before": {
+    "items": 0,
+    "characters": 2,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "history_after": {
+    "items": 10,
+    "characters": 28473,
+    "sha256": "07305bcd1f4432adc19b4dfa041b4b738d30fc4868a75f8bc1a6c6f211c8f4f8"
+  },
+  "score_eligible": true,
+  "correct": true,
+  "comparison_role": "primary_isolated",
+  "seconds": 39.656,
+  "usage": {
+    "input_tokens": 4938,
+    "output_tokens": 1743,
+    "cache_creation_input_tokens": 11498,
+    "cache_read_input_tokens": 256,
+    "total_tokens": 18435
+  },
+  "successful_responses": 4,
+  "history_transforms": [],
+  "request_attempts": [
+    {
+      "attempt": 1,
+      "started_at": 1789754007.9022617,
+      "history_characters": 283,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 4.178779099998792
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789754012.08257,
+      "history_characters": 17122,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 14.241058500003419
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789754026.3247588,
+      "history_characters": 22024,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 3.990656999998464
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789754030.321933,
+      "history_characters": 24155,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 17.235492100000556
+    }
+  ],
+  "transport_attempts": 4,
+  "transport_log": "transport.jsonl",
+  "transport_config": "transport_config.json"
+}

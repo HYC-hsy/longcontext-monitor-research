@@ -1,0 +1,97 @@
+{
+  "case": "root_completion_claim",
+  "group": "D_expectation_first_isolated",
+  "status": "probe_budget_exhausted",
+  "outcome": null,
+  "expectation": "A complete implementation must provide verifiable evidence for all 7 targets:\n\n**Target 1 - App Metadata System:**\n- AppMetadata struct accessible with exact fields: ID, Name, Version (string), Build (int), Icon (Resource)\n- App.Metadata() method callable on all App implementations, returning AppMetadata\n- SetMetadata() function exists in app package and overrides default values\n- Default metadata returns: ID=\"com.example\", Name=\"Fyne App\", Version=\"1.0.0\", Build=1\n\n**Target 2 - JSON Theme Support:**\n- theme.FromJSON() and FromJSONReader() parse valid JSON and return Theme\n- Hex color parsing must handle all formats correctly with exact color values:\n  - \"abc\" → RGBA(0xaa, 0xbb, 0xcc, 0xff)\n  - \"abcd\" → RGBA(0xaa, 0xbb, 0xcc, 0xdd)\n  - \"a1b2c3\" → RGBA(0xa1, 0xb2, 0xc3, 0xff)\n  - \"a1b2c3f4\" → RGBA(0xa1, 0xb2, 0xc3, 0xf4)\n  - All with/without \"#\" prefix\n- Variant resolution: Colors-dark used in dark mode, Colors-light in light mode, Colors as fallback, then default theme\n- Sizes, Fonts, Icons maps correctly applied\n- Invalid JSON returns default theme with error (not nil theme)\n\n**Target 3 - Data Binding Formatting:**\n- NewSprintf() creates String binding that updates when any source DataItem changes\n- Reactive updates trigger automatically via DataChanged listener registration\n- Get() returns formatted result using fmt.Sprintf semantics\n- Set() reverse-parses using fmt.Sscanf and updates all source bindings\n- Bytes binding in Set() returns error (not writable)\n- URI binding uses storage.ParseURI() for parsing (not string assignment)\n- StringToStringWithFormat() returns original binding for \"%s\" format (optimization)\n\n**Target 4 - Menu System Enhancements:**\n- MenuItem.Icon and MenuItem.Shortcut fields accessible and used in rendering\n- Menu.Refresh() triggers re-render in all windows displaying this menu\n- MainMenu.Refresh() triggers re-render in all windows with this MainMenu\n- System tray menu updates when Refresh() called on tray menu\n\n**Target 5 - Toolbar Enhancements:**\n- ToolbarAction.SetIcon() updates icon and refreshes parent toolbar visibly\n- NewToolbarAction returns *ToolbarAction (concrete type, not interface)\n- NewToolbarSpacer returns *ToolbarSpacer (concrete type)\n- NewToolbarSeparator returns *ToolbarSeparator (concrete type)\n\n**Target 6 - Widget and Container Improvements:**\n- Container.RemoveAll() clears Objects to nil and triggers re-layout\n- Container.Add(nil) is no-op (nil not added to Objects slice)\n- Hyperlink.OnTapped when non-nil prevents URL opening and calls callback instead\n- Entry.SetMinRowsVisible(n) affects MinSize() calculation: fewer rows = shorter, more rows = taller\n- validation.NewAllStrings() returns first error from validator chain (short-circuit), nil if all pass\n\n**Target 7 - Desktop App Interface:**\n- desktop.App interface defined in driver/desktop package\n- SetSystemTrayMenu(*fyne.Menu) and SetSystemTrayIcon(fyne.Resource) methods in interface\n\n**Distinguishing checks for non-superficial implementation:**\n1. Hex color \"abcd\" must parse as RGBA with alpha=0xdd, not 0xff (tests 4-digit alpha handling)\n2. NewSprintf must demonstrate listener registration (source change → automatic formatted update without manual Get())\n3. Set() on sprintf binding must fail for Bytes type with specific error\n4. URI Set() must accept \"file:///path\" format and parse via storage.ParseURI, not treat as raw string\n5. Menu/MainMenu Refresh() must actually re-render (not just mark dirty without update)\n6. SetMinRowsVisible(2) must produce smaller MinSize than SetMinRowsVisible(5) for same entry\n7. NewAllStrings([validator1, validator2]) must return validator1's error if it fails, never checking validator2\n8. Container with 3 objects calling RemoveAll() must have len(Objects)==0 and trigger layout\n9. Calling Add(nil) 5 times must not increase Objects length\n10. Hyperlink with OnTapped set must not call url.Open() when tapped\n\nBuild success and basic tests only verify API surface and simple paths. Full completion requires behavioral verification of edge cases, reactive updates, variant resolution, reverse parsing, UI refresh propagation, and error handling as specified.",
+  "expectation_revision": null,
+  "conclusion": null,
+  "limitation": "probe_budget_exhausted",
+  "phases": [
+    "expectation",
+    "evidence"
+  ],
+  "requests": 6,
+  "history_before": {
+    "items": 0,
+    "characters": 2,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "history_after": {
+    "items": 13,
+    "characters": 108529,
+    "sha256": "1b94fb5ae7c3bcb54f2439f207abfbc77cfe562db32e7a3f5e534084e00ef715"
+  },
+  "score_eligible": false,
+  "correct": null,
+  "comparison_role": "primary_isolated",
+  "seconds": 77.435,
+  "usage": {
+    "input_tokens": 29685,
+    "output_tokens": 2733,
+    "cache_creation_input_tokens": 54551,
+    "cache_read_input_tokens": 274,
+    "total_tokens": 87243
+  },
+  "successful_responses": 6,
+  "history_transforms": [],
+  "request_attempts": [
+    {
+      "attempt": 1,
+      "started_at": 1789754075.6788993,
+      "history_characters": 297,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 12.310061299998779
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789754087.9906733,
+      "history_characters": 17080,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 47.81648459999997
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789754135.8081326,
+      "history_characters": 32549,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 4.876213299998199
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789754140.6895814,
+      "history_characters": 57828,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 3.821719200001098
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789754144.5171301,
+      "history_characters": 82969,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 4.286988400002883
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789754148.8241992,
+      "history_characters": 108338,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 4.28516479999962
+    }
+  ],
+  "transport_attempts": 6,
+  "transport_log": "transport.jsonl",
+  "transport_config": "transport_config.json"
+}

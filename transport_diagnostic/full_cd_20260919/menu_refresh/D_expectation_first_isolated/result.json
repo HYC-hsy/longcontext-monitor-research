@@ -1,0 +1,79 @@
+{
+  "case": "menu_refresh",
+  "group": "D_expectation_first_isolated",
+  "status": "completed",
+  "outcome": "contradicted",
+  "expectation": "A correct menu implementation should observably demonstrate:\n\n1. **Icon/Shortcut Fields**: The `MenuItem` struct in `menu.go` must have two exported fields:\n   - `Icon Resource` - holds an optional icon resource\n   - `Shortcut Shortcut` - holds an optional keyboard shortcut\n   These fields must be integrated into the menu rendering system, not merely present as unused struct members.\n\n2. **Runtime Refresh Methods**: Both `*Menu` and `*MainMenu` types must provide `Refresh()` methods that trigger actual re-rendering of displayed menus.\n\n3. **Observable Behavior Test**: A correct implementation can be distinguished from a superficial one by:\n   - Creating a MenuItem with an initial icon and shortcut\n   - Displaying it in a window's main menu or as part of a Menu\n   - Modifying the MenuItem's Icon, Shortcut, Label, Checked, or Disabled fields\n   - Calling Refresh() on the Menu or MainMenu\n   - Verifying that the visual representation updates to reflect the changes without recreating the menu structure\n\nThe key distinguishing check: calling `Refresh()` after modifying MenuItem properties must cause the displayed menu to re-render with updated content. A superficial implementation that only adds the fields/methods without connecting them to the rendering pipeline would fail this test.",
+  "expectation_revision": null,
+  "conclusion": "The menu implementation partially satisfies the requirements but has a critical gap:\n\n**What is present:**\n1. ✓ MenuItem.Icon field (line 40-41): `Icon Resource` - correctly typed and exported\n2. ✓ MenuItem.Shortcut field (line 44-45): `Shortcut Shortcut` - correctly typed and exported  \n3. ✓ Menu.Refresh() method (line 12-19): Calls internal `refresh func()` callback when set\n4. ✓ Integration design: Both Menu and MenuItem have private `refresh func()` fields, suggesting a callback-based integration mechanism with the rendering system\n\n**What is missing:**\n✗ MainMenu.Refresh() method: The MainMenu struct (lines 70-77) lacks the required `Refresh()` method. The original task explicitly requires: \"Add a `Refresh()` method on `*MainMenu`. When called, all windows whose main menu is this `MainMenu` should re-render with the updated menu state.\"\n\n**Verdict:**\nThe implementation contradicts the expectation because MainMenu.Refresh() is absent. While the icon/shortcut fields are properly defined and Menu.Refresh() exists with apparent integration hooks, the missing MainMenu.Refresh() means the implementation does not fully provide \"the required icon/shortcut fields and runtime refresh behavior\" as specified—specifically, it lacks complete runtime refresh behavior for MainMenu.",
+  "limitation": null,
+  "phases": [
+    "expectation",
+    "evidence"
+  ],
+  "requests": 4,
+  "history_before": {
+    "items": 0,
+    "characters": 2,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "history_after": {
+    "items": 10,
+    "characters": 31494,
+    "sha256": "a7e81629b8fece61bcf5cf4500c2a3fd99faf1d6108328a718c0edee3a7f4721"
+  },
+  "score_eligible": true,
+  "correct": true,
+  "comparison_role": "primary_isolated",
+  "seconds": 48.944,
+  "usage": {
+    "input_tokens": 5395,
+    "output_tokens": 1950,
+    "cache_creation_input_tokens": 11900,
+    "cache_read_input_tokens": 232,
+    "total_tokens": 19477
+  },
+  "successful_responses": 4,
+  "history_transforms": [],
+  "request_attempts": [
+    {
+      "attempt": 1,
+      "started_at": 1789753877.7465749,
+      "history_characters": 276,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 4.343552199999976
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789753882.0917246,
+      "history_characters": 17063,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 19.009625000002416
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789753901.1022615,
+      "history_characters": 22994,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 5.672940999997081
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789753906.7772696,
+      "history_characters": 27122,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 19.912235900002997
+    }
+  ],
+  "transport_attempts": 4,
+  "transport_log": "transport.jsonl",
+  "transport_config": "transport_config.json"
+}

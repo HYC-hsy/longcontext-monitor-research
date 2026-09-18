@@ -1,0 +1,79 @@
+{
+  "case": "build_only_behavior",
+  "group": "D_expectation_first_isolated",
+  "status": "completed",
+  "outcome": "unresolved",
+  "expectation": "**Expected Observable Runtime Behaviors Across All Seven Targets:**\n\n**Target 1 (App Metadata System):**\n- Calling `app.Metadata()` on any App instance must return an AppMetadata struct with accessible ID, Name, Version, Build, and Icon fields\n- Default metadata (when SetMetadata not called) must return: ID=\"com.example\", Name=\"Fyne App\", Version=\"1.0.0\", Build=1\n- After calling `app.SetMetadata()` with custom values, subsequent `Metadata()` calls must return those custom values\n- All field types must match: ID/Name/Version as strings, Build as int, Icon as Resource\n- Distinguished from superficial: The metadata must be retrievable from the App interface itself, not through a separate global function\n\n**Target 2 (JSON Theme Support):**\n- `theme.FromJSON()` must parse valid JSON and return a working Theme that can be applied\n- Hex color parsing must handle all formats: 3-digit (#abc → 0xaa,0xbb,0xcc,0xff), 4-digit (#abcd → 0xaa,0xbb,0xcc,0xdd), 6-digit, 8-digit, with/without # prefix\n- Variant-specific colors (Colors-dark, Colors-light) must override generic Colors based on active theme variant\n- Missing JSON keys must fall back to default theme values\n- Invalid JSON must return default theme + error (not crash)\n- Distinguished from superficial: Color resolution order must respect variant-specific → generic → default precedence, not just apply the last value found\n\n**Target 3 (Data Binding Formatting):**\n- `binding.NewSprintf()` must return a String binding that updates automatically when any source binding changes\n- Format string must apply to current binding values using fmt.Sprintf semantics\n- `Set()` on the formatted binding must reverse-parse using fmt.Sscanf and update source bindings\n- Setting a Bytes binding via Sscanf must return an error\n- URI binding must use storage.ParseURI for reverse parsing\n- `StringToStringWithFormat()` with \"%s\" must return the original binding unchanged (identity optimization)\n- Distinguished from superficial: Changes to source bindings must trigger automatic reformatting without manual refresh calls; listener registration must be bidirectional\n\n**Target 4 (Menu System Enhancements):**\n- MenuItem.Icon and MenuItem.Shortcut fields must be accessible and modifiable\n- After modifying a MenuItem's Icon or Shortcut and calling Menu.Refresh(), the displayed menu must reflect changes without recreating the Menu\n- MainMenu.Refresh() must update all windows using that MainMenu\n- If a Menu is set as system tray menu, Menu.Refresh() must update the tray display\n- Distinguished from superficial: Refresh must update existing menu instances in-place, not require reassignment to windows\n\n**Target 5 (Toolbar Enhancements):**\n- `NewToolbarAction()` must return `*ToolbarAction` (concrete type), not ToolbarItem interface\n- `NewToolbarSpacer()` must return `*ToolbarSpacer` (concrete type)\n- `NewToolbarSeparator()` must return `*ToolbarSeparator` (concrete type)\n- `ToolbarAction.SetIcon()` must update the icon and visibly refresh the toolbar without recreating it\n- Distinguished from superficial: Return types must allow direct access to concrete type fields (e.g., toolbarAction.Icon = x works); SetIcon must trigger visual update\n\n**Target 6 (Widget and Container Improvements):**\n- `Container.RemoveAll()` must clear all objects and trigger relayout in one operation\n- `Container.Add(nil)` must be a no-op (not add nil to Objects slice)\n- `Hyperlink.OnTapped` when set must override URL opening; when nil must preserve default behavior\n- `Entry.SetMinRowsVisible(n)` on multi-line entries must change MinSize() calculation: n=2 makes it shorter than default (3), n=5 makes it taller\n- `validation.NewAllStrings(v1, v2, ...)` must run validators in order and return first error, or nil if all pass\n- Distinguished from superficial: RemoveAll must be more efficient than loop of Remove(); validator must short-circuit on first error, not collect all errors\n\n**Target 7 (Desktop App Interface):**\n- `desktop.App` interface must exist in driver/desktop package\n- Type assertion `desktopApp, ok := app.(desktop.App)` must succeed on desktop platforms\n- `SetSystemTrayMenu()` and `SetSystemTrayIcon()` must be callable on the asserted interface\n- Distinguished from superficial: The interface must be type-assertable from the general App interface, not require separate initialization\n\n**Cross-Target Integration:**\n- All APIs must be importable from documented paths without circular dependencies\n- Existing code using old APIs must continue working (backward compatibility)\n- Type changes (toolbar constructors) must not break compilation for code that assigns to ToolbarItem variables\n\n**Critical Distinguishing Checks:**\n1. Metadata must persist across multiple Metadata() calls (not recreated each time)\n2. JSON theme color resolution must check variant-specific before generic (not just override)\n3. Sprintf binding must automatically update on source changes (not require manual trigger)\n4. Menu refresh must work on existing instances (not require window reassignment)\n5. Toolbar constructors must return concrete types allowing field access\n6. Entry min rows must affect MinSize() calculation (not just be stored unused)\n7. Validator chain must short-circuit on first error (not run all validators)",
+  "expectation_revision": null,
+  "conclusion": "The build observation shows only that `go build -v ./...` succeeded with exit code 0, which confirms the implementation compiles without errors. However, this evidence is insufficient to verify the requested runtime behaviors across all seven targets.\n\n**What the build observation confirms:**\n- All required types, methods, and functions exist with correct signatures (otherwise compilation would fail)\n- No type mismatches or syntax errors\n- Import paths are resolvable\n- The code is structurally sound\n\n**What the build observation CANNOT confirm:**\n- **Target 1**: Whether Metadata() returns correct default values (ID=\"com.example\", Name=\"Fyne App\", Version=\"1.0.0\", Build=1) or if SetMetadata() actually persists values\n- **Target 2**: Whether hex color parsing handles all formats correctly (#abc, #abcd, 6-digit, 8-digit), whether variant-specific colors override generic colors in correct precedence order, or whether invalid JSON returns default theme + error\n- **Target 3**: Whether NewSprintf automatically updates when source bindings change, whether Set() correctly reverse-parses using fmt.Sscanf, whether Bytes returns an error, or whether StringToStringWithFormat(\"%s\") returns the original binding unchanged\n- **Target 4**: Whether Menu.Refresh() updates existing menu instances in-place without requiring reassignment, or whether system tray menus update when Menu.Refresh() is called\n- **Target 5**: Whether ToolbarAction.SetIcon() triggers a visual refresh, or whether the concrete return types allow field access\n- **Target 6**: Whether Container.Add(nil) is truly a no-op, whether Entry.SetMinRowsVisible() affects MinSize() calculations, whether NewAllStrings short-circuits on first error, or whether Hyperlink.OnTapped actually overrides URL opening\n- **Target 7**: Whether desktop.App type assertion succeeds on desktop platforms\n\nThe critical \"Distinguished from superficial\" checks require runtime execution evidence, not just compilation success. A successful build proves the API surface exists but provides no information about implementation correctness, default values, automatic behavior, state persistence, or any of the behavioral requirements specified in the expectation.\n\nTo resolve this probe, the evidence would need to include test execution results, runtime observations, or behavioral validation that demonstrates the implementation actually performs the specified runtime behaviors correctly.",
+  "limitation": null,
+  "phases": [
+    "expectation",
+    "evidence"
+  ],
+  "requests": 4,
+  "history_before": {
+    "items": 0,
+    "characters": 2,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "history_after": {
+    "items": 10,
+    "characters": 39359,
+    "sha256": "f442bece67ac53e2b07bf3010f9f3c0629f74f32e2849b1b343f5b12ddf5d8b2"
+  },
+  "score_eligible": true,
+  "correct": true,
+  "comparison_role": "primary_isolated",
+  "seconds": 72.752,
+  "usage": {
+    "input_tokens": 5739,
+    "output_tokens": 3201,
+    "cache_creation_input_tokens": 15076,
+    "cache_read_input_tokens": 287,
+    "total_tokens": 24303
+  },
+  "successful_responses": 4,
+  "history_transforms": [],
+  "request_attempts": [
+    {
+      "attempt": 1,
+      "started_at": 1789754187.563439,
+      "history_characters": 311,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 7.055171299998619
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789754194.6204593,
+      "history_characters": 17894,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 36.80958979999923
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789754231.4317048,
+      "history_characters": 32019,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 4.701514899999893
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789754236.1359048,
+      "history_characters": 33706,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 24.178785300002346
+    }
+  ],
+  "transport_attempts": 4,
+  "transport_log": "transport.jsonl",
+  "transport_config": "transport_config.json"
+}

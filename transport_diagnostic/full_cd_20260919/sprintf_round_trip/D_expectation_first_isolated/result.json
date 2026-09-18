@@ -1,0 +1,79 @@
+{
+  "case": "sprintf_round_trip",
+  "group": "D_expectation_first_isolated",
+  "status": "completed",
+  "outcome": "contradicted",
+  "expectation": "A formatted binding created with NewSprintf must support reverse Set/read round trips for the supplied values with the following observable behavior:\n\n1. **Standard type round trip**: For Bool, Int, Float, String, and Rune bindings:\n   - After calling Set() with a formatted string matching the format pattern, the source bindings must contain the parsed values\n   - A subsequent Get() must return a string that, when the format is applied to the parsed source values, produces output equivalent to the Set() input\n   - Example: NewSprintf(\"x=%d y=%d\", intA, intB).Set(\"x=10 y=20\") → intA.Get() returns 10, intB.Get() returns 20, and the formatted binding's Get() returns \"x=10 y=20\"\n\n2. **URI special handling**: URI bindings must be parsed via storage.ParseURI rather than fmt.Sscanf\n   - After Set(), the URI binding must contain the parsed URI value\n   - A subsequent Get() must format that URI value into the output string\n\n3. **Bytes rejection**: Calling Set() on a formatted binding that includes a Bytes binding must return an error and not modify the Bytes binding\n\n4. **Parse failure propagation**: If fmt.Sscanf cannot parse the input string according to the format, Set() must return an error and source bindings should remain unchanged\n\nThis distinguishes a correct implementation from a superficial one that only implements Get() formatting or that fails to update source bindings during Set(), or that uses incorrect parsing for URI types.",
+  "expectation_revision": null,
+  "conclusion": "The implementation contradicts the committed expectation for reverse Set/read round trips.\n\n**Evidence from sprintf.go (lines 90-93):**\n```go\nfunc (s *sprintf) Set(string) error {\n\t// sprintf bindings are read-only\n\treturn nil\n}\n```\n\nThe current implementation treats the formatted binding as read-only and returns nil without performing any operations. It fails all required behaviors:\n\n1. **No parsing**: Does not use fmt.Sscanf to parse the input string according to the format pattern\n2. **No source updates**: Does not update any of the source bindings with parsed values\n3. **No URI special handling**: Does not call storage.ParseURI for URI bindings\n4. **No Bytes rejection**: Does not return an error when the binding includes Bytes types\n5. **No parse failure detection**: Cannot detect or propagate parsing errors since no parsing occurs\n\nA correct implementation would need to:\n- Accept the string parameter and use it (currently ignored)\n- Parse using fmt.Sscanf with the format string to extract values\n- Type-switch on each source binding and call the appropriate Set() method with parsed values\n- Special-case URI bindings to use storage.ParseURI\n- Return an error for Bytes bindings and parse failures\n\nThe round trip cannot work because Set() is a no-op that leaves source bindings unchanged.",
+  "limitation": null,
+  "phases": [
+    "expectation",
+    "evidence"
+  ],
+  "requests": 4,
+  "history_before": {
+    "items": 0,
+    "characters": 2,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "history_after": {
+    "items": 10,
+    "characters": 32816,
+    "sha256": "32abb630003574325feb98abe63f4e028d4a3487d283e8a207836bfbf9e47cc8"
+  },
+  "score_eligible": true,
+  "correct": true,
+  "comparison_role": "primary_isolated",
+  "seconds": 47.238,
+  "usage": {
+    "input_tokens": 6150,
+    "output_tokens": 1925,
+    "cache_creation_input_tokens": 12302,
+    "cache_read_input_tokens": 246,
+    "total_tokens": 20623
+  },
+  "successful_responses": 4,
+  "history_transforms": [],
+  "request_attempts": [
+    {
+      "attempt": 1,
+      "started_at": 1789753807.9906845,
+      "history_characters": 276,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 4.541366099998413
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789753812.5342987,
+      "history_characters": 17019,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 22.35044460000063
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789753834.8858154,
+      "history_characters": 23961,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 4.616623499998241
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789753839.5041845,
+      "history_characters": 29265,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 15.723123200001282
+    }
+  ],
+  "transport_attempts": 4,
+  "transport_log": "transport.jsonl",
+  "transport_config": "transport_config.json"
+}

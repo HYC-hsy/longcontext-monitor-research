@@ -1,0 +1,60 @@
+{
+  "case": "container_safety",
+  "group": "C_isolated_direct",
+  "status": "completed",
+  "outcome": "supported_in_scope",
+  "expectation": null,
+  "expectation_revision": null,
+  "conclusion": "The Container implementation correctly supports both nil-safe Add and RemoveAll with the required relayout behavior.\n\n**Add method (lines 53-60):**\n- Checks `if add == nil` and returns early without appending\n- Appends the object to c.Objects when non-nil\n- Calls `c.layout()` to trigger relayout\n\n**RemoveAll method (lines 177-180):**\n- Sets `c.Objects = nil` to clear all objects\n- Calls `c.layout()` to trigger relayout\n\nBoth methods match the Target 6 requirements exactly: Add is nil-safe (nil is a no-op), and RemoveAll clears all objects and triggers re-layout.",
+  "limitation": null,
+  "phases": [
+    "evidence"
+  ],
+  "requests": 2,
+  "history_before": {
+    "items": 0,
+    "characters": 2,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "history_after": {
+    "items": 5,
+    "characters": 25660,
+    "sha256": "b3519234c2da9c880c06a24a5da84683b7fc991d5bfb8e0f56a529d003e1c725"
+  },
+  "score_eligible": true,
+  "correct": true,
+  "comparison_role": "primary_isolated",
+  "seconds": 15.941,
+  "usage": {
+    "input_tokens": 5901,
+    "output_tokens": 701,
+    "cache_creation_input_tokens": 1069,
+    "cache_read_input_tokens": 96,
+    "total_tokens": 7767
+  },
+  "successful_responses": 2,
+  "history_transforms": [],
+  "request_attempts": [
+    {
+      "attempt": 1,
+      "started_at": 1789753926.6970992,
+      "history_characters": 293,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 4.709363300000405
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789753931.4094143,
+      "history_characters": 22998,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 11.227013899999292
+    }
+  ],
+  "transport_attempts": 2,
+  "transport_log": "transport.jsonl",
+  "transport_config": "transport_config.json"
+}

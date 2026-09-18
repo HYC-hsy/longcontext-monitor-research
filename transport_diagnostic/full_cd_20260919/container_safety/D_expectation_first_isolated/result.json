@@ -1,0 +1,79 @@
+{
+  "case": "container_safety",
+  "group": "D_expectation_first_isolated",
+  "status": "completed",
+  "outcome": "supported_in_scope",
+  "expectation": "Container must provide a nil-safe Add() method that silently ignores nil objects without appending them to the Objects slice or triggering layout. Container must provide a RemoveAll() method that sets Objects to nil and triggers a relayout/refresh. To verify correctness beyond superficial implementation: (1) Add(nil) called multiple times should not increase Objects length; (2) RemoveAll() must both clear Objects and invoke the relayout mechanism so visual state updates; (3) RemoveAll() on an empty container should be safe and still trigger refresh.",
+  "expectation_revision": null,
+  "conclusion": "The Container implementation fully supports the expected behavior:\n\n**Nil-safe Add() (lines 53-59):**\n- Checks `if add == nil` and returns immediately\n- Does not append nil to Objects\n- Does not trigger layout when nil is passed\n- Multiple Add(nil) calls leave Objects unchanged\n\n**RemoveAll() with relayout (lines 172-176):**\n- Sets `c.Objects = nil` to clear all objects\n- Calls `c.layout()` to trigger the relayout mechanism\n- Safe on empty containers (setting nil to nil is a no-op)\n- Consistent with the pattern used by Add() and Remove()\n\nThe implementation matches the task requirement verbatim: \"sets Objects to nil and triggers a re-layout.\" The c.layout() method invokes the Layout algorithm when present (lines 178-182), which updates the visual positioning of objects. This is the same relayout mechanism used throughout Container for Add(), Remove(), and Resize() operations.\n\nAll three verification criteria from the expectation are satisfied by the observable implementation.",
+  "limitation": null,
+  "phases": [
+    "expectation",
+    "evidence"
+  ],
+  "requests": 4,
+  "history_before": {
+    "items": 0,
+    "characters": 2,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "history_after": {
+    "items": 10,
+    "characters": 32312,
+    "sha256": "675fbee835b3ce7bea6fa1f988c770a3964054ecd4aeeea5e1a957747d7e7731"
+  },
+  "score_eligible": true,
+  "correct": true,
+  "comparison_role": "primary_isolated",
+  "seconds": 45.274,
+  "usage": {
+    "input_tokens": 6112,
+    "output_tokens": 1836,
+    "cache_creation_input_tokens": 11503,
+    "cache_read_input_tokens": 235,
+    "total_tokens": 19686
+  },
+  "successful_responses": 4,
+  "history_transforms": [],
+  "request_attempts": [
+    {
+      "attempt": 1,
+      "started_at": 1789753942.6423638,
+      "history_characters": 262,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 3.961666700000933
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789753946.6113243,
+      "history_characters": 16888,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 18.144241000001784
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789753964.7594728,
+      "history_characters": 21909,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 3.5324703000005684
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789753968.294481,
+      "history_characters": 27915,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 19.620599400001083
+    }
+  ],
+  "transport_attempts": 4,
+  "transport_log": "transport.jsonl",
+  "transport_config": "transport_config.json"
+}

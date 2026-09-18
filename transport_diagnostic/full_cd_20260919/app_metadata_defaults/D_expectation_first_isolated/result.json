@@ -1,0 +1,79 @@
+{
+  "case": "app_metadata_defaults",
+  "group": "D_expectation_first_isolated",
+  "status": "completed",
+  "outcome": "supported_in_scope",
+  "expectation": "App Metadata System Observable Behaviors:\n\n1. **AppMetadata struct availability**: The type `fyne.AppMetadata` must be importable and constructible, with exactly these exported fields:\n   - `ID` (string)\n   - `Name` (string) \n   - `Version` (string)\n   - `Build` (int)\n   - `Icon` (fyne.Resource)\n\n2. **App.Metadata() method signature**: Any value satisfying the `fyne.App` interface must have a `Metadata() fyne.AppMetadata` method that compiles and returns an AppMetadata value.\n\n3. **SetMetadata function availability**: The function `app.SetMetadata(fyne.AppMetadata)` must be callable from the app sub-package and must affect subsequent calls to `Metadata()` on app instances.\n\n4. **Default metadata behavior**: Calling `Metadata()` on a newly created app (before any `SetMetadata` call) must return an AppMetadata with:\n   - ID = \"com.example\"\n   - Name = \"Fyne App\"\n   - Version = \"1.0.0\"\n   - Build = 1\n   - Icon = nil (or any default value)\n\n5. **Runtime override behavior**: After calling `app.SetMetadata()` with custom values, calling `Metadata()` on the app must return those custom values, not the defaults.\n\n**Distinguishing check**: Create an app, call `Metadata()` and verify defaults, then call `app.SetMetadata()` with custom values (e.g., ID=\"com.test\", Name=\"Test\", Version=\"2.0.0\", Build=42), then call `Metadata()` again and verify the custom values are returned. This distinguishes a working implementation from one that only returns hardcoded defaults.",
+  "expectation_revision": null,
+  "conclusion": "The implementation satisfies all App Metadata requirements within the evidence scope:\n\n**Expectation 1 - AppMetadata struct**: Confirmed in app.go lines 90-104. The struct is defined with all 5 required fields (ID string, Name string, Version string, Build int, Icon Resource) with exact name and type matches.\n\n**Expectation 2 - App.Metadata() method**: Confirmed in app.go lines 64-67 where the method is declared in the App interface, and in app/app.go lines 106-108 where fyneApp implements it by returning the metadata variable.\n\n**Expectation 3 - SetMetadata function**: Confirmed in app/meta.go lines 12-18. The function exists in the app sub-package, accepts a fyne.AppMetadata parameter, and assigns it to the package-level metadata variable that Metadata() returns.\n\n**Expectation 4 - Default metadata**: Confirmed in app/meta.go lines 5-10. The package variable is initialized with exactly the required defaults: ID=\"com.example\", Name=\"Fyne App\", Version=\"1.0.0\", Build=1, and Icon is unset (nil).\n\n**Expectation 5 - Runtime override behavior**: Confirmed by the implementation chain. SetMetadata(m) directly assigns to the metadata variable (meta.go line 17), and fyneApp.Metadata() directly returns that same variable (app/app.go line 107), ensuring that SetMetadata calls affect subsequent Metadata() calls.\n\nThe distinguishing check would pass: default metadata is returned initially, and calling SetMetadata() with custom values would be reflected in subsequent Metadata() calls because they share the same package-level variable.",
+  "limitation": null,
+  "phases": [
+    "expectation",
+    "evidence"
+  ],
+  "requests": 4,
+  "history_before": {
+    "items": 0,
+    "characters": 2,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "history_after": {
+    "items": 10,
+    "characters": 41271,
+    "sha256": "77008ec7b6d9c719e4003d91239640faacf8e6d18b327a6bfa969a96a87e2e0f"
+  },
+  "score_eligible": true,
+  "correct": true,
+  "comparison_role": "primary_isolated",
+  "seconds": 50.044,
+  "usage": {
+    "input_tokens": 8009,
+    "output_tokens": 2450,
+    "cache_creation_input_tokens": 12669,
+    "cache_read_input_tokens": 103,
+    "total_tokens": 23231
+  },
+  "successful_responses": 4,
+  "history_transforms": [],
+  "request_attempts": [
+    {
+      "attempt": 1,
+      "started_at": 1789753532.2205348,
+      "history_characters": 294,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 4.748790200002986
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789753536.9714,
+      "history_characters": 17297,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 18.061835099997552
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789753555.0340745,
+      "history_characters": 23861,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 6.715656899999885
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789753561.7529416,
+      "history_characters": 36228,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 20.510298400000465
+    }
+  ],
+  "transport_attempts": 4,
+  "transport_log": "transport.jsonl",
+  "transport_config": "transport_config.json"
+}

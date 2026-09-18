@@ -1,0 +1,69 @@
+{
+  "case": "json_theme_api",
+  "group": "C_isolated_direct",
+  "status": "completed",
+  "outcome": "contradicted",
+  "expectation": null,
+  "expectation_revision": "FromJSON should accept string parameter and both FromJSON/FromJSONReader should return (DefaultTheme(), error) on parse failures rather than (nil, error). The parseHexColor function should return a transparent color on error rather than nil.",
+  "conclusion": "The JSON theme implementation contradicts the task requirements in several ways:\n\n**API Signature Mismatch:**\n- Task requires: `FromJSON(data string) (fyne.Theme, error)`\n- Implementation provides: `FromJSON(data []byte) (fyne.Theme, error)`\nThe parameter type is `[]byte` instead of `string`.\n\n**Fallback Behavior Violations:**\n1. Task requirement: \"On parse error, return the default theme along with the error\"\n   - Implementation: Returns `nil, err` on JSON decode error (line 60-62)\n   - Expected: Should return `(DefaultTheme(), err)`\n\n2. Task requirement for hex colors: \"Invalid format returns a transparent color with an error\"\n   - Implementation: `parseHexColor` returns `nil, err` for invalid formats (line 238)\n   - Expected: Should return `(color.NRGBA{R:0, G:0, B:0, A:0}, err)`\n\n**What Works Correctly:**\n- JSON schema structure matches requirements (Colors, Colors-dark, Colors-light, Sizes, Fonts, Icons)\n- Color resolution order is correct (variant-specific → generic Colors → fallback theme)\n- Hex color parsing logic for all formats (3, 4, 6, 8 digits with/without #) is correctly implemented\n- Font style mapping works (though uses \"bolditalic\" lowercase vs task's \"boldItalic\" camelCase)\n- All Theme interface methods (Color, Font, Icon, Size) properly fall back to DefaultTheme()\n\nThe core functionality is sound, but the callable API contract and error-case fallback behavior do not match the documented requirements.",
+  "limitation": null,
+  "phases": [
+    "evidence"
+  ],
+  "requests": 3,
+  "history_before": {
+    "items": 0,
+    "characters": 2,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "history_after": {
+    "items": 7,
+    "characters": 32239,
+    "sha256": "ed49ab77878fa51c79815df2bbe51dbeedbee1973ea9c06f6609cd6bbe85730c"
+  },
+  "score_eligible": true,
+  "correct": true,
+  "comparison_role": "primary_isolated",
+  "seconds": 34.78,
+  "usage": {
+    "input_tokens": 7302,
+    "output_tokens": 1436,
+    "cache_creation_input_tokens": 7986,
+    "cache_read_input_tokens": 175,
+    "total_tokens": 16899
+  },
+  "successful_responses": 3,
+  "history_transforms": [],
+  "request_attempts": [
+    {
+      "attempt": 1,
+      "started_at": 1789753582.2701933,
+      "history_characters": 308,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 5.450715900002251
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789753587.7234042,
+      "history_characters": 24438,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 5.184729799999332
+    },
+    {
+      "attempt": 1,
+      "started_at": 1789753592.910884,
+      "history_characters": 27169,
+      "purpose": "review",
+      "transaction_id": null,
+      "outcome": "success",
+      "duration_seconds": 24.13825419999921
+    }
+  ],
+  "transport_attempts": 3,
+  "transport_log": "transport.jsonl",
+  "transport_config": "transport_config.json"
+}
