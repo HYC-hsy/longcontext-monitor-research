@@ -1,0 +1,19 @@
+{
+  "case": "json_theme_api",
+  "group": "direct_c",
+  "status": "completed",
+  "outcome": "contradicted",
+  "conclusion": "The JSON theme implementation has three specific deviations from the documented callable API in Target 2:\n\n1. **API signature mismatch**: The implementation defines `FromJSON(data []byte)` but the task requirement specifies `FromJSON(data string)`. The documented API expects a string parameter, not a byte slice.\n\n2. **Error handling behavior**: On parse error, the implementation returns `nil, err` (line 59-60), but the task requirement explicitly states \"On parse error, return the default theme along with the error.\" This should return `DefaultTheme(), err` to satisfy the fallback behavior requirement.\n\n3. **Font style key casing**: The implementation uses lowercase `\"bolditalic\"` (line 146) as the font map key, but the task documentation specifies `\"boldItalic\"` with camelCase. This affects the JSON schema contract—users following the documented schema would write `{\"Fonts\": {\"boldItalic\": \"...\"}}` but the implementation would not recognize it.\n\nThe hex color parsing (3, 4, 6, 8 digit formats with optional `#` prefix) is implemented correctly, color resolution order (variant-specific → generic Colors → default fallback) works as specified, and the JSON schema structure matches for Colors, Colors-dark, Colors-light, Sizes, Fonts, and Icons. The build succeeds without compilation errors.\n\nHowever, the API signature and error handling behavior do not satisfy the documented requirements.",
+  "score_eligible": true,
+  "correct": true,
+  "requests": 4,
+  "seconds": 48.833,
+  "usage": {
+    "input_tokens": 15243,
+    "output_tokens": 1912,
+    "cache_creation_input_tokens": 1522,
+    "cache_read_input_tokens": 22906,
+    "total_tokens": 41583
+  },
+  "material_evidence_count": 12
+}
