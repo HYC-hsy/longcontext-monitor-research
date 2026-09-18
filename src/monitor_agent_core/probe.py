@@ -149,6 +149,10 @@ class IndependentVerifier:
         tools = [_tool("file_read", "Read one permitted source or evidence file.", {
             "path": {"type": "string"}, "start": {"type": "integer"},
             "count": {"type": "integer"}, "tail": {"type": "boolean"},
+            "offset": {"type": "integer", "minimum": 0,
+                       "description": "Use the offset returned in next_read to continue a truncated first line."},
+            "max_chars": {"type": "integer", "minimum": 1, "maximum": 200000,
+                          "description": "Maximum decoded characters to return; normally omit."},
         })]
         if self.config.allow_code_run and phase == "evidence":
             tools.append(_tool("code_run", "Run one caller-supplied bounded observation.", {

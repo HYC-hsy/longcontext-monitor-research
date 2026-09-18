@@ -187,3 +187,38 @@ def test_transport_callback_keeps_lifecycle_and_drops_payloads():
         "request_id": "r1", "outcome": "retryable_error",
         "error_chain": [{"type": "ConnectionError", "code": None}],
     }]
+
+
+def test_file_read_cursor_continuation_is_complete_without_duplicates(tmp_path):
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    expected = "0123456789ABCDEFGHIJ\nsecond-line\nthird-line\n"
+    (evidence / "events.jsonl").write_text(expected, encoding="utf-8")
+    probe = IndependentVerifier(
+        SequenceClient([]),
+        MonitorWorkspace(evidence, tmp_path / "private"),
+        ProbeConfig(evidence_paths=("task/events.jsonl",)),
+    )
+    probe._allowed = {"task/events.jsonl"}
+    file_read = probe._tools("evidence")[0]["function"]["parameters"]["properties"]
+    assert {"offset", "max_chars"}.issubset(file_read)
+    arguments = {"path": "task/events.jsonl", "start": 1,
+                 "count": 3, "max_chars": 7}
+    pieces = []
+    cursors = []
+    while True:
+        outcome = probe._dispatch("file_read", arguments, "evidence")
+        assert outcome.data["status"] if isinstance(outcome.data, dict) and "status" in outcome.data else True
+        data = outcome.data
+        pieces.append(data["content"])
+        if not data["truncated"]:
+            break
+        cursor = data["next_read"]
+        cursors.append((cursor["start"], cursor.get("offset", 0)))
+        arguments = {"path": cursor["path"], "start": cursor["start"],
+                     "count": cursor["count"], "max_chars": cursor["max_chars"]}
+        if "offset" in cursor:
+            arguments["offset"] = cursor["offset"]
+    assert "".join(pieces) == expected
+    assert len(cursors) >= 2
+    assert len(set(cursors)) == len(cursors)
