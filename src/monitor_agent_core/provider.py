@@ -52,7 +52,10 @@ def failure_chain(exc):
         chain.append({'type': type(exc).__name__, 'code': code if code in {
             'unexpected_tool', 'empty_note', 'reasoning_echo', 'truncated_note',
             'incomplete_stream', 'abnormal_stop'} else None})
-        exc = exc.__cause__
+        seen.add(id(exc))
+        # A provider adapter may wrap a socket/read error implicitly with
+        # ``raise ...``. Preserve that diagnostic edge without the message.
+        exc = exc.__cause__ or exc.__context__
     return chain
 
 

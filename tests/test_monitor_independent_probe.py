@@ -183,6 +183,7 @@ def test_transport_callback_keeps_lifecycle_and_drops_payloads():
              secret="must-not-persist", response_body="must-not-persist")
     assert records == [{
         "event": "transport_request_finished", "case": "case", "group": "C",
+        "recorded_at": records[0]["recorded_at"],
         "request_id": "r1", "outcome": "retryable_error",
         "error_chain": [{"type": "ConnectionError", "code": None}],
     }]

@@ -11,6 +11,7 @@ import hashlib
 import json
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -95,7 +96,8 @@ def usage_total(records: list[dict]) -> dict:
     return totals
 
 
-def transport_audit_callback(records: list[dict], case_id: str, group_name: str):
+def transport_audit_callback(records: list[dict], case_id: str, group_name: str,
+                             transport_path: Path | None = None):
     """Keep provider lifecycle diagnostics without response bodies or secrets."""
     allowed = {
         "request_id", "attempt", "started_at", "duration_seconds", "purpose",
@@ -111,8 +113,15 @@ def transport_audit_callback(records: list[dict], case_id: str, group_name: str)
             item["metadata"] = {key: metadata[key] for key in (
                 "provider", "stream_complete", "stop_reason", "provider_message_id"
             ) if key in metadata}
-        records.append({"event": "transport_" + event, "case": case_id,
-                        "group": group_name, **item})
+        record = {"event": "transport_" + event, "case": case_id,
+                  "group": group_name,
+                  "recorded_at": datetime.now(timezone.utc).isoformat(), **item}
+        records.append(record)
+        if transport_path is not None:
+            transport_path.parent.mkdir(parents=True, exist_ok=True)
+            with transport_path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+                stream.flush()
     return callback
 
 
@@ -141,6 +150,16 @@ def run_case_group(case: dict, group_name: str, group: dict, fixture: Path,
         raise ValueError(f"unsupported group mode: {mode}")
     private = output / case["id"] / group_name / "private"
     private.mkdir(parents=True)
+    write_json(private.parent / "transport_config.json", {
+        "provider": provider_config.get("provider") if provider_config else None,
+        "model": provider_config.get("model") if provider_config else None,
+        "api_mode": provider_config.get("api_mode") if provider_config else None,
+        "timeout": provider_config.get("timeout") if provider_config else None,
+        "read_timeout": provider_config.get("read_timeout") if provider_config else None,
+        "max_retries": provider_config.get("max_retries") if provider_config else None,
+        "stream": True,
+        "apikey": "[redacted]",
+    })
     workspace = MonitorWorkspace(
         fixture / "task_evidence", private,
         task_mounts={"workspace": fixture / "workspace"},
@@ -151,7 +170,9 @@ def run_case_group(case: dict, group_name: str, group: dict, fixture: Path,
         # A copy in a fresh client; archived parent file itself is never mutated.
         client.restore_history(parent_history)
     records = []
-    client.progress_callback = transport_audit_callback(records, case["id"], group_name)
+    transport_path = private.parent / "transport.jsonl"
+    client.progress_callback = transport_audit_callback(
+        records, case["id"], group_name, transport_path)
     probe = IndependentVerifier(
         client, workspace,
         ProbeConfig(
@@ -192,9 +213,12 @@ def run_case_group(case: dict, group_name: str, group: dict, fixture: Path,
         }
     item["seconds"] = round(time.monotonic() - started, 3)
     item["usage"] = usage_total(client.usage_records)
+    item["successful_responses"] = len(client.usage_records)
     item["history_transforms"] = client.history_transforms
     item["request_attempts"] = client.request_attempts
     item["transport_attempts"] = len(client.request_attempts)
+    item["transport_log"] = "transport.jsonl"
+    item["transport_config"] = "transport_config.json"
     group_dir = private.parent
     write_json(group_dir / "result.json", item)
     (group_dir / "audit.jsonl").write_text(
