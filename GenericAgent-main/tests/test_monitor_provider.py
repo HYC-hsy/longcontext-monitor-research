@@ -2,7 +2,7 @@ import json
 import pytest
 
 from monitor_agent_core.provider import MonitorProviderClient
-from monitor_agent_core.provider import ProviderError, RetryableProviderError, _remote_error
+from monitor_agent_core.provider import ProviderError, RetryableProviderError, _remote_error, failure_chain
 
 
 def answer_item(text):
@@ -303,6 +303,39 @@ def test_http_error_routing(monkeypatch, status, error, retry):
     monkeypatch.setattr('monitor_agent_core.provider.requests.post', post)
     with pytest.raises(ProviderError): client._request([])
     assert len(calls) == (2 if retry else 1)
+
+
+def test_http_200_then_read_timeout_is_recorded_after_headers(monkeypatch):
+    client = MonitorProviderClient('native_claude', config(max_retries=0))
+    events = []
+    client.progress_callback = lambda event, **fields: events.append((event, fields))
+
+    class Response:
+        status_code = 200
+        headers = {"content-type": "text/event-stream"}
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def iter_lines(self): raise requests.ReadTimeout("synthetic read timeout")
+
+    import requests
+    monkeypatch.setattr('monitor_agent_core.provider.requests.post', lambda *a, **k: Response())
+    with pytest.raises(ProviderError):
+        client.complete([{'role': 'user', 'content': 'review'}], [])
+    assert any(event == 'response_headers' and fields['status_code'] == 200
+               for event, fields in events)
+    assert client.request_attempts[0]['error_type'] == 'ReadTimeout'
+
+
+def test_failure_chain_includes_implicit_context_without_messages():
+    try:
+        try:
+            raise TimeoutError('socket detail must not persist')
+        except TimeoutError as inner:
+            raise RetryableProviderError('wrapper')
+    except RetryableProviderError as outer:
+        chain = failure_chain(outer)
+    assert [item['type'] for item in chain] == ['RetryableProviderError', 'TimeoutError']
+    assert all('message' not in item for item in chain)
 
 
 def test_provider_kind_comes_from_explicit_config_or_model():
