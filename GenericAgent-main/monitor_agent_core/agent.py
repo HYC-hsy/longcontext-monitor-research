@@ -77,6 +77,18 @@ MONITOR_TOOLS = [
     _tool("allow_complete", "Allow only the currently pending root completion.", {}, []),
 ]
 
+INDEPENDENT_CHECK_TOOL = _tool(
+    "independent_check",
+    "Ask a fresh, isolated verifier one concrete local question. Give the question and only the "
+    "task evidence paths needed to answer it. The verifier cannot intervene or approve; use its "
+    "scoped result as evidence, not as a whole-task decision.",
+    {
+        "question": {"type": "string", "minLength": 1},
+        "paths": {"type": "array", "minItems": 1, "maxItems": 8,
+                  "items": {"type": "string"}},
+    }, ["question", "paths"],
+)
+
 
 MONITOR_SYSTEM_PROMPT = """You are the persistent Monitor Agent for a long-running Task Agent.
 Detect material task drift from public evidence, especially omitted requirements and completion claims based
@@ -204,7 +216,8 @@ INQUIRY_TOOL = _tool('inquiry',
 
 
 class MonitorAgent:
-    def __init__(self, client, workspace: MonitorWorkspace, max_review_turns=20, *, stop_event=None):
+    def __init__(self, client, workspace: MonitorWorkspace, max_review_turns=20, *, stop_event=None,
+                 independent_check=None):
         self.client = client
         tool_feedback = getattr(client, 'config', {}).get('monitor_tool_feedback', False)
         if type(tool_feedback) is not bool:
@@ -217,6 +230,7 @@ class MonitorAgent:
         self._seen_completion = None
         self._intervened_generation = None
         self.stop_event = stop_event if stop_event is not None else threading.Event()
+        self.independent_check = independent_check
         self.analysis = AnalysisSessions(workspace.private_root, self.stop_event)
         self.review_id = None
         self._progress_warning = False
@@ -499,6 +513,17 @@ class MonitorAgent:
                         raise ValueError('cancel requires session_id')
                     data = self.analysis.start(arguments.get('code'), arguments.get('type', 'python'),
                                                arguments.get('timeout', 60), arguments.get('wait_seconds', 1))
+            elif name == "independent_check":
+                if self.independent_check is None:
+                    raise ValueError("independent verification is disabled")
+                question = str(arguments.get("question", "")).strip()
+                paths = arguments.get("paths")
+                if not question or not isinstance(paths, list) or not paths:
+                    raise ValueError("question and at least one evidence path are required")
+                if len(paths) > 8 or any(not isinstance(path, str) or not path.startswith("task/")
+                                         for path in paths):
+                    raise ValueError("independent evidence paths must be task/ paths")
+                data = self.independent_check(question, tuple(paths))
             elif name == "wait":
                 pending = self.completion_pending
                 if self.completion_state is not None:
@@ -594,7 +619,10 @@ class MonitorAgent:
         action = None
         try:
             if self.pma_memory is not None:
-                action = self.pma_memory.review(self, wake_context, MONITOR_TOOLS)
+                pma_tools = [*MONITOR_TOOLS]
+                if self.independent_check is not None:
+                    pma_tools.append(INDEPENDENT_CHECK_TOOL)
+                action = self.pma_memory.review(self, wake_context, pma_tools)
                 return action
             if completion_pending and self.completion_state is None and self.task_understanding is not None:
                 wake_context += self.task_understanding.completion_context()
@@ -614,6 +642,8 @@ class MonitorAgent:
                         "After an intervention that completion proposal is no longer pending.")
             system = self.system_prompt + "\n\n" + mode
             tools = MONITOR_TOOLS
+            if self.independent_check is not None:
+                tools = [*tools, INDEPENDENT_CHECK_TOOL]
             if self.decision_context is not None:
                 system += (
                     '\n\nmonitor/overview.md is a refreshed file entry to ongoing work and original materials, '

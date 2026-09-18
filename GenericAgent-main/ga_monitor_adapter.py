@@ -67,6 +67,13 @@ class GenericAgentMonitorAdapter:
             stream.write(runtime_options['public_task'])
         runtime_options['task_original_path'] = str(original)
         runtime_options.setdefault('task_id', os.environ.get('GA_BENCH_RUN_ID') or uuid.uuid4().hex)
+        if os.environ.get('GA_MONITOR_INDEPENDENT_C', '0') not in {'0', '1'}:
+            raise ValueError('GA_MONITOR_INDEPENDENT_C must be 0 or 1')
+        if os.environ.get('GA_MONITOR_INDEPENDENT_C') == '1':
+            runtime_options['independent_probe_total_requests'] = int(
+                os.environ.get('GA_MONITOR_INDEPENDENT_C_TOTAL_REQUESTS', '6'))
+            runtime_options['independent_probe_max_requests'] = int(
+                os.environ.get('GA_MONITOR_INDEPENDENT_C_MAX_REQUESTS', '3'))
         try:
             self.runtime = MonitorRuntime(**runtime_options)
         except Exception:

@@ -49,6 +49,7 @@ def _coalesce_wake_command(commands, first, completion_is_active=None):
 def _worker(config, commands, outputs):
     from .agent import MonitorAgent
     from .provider import MonitorProviderClient, ProviderRecoveryExhausted
+    from .probe import IndependentVerifier, ProbeConfig
     from .workspace import MonitorWorkspace
 
     try:
@@ -64,7 +65,51 @@ def _worker(config, commands, outputs):
         history_path = Path(config["private_root"]) / "audit" / "provider_history.json"
         if history_path.is_file():
             client.restore_history(json.loads(history_path.read_text(encoding="utf-8")))
-        monitor = MonitorAgent(client, workspace, config["max_review_turns"], stop_event=config['stop_event'])
+        probe_total = int(config.get("independent_probe_total_requests", 0) or 0)
+        probe_per_call = int(config.get("independent_probe_max_requests", 3) or 3)
+        probe_lock = threading.Lock()
+
+        def independent_check(question, paths):
+            nonlocal probe_total
+            with probe_lock:
+                if probe_total <= 0:
+                    return {"status": "budget_exhausted", "outcome": None,
+                            "conclusion": None, "limitation": "independent_probe_budget_exhausted",
+                            "requests": 0}
+                allowance = min(probe_per_call, probe_total)
+            probe = IndependentVerifier.from_provider_config(
+                config["config_name"], config["model_config"], workspace,
+                ProbeConfig(mode="direct", source_paths=("task/original_task.txt",),
+                            evidence_paths=tuple(paths), max_requests=allowance, max_turns=8),
+                audit=lambda event, **fields: monitor_probe_audit(event, **fields),
+            )
+            result = probe.run(question)
+            telemetry = probe.client.drain_telemetry()
+            used = int(result.requests)
+            with probe_lock:
+                probe_total = max(0, probe_total - used)
+                remaining = probe_total
+            payload = {
+                "status": result.status, "outcome": result.outcome,
+                "conclusion": result.conclusion, "limitation": result.limitation,
+                "requests": used, "remaining_requests": remaining,
+                "usage": telemetry.get("usage", []),
+            }
+            monitor_probe_audit("independent_probe_finished", question=question,
+                                paths=list(paths), **payload)
+            return payload
+
+        def monitor_probe_audit(event, **fields):
+            # Keep probe evidence in the same monitor audit stream, without
+            # placing the child dialogue into the parent History.
+            try:
+                monitor._progress(event, **fields)
+            except Exception:
+                pass
+
+        monitor = MonitorAgent(client, workspace, config["max_review_turns"],
+                               stop_event=config['stop_event'],
+                               independent_check=(independent_check if probe_total > 0 else None))
     except Exception as exc:
         outputs.put({"kind": "failure", "error": repr(exc), "phase": "startup"})
         return
@@ -242,7 +287,8 @@ class MonitorRuntime:
                  model_config, interrupt_callback, max_review_turns=20,
                  completion_timeout=300, process_factory=None, worker_target=None,
                  interrupt_pending=None, run_timeout_seconds=10000, run_deadline_epoch=None,
-                 correction_begin=None, correction_end=None, task_original_path=None, task_id):
+                 correction_begin=None, correction_end=None, task_original_path=None, task_id,
+                 independent_probe_total_requests=0, independent_probe_max_requests=3):
         if model_config.get('monitor_hybrid_control', False):
             raise ValueError('Model-requested hybrid pause is retired')
         self.artifact_dir = Path(artifact_dir).resolve()
@@ -314,6 +360,8 @@ class MonitorRuntime:
             "latest_task_turn": self._latest_task_turn,
             "run_deadline_epoch": time.time() + max(0.0, self._run_deadline - time.monotonic()),
             "stop_event": self._stop_event,
+            "independent_probe_total_requests": int(independent_probe_total_requests),
+            "independent_probe_max_requests": int(independent_probe_max_requests),
             "completion_receipts": self._completion_receipts,
             "wake_receipts": self._wake_receipts,
         }, self._commands, self._outputs), daemon=True)
