@@ -47,6 +47,27 @@ continuation cursor. Both groups spent their budget before opening any of the
 four permitted implementation files (`theme/json.go`,
 `data/binding/sprintf.go`, `menu.go`, `driver/desktop/app.go`).
 
+The following is the redacted call/return trace extracted from the local
+`audit.jsonl`. `next` is the reader's `(start, offset)` continuation; every
+event-log return was truncated. No event content is reproduced.
+
+| Group | Call | Requested `start,count` | Returned `lines,chars` | `next` |
+| --- | ---: | --- | --- | --- |
+| C | 1 | event log default | 6, 20000 | 6, 7273 |
+| C | 2 | 6, 112 | 3, 20000 | 8, 8436 |
+| C | 3 | 8, 110 | 3, 20000 | 10, 9310 |
+| C | 4 | 10, 108 | 3, 20000 | 12, 2677 |
+| C | 5 | 12, 105 | 7, 20000 | 18, 3821 |
+| C | 6 | 18, 99 | 5, 20000 | 22, 3886 |
+| D | 3 | event log default | 6, 20000 | 6, 7273 |
+| D | 4 | 6, 112 | 3, 20000 | 8, 8436 |
+| D | 5 | 8, 110 | 3, 20000 | 10, 9310 |
+| D | 6 | 110, 10 | 4, 20000 | 113, 2954 |
+
+D's calls 1–2 were the untruncated original-task read and expectation commit.
+In C, call 1 also read the untruncated original task. Neither group used an
+`offset` argument in any request.
+
 The lower-level `MonitorWorkspace.read_text()` accepts `offset` and
 `max_chars`, and its `next_read` supplies them for mid-line continuation.
 `IndependentVerifier._dispatch()` forwards these arguments if present, but
