@@ -14,6 +14,8 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(ROOT / "GenericAgent-main"))
 sys.path.insert(0, str(ROOT / "method_discovery"))
 from monitor_agent_core.probe import IndependentVerifier, ProbeConfig, score_local_result  # noqa: E402
