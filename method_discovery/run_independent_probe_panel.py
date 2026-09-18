@@ -95,6 +95,27 @@ def usage_total(records: list[dict]) -> dict:
     return totals
 
 
+def transport_audit_callback(records: list[dict], case_id: str, group_name: str):
+    """Keep provider lifecycle diagnostics without response bodies or secrets."""
+    allowed = {
+        "request_id", "attempt", "started_at", "duration_seconds", "purpose",
+        "transaction_id", "outcome", "error_type", "error_chain", "retry_delay_seconds",
+        "status_code", "lines", "bytes_or_characters", "seconds", "next_batch",
+        "reason", "source", "delta_characters", "final_characters", "mismatch",
+        "reasoning_echo", "final_item_types", "usage", "provider_message_id", "metadata",
+    }
+    def callback(event, **fields):
+        item = {key: value for key, value in fields.items() if key in allowed}
+        metadata = item.get("metadata")
+        if isinstance(metadata, dict):
+            item["metadata"] = {key: metadata[key] for key in (
+                "provider", "stream_complete", "stop_reason", "provider_message_id"
+            ) if key in metadata}
+        records.append({"event": "transport_" + event, "case": case_id,
+                        "group": group_name, **item})
+    return callback
+
+
 def run_case_group(case: dict, group_name: str, group: dict, fixture: Path,
                    output: Path, provider_config: dict | None,
                    parent_history: list[dict]) -> dict:
@@ -130,6 +151,7 @@ def run_case_group(case: dict, group_name: str, group: dict, fixture: Path,
         # A copy in a fresh client; archived parent file itself is never mutated.
         client.restore_history(parent_history)
     records = []
+    client.progress_callback = transport_audit_callback(records, case["id"], group_name)
     probe = IndependentVerifier(
         client, workspace,
         ProbeConfig(
