@@ -1,6 +1,6 @@
 # 长程 Agent 的任务状态失真与持续监察
 
-最新审阅入口：[独立核验能力原型与专家问题（2026-09-18）](docs/INDEPENDENT_VERIFICATION_EXPERT_REVIEW_20260918.md)，随后看[测量修复与标签复核](docs/INDEPENDENT_VERIFICATION_MEASUREMENT_REPAIR_20260918.md)。这是离线局部试验；尚无完整面板结果，也未改在线监察流程。
+最新审阅入口：[独立核验能力原型与专家问题（2026-09-18）](docs/INDEPENDENT_VERIFICATION_EXPERT_REVIEW_20260918.md)，随后看[测量修复与标签复核](docs/INDEPENDENT_VERIFICATION_MEASUREMENT_REPAIR_20260918.md)及[2026-09-19 传输诊断](docs/INDEPENDENT_VERIFICATION_R4_TRANSPORT_DIAGNOSTIC_20260919.md)。这是离线局部试验；尚无完整面板结果，也未改在线监察流程。
 
 这是供受邀研究者讨论的**研究中快照**，不是论文最终实现或已验证的方法发布。希望大家帮助我们质疑设计、解释失败和选择下一步，而不是只评价成果展示。
 

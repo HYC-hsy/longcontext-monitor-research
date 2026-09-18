@@ -165,7 +165,8 @@ def run_case_group(case: dict, group_name: str, group: dict, fixture: Path,
             "status": "execution_error", "score_eligible": False,
             "error_type": type(exc).__name__,
             "correct": None,
-            "requests": len(client.usage_records),
+            "requests": probe.logical_calls,
+            "successful_responses": len(client.usage_records),
         }
     item["seconds"] = round(time.monotonic() - started, 3)
     item["usage"] = usage_total(client.usage_records)

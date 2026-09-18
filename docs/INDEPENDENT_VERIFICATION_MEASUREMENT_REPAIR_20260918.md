@@ -15,6 +15,11 @@ correct for an evidence-insufficient case; budget exhaustion cannot. The six
 request cap counts logical `client.complete()` calls, **not** transport retry
 attempts. Both counts, actual tokens, and wall time are recorded separately.
 
+The 2026-09-19 transport diagnostic corrected one remaining error-path
+counter: a failed logical call had been reported as zero because the runner
+used successful usage records. New runs count attempted logical calls even
+when the provider raises; old pilot JSON is left unchanged and annotated.
+
 ## Comparability
 
 - A is an archived root approval, not a per-question answer. It now has no
