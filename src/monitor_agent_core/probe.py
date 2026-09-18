@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
 from .actions import MonitorAction, ToolOutcome
-from .loop import run_review
+from .loop import MonitorLoopError, run_review
 from .provider import MonitorProviderClient
 
 
@@ -35,7 +35,8 @@ class ProbeConfig:
 @dataclass
 class ProbeResult:
     mode: ProbeMode
-    outcome: str = "unresolved"
+    status: str = "incomplete"
+    outcome: str | None = None
     expectation: str | None = None
     expectation_revision: str | None = None
     conclusion: str | None = None
@@ -46,10 +47,21 @@ class ProbeResult:
     history_after: dict[str, Any] | None = None
 
 
-def _tool(name: str, description: str, properties: dict[str, Any]) -> dict[str, Any]:
+def score_local_result(result: ProbeResult, expected: str) -> dict[str, bool | None]:
+    """Only an explicit finished verdict is eligible for correctness scoring."""
+    completed = result.status == "completed"
+    return {
+        "score_eligible": completed,
+        "correct": (result.outcome == expected) if completed else None,
+    }
+
+
+def _tool(name: str, description: str, properties: dict[str, Any],
+          required: tuple[str, ...] = ()) -> dict[str, Any]:
     return {"type": "function", "function": {
         "name": name, "description": description,
-        "parameters": {"type": "object", "properties": properties},
+        "parameters": {"type": "object", "properties": properties,
+                       "required": list(required)},
     }}
 
 
@@ -115,12 +127,15 @@ class IndependentVerifier:
             return ToolOutcome(None, action=MonitorAction(
                 "probe_phase_complete", {"phase": phase, "expectation": content}))
         if name == "finish_probe":
-            outcome = str(arguments.get("outcome", "unresolved"))
+            outcome = arguments.get("outcome")
             if outcome not in {"supported_in_scope", "contradicted", "unresolved"}:
-                return ToolOutcome({"status": "error", "error": "invalid local outcome"})
+                return ToolOutcome({"status": "error", "error": "explicit local outcome is required"})
+            conclusion = arguments.get("conclusion")
+            if not isinstance(conclusion, str) or not conclusion.strip():
+                return ToolOutcome({"status": "error", "error": "a substantive conclusion is required"})
             return ToolOutcome(None, action=MonitorAction(
                 "probe_complete", {"phase": phase, "outcome": outcome,
-                                    "conclusion": str(arguments.get("conclusion", "")),
+                                    "conclusion": conclusion.strip(),
                                     "revised_expectation": str(
                                         arguments.get("revised_expectation", "")).strip()}))
         return ToolOutcome({"status": "error", "error": f"tool {name} is not available in a probe"})
@@ -138,7 +153,7 @@ class IndependentVerifier:
         if phase == "expectation":
             tools.append(_tool("commit_expectation", "Commit the expected observable behavior.", {
                 "expectation": {"type": "string"},
-            }))
+            }, ("expectation",)))
         else:
             tools.append(_tool(
                 "finish_probe",
@@ -150,7 +165,7 @@ class IndependentVerifier:
                     "supported_in_scope", "contradicted", "unresolved"]},
                 "conclusion": {"type": "string"},
                 "revised_expectation": {"type": "string"},
-            }))
+            }, ("outcome", "conclusion")))
         return tools
 
     def _phase(self, phase: str, prompt: str, paths: tuple[str, ...]) -> MonitorAction:
@@ -187,6 +202,8 @@ class IndependentVerifier:
             )
         except ProbeBudgetExceeded:
             return MonitorAction("probe_budget_exhausted", {"phase": phase})
+        except MonitorLoopError:
+            return MonitorAction("probe_turn_limit", {"phase": phase})
         self._record("probe_phase_finished", phase=phase, action=action.kind)
         return action
 
@@ -207,15 +224,18 @@ class IndependentVerifier:
                 action = self._phase("evidence", question, self.config.source_paths + self.config.evidence_paths)
                 result.phases.append("evidence")
                 if action.kind == "probe_complete":
+                    result.status = "completed"
                     result.outcome = action.payload["outcome"]
                     result.conclusion = action.payload.get("conclusion")
                     result.expectation_revision = action.payload.get("revised_expectation") or None
                 else:
+                    result.status = action.kind
                     result.limitation = action.kind
             else:
                 action = self._phase("expectation", question, self.config.source_paths)
                 result.phases.append("expectation")
                 if action.kind != "probe_phase_complete":
+                    result.status = action.kind
                     result.limitation = action.kind
                     return result
                 result.expectation = action.payload["expectation"]
@@ -228,10 +248,12 @@ class IndependentVerifier:
                                      self.config.source_paths + self.config.evidence_paths)
                 result.phases.append("evidence")
                 if action.kind == "probe_complete":
+                    result.status = "completed"
                     result.outcome = action.payload["outcome"]
                     result.conclusion = action.payload.get("conclusion")
                     result.expectation_revision = action.payload.get("revised_expectation") or None
                 else:
+                    result.status = action.kind
                     result.limitation = action.kind
         finally:
             self.client.complete = original_complete

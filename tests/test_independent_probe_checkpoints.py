@@ -48,6 +48,25 @@ def test_public_only_materialization(tmp_path):
     assert not (output / "task_evidence" / "provider_history.json").exists()
     assert not list(output.rglob("*test-stdout*"))
     assert not list(output.rglob("*changes.patch"))
+    assert manifest["config_sha256"]
+    assert "parent_context/provider_history.json" in manifest["artifact_sha256"]
+    assert "workspace/widget/toolbar.go" in manifest["artifact_sha256"]
+
+    runner_script = ROOT / "method_discovery" / "run_independent_probe_panel.py"
+    runner_spec = importlib.util.spec_from_file_location("run_probe_panel", runner_script)
+    runner = importlib.util.module_from_spec(runner_spec)
+    runner_spec.loader.exec_module(runner)
+    assert runner.ensure_fixture(json.loads(CONFIG.read_text(encoding="utf-8")),
+                                 output, CONFIG)
+    target = output / "workspace" / "widget" / "toolbar.go"
+    target.write_text(target.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    try:
+        runner.ensure_fixture(json.loads(CONFIG.read_text(encoding="utf-8")),
+                              output, CONFIG)
+    except ValueError as exc:
+        assert "digest changed" in str(exc)
+    else:
+        assert False, "modified fixture must be rejected before model calls"
 
 
 def test_materializer_rejects_hidden_answer_path(tmp_path):

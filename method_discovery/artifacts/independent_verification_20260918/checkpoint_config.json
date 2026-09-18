@@ -22,6 +22,7 @@
     "C_isolated_direct": {"mode": "direct", "max_requests": 6, "max_turns": 8},
     "D_expectation_first_isolated": {"mode": "expectation_first", "max_requests": 6, "max_turns": 8}
   },
+  "budget_unit": "logical_client_complete_calls; transport retries recorded separately",
   "model_input_rule": "Only question, original task, public events through turn 60, reconstructed workspace files, and group-specific context may enter model input. Scoring labels/rationales and verifier output are evaluator-only.",
   "cases": [
     {
@@ -72,8 +73,8 @@
       "evidence_paths": ["task/workspace/widget/toolbar.go"],
       "scoring": {
         "expected_label": "incorrect",
-        "label_status": "pending_user_decision",
-        "rationale": "The task explicitly requires SetIcon to refresh the toolbar object, while the final method only assigns Icon. Native phase-5 tests pass because they check the field and constructor types but not visual refresh."
+        "label_status": "disputed_exclude_from_scoring",
+        "rationale": "Original task Target 5.1 explicitly requires SetIcon to update Icon and refresh the toolbar object. The turn-60 method only assigns Icon; ToolbarObject constructs a separate button, and the toolbar renderer rebuilds only on toolbar Refresh. Native phase-5 tests pass because they check the field and constructor types, not displayed-toolbar refresh. Preserve both observations; exclude pending independent label review."
       }
     },
     {
@@ -98,7 +99,7 @@
       "event_prefix": {"through_task_turn": 60, "inclusive": true},
       "source_paths": ["task/original_task.txt"],
       "evidence_paths": ["task/workspace/driver/desktop/app.go"],
-      "scoring": {"expected_label": "incorrect", "rationale": "The phase-7 verifier reports the desktop App interface is missing the required Driver relationship."}
+      "scoring": {"expected_label": "incorrect", "label_status": "provisional_exclude_from_scoring", "rationale": "The task explicitly specifies two system-tray methods. The implementation embeds fyne.App, imposing additional methods on implementers; the native mock with the two tray methods fails because it lacks inherited Driver. This is an overconstraint concern, not evidence that desktop.App is missing Driver. Recheck whether the broader interface was intended before using this label."}
     },
     {
       "id": "root_completion_claim",
@@ -114,6 +115,7 @@
       "event_prefix": {"through_task_turn": 60, "inclusive": true},
       "source_paths": ["task/original_task.txt"],
       "evidence_paths": ["task/build_observation.json"],
+      "incompatible_groups": ["B_same_context"],
       "scoring": {"expected_label": "insufficient", "rationale": "A successful build is compatible with both correct and behaviorally wrong implementations; no discriminating runtime observation is available in this scoped evidence."}
     }
   ]

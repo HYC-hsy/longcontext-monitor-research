@@ -8,6 +8,8 @@
 2. [检查点配置](../method_discovery/artifacts/independent_verification_20260918/checkpoint_config.json)和[材料重建器](../method_discovery/materialize_independent_probe.py)：A 是归档的根完成判断，B 复制父 History 再普通复核，C/D 使用空 History。隐藏评分字段不会进入模型输入。配置中的判断标签是离线评估材料，**不能用于在线提示或任务执行**。
 3. [面板运行器](../method_discovery/run_independent_probe_panel.py)、[测试](../tests/test_independent_probe_checkpoints.py)及[试跑审计](INDEPENDENT_VERIFICATION_PILOT_AUDIT_20260918.md)。运行器依赖原开发工作区中的任务副本与运行归档；本公开审阅包不含原始父 History、重建后的完整工作区、密钥和未筛选日志，故不能直接复现模型调用。
 
+后续修复见[测量修复与标签复核](INDEPENDENT_VERIFICATION_MEASUREMENT_REPAIR_20260918.md)：预算耗尽不再算正确未决，A 不再生成逐题伪答案，B 单列，C/D 为主比较；当前材料哈希清单见 [materialization_r4.json](../method_discovery/artifacts/independent_verification_20260918/materialization_r4.json)。原始 `result.json`/`audit.jsonl`、重建源码、父 History 仅在[私有证据仓库](https://github.com/HYC-hsy/longcontext-monitor-probe-evidence)；需仓库授权才能查看。
+
 ## 已知边界与待审问题
 
 - 目前 11 个局部问题都来自 Fyne 2.2 同一个 turn-60 根完成检查点，**不是** 11 个独立时间检查点。能否用这批材料仅做协议校准？正式比较还应补哪些正确、错误、证据不足的独立检查点？

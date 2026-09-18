@@ -1,7 +1,7 @@
 import json
 
 from monitor_agent_core.actions import MonitorAction
-from monitor_agent_core.probe import IndependentVerifier, ProbeConfig
+from monitor_agent_core.probe import IndependentVerifier, ProbeConfig, score_local_result
 from monitor_agent_core.provider import ModelResponse, ToolCall
 from monitor_agent_core.workspace import MonitorWorkspace
 
@@ -53,6 +53,7 @@ def test_direct_probe_is_local_and_returns_scoped_result(tmp_path):
     ))
     result = probe.run("Does the observed change support ordering?")
     assert result.outcome == "supported_in_scope"
+    assert result.status == "completed"
     assert result.phases == ["evidence"]
     assert result.requests == 3
     assert all(call_name not in {"intervene", "wait", "allow_complete"}
@@ -85,7 +86,8 @@ def test_expectation_first_blocks_evidence_until_expectation_committed(tmp_path)
 def test_probe_does_not_share_parent_history(tmp_path):
     parent = SequenceClient([])
     parent.history.append({"role": "assistant", "content": "TASK COMPLETE"})
-    child = SequenceClient([call("finish_probe", {"outcome": "unresolved"}, "1")])
+    child = SequenceClient([call("finish_probe", {
+        "outcome": "unresolved", "conclusion": "No behavior evidence was provided."}, "1")])
     result = IndependentVerifier(child, workspace(tmp_path), ProbeConfig(max_requests=1)).run("Question")
     assert result.history_before["items"] == 0
     assert parent.history == [{"role": "assistant", "content": "TASK COMPLETE"}]
@@ -99,7 +101,8 @@ def test_probe_budget_is_explicit_and_returns_unresolved(tmp_path):
     result = IndependentVerifier(client, workspace(tmp_path), ProbeConfig(
         max_requests=2, max_turns=4,
     )).run("Question")
-    assert result.outcome == "unresolved"
+    assert result.outcome is None
+    assert result.status == "probe_budget_exhausted"
     assert result.limitation == "probe_budget_exhausted"
     assert result.requests == 2
 
@@ -109,7 +112,8 @@ def test_expectation_phase_rejects_code_run_even_when_enabled(tmp_path):
     client = SequenceClient([
         call("code_run", {"code": "read evidence"}, "1"),
         call("commit_expectation", {"expectation": "ordered output"}, "2"),
-        call("finish_probe", {"outcome": "unresolved"}, "3"),
+        call("finish_probe", {"outcome": "unresolved",
+                              "conclusion": "No observable behavior is available."}, "3"),
     ])
     result = IndependentVerifier(
         client, workspace(tmp_path),
@@ -118,3 +122,32 @@ def test_expectation_phase_rejects_code_run_even_when_enabled(tmp_path):
     ).run("Question")
     assert result.phases == ["expectation", "evidence"]
     assert ran == []
+
+
+def test_empty_finish_requires_explicit_verdict_and_reason(tmp_path):
+    audit = []
+    client = SequenceClient([
+        call("finish_probe", {}, "1"),
+        call("finish_probe", {"outcome": "unresolved"}, "2"),
+        call("finish_probe", {"outcome": "unresolved",
+                              "conclusion": "Only a build result is available."}, "3"),
+    ])
+    result = IndependentVerifier(client, workspace(tmp_path), ProbeConfig(
+        max_requests=3,
+    ), audit=lambda event, **fields: audit.append((event, fields))).run("Question")
+    assert result.status == "completed"
+    assert result.outcome == "unresolved"
+    errors = [fields for event, fields in audit if event == "tool_result"
+              and isinstance(fields.get("data"), dict)
+              and fields["data"].get("status") == "error"]
+    assert len(errors) == 2
+
+
+def test_unfinished_probe_is_not_correct_unresolved(tmp_path):
+    client = SequenceClient([call("file_read", {"path": "task/original_task.txt"}, "1")])
+    result = IndependentVerifier(client, workspace(tmp_path), ProbeConfig(
+        max_requests=1,
+    )).run("Question")
+    assert score_local_result(result, "unresolved") == {
+        "score_eligible": False, "correct": None,
+    }

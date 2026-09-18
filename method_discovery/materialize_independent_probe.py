@@ -167,13 +167,23 @@ def build(config_path: Path, output: Path) -> dict:
         "provider_history.json": RUN / "agent/monitor/monitor_private/audit/provider_history.json",
     }.items():
         shutil.copyfile(source, parent / name)
+    artifact_paths = [
+        evidence / "original_task.txt", evidence / "public_events.jsonl",
+        evidence / "build_observation.json", parent / "pma_memory.json",
+        parent / "provider_history.json",
+    ] + [workspace / relative for relative in sorted(contents)]
     manifest = {
         "checkpoint": "turn-60-root-completion",
         "source_run": config["fixture"]["parent_run_id"],
+        "config_sha256": digest(config_path).lower(),
         "public_event_lines": len(events),
         "replayed_operations": operations,
-        "files": {str(path).replace("\\", "/"): hashlib.sha256(value.encode("utf-8")).hexdigest()
-                  for path, value in sorted(contents.items())},
+        "files": {path.as_posix(): digest(workspace / path).lower()
+                  for path in sorted(contents)},
+        "artifact_sha256": {
+            path.relative_to(output).as_posix(): digest(path).lower()
+            for path in artifact_paths
+        },
         "evaluator_only": "Native verifier output remains outside this materialization.",
     }
     (output / "materialization.json").write_text(
