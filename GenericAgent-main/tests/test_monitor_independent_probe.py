@@ -60,6 +60,9 @@ def test_direct_probe_is_local_and_returns_scoped_result(tmp_path):
     assert result.status == "completed"
     assert result.phases == ["evidence"]
     assert result.requests == 3
+    assert result.history_after is not None
+    assert probe.evidence_refs[0]["path"] == "task/original_task.txt"
+    assert probe.evidence_refs[0]["sha256"]
     assert all(call_name not in {"intervene", "wait", "allow_complete"}
                for _, tools in client.calls
                for call_name in [item["function"]["name"] for item in tools])

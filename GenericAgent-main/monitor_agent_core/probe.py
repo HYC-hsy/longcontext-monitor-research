@@ -89,6 +89,7 @@ class IndependentVerifier:
         self.audit = audit
         self._requests = 0
         self._allowed: set[str] = set()
+        self.evidence_refs: list[dict[str, Any]] = []
         self._original_complete = None
 
     @property
@@ -120,6 +121,11 @@ class IndependentVerifier:
                 tail=arguments.get("tail", False), offset=arguments.get("offset", 0),
                 max_chars=arguments.get("max_chars", 20000),
             )
+            self.evidence_refs.append({
+                key: data.get(key) for key in
+                ("path", "start", "lines", "offset", "sha256", "truncated", "next_read")
+                if key in data
+            })
             return ToolOutcome(data)
         if name == "code_run":
             if phase != "evidence" or not self.config.allow_code_run:
