@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from monitor_agent_core.actions import MonitorAction
 from monitor_agent_core.probe import IndependentVerifier, ProbeConfig, score_local_result
 from monitor_agent_core.provider import ModelResponse, ToolCall
@@ -151,3 +153,15 @@ def test_unfinished_probe_is_not_correct_unresolved(tmp_path):
     assert score_local_result(result, "unresolved") == {
         "score_eligible": False, "correct": None,
     }
+
+
+def test_failed_provider_call_is_still_counted_as_one_logical_attempt(tmp_path):
+    class FailingClient(SequenceClient):
+        def complete(self, messages, tools):
+            self.calls.append((messages, tools))
+            raise ConnectionError("temporary provider failure")
+
+    probe = IndependentVerifier(FailingClient([]), workspace(tmp_path), ProbeConfig())
+    with pytest.raises(ConnectionError):
+        probe.run("Question")
+    assert probe.logical_calls == 1

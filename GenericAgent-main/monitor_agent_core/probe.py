@@ -91,6 +91,11 @@ class IndependentVerifier:
         self._allowed: set[str] = set()
         self._original_complete = None
 
+    @property
+    def logical_calls(self) -> int:
+        """Number of client.complete calls attempted, including a failed call."""
+        return self._requests
+
     @classmethod
     def from_provider_config(cls, config_name: str, provider_config: dict[str, Any],
                              workspace, config: ProbeConfig, **kwargs):
