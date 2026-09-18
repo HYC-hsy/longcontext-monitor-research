@@ -1,0 +1,120 @@
+import json
+
+from monitor_agent_core.actions import MonitorAction
+from monitor_agent_core.probe import IndependentVerifier, ProbeConfig
+from monitor_agent_core.provider import ModelResponse, ToolCall
+from monitor_agent_core.workspace import MonitorWorkspace
+
+
+def call(name, arguments, cid):
+    return ModelResponse("", [ToolCall(cid, name, json.dumps(arguments))], {})
+
+
+class SequenceClient:
+    def __init__(self, responses):
+        self.responses = iter(responses)
+        self.history = []
+        self.calls = []
+
+    def complete(self, messages, tools):
+        self.calls.append((messages, tools))
+        self.history.extend(messages)
+        response = next(self.responses)
+        self.history.append({"role": "assistant", "content": response.content})
+        return response
+
+    def record_tool_results(self, results):
+        self.history.append({"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": r["tool_use_id"],
+             "content": r["content"]} for r in results
+        ]})
+
+    def history_measure(self):
+        encoded = json.dumps(self.history, ensure_ascii=False).encode()
+        return {"items": len(self.history), "characters": len(encoded), "sha256": "fixture"}
+
+
+def workspace(tmp_path):
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    (evidence / "original_task.txt").write_text("Refresh must preserve ordering.\n", encoding="utf-8")
+    (evidence / "events.jsonl").write_text("implementation observed\n", encoding="utf-8")
+    return MonitorWorkspace(evidence, tmp_path / "private")
+
+
+def test_direct_probe_is_local_and_returns_scoped_result(tmp_path):
+    client = SequenceClient([
+        call("file_read", {"path": "task/original_task.txt"}, "1"),
+        call("file_read", {"path": "task/events.jsonl"}, "2"),
+        call("finish_probe", {"outcome": "supported_in_scope", "conclusion": "ordering observed"}, "3"),
+    ])
+    probe = IndependentVerifier(client, workspace(tmp_path), ProbeConfig(
+        mode="direct", evidence_paths=("task/events.jsonl",), max_requests=3,
+    ))
+    result = probe.run("Does the observed change support ordering?")
+    assert result.outcome == "supported_in_scope"
+    assert result.phases == ["evidence"]
+    assert result.requests == 3
+    assert all(call_name not in {"intervene", "wait", "allow_complete"}
+               for _, tools in client.calls
+               for call_name in [item["function"]["name"] for item in tools])
+
+
+def test_expectation_first_blocks_evidence_until_expectation_committed(tmp_path):
+    audit = []
+    client = SequenceClient([
+        call("file_read", {"path": "task/events.jsonl"}, "1"),
+        call("commit_expectation", {"expectation": "ordering is preserved"}, "2"),
+        call("file_read", {"path": "task/events.jsonl"}, "3"),
+        call("finish_probe", {"outcome": "contradicted", "conclusion": "event does not establish order"}, "4"),
+    ])
+    probe = IndependentVerifier(client, workspace(tmp_path), ProbeConfig(
+        mode="expectation_first", evidence_paths=("task/events.jsonl",), max_requests=4,
+    ), audit=lambda event, **fields: audit.append((event, fields)))
+    result = probe.run("Is ordering supported?")
+    assert result.expectation == "ordering is preserved"
+    assert result.outcome == "contradicted"
+    assert result.phases == ["expectation", "evidence"]
+    # The first evidence read is denied by the phase-specific dispatch.
+    denied = [fields for event, fields in audit
+              if event == "tool_result" and "outside this probe phase"
+              in json.dumps(fields, ensure_ascii=False)]
+    assert denied
+
+
+def test_probe_does_not_share_parent_history(tmp_path):
+    parent = SequenceClient([])
+    parent.history.append({"role": "assistant", "content": "TASK COMPLETE"})
+    child = SequenceClient([call("finish_probe", {"outcome": "unresolved"}, "1")])
+    result = IndependentVerifier(child, workspace(tmp_path), ProbeConfig(max_requests=1)).run("Question")
+    assert result.history_before["items"] == 0
+    assert parent.history == [{"role": "assistant", "content": "TASK COMPLETE"}]
+
+
+def test_probe_budget_is_explicit_and_returns_unresolved(tmp_path):
+    client = SequenceClient([
+        call("file_read", {"path": "task/original_task.txt"}, "1"),
+        call("file_read", {"path": "task/original_task.txt"}, "2"),
+    ])
+    result = IndependentVerifier(client, workspace(tmp_path), ProbeConfig(
+        max_requests=2, max_turns=4,
+    )).run("Question")
+    assert result.outcome == "unresolved"
+    assert result.limitation == "probe_budget_exhausted"
+    assert result.requests == 2
+
+
+def test_expectation_phase_rejects_code_run_even_when_enabled(tmp_path):
+    ran = []
+    client = SequenceClient([
+        call("code_run", {"code": "read evidence"}, "1"),
+        call("commit_expectation", {"expectation": "ordered output"}, "2"),
+        call("finish_probe", {"outcome": "unresolved"}, "3"),
+    ])
+    result = IndependentVerifier(
+        client, workspace(tmp_path),
+        ProbeConfig(mode="expectation_first", allow_code_run=True, max_requests=3),
+        code_runner=lambda args: ran.append(args),
+    ).run("Question")
+    assert result.phases == ["expectation", "evidence"]
+    assert ran == []
