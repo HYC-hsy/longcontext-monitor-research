@@ -1,4 +1,6 @@
 import json
+import importlib.util
+from pathlib import Path
 
 import pytest
 
@@ -165,3 +167,22 @@ def test_failed_provider_call_is_still_counted_as_one_logical_attempt(tmp_path):
     with pytest.raises(ConnectionError):
         probe.run("Question")
     assert probe.logical_calls == 1
+
+
+def test_transport_callback_keeps_lifecycle_and_drops_payloads():
+    path = Path(__file__).parents[2] / "method_discovery" / "run_independent_probe_panel.py"
+    spec = importlib.util.spec_from_file_location("probe_panel_transport", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    transport_audit_callback = module.transport_audit_callback
+
+    records = []
+    callback = transport_audit_callback(records, "case", "C")
+    callback("request_finished", request_id="r1", outcome="retryable_error",
+             error_chain=[{"type": "ConnectionError", "code": None}],
+             secret="must-not-persist", response_body="must-not-persist")
+    assert records == [{
+        "event": "transport_request_finished", "case": "case", "group": "C",
+        "request_id": "r1", "outcome": "retryable_error",
+        "error_chain": [{"type": "ConnectionError", "code": None}],
+    }]

@@ -566,7 +566,8 @@ class MonitorProviderClient:
             except (RetryableProviderError, requests.Timeout, requests.ConnectionError,
                     requests.exceptions.ChunkedEncodingError) as exc:
                 last_error = exc
-                record.update(outcome='retryable_error', error_type=type(exc).__name__)
+                record.update(outcome='retryable_error', error_type=type(exc).__name__,
+                             error_chain=failure_chain(exc))
                 if self._cancelled.is_set():
                     raise ProviderError('Provider request cancelled') from exc
                 if attempt >= self.max_retries:
@@ -579,7 +580,8 @@ class MonitorProviderClient:
                 if self._cancelled.wait(delay):
                     raise ProviderError('Provider request cancelled') from exc
             except Exception as exc:
-                record.update(outcome='error', error_type=type(exc).__name__)
+                record.update(outcome='error', error_type=type(exc).__name__,
+                             error_chain=failure_chain(exc))
                 raise
             finally:
                 if self._cancelled.is_set(): record['outcome'] = 'cancelled'
