@@ -133,7 +133,9 @@ def run_panel(args):
     write_json(output / "manifest.json", {
         "schema": experiment["schema"], "checkpoint_sha256": hashlib.sha256(
             (PANEL / "checkpoint_config.json").read_bytes()).hexdigest(),
-        "cases": [case["id"] for case in cases], "evidence_count": len(evidence),
+        "cases": [case["id"] for case in cases],
+        "evidence_count_by_case": {case["id"]: len(evidence_by_case[case["id"]])
+                                   for case in cases},
         "groups": ["direct_c", "autonomous_selection_c"],
         "total_calls": experiment["total_calls"],
     })
