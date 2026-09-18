@@ -6,9 +6,12 @@ identities:
 - `independent-c-fyne-2.2.0-roadmap-c_off-r3`
 - `independent-c-fyne-2.2.0-roadmap-c_on-r3` (serially after C-off)
 
-The C-off runner is currently still executing. No native result or method
-effect claim exists yet. The earlier concurrent launch was invalidated by a
-shared OTEL container-name collision and is not part of this pair.
+The first C-off runner was stopped after the connection-layer fixes were
+identified; its partial trajectory is retained as an invalidated diagnostic.
+The corrected pair is prepared under the fresh `r4` manifest and has not yet
+been started. No native result or method effect claim exists yet. The earlier
+concurrent launch was invalidated by a shared OTEL container-name collision and
+is not part of either pair.
 
 The only intended difference is `GA_MONITOR_INDEPENDENT_C=0` versus `1`.
 Both runs use the same Fyne 2.2 task, model, memory, compression, concurrency,

@@ -41,6 +41,14 @@ def build(output: Path, suffix: str) -> dict:
         })
         row["environment"] = env
         row["task_role"] = "existing_supervisor_optional_c"
+        row["argv"] = [
+            "D:\\python\\envs\\ga_bench\\python.exe",
+            "scripts/run_ultralong_m12_proofs.py",
+            "--experiment-manifest", str(output.resolve()),
+            "--source", "roadmapbench", "--task-id", "fyn-2.2.0-roadmap",
+            "--run-id", row["run_id"], "--llm-no", "0",
+            "--max-agent-seconds", "10000",
+        ]
         runs.append(row)
     result = {
         "schema_version": "independent-c-online-fyne-pair/1",

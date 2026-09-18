@@ -83,20 +83,46 @@ def _worker(config, commands, outputs):
                             evidence_paths=tuple(paths), max_requests=allowance, max_turns=8),
                 audit=lambda event, **fields: monitor_probe_audit(event, **fields),
             )
-            result = probe.run(question)
-            telemetry = probe.client.drain_telemetry()
-            used = int(result.requests)
-            with probe_lock:
-                probe_total = max(0, probe_total - used)
-                remaining = probe_total
-            payload = {
-                "status": result.status, "outcome": result.outcome,
-                "conclusion": result.conclusion, "limitation": result.limitation,
-                "requests": used, "remaining_requests": remaining,
-                "usage": telemetry.get("usage", []),
-            }
-            monitor_probe_audit("independent_probe_finished", question=question,
-                                paths=list(paths), **payload)
+            # A child request must obey the same stop/deadline as its parent;
+            # otherwise a failed or cancelled probe can outlive supervision.
+            probe.client.recovery_deadline = getattr(client, "recovery_deadline", None)
+            probe.client.recovery_stop = getattr(client, "recovery_stop", config["stop_event"])
+            result = None
+            telemetry = {}
+            error = None
+            try:
+                result = probe.run(question)
+            except Exception as exc:
+                error = repr(exc)
+            finally:
+                telemetry = probe.client.drain_telemetry()
+                used = int(probe.logical_calls)
+                with probe_lock:
+                    probe_total = max(0, probe_total - used)
+                    remaining = probe_total
+                refs = list(probe.evidence_refs)
+                changed = []
+                for ref in refs:
+                    try:
+                        current = workspace.read_text(ref["path"], 1, 1, max_chars=1)
+                        if current.get("sha256") != ref.get("sha256"):
+                            changed.append({"path": ref["path"],
+                                            "before": ref.get("sha256"),
+                                            "after": current.get("sha256")})
+                    except Exception as exc:
+                        changed.append({"path": ref.get("path"),
+                                        "status": "unavailable", "error": type(exc).__name__})
+                payload = {
+                    "status": result.status if result is not None else "error",
+                    "outcome": result.outcome if result is not None else None,
+                    "conclusion": result.conclusion if result is not None else None,
+                    "limitation": result.limitation if result is not None else error,
+                    "requests": used, "remaining_requests": remaining,
+                    "usage": telemetry.get("usage", []),
+                    "evidence_refs": refs, "evidence_changed": changed,
+                }
+                monitor_probe_audit("independent_probe_finished", question=question,
+                                    paths=list(paths), **payload)
             return payload
 
         def monitor_probe_audit(event, **fields):
