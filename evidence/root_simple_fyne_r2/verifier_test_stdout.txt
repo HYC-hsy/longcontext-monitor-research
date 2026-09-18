@@ -1,0 +1,248 @@
+=== Phase 1: App Metadata System ===
+=== RUN   TestPhase1_AppMetadataStruct
+--- PASS: TestPhase1_AppMetadataStruct (0.00s)
+=== RUN   TestPhase1_AppMetadataDefaultFields
+--- PASS: TestPhase1_AppMetadataDefaultFields (0.00s)
+=== RUN   TestPhase1_AppMetadataIconField
+--- PASS: TestPhase1_AppMetadataIconField (0.00s)
+=== RUN   TestPhase1_AppInterfaceHasMetadata
+--- PASS: TestPhase1_AppInterfaceHasMetadata (0.00s)
+PASS
+ok  	fyne.io/fyne/v2	0.004s
+PASSED
+=== Phase 2: JSON Theme Support ===
+# fyne.io/fyne/v2/theme [fyne.io/fyne/v2/theme.test]
+theme/test_02_json_theme_test.go:29:22: cannot use `{
+"Colors": {"background": "#c0c0c0ff"},
+"Colors-light": {"foreground": "#ffffffff"},
+"Sizes": {"iconInline": 5.0}
+}` (untyped string constant "{\n\"Colors\": {\"background\": \"#c0c0c0ff\"},\n\"Colors-light\": {...) as []byte value in argument to FromJSON
+theme/test_02_json_theme_test.go:65:22: cannot use `{"Colors": {"background": "#ff0000"}}` (untyped string constant "{\"Colors\": {\"background\": \"#ff0000\"}}") as []byte value in argument to FromJSON
+theme/test_02_json_theme_test.go:105:22: cannot use `{invalid json` (untyped string constant "{invalid json") as []byte value in argument to FromJSON
+theme/test_02_json_theme_test.go:136:23: cannot use jsonStr (variable of type string) as []byte value in argument to FromJSON
+theme/test_02_json_theme_test.go:149:22: cannot use `{
+"Colors": {"foreground": "#ffffffff"},
+"Colors-dark": {"foreground": "#000000ff"},
+"Colors-light": {"background": "#303030"}
+}` (untyped string constant "{\n\"Colors\": {\"foreground\": \"#ffffffff\"},\n\"Colors-dark\": {\...) as []byte value in argument to FromJSON
+theme/test_02_json_theme_test.go:182:22: cannot use `{}` (untyped string constant "{}") as []byte value in argument to FromJSON
+FAIL	fyne.io/fyne/v2/theme [build failed]
+FAIL
+FAILED
+=== Phase 3: Data Binding Formatting ===
+=== RUN   TestPhase3_SprintfConversionRead
+    test_03_binding_sprintf_test.go:47: 
+        	Error Trace:	test_03_binding_sprintf_test.go:47
+        	Error:      	Not equal: 
+        	            	expected: "Bool true, Float 42.000000, Int %!i(int=7), Rune 66, String 'this is a string', URI 'file:///'"
+        	            	actual  : "Bool true, Float 42.000000, Int %!i(int=7), Rune &{{{[0xc00004e128] {{0 0} 0 0 {{} 0} {{} 0}}} 0xc0000152c0} 66}, String 'this is a string', URI '&{{{[0xc00004e138] {{0 0} 0 0 {{} 0} {{} 0}}} 0xc0000216c0} 0xc000016540}'"
+        	            	
+        	            	Diff:
+        	            	--- Expected
+        	            	+++ Actual
+        	            	@@ -1 +1 @@
+        	            	-Bool true, Float 42.000000, Int %!i(int=7), Rune 66, String 'this is a string', URI 'file:///'
+        	            	+Bool true, Float 42.000000, Int %!i(int=7), Rune &{{{[0xc00004e128] {{0 0} 0 0 {{} 0} {{} 0}}} 0xc0000152c0} 66}, String 'this is a string', URI '&{{{[0xc00004e138] {{0 0} 0 0 {{} 0} {{} 0}}} 0xc0000216c0} 0xc000016540}'
+        	Test:       	TestPhase3_SprintfConversionRead
+    test_03_binding_sprintf_test.go:63: 
+        	Error Trace:	test_03_binding_sprintf_test.go:63
+        	Error:      	Not equal: 
+        	            	expected: "Bool false, Float 7.000000, Int %!i(int=42), Rune 67, String 'a different string', URI 'file:///'"
+        	            	actual  : "Bool false, Float 7.000000, Int %!i(int=42), Rune &{{{[0xc00004e128] {{0 0} 0 0 {{} 0} {{} 0}}} 0xc0000152c0} 67}, String 'a different string', URI '&{{{[0xc00004e138] {{0 0} 0 0 {{} 0} {{} 0}}} 0xc0000216c0} 0xc000016540}'"
+        	            	
+        	            	Diff:
+        	            	--- Expected
+        	            	+++ Actual
+        	            	@@ -1 +1 @@
+        	            	-Bool false, Float 7.000000, Int %!i(int=42), Rune 67, String 'a different string', URI 'file:///'
+        	            	+Bool false, Float 7.000000, Int %!i(int=42), Rune &{{{[0xc00004e128] {{0 0} 0 0 {{} 0} {{} 0}}} 0xc0000152c0} 67}, String 'a different string', URI '&{{{[0xc00004e138] {{0 0} 0 0 {{} 0} {{} 0}}} 0xc0000216c0} 0xc000016540}'
+        	Test:       	TestPhase3_SprintfConversionRead
+--- FAIL: TestPhase3_SprintfConversionRead (0.00s)
+=== RUN   TestPhase3_SprintfConversionReadWrite
+    test_03_binding_sprintf_test.go:93: 
+        	Error Trace:	test_03_binding_sprintf_test.go:93
+        	Error:      	Not equal: 
+        	            	expected: "Bool true , Float 42.000000 , Int 7 , Rune 66 , String this is a string , URI file:///"
+        	            	actual  : "Bool true , Float 42.000000 , Int 7 , Rune &{{{[0xc000366020] {{0 0} 0 0 {{} 0} {{} 0}}} 0xc000310288} 66} , String this is a string , URI &{{{[0xc000366030] {{0 0} 0 0 {{} 0} {{} 0}}} 0xc00031e3c0} 0xc00030e180}"
+        	            	
+        	            	Diff:
+        	            	--- Expected
+        	            	+++ Actual
+        	            	@@ -1 +1 @@
+        	            	-Bool true , Float 42.000000 , Int 7 , Rune 66 , String this is a string , URI file:///
+        	            	+Bool true , Float 42.000000 , Int 7 , Rune &{{{[0xc000366020] {{0 0} 0 0 {{} 0} {{} 0}}} 0xc000310288} 66} , String this is a string , URI &{{{[0xc000366030] {{0 0} 0 0 {{} 0} {{} 0}}} 0xc00031e3c0} 0xc00030e180}
+        	Test:       	TestPhase3_SprintfConversionReadWrite
+    test_03_binding_sprintf_test.go:101: 
+        	Error Trace:	test_03_binding_sprintf_test.go:101
+        	Error:      	Not equal: 
+        	            	expected: true
+        	            	actual  : false
+        	Test:       	TestPhase3_SprintfConversionReadWrite
+    test_03_binding_sprintf_test.go:102: 
+        	Error Trace:	test_03_binding_sprintf_test.go:102
+        	Error:      	Not equal: 
+        	            	expected: 42
+        	            	actual  : 7
+        	Test:       	TestPhase3_SprintfConversionReadWrite
+    test_03_binding_sprintf_test.go:103: 
+        	Error Trace:	test_03_binding_sprintf_test.go:103
+        	Error:      	Not equal: 
+        	            	expected: 7
+        	            	actual  : 42
+        	Test:       	TestPhase3_SprintfConversionReadWrite
+    test_03_binding_sprintf_test.go:104: 
+        	Error Trace:	test_03_binding_sprintf_test.go:104
+        	Error:      	Not equal: 
+        	            	expected: 66
+        	            	actual  : 67
+        	Test:       	TestPhase3_SprintfConversionReadWrite
+    test_03_binding_sprintf_test.go:105: 
+        	Error Trace:	test_03_binding_sprintf_test.go:105
+        	Error:      	Not equal: 
+        	            	expected: "this is a string"
+        	            	actual  : "nospacestring"
+        	            	
+        	            	Diff:
+        	            	--- Expected
+        	            	+++ Actual
+        	            	@@ -1 +1 @@
+        	            	-this is a string
+        	            	+nospacestring
+        	Test:       	TestPhase3_SprintfConversionReadWrite
+    test_03_binding_sprintf_test.go:106: 
+        	Error Trace:	test_03_binding_sprintf_test.go:106
+        	Error:      	Not equal: 
+        	            	expected: "file:///"
+        	            	actual  : "file:///var/"
+        	            	
+        	            	Diff:
+        	            	--- Expected
+        	            	+++ Actual
+        	            	@@ -1 +1 @@
+        	            	-file:///
+        	            	+file:///var/
+        	Test:       	TestPhase3_SprintfConversionReadWrite
+    test_03_binding_sprintf_test.go:114: 
+        	Error Trace:	test_03_binding_sprintf_test.go:114
+        	Error:      	Not equal: 
+        	            	expected: "Bool true , Float 42.000000 , Int 7 , Rune 66 , String this is a string , URI file:///"
+        	            	actual  : "Bool true , Float 42.000000 , Int 7 , Rune &{{{[0xc000366020] {{0 0} 0 0 {{} 0} {{} 0}}} 0xc000310288} 66} , String this is a string , URI &{{{[0xc000366030] {{0 0} 0 0 {{} 0} {{} 0}}} 0xc00031e3c0} 0xc00030e180}"
+        	            	
+        	            	Diff:
+        	            	--- Expected
+        	            	+++ Actual
+        	            	@@ -1 +1 @@
+        	            	-Bool true , Float 42.000000 , Int 7 , Rune 66 , String this is a string , URI file:///
+        	            	+Bool true , Float 42.000000 , Int 7 , Rune &{{{[0xc000366020] {{0 0} 0 0 {{} 0} {{} 0}}} 0xc000310288} 66} , String this is a string , URI &{{{[0xc000366030] {{0 0} 0 0 {{} 0} {{} 0}}} 0xc00031e3c0} 0xc00030e180}
+        	Test:       	TestPhase3_SprintfConversionReadWrite
+    test_03_binding_sprintf_test.go:115: 
+        	Error Trace:	test_03_binding_sprintf_test.go:115
+        	Error:      	Should not be: "Bool true , Float 42.000000 , Int 7 , Rune &{{{[0xc000366020] {{0 0} 0 0 {{} 0} {{} 0}}} 0xc000310288} 66} , String this is a string , URI &{{{[0xc000366030] {{0 0} 0 0 {{} 0} {{} 0}}} 0xc00031e3c0} 0xc00030e180}"
+        	Test:       	TestPhase3_SprintfConversionReadWrite
+--- FAIL: TestPhase3_SprintfConversionReadWrite (0.00s)
+=== RUN   TestPhase3_StringToStringWithFormat
+    test_03_binding_sprintf_test.go:139: 
+        	Error Trace:	test_03_binding_sprintf_test.go:139
+        	Error:      	Not equal: 
+        	            	expected: "this is a string"
+        	            	actual  : "nospacestring"
+        	            	
+        	            	Diff:
+        	            	--- Expected
+        	            	+++ Actual
+        	            	@@ -1 +1 @@
+        	            	-this is a string
+        	            	+nospacestring
+        	Test:       	TestPhase3_StringToStringWithFormat
+    test_03_binding_sprintf_test.go:145: 
+        	Error Trace:	test_03_binding_sprintf_test.go:145
+        	Error:      	Should not be: "String this is a string"
+        	Test:       	TestPhase3_StringToStringWithFormat
+    test_03_binding_sprintf_test.go:149: 
+        	Error Trace:	test_03_binding_sprintf_test.go:149
+        	Error:      	Not equal: 
+        	            	expected: *binding.boundExternalString(&binding.boundExternalString{boundString:binding.boundString{base:binding.base{listeners:[]binding.DataListener{(*binding.listener)(0xc000366040), (*binding.listener)(0xc000366048)}, lock:sync.RWMutex{w:sync.Mutex{state:0, sema:0x0}, writerSem:0x0, readerSem:0x0, readerCount:atomic.Int32{_:atomic.noCopy{}, v:0}, readerWait:atomic.Int32{_:atomic.noCopy{}, v:0}}}, val:(*string)(0xc00031ed20)}, old:"this is a string"})
+        	            	actual  : *binding.stringToStringWithFormat(&binding.stringToStringWithFormat{base:binding.base{listeners:[]binding.DataListener(nil), lock:sync.RWMutex{w:sync.Mutex{state:0, sema:0x0}, writerSem:0x0, readerSem:0x0, readerCount:atomic.Int32{_:atomic.noCopy{}, v:0}, readerWait:atomic.Int32{_:atomic.noCopy{}, v:0}}}, format:"%s", source:(*binding.boundExternalString)(0xc0003205a0)})
+        	Test:       	TestPhase3_StringToStringWithFormat
+--- FAIL: TestPhase3_StringToStringWithFormat (0.00s)
+FAIL
+FAIL	fyne.io/fyne/v2/data/binding	0.006s
+FAIL
+FAILED
+=== Phase 4: Menu System Enhancements ===
+# fyne.io/fyne/v2_test [fyne.io/fyne/v2.test]
+./test_04_menu_enhancements_test.go:82:33: cannot use mainMenu (variable of type *fyne.MainMenu) as interface{Refresh()} value in variable declaration: *fyne.MainMenu does not implement interface{Refresh()} (missing method Refresh)
+FAIL	fyne.io/fyne/v2 [build failed]
+FAIL
+FAILED
+=== Phase 5: Toolbar Enhancements ===
+=== RUN   TestPhase5_ToolbarSetIcon
+--- PASS: TestPhase5_ToolbarSetIcon (0.00s)
+=== RUN   TestPhase5_NewToolbarActionConcreteType
+--- PASS: TestPhase5_NewToolbarActionConcreteType (0.00s)
+=== RUN   TestPhase5_NewToolbarSpacerConcreteType
+--- PASS: TestPhase5_NewToolbarSpacerConcreteType (0.00s)
+=== RUN   TestPhase5_NewToolbarSeparatorConcreteType
+--- PASS: TestPhase5_NewToolbarSeparatorConcreteType (0.00s)
+=== RUN   TestPhase5_ToolbarSetIconUpdatesField
+--- PASS: TestPhase5_ToolbarSetIconUpdatesField (0.00s)
+PASS
+ok  	fyne.io/fyne/v2/widget	0.010s
+PASSED
+=== Phase 6: Widget and Container Improvements ===
+=== RUN   TestPhase6_ContainerRemoveAll
+2026/09/18 11:31:02 Fyne error:  Attempt to access current Fyne app when none is started
+2026/09/18 11:31:02   At: /app/app.go:87
+2026/09/18 11:31:02 Fyne error:  Attempt to access current Fyne app when none is started
+2026/09/18 11:31:02   At: /app/app.go:87
+2026/09/18 11:31:02 Fyne error:  Attempt to access current Fyne app when none is started
+2026/09/18 11:31:02   At: /app/app.go:87
+2026/09/18 11:31:02 Fyne error:  Attempt to access current Fyne app when none is started
+2026/09/18 11:31:02   At: /app/app.go:87
+2026/09/18 11:31:02 Fyne error:  Attempt to access current Fyne app when none is started
+2026/09/18 11:31:02   At: /app/app.go:87
+--- PASS: TestPhase6_ContainerRemoveAll (0.00s)
+=== RUN   TestPhase6_ContainerRemoveAllEmpty
+2026/09/18 11:31:02 Fyne error:  Attempt to access current Fyne app when none is started
+2026/09/18 11:31:02   At: /app/app.go:87
+2026/09/18 11:31:02 Fyne error:  Attempt to access current Fyne app when none is started
+2026/09/18 11:31:02   At: /app/app.go:87
+--- PASS: TestPhase6_ContainerRemoveAllEmpty (0.00s)
+=== RUN   TestPhase6_ContainerAddNilSafe
+2026/09/18 11:31:02 Fyne error:  Attempt to access current Fyne app when none is started
+2026/09/18 11:31:02   At: /app/app.go:87
+2026/09/18 11:31:02 Fyne error:  Attempt to access current Fyne app when none is started
+2026/09/18 11:31:02   At: /app/app.go:87
+--- PASS: TestPhase6_ContainerAddNilSafe (0.00s)
+PASS
+ok  	fyne.io/fyne/v2	0.004s
+=== RUN   TestPhase6_HyperlinkOnTapped
+--- PASS: TestPhase6_HyperlinkOnTapped (0.00s)
+=== RUN   TestPhase6_HyperlinkOnTappedNil
+--- PASS: TestPhase6_HyperlinkOnTappedNil (0.00s)
+=== RUN   TestPhase6_HyperlinkOnTappedMultiple
+--- PASS: TestPhase6_HyperlinkOnTappedMultiple (0.00s)
+=== RUN   TestPhase6_EntrySetMinRowsVisible
+--- PASS: TestPhase6_EntrySetMinRowsVisible (0.00s)
+=== RUN   TestPhase6_EntrySetMinRowsVisibleDefault
+--- PASS: TestPhase6_EntrySetMinRowsVisibleDefault (0.00s)
+PASS
+ok  	fyne.io/fyne/v2/widget	0.009s
+=== RUN   TestPhase6_NewAllStrings
+--- PASS: TestPhase6_NewAllStrings (0.00s)
+=== RUN   TestPhase6_NewAllStringsSingleValidator
+--- PASS: TestPhase6_NewAllStringsSingleValidator (0.00s)
+=== RUN   TestPhase6_NewAllStringsAllPass
+--- PASS: TestPhase6_NewAllStringsAllPass (0.00s)
+=== RUN   TestPhase6_NewAllStringsEmpty
+--- PASS: TestPhase6_NewAllStringsEmpty (0.00s)
+PASS
+ok  	fyne.io/fyne/v2/data/validation	0.004s
+PASSED
+=== Phase 7: Desktop App Interface ===
+# fyne.io/fyne/v2/driver/desktop_test [fyne.io/fyne/v2/driver/desktop.test]
+driver/desktop/test_07_desktop_app_test.go:52:22: cannot use &mockDesktopApp{} (value of type *mockDesktopApp) as desktop.App value in variable declaration: *mockDesktopApp does not implement desktop.App (missing method Driver)
+FAIL	fyne.io/fyne/v2/driver/desktop [build failed]
+FAIL
+FAILED
+Result: 3/7 phases | Reward: 0.45454545454545453
