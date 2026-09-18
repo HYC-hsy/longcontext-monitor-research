@@ -554,7 +554,7 @@ class MonitorProviderClient:
                 self._progress('request_usage', request_id=request_id, usage=result[1])
                 # Completed transport is not necessarily a usable agent response.
                 # Retry before committing history or consuming a review turn.
-                if not any(
+                if record['purpose'] not in ('continuation', 'format_repair') and not any(
                     (block.get('type') == 'text' and str(block.get('text') or '').strip())
                     or (block.get('type') == 'tool_use' and str(block.get('name') or '').strip())
                     for block in result[0]
