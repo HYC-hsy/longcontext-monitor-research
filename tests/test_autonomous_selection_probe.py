@@ -70,7 +70,7 @@ def test_parent_selection_child_c_and_final_share_budget(tmp_path):
     )
     assert result["status"] == "completed"
     assert result["selection"]["question"].startswith("Does the observed")
-    assert result["child"].outcome == "supported_in_scope"
+    assert result["child"]["outcome"] == "supported_in_scope"
     assert result["final"]["outcome"] == "supported_in_scope"
     assert result["budget_used"] == 5
     assert parent.calls == 3

@@ -85,7 +85,11 @@ def load_inputs(config_path: Path):
         "task/public_events.jsonl", "task/build_observation.json",
         *(f"task/workspace/{path}" for path in workspace_files),
     )
-    return experiment, checkpoint, fixture, selected, evidence
+    evidence_by_case = {
+        case["id"]: tuple(experiment.get("evidence_overrides", {}).get(
+            case["id"], evidence)) for case in selected
+    }
+    return experiment, checkpoint, fixture, selected, evidence_by_case
 
 
 def run_direct(case, fixture, evidence, profile, output):
@@ -122,7 +126,7 @@ def run_direct(case, fixture, evidence, profile, output):
 
 
 def run_panel(args):
-    experiment, checkpoint, fixture, cases, evidence = load_inputs(args.config)
+    experiment, checkpoint, fixture, cases, evidence_by_case = load_inputs(args.config)
     profile = load_profile(args.profile, args.profile_file)
     output = args.output
     output.mkdir(parents=True)
@@ -134,6 +138,7 @@ def run_panel(args):
         "total_calls": experiment["total_calls"],
     })
     for case in cases:
+        evidence = evidence_by_case[case["id"]]
         direct = run_direct(case, fixture, evidence, profile, output)
         parent_client = MonitorProviderClient("autonomous-selection::parent", dict(profile))
         child_client = MonitorProviderClient("autonomous-selection::child-c", dict(profile))

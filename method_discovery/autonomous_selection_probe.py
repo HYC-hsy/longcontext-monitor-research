@@ -154,9 +154,12 @@ def run_autonomous_selection_case(parent_client, child_client, workspace,
         "whose answer could materially change the decision. Do not assume a checker or hidden "
         "answer, and do not invent a defect."
     )
+    material_index = "\n\nPermitted material paths (same upper bound for parent and C):\n" + \
+        "\n".join(f"- {path}" for path in sorted(allowed))
     selection = _run_parent_phase(
         parent_client, parent_system,
-        question + "\n\nChoose the most decision-relevant local uncertainty before any final decision.",
+        question + material_index +
+        "\n\nChoose the most decision-relevant local uncertainty before any final decision.",
         _selection_tools(), workspace, allowed, budget, config.selection_turns, record,
         "select_local_question")
     if selection.kind != "select_local_question":
@@ -174,10 +177,16 @@ def run_autonomous_selection_case(parent_client, child_client, workspace,
         audit=record,
     )
     child_result = child.run(str(selected["question"]))
+    child_data = {
+        "status": child_result.status, "outcome": child_result.outcome,
+        "conclusion": child_result.conclusion,
+        "limitation": child_result.limitation,
+        "requests": child_result.requests,
+    }
     budget.used += child.logical_calls
     if budget.remaining < 1:
         return {"status": "incomplete", "stage": "final", "selection": selected,
-                "child": child_result, "budget_used": budget.used}
+                "child": child_data, "budget_used": budget.used}
 
     final_prompt = (
         f"Original acceptance question:\n{question}\n\n"
@@ -199,6 +208,6 @@ def run_autonomous_selection_case(parent_client, child_client, workspace,
         budget, config.final_turns, record, "finalize_parent_decision")
     if final.kind != "finalize_parent_decision":
         return {"status": "incomplete", "stage": "final", "selection": selected,
-                "child": child_result, "budget_used": budget.used}
-    return {"status": "completed", "selection": selected, "child": child_result,
+                "child": child_data, "budget_used": budget.used}
+    return {"status": "completed", "selection": selected, "child": child_data,
             "final": final.payload, "budget_used": budget.used}
