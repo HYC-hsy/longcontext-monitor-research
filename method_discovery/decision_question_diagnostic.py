@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -64,33 +64,48 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest().lower()
 
 
-def extract_model_history_at_cursor(dialogue_path: Path, max_cursor: int) -> tuple[list[dict[str, Any]], int]:
-    """Extract an actual provider input at or before a public cursor.
+def select_review_model_input(dialogue_path: Path, review_id: str,
+                              model_input_index: int) -> dict[str, Any]:
+    """Locate one exact incremental model input for audit purposes.
 
-    The dialogue archive records each model input after the wake cursor was
-    chosen.  Selecting that complete input is safer than filtering individual
-    messages by keywords: it preserves the old judgments that really existed,
-    while excluding later model outputs, approvals, and post-hoc evaluation.
+    ``model_input.messages`` is deliberately *not* treated as a full provider
+    History.  It is the increment recorded for that request.  The caller must
+    separately provide the matching provider-history snapshot.
     """
-    chosen = None
-    chosen_cursor = -1
-    for line in dialogue_path.read_text(encoding="utf-8").splitlines():
+    seen = 0
+    for line_number, line in enumerate(dialogue_path.read_text(encoding="utf-8").splitlines(), 1):
         event = json.loads(line)
-        if event.get("event") != "model_input":
+        if event.get("event") != "model_input" or event.get("review_id") != review_id:
             continue
-        wake = str(event.get("wake_context", ""))
-        match = re.search(r"cursor advanced through (\d+)", wake)
-        cursor = int(match.group(1)) if match else (0 if "Turn-zero" in wake else None)
-        if cursor is None or cursor > max_cursor or cursor < chosen_cursor:
-            continue
-        messages = event.get("messages")
-        if not isinstance(messages, list):
-            raise ValueError("model_input has no provider message list")
-        chosen = json.loads(json.dumps(messages, ensure_ascii=False))
-        chosen_cursor = cursor
-    if chosen is None:
-        raise ValueError(f"no model_input at or before cursor {max_cursor}")
-    return chosen, chosen_cursor
+        if seen == model_input_index:
+            messages = event.get("messages")
+            if not isinstance(messages, list):
+                raise ValueError("model_input has no incremental message list")
+            return {"line": line_number, "review_id": review_id,
+                    "model_input_index": model_input_index,
+                    "messages": json.loads(json.dumps(messages, ensure_ascii=False)),
+                    "timestamp": event.get("timestamp")}
+        seen += 1
+    raise ValueError(f"model_input not found: review_id={review_id}, index={model_input_index}")
+
+
+def extract_model_history_at_checkpoint(snapshot_path: Path, expected_sha256: str | None = None,
+                                        source_kind: str = "provider_snapshot") -> list[dict[str, Any]]:
+    """Load the complete History snapshot selected for a checkpoint.
+
+    A dialogue increment alone cannot reconstruct the persistent parent
+    History.  If an offline reconstruction is used, it must be materialized
+    as a separate file and labelled ``constructed_offline`` in the manifest;
+    this function never silently promotes an increment to a faithful History.
+    """
+    if source_kind not in {"provider_snapshot", "constructed_offline"}:
+        raise ValueError("unknown history source kind")
+    if expected_sha256 and digest(snapshot_path) != expected_sha256.lower():
+        raise ValueError("parent History snapshot digest changed")
+    history = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    if not isinstance(history, list) or any(not isinstance(item, dict) for item in history):
+        raise ValueError("parent History snapshot must be a list of messages")
+    return history
 
 
 def validate_checkpoint_fixture(config: dict[str, Any], fixture: Path,
@@ -145,7 +160,51 @@ def validate_checkpoint_fixture(config: dict[str, Any], fixture: Path,
         for path in case.get("evidence_paths", []):
             if path.startswith(("verifier/", "solution/")):
                 raise ValueError(f"posthoc/hidden evidence in model paths: {path}")
+        for path in case.get("source_paths", []):
+            if path.startswith(("verifier/", "solution/")):
+                raise ValueError(f"posthoc/hidden source path: {path}")
+    visible_events = fixture / visible["events"]
+    cursors = []
+    for line in visible_events.read_text(encoding="utf-8").splitlines():
+        event = json.loads(line)
+        if isinstance(event.get("cursor"), int):
+            cursors.append(event["cursor"])
+    if not cursors or max(cursors) != visible["through_cursor"]:
+        raise ValueError("visible event prefix does not end at declared cursor")
     return history
+
+
+def materialize_model_view(config: dict[str, Any], fixture: Path, case: dict[str, Any],
+                           destination: Path) -> tuple[Path, set[str]]:
+    """Build a per-case read-only view containing only declared model files."""
+    if destination.exists():
+        raise FileExistsError(f"model view already exists: {destination}")
+    destination.mkdir(parents=True)
+    manifest = json.loads((fixture / "materialization.json").read_text(encoding="utf-8"))
+    declared = set(manifest.get("artifact_sha256", {}))
+    visible_events = config["checkpoint"]["model_visible"]["events"]
+    roots = {"task/public_events.jsonl": visible_events,
+             "task/original_task.txt": "task_evidence/original_task.txt",
+             "task/build_observation.json": "task_evidence/build_observation.json"}
+    paths = set(case.get("source_paths", ())) | set(case.get("evidence_paths", ()))
+    for virtual in paths:
+        if virtual == "task/public_events.jsonl":
+            source_relative = visible_events
+        elif virtual.startswith("task/workspace/"):
+            source_relative = "workspace/" + virtual.removeprefix("task/workspace/")
+        elif virtual in roots:
+            source_relative = roots[virtual]
+        else:
+            raise ValueError(f"unmapped model-visible path: {virtual}")
+        if source_relative not in declared:
+            raise ValueError(f"model-visible path is not manifest-listed: {source_relative}")
+        source = fixture / source_relative
+        if not source.is_file():
+            raise ValueError(f"model-visible source missing: {source_relative}")
+        target = destination / virtual
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+    return destination, paths
 
 
 def _tool(name: str, description: str, properties: dict[str, Any], required=()):
@@ -285,14 +344,43 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
                 "stage": "question", "question_calls": q_budget.used,
                 "ordinary_calls": a_budget.used}
     selected = question_action.payload
+    question_history = q_client.export_history()
     if not selected.get("worthwhile"):
+        no_question_prompt = prefix_prompt + (
+            "\n\nThe Supervisor found no additional premise whose answer would change the "
+            "decision. Make the parent decision directly and explain the evidence scope."
+        )
+        b_client = parent_client_factory("parent_direct_no_question")
+        b_client.restore_history(question_history)
+        b_budget = CallBudget(config.total_calls)
+        b_budget.used = q_budget.used
+        b = _run_parent(
+            b_client,
+            "You are the continuing Supervisor. No isolated verifier is needed. "
+            "Make the parent decision without inventing a new question.",
+            no_question_prompt, [_finish_tool()], workspace, allowed, b_budget,
+            config.final_turns, "finish_parent_decision", record,
+        )
+        c_client = parent_client_factory("parent_after_c_no_question")
+        c_client.restore_history(question_history)
+        c_budget = CallBudget(config.total_calls)
+        c_budget.used = q_budget.used
+        c_final = _run_parent(
+            c_client,
+            "You are the continuing Supervisor. No isolated verifier was justified. "
+            "Make the parent decision and preserve the evidence scope.",
+            no_question_prompt, [_finish_tool()], workspace, allowed, c_budget,
+            config.final_turns, "finish_parent_decision", record,
+        )
         return {
-            "status": "no_question",
+            "status": "completed" if (b.kind == "finish_parent_decision" and
+                                        c_final.kind == "finish_parent_decision") else "incomplete",
             "selected_question": selected,
             "ordinary": {"action": a.kind, "payload": a.payload, "calls": a_budget.used},
-            "question_calls": q_budget.used,
+            "parent_direct": {"action": b.kind, "payload": b.payload, "calls": b_budget.used},
+            "isolated_c": {"action": c_final.kind, "payload": c_final.payload,
+                           "child_status": "not_called", "calls": c_budget.used},
         }
-    question_history = q_client.export_history()
 
     # B: direct parent investigation from the exact question-generation state.
     b_client = parent_client_factory("parent_direct")

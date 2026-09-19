@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +22,7 @@ from monitor_agent_core.configuration import load_profile  # noqa: E402
 
 from decision_question_diagnostic import (  # noqa: E402
     DiagnosticConfig, run_three_way_case, validate_checkpoint_fixture,
+    materialize_model_view,
 )
 
 
@@ -68,36 +70,81 @@ def main() -> None:
         case_id = case["id"]
         private = args.output / case_id / "private"
         private.mkdir(parents=True)
-        workspace = MonitorWorkspace(
-            args.fixture / "task_evidence", private,
-            task_mounts={"workspace": args.fixture / "workspace"},
-        )
+        model_view, _ = materialize_model_view(config, args.fixture, case,
+                                               private.parent / "model_visible")
+        workspace = MonitorWorkspace(model_view, private)
+        audit_path = private.parent / "audit.jsonl"
+        transport_path = private.parent / "transport.jsonl"
+        clients = {}
+
+        def append_json(path, item):
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(item, ensure_ascii=False, default=str) + "\n")
+                stream.flush()
+
+        def audit(event, **fields):
+            append_json(audit_path, {"event": event, "case": case_id,
+                                     "recorded_at": datetime.now(timezone.utc).isoformat(),
+                                     **fields})
+
+        def transport(branch, event, **fields):
+            allowed = {"request_id", "attempt", "started_at", "duration_seconds",
+                       "purpose", "transaction_id", "outcome", "error_type",
+                       "error_chain", "retry_delay_seconds", "status_code", "lines",
+                       "bytes_or_characters", "seconds", "next_batch", "reason",
+                       "source", "usage", "provider_message_id", "metadata"}
+            item = {key: value for key, value in fields.items() if key in allowed}
+            append_json(transport_path, {
+                "event": "transport_" + event, "case": case_id, "branch": branch,
+                "recorded_at": datetime.now(timezone.utc).isoformat(), **item,
+            })
 
         def parent_factory(branch):
-            return MonitorProviderClient(
+            client = MonitorProviderClient(
                 f"decision_question::{case_id}::{branch}", dict(provider)
             )
+            client.progress_callback = lambda event, **fields: transport(branch, event, **fields)
+            clients[branch] = client
+            return client
 
         def child_factory(branch):
-            return MonitorProviderClient(
+            client = MonitorProviderClient(
                 f"decision_question::{case_id}::{branch}", dict(provider)
             )
+            client.progress_callback = lambda event, **fields: transport(branch, event, **fields)
+            clients[branch] = client
+            return client
 
-        audit = []
         result = run_three_way_case(
             parent_factory, child_factory, workspace,
             case["acceptance_question"], tuple(case["source_paths"]),
             tuple(case["evidence_paths"]), parent_history, run_config,
-            audit=lambda event, **fields: audit.append({"event": event, **fields}),
+            audit=audit,
         )
+        usage = {}
+        for branch, client in clients.items():
+            usage[branch] = {
+                "logical_calls": len(client.usage_records),
+                "request_attempts": len(client.request_attempts),
+                "input_tokens": sum(int(x.get("input_tokens") or 0) for x in client.usage_records),
+                "output_tokens": sum(int(x.get("output_tokens") or 0) for x in client.usage_records),
+                "total_tokens": sum(sum(int(x.get(key) or 0) for key in
+                                         ("input_tokens", "output_tokens",
+                                          "cache_creation_input_tokens",
+                                          "cache_read_input_tokens"))
+                                    for x in client.usage_records),
+            }
+        actual_total_tokens = sum(item["total_tokens"] for item in usage.values())
+        shared_tokens = usage.get("question", {}).get("total_tokens", 0)
         record = {"case": case_id, "result": result,
-                  "model_visible_checkpoint": config["checkpoint"]["id"]}
+                  "model_visible_checkpoint": config["checkpoint"]["id"],
+                  "usage_by_branch": usage,
+                  "actual_unique_total_tokens": actual_total_tokens,
+                  "shared_question_tokens_counted_per_comparison_branch": shared_tokens,
+                  "shared_question_branch_accounting": ["parent_direct", "isolated_c"],
+                  "transport_log": "transport.jsonl", "audit_log": "audit.jsonl"}
         (private.parent / "result.json").write_text(
             json.dumps(record, ensure_ascii=False, indent=2, default=str) + "\n",
-            encoding="utf-8",
-        )
-        (private.parent / "audit.jsonl").write_text(
-            "".join(json.dumps(item, ensure_ascii=False, default=str) + "\n" for item in audit),
             encoding="utf-8",
         )
         results.append(record)

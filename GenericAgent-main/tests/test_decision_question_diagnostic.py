@@ -104,8 +104,11 @@ def test_checkpoint_validation_does_not_require_prior_approval(tmp_path):
     fixture = tmp_path / "fixture"
     (fixture / "task_evidence").mkdir(parents=True)
     (fixture / "parent_context").mkdir()
-    (fixture / "task_evidence" / "visible.jsonl").write_text("prefix\n", encoding="utf-8")
-    (fixture / "task_evidence" / "full.jsonl").write_text("prefix\nfuture\n", encoding="utf-8")
+    (fixture / "task_evidence" / "visible.jsonl").write_text(
+        json.dumps({"cursor": 3, "task_turn": 2}) + "\n", encoding="utf-8")
+    (fixture / "task_evidence" / "full.jsonl").write_text(
+        json.dumps({"cursor": 3}) + "\n" + json.dumps({"cursor": 4}) + "\n",
+        encoding="utf-8")
     (fixture / "parent_context" / "history.json").write_text("[]", encoding="utf-8")
     config = {
         "checkpoint": {
@@ -142,16 +145,19 @@ def test_history_extraction_uses_complete_model_input_not_posthoc_output(tmp_pat
     module = _load()
     dialogue = tmp_path / "dialogue.jsonl"
     rows = [
-        {"event": "model_input", "wake_context": "Public task cursor advanced through 3.",
+        {"event": "model_input", "review_id": "r1", "wake_context": "Public task cursor advanced through 3.",
          "messages": [{"role": "user", "content": "old"}]},
         {"event": "model_output", "tool_calls": [{"name": "intervene"}]},
-        {"event": "model_input", "wake_context": "Public task cursor advanced through 8.",
+        {"event": "model_input", "review_id": "r1", "wake_context": "Public task cursor advanced through 8.",
          "messages": [{"role": "user", "content": "new"}]},
         {"event": "model_output", "tool_calls": [{"name": "allow_complete"}]},
     ]
     dialogue.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
-    history, cursor = module.extract_model_history_at_cursor(dialogue, 3)
-    assert cursor == 3
+    increment = module.select_review_model_input(dialogue, "r1", 0)
+    assert increment["line"] == 1
+    snapshot = tmp_path / "history.json"
+    snapshot.write_text(json.dumps([{"role": "user", "content": "old"}]), encoding="utf-8")
+    history = module.extract_model_history_at_checkpoint(snapshot)
     assert history == [{"role": "user", "content": "old"}]
 
 
@@ -170,7 +176,8 @@ def test_no_worthwhile_question_does_not_force_isolated_probe(tmp_path):
             return Client([_call("select_decision_question", {
                 "question": "", "reason": "No unresolved premise can change this decision.",
                 "worthwhile": False}, "q1")])
-        raise AssertionError("no branch should be created when no question is worthwhile")
+        return Client([_call("finish_parent_decision", {
+            "outcome": "supported_in_scope", "conclusion": "no extra question needed"}, "f1")])
 
     def child(kind):
         raise AssertionError("isolated C must not run")
@@ -179,4 +186,38 @@ def test_no_worthwhile_question_does_not_force_isolated_probe(tmp_path):
         parent, child, workspace, "Should this implementation be accepted?",
         ("task/original_task.txt",), (), [],
     )
-    assert result["status"] == "no_question"
+    assert result["status"] == "completed"
+    assert result["isolated_c"]["child_status"] == "not_called"
+
+
+def test_model_view_contains_only_declared_case_material(tmp_path):
+    module = _load()
+    fixture = tmp_path / "fixture"
+    (fixture / "task_evidence").mkdir(parents=True)
+    (fixture / "workspace").mkdir()
+    (fixture / "task_evidence" / "events.jsonl").write_text(
+        json.dumps({"cursor": 2}) + "\n", encoding="utf-8")
+    (fixture / "task_evidence" / "original_task.txt").write_text("task", encoding="utf-8")
+    (fixture / "task_evidence" / "full_archive.jsonl").write_text(
+        json.dumps({"cursor": 2}) + "\n" + json.dumps({"cursor": 3}) + "\n",
+        encoding="utf-8")
+    (fixture / "workspace" / "impl.go").write_text("impl", encoding="utf-8")
+    config = {"checkpoint": {"id": "cp", "model_visible": {
+        "events": "task_evidence/events.jsonl", "parent_history": "parent.json",
+        "through_cursor": 2}, "research_archive": {"events": "task_evidence/full_archive.jsonl"}},
+        "cases": [{"id": "x", "source_paths": ["task/original_task.txt"],
+                   "evidence_paths": ["task/workspace/impl.go"]}]}
+    (fixture / "parent.json").write_text("[]", encoding="utf-8")
+    import hashlib
+    def sha(p): return hashlib.sha256(p.read_bytes()).hexdigest()
+    files = ["task_evidence/events.jsonl", "task_evidence/full_archive.jsonl",
+             "task_evidence/original_task.txt", "workspace/impl.go", "parent.json"]
+    (fixture / "materialization.json").write_text(json.dumps({
+        "checkpoint": "cp", "model_visible_cursor": 2,
+        "artifact_sha256": {name: sha(fixture / name) for name in files},
+    }), encoding="utf-8")
+    destination = tmp_path / "view"
+    module.materialize_model_view(config, fixture, config["cases"][0], destination)
+    assert (destination / "task" / "original_task.txt").is_file()
+    assert (destination / "task" / "workspace" / "impl.go").is_file()
+    assert not (destination / "task_evidence" / "full_archive.jsonl").exists()

@@ -45,7 +45,9 @@ investigation. Transport retries are recorded separately by the provider.
 Each case stores the selected question, branch status, final decision, C's
 scoped conclusion and evidence references, plus the audit stream. No scoring
 labels, native verifier output, or post-hoc rationale enters a model-visible
-mount.
+mount. The CLI writes `audit.jsonl` and provider `transport.jsonl` records
+incrementally, and reports both unique actual usage and the comparison ledger
+where the shared question cost is counted once per B/C branch.
 
 ## Current status
 
