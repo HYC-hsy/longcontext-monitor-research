@@ -73,11 +73,13 @@ Actual unique recorded token units: **470,110**.
 6. Submitted `contradicted` and named the missing validator.
 
 The final conclusion matches the frozen workspace: post-run research-side inspection confirms
-`task/workspace/data/validation/all.go` is absent. However, the model's explanation also says a
-directory listing confirmed the absence. That statement is not supported by its model-visible
-tool results because call 4 failed. The valid in-run basis was the explicit original requirement
-plus its omission from the implementation summary. This run is therefore **decision-correct but
-contains an evidence-scope overclaim**, not a fully grounded success.
+`task/workspace/data/validation/all.go` is absent. Call 4 in this diagnostic failed, but a later
+source audit found that the restored parent History already contained an earlier successful
+directory listing at History messages 93--94. That observation listed the frozen
+`/app/data/validation/` contents without `all.go`. Therefore the directory assertion was grounded
+in persistent parent evidence even though the attempted repeat check failed. The statement that
+Targets 1--5 and 7 were all correct remains over-broad: the History deeply checked Target 1, but
+did not equivalently verify every other target.
 
 ### Shared-question operation sequence
 
@@ -104,8 +106,9 @@ The useful evidence is narrower:
 2. The fixed serial question stage still fails within three calls, even with accurate budget
    visibility.
 3. C's incremental value remains untested because the shared question was never produced.
-4. A can reach the right decision while still laundering a failed check into its explanation; final
-   labels alone are insufficient for evaluation.
+4. Evidence provenance must include restored History as well as calls made in the diagnostic;
+   auditing only the latter can falsely classify a supported assertion as hallucinated. The broad
+   claim that all other targets were correct still exceeds the recorded verification.
 
 Per the predefined stopping rule, this sample is retained without increasing question budget,
 rerunning, changing prompts, or forcing C to appear. The next decision is whether the fixed serial

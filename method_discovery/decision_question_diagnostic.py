@@ -362,9 +362,10 @@ def _clone_parent_workspace(source: MonitorWorkspace, destination: Path) -> Moni
 
 
 def _with_protocol_receipt(data: Any, budget: CallBudget, stage_start: int,
-                           stage_limit: int, ending_tool: str) -> Any:
+                           stage_limit: int, ending_tool: str,
+                           protocol: str = "parent-state-maintenance-restored-v1") -> Any:
     receipt = {
-        "protocol": "parent-state-maintenance-restored-v1",
+        "protocol": protocol,
         "global_calls_remaining": budget.remaining,
         "stage_calls_remaining": max(0, stage_limit - (budget.used - stage_start)),
         "required_ending_tool": ending_tool,
@@ -419,7 +420,10 @@ def _dispatch_parent_workspace(workspace, public_allowed: set[str], name: str,
 def _run_parent(client, system: str, prompt: str, tools, workspace, allowed: set[str],
                 budget: CallBudget, max_turns: int, action_name: str,
                 audit: Callable[..., None] | None = None,
-                restore_private_maintenance: bool = False) -> MonitorAction:
+                restore_private_maintenance: bool = False,
+                extra_dispatch: Callable[[str, dict[str, Any]], ToolOutcome | None] | None = None,
+                receipt_protocol: str = "parent-state-maintenance-restored-v1"
+                ) -> MonitorAction:
     original = client.complete
     stage_start = budget.used
     if action_name == "finish_parent_decision":
@@ -443,13 +447,17 @@ def _run_parent(client, system: str, prompt: str, tools, workspace, allowed: set
                 action_name=action_name,
             )
         def dispatch(name, args):
-            if restore_private_maintenance:
+            handled = extra_dispatch(name, args) if extra_dispatch is not None else None
+            if handled is not None:
+                pass
+            elif restore_private_maintenance:
                 handled = _dispatch_parent_workspace(workspace, allowed, name, args)
             else:
                 handled = _dispatch_read(workspace, allowed, name, args)
             if handled is not None:
                 handled.data = _with_protocol_receipt(
-                    handled.data, budget, stage_start, max_turns, action_name)
+                    handled.data, budget, stage_start, max_turns, action_name,
+                    receipt_protocol)
                 return handled
             if name == action_name:
                 if action_name == "select_decision_question":
