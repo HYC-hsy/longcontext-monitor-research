@@ -538,6 +538,18 @@ class MonitorProviderClient:
         expected_parameters = request.get('model_parameters')
         if not isinstance(expected_parameters, dict):
             raise ValueError('captured request has no model parameters')
+        actual_parameters = {
+            'model': self.model, 'api_mode': self.api_mode,
+            'max_tokens': self.max_tokens,
+            'reasoning_effort': self.reasoning_effort,
+            'thinking_type': self.thinking_type,
+            'temperature': self.temperature,
+        }
+        for field, expected in expected_parameters.items():
+            if field in actual_parameters and actual_parameters[field] != expected:
+                raise ValueError(
+                    f'captured request model mismatch: field={field} '
+                    f'expected={expected!r} actual={actual_parameters[field]!r}')
         self.system = str(request.get('system') or '')
         self.restore_history(request.get('messages') or [])
         self.review_id = request.get('review_id')

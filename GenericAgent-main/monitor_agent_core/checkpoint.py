@@ -35,7 +35,7 @@ def _file_manifest(root: Path) -> dict[str, str]:
     return {
         path.relative_to(root).as_posix(): _sha(path)
         for path in sorted(root.rglob("*"))
-        if path.is_file() and path.name not in excluded
+        if path.is_file() and path.relative_to(root).as_posix() not in excluded
     }
 
 

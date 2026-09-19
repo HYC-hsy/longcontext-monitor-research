@@ -225,3 +225,35 @@ def test_file_read_cursor_continuation_is_complete_without_duplicates(tmp_path):
     assert "".join(pieces) == expected
     assert len(cursors) >= 2
     assert len(set(cursors)) == len(cursors)
+
+
+@pytest.mark.parametrize("arguments", [
+    {"path": "task/events.jsonl", "start": 0},
+    {"path": "task/events.jsonl", "count": 1001},
+    {"path": "task/events.jsonl", "offset": -1},
+    {"path": "task/events.jsonl", "max_chars": 0},
+    {"path": "task/events.jsonl", "tail": True, "start": 2},
+    {"path": "task/events.jsonl", "tail": True, "offset": 1},
+])
+def test_child_read_contract_returns_explicit_tool_error(tmp_path, arguments):
+    probe = IndependentVerifier(
+        SequenceClient([]), workspace(tmp_path),
+        ProbeConfig(evidence_paths=("task/events.jsonl",)),
+    )
+    probe._allowed = {"task/events.jsonl"}
+    result = probe._dispatch("file_read", arguments, "evidence")
+    assert result.data["status"] == "error"
+    assert result.data["error"]
+
+
+def test_child_cannot_read_parent_private_note(tmp_path):
+    ws = workspace(tmp_path)
+    (ws.private_root / "working.md").write_text("parent-only", encoding="utf-8")
+    probe = IndependentVerifier(
+        SequenceClient([]), ws,
+        ProbeConfig(evidence_paths=("task/events.jsonl",)),
+    )
+    probe._allowed = {"task/events.jsonl"}
+    result = probe._dispatch("file_read", {"path": "monitor/working.md"}, "evidence")
+    assert result.data == {
+        "status": "error", "error": "path is outside this probe phase"}

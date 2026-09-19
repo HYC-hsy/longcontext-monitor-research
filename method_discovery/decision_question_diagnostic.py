@@ -277,6 +277,30 @@ def materialize_live_checkpoint_view(checkpoint: dict[str, Any], case: dict[str,
     return destination, paths
 
 
+def materialize_live_parent_state(checkpoint: dict[str, Any], destination: Path
+                                  ) -> tuple[Path, set[str]]:
+    """Restore frozen parent-only Monitor state without exposing it to child C."""
+    if destination.exists():
+        raise FileExistsError(f"parent state destination already exists: {destination}")
+    destination.mkdir(parents=True)
+    root = checkpoint["root"]
+    declared = set(checkpoint["manifest"]["files"])
+    allowed: set[str] = set()
+    prefix = "monitor/state/"
+    for relative in sorted(path for path in declared if path.startswith(prefix)):
+        source = root / relative
+        if not source.is_file():
+            raise ValueError(f"checkpoint parent state is not readable: {relative}")
+        suffix = relative.removeprefix(prefix)
+        if not suffix:
+            continue
+        target = destination / suffix
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        allowed.add("monitor/" + suffix)
+    return destination, allowed
+
+
 def _tool(name: str, description: str, properties: dict[str, Any], required=()):
     return {"type": "function", "function": {
         "name": name, "description": description,
@@ -324,11 +348,15 @@ def _dispatch_read(workspace, allowed: set[str], name: str, args: dict[str, Any]
     path = str(args.get("path", "")).replace("\\", "/")
     if path not in allowed:
         return ToolOutcome({"status": "error", "error": "path is outside this experiment"})
-    return ToolOutcome(workspace.read_text(
-        path, args.get("start", 1), args.get("count", 200),
-        tail=args.get("tail", False), offset=args.get("offset", 0),
-        max_chars=args.get("max_chars", 20000),
-    ))
+    try:
+        data = workspace.read_text(
+            path, args.get("start", 1), args.get("count", 200),
+            tail=args.get("tail", False), offset=args.get("offset", 0),
+            max_chars=args.get("max_chars", 20000),
+        )
+    except (TypeError, ValueError) as exc:
+        return ToolOutcome({"status": "error", "error": str(exc)})
+    return ToolOutcome(data)
 
 
 def _run_parent(client, system: str, prompt: str, tools, workspace, allowed: set[str],
@@ -344,6 +372,17 @@ def _run_parent(client, system: str, prompt: str, tools, workspace, allowed: set
 
     client.complete = counted
     try:
+        if audit:
+            history = (client.history_measure() if hasattr(client, "history_measure") else {})
+            audit(
+                "branch_initial_request_basis",
+                history=history,
+                system_sha256=hashlib.sha256(system.encode("utf-8")).hexdigest(),
+                prompt_sha256=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+                tools_sha256=hashlib.sha256(json.dumps(
+                    tools, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest(),
+                action_name=action_name,
+            )
         def dispatch(name, args):
             read = _dispatch_read(workspace, allowed, name, args)
             if read is not None:
@@ -386,6 +425,8 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
                        parent_history: list[dict[str, Any]],
                        config: DiagnosticConfig = DiagnosticConfig(),
                        parent_system: str | None = None,
+                       parent_state_paths: tuple[str, ...] = (),
+                       child_workspace=None,
                        audit: Callable[..., None] | None = None,
                        branch_sink: Callable[[str, dict[str, Any]], None] | None = None
                        ) -> dict[str, Any]:
@@ -419,9 +460,13 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
             "calls": budget.used,
             "budget_calls": budget.used,
         }
-    allowed = {str(p).replace("\\", "/") for p in source_paths + evidence_paths}
+    public_allowed = {str(p).replace("\\", "/") for p in source_paths + evidence_paths}
+    parent_allowed = public_allowed | {
+        str(p).replace("\\", "/") for p in parent_state_paths
+    }
+    child_workspace = child_workspace or workspace
     prefix_prompt = acceptance_question + "\n\nPermitted paths:\n" + \
-        "\n".join(f"- {path}" for path in sorted(allowed))
+        "\n".join(f"- {path}" for path in sorted(parent_allowed))
     stable_system = ((parent_system or "").rstrip() + "\n\n") if parent_system else ""
     offline_system = (stable_system +
         "Offline diagnostic constraint: you cannot intervene, approve the live task, "
@@ -436,7 +481,7 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
         offline_system + "Investigate the acceptance question using "
         "public evidence, then make one scoped decision. Do not assume a checker.",
         prefix_prompt + "\n\nInvestigate as you judge appropriate.",
-        [_read_tool(), _finish_tool()], workspace, allowed, a_budget,
+        [_read_tool(), _finish_tool()], workspace, parent_allowed, a_budget,
         config.total_calls, "finish_parent_decision", scoped("ordinary"),
     )
     ordinary = parent_result(a, a_budget)
@@ -452,7 +497,7 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
         "unresolved premise is worth investigating. Preserve the original task terms; "
         "do not name a known defect merely because it is in the evaluator's notes.",
         prefix_prompt + "\n\nFirst decide whether one unresolved premise could change the decision.",
-        [_read_tool(), _question_tool()], workspace, allowed, q_budget,
+        [_read_tool(), _question_tool()], workspace, parent_allowed, q_budget,
         config.question_turns, "select_decision_question", scoped("question"),
     )
     if question_action.kind != "select_decision_question":
@@ -486,7 +531,7 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
             b_client,
             offline_system + "No isolated verifier is needed. "
             "Make the parent decision without inventing a new question.",
-            no_question_prompt, [_finish_tool()], workspace, allowed, b_budget,
+            no_question_prompt, [_finish_tool()], workspace, parent_allowed, b_budget,
             config.final_turns, "finish_parent_decision", scoped("parent_direct"),
         )
         c_client = parent_client_factory("parent_after_c_no_question")
@@ -497,7 +542,7 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
             c_client,
             offline_system + "No isolated verifier was justified. "
             "Make the parent decision and preserve the evidence scope.",
-            no_question_prompt, [_finish_tool()], workspace, allowed, c_budget,
+            no_question_prompt, [_finish_tool()], workspace, parent_allowed, c_budget,
             config.final_turns, "finish_parent_decision", scoped("isolated_c_parent"),
         )
         direct = parent_result(b, b_budget)
@@ -522,7 +567,7 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
         offline_system + "Investigate the selected premise directly "
         "with the same permitted evidence, then decide the original question.",
         prefix_prompt + "\n\nSelected unresolved premise:\n" + str(selected.get("question", "")),
-        [_read_tool(), _finish_tool()], workspace, allowed, b_budget,
+        [_read_tool(), _finish_tool()], workspace, parent_allowed, b_budget,
         max(1, b_budget.remaining), "finish_parent_decision", scoped("parent_direct"),
     )
     direct = parent_result(b, b_budget)
@@ -534,7 +579,7 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
     c_budget = CallBudget(config.total_calls)
     c_budget.used = q_budget.used  # same shared question cost
     child = IndependentVerifier(
-        child_client_factory("isolated_c"), workspace,
+        child_client_factory("isolated_c"), child_workspace,
         ProbeConfig(mode="direct", source_paths=source_paths,
                     evidence_paths=evidence_paths,
                     max_requests=max(1, min(config.investigation_turns,
@@ -566,7 +611,7 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
         c_parent,
         offline_system + "Use the isolated result only within its "
         "evidence scope; make the final decision and preserve unresolved limits.",
-        c_prompt, [_finish_tool()], workspace, allowed, c_budget,
+        c_prompt, [_finish_tool()], workspace, parent_allowed, c_budget,
         config.final_turns, "finish_parent_decision", scoped("isolated_c_parent"),
     )
     isolated = parent_result(c_final, c_budget)

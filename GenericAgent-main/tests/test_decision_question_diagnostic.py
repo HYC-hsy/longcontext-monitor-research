@@ -27,6 +27,7 @@ class Client:
     def __init__(self, responses):
         self.responses = iter(responses)
         self.history = []
+        self.restored_history = None
         self.calls = 0
 
     def complete(self, messages, tools):
@@ -43,6 +44,7 @@ class Client:
 
     def restore_history(self, history):
         self.history = json.loads(json.dumps(history))
+        self.restored_history = json.loads(json.dumps(history))
 
     def export_history(self):
         return json.loads(json.dumps(self.history))
@@ -107,6 +109,61 @@ def test_three_way_uses_one_question_for_parent_and_c(tmp_path):
     # earlier.
     assert result["parent_direct"]["calls"] <= 6
     assert result["isolated_c"]["calls"] <= 6
+
+
+def test_three_way_restores_identical_common_parent_states_before_declared_branches(tmp_path):
+    module = _load()
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    (evidence / "original_task.txt").write_text("task", encoding="utf-8")
+    workspace = MonitorWorkspace(evidence, tmp_path / "private")
+    base = [{"role": "user", "content": [{"type": "text", "text": "shared-state"}]}]
+    clients = {}
+
+    def parent(kind):
+        if kind == "question":
+            responses = [_call("select_decision_question", {
+                "question": "What is supported?", "reason": "changes decision",
+                "worthwhile": True}, "q")]
+        else:
+            responses = [_call("finish_parent_decision", {
+                "outcome": "unresolved", "conclusion": kind}, kind)]
+        clients[kind] = Client(responses)
+        return clients[kind]
+
+    def child(kind):
+        return Client([_call("finish_probe", {
+            "outcome": "unresolved", "conclusion": "local"}, "c")])
+
+    module.run_three_way_case(
+        parent, child, workspace, "Decide.",
+        ("task/original_task.txt",), (), base,
+    )
+    assert clients["ordinary"].history[0] == base[0]
+    assert clients["question"].history[0] == base[0]
+    assert clients["parent_direct"].history[0] == base[0]
+    assert clients["parent_after_c"].history[0] == base[0]
+    assert clients["parent_direct"].restored_history == clients["parent_after_c"].restored_history
+
+
+@pytest.mark.parametrize("arguments", [
+    {"path": "task/events.jsonl", "start": 0},
+    {"path": "task/events.jsonl", "count": 1001},
+    {"path": "task/events.jsonl", "offset": -1},
+    {"path": "task/events.jsonl", "max_chars": 0},
+    {"path": "task/events.jsonl", "tail": True, "start": 2},
+    {"path": "task/events.jsonl", "tail": True, "offset": 1},
+])
+def test_parent_read_contract_returns_explicit_tool_error(tmp_path, arguments):
+    module = _load()
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    (evidence / "events.jsonl").write_text("event\n", encoding="utf-8")
+    workspace = MonitorWorkspace(evidence, tmp_path / "private")
+    result = module._dispatch_read(
+        workspace, {"task/events.jsonl"}, "file_read", arguments)
+    assert result.data["status"] == "error"
+    assert result.data["error"]
 
 
 def test_checkpoint_validation_does_not_require_prior_approval(tmp_path):
@@ -424,6 +481,7 @@ def test_validated_live_checkpoint_materializes_without_manual_relayout(tmp_path
     (task / "workspace" / "impl.go").write_text("implementation", encoding="utf-8")
     private = tmp_path / "private-state"
     private.mkdir()
+    (private / "working.md").write_text("frozen parent judgment", encoding="utf-8")
     request = {"system": "supervisor", "messages": [], "tools": [],
                "model_parameters": {"model": "m"},
                "root_handoff": {"generation": 1, "request_id": "completion-1", "cursor": 1}}
@@ -438,6 +496,21 @@ def test_validated_live_checkpoint_materializes_without_manual_relayout(tmp_path
         "evidence_paths": ["task/workspace/impl.go"]}, tmp_path / "diagnostic-view")
     assert allowed == {"task/original_task.txt", "task/workspace/impl.go"}
     assert (view / "workspace/impl.go").read_text() == "implementation"
+    parent_private, parent_allowed = module.materialize_live_parent_state(
+        loaded, tmp_path / "diagnostic-parent")
+    assert parent_allowed == {"monitor/working.md"}
+    parent_workspace = MonitorWorkspace(view, parent_private)
+    child_workspace = MonitorWorkspace(view, tmp_path / "diagnostic-child")
+    assert parent_workspace.read_text("monitor/working.md")["content"] == \
+        "frozen parent judgment"
+    with pytest.raises(Exception):
+        child_workspace.read_text("monitor/working.md")
+    (private / "working.md").write_text("mutated live judgment", encoding="utf-8")
+    (task / "workspace" / "impl.go").write_text("mutated live implementation", encoding="utf-8")
+    assert parent_workspace.read_text("monitor/working.md")["content"] == \
+        "frozen parent judgment"
+    assert parent_workspace.read_text("task/workspace/impl.go")["content"] == \
+        "implementation"
     with pytest.raises(ValueError, match="escapes"):
         module.materialize_live_checkpoint_view(
             loaded, {"source_paths": ["task/../identity.json"], "evidence_paths": []},

@@ -84,6 +84,23 @@ def test_checkpoint_loader_rejects_mutation(tmp_path, relative):
         load_root_checkpoint(checkpoint)
 
 
+def test_task_file_named_manifest_is_hashed_and_mutation_is_rejected(tmp_path):
+    events, synopsis, workspace, private = _materials(tmp_path)
+    task_manifest = workspace / "workspace" / "manifest.json"
+    task_manifest.write_text('{"task": true}\n', encoding="utf-8")
+    checkpoint = write_root_checkpoint(
+        checkpoint_root=tmp_path / "checkpoints", checkpoint_id="checkpoint-0001",
+        request=_request(), identity={"handoff": _request()["root_handoff"]},
+        event_source=events, synopsis_source=synopsis,
+        task_snapshot=workspace, private_root=private)
+    loaded = load_root_checkpoint(checkpoint)
+    assert "task/workspace/manifest.json" in loaded["manifest"]["files"]
+    frozen = checkpoint / "task" / "workspace" / "manifest.json"
+    frozen.write_text('{"task": false}\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="hash changed"):
+        load_root_checkpoint(checkpoint)
+
+
 def test_request_capture_uses_observed_handoff_and_deduplicates_retry(tmp_path):
     client = MonitorProviderClient("test", {
         "apikey": "test", "apibase": "http://127.0.0.1", "model": "test",
@@ -204,6 +221,25 @@ def test_provider_restores_exact_send_boundary_without_duplicate_dynamic_context
     texts = [block.get("text") for message in restored.history
              for block in message.get("content", [])]
     assert texts.count("dynamic context") == 1
+
+
+def test_restore_rejects_mismatched_model_before_mutating_snapshot_or_client():
+    source_config = {"apikey": "test", "apibase": "http://127.0.0.1",
+                     "model": "old-model", "provider": "openai", "api_mode": "chat",
+                     "max_tokens": 1234}
+    source = MonitorProviderClient("old", source_config)
+    source.system = "old system"
+    source.history = [{"role": "user", "content": [{"type": "text", "text": "state"}]}]
+    snapshot = source.assembled_request_snapshot([])
+    encoded = json.dumps(snapshot, sort_keys=True)
+    target = MonitorProviderClient("new", dict(source_config, model="new-model"))
+    target.system = "unchanged"
+    target.history = []
+    with pytest.raises(ValueError, match="field=model"):
+        target.restore_request_snapshot(snapshot)
+    assert target.system == "unchanged"
+    assert target.history == []
+    assert json.dumps(snapshot, sort_keys=True) == encoded
 
 
 def test_checkpoint_single_file_transport_roundtrip(tmp_path):

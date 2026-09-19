@@ -22,10 +22,14 @@ from monitor_agent_core.provider import MonitorProviderClient  # noqa: E402
 from monitor_agent_core.checkpoint import load_root_checkpoint, restored_request  # noqa: E402
 from monitor_agent_core.workspace import MonitorWorkspace  # noqa: E402
 from monitor_agent_core.configuration import load_profile  # noqa: E402
+from monitor_agent_core.experiment_contract import (  # noqa: E402
+    load_contract, resolved_monitor_config, validate_inherited_child, validate_role,
+)
 
 from decision_question_diagnostic import (  # noqa: E402
     DiagnosticConfig, run_three_way_case, validate_checkpoint_fixture,
     materialize_model_view, materialize_live_checkpoint_view,
+    materialize_live_parent_state,
 )
 
 
@@ -36,18 +40,27 @@ def preflight_cases(config, fixture, cases, root, live_checkpoint=None):
     prepared = {}
     for case in cases:
         case_root = root / case["id"]
-        private = case_root / "private"
-        private.mkdir(parents=True)
+        private = case_root / "parent_private"
+        child_private = case_root / "child_private"
         if live_checkpoint is None:
             model_view, allowed = materialize_model_view(
                 config, fixture, case, case_root / "model_visible")
+            private.mkdir(parents=True)
+            parent_state_paths = set()
         else:
             model_view, allowed = materialize_live_checkpoint_view(
                 live_checkpoint, case, case_root / "model_visible")
+            private, parent_state_paths = materialize_live_parent_state(
+                live_checkpoint, private)
+        child_private.mkdir(parents=True)
         workspace = MonitorWorkspace(model_view, private)
+        child_workspace = MonitorWorkspace(model_view, child_private)
         for virtual_path in sorted(allowed):
             workspace.resolve_read(virtual_path)
-        prepared[case["id"]] = (private, workspace)
+        for virtual_path in sorted(parent_state_paths):
+            workspace.resolve_read(virtual_path)
+        prepared[case["id"]] = (
+            private, workspace, child_workspace, tuple(sorted(parent_state_paths)))
     return prepared
 
 
@@ -59,6 +72,7 @@ def main() -> None:
     sources.add_argument("--live-checkpoint", type=Path)
     parser.add_argument("--profile-file", type=Path, required=True)
     parser.add_argument("--profile", required=True)
+    parser.add_argument("--model-contract", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--cases", nargs="+", default=["all"])
     parser.add_argument("--dry-run", action="store_true")
@@ -104,6 +118,16 @@ def main() -> None:
         with tempfile.TemporaryDirectory(prefix="decision-question-restore-") as temp:
             preflight_cases(config, args.fixture, cases, Path(temp), live_checkpoint)
         provider = load_profile(args.profile, args.profile_file)
+        if args.model_contract:
+            contract = load_contract(args.model_contract)
+            resolved = resolved_monitor_config(args.profile, provider)
+            validate_role(contract, "supervisor", resolved)
+            validate_inherited_child(contract, resolved)
+        if live_checkpoint["identity"].get("config_name") != args.profile:
+            raise ValueError(
+                "checkpoint supervisor profile mismatch: "
+                f"expected={args.profile!r} "
+                f"actual={live_checkpoint['identity'].get('config_name')!r}")
         validator = MonitorProviderClient("checkpoint_restore_validation", dict(provider))
         reproduced = validator.restore_request_snapshot(exact_request)
         encoded = json.dumps(
@@ -132,6 +156,22 @@ def main() -> None:
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     provider = load_profile(args.profile, args.profile_file)
+    resolved_model = resolved_monitor_config(args.profile, provider)
+    if args.model_contract:
+        contract = load_contract(args.model_contract)
+        validate_role(contract, "supervisor", resolved_model)
+        validate_inherited_child(contract, resolved_model)
+    if live_checkpoint is not None and live_checkpoint["identity"].get("config_name") != args.profile:
+        raise ValueError(
+            "checkpoint supervisor profile mismatch: "
+            f"expected={args.profile!r} "
+            f"actual={live_checkpoint['identity'].get('config_name')!r}")
+    (args.output / "resolved_model_config.json").write_text(json.dumps({
+        "profile": args.profile,
+        "resolved": resolved_model,
+        "independent_c": {"inherits": "supervisor"},
+        "fallback_allowed": False,
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if live_checkpoint is not None:
         validator = MonitorProviderClient("checkpoint_restore_validation", dict(provider))
         validator.restore_request_snapshot(exact_request)
@@ -145,7 +185,7 @@ def main() -> None:
     results = []
     for case in cases:
         case_id = case["id"]
-        private, workspace = prepared[case_id]
+        private, workspace, child_workspace, parent_state_paths = prepared[case_id]
         audit_path = private.parent / "audit.jsonl"
         transport_path = private.parent / "transport.jsonl"
         clients = {}
@@ -205,6 +245,7 @@ def main() -> None:
                                                "cache_creation_input_tokens",
                                                "cache_read_input_tokens"))
                                         for x in client.usage_records),
+                    "history_transforms": list(getattr(client, "history_transforms", ())),
                 }
             return snapshot
 
@@ -224,7 +265,8 @@ def main() -> None:
                 parent_factory, child_factory, workspace,
                 case["acceptance_question"], tuple(case["source_paths"]),
                 tuple(case["evidence_paths"]), parent_history, run_config,
-                parent_system=parent_system, audit=audit, branch_sink=branch_sink,
+                parent_system=parent_system, parent_state_paths=parent_state_paths,
+                child_workspace=child_workspace, audit=audit, branch_sink=branch_sink,
             )
         except Exception as exc:
             result = {"status": "error", "error_type": type(exc).__name__,

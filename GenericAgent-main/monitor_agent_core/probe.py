@@ -116,11 +116,14 @@ class IndependentVerifier:
             path = str(arguments.get("path", "")).replace("\\", "/")
             if not self._allowed_path(path):
                 return ToolOutcome({"status": "error", "error": "path is outside this probe phase"})
-            data = self.workspace.read_text(
-                path, arguments.get("start", 1), arguments.get("count", 200),
-                tail=arguments.get("tail", False), offset=arguments.get("offset", 0),
-                max_chars=arguments.get("max_chars", 20000),
-            )
+            try:
+                data = self.workspace.read_text(
+                    path, arguments.get("start", 1), arguments.get("count", 200),
+                    tail=arguments.get("tail", False), offset=arguments.get("offset", 0),
+                    max_chars=arguments.get("max_chars", 20000),
+                )
+            except (TypeError, ValueError) as exc:
+                return ToolOutcome({"status": "error", "error": str(exc)})
             self.evidence_refs.append({
                 key: data.get(key) for key in
                 ("path", "start", "lines", "offset", "sha256", "truncated", "next_read")
@@ -153,8 +156,10 @@ class IndependentVerifier:
 
     def _tools(self, phase: str) -> list[dict[str, Any]]:
         tools = [_tool("file_read", "Read one permitted source or evidence file.", {
-            "path": {"type": "string"}, "start": {"type": "integer"},
-            "count": {"type": "integer"}, "tail": {"type": "boolean"},
+            "path": {"type": "string"},
+            "start": {"type": "integer", "minimum": 1},
+            "count": {"type": "integer", "minimum": 1, "maximum": 1000},
+            "tail": {"type": "boolean"},
             "offset": {"type": "integer", "minimum": 0,
                        "description": "Use the offset returned in next_read to continue a truncated first line."},
             "max_chars": {"type": "integer", "minimum": 1, "maximum": 200000,

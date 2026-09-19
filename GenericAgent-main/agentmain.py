@@ -25,6 +25,10 @@ from completion_checkpoint import FirstCompletionCheckpoint, checkpoint_identity
 from manual_completion_boundary import ManualCompletionBoundary
 from task_interruption import ResumableInterruption
 from monitor_agent_core.correction_barrier import CorrectionBarrier
+from monitor_agent_core.experiment_contract import (
+    load_contract, resolved_monitor_config, resolved_task_client,
+    validate_live_roles,
+)
 from candidate_online_gate import CandidateOnlineEvidenceGate
 from recovery_presentation_gate import RecoveryPresentationGate
 from priority_residual_gate import POLICIES as PRIORITY_RESIDUAL_POLICIES, PriorityResidualRecoveryGate
@@ -357,10 +361,29 @@ class GenericAgent:
                 )
                 from ga_monitor_adapter import monitor_profile
                 monitor_model_config = monitor_profile(monitor_config_name)
+                contract = None
+                contract_path = os.environ.get('GA_MODEL_CONTRACT_FILE')
+                if contract_path:
+                    if not os.path.isabs(contract_path):
+                        contract_path = os.path.join(script_dir, contract_path)
+                    contract = load_contract(contract_path)
+                    task_profile = os.environ.get('GA_LLM_CONFIG_NAME') or ''
+                    task_resolved = resolved_task_client(task_profile, self.llmclient)
+                    monitor_resolved = resolved_monitor_config(
+                        monitor_config_name, monitor_model_config)
+                    child_override = (os.environ.get('GA_MONITOR_INDEPENDENT_C_PROFILE')
+                                      or os.environ.get('GA_MONITOR_INDEPENDENT_C_CONFIG'))
+                    resolved_contract = validate_live_roles(
+                        contract, task_resolved, monitor_resolved, child_override)
                 artifact_dir = os.environ.get('GA_MONITOR_ARTIFACT_DIR') or os.path.join(
                     script_dir, 'temp', 'clean_monitor',
                     os.environ.get('GA_BENCH_RUN_ID') or research_id('monitor_run')
                 )
+                if contract is not None:
+                    os.makedirs(artifact_dir, exist_ok=True)
+                    with open(os.path.join(artifact_dir, 'resolved_model_config.json'),
+                              'x', encoding='utf-8') as stream:
+                        json.dump(resolved_contract, stream, ensure_ascii=False, indent=2)
                 self.monitor_runtime = GenericAgentMonitorAdapter(
                     public_task=raw_query,
                     task_workspace=handler_cwd,
