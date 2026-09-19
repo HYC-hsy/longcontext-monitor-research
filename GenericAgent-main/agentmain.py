@@ -379,11 +379,6 @@ class GenericAgent:
                     script_dir, 'temp', 'clean_monitor',
                     os.environ.get('GA_BENCH_RUN_ID') or research_id('monitor_run')
                 )
-                if contract is not None:
-                    os.makedirs(artifact_dir, exist_ok=True)
-                    with open(os.path.join(artifact_dir, 'resolved_model_config.json'),
-                              'x', encoding='utf-8') as stream:
-                        json.dump(resolved_contract, stream, ensure_ascii=False, indent=2)
                 self.monitor_runtime = GenericAgentMonitorAdapter(
                     public_task=raw_query,
                     task_workspace=handler_cwd,
@@ -397,6 +392,10 @@ class GenericAgent:
                     max_review_turns=int(os.environ.get('GA_MONITOR_MAX_REVIEW_TURNS', '20')),
                     completion_timeout=float(os.environ.get('GA_MONITOR_COMPLETION_TIMEOUT_SECONDS', '300')),
                 )
+                if contract is not None:
+                    with open(os.path.join(artifact_dir, 'resolved_model_config.json'),
+                              'x', encoding='utf-8') as stream:
+                        json.dump(resolved_contract, stream, ensure_ascii=False, indent=2)
                 self.research_checkpoint_callback = None
                 self.completion_decision_callback = self.monitor_runtime.review_completion
             rquery = smart_format(raw_query.replace('\n', ' '), max_str_len=200)
