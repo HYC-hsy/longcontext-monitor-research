@@ -137,6 +137,9 @@ class MonitorProviderClient:
         self.system = ""
         self.history = []
         self.usage_records = []
+        # High-level complete() invocations, including calls that fail before
+        # a usage record can be produced. Transport retries remain separate.
+        self.complete_calls = 0
         self.history_transforms = []
         self.request_attempts = []
         self._cancelled = threading.Event()
@@ -466,6 +469,7 @@ class MonitorProviderClient:
         return value
 
     def complete(self, messages: list[dict], tools: list[dict]) -> ModelResponse:
+        self.complete_calls += 1
         user_blocks = []
         for message in messages:
             if message["role"] == "system":

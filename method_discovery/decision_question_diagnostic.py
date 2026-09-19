@@ -363,6 +363,7 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
             "conclusion": payload.get("conclusion"),
             "limitation": payload.get("reason") or payload.get("detail"),
             "calls": budget.used,
+            "budget_calls": budget.used,
         }
     allowed = {str(p).replace("\\", "/") for p in source_paths + evidence_paths}
     prefix_prompt = acceptance_question + "\n\nPermitted paths:\n" + \

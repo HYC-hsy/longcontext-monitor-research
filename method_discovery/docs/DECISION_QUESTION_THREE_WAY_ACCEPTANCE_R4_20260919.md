@@ -32,11 +32,12 @@ non-discriminating evidence is `unresolved`.
 
 ## Deterministic verification
 
-Twelve regression tests pass, including:
+Thirteen regression tests pass, including:
 
 - requirement read -> evidence read -> question submission at the stage edge;
 - question-stage exhaustion preserving an already completed ordinary branch;
 - one branch exception not erasing sibling results;
+- missing or invalid checkpoint cursors rejected before model calls;
 - exact fixture/history provenance and per-case model-view isolation.
 
 ## R4 three-case acceptance run

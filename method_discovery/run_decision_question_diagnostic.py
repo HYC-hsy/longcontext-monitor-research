@@ -134,7 +134,9 @@ def main() -> None:
             snapshot = {}
             for branch, client in clients.items():
                 snapshot[branch] = {
-                    "logical_calls": len(client.usage_records),
+                    "complete_calls": int(getattr(client, "complete_calls",
+                                                  len(client.usage_records))),
+                    "successful_responses": len(client.usage_records),
                     "request_attempts": len(client.request_attempts),
                     "input_tokens": sum(int(x.get("input_tokens") or 0)
                                         for x in client.usage_records),

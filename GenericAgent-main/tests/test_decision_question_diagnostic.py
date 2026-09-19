@@ -3,6 +3,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from monitor_agent_core.provider import ModelResponse, ToolCall
 from monitor_agent_core.workspace import MonitorWorkspace
 
@@ -147,6 +149,35 @@ def test_checkpoint_validation_does_not_require_prior_approval(tmp_path):
     }
     (fixture / "materialization.json").write_text(json.dumps(manifest), encoding="utf-8")
     assert module.validate_checkpoint_fixture(config, fixture, config_path) == []
+
+
+def test_checkpoint_validation_rejects_missing_cursor(tmp_path):
+    module = _load()
+    fixture = tmp_path / "fixture"
+    (fixture / "task_evidence").mkdir(parents=True)
+    (fixture / "parent_context").mkdir()
+    (fixture / "task_evidence" / "visible.jsonl").write_text(
+        json.dumps({"task_turn": 2}) + "\n", encoding="utf-8")
+    (fixture / "task_evidence" / "full.jsonl").write_text(
+        json.dumps({"task_turn": 2}) + "\n", encoding="utf-8")
+    (fixture / "parent_context" / "history.json").write_text("[]", encoding="utf-8")
+    config = {"checkpoint": {"id": "missing-cursor", "model_visible": {
+        "events": "task_evidence/visible.jsonl", "parent_history": "parent_context/history.json",
+        "history_source_kind": "provider_snapshot", "through_cursor": 0},
+        "research_archive": {"events": "task_evidence/full.jsonl"}}, "cases": []}
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    import hashlib
+    def sha(p): return hashlib.sha256(p.read_bytes()).hexdigest()
+    files = ["task_evidence/visible.jsonl", "task_evidence/full.jsonl",
+             "parent_context/history.json"]
+    (fixture / "materialization.json").write_text(json.dumps({
+        "checkpoint": "missing-cursor", "model_visible_cursor": 0,
+        "config_sha256": sha(config_path),
+        "artifact_sha256": {name: sha(fixture / name) for name in files},
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="cursor"):
+        module.validate_checkpoint_fixture(config, fixture, config_path)
 
 
 def test_history_extraction_uses_complete_model_input_not_posthoc_output(tmp_path):
