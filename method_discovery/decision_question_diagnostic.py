@@ -422,7 +422,9 @@ def _run_parent(client, system: str, prompt: str, tools, workspace, allowed: set
                 audit: Callable[..., None] | None = None,
                 restore_private_maintenance: bool = False,
                 extra_dispatch: Callable[[str, dict[str, Any]], ToolOutcome | None] | None = None,
-                receipt_protocol: str = "parent-state-maintenance-restored-v1"
+                receipt_protocol: str = "parent-state-maintenance-restored-v1",
+                evidence_decorator: Callable[[str, dict[str, Any], ToolOutcome], ToolOutcome] | None = None,
+                custom_action_handler: Callable[[str, dict[str, Any]], ToolOutcome | None] | None = None,
                 ) -> MonitorAction:
     original = client.complete
     stage_start = budget.used
@@ -455,11 +457,17 @@ def _run_parent(client, system: str, prompt: str, tools, workspace, allowed: set
             else:
                 handled = _dispatch_read(workspace, allowed, name, args)
             if handled is not None:
+                if evidence_decorator is not None:
+                    handled = evidence_decorator(name, args, handled)
                 handled.data = _with_protocol_receipt(
                     handled.data, budget, stage_start, max_turns, action_name,
                     receipt_protocol)
                 return handled
             if name == action_name:
+                if custom_action_handler is not None:
+                    custom = custom_action_handler(name, args)
+                    if custom is not None:
+                        return custom
                 if action_name == "select_decision_question":
                     if not isinstance(args.get("reason"), str) or not str(args.get("reason")).strip():
                         return ToolOutcome({"status": "error", "error": "reason is required"})

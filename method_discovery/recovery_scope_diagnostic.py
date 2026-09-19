@@ -43,13 +43,14 @@ def _tree_hashes(root: Path) -> dict[str, str]:
     }
 
 
-def _run_local_check(workspace: Path) -> tuple[subprocess.CompletedProcess[str], str]:
+def _run_local_check(workspace: Path, package: str = "./data/validation"
+                     ) -> tuple[subprocess.CompletedProcess[str], str]:
     environment = dict(os.environ)
     environment["GOFLAGS"] = "-mod=vendor"
     go = shutil.which("go")
     if go:
-        command = [go, "test", "./data/validation"]
-        label = "go test ./data/validation"
+        command = [go, "test", package]
+        label = f"go test {package}"
     else:
         docker = shutil.which("docker")
         if not docker:
@@ -59,9 +60,9 @@ def _run_local_check(workspace: Path) -> tuple[subprocess.CompletedProcess[str],
             "-e", "GOFLAGS=-mod=vendor",
             "-v", f"{workspace.resolve()}:/workspace",
             "-w", "/workspace", GO_CHECK_IMAGE,
-            "go", "test", "./data/validation",
+            "go", "test", package,
         ]
-        label = f"docker:{GO_CHECK_IMAGE} go test ./data/validation (network=none)"
+        label = f"docker:{GO_CHECK_IMAGE} go test {package} (network=none)"
     completed = subprocess.run(
         command, cwd=workspace, env=environment, text=True,
         capture_output=True, timeout=180, check=False,
