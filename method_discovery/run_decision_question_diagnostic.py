@@ -51,7 +51,8 @@ def preflight_cases(config, fixture, cases, root, live_checkpoint=None):
     prepared = {}
     for case in cases:
         case_root = root / case["id"]
-        private = case_root / "parent_private"
+        private = case_root / "parent_state_seed"
+        branch_private_root = case_root / "parent_branches"
         child_private = case_root / "child_private"
         if live_checkpoint is None:
             model_view, allowed = materialize_model_view(
@@ -64,6 +65,7 @@ def preflight_cases(config, fixture, cases, root, live_checkpoint=None):
             private, parent_state_paths = materialize_live_parent_state(
                 live_checkpoint, private)
         child_private.mkdir(parents=True)
+        branch_private_root.mkdir(parents=True)
         workspace = MonitorWorkspace(model_view, private)
         child_workspace = MonitorWorkspace(model_view, child_private)
         for virtual_path in sorted(allowed):
@@ -71,7 +73,8 @@ def preflight_cases(config, fixture, cases, root, live_checkpoint=None):
         for virtual_path in sorted(parent_state_paths):
             workspace.resolve_read(virtual_path)
         prepared[case["id"]] = (
-            private, workspace, child_workspace, tuple(sorted(parent_state_paths)))
+            private, branch_private_root, workspace, child_workspace,
+            tuple(sorted(parent_state_paths)))
     return prepared
 
 
@@ -197,7 +200,7 @@ def main() -> None:
     results = []
     for case in cases:
         case_id = case["id"]
-        private, workspace, child_workspace, parent_state_paths = prepared[case_id]
+        private, branch_private_root, workspace, child_workspace, parent_state_paths = prepared[case_id]
         audit_path = private.parent / "audit.jsonl"
         transport_path = private.parent / "transport.jsonl"
         clients = {}
@@ -279,6 +282,8 @@ def main() -> None:
                 tuple(case["evidence_paths"]), parent_history, run_config,
                 parent_system=parent_system, parent_state_paths=parent_state_paths,
                 child_workspace=child_workspace, audit=audit, branch_sink=branch_sink,
+                protocol_id=config.get("protocol", {}).get("id", "restricted-read-only-v1"),
+                branch_private_root=branch_private_root,
             )
         except Exception as exc:
             result = {"status": "error", "error_type": type(exc).__name__,

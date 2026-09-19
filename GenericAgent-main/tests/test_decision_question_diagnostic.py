@@ -146,6 +146,129 @@ def test_three_way_restores_identical_common_parent_states_before_declared_branc
     assert clients["parent_direct"].restored_history == clients["parent_after_c"].restored_history
 
 
+def test_restored_parent_maintenance_is_branch_private_and_uses_real_dispatch(tmp_path):
+    module = _load()
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    (evidence / "original_task.txt").write_text("task", encoding="utf-8")
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    (seed / "working.md").write_text("S0\n", encoding="utf-8")
+    workspace = MonitorWorkspace(evidence, seed)
+    branches = tmp_path / "branches"
+    branches.mkdir()
+    clients = {}
+
+    def parent(kind):
+        if kind == "ordinary":
+            responses = [
+                _call("file_write", {"path": "monitor/a.md", "content": "A", "mode": "replace"}, "a1"),
+                _call("file_write", {"path": "monitor/a.md", "content": "+", "mode": "append"}, "a2"),
+                _call("file_patch", {"path": "monitor/a.md", "old_text": "A+", "new_text": "A2"}, "a3"),
+                _call("file_read", {"path": "monitor/a.md"}, "a4"),
+                _call("file_write", {"path": "task/original_task.txt", "content": "bad"}, "a5"),
+                _call("finish_parent_decision", {"outcome": "unresolved", "conclusion": "A done"}, "a6"),
+            ]
+        elif kind == "question":
+            responses = [
+                _call("file_read", {"path": "monitor/a.md"}, "q1"),
+                _call("file_write", {"path": "monitor/q.md", "content": "Q", "mode": "replace"}, "q2"),
+                _call("select_decision_question", {"question": "What supports completion?",
+                      "reason": "It changes the decision.", "worthwhile": True}, "q3"),
+            ]
+        elif kind == "parent_direct":
+            responses = [
+                _call("file_read", {"path": "monitor/q.md"}, "b1"),
+                _call("file_write", {"path": "monitor/q.md", "content": "-B", "mode": "append"}, "b2"),
+                _call("finish_parent_decision", {"outcome": "unresolved", "conclusion": "B done"}, "b3"),
+            ]
+        else:
+            responses = [_call("finish_parent_decision", {
+                "outcome": "unresolved", "conclusion": "C parent done"}, "cp1")]
+        clients[kind] = Client(responses)
+        return clients[kind]
+
+    child_clients = {}
+    def child(kind):
+        child_clients[kind] = Client([
+            _call("file_read", {"path": "monitor/q.md"}, "c1"),
+            _call("finish_probe", {"outcome": "unresolved",
+                  "conclusion": "private state is unavailable"}, "c2"),
+        ])
+        return child_clients[kind]
+
+    result = module.run_three_way_case(
+        parent, child, workspace, "Decide.", ("task/original_task.txt",), (), [],
+        protocol_id="parent-state-maintenance-restored-v1",
+        branch_private_root=branches,
+    )
+    assert result["ordinary"]["calls"] == 6
+    assert result["question"]["calls"] == 3
+    assert (branches / "ordinary" / "a.md").read_text(encoding="utf-8") == "A2"
+    assert not (branches / "question" / "a.md").exists()
+    assert (branches / "question" / "q.md").read_text(encoding="utf-8") == "Q"
+    assert (branches / "parent_direct" / "q.md").read_text(encoding="utf-8") == "Q-B"
+    assert (branches / "parent_after_c" / "q.md").read_text(encoding="utf-8") == "Q"
+    assert (seed / "working.md").read_text(encoding="utf-8") == "S0\n"
+    assert (evidence / "original_task.txt").read_text(encoding="utf-8") == "task"
+    assert "6 logical calls remain globally" in json.dumps(
+        clients["ordinary"].history[0:2], ensure_ascii=False)
+    assert any("global_calls_remaining" in json.dumps(message, ensure_ascii=False)
+               and "5" in json.dumps(message, ensure_ascii=False)
+               for message in clients["ordinary"].history)
+    assert any("No readable file" in json.dumps(message, ensure_ascii=False)
+               for message in clients["question"].history)
+    assert any("outside" in json.dumps(message, ensure_ascii=False)
+               for message in child_clients["isolated_c"].history)
+    assert result["isolated_c"]["child_outcome"] == "unresolved"
+
+    protected_result = tmp_path / "result.json"
+    protected_result.write_text("protected", encoding="utf-8")
+    for forbidden in ("task/original_task.txt", "monitor/../result.json",
+                      "monitor/../parent_after_c/q.md"):
+        denied = module._dispatch_parent_workspace(
+            MonitorWorkspace(evidence, branches / "ordinary"),
+            {"task/original_task.txt"}, "file_write",
+            {"path": forbidden, "content": "overwrite", "mode": "replace"})
+        assert denied.data["status"] == "error"
+    assert protected_result.read_text(encoding="utf-8") == "protected"
+
+
+def test_restored_protocol_does_not_extend_unfinished_stage_budgets(tmp_path):
+    module = _load()
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    (evidence / "original_task.txt").write_text("task", encoding="utf-8")
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    workspace = MonitorWorkspace(evidence, seed)
+    branches = tmp_path / "branches"
+    branches.mkdir()
+    clients = {}
+
+    def parent(kind):
+        limit = 6 if kind == "ordinary" else 3
+        client = Client([_call("file_read", {"path": "task/original_task.txt"},
+                                            f"{kind}-{index}")
+                         for index in range(limit)])
+        clients[kind] = client
+        return client
+
+    result = module.run_three_way_case(
+        parent, lambda kind: (_ for _ in ()).throw(AssertionError(kind)), workspace,
+        "Decide.", ("task/original_task.txt",), (), [],
+        protocol_id="parent-state-maintenance-restored-v1",
+        branch_private_root=branches,
+    )
+    assert result["ordinary"]["status"] == "budget_or_protocol_incomplete"
+    assert result["ordinary"]["calls"] == 6
+    assert clients["ordinary"].calls == 6
+    assert result["question"]["status"] == "budget_or_protocol_incomplete"
+    assert result["question"]["calls"] == 3
+    assert clients["question"].calls == 3
+    assert result["parent_direct"]["status"] == "not_run"
+
+
 @pytest.mark.parametrize("arguments", [
     {"path": "task/events.jsonl", "start": 0},
     {"path": "task/events.jsonl", "count": 1001},
