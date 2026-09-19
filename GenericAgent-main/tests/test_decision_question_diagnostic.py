@@ -219,6 +219,6 @@ def test_model_view_contains_only_declared_case_material(tmp_path):
     }), encoding="utf-8")
     destination = tmp_path / "view"
     module.materialize_model_view(config, fixture, config["cases"][0], destination)
-    assert (destination / "task" / "original_task.txt").is_file()
-    assert (destination / "task" / "workspace" / "impl.go").is_file()
+    assert (destination / "original_task.txt").is_file()
+    assert (destination / "workspace" / "impl.go").is_file()
     assert not (destination / "task_evidence" / "full_archive.jsonl").exists()

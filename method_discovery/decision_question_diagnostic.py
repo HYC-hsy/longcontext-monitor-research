@@ -206,7 +206,9 @@ def materialize_model_view(config: dict[str, Any], fixture: Path, case: dict[str
         source = fixture / source_relative
         if not source.is_file():
             raise ValueError(f"model-visible source missing: {source_relative}")
-        target = destination / virtual
+        # ``task/`` is the virtual namespace, not a physical directory under
+        # the evidence root.  MonitorWorkspace maps task/ to destination.
+        target = destination / virtual.removeprefix("task/")
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
     return destination, paths
