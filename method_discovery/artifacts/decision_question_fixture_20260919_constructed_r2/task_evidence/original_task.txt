@@ -1,0 +1,178 @@
+# Cross-Platform GUI Toolkit Development Roadmap
+
+## Overview
+
+This library is a cross-platform GUI toolkit for Go, enabling developers to build native-quality applications that run on desktop (Windows, macOS, Linux), mobile (iOS, Android), and web from a single codebase. Its development is focused on expanding the toolkit's capabilities while maintaining a simple, idiomatic Go API.
+
+---
+
+## Goals
+
+Our primary goal for this release is to establish an application metadata system that allows apps to expose their identity (name, version, build number) at runtime, and to introduce JSON-based theming so that themes can be defined declaratively without writing Go code. These two features are complementary: metadata lets an app know about itself, while JSON themes let users customize its appearance through configuration files.
+
+In parallel, we plan to deliver several independent improvements across the toolkit: a formatted data binding system for constructing display strings from multiple typed bindings, enhancements to the menu system (shortcut keys, icons, and runtime refresh), improvements to toolbar item constructors, and a collection of widget and container usability improvements including a container clear operation, a custom hyperlink callback, minimum row visibility for multi-line entries, and a validator chaining utility. We also plan to define a desktop-specific application interface to support system tray integration on desktop platforms.
+
+The following capabilities are planned for this release:
+
+- **Target 1: App Metadata System** — Allow applications to expose and query their identity and version at runtime
+- **Target 2: JSON Theme Support** — Enable themes to be defined in JSON format with color, size, font, and icon overrides
+- **Target 3: Data Binding Formatting** — Provide sprintf-style formatted bindings that combine multiple typed data sources
+- **Target 4: Menu System Enhancements** — Add icon and keyboard shortcut support to menu items, plus runtime refresh
+- **Target 5: Toolbar Enhancements** — Enable dynamic icon changes on toolbar actions and return concrete types from constructors
+- **Target 6: Widget and Container Improvements** — Container clear, hyperlink callbacks, entry row visibility, and validator chaining
+- **Target 7: Desktop App Interface** — Define the desktop-specific application interface for system tray integration
+
+---
+
+## Target 1: App Metadata System
+
+Applications often need access to their own identity information — name, version, build number, and unique identifier — for display in about screens, notification titles, or telemetry. Currently, there is no standard way for a running app to query this information. We plan to introduce an `AppMetadata` struct and wire it into the `App` interface so that any app can call `Metadata()` to retrieve its build-time identity.
+
+A typical usage would be: after the app starts, call `app.Metadata()` to get an `AppMetadata` value, then read `.Name`, `.Version`, or `.ID` for display purposes.
+
+### Requirements
+
+1. **`AppMetadata` struct** — Define a new struct in the root `fyne` package (`app.go`) that captures build metadata:
+   - `ID string` — the unique application identifier (e.g., `"com.example"`)
+   - `Name string` — human-friendly application name (e.g., `"Fyne App"`)
+   - `Version string` — semantic version string (e.g., `"1.0.0"`)
+   - `Build int` — build number (e.g., `1`)
+   - `Icon Resource` — optional icon resource bundled at build time (the `Resource` type already exists in the `fyne` package)
+
+2. **`App.Metadata()` method** — Add a `Metadata() AppMetadata` method to the `App` interface. Every `App` implementation must return its `AppMetadata`. Since `App` is a widely-implemented interface, all existing concrete implementations in the codebase must be updated to satisfy the new method.
+
+3. **`SetMetadata` function** — In the `app` sub-package (`app/meta.go`), provide a `SetMetadata(m fyne.AppMetadata)` function that overrides the packaged metadata at runtime. The internal `fyneApp` type's `Metadata()` method returns the currently set metadata.
+
+4. **Default metadata** — When no metadata has been explicitly set, `Metadata()` should return sensible defaults: `ID: "com.example"`, `Name: "Fyne App"`, `Version: "1.0.0"`, `Build: 1`.
+
+---
+
+## Target 2: JSON Theme Support
+
+Theme customization currently requires writing Go code that implements the `Theme` interface. We plan to add the ability to define themes declaratively in JSON, where a JSON document specifies color overrides, size adjustments, font resources, and icon resources. Any values not present in the JSON fall back to the default theme.
+
+A typical usage would be: parse a JSON string with `theme.FromJSON(jsonStr)` to get a `Theme` value, then apply it via the settings system. Colors can be specified in hex (3, 4, 6, or 8 digit formats with optional `#` prefix), and variant-specific colors are supported through `"Colors-dark"` and `"Colors-light"` keys.
+
+### Requirements
+
+1. **`FromJSON(data string) (fyne.Theme, error)`** — Parse a JSON string and return a `Theme`. On parse error, return the default theme along with the error. Importable from the `theme` package.
+
+2. **`FromJSONReader(r io.Reader) (fyne.Theme, error)`** — Same as `FromJSON` but reads from an `io.Reader`.
+
+3. **JSON schema** — The JSON structure supports the following top-level keys:
+   - `"Colors"` — map of color name to hex string; applied regardless of variant
+   - `"Colors-dark"` — map of color name to hex string; applied only in dark variant
+   - `"Colors-light"` — map of color name to hex string; applied only in light variant
+   - `"Sizes"` — map of size name to float32 value
+   - `"Fonts"` — map of font style name (`"regular"`, `"bold"`, `"boldItalic"`, `"monospace"`) to URI string pointing to the font resource
+   - `"Icons"` — map of icon name to URI string pointing to the icon resource
+   - Color resolution order: variant-specific colors are checked first, then generic `"Colors"`, then the default theme fallback
+
+4. **Hex color parsing** — Support the following hex formats (all with or without `#` prefix):
+   - 3 digits (`"abc"` → `0xaa 0xbb 0xcc 0xff`)
+   - 4 digits (`"abcd"` → `0xaa 0xbb 0xcc 0xdd`; note: `#rgb` with 4 chars starting with `#` is handled as `#` + 3-digit)
+   - 6 digits (`"a1b2c3"` → `0xa1 0xb2 0xc3 0xff`)
+   - 8 digits (`"a1b2c3f4"` → `0xa1 0xb2 0xc3 0xf4`)
+   - Invalid format returns a transparent color with an error
+
+---
+
+## Target 3: Data Binding Formatting
+
+The data binding system currently supports individual typed bindings (Bool, Int, Float, String, etc.) but has no way to combine multiple bindings into a formatted display string. We plan to introduce `NewSprintf`, which works like `fmt.Sprintf` but takes data bindings as arguments instead of static values. When any source binding changes, the formatted string automatically updates. The formatted binding also supports reverse parsing via `Set()` using `fmt.Sscanf` semantics.
+
+A typical usage would be: create bindings for a name and age, then `NewSprintf("Name: %s, Age: %d", nameBinding, ageBinding)` produces a `String` binding that updates whenever either source changes.
+
+### Requirements
+
+1. **`NewSprintf(format string, b ...DataItem) String`** — Create a formatted string binding in the `binding` package (`data/binding/sprintf.go`). The function:
+   - Accepts a format string and variadic `DataItem` arguments (which may be `Bool`, `Bytes`, `Float`, `Int`, `Rune`, `String`, or `URI` bindings)
+   - Returns a `String` binding
+   - When any source binding changes (via the `DataChanged` listener), reads all source values and formats them with `fmt.Sprintf`
+   - `Get()` returns the formatted string; if any source had an error during the last `DataChanged`, returns that error
+   - `Set(str string)` parses the string back using `fmt.Sscanf` and sets each source binding to the parsed value. `Bytes` and `URI` types have special handling: `Bytes` cannot be round-tripped (returns an error), `URI` is parsed via `storage.ParseURI`.
+
+2. **`StringToStringWithFormat(str String, format string) String`** — A convenience function that wraps a `String` binding with a format. If the format is `"%s"` (identity), return the original binding directly (no wrapping). Otherwise, delegate to `NewSprintf(format, str)`.
+
+---
+
+## Target 4: Menu System Enhancements
+
+Menu items currently support labels, actions, checked state, and disabled state, but lack icon and keyboard shortcut support. We plan to add `Icon` and `Shortcut` fields to `MenuItem`, and add `Refresh()` methods to both `Menu` and `MainMenu` so that changes to menu items (including icons and shortcuts) can be reflected at runtime without recreating the menu.
+
+### Requirements
+
+1. **`MenuItem.Icon` field** — Add an `Icon Resource` field to the `MenuItem` struct in the root `fyne` package (`menu.go`). This holds an optional icon to display alongside the menu item label.
+
+2. **`MenuItem.Shortcut` field** — Add a `Shortcut Shortcut` field to the `MenuItem` struct. This holds an optional keyboard shortcut associated with the menu item. The `Shortcut` interface already exists in the `fyne` package.
+
+3. **`Menu.Refresh()` method** — Add a `Refresh()` method on `*Menu`. When called, all windows currently displaying this `Menu` as part of their main menu should re-render with the updated menu state. If this menu is currently set as the system tray menu, the tray menu should also be refreshed.
+
+4. **`MainMenu.Refresh()` method** — Add a `Refresh()` method on `*MainMenu`. When called, all windows whose main menu is this `MainMenu` should re-render with the updated menu state.
+
+---
+
+## Target 5: Toolbar Enhancements
+
+Toolbar action items currently have a static icon set at construction time, with no way to change it afterward. Additionally, the toolbar item constructors return the `ToolbarItem` interface rather than the concrete type, which limits access to type-specific fields. We plan to add a `SetIcon` method and change the constructors to return concrete types.
+
+### Requirements
+
+1. **`ToolbarAction.SetIcon(icon fyne.Resource)`** — Add a method on `*ToolbarAction` in the `widget` package (`widget/toolbar.go`) that updates the action's `Icon` field and refreshes the toolbar object.
+
+2. **`NewToolbarAction` return type** — Change the return type from `ToolbarItem` to `*ToolbarAction`. The function signature becomes: `func NewToolbarAction(icon fyne.Resource, onActivated func()) *ToolbarAction`.
+
+3. **`NewToolbarSpacer` return type** — Change the return type from `ToolbarItem` to `*ToolbarSpacer`. The function signature becomes: `func NewToolbarSpacer() *ToolbarSpacer`.
+
+4. **`NewToolbarSeparator` return type** — Change the return type from `ToolbarItem` to `*ToolbarSeparator`. The function signature becomes: `func NewToolbarSeparator() *ToolbarSeparator`.
+
+---
+
+## Target 6: Widget and Container Improvements
+
+Several independent usability improvements are planned across widgets and containers:
+
+### Requirements
+
+1. **`Container.RemoveAll()`** — Add a `RemoveAll()` method on `*Container` in the root `fyne` package (`container.go`). It sets `Objects` to `nil` and triggers a re-layout. This is more efficient than removing objects one by one.
+
+2. **Nil-safe `Container.Add()`** — Update `Container.Add()` so that passing `nil` is a no-op (the nil object is not appended to `Objects`).
+
+3. **`Hyperlink.OnTapped` callback** — Add an `OnTapped func()` field to the `Hyperlink` struct in the `widget` package (`widget/hyperlink.go`). When `OnTapped` is non-nil, tapping the hyperlink calls `OnTapped` instead of opening the URL. When `OnTapped` is nil, the existing URL-opening behavior is preserved.
+
+4. **`Entry.SetMinRowsVisible(count int)`** — Add a method on `*Entry` in the `widget` package (`widget/entry.go`). For multi-line entries, this overrides the default minimum number of visible rows (default is 3). The method stores the count internally, and the entry's `MinSize()` calculation uses this count instead of the global default when it is greater than 0. Setting `count` to 2 should make the entry shorter than default; setting it to 5 should make it taller.
+
+5. **`validation.NewAllStrings(validators ...fyne.StringValidator) fyne.StringValidator`** — Add a validator combinator in the `data/validation` package (`data/validation/all.go`). It returns a `StringValidator` that runs all provided validators in order and returns the first error encountered (or nil if all pass). This enables chaining multiple validators (e.g., time format validation and regexp validation together).
+
+---
+
+## Target 7: Desktop App Interface
+
+Desktop platforms support system tray integration, but the current `App` interface has no methods for it. We plan to define a `desktop.App` interface in the `driver/desktop` package that extends the concept of an application with desktop-specific capabilities. Applications can type-assert to `desktop.App` to access system tray functionality.
+
+### Requirements
+
+1. **`desktop.App` interface** — Define a new interface in `driver/desktop/app.go` with two methods:
+   - `SetSystemTrayMenu(menu *fyne.Menu)` — sets the system tray menu
+   - `SetSystemTrayIcon(icon fyne.Resource)` — sets the system tray icon
+
+---
+
+## Completion Criteria
+
+- All new types, functions, and methods are importable from their documented paths
+- Existing APIs remain unchanged (backward compatibility)
+- `AppMetadata` struct fields match the specified names and types
+- JSON theme parsing correctly handles all hex color formats and falls back to the default theme for missing values
+- Data binding formatting updates reactively when source bindings change
+- Menu item icon and shortcut fields are accessible on the `MenuItem` struct
+- Toolbar constructors return concrete types, not the `ToolbarItem` interface
+- `Container.RemoveAll()` clears all objects; `Add(nil)` is a no-op
+- `Hyperlink.OnTapped` callback overrides default URL-opening when set
+- `Entry.SetMinRowsVisible` affects the minimum size of multi-line entries
+- `NewAllStrings` chains multiple validators, returning the first error
+- `desktop.App` interface defines the system tray API surface
+
+
+[Execution environment]
+This run is offline. Public internet, reference solutions and prior-run artifacts are unavailable. Use the provided task, local repository, installed dependencies and execution evidence. Model inference is supplied separately; local tools remain available.

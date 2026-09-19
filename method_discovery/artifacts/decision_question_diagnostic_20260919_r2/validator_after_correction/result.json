@@ -1,0 +1,75 @@
+{
+  "case": "validator_after_correction",
+  "result": {
+    "status": "completed",
+    "selected_question": {
+      "question": "No unresolved premise warrants investigation",
+      "reason": "The implementation demonstrably meets both specified requirements: it iterates through validators in order using a range loop, and returns the first error encountered via early return. The core behavior is straightforward and verifiable from the code itself.",
+      "worthwhile": false
+    },
+    "ordinary": {
+      "action": "finish_parent_decision",
+      "payload": {
+        "outcome": "supported_in_scope",
+        "conclusion": "The final validator implementation correctly combines validators in order and returns the first error as required. The function iterates through validators sequentially, returns immediately upon encountering the first error, and returns nil if all validators pass."
+      },
+      "calls": 2
+    },
+    "parent_direct": {
+      "action": "finish_parent_decision",
+      "payload": {
+        "outcome": "supported_in_scope",
+        "conclusion": "The validator implementation correctly combines validators in order and returns the first error as required.\n\n**Evidence:**\n1. **Combines in order**: The `for _, validator := range validators` loop (line 14) iterates through the slice sequentially from first to last, which is the guaranteed behavior of Go's range operator on slices.\n\n2. **Returns first error**: Lines 18-19 execute `if err := validator(text); err != nil { return err }`, immediately returning when any validator produces an error. This early-return pattern ensures the first error is returned.\n\n3. **Returns nil if all pass**: Line 22 returns nil after the loop completes, which only happens when no validator returned an error.\n\nThe implementation includes a nil-check (lines 15-16) that skips nil validators, which is defensive programming that doesn't violate the requirements. Both explicit requirements are satisfied by the code structure itself—no runtime testing needed to verify sequential iteration and early-return logic."
+      },
+      "calls": 3
+    },
+    "isolated_c": {
+      "action": "finish_parent_decision",
+      "payload": {
+        "outcome": "supported_in_scope",
+        "conclusion": "Yes, the validator implementation combines validators in order and returns the first error as required. The for-range loop iterates through validators sequentially, and the early return pattern exits on the first error encountered. Both requirements are directly satisfied by the code structure."
+      },
+      "child_status": "not_called",
+      "calls": 3
+    }
+  },
+  "model_visible_checkpoint": "fyn-2.2.0-roadmap-turn-60-constructed-r1",
+  "usage_by_branch": {
+    "ordinary": {
+      "logical_calls": 2,
+      "request_attempts": 2,
+      "input_tokens": 4546,
+      "output_tokens": 1041,
+      "total_tokens": 6677
+    },
+    "question": {
+      "logical_calls": 2,
+      "request_attempts": 2,
+      "input_tokens": 4551,
+      "output_tokens": 980,
+      "total_tokens": 6671
+    },
+    "parent_direct_no_question": {
+      "logical_calls": 1,
+      "request_attempts": 1,
+      "input_tokens": 81,
+      "output_tokens": 817,
+      "total_tokens": 6528
+    },
+    "parent_after_c_no_question": {
+      "logical_calls": 1,
+      "request_attempts": 1,
+      "input_tokens": 81,
+      "output_tokens": 688,
+      "total_tokens": 6398
+    }
+  },
+  "actual_unique_total_tokens": 26274,
+  "shared_question_tokens_counted_per_comparison_branch": 6671,
+  "shared_question_branch_accounting": [
+    "parent_direct",
+    "isolated_c"
+  ],
+  "transport_log": "transport.jsonl",
+  "audit_log": "audit.jsonl"
+}
