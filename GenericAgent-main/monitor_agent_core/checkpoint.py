@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import tarfile
 import tempfile
 import time
 from pathlib import Path
@@ -123,6 +124,57 @@ def restored_request(checkpoint_dir) -> dict:
     return json.loads(json.dumps(request, ensure_ascii=False))
 
 
+def package_root_checkpoint(checkpoint_dir) -> Path:
+    """Create one atomic transport artifact for a validated checkpoint tree."""
+    root = Path(checkpoint_dir).resolve(strict=True)
+    load_root_checkpoint(root)
+    archive = root.with_suffix(".tar")
+    if archive.exists():
+        return archive
+    partial = archive.with_suffix(".tar.partial")
+    try:
+        with tarfile.open(partial, "w", dereference=False) as stream:
+            stream.add(root, arcname=root.name, recursive=True)
+        partial.replace(archive)
+        return archive
+    finally:
+        partial.unlink(missing_ok=True)
+
+
+def extract_root_checkpoint_archive(archive_path, destination) -> Path:
+    """Safely extract one transport artifact, then enforce the normal manifest."""
+    archive_path = Path(archive_path).resolve(strict=True)
+    destination = Path(destination).resolve()
+    if destination.exists():
+        raise FileExistsError(f"checkpoint extraction destination exists: {destination}")
+    destination.mkdir(parents=True)
+    try:
+        with tarfile.open(archive_path, "r") as stream:
+            members = stream.getmembers()
+            if not members:
+                raise ValueError("checkpoint archive is empty")
+            roots = {Path(member.name).parts[0] for member in members if Path(member.name).parts}
+            if len(roots) != 1:
+                raise ValueError("checkpoint archive must contain exactly one root")
+            for member in members:
+                parts = Path(member.name).parts
+                if (not parts or Path(member.name).is_absolute() or ".." in parts
+                        or not (member.isdir() or member.isfile())):
+                    raise ValueError("checkpoint archive contains an unsafe member")
+                target = (destination / member.name).resolve()
+                try:
+                    target.relative_to(destination)
+                except ValueError as exc:
+                    raise ValueError("checkpoint archive member escapes destination") from exc
+            stream.extractall(destination, members=members, filter="data")
+        root = destination / next(iter(roots))
+        load_root_checkpoint(root)
+        return root
+    except Exception:
+        shutil.rmtree(destination, ignore_errors=True)
+        raise
+
+
 def capture_live_root_checkpoint(*, workspace, checkpoint_root, snapshot, identity,
                                  current_handoff) -> Path:
     """Capture the exact observed root request and its stable public evidence.
@@ -170,7 +222,7 @@ def capture_live_root_checkpoint(*, workspace, checkpoint_root, snapshot, identi
             "history_source_kind": "provider_snapshot",
             "handoff": handoff,
         }
-        return write_root_checkpoint(
+        final = write_root_checkpoint(
             checkpoint_root=checkpoint_root,
             checkpoint_id=f"checkpoint-{int(handoff['generation']):04d}",
             request=snapshot,
@@ -180,5 +232,7 @@ def capture_live_root_checkpoint(*, workspace, checkpoint_root, snapshot, identi
             task_snapshot=task_snapshot,
             private_root=workspace.private_root,
         )
+        package_root_checkpoint(final)
+        return final
     finally:
         frozen_events.unlink(missing_ok=True)

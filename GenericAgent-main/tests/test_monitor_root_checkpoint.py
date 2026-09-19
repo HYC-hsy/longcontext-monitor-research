@@ -4,7 +4,8 @@ import time
 import pytest
 
 from monitor_agent_core.checkpoint import (
-    capture_live_root_checkpoint, load_root_checkpoint, restored_request,
+    capture_live_root_checkpoint, extract_root_checkpoint_archive,
+    load_root_checkpoint, package_root_checkpoint, restored_request,
     write_root_checkpoint)
 from monitor_agent_core.agent import MonitorAgent
 from monitor_agent_core.provider import MonitorProviderClient, RetryableProviderError
@@ -203,3 +204,31 @@ def test_provider_restores_exact_send_boundary_without_duplicate_dynamic_context
     texts = [block.get("text") for message in restored.history
              for block in message.get("content", [])]
     assert texts.count("dynamic context") == 1
+
+
+def test_checkpoint_single_file_transport_roundtrip(tmp_path):
+    events, synopsis, workspace, private = _materials(tmp_path)
+    root = write_root_checkpoint(
+        checkpoint_root=tmp_path / "checkpoints", checkpoint_id="checkpoint-0001",
+        request=_request(), identity={"handoff": _request()["root_handoff"]},
+        event_source=events, synopsis_source=synopsis,
+        task_snapshot=workspace, private_root=private)
+    archive = package_root_checkpoint(root)
+    shutil_target = tmp_path / "transported"
+    extracted = extract_root_checkpoint_archive(archive, shutil_target)
+    assert restored_request(extracted) == _request()
+    assert (extracted / "task/workspace/code.py").read_text() == "value = 1\n"
+
+
+def test_checkpoint_archive_rejects_unsafe_member(tmp_path):
+    import io
+    import tarfile
+    archive = tmp_path / "unsafe.tar"
+    with tarfile.open(archive, "w") as stream:
+        info = tarfile.TarInfo("../escape")
+        content = b"bad"
+        info.size = len(content)
+        stream.addfile(info, io.BytesIO(content))
+    with pytest.raises(ValueError, match="unsafe"):
+        extract_root_checkpoint_archive(archive, tmp_path / "extracted")
+    assert not (tmp_path / "escape").exists()
