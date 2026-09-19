@@ -94,6 +94,20 @@ def validate_role(contract: dict, role: str, actual: dict) -> None:
             )
 
 
+def validate_source_upstream(contract: dict, role: str, actual: dict) -> None:
+    expected = (contract.get("roles") or {}).get(role) or {}
+    source = expected.get("source")
+    if not isinstance(source, dict):
+        raise ValueError(f"model contract role {role} has no source configuration")
+    for field, wanted in source.items():
+        got = actual.get(field)
+        if _normal(got) != _normal(wanted):
+            raise ValueError(
+                f"model source mismatch: role={role} field={field} "
+                f"expected={wanted!r} actual={got!r}"
+            )
+
+
 def validate_inherited_child(contract: dict, supervisor: dict,
                              child: dict | None = None) -> dict:
     rule = (contract.get("roles") or {}).get("independent_c") or {}

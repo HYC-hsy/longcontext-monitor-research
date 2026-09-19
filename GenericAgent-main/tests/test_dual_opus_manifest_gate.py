@@ -60,3 +60,16 @@ def test_production_manifest_gate_rejects_old_supervisor_and_child_default(tmp_p
     with pytest.raises(ValueError, match="must inherit supervisor"):
         module.validate_manifest_models(
             manifest, ROOT / "monitor_config" / "models.local.json")
+
+
+def test_production_manifest_gate_rejects_bundle_rewritten_source_profile(tmp_path):
+    module = load_module()
+    contract = ROOT / "GenericAgent-main" / "monitor_agent_core" / "dual_opus_contract.json"
+    profile_path = tmp_path / "profiles.json"
+    profiles = json.loads(
+        (ROOT / "monitor_config" / "models.local.json").read_text(encoding="utf-8"))
+    profiles["claude_monitor_opus48"]["apibase"] = "http://127.0.0.1:18765"
+    profile_path.write_text(json.dumps(profiles), encoding="utf-8")
+    manifest = write_manifest(tmp_path, contract)
+    with pytest.raises(ValueError, match="model source mismatch: role=supervisor"):
+        module.validate_manifest_models(manifest, profile_path)

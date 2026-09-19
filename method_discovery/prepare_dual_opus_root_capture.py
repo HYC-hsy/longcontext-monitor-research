@@ -15,12 +15,12 @@ CONTRACT = ROOT / "GenericAgent-main" / "monitor_agent_core" / "dual_opus_contra
 
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
-    path = OUT / "dual_opus_root_capture_r2_manifest.json"
+    path = OUT / "dual_opus_root_capture_r4_manifest.json"
     if path.exists():
         raise SystemExit("Manifest exists; do not overwrite an experiment identity")
     manifest = build_manifest(
         "roadmapbench:fyn-2.2.0-roadmap",
-        "dual-opus48-root-capture-20260919-r2",
+        "dual-opus48-root-capture-20260919-r4",
         path,
     )
     manifest["candidate"] = "frozen-supervisor-real-state-capture"

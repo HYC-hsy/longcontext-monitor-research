@@ -17,6 +17,7 @@ from llmcore import resolve_client  # noqa: E402
 from monitor_agent_core.configuration import load_profile  # noqa: E402
 from monitor_agent_core.experiment_contract import (  # noqa: E402
     load_contract, resolved_monitor_config, resolved_task_client, validate_live_roles,
+    validate_source_upstream,
 )
 
 
@@ -59,8 +60,12 @@ def validate_manifest_models(manifest_path, monitor_profile_path) -> dict:
         if task_client is None:
             raise ValueError(f"task profile cannot be resolved: {task_profile}")
         monitor_config = load_profile(monitor_profile, monitor_profile_path)
-        task = resolved_task_client(task_profile, task_client)
-        supervisor = resolved_monitor_config(monitor_profile, monitor_config)
+        source_task = resolved_task_client(task_profile, task_client)
+        source_supervisor = resolved_monitor_config(monitor_profile, monitor_config)
+    validate_source_upstream(contract, "task_agent", source_task)
+    validate_source_upstream(contract, "supervisor", source_supervisor)
+    task = dict(source_task, endpoint_host="127.0.0.1")
+    supervisor = dict(source_supervisor, endpoint_host="127.0.0.1")
     child_override = (environment.get("GA_MONITOR_INDEPENDENT_C_PROFILE")
                       or environment.get("GA_MONITOR_INDEPENDENT_C_CONFIG"))
     resolved = validate_live_roles(
@@ -69,6 +74,10 @@ def validate_manifest_models(manifest_path, monitor_profile_path) -> dict:
         "schema_version": "resolved-monitor-experiment-config/1",
         "run_id": manifest["runs"][0].get("run_id"),
         "network_requests": 0,
+        "source_upstreams": {
+            "task_agent": {"endpoint_host": source_task.get("endpoint_host")},
+            "supervisor": {"endpoint_host": source_supervisor.get("endpoint_host")},
+        },
     })
     return resolved
 
