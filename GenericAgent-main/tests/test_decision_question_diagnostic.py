@@ -116,6 +116,7 @@ def test_checkpoint_validation_does_not_require_prior_approval(tmp_path):
             "model_visible": {
                 "events": "task_evidence/visible.jsonl",
                 "parent_history": "parent_context/history.json",
+                "history_source_kind": "provider_snapshot",
                 "through_cursor": 3,
             },
             "research_archive": {"events": "task_evidence/full.jsonl"},

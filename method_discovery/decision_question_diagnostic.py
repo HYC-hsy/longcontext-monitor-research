@@ -144,7 +144,12 @@ def validate_checkpoint_fixture(config: dict[str, Any], fixture: Path,
             raise ValueError(f"declared checkpoint material is not in manifest: {relative}")
 
     history_path = fixture / visible["parent_history"]
-    history = json.loads(history_path.read_text(encoding="utf-8"))
+    history_kind = visible.get("history_source_kind")
+    if history_kind not in {"provider_snapshot", "constructed_offline"}:
+        raise ValueError("parent History source kind must be declared explicitly")
+    history = extract_model_history_at_checkpoint(
+        history_path, manifest["artifact_sha256"][visible["parent_history"]], history_kind
+    )
     forbidden = set(checkpoint.get("forbid_control_actions", []))
     found = []
     for message in history:
