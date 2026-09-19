@@ -46,3 +46,25 @@ Once such a checkpoint exists, the same three-way runner can consume it with
 the existing material and hash validation. Cases with sufficient evidence may
 finish directly; C is optional and is evaluated only for incremental evidence
 after the parent has stated a decision-changing unresolved premise.
+
+## Implementation mapping and offline acceptance
+
+- `decision_question_diagnostic.py`: strict per-line cursor validation and
+  all-parent branch aggregation.
+- `run_decision_question_diagnostic.py`: one shared preflight path for dry-run
+  and execution; dry-run materializes temporary views and never loads a
+  provider.
+- `monitor_agent_core/provider.py`: an optional request-assembly callback
+  fires once, after compaction and dynamic context insertion but before
+  transport; retries do not create another checkpoint.
+- `monitor_agent_core/runtime.py`: the callback is enabled only for a root
+  handoff, writes request/system/tools/parameters, the event prefix, private
+  state, workspace snapshot and hashes, and writes `complete.json` last.
+- `monitor_agent_core/agent.py`: each review resets the one-capture guard and
+  associates the provider request with the review id.
+
+The production-path regression set has 20 passing tests. It covers malformed
+cursor records, branch isolation, failed-call accounting, no-question without
+C creation, and one-time request assembly containing dynamic context. A real
+checkpoint is still required before the three-way API comparison; no
+constructed empty-History fixture is promoted to that role.

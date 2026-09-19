@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,6 +25,24 @@ from decision_question_diagnostic import (  # noqa: E402
     DiagnosticConfig, run_three_way_case, validate_checkpoint_fixture,
     materialize_model_view,
 )
+
+
+def preflight_cases(config, fixture, cases, root):
+    """Materialize and resolve every selected model view before model setup."""
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    prepared = {}
+    for case in cases:
+        case_root = root / case["id"]
+        private = case_root / "private"
+        private.mkdir(parents=True)
+        model_view, allowed = materialize_model_view(
+            config, fixture, case, case_root / "model_visible")
+        workspace = MonitorWorkspace(model_view, private)
+        for virtual_path in sorted(allowed):
+            workspace.resolve_read(virtual_path)
+        prepared[case["id"]] = (private, workspace)
+    return prepared
 
 
 def main() -> None:
@@ -47,28 +66,22 @@ def main() -> None:
         if len(cases) != len(wanted):
             raise ValueError("unknown or duplicate case id")
     if args.dry_run:
+        with tempfile.TemporaryDirectory(prefix="decision-question-preflight-") as temp:
+            prepared = preflight_cases(config, args.fixture, cases, Path(temp))
         print(json.dumps({
             "checkpoint": config["checkpoint"].get("id"),
             "cases": [case["id"] for case in cases],
             "branches": ["ordinary", "parent_direct", "isolated_c"],
             "model_visible": config["checkpoint"]["model_visible"],
             "research_archive": config["checkpoint"]["research_archive"],
+            "status": "passed",
+            "provider_created": False,
         }, ensure_ascii=False, indent=2))
         return
 
     args.output.mkdir(parents=True)
-    # Materialize and resolve every selected view before the first model call.
-    prepared = {}
-    for case in cases:
-        case_root = args.output / case["id"]
-        private = case_root / "private"
-        private.mkdir(parents=True)
-        model_view, allowed = materialize_model_view(
-            config, args.fixture, case, case_root / "model_visible")
-        workspace = MonitorWorkspace(model_view, private)
-        for virtual_path in sorted(allowed):
-            workspace.resolve_read(virtual_path)
-        prepared[case["id"]] = (private, workspace)
+    # The formal run uses exactly the same preflight as dry-run.
+    prepared = preflight_cases(config, args.fixture, cases, args.output)
     (args.output / "preflight.json").write_text(json.dumps({
         "checkpoint": config["checkpoint"]["id"],
         "cases": [case["id"] for case in cases],

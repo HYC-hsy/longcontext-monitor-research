@@ -612,6 +612,8 @@ class MonitorAgent:
     def review(self, wake_context: str, completion_pending=False) -> MonitorAction:
         started = time.time()
         self.review_id = uuid.uuid4().hex
+        self.client.review_id = self.review_id
+        self.client.checkpoint_captured = False
         self._progress('review_started', completion_pending=bool(completion_pending))
         before = self.client.history_measure()
         self.completion_pending = bool(completion_pending)

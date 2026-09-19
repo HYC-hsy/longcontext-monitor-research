@@ -6,6 +6,8 @@ import json
 import multiprocessing as mp
 import queue
 import hashlib
+import shutil
+import tempfile
 import threading
 import time
 import uuid
@@ -62,6 +64,74 @@ def _worker(config, commands, outputs):
             config["evidence_root"], config["private_root"],
             task_mounts={"workspace": config["task_workspace"]},
         )
+        checkpoint_root = Path(config["private_root"]) / "audit" / "live_checkpoints"
+        checkpoint_root.mkdir(parents=True, exist_ok=True)
+        checkpoint_sequence = len(list(checkpoint_root.glob("checkpoint-*")))
+
+        def capture_root_request(snapshot):
+            """Persist one complete root-handoff request before transport."""
+            nonlocal checkpoint_sequence
+            checkpoint_sequence += 1
+            final = checkpoint_root / f"checkpoint-{checkpoint_sequence:04d}"
+            temporary = Path(tempfile.mkdtemp(prefix=".capture-", dir=checkpoint_root))
+            try:
+                events = workspace.evidence_root / "public_events.jsonl"
+                lines = events.read_text(encoding="utf-8").splitlines() if events.exists() else []
+                cutoff = int(config.get("completion_cursor").value)
+                parsed = []
+                for index, line in enumerate(lines):
+                    row = json.loads(line)
+                    event_cursor = row.get("archive_sequence", row.get("cursor"))
+                    if type(event_cursor) is not int:
+                        raise ValueError(f"event {index} has no valid cursor")
+                    if event_cursor > cutoff:
+                        raise ValueError("events advanced while capturing root boundary")
+                    parsed.append(row)
+                if not parsed or parsed[-1].get("archive_sequence", parsed[-1].get("cursor")) != cutoff:
+                    raise ValueError("event prefix does not end at root boundary cursor")
+                visible_events = temporary / "events" / "public_events.jsonl"
+                visible_events.parent.mkdir(parents=True, exist_ok=True)
+                visible_events.write_text("\n".join(
+                    json.dumps(row, ensure_ascii=False) for row in parsed) + "\n", encoding="utf-8")
+                synopsis = workspace.evidence_root / "synopsis.jsonl"
+                if synopsis.exists():
+                    shutil.copy2(synopsis, temporary / "events" / "synopsis.jsonl")
+                request_path = temporary / "request.json"
+                request_path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+                workspace.refresh_snapshot()
+                shutil.copytree(workspace.snapshot_root, temporary / "workspace")
+                private_state = temporary / "private_state"
+                private_state.mkdir()
+                for child in Path(config["private_root"]).iterdir():
+                    if child.name in {"audit", ".task_view"}:
+                        continue
+                    destination = private_state / child.name
+                    shutil.copytree(child, destination) if child.is_dir() else shutil.copy2(child, destination)
+                manifest = {}
+                for root in (temporary / "events", temporary / "workspace", temporary / "private_state"):
+                    for path in root.rglob("*"):
+                        if path.is_file():
+                            manifest[str(path.relative_to(temporary)).replace("\\", "/")] = hashlib.sha256(path.read_bytes()).hexdigest()
+                (temporary / "identity.json").write_text(json.dumps({
+                    "task_id": config.get("task_id"), "config_name": config.get("config_name"),
+                    "review_id": snapshot.get("review_id"),
+                    "request_sequence": snapshot.get("request_sequence"),
+                    "cursor": cutoff, "task_turn": int(config.get("latest_task_turn").value),
+                    "cursor_field": "archive_sequence" if parsed and "archive_sequence" in parsed[-1] else "cursor",
+                    "captured_at": time.time(), "source": "live_request_before_transport",
+                    "history_source_kind": "provider_snapshot",
+                }, ensure_ascii=False, indent=2), encoding="utf-8")
+                (temporary / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+                (temporary / "complete.json").write_text(json.dumps({
+                    "status": "complete", "cursor": cutoff, "files": len(manifest),
+                }, indent=2), encoding="utf-8")
+                temporary.replace(final)
+            except Exception as exc:
+                shutil.rmtree(temporary, ignore_errors=True)
+                client._progress("root_checkpoint_invalid", error_type=type(exc).__name__, error=str(exc))
+                raise
+
+        client.request_assembly_callback = capture_root_request
         history_path = Path(config["private_root"]) / "audit" / "provider_history.json"
         if history_path.is_file():
             client.restore_history(json.loads(history_path.read_text(encoding="utf-8")))
@@ -202,6 +272,7 @@ def _worker(config, commands, outputs):
             # Only actual review-ending actions define compaction boundaries.
             client.CONTROL_ACTIONS = {"wait", "allow_complete"}
         try:
+            client.checkpoint_kind = "root_handoff" if completion else "ordinary"
             next_receipt_offset = receipt_offset
             receipt_path = Path(config["private_root"]) / "delivery_feedback.jsonl"
             if receipt_path.exists():
@@ -223,6 +294,8 @@ def _worker(config, commands, outputs):
             # A terminal transport recovery must not silently restart via the
             # queued patrol/completion commands after the parent has failed it.
             return not isinstance(exc, ProviderRecoveryExhausted)
+        finally:
+            client.checkpoint_kind = None
         if action.kind == "wait":
             release_wake = close_watch or wake_receipts is not None
             close_watch = action.payload.get('mode', 'follow') == 'follow'
@@ -377,7 +450,7 @@ class MonitorRuntime:
         self._closed = threading.Event()
         process = process_factory or self._context.Process
         self._process = process(target=worker_target or _worker, args=({
-            "config_name": config_name, "model_config": dict(model_config),
+            "config_name": config_name, "model_config": dict(model_config), "task_id": task_id,
             "evidence_root": str(self.evidence_root), "private_root": str(self.private_root),
             "task_workspace": str(task_workspace), "max_review_turns": int(max_review_turns),
             "task_original_path": self.task_original_path,

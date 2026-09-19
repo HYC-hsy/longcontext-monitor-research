@@ -133,6 +133,9 @@ def validate_checkpoint_fixture(config: dict[str, Any], fixture: Path,
         raise ValueError("wrong checkpoint id")
     visible = checkpoint.get("model_visible", {})
     archive = checkpoint.get("research_archive", {})
+    cursor_field = visible.get("cursor_field", "cursor")
+    if not isinstance(cursor_field, str) or not cursor_field:
+        raise ValueError("checkpoint cursor_field must be a non-empty string")
     if not visible.get("events") or not visible.get("parent_history"):
         raise ValueError("checkpoint must declare model-visible event and history files")
     if not archive.get("events"):
@@ -179,12 +182,23 @@ def validate_checkpoint_fixture(config: dict[str, Any], fixture: Path,
     visible_events = fixture / visible["events"]
     visible_lines = visible_events.read_text(encoding="utf-8").splitlines()
     cursors, task_turns = [], []
-    for line in visible_lines:
-        event = json.loads(line)
-        if isinstance(event.get("cursor"), int):
-            cursors.append(event["cursor"])
-        if isinstance(event.get("task_turn"), int):
-            task_turns.append(event["task_turn"])
+    for index, line in enumerate(visible_lines):
+        if not line.strip():
+            raise ValueError(f"event {index}: empty JSONL record")
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"event {index}: invalid JSON") from exc
+        if not isinstance(event, dict):
+            raise ValueError(f"event {index}: expected an object")
+        cursor = event.get(cursor_field)
+        # bool is an int subclass, but is not a cursor in the archive protocol.
+        if type(cursor) is not int or cursor < 0:
+            raise ValueError(f"event {index}: invalid cursor")
+        cursors.append(cursor)
+        task_turn = event.get("task_turn")
+        if type(task_turn) is int:
+            task_turns.append(task_turn)
     if not cursors or max(cursors) != visible["through_cursor"]:
         raise ValueError("visible event prefix does not end at declared cursor")
     if cursors != list(range(cursors[0], visible["through_cursor"] + 1)):
@@ -345,6 +359,12 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
     record = audit or (lambda event, **fields: None)
     save_branch = branch_sink or (lambda name, result: None)
 
+    def overall_status(ordinary, direct, isolated):
+        return "completed" if all(
+            result.get("status") == "completed"
+            for result in (ordinary, direct, isolated)
+        ) else "incomplete"
+
     def scoped(branch: str):
         return lambda event, **fields: record(event, branch=branch, **fields)
 
@@ -448,8 +468,7 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
         save_branch("parent_direct", direct)
         save_branch("isolated_c", isolated)
         return {
-            "status": "completed" if (direct["status"] == "completed" and
-                                        isolated["status"] == "completed") else "incomplete",
+            "status": overall_status(ordinary, direct, isolated),
             "selected_question": selected,
             "ordinary": ordinary, "question": question_record,
             "parent_direct": direct, "isolated_c": isolated,
@@ -521,8 +540,7 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
     })
     save_branch("isolated_c", isolated)
     return {
-        "status": "completed" if all(x["status"] == "completed"
-                                     for x in (ordinary, direct, isolated)) else "incomplete",
+        "status": overall_status(ordinary, direct, isolated),
         "selected_question": selected,
         "ordinary": ordinary, "question": question_record,
         "parent_direct": direct, "isolated_c": isolated,

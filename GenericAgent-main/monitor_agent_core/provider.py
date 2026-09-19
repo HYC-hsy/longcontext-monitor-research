@@ -146,6 +146,12 @@ class MonitorProviderClient:
         self._active_lock = threading.Lock()
         self._active_response = None
         self.progress_callback = None
+        # Optional read-only hook used by the runtime to capture one exact
+        # root-handoff request before transport. It must not alter the request.
+        self.request_assembly_callback = None
+        self.checkpoint_kind = None
+        self.review_id = None
+        self.checkpoint_captured = False
 
     def _progress(self, event, **fields):
         callback = getattr(self, 'progress_callback', None)
@@ -507,6 +513,27 @@ class MonitorProviderClient:
         if entry is not None:
             self.history.append(entry)
         try:
+            callback = getattr(self, 'request_assembly_callback', None)
+            if (callback is not None and not self.checkpoint_captured
+                    and getattr(self, 'checkpoint_kind', None) == 'root_handoff'
+                    and getattr(self, 'request_purpose', 'review') == 'review'):
+                snapshot = {
+                    'review_id': getattr(self, 'review_id', None),
+                    'request_sequence': self.complete_calls,
+                    'purpose': getattr(self, 'request_purpose', 'review'),
+                    'system': self.system,
+                    'messages': json.loads(json.dumps(self.history, ensure_ascii=False, default=str)),
+                    'tools': json.loads(json.dumps(tools, ensure_ascii=False, default=str)),
+                    'model_parameters': {
+                        'model': self.model, 'api_mode': self.api_mode,
+                        'max_tokens': self.max_tokens,
+                        'reasoning_effort': self.reasoning_effort,
+                        'thinking_type': self.thinking_type,
+                        'temperature': self.temperature,
+                    },
+                }
+                callback(snapshot)
+                self.checkpoint_captured = True
             return self._request_with_recovery(tools)
         finally:
             if entry is not None:

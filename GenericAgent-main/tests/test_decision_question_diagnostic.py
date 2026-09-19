@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from monitor_agent_core.provider import ModelResponse, ToolCall
+from monitor_agent_core.provider import ModelResponse, MonitorProviderClient, ToolCall
 from monitor_agent_core.workspace import MonitorWorkspace
 
 
@@ -180,6 +180,40 @@ def test_checkpoint_validation_rejects_missing_cursor(tmp_path):
         module.validate_checkpoint_fixture(config, fixture, config_path)
 
 
+@pytest.mark.parametrize("bad", [{"task_turn": 2}, {"cursor": "1"},
+                                  {"cursor": 1.0}, {"cursor": True},
+                                  {"cursor": -1}])
+def test_checkpoint_validation_rejects_bad_cursor_inside_sequence(tmp_path, bad):
+    module = _load()
+    fixture = tmp_path / "fixture"
+    (fixture / "task_evidence").mkdir(parents=True)
+    (fixture / "parent_context").mkdir()
+    rows = [{"cursor": 0, "task_turn": 1}, bad, {"cursor": 2, "task_turn": 2}]
+    visible = fixture / "task_evidence" / "visible.jsonl"
+    full = fixture / "task_evidence" / "full.jsonl"
+    visible.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+    full.write_text(visible.read_text(encoding="utf-8"), encoding="utf-8")
+    history = fixture / "parent_context" / "history.json"
+    history.write_text("[]", encoding="utf-8")
+    config = {"checkpoint": {"id": "bad-cursor", "model_visible": {
+        "events": "task_evidence/visible.jsonl", "parent_history": "parent_context/history.json",
+        "history_source_kind": "provider_snapshot", "through_cursor": 2},
+        "research_archive": {"events": "task_evidence/full.jsonl"}}, "cases": []}
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    import hashlib
+    sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
+    files = ["task_evidence/visible.jsonl", "task_evidence/full.jsonl",
+             "parent_context/history.json"]
+    (fixture / "materialization.json").write_text(json.dumps({
+        "checkpoint": "bad-cursor", "model_visible_cursor": 2,
+        "config_sha256": sha(config_path),
+        "artifact_sha256": {name: sha(fixture / name) for name in files},
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="cursor"):
+        module.validate_checkpoint_fixture(config, fixture, config_path)
+
+
 def test_history_extraction_uses_complete_model_input_not_posthoc_output(tmp_path):
     module = _load()
     dialogue = tmp_path / "dialogue.jsonl"
@@ -257,6 +291,58 @@ def test_question_budget_exit_preserves_completed_ordinary_branch(tmp_path):
     assert result["ordinary"]["outcome"] == "unresolved"
     assert result["question"]["status"] == "budget_or_protocol_incomplete"
     assert result["parent_direct"]["status"] == "not_run"
+
+
+def test_ordinary_failure_is_not_hidden_by_no_question_success(tmp_path):
+    module = _load()
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    (evidence / "original_task.txt").write_text("Requirement.\n", encoding="utf-8")
+    workspace = MonitorWorkspace(evidence, tmp_path / "private")
+
+    def parent(kind):
+        if kind == "ordinary":
+            return ErrorClient([])
+        if kind == "question":
+            return Client([_call("select_decision_question", {
+                "question": "", "reason": "No unresolved premise.", "worthwhile": False}, "q1")])
+        return Client([_call("finish_parent_decision", {
+            "outcome": "supported_in_scope", "conclusion": "already supported"}, "f1")])
+
+    result = module.run_three_way_case(
+        parent, lambda kind: (_ for _ in ()).throw(AssertionError(kind)), workspace,
+        "Decide.", ("task/original_task.txt",), (), [],
+    )
+    assert result["ordinary"]["status"] == "error"
+    assert result["parent_direct"]["status"] == "completed"
+    assert result["isolated_c"]["status"] == "completed"
+    assert result["status"] == "incomplete"
+
+
+def test_request_assembly_capture_includes_dynamic_context_once():
+    client = MonitorProviderClient("capture-test", {
+        "apikey": "test", "apibase": "http://127.0.0.1", "model": "test",
+        "provider": "openai", "api_mode": "chat", "max_retries": 2,
+    })
+    client.system = "stable system"
+    client.history = [{"role": "user", "content": [{"type": "text", "text": "prior"}]}]
+    client.prepare_active_context = lambda: "dynamic context"
+    client.checkpoint_kind = "root_handoff"
+    client.review_id = "review-1"
+    captured = []
+    client.request_assembly_callback = captured.append
+    client._request_with_recovery = lambda tools: ([], {})
+    client.complete([{"role": "system", "content": "stable system"},
+                     {"role": "user", "content": "current input"}],
+                    [{"type": "function", "function": {"name": "wait"}}])
+    assert len(captured) == 1
+    assert captured[0]["review_id"] == "review-1"
+    assert captured[0]["system"] == "stable system"
+    texts = [block.get("text") for message in captured[0]["messages"]
+             for block in message.get("content", [])]
+    assert texts.count("dynamic context") == 1
+    client.complete([{"role": "user", "content": "second"}], [])
+    assert len(captured) == 1
 
 
 def test_one_branch_exception_does_not_erase_other_branch_results(tmp_path):
