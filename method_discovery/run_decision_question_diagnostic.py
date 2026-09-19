@@ -24,6 +24,7 @@ from monitor_agent_core.workspace import MonitorWorkspace  # noqa: E402
 from monitor_agent_core.configuration import load_profile  # noqa: E402
 from monitor_agent_core.experiment_contract import (  # noqa: E402
     load_contract, resolved_monitor_config, validate_inherited_child, validate_role,
+    validate_source_upstream,
 )
 
 from decision_question_diagnostic import (  # noqa: E402
@@ -31,6 +32,16 @@ from decision_question_diagnostic import (  # noqa: E402
     materialize_model_view, materialize_live_checkpoint_view,
     materialize_live_parent_state,
 )
+
+
+def validate_direct_profile_contract(contract, profile, provider):
+    """Validate the host HTTPS source and its equivalent isolated runtime identity."""
+    source = resolved_monitor_config(profile, provider)
+    validate_source_upstream(contract, "supervisor", source)
+    runtime = dict(source, endpoint_host="127.0.0.1")
+    validate_role(contract, "supervisor", runtime)
+    validate_inherited_child(contract, runtime)
+    return {"source": source, "runtime": runtime}
 
 
 def preflight_cases(config, fixture, cases, root, live_checkpoint=None):
@@ -120,9 +131,7 @@ def main() -> None:
         provider = load_profile(args.profile, args.profile_file)
         if args.model_contract:
             contract = load_contract(args.model_contract)
-            resolved = resolved_monitor_config(args.profile, provider)
-            validate_role(contract, "supervisor", resolved)
-            validate_inherited_child(contract, resolved)
+            validate_direct_profile_contract(contract, args.profile, provider)
         if live_checkpoint["identity"].get("config_name") != args.profile:
             raise ValueError(
                 "checkpoint supervisor profile mismatch: "
@@ -159,8 +168,10 @@ def main() -> None:
     resolved_model = resolved_monitor_config(args.profile, provider)
     if args.model_contract:
         contract = load_contract(args.model_contract)
-        validate_role(contract, "supervisor", resolved_model)
-        validate_inherited_child(contract, resolved_model)
+        contract_resolution = validate_direct_profile_contract(
+            contract, args.profile, provider)
+    else:
+        contract_resolution = {"source": resolved_model, "runtime": resolved_model}
     if live_checkpoint is not None and live_checkpoint["identity"].get("config_name") != args.profile:
         raise ValueError(
             "checkpoint supervisor profile mismatch: "
@@ -168,7 +179,8 @@ def main() -> None:
             f"actual={live_checkpoint['identity'].get('config_name')!r}")
     (args.output / "resolved_model_config.json").write_text(json.dumps({
         "profile": args.profile,
-        "resolved": resolved_model,
+        "source": contract_resolution["source"],
+        "resolved": contract_resolution["runtime"],
         "independent_c": {"inherits": "supervisor"},
         "fallback_allowed": False,
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
