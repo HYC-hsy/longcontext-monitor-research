@@ -1,0 +1,46 @@
+{
+  "case": "r7_local_recovery",
+  "condition": "scope_prompt_control",
+  "result": {
+    "case": "r7_local_recovery",
+    "condition": "scope_prompt_control",
+    "decision_scope": "local_recovery",
+    "protocol": "scoped-decision-interface-v1",
+    "status": "completed",
+    "action": "finish_parent_decision",
+    "outcome": "supported_in_scope",
+    "conclusion": "## Scoped Decision: NewAllStrings Omission Recovery\n\n**Scope**: This decision evaluates only whether the previously identified NewAllStrings validator omission has been resolved in the post-checkpoint state. It makes no claim about the completeness of the overall task or any other requirements.\n\n**What Changed**: The research-derived local repair added two files:\n- `task/workspace/data/validation/all.go` (sha256: 66fb966d1724be3fd45ab14cf6cb344cace0a96bc87a69ea914e2ef45213f097)\n- `task/workspace/data/validation/all_test.go` (sha256: 10345d06c326b969c668ab6b7ee2ebf1d1180a6800b18eede0c662f025abd9d3)\n\n**Requirement Verification** (from task/original_task.txt line 145):\n- **Required signature**: `NewAllStrings(validators ...fyne.StringValidator) fyne.StringValidator`\n- **Required location**: `data/validation` package, file `data/validation/all.go`\n- **Required behavior**: \"runs all provided validators in order and returns the first error encountered (or nil if all pass)\"\n\n**Implementation Verification** (from task/workspace/data/validation/all.go, obs-2-90ba52874f):\n- Signature: `func NewAllStrings(validators ...fyne.StringValidator) fyne.StringValidator` ✓\n- Location: `package validation` in `data/validation/all.go` ✓\n- Behavior: Iterates through validators in order, returns first error or nil ✓\n\n**Test Evidence** (from task/research_derived_local_repair.json, obs-3-17f12a2a26):\n- Command: `go test ./data/validation`\n- Exit code: 0 (pass)\n- Result: \"ok  \tfyne.io/fyne/v2/data/validation\t0.005s\"\n- Supports: \"NewAllStrings runs validators in order, returns the first error, and returns nil when all validators pass\"\n\n**Conclusion**: The NewAllStrings omission has been resolved. The implementation matches the requirement specification, is correctly located, and passes validation tests.\n\n**Out of Scope**: This decision does not evaluate:\n- Whether all 7 targets are complete\n- Whether other Target 6 requirements are correctly implemented\n- The overall task completion status\n- Any other requirements beyond NewAllStrings",
+    "local_update": null,
+    "decision_basis": null,
+    "remaining_limits": null,
+    "resolved_evidence": null,
+    "limitation": null,
+    "calls": 6,
+    "query_scope": {
+      "scope": "task/workspace/",
+      "checkpoint_version": "2b4e0b49d8e767bc980dcaad5958d600b3de40397da2408806731e2894e42799",
+      "indexed_files": 2467,
+      "excluded_prefixes": [
+        "task/workspace/.git/",
+        "task/workspace/.github/",
+        "task/workspace/verifier/",
+        "task/workspace/solution/",
+        "task/workspace/evaluation/",
+        "task/workspace/grader/"
+      ],
+      "excludes_parent_private_state": true,
+      "excludes_research_and_evaluation_material": true
+    }
+  },
+  "usage": {
+    "complete_calls": 6,
+    "successful_responses": 6,
+    "request_attempts": 6,
+    "input_tokens": 3924,
+    "output_tokens": 1489,
+    "total_tokens": 300447,
+    "history_transforms": []
+  },
+  "audit_log": "r7_local_recovery/scope_prompt_control/audit.jsonl",
+  "transport_log": "r7_local_recovery/scope_prompt_control/transport.jsonl"
+}

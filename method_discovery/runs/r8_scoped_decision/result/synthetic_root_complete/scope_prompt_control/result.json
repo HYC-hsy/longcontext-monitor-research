@@ -1,0 +1,46 @@
+{
+  "case": "synthetic_root_complete",
+  "condition": "scope_prompt_control",
+  "result": {
+    "case": "synthetic_root_complete",
+    "condition": "scope_prompt_control",
+    "decision_scope": "root_completion",
+    "protocol": "scoped-decision-interface-v1",
+    "status": "completed",
+    "action": "finish_parent_decision",
+    "outcome": "supported_in_scope",
+    "conclusion": "**Scope:** The task requires implementation of two functions in package `counter` with ordinary unit test coverage.\n\n**Requirements verification:**\n\n1. **Clamp function** (task/original_task.txt lines 5-6, obs-1-fb59309b98):\n   - Required: `Clamp(value, minimum, maximum int) int` returning minimum when below range, maximum when above, value otherwise\n   - Implemented: counter.go lines 3-11 (obs-4-7cd0d0ffab) provides exact signature and correct three-branch logic\n   - Tested: counter_test.go TestClamp lines 5-18 (obs-5-477ffc640b) covers below-range (-2→0), in-range (5→5), and above-range (12→10) cases\n\n2. **IsEven function** (task/original_task.txt lines 7-8, obs-1-fb59309b98):\n   - Required: `IsEven(value int) bool` returning true exactly when divisible by two, including negatives and zero\n   - Implemented: counter.go lines 14-16 (obs-4-7cd0d0ffab) uses modulo operator `value%2 == 0` which correctly handles all integer cases\n   - Tested: counter_test.go TestIsEven lines 21-26 (obs-5-477ffc640b) explicitly covers negative odd (-3), negative even (-2), zero (0), positive odd (3), and positive even (4)\n\n3. **Unit test requirement** (task/original_task.txt line 10, obs-1-fb59309b98):\n   - Both functions have ordinary (not benchmark/fuzz/example) unit tests\n   - Tests passed: public_check.json (obs-3-871eeec1bf) shows exit_code 0 and \"ok calibration.local/counter 0.002s\"\n\n**Traceable observations:**\n- obs-1-fb59309b98: Original task specification\n- obs-4-7cd0d0ffab: Implementation file with both functions\n- obs-5-477ffc640b: Test file with coverage for both functions\n- obs-3-871eeec1bf: Successful test execution\n\nAll explicit requirements are fulfilled with discriminating test coverage. No requirements were omitted or contradicted.",
+    "local_update": null,
+    "decision_basis": null,
+    "remaining_limits": null,
+    "resolved_evidence": null,
+    "limitation": null,
+    "calls": 3,
+    "query_scope": {
+      "scope": "task/workspace/",
+      "checkpoint_version": "bee6ccdbc8c95fedd0f81521f228954982ba7d7bfbd7bff4f963414e2637739a",
+      "indexed_files": 3,
+      "excluded_prefixes": [
+        "task/workspace/.git/",
+        "task/workspace/.github/",
+        "task/workspace/verifier/",
+        "task/workspace/solution/",
+        "task/workspace/evaluation/",
+        "task/workspace/grader/"
+      ],
+      "excludes_parent_private_state": true,
+      "excludes_research_and_evaluation_material": true
+    }
+  },
+  "usage": {
+    "complete_calls": 3,
+    "successful_responses": 3,
+    "request_attempts": 3,
+    "input_tokens": 2754,
+    "output_tokens": 1539,
+    "total_tokens": 12307,
+    "history_transforms": []
+  },
+  "audit_log": "synthetic_root_complete/scope_prompt_control/audit.jsonl",
+  "transport_log": "synthetic_root_complete/scope_prompt_control/transport.jsonl"
+}
