@@ -6,8 +6,6 @@ import json
 import multiprocessing as mp
 import queue
 import hashlib
-import shutil
-import tempfile
 import threading
 import time
 import uuid
@@ -50,6 +48,7 @@ def _coalesce_wake_command(commands, first, completion_is_active=None):
 
 def _worker(config, commands, outputs):
     from .agent import MonitorAgent
+    from .checkpoint import capture_live_root_checkpoint
     from .provider import MonitorProviderClient, ProviderRecoveryExhausted
     from .probe import IndependentVerifier, ProbeConfig
     from .workspace import MonitorWorkspace
@@ -66,70 +65,29 @@ def _worker(config, commands, outputs):
         )
         checkpoint_root = Path(config["private_root"]) / "audit" / "live_checkpoints"
         checkpoint_root.mkdir(parents=True, exist_ok=True)
-        checkpoint_sequence = len(list(checkpoint_root.glob("checkpoint-*")))
-
         def capture_root_request(snapshot):
             """Persist one complete root-handoff request before transport."""
-            nonlocal checkpoint_sequence
-            checkpoint_sequence += 1
-            final = checkpoint_root / f"checkpoint-{checkpoint_sequence:04d}"
-            temporary = Path(tempfile.mkdtemp(prefix=".capture-", dir=checkpoint_root))
+            handoff = snapshot.get("root_handoff") or {}
             try:
-                events = workspace.evidence_root / "public_events.jsonl"
-                lines = events.read_text(encoding="utf-8").splitlines() if events.exists() else []
-                cutoff = int(config.get("completion_cursor").value)
-                parsed = []
-                for index, line in enumerate(lines):
-                    row = json.loads(line)
-                    event_cursor = row.get("archive_sequence", row.get("cursor"))
-                    if type(event_cursor) is not int:
-                        raise ValueError(f"event {index} has no valid cursor")
-                    if event_cursor > cutoff:
-                        raise ValueError("events advanced while capturing root boundary")
-                    parsed.append(row)
-                if not parsed or parsed[-1].get("archive_sequence", parsed[-1].get("cursor")) != cutoff:
-                    raise ValueError("event prefix does not end at root boundary cursor")
-                visible_events = temporary / "events" / "public_events.jsonl"
-                visible_events.parent.mkdir(parents=True, exist_ok=True)
-                visible_events.write_text("\n".join(
-                    json.dumps(row, ensure_ascii=False) for row in parsed) + "\n", encoding="utf-8")
-                synopsis = workspace.evidence_root / "synopsis.jsonl"
-                if synopsis.exists():
-                    shutil.copy2(synopsis, temporary / "events" / "synopsis.jsonl")
-                request_path = temporary / "request.json"
-                request_path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
-                workspace.refresh_snapshot()
-                shutil.copytree(workspace.snapshot_root, temporary / "workspace")
-                private_state = temporary / "private_state"
-                private_state.mkdir()
-                for child in Path(config["private_root"]).iterdir():
-                    if child.name in {"audit", ".task_view"}:
-                        continue
-                    destination = private_state / child.name
-                    shutil.copytree(child, destination) if child.is_dir() else shutil.copy2(child, destination)
-                manifest = {}
-                for root in (temporary / "events", temporary / "workspace", temporary / "private_state"):
-                    for path in root.rglob("*"):
-                        if path.is_file():
-                            manifest[str(path.relative_to(temporary)).replace("\\", "/")] = hashlib.sha256(path.read_bytes()).hexdigest()
-                (temporary / "identity.json").write_text(json.dumps({
-                    "task_id": config.get("task_id"), "config_name": config.get("config_name"),
+                identity = {
+                    "task_id": config.get("task_id"), "run_id": config.get("run_id"),
+                    "config_name": config.get("config_name"),
                     "review_id": snapshot.get("review_id"),
                     "request_sequence": snapshot.get("request_sequence"),
-                    "cursor": cutoff, "task_turn": int(config.get("latest_task_turn").value),
-                    "cursor_field": "archive_sequence" if parsed and "archive_sequence" in parsed[-1] else "cursor",
-                    "captured_at": time.time(), "source": "live_request_before_transport",
-                    "history_source_kind": "provider_snapshot",
-                }, ensure_ascii=False, indent=2), encoding="utf-8")
-                (temporary / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-                (temporary / "complete.json").write_text(json.dumps({
-                    "status": "complete", "cursor": cutoff, "files": len(manifest),
-                }, indent=2), encoding="utf-8")
-                temporary.replace(final)
+                    "task_turn": int(config.get("latest_task_turn").value),
+                }
+                final = capture_live_root_checkpoint(
+                    workspace=workspace, checkpoint_root=checkpoint_root,
+                    snapshot=snapshot, identity=identity,
+                    current_handoff=current_completion)
+                client._progress("root_checkpoint_created", path=str(final),
+                                 request_id=handoff["request_id"], cursor=handoff["cursor"])
+                return True
             except Exception as exc:
-                shutil.rmtree(temporary, ignore_errors=True)
                 client._progress("root_checkpoint_invalid", error_type=type(exc).__name__, error=str(exc))
-                raise
+                if config.get("root_checkpoint_required"):
+                    raise
+                return False
 
         client.request_assembly_callback = capture_root_request
         history_path = Path(config["private_root"]) / "audit" / "provider_history.json"
@@ -272,7 +230,6 @@ def _worker(config, commands, outputs):
             # Only actual review-ending actions define compaction boundaries.
             client.CONTROL_ACTIONS = {"wait", "allow_complete"}
         try:
-            client.checkpoint_kind = "root_handoff" if completion else "ordinary"
             next_receipt_offset = receipt_offset
             receipt_path = Path(config["private_root"]) / "delivery_feedback.jsonl"
             if receipt_path.exists():
@@ -294,8 +251,6 @@ def _worker(config, commands, outputs):
             # A terminal transport recovery must not silently restart via the
             # queued patrol/completion commands after the parent has failed it.
             return not isinstance(exc, ProviderRecoveryExhausted)
-        finally:
-            client.checkpoint_kind = None
         if action.kind == "wait":
             release_wake = close_watch or wake_receipts is not None
             close_watch = action.payload.get('mode', 'follow') == 'follow'
@@ -318,6 +273,12 @@ def _worker(config, commands, outputs):
                 })
         elif action.kind == "allow_complete":
             approval_id = action.payload.get("request_id", request_id)
+            current = current_completion()
+            key = ((current or {}).get("generation"), (current or {}).get("request_id"))
+            if config.get("root_checkpoint_required") and key not in client.captured_root_handoffs:
+                outputs.put({"kind": "failure", "error": "Required root checkpoint was not captured",
+                             "completion": True, "request_id": approval_id})
+                return False
             outputs.put({"kind": "completion", "decision": "allow", "cursor": cursor,
                          "request_id": approval_id})
             # Delivery, not the model's proposal, determines whether this task ended.
@@ -387,10 +348,13 @@ class MonitorRuntime:
                  completion_timeout=300, process_factory=None, worker_target=None,
                  interrupt_pending=None, run_timeout_seconds=10000, run_deadline_epoch=None,
                  correction_begin=None, correction_end=None, task_original_path=None, task_id,
-                 independent_probe_total_requests=0, independent_probe_max_requests=3):
+                 independent_probe_total_requests=0, independent_probe_max_requests=3,
+                 root_checkpoint_required=False, run_id=None):
         if model_config.get('monitor_hybrid_control', False):
             raise ValueError('Model-requested hybrid pause is retired')
         self.artifact_dir = Path(artifact_dir).resolve()
+        if type(root_checkpoint_required) is not bool:
+            raise ValueError("root_checkpoint_required must be boolean")
         if not isinstance(task_id, str) or not task_id.strip():
             raise ValueError('An explicit non-empty task_id is required')
         task_workspace = Path(task_workspace).resolve()
@@ -456,6 +420,8 @@ class MonitorRuntime:
             "task_original_path": self.task_original_path,
             "active_completion": self._active_completion,
             "completion_cursor": self._completion_cursor,
+            "root_checkpoint_required": root_checkpoint_required,
+            "run_id": run_id,
             "latest_task_turn": self._latest_task_turn,
             "run_deadline_epoch": time.time() + max(0.0, self._run_deadline - time.monotonic()),
             "stop_event": self._stop_event,

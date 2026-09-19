@@ -8,6 +8,7 @@ research archive.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import tempfile
@@ -18,16 +19,17 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "GenericAgent-main"))
 
 from monitor_agent_core.provider import MonitorProviderClient  # noqa: E402
+from monitor_agent_core.checkpoint import load_root_checkpoint, restored_request  # noqa: E402
 from monitor_agent_core.workspace import MonitorWorkspace  # noqa: E402
 from monitor_agent_core.configuration import load_profile  # noqa: E402
 
 from decision_question_diagnostic import (  # noqa: E402
     DiagnosticConfig, run_three_way_case, validate_checkpoint_fixture,
-    materialize_model_view,
+    materialize_model_view, materialize_live_checkpoint_view,
 )
 
 
-def preflight_cases(config, fixture, cases, root):
+def preflight_cases(config, fixture, cases, root, live_checkpoint=None):
     """Materialize and resolve every selected model view before model setup."""
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
@@ -36,8 +38,12 @@ def preflight_cases(config, fixture, cases, root):
         case_root = root / case["id"]
         private = case_root / "private"
         private.mkdir(parents=True)
-        model_view, allowed = materialize_model_view(
-            config, fixture, case, case_root / "model_visible")
+        if live_checkpoint is None:
+            model_view, allowed = materialize_model_view(
+                config, fixture, case, case_root / "model_visible")
+        else:
+            model_view, allowed = materialize_live_checkpoint_view(
+                live_checkpoint, case, case_root / "model_visible")
         workspace = MonitorWorkspace(model_view, private)
         for virtual_path in sorted(allowed):
             workspace.resolve_read(virtual_path)
@@ -48,17 +54,30 @@ def preflight_cases(config, fixture, cases, root):
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--fixture", type=Path, required=True)
+    sources = parser.add_mutually_exclusive_group(required=True)
+    sources.add_argument("--fixture", type=Path)
+    sources.add_argument("--live-checkpoint", type=Path)
     parser.add_argument("--profile-file", type=Path, required=True)
     parser.add_argument("--profile", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--cases", nargs="+", default=["all"])
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--restore-only", action="store_true")
     args = parser.parse_args()
+    if args.dry_run and args.restore_only:
+        raise ValueError("--dry-run and --restore-only are mutually exclusive")
     if args.output.exists():
         raise FileExistsError(f"Use a fresh output directory: {args.output}")
     config = json.loads(args.config.read_text(encoding="utf-8"))
-    parent_history = validate_checkpoint_fixture(config, args.fixture, args.config)
+    live_checkpoint = None
+    parent_system = None
+    if args.live_checkpoint:
+        live_checkpoint = load_root_checkpoint(args.live_checkpoint)
+        exact_request = restored_request(args.live_checkpoint)
+        parent_history = exact_request["messages"]
+        parent_system = exact_request["system"]
+    else:
+        parent_history = validate_checkpoint_fixture(config, args.fixture, args.config)
     cases = config.get("cases", [])
     if args.cases != ["all"]:
         wanted = set(args.cases)
@@ -67,7 +86,7 @@ def main() -> None:
             raise ValueError("unknown or duplicate case id")
     if args.dry_run:
         with tempfile.TemporaryDirectory(prefix="decision-question-preflight-") as temp:
-            prepared = preflight_cases(config, args.fixture, cases, Path(temp))
+            prepared = preflight_cases(config, args.fixture, cases, Path(temp), live_checkpoint)
         print(json.dumps({
             "checkpoint": config["checkpoint"].get("id"),
             "cases": [case["id"] for case in cases],
@@ -79,9 +98,32 @@ def main() -> None:
         }, ensure_ascii=False, indent=2))
         return
 
+    if args.restore_only:
+        if live_checkpoint is None:
+            raise ValueError("--restore-only requires --live-checkpoint")
+        with tempfile.TemporaryDirectory(prefix="decision-question-restore-") as temp:
+            preflight_cases(config, args.fixture, cases, Path(temp), live_checkpoint)
+        provider = load_profile(args.profile, args.profile_file)
+        validator = MonitorProviderClient("checkpoint_restore_validation", dict(provider))
+        reproduced = validator.restore_request_snapshot(exact_request)
+        encoded = json.dumps(
+            reproduced, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        args.output.mkdir(parents=True)
+        (args.output / "restore_validation.json").write_text(json.dumps({
+            "status": "passed", "network_requests": 0,
+            "request_sha256": hashlib.sha256(encoded).hexdigest(),
+            "message_count": len(reproduced["messages"]),
+            "root_handoff": reproduced["root_handoff"],
+            "dynamic_context_source": "already_present_in_captured_messages_not_reappended",
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps({"status": "passed", "network_requests": 0,
+                          "output": str(args.output)}, ensure_ascii=False))
+        return
+
     args.output.mkdir(parents=True)
     # The formal run uses exactly the same preflight as dry-run.
-    prepared = preflight_cases(config, args.fixture, cases, args.output)
+    prepared = preflight_cases(config, args.fixture, cases, args.output, live_checkpoint)
     (args.output / "preflight.json").write_text(json.dumps({
         "checkpoint": config["checkpoint"]["id"],
         "cases": [case["id"] for case in cases],
@@ -90,6 +132,9 @@ def main() -> None:
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     provider = load_profile(args.profile, args.profile_file)
+    if live_checkpoint is not None:
+        validator = MonitorProviderClient("checkpoint_restore_validation", dict(provider))
+        validator.restore_request_snapshot(exact_request)
     diagnostic = config.get("diagnostic", {})
     run_config = DiagnosticConfig(
         total_calls=int(diagnostic.get("total_calls", 6)),
@@ -179,7 +224,7 @@ def main() -> None:
                 parent_factory, child_factory, workspace,
                 case["acceptance_question"], tuple(case["source_paths"]),
                 tuple(case["evidence_paths"]), parent_history, run_config,
-                audit=audit, branch_sink=branch_sink,
+                parent_system=parent_system, audit=audit, branch_sink=branch_sink,
             )
         except Exception as exc:
             result = {"status": "error", "error_type": type(exc).__name__,

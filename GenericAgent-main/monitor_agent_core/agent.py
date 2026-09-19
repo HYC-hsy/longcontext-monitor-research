@@ -580,11 +580,16 @@ class MonitorAgent:
 
     def _refresh_completion(self):
         if self.completion_state is None:
+            self.client.observed_root_handoff = None
             return None
         current = self.completion_state()
         if current and current["generation"] == self._intervened_generation:
             current = None
         self.completion_pending = current is not None
+        # This identity is updated while assembling each real parent request,
+        # after compaction and immediately before transport.  It therefore
+        # follows what the request actually observed, not how the review began.
+        self.client.observed_root_handoff = dict(current) if current else None
         if current == self._seen_completion:
             return None
         self._seen_completion = current
@@ -613,7 +618,6 @@ class MonitorAgent:
         started = time.time()
         self.review_id = uuid.uuid4().hex
         self.client.review_id = self.review_id
-        self.client.checkpoint_captured = False
         self._progress('review_started', completion_pending=bool(completion_pending))
         before = self.client.history_measure()
         self.completion_pending = bool(completion_pending)

@@ -41,6 +41,11 @@ class GenericAgentMonitorAdapter:
         deadline = os.environ.get("GA_MONITOR_RUN_DEADLINE_EPOCH")
         if deadline is not None:
             runtime_options["run_deadline_epoch"] = float(deadline)
+        capture_mode = os.environ.get("GA_MONITOR_ROOT_CAPTURE_REQUIRED", "0")
+        if capture_mode not in {"0", "1"}:
+            raise ValueError("GA_MONITOR_ROOT_CAPTURE_REQUIRED must be 0 or 1")
+        runtime_options["root_checkpoint_required"] = capture_mode == "1"
+        runtime_options["run_id"] = os.environ.get("GA_BENCH_RUN_ID")
         for environment, setting in (
             ("GA_MONITOR_GROUNDED_CONTEXT", "monitor_grounded_context"),
             ("GA_MONITOR_HANDOFF_VALIDATION", "monitor_handoff_validation"),

@@ -246,6 +246,37 @@ def materialize_model_view(config: dict[str, Any], fixture: Path, case: dict[str
     return destination, paths
 
 
+def materialize_live_checkpoint_view(checkpoint: dict[str, Any], case: dict[str, Any],
+                                     destination: Path) -> tuple[Path, set[str]]:
+    """Create a case view directly from a validated live checkpoint."""
+    if destination.exists():
+        raise FileExistsError(f"model view already exists: {destination}")
+    destination.mkdir(parents=True)
+    paths = set(case.get("source_paths", ())) | set(case.get("evidence_paths", ()))
+    root = checkpoint["root"]
+    task_root = (root / "task").resolve()
+    declared = set(checkpoint["manifest"]["files"])
+    for virtual in paths:
+        normalized = str(virtual).replace("\\", "/")
+        if not normalized.startswith("task/") or normalized.startswith(
+                ("task/verifier/", "task/solution/")):
+            raise ValueError(f"unmapped or forbidden checkpoint path: {virtual}")
+        source = (root / normalized).resolve()
+        try:
+            source.relative_to(task_root)
+        except ValueError as exc:
+            raise ValueError(f"checkpoint path escapes task evidence: {virtual}") from exc
+        relative = source.relative_to(root).as_posix()
+        if relative not in declared:
+            raise ValueError(f"checkpoint path is not manifest-listed: {virtual}")
+        if not source.is_file():
+            raise ValueError(f"checkpoint path is not readable: {virtual}")
+        target = destination / normalized.removeprefix("task/")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+    return destination, paths
+
+
 def _tool(name: str, description: str, properties: dict[str, Any], required=()):
     return {"type": "function", "function": {
         "name": name, "description": description,
@@ -352,6 +383,7 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
                        evidence_paths: tuple[str, ...],
                        parent_history: list[dict[str, Any]],
                        config: DiagnosticConfig = DiagnosticConfig(),
+                       parent_system: str | None = None,
                        audit: Callable[..., None] | None = None,
                        branch_sink: Callable[[str, dict[str, Any]], None] | None = None
                        ) -> dict[str, Any]:
@@ -388,6 +420,10 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
     allowed = {str(p).replace("\\", "/") for p in source_paths + evidence_paths}
     prefix_prompt = acceptance_question + "\n\nPermitted paths:\n" + \
         "\n".join(f"- {path}" for path in sorted(allowed))
+    stable_system = ((parent_system or "").rstrip() + "\n\n") if parent_system else ""
+    offline_system = (stable_system +
+        "Offline diagnostic constraint: you cannot intervene, approve the live task, "
+        "or write task files. You remain the same Supervisor and must use only the frozen evidence.\n\n")
 
     # A: ordinary parent investigation, without manufactured question selection.
     a_client = parent_client_factory("ordinary")
@@ -395,7 +431,7 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
     a_budget = CallBudget(config.total_calls)
     a = _run_parent(
         a_client,
-        "You are the continuing Supervisor. Investigate the acceptance question using "
+        offline_system + "Investigate the acceptance question using "
         "public evidence, then make one scoped decision. Do not assume a checker.",
         prefix_prompt + "\n\nInvestigate as you judge appropriate.",
         [_read_tool(), _finish_tool()], workspace, allowed, a_budget,
@@ -410,7 +446,7 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
     q_budget = CallBudget(config.total_calls)
     question_action = _run_parent(
         q_client,
-        "You are the continuing Supervisor. Identify whether a decision-changing "
+        offline_system + "Identify whether a decision-changing "
         "unresolved premise is worth investigating. Preserve the original task terms; "
         "do not name a known defect merely because it is in the evaluator's notes.",
         prefix_prompt + "\n\nFirst decide whether one unresolved premise could change the decision.",
@@ -446,7 +482,7 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
         b_budget.used = q_budget.used
         b = _run_parent(
             b_client,
-            "You are the continuing Supervisor. No isolated verifier is needed. "
+            offline_system + "No isolated verifier is needed. "
             "Make the parent decision without inventing a new question.",
             no_question_prompt, [_finish_tool()], workspace, allowed, b_budget,
             config.final_turns, "finish_parent_decision", scoped("parent_direct"),
@@ -457,7 +493,7 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
         c_budget.used = q_budget.used
         c_final = _run_parent(
             c_client,
-            "You are the continuing Supervisor. No isolated verifier was justified. "
+            offline_system + "No isolated verifier was justified. "
             "Make the parent decision and preserve the evidence scope.",
             no_question_prompt, [_finish_tool()], workspace, allowed, c_budget,
             config.final_turns, "finish_parent_decision", scoped("isolated_c_parent"),
@@ -481,7 +517,7 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
     b_budget.used = q_budget.used  # shared question call is charged to B
     b = _run_parent(
         b_client,
-        "You are the continuing Supervisor. Investigate the selected premise directly "
+        offline_system + "Investigate the selected premise directly "
         "with the same permitted evidence, then decide the original question.",
         prefix_prompt + "\n\nSelected unresolved premise:\n" + str(selected.get("question", "")),
         [_read_tool(), _finish_tool()], workspace, allowed, b_budget,
@@ -526,7 +562,7 @@ def run_three_way_case(parent_client_factory, child_client_factory, workspace,
         json.dumps(child_payload, ensure_ascii=False)
     c_final = _run_parent(
         c_parent,
-        "You are the continuing Supervisor. Use the isolated result only within its "
+        offline_system + "Use the isolated result only within its "
         "evidence scope; make the final decision and preserve unresolved limits.",
         c_prompt, [_finish_tool()], workspace, allowed, c_budget,
         config.final_turns, "finish_parent_decision", scoped("isolated_c_parent"),

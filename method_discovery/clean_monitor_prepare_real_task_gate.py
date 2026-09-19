@@ -16,8 +16,8 @@ from m1_prepare_real_task_batch import ROOT, BENCH, tree_hash
 from m3_prepare_real_task_gate import R0_TASKS, execution_harness_hash
 
 
-def environment(source_hash: str) -> dict[str, str]:
-    return {
+def environment(source_hash: str, require_root_checkpoint=False) -> dict[str, str]:
+    values = {
         "GA_RUN_ISOLATION": "no-network-unix-inference-v1",
         "GA_BASELINE_CONDITION": "original",
         "GA_EXPERIMENT_ID": "clean-monitor-foundation-v1",
@@ -31,6 +31,9 @@ def environment(source_hash: str) -> dict[str, str]:
         "GA_METHOD_EXPECTED_SOURCE_SHA256": source_hash,
         "GA_EXPERIMENT_HARNESS_SHA256": execution_harness_hash(),
     }
+    if require_root_checkpoint:
+        values["GA_MONITOR_ROOT_CAPTURE_REQUIRED"] = "1"
+    return values
 
 
 def registered_method_task(task_id: str) -> tuple[dict[str, Any], bytes]:
@@ -42,13 +45,14 @@ def registered_method_task(task_id: str) -> tuple[dict[str, Any], bytes]:
     return task, registry_bytes
 
 
-def build_manifest(task_id: str, run_suffix="r1", manifest_path: Path | None = None):
+def build_manifest(task_id: str, run_suffix="r1", manifest_path: Path | None = None,
+                   require_root_checkpoint=False):
     task, registry_bytes = registered_method_task(task_id)
     source, local_id = task["global_task_id"].split(":", 1)
     slug = local_id.replace(":", "-").replace("/", "-").replace("__", "-")
     source_hash = tree_hash(ROOT / "GenericAgent-main")
     run_id = f"clean-monitor-{slug}-{run_suffix}"
-    env = environment(source_hash)
+    env = environment(source_hash, require_root_checkpoint)
     env["BENCHMARK_CAMPAIGN_ROOT"] = str(
         BENCH / "output" / "clean_monitor_real_tasks" / slug
     )
@@ -88,8 +92,10 @@ def main() -> int:
     parser.add_argument("--task-id", required=True)
     parser.add_argument("--run-suffix", default="r1")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--require-root-checkpoint", action="store_true")
     args = parser.parse_args()
-    manifest = build_manifest(args.task_id, args.run_suffix, args.output)
+    manifest = build_manifest(args.task_id, args.run_suffix, args.output,
+                              args.require_root_checkpoint)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({

@@ -149,9 +149,10 @@ class MonitorProviderClient:
         # Optional read-only hook used by the runtime to capture one exact
         # root-handoff request before transport. It must not alter the request.
         self.request_assembly_callback = None
-        self.checkpoint_kind = None
         self.review_id = None
-        self.checkpoint_captured = False
+        self.observed_root_handoff = None
+        self.captured_root_handoffs = set()
+        self.failed_root_handoffs = set()
 
     def _progress(self, event, **fields):
         callback = getattr(self, 'progress_callback', None)
@@ -475,7 +476,9 @@ class MonitorProviderClient:
         return value
 
     def complete(self, messages: list[dict], tools: list[dict]) -> ModelResponse:
-        self.complete_calls += 1
+        # Some offline harnesses construct a minimal client via ``__new__``;
+        # preserve the production counter contract there as well.
+        self.complete_calls = int(getattr(self, "complete_calls", 0)) + 1
         user_blocks = []
         for message in messages:
             if message["role"] == "system":
@@ -504,6 +507,48 @@ class MonitorProviderClient:
         self.usage_records.append(dict(usage))
         return ModelResponse(text, calls, usage)
 
+    def assembled_request_snapshot(self, tools, *, handoff=None, request_sequence=None,
+                                   purpose=None) -> dict:
+        """Return the semantic request at the provider send boundary.
+
+        This is the production assembly used by live capture and exact restore
+        validation.  It never appends input or dynamic context itself.
+        """
+        return {
+            'review_id': self.review_id,
+            'request_sequence': self.complete_calls if request_sequence is None else request_sequence,
+            'purpose': purpose or getattr(self, 'request_purpose', 'review'),
+            'system': self.system,
+            'messages': json.loads(json.dumps(self.history, ensure_ascii=False, default=str)),
+            'tools': json.loads(json.dumps(tools, ensure_ascii=False, default=str)),
+            'root_handoff': json.loads(json.dumps(
+                self.observed_root_handoff if handoff is None else handoff,
+                ensure_ascii=False, default=str)),
+            'model_parameters': {
+                'model': self.model, 'api_mode': self.api_mode,
+                'max_tokens': self.max_tokens,
+                'reasoning_effort': self.reasoning_effort,
+                'thinking_type': self.thinking_type,
+                'temperature': self.temperature,
+            },
+        }
+
+    def restore_request_snapshot(self, request: dict) -> dict:
+        """Restore and reproduce a captured pre-send request without re-appending input."""
+        expected_parameters = request.get('model_parameters')
+        if not isinstance(expected_parameters, dict):
+            raise ValueError('captured request has no model parameters')
+        self.system = str(request.get('system') or '')
+        self.restore_history(request.get('messages') or [])
+        self.review_id = request.get('review_id')
+        self.observed_root_handoff = json.loads(json.dumps(request.get('root_handoff')))
+        reproduced = self.assembled_request_snapshot(
+            request.get('tools') or [], handoff=request.get('root_handoff'),
+            request_sequence=request.get('request_sequence'), purpose=request.get('purpose'))
+        if reproduced != request:
+            raise ValueError('captured request does not reproduce under the configured provider')
+        return reproduced
+
     def _request(self, tools):
         # Request-local context never becomes another permanent history copy.
         # Read after compaction, so a newly written handoff is visible immediately.
@@ -514,26 +559,16 @@ class MonitorProviderClient:
             self.history.append(entry)
         try:
             callback = getattr(self, 'request_assembly_callback', None)
-            if (callback is not None and not self.checkpoint_captured
-                    and getattr(self, 'checkpoint_kind', None) == 'root_handoff'
+            handoff = getattr(self, 'observed_root_handoff', None)
+            handoff_key = ((handoff or {}).get('generation'), (handoff or {}).get('request_id'))
+            if (callback is not None and handoff
+                    and handoff_key not in self.captured_root_handoffs
+                    and handoff_key not in self.failed_root_handoffs
                     and getattr(self, 'request_purpose', 'review') == 'review'):
-                snapshot = {
-                    'review_id': getattr(self, 'review_id', None),
-                    'request_sequence': self.complete_calls,
-                    'purpose': getattr(self, 'request_purpose', 'review'),
-                    'system': self.system,
-                    'messages': json.loads(json.dumps(self.history, ensure_ascii=False, default=str)),
-                    'tools': json.loads(json.dumps(tools, ensure_ascii=False, default=str)),
-                    'model_parameters': {
-                        'model': self.model, 'api_mode': self.api_mode,
-                        'max_tokens': self.max_tokens,
-                        'reasoning_effort': self.reasoning_effort,
-                        'thinking_type': self.thinking_type,
-                        'temperature': self.temperature,
-                    },
-                }
-                callback(snapshot)
-                self.checkpoint_captured = True
+                snapshot = self.assembled_request_snapshot(tools, handoff=handoff)
+                captured = callback(snapshot)
+                (self.captured_root_handoffs if captured is not False
+                 else self.failed_root_handoffs).add(handoff_key)
             return self._request_with_recovery(tools)
         finally:
             if entry is not None:
