@@ -442,3 +442,9 @@ def test_validated_live_checkpoint_materializes_without_manual_relayout(tmp_path
         module.materialize_live_checkpoint_view(
             loaded, {"source_paths": ["task/../identity.json"], "evidence_paths": []},
             tmp_path / "bad-view")
+
+
+def test_diagnostic_read_schema_matches_workspace_page_limits():
+    properties = _load()._read_tool()["function"]["parameters"]["properties"]
+    assert properties["start"]["minimum"] == 1
+    assert properties["count"] == {"type": "integer", "minimum": 1, "maximum": 1000}

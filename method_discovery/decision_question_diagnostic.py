@@ -287,8 +287,10 @@ def _tool(name: str, description: str, properties: dict[str, Any], required=()):
 
 def _read_tool():
     return _tool("file_read", "Read one permitted task or workspace file.", {
-        "path": {"type": "string"}, "start": {"type": "integer"},
-        "count": {"type": "integer"}, "tail": {"type": "boolean"},
+        "path": {"type": "string"},
+        "start": {"type": "integer", "minimum": 1},
+        "count": {"type": "integer", "minimum": 1, "maximum": 1000},
+        "tail": {"type": "boolean"},
         "offset": {"type": "integer", "minimum": 0},
         "max_chars": {"type": "integer", "minimum": 1, "maximum": 200000},
     })
