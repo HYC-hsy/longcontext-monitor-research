@@ -86,6 +86,11 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--minimal-history", action="store_true")
     args = parser.parse_args()
+    if not args.minimal_history:
+        raise ValueError(
+            "Legacy post-hoc History is disabled. Use --minimal-history or provide "
+            "a separately verified provider snapshot."
+        )
     if args.output.exists():
         raise FileExistsError(args.output)
 
@@ -136,8 +141,8 @@ def main() -> None:
     }
     config["diagnostic"] = {
         "total_calls": 6,
-        "question_turns": 2,
-        "investigation_turns": 3,
+        "question_turns": 3,
+        "investigation_turns": 2,
         "final_turns": 1,
     }
     for case in config.get("cases", []):

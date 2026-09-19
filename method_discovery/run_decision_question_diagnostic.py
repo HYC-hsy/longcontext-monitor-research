@@ -56,23 +56,38 @@ def main() -> None:
         }, ensure_ascii=False, indent=2))
         return
 
-    provider = load_profile(args.profile, args.profile_file)
     args.output.mkdir(parents=True)
+    # Materialize and resolve every selected view before the first model call.
+    prepared = {}
+    for case in cases:
+        case_root = args.output / case["id"]
+        private = case_root / "private"
+        private.mkdir(parents=True)
+        model_view, allowed = materialize_model_view(
+            config, args.fixture, case, case_root / "model_visible")
+        workspace = MonitorWorkspace(model_view, private)
+        for virtual_path in sorted(allowed):
+            workspace.resolve_read(virtual_path)
+        prepared[case["id"]] = (private, workspace)
+    (args.output / "preflight.json").write_text(json.dumps({
+        "checkpoint": config["checkpoint"]["id"],
+        "cases": [case["id"] for case in cases],
+        "status": "passed",
+        "history_source_kind": config["checkpoint"]["model_visible"]["history_source_kind"],
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    provider = load_profile(args.profile, args.profile_file)
     diagnostic = config.get("diagnostic", {})
     run_config = DiagnosticConfig(
         total_calls=int(diagnostic.get("total_calls", 6)),
-        question_turns=int(diagnostic.get("question_turns", 2)),
+        question_turns=int(diagnostic.get("question_turns", 3)),
         investigation_turns=int(diagnostic.get("investigation_turns", 4)),
         final_turns=int(diagnostic.get("final_turns", 1)),
     )
     results = []
     for case in cases:
         case_id = case["id"]
-        private = args.output / case_id / "private"
-        private.mkdir(parents=True)
-        model_view, _ = materialize_model_view(config, args.fixture, case,
-                                               private.parent / "model_visible")
-        workspace = MonitorWorkspace(model_view, private)
+        private, workspace = prepared[case_id]
         audit_path = private.parent / "audit.jsonl"
         transport_path = private.parent / "transport.jsonl"
         clients = {}
@@ -115,25 +130,49 @@ def main() -> None:
             clients[branch] = client
             return client
 
-        result = run_three_way_case(
-            parent_factory, child_factory, workspace,
-            case["acceptance_question"], tuple(case["source_paths"]),
-            tuple(case["evidence_paths"]), parent_history, run_config,
-            audit=audit,
-        )
-        usage = {}
-        for branch, client in clients.items():
-            usage[branch] = {
-                "logical_calls": len(client.usage_records),
-                "request_attempts": len(client.request_attempts),
-                "input_tokens": sum(int(x.get("input_tokens") or 0) for x in client.usage_records),
-                "output_tokens": sum(int(x.get("output_tokens") or 0) for x in client.usage_records),
-                "total_tokens": sum(sum(int(x.get(key) or 0) for key in
-                                         ("input_tokens", "output_tokens",
-                                          "cache_creation_input_tokens",
-                                          "cache_read_input_tokens"))
-                                    for x in client.usage_records),
-            }
+        def usage_snapshot():
+            snapshot = {}
+            for branch, client in clients.items():
+                snapshot[branch] = {
+                    "logical_calls": len(client.usage_records),
+                    "request_attempts": len(client.request_attempts),
+                    "input_tokens": sum(int(x.get("input_tokens") or 0)
+                                        for x in client.usage_records),
+                    "output_tokens": sum(int(x.get("output_tokens") or 0)
+                                         for x in client.usage_records),
+                    "total_tokens": sum(sum(int(x.get(key) or 0) for key in
+                                              ("input_tokens", "output_tokens",
+                                               "cache_creation_input_tokens",
+                                               "cache_read_input_tokens"))
+                                        for x in client.usage_records),
+                }
+            return snapshot
+
+        def branch_sink(branch, branch_result):
+            entry = {"case": case_id, "branch": branch,
+                     "recorded_at": datetime.now(timezone.utc).isoformat(),
+                     "result": branch_result, "usage_by_client": usage_snapshot()}
+            branch_dir = private.parent / "branches"
+            branch_dir.mkdir(exist_ok=True)
+            (branch_dir / f"{branch}.json").write_text(
+                json.dumps(entry, ensure_ascii=False, indent=2, default=str) + "\n",
+                encoding="utf-8")
+            append_json(private.parent / "branch_results.jsonl", entry)
+
+        try:
+            result = run_three_way_case(
+                parent_factory, child_factory, workspace,
+                case["acceptance_question"], tuple(case["source_paths"]),
+                tuple(case["evidence_paths"]), parent_history, run_config,
+                audit=audit, branch_sink=branch_sink,
+            )
+        except Exception as exc:
+            result = {"status": "error", "error_type": type(exc).__name__,
+                      "error": str(exc)}
+            append_json(audit_path, {"event": "case_exception", "case": case_id,
+                                     "recorded_at": datetime.now(timezone.utc).isoformat(),
+                                     "error_type": type(exc).__name__, "error": str(exc)})
+        usage = usage_snapshot()
         actual_total_tokens = sum(item["total_tokens"] for item in usage.values())
         shared_tokens = usage.get("question", {}).get("total_tokens", 0)
         record = {"case": case_id, "result": result,

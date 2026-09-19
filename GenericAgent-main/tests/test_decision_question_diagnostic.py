@@ -45,6 +45,12 @@ class Client:
         return json.loads(json.dumps(self.history))
 
 
+class ErrorClient(Client):
+    def complete(self, messages, tools):
+        self.calls += 1
+        raise RuntimeError("synthetic transport failure")
+
+
 def test_three_way_uses_one_question_for_parent_and_c(tmp_path):
     module = _load()
     evidence = tmp_path / "evidence"
@@ -64,9 +70,10 @@ def test_three_way_uses_one_question_for_parent_and_c(tmp_path):
         if kind == "question":
             return Client([
                 _call("file_read", {"path": "task/original_task.txt"}, "q1"),
+                _call("file_read", {"path": "task/events.jsonl"}, "q2"),
                 _call("select_decision_question", {
                     "question": "Does the observation establish ordering?",
-                    "reason": "It could change acceptance.", "worthwhile": True}, "q2"),
+                    "reason": "It could change acceptance.", "worthwhile": True}, "q3"),
             ])
         if kind == "parent_direct":
             return Client([
@@ -90,7 +97,7 @@ def test_three_way_uses_one_question_for_parent_and_c(tmp_path):
     )
     assert result["status"] == "completed"
     assert result["selected_question"]["question"] == "Does the observation establish ordering?"
-    assert result["parent_direct"]["payload"]["outcome"] == "supported_in_scope"
+    assert result["parent_direct"]["outcome"] == "supported_in_scope"
     assert result["isolated_c"]["child_outcome"] == "supported_in_scope"
     # Both branches receive the same six-call ceiling and both charge the
     # shared question prefix; actual use may differ if one reaches a verdict
@@ -107,7 +114,7 @@ def test_checkpoint_validation_does_not_require_prior_approval(tmp_path):
     (fixture / "task_evidence" / "visible.jsonl").write_text(
         json.dumps({"cursor": 3, "task_turn": 2}) + "\n", encoding="utf-8")
     (fixture / "task_evidence" / "full.jsonl").write_text(
-        json.dumps({"cursor": 3}) + "\n" + json.dumps({"cursor": 4}) + "\n",
+        json.dumps({"cursor": 3, "task_turn": 2}) + "\n" + json.dumps({"cursor": 4}) + "\n",
         encoding="utf-8")
     (fixture / "parent_context" / "history.json").write_text("[]", encoding="utf-8")
     config = {
@@ -189,6 +196,62 @@ def test_no_worthwhile_question_does_not_force_isolated_probe(tmp_path):
     )
     assert result["status"] == "completed"
     assert result["isolated_c"]["child_status"] == "not_called"
+
+
+def test_question_budget_exit_preserves_completed_ordinary_branch(tmp_path):
+    module = _load()
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    (evidence / "original_task.txt").write_text("Requirement.\n", encoding="utf-8")
+    workspace = MonitorWorkspace(evidence, tmp_path / "private")
+
+    def parent(kind):
+        if kind == "ordinary":
+            return Client([_call("finish_parent_decision", {
+                "outcome": "unresolved", "conclusion": "ordinary completed"}, "a1")])
+        if kind == "question":
+            return Client([
+                _call("file_read", {"path": "task/original_task.txt"}, "q1"),
+                _call("file_read", {"path": "task/original_task.txt"}, "q2"),
+                _call("file_read", {"path": "task/original_task.txt"}, "q3"),
+            ])
+        raise AssertionError(kind)
+
+    result = module.run_three_way_case(
+        parent, lambda kind: None, workspace, "Decide.",
+        ("task/original_task.txt",), (), [],
+    )
+    assert result["status"] == "incomplete"
+    assert result["ordinary"]["status"] == "completed"
+    assert result["ordinary"]["outcome"] == "unresolved"
+    assert result["question"]["status"] == "budget_or_protocol_incomplete"
+    assert result["parent_direct"]["status"] == "not_run"
+
+
+def test_one_branch_exception_does_not_erase_other_branch_results(tmp_path):
+    module = _load()
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    (evidence / "original_task.txt").write_text("Requirement.\n", encoding="utf-8")
+    workspace = MonitorWorkspace(evidence, tmp_path / "private")
+
+    def parent(kind):
+        if kind == "ordinary":
+            return ErrorClient([])
+        if kind == "question":
+            return Client([_call("select_decision_question", {
+                "question": "", "reason": "No useful question.",
+                "worthwhile": False}, "q1")])
+        return Client([_call("finish_parent_decision", {
+            "outcome": "unresolved", "conclusion": "saved sibling result"}, "f1")])
+
+    result = module.run_three_way_case(
+        parent, lambda kind: None, workspace, "Decide.",
+        ("task/original_task.txt",), (), [],
+    )
+    assert result["ordinary"]["status"] == "error"
+    assert result["parent_direct"]["status"] == "completed"
+    assert result["parent_direct"]["conclusion"] == "saved sibling result"
 
 
 def test_model_view_contains_only_declared_case_material(tmp_path):
