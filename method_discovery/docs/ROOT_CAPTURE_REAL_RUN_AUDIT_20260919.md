@@ -23,3 +23,48 @@ The old runtime fixed `checkpoint_kind` from the review-entry `completion` argum
 ## Boundary of the conclusion
 
 The old records do not contain the exact request ordinal that first observed `completion-2`, because the callback never recorded a request snapshot. They therefore diagnose the missed trigger but cannot serve as a faithful restored parent state. Full History, workspace contents, hidden evaluation material, and credentials remain local.
+
+## R5 acceptance run
+
+Run `clean-monitor-fyn-2.2.0-roadmap-root-capture-20260919-r5` loaded the
+atomic-archive implementation at source hash
+`4d617c412e4746406dd06f489ac1a76c9eca0956de94a9e3e8ca36047e91ec73`.
+It recorded two distinct live request checkpoints:
+
+- `completion-1`, archive cursor 347, 92 parent-history messages, 2,507
+  manifest files;
+- `completion-2`, archive cursor 555, 153 parent-history messages, 2,510
+  manifest files.
+
+Both exported tar files were independently extracted and accepted by the
+production manifest loader. Every declared file and hash matched. The second
+checkpoint also passed the production provider restore path without a network
+request. Its reproduced semantic request SHA-256 is
+`51aafe83322de620a15992a0b4bfb0df018a4ee552f10b1ce9f6f4c21657db83`;
+the captured dynamic context was already present exactly once and was not
+re-appended.
+
+The long task itself did not complete. After the second checkpoint, a normal
+continuation request and its one permitted format-repair attempt both returned
+an empty note. The bounded continuation contract rejected both and failed
+closed with `HistoryCapacityError(ContinuationContractError: empty_note)`.
+This is a post-checkpoint task-run failure, not a checkpoint-integrity failure.
+
+## Three-way diagnostic attempts
+
+The first diagnostic attempt exposed an interface mismatch: the diagnostic
+`file_read` schema did not advertise the workspace reader's `count <= 1000`
+limit. The ordinary branch therefore failed after five useful investigation
+calls when the model requested a larger page. Commit `b69f755` aligns the
+schema with the production reader and adds a regression test (17 related tests
+pass). That attempt is retained as an engineering failure and is not scored.
+
+The frozen retry was stopped by provider transport instability rather than a
+method decision. The ordinary and shared-question clients each made one
+logical call and three transport attempts; neither obtained a successful
+response or usage record. The parent-direct and isolated-C branches therefore
+did not run. No conclusion about the three investigation conditions is
+supported by this retry.
+
+Public artifacts intentionally omit checkpoint tar files, complete parent
+History, frozen source contents, credentials, and evaluator-only material.
