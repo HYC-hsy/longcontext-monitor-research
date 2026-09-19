@@ -1,27 +1,25 @@
 # Real root-handoff capture audit — 2026-09-19
 
-## Run identity
+## Run identity and outcome
 
 - Run: `clean-monitor-fyn-2.2.0-roadmap-root-capture-20260919-r2`
 - Task: `roadmapbench:fyn-2.2.0-roadmap`
-- Task model: `claude-opus-4-6`
-- Monitor profile: `native_oai_cc_vibe_gpt56_sol_high`
-- Isolation: `no-network-unix-inference-v1`
-- Source/runtime identity: recorded in the run's `result.json`; no credentials are included here.
+- Baseline: `6379f2d`
+- Task model: `claude-opus-4-6`; monitor profile: `native_oai_cc_vibe_gpt56_sol_high`
+- Native evaluation: reward `1.0`, all `7/7` phases passed
 
-## Observed result
+The expected `monitor_private/audit/live_checkpoints/checkpoint-*` directory remained empty, so this run is not a recoverable decision checkpoint. No request was reconstructed from final History or final code.
 
-The real task completed normally: the native evaluation reported `reward=1.0` and `7/7` phases passed. The monitor performed sustained concurrent observation, multiple interventions, History compaction, and finally accepted `completion-2` at event cursor `681`.
+## What the retained records establish
 
-The run's public receipts contain the completion boundary and its delivery outcome. However, the expected `monitor_private/audit/live_checkpoints/checkpoint-*` directory remained empty. Consequently this run is valid evidence of task execution and monitor behavior, but **not** a valid exact-restoration checkpoint for the three-way decision diagnostic.
+The isolated bundle did load the source containing the capture callback. Its three source hashes and the sanitized timing evidence are recorded in `method_discovery/artifacts/root_capture_20260919/capture_failure_evidence_r2.json`.
 
-## Why it is blocked
+The final monitor review `84a289fb01e24122b0abd83db1d6d89b` began at `08:34:07Z` with `completion_pending=false`. The Task Agent proposed its final completion at `08:36:45Z`, while that ordinary review was still running. The same review later returned `allow_complete` for `completion-2` and finished at `08:50:32Z`.
 
-The completion receipt was delivered, but no complete request-before-transport snapshot was materialized. We therefore do not infer the system/messages/tools/dynamic-context input from the final History or from the post-completion workspace. Doing so would violate the real-state capture contract.
+The old runtime fixed `checkpoint_kind` from the review-entry `completion` argument. The old provider invoked capture only when that value was `root_handoff`. Thus the later handoff became visible to the model and could be approved, but its request remained classified as an ordinary review for capture purposes. There are no `root_checkpoint_created` or `root_checkpoint_invalid` records and no checkpoint elsewhere under the job, which distinguishes a missed trigger from a detected write failure.
 
-This is an engineering wiring issue, not a C/D result and not a task-quality failure. The next change must make the root-handoff request assembly callback observable and fail closed when a completion boundary has no checkpoint. No diagnostic comparison should use this run as if it were a faithful snapshot.
+`public_event_count=2545` counts research telemetry records. `completion_cursor=681` is the Monitor public archive's one-based `archive_sequence`. They are different counters and are not evidence that the snapshot crossed its boundary.
 
-## Public evidence retained
+## Boundary of the conclusion
 
-The full run remains in the local controlled output directory. Publicly shareable summaries may include the run identity, result metadata, receipt counts, and this audit. Do not publish credentials, complete provider History, hidden evaluator material, or private workspace contents.
-
+The old records do not contain the exact request ordinal that first observed `completion-2`, because the callback never recorded a request snapshot. They therefore diagnose the missed trigger but cannot serve as a faithful restored parent state. Full History, workspace contents, hidden evaluation material, and credentials remain local.

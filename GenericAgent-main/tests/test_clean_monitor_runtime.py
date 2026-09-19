@@ -39,6 +39,7 @@ def _runtime(tmp_path, callback):
         model_config={},
         interrupt_callback=callback,
         worker_target=scripted_clean_monitor_worker,
+        task_id="test:clean-monitor-runtime",
     )
 
 
@@ -53,9 +54,10 @@ def test_boundary_creates_two_layer_archive_and_delivers_immediate_correction(tm
     runtime = _runtime(tmp_path, callback)
     started = time.monotonic()
     runtime.archive_boundary({
-        "boundary": "post_model_pre_tool", "internal_turn": 4,
-        "response_content": "<summary>Replace wildcard with request origin</summary>",
-        "tool_calls": [{"tool_name": "file_patch", "args": {"path": "cors.py"}}],
+        "boundary": "post_model_pre_tool", "task_turn": 4,
+        "synopsis": "Replace wildcard with request origin",
+        "text": "<summary>Replace wildcard with request origin</summary>",
+        "tool_calls": [{"name": "file_patch", "args": {"path": "cors.py"}}],
         "tool_results": [],
     })
     assert time.monotonic() - started < 0.2
@@ -150,6 +152,7 @@ def test_artifacts_cannot_be_nested_in_supervised_workspace(tmp_path):
             model_config={},
             interrupt_callback=lambda _: None,
             worker_target=scripted_clean_monitor_worker,
+            task_id="test:nested-artifacts",
         )
 
 
@@ -177,12 +180,31 @@ def test_ga_adapter_does_not_turn_incomplete_review_into_more_work():
     assert "MONITOR_REVIEW_INCOMPLETE" in decision.reason_codes
 
 
-def test_ga_adapter_passes_launcher_deadline(monkeypatch):
+def test_ga_adapter_passes_launcher_deadline(monkeypatch, tmp_path):
     captured = {}
     monkeypatch.setenv('GA_MONITOR_RUN_DEADLINE_EPOCH', '2000000000')
     monkeypatch.setattr('ga_monitor_adapter.MonitorRuntime', lambda **kw: captured.update(kw))
-    GenericAgentMonitorAdapter()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    GenericAgentMonitorAdapter(public_task="task", task_workspace=workspace,
+                               model_config={}, artifact_dir=tmp_path / "artifacts",
+                               config_name="test", interrupt_callback=lambda _: None)
     assert captured['run_deadline_epoch'] == 2000000000
+
+
+@pytest.mark.parametrize("value, expected", [("0", False), ("1", True)])
+def test_ga_adapter_passes_explicit_root_capture_mode(monkeypatch, tmp_path, value, expected):
+    captured = {}
+    monkeypatch.setenv("GA_MONITOR_ROOT_CAPTURE_REQUIRED", value)
+    monkeypatch.setenv("GA_BENCH_RUN_ID", "capture-run")
+    monkeypatch.setattr('ga_monitor_adapter.MonitorRuntime', lambda **kw: captured.update(kw))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    GenericAgentMonitorAdapter(public_task="task", task_workspace=workspace,
+                               model_config={}, artifact_dir=tmp_path / "artifacts",
+                               config_name="test", interrupt_callback=lambda _: None)
+    assert captured["root_checkpoint_required"] is expected
+    assert captured["run_id"] == "capture-run"
 
 
 def test_patrol_wake_backlog_coalesces_to_latest_cursor():

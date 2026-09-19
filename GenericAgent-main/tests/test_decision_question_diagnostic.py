@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from monitor_agent_core.provider import ModelResponse, MonitorProviderClient, ToolCall
+from monitor_agent_core.checkpoint import load_root_checkpoint, write_root_checkpoint
 from monitor_agent_core.workspace import MonitorWorkspace
 
 
@@ -327,7 +328,8 @@ def test_request_assembly_capture_includes_dynamic_context_once():
     client.system = "stable system"
     client.history = [{"role": "user", "content": [{"type": "text", "text": "prior"}]}]
     client.prepare_active_context = lambda: "dynamic context"
-    client.checkpoint_kind = "root_handoff"
+    client.observed_root_handoff = {
+        "generation": 1, "request_id": "completion-1", "cursor": 7}
     client.review_id = "review-1"
     captured = []
     client.request_assembly_callback = captured.append
@@ -338,11 +340,17 @@ def test_request_assembly_capture_includes_dynamic_context_once():
     assert len(captured) == 1
     assert captured[0]["review_id"] == "review-1"
     assert captured[0]["system"] == "stable system"
+    assert captured[0]["root_handoff"]["request_id"] == "completion-1"
     texts = [block.get("text") for message in captured[0]["messages"]
              for block in message.get("content", [])]
     assert texts.count("dynamic context") == 1
     client.complete([{"role": "user", "content": "second"}], [])
     assert len(captured) == 1
+    client.observed_root_handoff = {
+        "generation": 2, "request_id": "completion-2", "cursor": 9}
+    client.complete([{"role": "user", "content": "third"}], [])
+    assert len(captured) == 2
+    assert captured[-1]["root_handoff"]["request_id"] == "completion-2"
 
 
 def test_one_branch_exception_does_not_erase_other_branch_results(tmp_path):
@@ -402,3 +410,35 @@ def test_model_view_contains_only_declared_case_material(tmp_path):
     assert (destination / "original_task.txt").is_file()
     assert (destination / "workspace" / "impl.go").is_file()
     assert not (destination / "task_evidence" / "full_archive.jsonl").exists()
+
+
+def test_validated_live_checkpoint_materializes_without_manual_relayout(tmp_path):
+    module = _load()
+    events = tmp_path / "events.jsonl"
+    events.write_text(json.dumps({"archive_sequence": 1}) + "\n", encoding="utf-8")
+    synopsis = tmp_path / "synopsis.jsonl"
+    synopsis.write_text(json.dumps({"cursor": 1}) + "\n", encoding="utf-8")
+    task = tmp_path / "task-view"
+    (task / "workspace").mkdir(parents=True)
+    (task / "original_task.txt").write_text("requirement", encoding="utf-8")
+    (task / "workspace" / "impl.go").write_text("implementation", encoding="utf-8")
+    private = tmp_path / "private-state"
+    private.mkdir()
+    request = {"system": "supervisor", "messages": [], "tools": [],
+               "model_parameters": {"model": "m"},
+               "root_handoff": {"generation": 1, "request_id": "completion-1", "cursor": 1}}
+    root = write_root_checkpoint(
+        checkpoint_root=tmp_path / "checkpoints", checkpoint_id="checkpoint-0001",
+        request=request, identity={"handoff": request["root_handoff"]},
+        event_source=events, synopsis_source=synopsis,
+        task_snapshot=task, private_root=private)
+    loaded = load_root_checkpoint(root)
+    view, allowed = module.materialize_live_checkpoint_view(loaded, {
+        "source_paths": ["task/original_task.txt"],
+        "evidence_paths": ["task/workspace/impl.go"]}, tmp_path / "diagnostic-view")
+    assert allowed == {"task/original_task.txt", "task/workspace/impl.go"}
+    assert (view / "workspace/impl.go").read_text() == "implementation"
+    with pytest.raises(ValueError, match="escapes"):
+        module.materialize_live_checkpoint_view(
+            loaded, {"source_paths": ["task/../identity.json"], "evidence_paths": []},
+            tmp_path / "bad-view")

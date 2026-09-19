@@ -77,7 +77,8 @@ def test_request_started_is_durable_before_request_returns(tmp_path, monkeypatch
         thread.join(3)
     assert len(results) == 1
     rows = [json.loads(x) for x in path.read_text().splitlines()]
-    assert [r['event'] for r in rows] == ['request_started', 'request_usage', 'request_finished']
+    assert [r['event'] for r in rows] == [
+        'request_started', 'response_metadata', 'request_usage', 'request_finished']
     assert len({r['request_id'] for r in rows}) == 1
     agent.dispatch('file_read', {'path': 'task/missing'})
     rows = [json.loads(x) for x in path.read_text().splitlines()]
