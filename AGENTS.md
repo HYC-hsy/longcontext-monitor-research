@@ -9,7 +9,7 @@
 - 调查策略候选必须分别说明三个内部环节：选择哪个待核验目标、设计什么能区分相关状态的观察、如何分配有限控制预算；不得再把三者统称为 `tool selection`。R11 离线解剖及 E/F/G 未实现候选见 `method_discovery/docs/R11_SELECTOR_FAILURE_ANATOMY_20260921.md`，其中已知 JSON/Sprintf 缺陷只属于研究侧评价，不得进入未来候选输入。
 - A/B 首次真实筛选已经完成并冻结，见 `method_discovery/docs/R11_INVESTIGATION_ACTION_SCREEN_RESULT_20260921.md`。O 在 R7 错误整体状态 0/2、正确控制 1/1；A 为 0/2、0/1；B 为 1/2、0/1（正确控制预算未完成）。六次候选首动作均未直接取得能区分根完成的证据；B 唯一正确拒绝来自父模型后续另行搜索，不得归因于首动作或短视图。A/B 暂不晋级、不接入在线、不继续润色；C/D仍不开发。
 - R10 V1（`70536ba`）保留为带混杂的诊断记录：`material_condition` 曾随补充观察进入模型输入，故其结果反映原始观察与方向性条件标签共同作用，不能完全归因于证据内容。原结果、配置和哈希不得覆写。独立 `visible-counterexample-consumption-neutral-v2` 六份去标签校准已完成：JSON直接观察仍2/2正确拒绝、局部支持仍1/2、正确小型控制2/2批准；说明条件名不是本批JSON结果的必要条件，但仍不证明自主调查或在线增益。见 `method_discovery/docs/R10_NEUTRAL_CALIBRATION_RESULT_20260920.md`。
-- 当前优先研究调查动作的选择与组织。候选池见 `method_discovery/docs/RESEARCH_CANDIDATES_AFTER_R10.md`：A（完整父上下文单步调查动作）与 B（要求侧短视图单步调查动作）已完成独立最小入口和无模型验收，但尚未真实调用或接入在线监督；C（证据来源依赖维护）与 D（行为探针）暂不开发。R9范围提示、R8复杂裁决接口、三轮串行选题和独立核验C不自动恢复。
+- 当前优先研究调查动作的选择与组织。候选池见 `method_discovery/docs/RESEARCH_CANDIDATES_AFTER_R10.md`：A/B 已完成 R11 首次真实筛选并以当前形态淘汰；E（decision-discriminating frontier）与 G（counterfactual observation selection）是下一批待筛选候选。F/C/D 保持关闭。R9范围提示、R8复杂裁决接口、三轮串行选题和独立核验C不自动恢复。
 - 理论启发、诊断、候选初筛、独立复验与在线效果不得混称；工程通过、工具被使用、主决定正确与全部理由可靠也必须分别报告。控制论概念只提供问题结构，不继承缺少前提条件的数学保证。
 - 研究元数据与模型证据必须分离。模型输入只能由显式白名单投影生成：允许统一中性说明及真实路径、哈希、行号、范围和原文；条件名、run id、预期标签、评价、候选设计和已知缺陷不得进入。必须在生产请求发送前验证这一边界，不能只测试简化对象。
 - `AGENTS.md`、审计报告、候选清单和评价材料属于开发侧知识，禁止自动注入任务 Agent、持续 Supervisor、临时核验器或调查动作选择器。原题与源码原有术语必须保留，不得用关键词过滤伪造中性。
