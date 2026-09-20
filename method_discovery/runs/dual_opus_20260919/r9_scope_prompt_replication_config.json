@@ -1,0 +1,68 @@
+{
+  "schema": "scope-prompt-replication/v1",
+  "created": "2026-09-20",
+  "baseline_commit": "b1f8f6d",
+  "protocol": {
+    "id": "scope-prompt-replication-v1",
+    "total_calls_per_record": 6,
+    "repeats_per_condition": 2,
+    "model_unchanged": true,
+    "query_capability_unchanged": true,
+    "parent_state_reset_each_record": true,
+    "independent_c": false,
+    "scoped_interface": false
+  },
+  "conditions": [
+    "ordinary_investigation",
+    "scope_prompt_candidate"
+  ],
+  "cases": {
+    "r7_local_recovery": {
+      "checkpoint": "repaired",
+      "initial_paths": [
+        "task/original_task.txt",
+        "task/public_events.jsonl",
+        "task/research_derived_local_repair.json",
+        "task/workspace/IMPLEMENTATION_SUMMARY.md",
+        "task/workspace/data/validation/all.go",
+        "task/workspace/data/validation/all_test.go"
+      ]
+    },
+    "r7_root_completion": {
+      "checkpoint": "repaired",
+      "initial_paths": [
+        "task/original_task.txt",
+        "task/public_events.jsonl",
+        "task/research_derived_local_repair.json",
+        "task/workspace/IMPLEMENTATION_SUMMARY.md",
+        "task/workspace/data/validation/all.go",
+        "task/workspace/data/validation/all_test.go"
+      ]
+    },
+    "synthetic_root_complete": {
+      "checkpoint": "synthetic",
+      "initial_paths": [
+        "task/original_task.txt",
+        "task/public_events.jsonl",
+        "task/public_check.json",
+        "task/workspace/go.mod",
+        "task/workspace/counter.go",
+        "task/workspace/counter_test.go"
+      ]
+    }
+  },
+  "run_order": [
+    {"case": "r7_local_recovery", "condition": "ordinary_investigation", "repeat": 1},
+    {"case": "r7_local_recovery", "condition": "scope_prompt_candidate", "repeat": 1},
+    {"case": "r7_local_recovery", "condition": "scope_prompt_candidate", "repeat": 2},
+    {"case": "r7_local_recovery", "condition": "ordinary_investigation", "repeat": 2},
+    {"case": "r7_root_completion", "condition": "scope_prompt_candidate", "repeat": 1},
+    {"case": "r7_root_completion", "condition": "ordinary_investigation", "repeat": 1},
+    {"case": "r7_root_completion", "condition": "ordinary_investigation", "repeat": 2},
+    {"case": "r7_root_completion", "condition": "scope_prompt_candidate", "repeat": 2},
+    {"case": "synthetic_root_complete", "condition": "ordinary_investigation", "repeat": 1},
+    {"case": "synthetic_root_complete", "condition": "scope_prompt_candidate", "repeat": 1},
+    {"case": "synthetic_root_complete", "condition": "scope_prompt_candidate", "repeat": 2},
+    {"case": "synthetic_root_complete", "condition": "ordinary_investigation", "repeat": 2}
+  ]
+}
