@@ -140,6 +140,7 @@ def _execute_selected_action(*, response, workspace: MonitorWorkspace,
 
 
 def run_investigation_candidate(*, candidate: str, selector_client, parent_client,
+                                run_key: str,
                                 seed_workspace: MonitorWorkspace, branch_private_root: Path,
                                 index: FrozenEvidenceIndex, initial_paths: tuple[str, ...],
                                 parent_history: list[dict[str, Any]], parent_system: str,
@@ -151,7 +152,7 @@ def run_investigation_candidate(*, candidate: str, selector_client, parent_clien
         raise ValueError("the first candidate protocol freezes the total budget at six calls")
     budget = CallBudget(total_calls)
     workspace = _clone_parent_workspace(
-        seed_workspace, Path(branch_private_root) / candidate)
+        seed_workspace, Path(branch_private_root) / run_key / candidate)
     allowed = {str(path).replace("\\", "/") for path in initial_paths}
     spec = selector_spec(
         candidate=candidate, parent_system=parent_system, original_task=original_task,

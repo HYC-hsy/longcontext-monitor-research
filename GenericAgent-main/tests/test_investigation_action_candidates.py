@@ -91,6 +91,7 @@ def test_a_and_b_execute_one_existing_action_then_restore_same_parent_state(tmp_
         results[candidate] = module.run_investigation_candidate(
             candidate=candidate, selector_client=selectors[candidate],
             parent_client=parents[candidate], seed_workspace=workspace,
+            run_key="same-r1",
             branch_private_root=tmp_path / "branches", index=index,
             initial_paths=("task/original_task.txt",), parent_history=history,
             parent_system="Original supervisor system",
@@ -124,6 +125,7 @@ def test_selector_rejects_multiple_actions_without_free_retry_and_parent_continu
     parent = Client([finish()])
     result = module.run_investigation_candidate(
         candidate="full_parent_action", selector_client=selector, parent_client=parent,
+        run_key="multiple-r1",
         seed_workspace=workspace, branch_private_root=tmp_path / "branches", index=index,
         initial_paths=("task/original_task.txt",), parent_history=[],
         parent_system="Original", original_task="Requirement", decision_scope="root completion",
@@ -165,6 +167,7 @@ def test_candidate_name_only_does_not_change_actual_parent_request(tmp_path):
         parent = Client([finish()])
         module.run_investigation_candidate(
             candidate=candidate, selector_client=selector, parent_client=parent,
+            run_key="invariance-r1",
             seed_workspace=workspace, branch_private_root=tmp_path / "isolated", index=index,
             initial_paths=("task/original_task.txt",), parent_history=history,
             parent_system="Original supervisor system", original_task="Requirement",

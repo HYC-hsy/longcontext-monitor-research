@@ -71,6 +71,7 @@ def main() -> None:
     parser.add_argument("--profile", required=True)
     parser.add_argument("--model-contract", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--only-sequence", type=int, action="append")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     if args.output.exists():
@@ -149,7 +150,12 @@ def main() -> None:
         requests[case] = restored_request(checkpoint["root"])
 
     results = []
+    selected_sequences = set(args.only_sequence or range(1, 10))
+    if not selected_sequences or not selected_sequences.issubset(set(range(1, 10))):
+        raise ValueError("--only-sequence must select values from 1 through 9")
     for sequence, item in enumerate(config["run_order"], start=1):
+        if sequence not in selected_sequences:
+            continue
         case, condition, repeat = item["case"], item["condition"], item["repeat"]
         index, workspace, branches, _, initial = prepared[case]
         request = requests[case]
@@ -199,6 +205,7 @@ def main() -> None:
                 expected_scope, question = case_question(case)
                 result = run_investigation_candidate(
                     candidate=condition, selector_client=selector, parent_client=parent,
+                    run_key=f"{case}-r{repeat}",
                     seed_workspace=workspace, branch_private_root=branches, index=index,
                     initial_paths=initial, parent_history=request["messages"],
                     parent_system=request["system"], original_task=original_task,
