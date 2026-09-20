@@ -81,24 +81,38 @@ def selector_spec(*, candidate: str, parent_system: str, original_task: str,
     }
 
 
+def _selection_result(*, research_record: dict[str, Any],
+                      model_visible: dict[str, Any]) -> dict[str, Any]:
+    """Keep experiment identity outside the observation returned to the parent model."""
+    return {"research_record": research_record, "model_visible": model_visible}
+
+
 def _execute_selected_action(*, response, workspace: MonitorWorkspace,
                              public_allowed: set[str], index: FrozenEvidenceIndex,
                              candidate: str) -> dict[str, Any]:
     calls = list(response.tool_calls or ())
     if len(calls) != 1:
-        return {
-            "status": "selection_error", "error": "selector must return exactly one tool call",
-            "tool_call_count": len(calls),
-        }
+        return _selection_result(
+            research_record={"candidate": candidate, "tool_call_count": len(calls)},
+            model_visible={
+                "status": "selection_error",
+                "error": "selector must return exactly one tool call",
+            })
     call = calls[0]
     if call.name not in SELECTOR_TOOL_NAMES:
-        return {"status": "selection_error", "error": "illegal selector tool", "tool": call.name}
+        return _selection_result(
+            research_record={"candidate": candidate},
+            model_visible={"status": "selection_error", "error": "illegal selector tool",
+                           "tool": call.name})
     try:
         arguments = json.loads(call.arguments or "{}")
         if not isinstance(arguments, dict):
             raise ValueError("tool arguments must be an object")
     except (json.JSONDecodeError, ValueError) as exc:
-        return {"status": "selection_error", "error": str(exc), "tool": call.name}
+        return _selection_result(
+            research_record={"candidate": candidate},
+            model_visible={"status": "selection_error", "error": str(exc),
+                           "tool": call.name})
     # Match the production parent loop: frozen-index query/read dispatch has priority,
     # while the explicit initial-path reader remains the fallback.
     outcome = index.dispatch(workspace, call.name, arguments)
@@ -107,16 +121,22 @@ def _execute_selected_action(*, response, workspace: MonitorWorkspace,
     if outcome is None:
         outcome = ToolOutcome({"status": "error", "error": "selected tool is unavailable"})
     data = outcome.data
-    return {
-        "status": "executed" if not (isinstance(data, dict) and data.get("status") == "error")
-        else "tool_error",
-        "caller": candidate,
-        "observed_at": datetime.now(timezone.utc).isoformat(),
-        "tool": call.name,
-        "arguments": arguments,
-        "query_scope": _objective_view(index),
-        "raw_receipt": data,
-    }
+    observed_at = datetime.now(timezone.utc).isoformat()
+    return _selection_result(
+        research_record={
+            "candidate": candidate,
+            "caller": candidate,
+            "observed_at": observed_at,
+            "selected_tool": call.name,
+        },
+        model_visible={
+            "status": "executed" if not (
+                isinstance(data, dict) and data.get("status") == "error") else "tool_error",
+            "tool": call.name,
+            "arguments": arguments,
+            "query_scope": _objective_view(index),
+            "raw_receipt": data,
+        })
 
 
 def run_investigation_candidate(*, candidate: str, selector_client, parent_client,
@@ -156,7 +176,7 @@ def run_investigation_candidate(*, candidate: str, selector_client, parent_clien
         acceptance_question + "\n\nA one-call investigation selector was run for this current "
         "decision. Its actual current observation follows. It is not a historical tool call, and "
         "executing a tool does not by itself establish semantic correctness:\n\n" +
-        json.dumps(observation, ensure_ascii=False, indent=2) +
+        json.dumps(observation["model_visible"], ensure_ascii=False, indent=2) +
         f"\n\nProtocol budget: {budget.remaining} logical calls remain for investigation and "
         "the final parent decision."
     )

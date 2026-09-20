@@ -99,8 +99,8 @@ def test_a_and_b_execute_one_existing_action_then_restore_same_parent_state(tmp_
         )
     assert results["full_parent_action"]["calls"] == 2
     assert results["requirement_side_action"]["calls"] == 2
-    assert results["full_parent_action"]["selection_observation"]["status"] == "executed"
-    assert results["requirement_side_action"]["selection_observation"]["status"] == "executed"
+    assert results["full_parent_action"]["selection_observation"]["model_visible"]["status"] == "executed"
+    assert results["requirement_side_action"]["selection_observation"]["model_visible"]["status"] == "executed"
     assert selectors["full_parent_action"].calls[0]["history"] == history
     assert selectors["requirement_side_action"].calls[0]["history"] == []
     assert parents["full_parent_action"].calls[0]["history"] == history
@@ -108,6 +108,8 @@ def test_a_and_b_execute_one_existing_action_then_restore_same_parent_state(tmp_
     parent_visible = json.dumps(
         parents["full_parent_action"].calls[0]["messages"], ensure_ascii=False)
     assert "current observation" in parent_visible
+    assert "full_parent_action" not in parent_visible
+    assert "caller" not in parent_visible
 
 
 def test_selector_rejects_multiple_actions_without_free_retry_and_parent_continues(tmp_path):
@@ -127,7 +129,7 @@ def test_selector_rejects_multiple_actions_without_free_retry_and_parent_continu
         parent_system="Original", original_task="Requirement", decision_scope="root completion",
         acceptance_question="Can the task complete?",
     )
-    assert result["selection_observation"]["status"] == "selection_error"
+    assert result["selection_observation"]["model_visible"]["status"] == "selection_error"
     assert result["calls"] == 2
     assert len(selector.calls) == 1
     assert len(parent.calls) == 1
@@ -147,3 +149,42 @@ def test_candidate_specs_contain_no_research_labels(tmp_path):
         assert "Sprintf" not in visible
         assert "expected_label" not in visible
         assert "run_id" not in visible
+
+
+def test_candidate_name_only_does_not_change_actual_parent_request(tmp_path):
+    module = load_module()
+    direct = sys.modules["direct_evidence_diagnostic"]
+    checkpoint, workspace = fixture(tmp_path)
+    index = direct.FrozenEvidenceIndex(checkpoint)
+    history = [{"role": "user", "content": "same complete parent state"}]
+    parent_requests = {}
+    for candidate in module.CANDIDATES:
+        selector = Client([
+            call("file_read", {"path": "task/workspace/api.go", "start": 1, "count": 20}, "s")
+        ])
+        parent = Client([finish()])
+        module.run_investigation_candidate(
+            candidate=candidate, selector_client=selector, parent_client=parent,
+            seed_workspace=workspace, branch_private_root=tmp_path / "isolated", index=index,
+            initial_paths=("task/original_task.txt",), parent_history=history,
+            parent_system="Original supervisor system", original_task="Requirement",
+            decision_scope="root completion", acceptance_question="Can the task complete?",
+        )
+        parent_requests[candidate] = parent.calls[0]
+    assert parent_requests["full_parent_action"] == parent_requests["requirement_side_action"]
+
+
+def test_screen_manifest_freezes_nine_records_and_six_call_budget():
+    config = json.loads((ROOT / "method_discovery/runs/dual_opus_20260919/"
+                         "r11_investigation_action_screen_config.json").read_text(
+                             encoding="utf-8"))
+    triples = [(item["case"], item["condition"], item["repeat"])
+               for item in config["run_order"]]
+    assert len(triples) == len(set(triples)) == 9
+    assert config["conditions"] == [
+        "ordinary", "full_parent_action", "requirement_side_action"]
+    assert config["protocol"]["total_calls_per_record"] == 6
+    assert config["protocol"]["ordinary_calls"] == 6
+    assert config["protocol"]["selector_calls"] == 1
+    assert config["protocol"]["selected_parent_calls"] == 5
+    assert config["protocol"]["independent_c"] is False

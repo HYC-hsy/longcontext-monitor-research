@@ -1,0 +1,53 @@
+{
+  "schema": "investigation-action-screen/v1",
+  "created": "2026-09-20",
+  "baseline_commit": "ae0cde9",
+  "protocol": {
+    "id": "investigation-action-screen-v1",
+    "total_calls_per_record": 6,
+    "ordinary_calls": 6,
+    "selector_calls": 1,
+    "selected_parent_calls": 5,
+    "independent_c": false,
+    "scope_prompt": false,
+    "scoped_interface": false
+  },
+  "cases": {
+    "r7_root_completion": {
+      "checkpoint": "repaired",
+      "repeats": 2,
+      "initial_paths": [
+        "task/original_task.txt",
+        "task/public_events.jsonl",
+        "task/research_derived_local_repair.json",
+        "task/workspace/IMPLEMENTATION_SUMMARY.md",
+        "task/workspace/data/validation/all.go",
+        "task/workspace/data/validation/all_test.go"
+      ]
+    },
+    "synthetic_root_complete": {
+      "checkpoint": "synthetic",
+      "repeats": 1,
+      "initial_paths": [
+        "task/original_task.txt",
+        "task/public_events.jsonl",
+        "task/public_check.json",
+        "task/workspace/go.mod",
+        "task/workspace/counter.go",
+        "task/workspace/counter_test.go"
+      ]
+    }
+  },
+  "conditions": ["ordinary", "full_parent_action", "requirement_side_action"],
+  "run_order": [
+    {"case": "r7_root_completion", "condition": "ordinary", "repeat": 1},
+    {"case": "r7_root_completion", "condition": "full_parent_action", "repeat": 1},
+    {"case": "r7_root_completion", "condition": "requirement_side_action", "repeat": 1},
+    {"case": "r7_root_completion", "condition": "requirement_side_action", "repeat": 2},
+    {"case": "r7_root_completion", "condition": "full_parent_action", "repeat": 2},
+    {"case": "r7_root_completion", "condition": "ordinary", "repeat": 2},
+    {"case": "synthetic_root_complete", "condition": "ordinary", "repeat": 1},
+    {"case": "synthetic_root_complete", "condition": "full_parent_action", "repeat": 1},
+    {"case": "synthetic_root_complete", "condition": "requirement_side_action", "repeat": 1}
+  ]
+}
