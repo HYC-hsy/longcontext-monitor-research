@@ -1,0 +1,85 @@
+{
+  "audit": "r10-r12-parent-investigation-and-budget-v1",
+  "baseline": "241c6ed",
+  "model_calls": 0,
+  "scope": "existing frozen R10-R12 traces only",
+  "counterexample_discovery_records": [
+    {
+      "id": "r10-neutral-local-support-r1",
+      "source": "method_discovery/runs/r10_neutral_calibration/result/records/01-r7_local_support_visible-r1/audit.jsonl",
+      "selector_calls": 0,
+      "total_calls": 6,
+      "first_independent_counterexample_call": 2,
+      "first_counterexample": "theme/json.go implementation conflicts with the JSON requirement",
+      "calls_before_counterexample": 1,
+      "finish_call": 6,
+      "sprintf_observation_call": 5,
+      "novel_evidence_calls": [2, 3, 4, 5],
+      "non_discriminating_or_repeated_calls": [1],
+      "tools_used": ["file_read", "text_search", "finish_parent_decision"],
+      "new_tool_schema_required": false,
+      "terminal_opportunity_preserved": true,
+      "notes": "Call 1 read recent public claims. Calls 2-3 read JSON implementation, call 4 reread the authoritative requirement, call 5 searched for the missing reverse Set implementation, and call 6 rejected completion."
+    },
+    {
+      "id": "r11-b-r7-r2",
+      "source": "method_discovery/runs/r11_investigation_action_screen/recovery_04_05/records/04-r7_root_completion-requirement_side_action-r2/audit.jsonl",
+      "selector_calls": 1,
+      "total_calls": 6,
+      "first_independent_counterexample_global_call": 4,
+      "first_independent_counterexample_parent_call": 3,
+      "first_counterexample": "FromJSON definitions have extra base parameters",
+      "calls_before_counterexample": 3,
+      "finish_global_call": 6,
+      "novel_evidence_global_calls": [4, 5],
+      "non_discriminating_or_repeated_global_calls": [1, 2, 3],
+      "tools_used_by_parent": ["file_read", "text_search", "finish_parent_decision"],
+      "new_tool_schema_required_for_counterexample": false,
+      "terminal_opportunity_preserved": true,
+      "notes": "The selector searched repaired AppMetadata. Parent calls then read the completion claim and repeated NewAllStrings before independently searching FromJSON, rereading the requirement, and finishing."
+    },
+    {
+      "id": "r12-g-r7-r2",
+      "source": "method_discovery/runs/r12_discriminating_selector_screen/result/records/04-r7_root_completion-counterfactual_observation-r2/audit.jsonl",
+      "selector_calls": 1,
+      "selector_status": "protocol_failure_no_evidence",
+      "total_calls": 6,
+      "first_independent_counterexample_global_call": 5,
+      "first_independent_counterexample_parent_call": 4,
+      "first_counterexample": "FromJSON definitions have extra base parameters",
+      "calls_before_counterexample": 4,
+      "finish_call": null,
+      "remaining_calls_after_counterexample_receipt": 1,
+      "last_call_action": "file_read task/workspace/driver/desktop/app.go",
+      "novel_evidence_global_calls": [5, 6],
+      "non_discriminating_or_repeated_global_calls": [1, 2, 3, 4],
+      "tools_used_by_parent": ["file_read", "text_search"],
+      "new_tool_schema_required_for_counterexample": false,
+      "terminal_opportunity_preserved": false,
+      "budget_counterfactual": "A terminal reserve would have guaranteed a decision opportunity on global call 6. Removing the selector would arithmetically add one parent-call slot if the later sequence were unchanged, but the trace cannot establish that model behavior would remain unchanged."
+    }
+  ],
+  "directly_visible_counterexample_controls": {
+    "records": ["r10-json-visible-r1", "r10-json-visible-r2"],
+    "classification": "evidence consumption controls, not autonomous counterexample discovery",
+    "result": "both accurately rejected completion"
+  },
+  "correct_control_records": [
+    {"id":"r11-o-synthetic","calls":3,"selector_calls":0,"result":"correct approval","finish_call":3},
+    {"id":"r11-a-synthetic","calls":5,"selector_calls":1,"result":"incorrect unresolved","finish_global_call":5,"first_action":"workspace inventory"},
+    {"id":"r11-b-synthetic","calls":6,"selector_calls":1,"result":"incomplete","finish_call":null,"first_action":"workspace inventory"},
+    {"id":"r12-g-synthetic","calls":6,"selector_calls":1,"result":"incorrect unresolved","finish_global_call":6,"first_action":"workspace inventory unable to observe stated behavior"},
+    {"id":"r12-e-synthetic","calls":6,"selector_calls":1,"result":"incorrect unresolved","finish_global_call":6,"first_action":"workspace inventory weaker than premise"}
+  ],
+  "budget_mechanics": {
+    "remaining_budget_is_model_visible": true,
+    "evidence": "tool receipts include global_calls_remaining, stage_calls_remaining, and required_ending_tool",
+    "r12_g_r2_receipt_after_json": {"global_calls_remaining":1,"required_ending_tool":"finish_parent_decision"},
+    "finish_competes_with_investigation": true,
+    "reason": "every provider complete() consumes one logical call; a tool result requires a later model call to consume it and submit finish_parent_decision",
+    "engineering_terminal_reserve_possible": true,
+    "semantic_decision_still_model_owned": true
+  },
+  "candidate_priority": ["H1_terminal_budget_reserve", "H3_evidence_type_active_view", "H4_evidence_linked_tool_affordance", "H2_in_band_decision_relevant_investigation"],
+  "closed": ["F_coverage_gap_frontier", "C_source_dependency", "D_behavior_probe", "G_counterfactual_selector", "E_decision_frontier_selector"]
+}

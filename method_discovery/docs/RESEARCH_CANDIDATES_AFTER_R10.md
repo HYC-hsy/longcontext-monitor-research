@@ -80,6 +80,17 @@ R10 V1 的直接 JSON 证据条件 2/2 拒绝、局部支持条件 1/2 拒绝、
 
 R12 预注册比较结果为：O 在错误根状态 0/2、正确控制 1/1；G 为 0/2、0/1；E 为 0/2、0/1。G/E 都没有改善错误状态，并明显拖坏正确控制。当前停止结构化 selector 路线，不继续增加字段；F/C/D仍关闭。完整逐记录审计见 `R12_DISCRIMINATING_SELECTOR_SCREEN_RESULT_20260921.md`。
 
+## 第三批：不增加模型调用的机制转向（仅设计）
+
+R10--R12 对照审计见 `R12_PARENT_INVESTIGATION_AND_BUDGET_AUDIT_20260921.md`。父 Supervisor 曾使用原有 `file_read` / `text_search` 自主取得 JSON/Sprintf 反例；R12 G-r2 也在最后一个可用于取证的调用取得 JSON 证据，却把剩余唯一调用继续用于调查而没有裁决。因此下一批不再增加独立 selector，而在普通六次父循环内分别研究：
+
+1. **H1 Terminal Budget Reserve**：工程为最终父裁决保留最后一次调用；不增加调用，不替模型判断结论。
+2. **H3 Evidence-Type Active View**：按可确定的来源类型组织已有证据，不生成要求PASS表，不判断真实性。
+3. **H4 Evidence-Linked Tool Affordance**：在现有 read/list/search 上可选携带当前核验对象，并让回执明确操作实际支持的证据类型与范围；不增加wrapper或调用。
+4. **H2 In-band Decision-Relevant Investigation**：在现有父循环和私有状态中维护一个可修订的当前决策前提；不设独立选题阶段或最终结构化裁决表。
+
+当前研究侧优先级为 `H1 > H3 > H4 > H2`。四者均未实现、未调用模型；应独立与普通O比较，不先组合。H1优先是因为它直接解释已观察到的闭环损失、工程确定性高且对正确控制侵扰最小；H2最后是因为其状态协议最容易重新制造R9式提示效应或G/E式协议摩擦。F/C/D继续关闭。
+
 ### theoretical_inspiration（设计依据，不是效果证明）
 
 能观测性/观测设计、新息、主动诊断/实验设计、Value of Computation 与真值/理由维护分别帮助描述“能否区分状态、是否只是重复、有限预算如何查、查询能否改变决定、支持来源是否被混同”。当前 Agent 系统不满足经典理论的数学前提，不继承其最优性、稳定性或可观测性保证。
