@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from monitor_agent_core.workspace import MonitorWorkspace
 
@@ -25,6 +26,29 @@ SUPPLEMENTAL_NEUTRAL_INSTRUCTION = (
     "into the historical timeline."
 )
 
+VISIBLE_OBSERVATION_FIELDS = (
+    "path", "file_sha256", "start", "lines", "total_lines", "content",
+)
+
+
+def visible_supplement(observations: list[Mapping[str, Any]]) -> dict[str, Any]:
+    """Project research records into the only supplemental fields visible to the model.
+
+    This is deliberately an allow-list rather than a deny-list.  Condition names, run ids,
+    expected labels, scoring metadata and source mappings remain research-side even when the
+    caller stores them beside the observations.
+    """
+    projected = []
+    for index, observation in enumerate(observations):
+        missing = [field for field in VISIBLE_OBSERVATION_FIELDS if field not in observation]
+        if missing:
+            raise ValueError(f"observation {index} is missing visible fields: {missing}")
+        projected.append({field: observation[field] for field in VISIBLE_OBSERVATION_FIELDS})
+    return {
+        "notice": SUPPLEMENTAL_NEUTRAL_INSTRUCTION,
+        "observations": projected,
+    }
+
 # Frozen verbatim from R8 scope_prompt_control.  Do not polish during replication.
 R8_SCOPE_GUIDANCE = (
     "At the final decision, distinguish the scope being decided, what the latest local update "
@@ -41,7 +65,7 @@ R8_NATURAL_ORGANIZATION = (
 def condition_spec(*, case: str, condition: str, parent_system: str,
                    initial_paths: tuple[str, ...], descriptor: dict[str, Any],
                    total_calls: int = 6,
-                   supplemental_observation: str | None = None) -> dict[str, Any]:
+                   supplemental_observation: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Construct the frozen matched input.  Only R8 guidance differs."""
     if case not in CASES or condition not in CONDITIONS:
         raise ValueError("unknown scope-prompt replication case or condition")
@@ -68,8 +92,8 @@ def condition_spec(*, case: str, condition: str, parent_system: str,
         system = common_system
         prompt = question + named_evidence
     if supplemental_observation is not None:
-        prompt += ("\n\n" + SUPPLEMENTAL_NEUTRAL_INSTRUCTION + "\n\n" +
-                   supplemental_observation)
+        visible = visible_supplement(list(supplemental_observation.get("observations", ())))
+        prompt += ("\n\n" + json.dumps(visible, ensure_ascii=False, indent=2))
     tools = [_read_tool(), file_list_tool(), text_search_tool(),
              _monitor_tool("file_write"), _monitor_tool("file_patch"), _finish_tool()]
     return {
@@ -86,7 +110,7 @@ def run_scope_prompt_condition(*, case: str, condition: str, run_key: str,
                                initial_paths: tuple[str, ...],
                                parent_history: list[dict[str, Any]], parent_system: str,
                                total_calls: int = 6,
-                               supplemental_observation: str | None = None,
+                               supplemental_observation: Mapping[str, Any] | None = None,
                                audit: Callable[..., None] | None = None) -> dict[str, Any]:
     expected_scope, _ = case_question(case)
     descriptor = index.descriptor()

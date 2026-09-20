@@ -23,11 +23,12 @@ from run_recovery_scope_diagnostic import validate_derivation  # noqa: E402
 from run_scoped_decision_diagnostic import prepare_case, usage  # noqa: E402
 from scope_prompt_replication import (  # noqa: E402
     CASES, CONDITIONS, PROTOCOL_ID, R8_NATURAL_ORGANIZATION, R8_SCOPE_GUIDANCE,
-    SUPPLEMENTAL_NEUTRAL_INSTRUCTION, condition_spec, run_scope_prompt_condition,
+    condition_spec, run_scope_prompt_condition, visible_supplement,
 )
 
 
-EVIDENCE_VISIBILITY_PROTOCOL = "visible-counterexample-consumption-v1"
+LEGACY_EVIDENCE_VISIBILITY_PROTOCOL = "visible-counterexample-consumption-v1"
+EVIDENCE_VISIBILITY_PROTOCOL = "visible-counterexample-consumption-neutral-v2"
 
 
 def append_json(path: Path, item: dict) -> None:
@@ -134,10 +135,12 @@ def _supplement(checkpoint: dict, material: str) -> dict:
     else:
         raise ValueError(f"unknown evidence-visibility material: {material}")
     return {
-        "material_condition": material,
-        "presentation": "research-side preselected frozen observations at current diagnostic turn",
-        "neutral_instruction": SUPPLEMENTAL_NEUTRAL_INSTRUCTION,
-        "excerpts": excerpts,
+        "research_record": {
+            "material_condition": material,
+            "presentation": "research-side preselected frozen observations at current diagnostic turn",
+            "source_mapping": [item["path"] for item in excerpts],
+        },
+        "model_visible": visible_supplement(excerpts),
     }
 
 
@@ -268,8 +271,7 @@ def _run_evidence_visibility(args, config: dict) -> None:
                 seed_workspace=workspace, branch_private_root=branches, index=index,
                 initial_paths=initial, parent_history=request["messages"],
                 parent_system=request["system"], total_calls=6,
-                supplemental_observation=json.dumps(
-                    supplements[material], ensure_ascii=False, indent=2), audit=audit)
+                supplemental_observation=supplements[material]["model_visible"], audit=audit)
         except Exception as exc:
             result = {"case": base_case, "condition": "ordinary_investigation",
                       "material": material, "repeat": repeat,
@@ -309,6 +311,10 @@ def main() -> None:
         raise FileExistsError(f"Use a fresh output directory: {args.output}")
     config = json.loads(args.config.read_text(encoding="utf-8"))
     protocol = config.get("protocol", {}).get("id")
+    if protocol == LEGACY_EVIDENCE_VISIBILITY_PROTOCOL:
+        raise ValueError(
+            "R10 V1 is frozen because research condition metadata was model-visible; "
+            "use the neutral-v2 calibration manifest instead")
     if protocol == EVIDENCE_VISIBILITY_PROTOCOL:
         _run_evidence_visibility(args, config)
         return

@@ -147,9 +147,12 @@ def test_supplement_is_current_neutral_input_not_r8_guidance():
         case="r7_root_completion", condition="ordinary_investigation",
         parent_system="Original", initial_paths=("task/original_task.txt",),
         descriptor={"scope": "task/workspace/", "indexed_files": 3}, total_calls=6,
-        supplemental_observation='{"path":"task/original_task.txt","content":"raw"}')
+        supplemental_observation={"observations": [{
+            "path": "task/original_task.txt", "file_sha256": "abc", "start": 1,
+            "lines": 1, "total_lines": 1, "content": "1: raw",
+        }]})
     assert module.SUPPLEMENTAL_NEUTRAL_INSTRUCTION in spec["prompt"]
-    assert '"content":"raw"' in spec["prompt"]
+    assert '"content": "1: raw"' in spec["prompt"]
     assert module.R8_SCOPE_GUIDANCE not in spec["prompt"]
     assert module.R8_SCOPE_GUIDANCE not in spec["system"]
     assert all(tool["function"]["name"] != "finish_scoped_decision" for tool in spec["tools"])
@@ -157,9 +160,112 @@ def test_supplement_is_current_neutral_input_not_r8_guidance():
 
 def test_visible_counterexample_config_has_six_fixed_runs():
     config = json.loads((ROOT / "method_discovery/runs/dual_opus_20260919/"
-                         "r10_visible_counterexample_config.json").read_text(encoding="utf-8"))
+                         "r10_neutral_calibration_config.json").read_text(encoding="utf-8"))
     pairs = [(item["material"], item["repeat"]) for item in config["run_order"]]
     assert len(pairs) == len(set(pairs)) == 6
     assert config["protocol"]["scope_prompt"] is False
     assert config["protocol"]["scoped_interface"] is False
     assert config["protocol"]["independent_c"] is False
+
+
+def _visibility_checkpoint(tmp_path):
+    root = tmp_path / "visibility-checkpoint"
+    (root / "task/workspace/theme").mkdir(parents=True)
+    task_lines = [f"requirement line {index}" for index in range(1, 90)]
+    task_lines[51:60] = [
+        "JSON theme requirement", "FromJSON(data string)", "FromJSONReader(io.Reader)",
+        "required schema", "required variants", "required colors", "required fonts",
+        "required icons", "required errors",
+    ]
+    (root / "task/original_task.txt").write_text("\n".join(task_lines) + "\n", encoding="utf-8")
+    code_lines = [f"// code line {index}" for index in range(1, 100)]
+    code_lines[68:82] = [
+        "func FromJSON(data []byte, base Theme) (Theme, error) {",
+        "  return nil, nil", "}", "func FromJSONReader(r io.Reader, base Theme) (Theme, error) {",
+        "  return nil, nil", "}", "// context", "// context", "// context", "// context",
+        "// context", "// context", "// context", "// context",
+    ]
+    (root / "task/workspace/theme/json.go").write_text(
+        "\n".join(code_lines) + "\n", encoding="utf-8")
+    files = {}
+    for path in root.rglob("*"):
+        if path.is_file():
+            files[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return {"root": root, "manifest": {"files": files}}
+
+
+def test_production_supplement_projection_hides_research_metadata_in_actual_request(tmp_path):
+    runner = _load("scope_prompt_replication_runner_projection",
+                   "method_discovery/run_scope_prompt_replication.py")
+    module = sys.modules["scope_prompt_replication"]
+    direct = sys.modules["direct_evidence_diagnostic"]
+    checkpoint = _visibility_checkpoint(tmp_path)
+    supplement = runner._supplement(checkpoint, "r7_json_counterexample_visible")
+    assert "material_condition" in supplement["research_record"]
+    assert "material_condition" not in supplement["model_visible"]
+
+    evidence = tmp_path / "evidence"
+    (evidence / "workspace/theme").mkdir(parents=True)
+    (evidence / "original_task.txt").write_text("requirements", encoding="utf-8")
+    (evidence / "workspace/theme/json.go").write_text("implementation", encoding="utf-8")
+    index_checkpoint = _checkpoint(tmp_path / "index")
+    index = direct.FrozenEvidenceIndex(index_checkpoint)
+    seed = tmp_path / "seed-projection"
+    seed.mkdir()
+    (seed / "working.md").write_text("S0", encoding="utf-8")
+    client = Client([_finish()])
+    module.run_scope_prompt_condition(
+        case="r7_root_completion", condition="ordinary_investigation", run_key="projection",
+        parent_client=client,
+        seed_workspace=MonitorWorkspace(index_checkpoint["root"] / "task", seed),
+        branch_private_root=tmp_path / "branches-projection", index=index,
+        initial_paths=("task/original_task.txt",), parent_history=[],
+        parent_system="Original supervisor system", total_calls=6,
+        supplemental_observation=supplement["model_visible"])
+    sent = json.dumps(client.calls[0], ensure_ascii=False, sort_keys=True)
+    assert "FromJSON(data string)" in sent
+    assert "r7_json_counterexample_visible" not in sent
+    assert "material_condition" not in sent
+    assert "expected_label" not in sent
+    assert "run_id" not in sent
+
+
+def test_research_labels_do_not_change_model_visible_request(tmp_path):
+    runner = _load("scope_prompt_replication_runner_label_invariance",
+                   "method_discovery/run_scope_prompt_replication.py")
+    module = sys.modules["scope_prompt_replication"]
+    checkpoint = _visibility_checkpoint(tmp_path)
+    supplement = runner._supplement(checkpoint, "r7_json_counterexample_visible")
+    common = dict(
+        case="r7_root_completion", condition="ordinary_investigation",
+        parent_system="Original", initial_paths=("task/original_task.txt",),
+        descriptor={"scope": "task/workspace/", "indexed_files": 3}, total_calls=6,
+        supplemental_observation=supplement["model_visible"])
+    first = module.condition_spec(**common)
+    supplement["research_record"].update({
+        "material_condition": "renamed", "expected_label": "different", "run_id": "other"})
+    second = module.condition_spec(**common)
+    assert first == second
+
+
+def test_changing_raw_observation_changes_visible_request_and_keeps_provenance():
+    module = _load("scope_prompt_replication_observation_change",
+                   "method_discovery/scope_prompt_replication.py")
+    base = {
+        "path": "task/workspace/theme/json.go", "file_sha256": "sha-v1",
+        "start": 70, "lines": 2, "total_lines": 100,
+        "content": "70: first\n71: observation",
+    }
+    common = dict(
+        case="r7_root_completion", condition="ordinary_investigation",
+        parent_system="Original", initial_paths=("task/original_task.txt",),
+        descriptor={"scope": "task/workspace/", "indexed_files": 3}, total_calls=6)
+    first = module.condition_spec(
+        **common, supplemental_observation={"observations": [base]})
+    changed = dict(base, file_sha256="sha-v2", content="70: changed\n71: observation")
+    second = module.condition_spec(
+        **common, supplemental_observation={"observations": [changed]})
+    assert first["system"] == second["system"]
+    assert first["tools"] == second["tools"]
+    assert first["prompt"] != second["prompt"]
+    assert "sha-v1" in first["prompt"] and "sha-v2" in second["prompt"]
