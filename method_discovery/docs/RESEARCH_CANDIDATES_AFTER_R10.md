@@ -80,16 +80,16 @@ R10 V1 的直接 JSON 证据条件 2/2 拒绝、局部支持条件 1/2 拒绝、
 
 R12 预注册比较结果为：O 在错误根状态 0/2、正确控制 1/1；G 为 0/2、0/1；E 为 0/2、0/1。G/E 都没有改善错误状态，并明显拖坏正确控制。当前停止结构化 selector 路线，不继续增加字段；F/C/D仍关闭。完整逐记录审计见 `R12_DISCRIMINATING_SELECTOR_SCREEN_RESULT_20260921.md`。
 
-## 第三批：不增加模型调用的机制转向（仅设计）
+## 第三批：调查与闭环资源候选（仅设计）
 
-R10--R12 对照审计见 `R12_PARENT_INVESTIGATION_AND_BUDGET_AUDIT_20260921.md`。父 Supervisor 曾使用原有 `file_read` / `text_search` 自主取得 JSON/Sprintf 反例；R12 G-r2 也在最后一个可用于取证的调用取得 JSON 证据，却把剩余唯一调用继续用于调查而没有裁决。因此下一批不再增加独立 selector，而在普通六次父循环内分别研究：
+R10--R12 对照审计见 `R12_PARENT_INVESTIGATION_AND_BUDGET_AUDIT_20260921.md`。父 Supervisor 曾使用原有 `file_read` / `text_search` 自主取得 JSON/Sprintf 反例；R12 G-r2 也在接近预算边界时取得 JSON 证据，却把剩余唯一调用继续用于调查而没有裁决。R14 进一步限定：这只直接证明当前六次诊断丢失 closure opportunity，不能证明固定 reserve 会产生正确决定。下一批不再增加独立 selector，并把 investigation/retrieval 与 closure/resource 分开研究：
 
-1. **H1 Terminal Budget Reserve**：工程为最终父裁决保留最后一次调用；不增加调用，不替模型判断结论。
+1. **Resource-Aware Closure Control（原 H1 的上位候选）**：研究有限监督资源下怎样保留形成有效控制决定的机会。固定 terminal-call reserve 只是尚未实现的一个实例；另有 adaptive stopping/reserve 与 investigation/closure 分账。R14 已确认六次只是诊断 calibration、不是在线部署不变量，因此不再把候选写成“强制保留第六次”。
 2. **H3 Evidence-Type Active View**：按可确定的来源类型组织已有证据，不生成要求PASS表，不判断真实性。
 3. **H4 Evidence-Linked Tool Affordance**：在现有 read/list/search 上可选携带当前核验对象，并让回执明确操作实际支持的证据类型与范围；不增加wrapper或调用。
 4. **H2 In-band Decision-Relevant Investigation**：在现有父循环和私有状态中维护一个可修订的当前决策前提；不设独立选题阶段或最终结构化裁决表。
 
-R13 lineage 审计后，原 `H1 > H3 > H4 > H2` 只保留为 R12 时点的历史排序，不再作为当前实现顺序。四者仍均未实现、未调用模型；H1 的历史预算审计独立冻结。R13 显示 raw History/tool receipts 中来源、范围和版本大多仍可追溯，JSON/Sprintf 的主要失败是未选择或未消费已有直接证据，而不是缺少 provenance 数据；没有证据证明派生 claim 被最终判断当作多份独立支持。因此 H3 不晋级实现，P2/P3 推迟。只保留 P1 provenance tags 作为需另行确认的低成本 instrumentation/消融候选；它不能替代调查选择。F/C/D继续关闭。
+R13 lineage 审计后，原 `H1 > H3 > H4 > H2` 只保留为 R12 时点的历史排序，不再作为当前实现顺序。四者仍均未实现、未调用模型。R14 已冻结 H1 的历史预算审计，并把它改写为上位的 Resource-Aware Closure Control；没有选定任何实例。R13 显示 raw History/tool receipts 中来源、范围和版本大多仍可追溯，JSON/Sprintf 的主要失败是未选择或未消费已有直接证据，而不是缺少 provenance 数据；没有证据证明派生 claim 被最终判断当作多份独立支持。因此 H3 不晋级实现，P2/P3 推迟。只保留 P1 provenance tags 作为需另行确认的低成本 instrumentation/消融候选；它不能替代调查选择。F/C/D继续关闭。
 
 ### R13：轻量 provenance-aware epistemic state 审计
 
@@ -107,7 +107,7 @@ R13 lineage 审计后，原 `H1 > H3 > H4 > H2` 只保留为 R12 时点的历史
 2. **P2 Bounded evidence view**：`not justified`。它必然混入“哪些材料相关”的 retrieval policy，当前不能把收益归因于 representation。
 3. **P3 Minimal lineage state**：`do not implement`。没有 duplicate inflation 证据，且语义派生关系不能由 runtime 可靠自动生成。
 
-H1 与这些候选保持独立：H1 是 closure/control safeguard，P1--P3 是 epistemic representation；当前没有组合实验依据。
+Resource-Aware Closure Control 与这些候选保持独立：前者是 closure/resource control，P1--P3 是 epistemic representation；当前没有组合实验依据。R13 的 investigation/retrieval 主线也必须与 closure 分开：后者只能处理“已经或接近取得足够证据后怎样完成闭环”，不能解释为何没有读取 JSON/Sprintf 或为何重复 AppMetadata。详见 `R14_CLOSURE_BUDGET_SEMANTICS_AUDIT_20260921.md`。
 
 ### theoretical_inspiration（设计依据，不是效果证明）
 

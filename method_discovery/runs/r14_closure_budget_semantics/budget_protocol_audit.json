@@ -1,0 +1,168 @@
+{
+  "schema_version": "r14-budget-protocol-audit-v1",
+  "baseline_commit": "e3d98e4",
+  "date": "2026-09-21",
+  "model_api_calls": 0,
+  "experiments_run": 0,
+  "implementation_changes": 0,
+  "six_call_classification": {
+    "experimental_calibration": true,
+    "method_assumption": false,
+    "deployment_constraint": false,
+    "deployment_invariant": false,
+    "summary": "Six calls originated as a shared diagnostic ceiling after a four-request protocol-limited pilot; it is neither theoretically optimal nor the online default."
+  },
+  "history": [
+    {
+      "stage": "independent_verification_four_request_pilot",
+      "limit": 4,
+      "finding": "protocol_limited",
+      "reason": "D normally needed read, expectation commit, further read, and decision; the pilot was excluded.",
+      "source_refs": [
+        "method_discovery/docs/INDEPENDENT_VERIFICATION_PILOT_AUDIT_20260918.md:17",
+        "method_discovery/docs/INDEPENDENT_VERIFICATION_PILOT_AUDIT_20260918.md:64",
+        "method_discovery/docs/INDEPENDENT_VERIFICATION_CHECKPOINT_FREEZE_20260918.md:20"
+      ]
+    },
+    {
+      "stage": "independent_verification_b_c_d",
+      "limit": 6,
+      "purpose": ["experimental_calibration", "fair_comparison", "cost_containment"],
+      "source_refs": [
+        "method_discovery/docs/INDEPENDENT_VERIFICATION_PILOT_AUDIT_20260918.md:17",
+        "research_collaboration_private/method_discovery/artifacts/independent_verification_20260918/checkpoint_config.json"
+      ]
+    },
+    {
+      "stage": "decision_question_three_way",
+      "limit": 6,
+      "inherited_by": ["A_ordinary", "B_parent_direct", "C_isolated_probe"],
+      "source_refs": ["method_discovery/docs/DECISION_QUESTION_THREE_WAY_ACCEPTANCE_R4_20260919.md:15"]
+    },
+    {
+      "stage": "later_diagnostics",
+      "limit": 6,
+      "inherited_by": ["R7", "R8", "R9", "R10", "R11_O_A_B", "R12_O_G_E"],
+      "interpretation": "frozen comparison convention, not renewed theory or deployment evidence"
+    }
+  ],
+  "logical_call_semantics": {
+    "unit": "one high-level provider.complete invocation, including failed invocations before usage is returned",
+    "tool_execution_counts_as_logical_call": false,
+    "tool_receipt_consumed": "on the next provider.complete invocation",
+    "finish_requires_model_response": true,
+    "transport_retries_separate": true,
+    "private_file_tool_execution_separate": true,
+    "continuation_requests_in_call_budget": false,
+    "continuation_note": "Continuation and possible format repair call client._request directly and therefore consume real provider resources without increasing the diagnostic logical-call counter.",
+    "source_refs": [
+      "method_discovery/decision_question_diagnostic.py:58-70",
+      "method_discovery/decision_question_diagnostic.py:420-500",
+      "GenericAgent-main/monitor_agent_core/loop.py:14-152",
+      "GenericAgent-main/monitor_agent_core/provider.py:478-508",
+      "GenericAgent-main/monitor_agent_core/provider.py:614-670",
+      "GenericAgent-main/monitor_agent_core/agent.py:349-442"
+    ]
+  },
+  "protocols": {
+    "A_current": {
+      "investigation_and_closure_share_budget": true,
+      "sequence": ["model", "optional_tool", "receipt", "next_model", "decision"],
+      "risk": "a final tool receipt cannot affect the bounded episode without another model opportunity"
+    },
+    "B_fixed_terminal_reserve": {
+      "total_calls_increased": false,
+      "change": "last call is decision-only",
+      "tradeoff": "preserves closure opportunity but removes one possible investigation call"
+    },
+    "C_separate_accounting": {
+      "concept": "up to B investigation calls plus one closure opportunity",
+      "free_in_real_compute": false,
+      "fairness_requirement": "apply the same two-dimensional budget to every condition or match all total model compute"
+    }
+  },
+  "online_comparison": {
+    "diagnostic_default_calls": 6,
+    "online_default_review_turns": 20,
+    "online_has_six_call_invariant": false,
+    "online_root_decision_tool": "allow_complete",
+    "online_has_dedicated_finalization_stage": false,
+    "other_resources": [
+      "run deadline",
+      "completion waiting latency",
+      "provider connect/read timeouts",
+      "transport retries and recovery deadline",
+      "context/history limits and continuation",
+      "tokens and API cost",
+      "tool wall time",
+      "task blocking latency"
+    ],
+    "source_refs": [
+      "GenericAgent-main/monitor_agent_core/runtime.py:192-337",
+      "GenericAgent-main/monitor_agent_core/runtime.py:347-420",
+      "GenericAgent-main/monitor_agent_core/agent.py:617-710"
+    ]
+  },
+  "r12_g_r2": {
+    "facts": [
+      "global call 5 obtained the real FromJSON signature conflict",
+      "the receipt reported one logical call remaining and required finish_parent_decision",
+      "global call 6 read Desktop instead of submitting a decision",
+      "the bounded episode ended without a formal parent decision",
+      "a closure opportunity was lost under this diagnostic protocol"
+    ],
+    "unsupported_counterfactuals": [
+      "removing the selector would guarantee success",
+      "reserving the final call would guarantee a correct rejection",
+      "unlimited budget would necessarily solve the task",
+      "the last call would certainly finish if tools were disabled",
+      "the selector was the sole cause of failure"
+    ],
+    "source_ref": "method_discovery/docs/R12_PARENT_INVESTIGATION_AND_BUDGET_AUDIT_20260921.md"
+  },
+  "candidate": {
+    "name": "Resource-Aware Closure Control",
+    "status": "design_candidate_no_instance_selected",
+    "scope": "preserve resources needed to close a control decision after sufficient or nearly sufficient evidence is available",
+    "does_not_solve": [
+      "target selection",
+      "failure to retrieve JSON or Sprintf evidence",
+      "repeated investigation of repaired local issues"
+    ],
+    "instances": [
+      {
+        "id": "RACC-1",
+        "name": "fixed_terminal_call_reserve",
+        "adds_real_call": false,
+        "falsifier": "it blocks decisive late evidence without improving valid closure or worsens correct controls"
+      },
+      {
+        "id": "RACC-2",
+        "name": "adaptive_stopping_or_reserve",
+        "adds_real_call": false,
+        "falsifier": "general non-leaking stop signals cannot be produced or cause premature closure"
+      },
+      {
+        "id": "RACC-3",
+        "name": "separate_investigation_and_closure_accounting",
+        "adds_real_call": true,
+        "falsifier": "the extra closure opportunity adds cost without improving grounded decisions over a compute-matched baseline"
+      }
+    ]
+  },
+  "research_tracks": {
+    "investigation_retrieval_control": "primary current bottleneck from R13",
+    "closure_resource_control": "independent downstream candidate supported only by bounded-episode closure loss"
+  },
+  "recommended_resource_reporting": {
+    "diagnostic_hard_ceiling": "logical provider calls",
+    "co_primary": [
+      "all real provider requests and transport attempts",
+      "input output and cache tokens",
+      "dollar cost when available",
+      "supervisor wall-clock latency",
+      "task blocking latency"
+    ],
+    "secondary": ["tool operations", "tool wall time", "failure rate", "completion-boundary latency"]
+  }
+}
