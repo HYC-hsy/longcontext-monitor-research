@@ -6,6 +6,8 @@
 
 ### R10 后当前研究状态与协作边界（2026-09-20）
 
+- 2026-09-21 R7–R14 微观诊断阶段已收束，权威合成见 `method_discovery/docs/R7_R14_METHOD_DISCOVERY_SYNTHESIS_20260921.md`。当前唯一主机制设计是 Decision-Centered Epistemic Control v0：同一持续 Supervisor 只维护当前决定锚点、active concern 的修复/退出生命周期和少量带来源/范围/版本边界的当前 grounds，并在原工具循环中完成 observe/investigate/intervene/recovery/wait/complete。ordinary persistent Supervisor 是唯一比较对象；A/B/C/D/E/F/G/H/P/RACC 均转为历史诊断证据，不再逐个迭代。第一版不加入独立 selector/verifier、额外模型阶段、完整 checklist/TMS 或 closure reserve。下一步只有一次小型判别实验；通过后直接进入完整 method_dev 长程对照，不再新增 R15 式 checkpoint 微观审计。
+
 - 调查策略候选必须分别说明三个内部环节：选择哪个待核验目标、设计什么能区分相关状态的观察、如何分配有限控制预算；不得再把三者统称为 `tool selection`。R11 离线解剖见 `method_discovery/docs/R11_SELECTOR_FAILURE_ANATOMY_20260921.md`；G/E 首次真实筛选见 `method_discovery/docs/R12_DISCRIMINATING_SELECTOR_SCREEN_RESULT_20260921.md`。其中已知 JSON/Sprintf 缺陷只属于研究侧评价，不得进入候选输入。
 - A/B 首次真实筛选已经完成并冻结，见 `method_discovery/docs/R11_INVESTIGATION_ACTION_SCREEN_RESULT_20260921.md`。O 在 R7 错误整体状态 0/2、正确控制 1/1；A 为 0/2、0/1；B 为 1/2、0/1（正确控制预算未完成）。六次候选首动作均未直接取得能区分根完成的证据；B 唯一正确拒绝来自父模型后续另行搜索，不得归因于首动作或短视图。A/B 暂不晋级、不接入在线、不继续润色；C/D仍不开发。
 - R10 V1（`70536ba`）保留为带混杂的诊断记录：`material_condition` 曾随补充观察进入模型输入，故其结果反映原始观察与方向性条件标签共同作用，不能完全归因于证据内容。原结果、配置和哈希不得覆写。独立 `visible-counterexample-consumption-neutral-v2` 六份去标签校准已完成：JSON直接观察仍2/2正确拒绝、局部支持仍1/2、正确小型控制2/2批准；说明条件名不是本批JSON结果的必要条件，但仍不证明自主调查或在线增益。见 `method_discovery/docs/R10_NEUTRAL_CALIBRATION_RESULT_20260920.md`。

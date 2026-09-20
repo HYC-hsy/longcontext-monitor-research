@@ -2,6 +2,16 @@
 
 审计基线：`70536ba`。本文件是研究侧候选登记，不是模型输入，也不授权自动启动真实调用。
 
+## 2026-09-21 收束裁决：候选池停止扩张
+
+R7–R14 的方法发现诊断已由 `R7_R14_METHOD_DISCOVERY_SYNTHESIS_20260921.md` 合成为一个主机制：**Decision-Centered Epistemic Control v0**。当前只保留 ordinary persistent Supervisor 作为比较对象，不再让下文 A/B/C/D/E/F/G/H/P/RACC 继续并列竞争或逐个迭代。
+
+DCEC-v0 只包含三个最小功能：当前决定锚点、active concern 的修复/退出生命周期、以及带来源/范围/版本边界的当前决定依据；由同一个持续 Supervisor 在原工具循环中维护，不增加 selector/verifier Agent、独立模型阶段、完整 checklist 或 TMS。下文所有旧候选卡均为历史诊断与设计证据。
+
+Resource-Aware Closure Control 暂存为未来独立 closure/resource component，不并入 v0。只有完整长程运行再次稳定出现“决定性证据已取得但缺少闭环资源”，才重新立项；六次 diagnostic ceiling 不构成部署依据。
+
+下一步若获批准，只有一次小型判别实验：ordinary persistent Supervisor vs DCEC-v0，检查 concern 是否在修复后退出、未直接支持且与当前决定相关的问题是否进入调查、工具动作是否匹配目标，以及正确控制是否退化。通过后直接进入完整 method_dev 长程对照，不再新增 checkpoint 微观候选。
+
 ## 当前证据边界
 
 R10 V1 的直接 JSON 证据条件 2/2 拒绝、局部支持条件 1/2 拒绝、正确合成控制 2/2 批准，但方向性 `material_condition` 曾进入模型输入。因此先完成去标签校准，不能直接把 V1 当作证据内容的独立效果。
