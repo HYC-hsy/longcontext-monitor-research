@@ -1,0 +1,245 @@
+{
+  "schema": "r11-selector-failure-anatomy/v1",
+  "baseline_commit": "8ff6cb7",
+  "analysis_mode": "offline_no_model_calls",
+  "sources": {
+    "r7_request": {
+      "path": "method_discovery/runs/r7_recovery_scope/cp-local-repair/request.json",
+      "sha256": "08be3672de5153a6fca3591d73cbe0638cdae95a86c69b726e304a68315c4c8a",
+      "system_characters": 4967,
+      "history_messages": 95,
+      "history_content_characters": 181993
+    },
+    "r7_original_task": {
+      "path": "method_discovery/runs/r7_recovery_scope/cp-local-repair/task/original_task.txt",
+      "sha256": "cae5f11a98aa573cf93629b8fb0becc18f395c5bdad25e09b8927d06f0725080",
+      "characters": 14467
+    },
+    "synthetic_request": {
+      "path": "method_discovery/runs/r8_scoped_decision/cp-synthetic-complete/request.json",
+      "sha256": "2cdc32c312a387377b0ea42d8f5c9a53acd9ba64af632ca9723fcd1c287ae4f2",
+      "system_characters": 4967,
+      "history_messages": 1,
+      "history_content_characters": 94
+    },
+    "synthetic_original_task": {
+      "path": "method_discovery/runs/r8_scoped_decision/cp-synthetic-complete/task/original_task.txt",
+      "sha256": "e63859d06c931a58c033a1a70d95b09ef1d3d86a693e2bd1b9536348d315730e",
+      "characters": 414
+    },
+    "selector_implementation": "method_discovery/investigation_action_candidates.py",
+    "run_evaluation": "method_discovery/runs/r11_investigation_action_screen/evaluation.json",
+    "local_only_sources": ["per-record audit.jsonl", "provider History", "branch-private working state"]
+  },
+  "method_limit": "The selector emitted a tool call without a free-text rationale. Failure attribution uses its actual visible input, selected action and real receipt; it does not claim access to hidden reasoning.",
+  "visibility_profiles": {
+    "full_parent_action_r7": {
+      "visible": [
+        "the restored 95-message parent History",
+        "the stable Supervisor system plus the single-step selector role",
+        "the complete original task repeated in the current selector prompt",
+        "decision_scope=root_completion",
+        "frozen scope/version/indexed-file count",
+        "file_read, file_list and text_search schemas"
+      ],
+      "coverage_knowledge": "The History contains the AppMetadata diagnosis, correction, successful rereads and explicit recognition that Target 1 fixes completed. It also contains the original JSON and Sprintf requirements, but most later mentions of them are task-agent implementation/completion summaries rather than direct semantic checks.",
+      "salience": {
+        "AppMetadata_occurrences_in_history": 52,
+        "FromJSON_occurrences_in_history": 19,
+        "Sprintf_occurrences_in_history": 14,
+        "completion_occurrences_in_history": 54,
+        "last_history_message_with_AppMetadata": 87,
+        "last_history_message_with_FromJSON": 74,
+        "last_history_message_with_Sprintf": 74,
+        "last_history_message_with_completion_language": 93
+      }
+    },
+    "requirement_side_action_r7": {
+      "visible": [
+        "a new empty selector History",
+        "a selector-only system instruction",
+        "the complete original task in Target 1 through Target 7 order",
+        "decision_scope=root_completion",
+        "frozen scope/version/indexed-file count",
+        "file_read, file_list and text_search schemas"
+      ],
+      "not_visible": [
+        "task-agent completion summaries",
+        "the parent Supervisor's completion narrative",
+        "the parent History showing AppMetadata investigation and repair",
+        "a coverage map distinguishing direct observations from claims"
+      ],
+      "coverage_knowledge": "It could not know from its supplied view that AppMetadata had already been investigated and repaired. Repeating Target 1 is therefore a coverage/state representation failure in addition to selecting the wrong target for this decision."
+    },
+    "full_parent_action_synthetic": {
+      "visible": [
+        "one restored user message saying a completion proposal exists",
+        "the complete 414-character two-requirement task repeated in the selector prompt",
+        "decision_scope=root_completion",
+        "a frozen index stating that three files exist",
+        "file_read, file_list and text_search schemas"
+      ]
+    },
+    "requirement_side_action_synthetic": {
+      "visible": [
+        "an empty selector History",
+        "the complete 414-character two-requirement task",
+        "decision_scope=root_completion",
+        "a frozen index stating that three files exist",
+        "file_read, file_list and text_search schemas"
+      ]
+    }
+  },
+  "records": [
+    {
+      "sequence": 2,
+      "condition": "full_parent_action",
+      "case": "r7_root_completion",
+      "visibility_profile": "full_parent_action_r7",
+      "selected_action": {"tool": "file_read", "path": "task/public_events.jsonl", "tail": true, "count": 1},
+      "target_kind": "task_agent_completion_claim",
+      "new_observation": "The latest event repeats the task Agent's claim that all seven targets and tests are complete.",
+      "decision_discriminating": false,
+      "why_not_discriminating": "The system already marks Agent statements as provisional evidence. The same claim is compatible with both the actually defective and a correct workspace.",
+      "prior_coverage_knowability": "yes",
+      "coverage_interpretation": "The full History made the completion proposal and prior investigations available; no missing state prevented recognizing this as a repeated claim rather than an independent check.",
+      "failure_classes": ["target_selection_failure", "observation_design_failure"],
+      "control_allocation_failure": false
+    },
+    {
+      "sequence": 3,
+      "condition": "requirement_side_action",
+      "case": "r7_root_completion",
+      "visibility_profile": "requirement_side_action_r7",
+      "selected_action": {"tool": "text_search", "query": "type AppMetadata struct", "path": "task/workspace"},
+      "target_kind": "already_repaired_requirement",
+      "new_observation": "One exact symbol-existence match in app.go.",
+      "decision_discriminating": false,
+      "why_not_discriminating": "It neither checks all AppMetadata requirements nor bears on the still-unchecked JSON/Sprintf semantics; both a root-complete and root-incomplete workspace can contain this struct.",
+      "prior_coverage_knowability": "no",
+      "coverage_interpretation": "The short view intentionally removed the parent History and supplied no covered/uncovered frontier, so it could not know Target 1 had been repaired.",
+      "failure_classes": ["target_selection_failure", "observation_design_failure"],
+      "control_allocation_failure": false
+    },
+    {
+      "sequence": 4,
+      "condition": "requirement_side_action",
+      "case": "r7_root_completion",
+      "visibility_profile": "requirement_side_action_r7",
+      "selected_action": {"tool": "text_search", "query": "AppMetadata", "path": "task/workspace", "case_sensitive": true, "max_results": 50},
+      "target_kind": "already_repaired_requirement",
+      "new_observation": "Eighteen symbol and summary matches showing AppMetadata-related files and declarations.",
+      "decision_discriminating": false,
+      "why_not_discriminating": "The broad existence search adds coverage for the already repaired target but cannot distinguish root completion from a workspace with an independent JSON or Sprintf defect.",
+      "prior_coverage_knowability": "no",
+      "coverage_interpretation": "The short view had no repair/coverage state. The parent later found the JSON signature conflict through different searches; the selected action did not reveal it.",
+      "failure_classes": ["target_selection_failure", "observation_design_failure"],
+      "control_allocation_failure": false
+    },
+    {
+      "sequence": 5,
+      "condition": "full_parent_action",
+      "case": "r7_root_completion",
+      "visibility_profile": "full_parent_action_r7",
+      "selected_action": {"tool": "file_read", "path": "task/public_events.jsonl", "start": 87, "count": 1},
+      "target_kind": "task_agent_completion_claim",
+      "new_observation": "The same root-completion proposal and implementation summary read by sequence 2.",
+      "decision_discriminating": false,
+      "why_not_discriminating": "It is a task claim, not an observation that separates correct from superficially complete implementations.",
+      "prior_coverage_knowability": "yes",
+      "coverage_interpretation": "The full History and stable system supplied enough information to know that this statement was provisional and already present.",
+      "failure_classes": ["target_selection_failure", "observation_design_failure"],
+      "control_allocation_failure": false
+    },
+    {
+      "sequence": 8,
+      "condition": "full_parent_action",
+      "case": "synthetic_root_complete",
+      "visibility_profile": "full_parent_action_synthetic",
+      "selected_action": {"tool": "file_list", "path": "task/workspace", "recursive": true},
+      "target_kind": "workspace_inventory",
+      "new_observation": "The frozen workspace contains counter.go, counter_test.go and go.mod.",
+      "decision_discriminating": false,
+      "why_not_discriminating": "The same three-file inventory can contain correct, empty or subtly wrong implementations. The two explicit behaviors require content-level observations.",
+      "prior_coverage_knowability": "not_applicable",
+      "coverage_interpretation": "The task was concise and fully visible. The selector lacked file names before listing, but it already knew there were only three indexed files and was not required to state how inventory outcomes would affect completion.",
+      "failure_classes": ["observation_design_failure", "control_allocation_failure"],
+      "control_allocation_evidence": "O approved correctly in three calls. A spent the selector call, then ended incorrectly unresolved after four parent calls despite the original task being an allowed file."
+    },
+    {
+      "sequence": 9,
+      "condition": "requirement_side_action",
+      "case": "synthetic_root_complete",
+      "visibility_profile": "requirement_side_action_synthetic",
+      "selected_action": {"tool": "file_list", "path": "task/workspace", "recursive": true},
+      "target_kind": "workspace_inventory",
+      "new_observation": "The same three-file inventory as sequence 8.",
+      "decision_discriminating": false,
+      "why_not_discriminating": "Inventory does not test Clamp, IsEven or their unit tests and is compatible with both complete and incomplete states.",
+      "prior_coverage_knowability": "not_applicable",
+      "coverage_interpretation": "The complete two-requirement task was visible, but the one-shot action contract did not require a decision-changing premise or counterfactual outcomes.",
+      "failure_classes": ["observation_design_failure", "control_allocation_failure"],
+      "control_allocation_evidence": "The selector consumed one of six calls; the parent used all remaining five on inventory, file reads and searches and never submitted a decision."
+    }
+  ],
+  "why_json_and_sprintf_were_not_selected": {
+    "full_parent_action": [
+      "They were present in the original task and History, so this was not literal omission.",
+      "AppMetadata had much higher repetition and more recent direct investigation, while JSON/Sprintf were mostly present in task-agent implementation summaries; the input did not label that difference as already-covered versus claim-only.",
+      "The newest root-completion proposal was an easy, salient event target, and the selector prompt required an action but did not require a premise, novelty check or two outcomes that would separate correct from incorrect completion.",
+      "Low-level tools exposed many possible reads/searches without an intermediate decision frontier, so selecting the newest claim satisfied the syntax while providing no new semantic evidence."
+    ],
+    "requirement_side_action": [
+      "JSON and Sprintf were present as Targets 2 and 3; they were not hidden from the selector.",
+      "The short view removed the only evidence that Target 1 had already been repaired and supplied no coverage state, making the first, concrete AppMetadata symbols appear as legitimate unresolved targets.",
+      "The original task is ordered Target 1 through Target 7. AppMetadata offers a cheap exact-symbol search; JSON signatures and Sprintf reverse behavior require comparing requirement text with implementation semantics.",
+      "The action schema did not require the selector to justify information novelty or specify which positive and negative receipts would change root completion."
+    ]
+  },
+  "aggregate": {
+    "target_selection_failure_records": [2, 3, 4, 5],
+    "observation_design_failure_records": [2, 3, 4, 5, 8, 9],
+    "control_allocation_failure_records": [8, 9],
+    "decision_discriminating_first_actions": "0/6",
+    "known_repair_reselected_with_knowledge": "0/2 full-parent runs",
+    "known_repair_reselected_without_coverage_state": "2/2 requirement-side R7 runs"
+  },
+  "candidate_priority": ["E_decision_discriminating_frontier", "G_counterfactual_observation_selection", "F_coverage_gap_frontier"],
+  "candidate_cards": {
+    "E_decision_discriminating_frontier": {
+      "targets_failures": ["target_selection_failure", "observation_design_failure"],
+      "changed_internal_step": "One selector call must jointly expose a concrete decision-changing premise, two discriminating outcomes and one immediately executable existing read/list/search action.",
+      "main_difference_from_ordinary": "The first investigation action is bound to an explicit root-decision premise and outcome contrast instead of being an unconstrained low-level tool call.",
+      "not_prompt_only": "Use one auditable action-selection interface whose structured payload and executed receipt are preserved; engineering validates traceability and executes the nested existing tool, but does not judge semantic correctness.",
+      "not_old_question_stage": "Premise and action are produced in the same single call; there is no separate question round, child judge or multi-round handoff.",
+      "additional_model_calls": "One selector call within the same six-call total (1+5), matching R11 A/B.",
+      "minimal_experiment": "Compare O versus E on the same erroneous root state and correct control, with fixed 6 versus 1+5 budgets; score premise relevance, outcome discriminability, actual receipt, parent use and final decision.",
+      "direct_falsifier": "E again chooses repaired targets/claims/inventory, or its stated A/B outcomes would not change completion, or it harms the correct control without increasing valid defect discovery.",
+      "competing_explanations": ["benefit may come from extra structured deliberation rather than premise selection", "field burden may merely make the model more conservative", "one extra call may explain any change"]
+    },
+    "F_coverage_gap_frontier": {
+      "targets_failures": ["target_selection_failure", "coverage_state_representation_failure"],
+      "changed_internal_step": "Expose only a small frontier of root-relevant premises whose current support is claim/summary-only versus direct observation, including version/source, solely for choosing what to investigate next.",
+      "main_difference_from_ordinary": "The selector receives a bounded coverage frontier instead of either the entire undifferentiated History or no coverage state.",
+      "not_prompt_only": "The frontier is a persistent, versioned state artifact consumed by the selector and audited after selection; it is not a sentence asking the model to remember coverage.",
+      "not_old_question_stage": "No additional question dialogue is added. The selector still makes one action call; the frontier is existing state, not a new three-turn stage.",
+      "additional_model_calls": "No call beyond the one selector call if the same Supervisor maintains the frontier during ordinary state updates; token/state maintenance cost must still be reported.",
+      "minimal_experiment": "Hold the short-view selector and 1+5 budget fixed; compare no frontier versus a frontier produced before outcomes are known, on states containing both a repaired requirement and claim-only requirements.",
+      "direct_falsifier": "The selector continues to pick directly covered premises, the frontier omits the decisive weak premise, or apparent benefit disappears when frontier construction is blinded to known defects.",
+      "competing_explanations": ["frontier content may leak researcher-selected defects", "ordering rather than coverage labels may drive selection", "the state may become a disguised checklist or PASS table"]
+    },
+    "G_counterfactual_observation_selection": {
+      "targets_failures": ["observation_design_failure"],
+      "changed_internal_step": "Before executing its one action, the selector must state what receipt would be expected if the chosen requirement were correct and what different receipt would reveal an error.",
+      "main_difference_from_ordinary": "The action is selected for counterfactual separation, not merely relevance or information availability.",
+      "not_prompt_only": "Attach the two counterfactual outcomes to the executable action in one enforced, logged interface; reject structurally missing outcomes but leave their semantics to the model and research audit.",
+      "not_old_question_stage": "The counterfactual and tool call occur in one model response and one execution; no preliminary question conversation is introduced.",
+      "additional_model_calls": "One selector call within the existing 1+5 allocation; no extra judge.",
+      "minimal_experiment": "Use the same visible view and target opportunities as R11, comparing the old unconstrained action interface with G; measure whether claim reads/file lists disappear and whether receipts actually distinguish correct from incorrect states.",
+      "direct_falsifier": "The model supplies generic outcomes compatible with either state, keeps choosing completion claims/inventory, or improves rejection only by becoming uniformly uncertain.",
+      "competing_explanations": ["structured counterfactual text may consume attention without improving target selection", "better actions may result from longer reasoning rather than the counterfactual", "G cannot repair missing coverage state"]
+    }
+  },
+  "theoretical_boundary": "Observability, innovation, active diagnosis/experimental design, value of computation and truth-maintenance concepts structure the failure and inspire candidates. This Agent setting does not satisfy their classical mathematical assumptions, so no optimality, stability or observability guarantee is inherited.",
+  "next_minimal_experiment_recommendation": "After explicit user approval, screen E first against O under 6 versus 1+5 on frozen development states plus a correct control. Keep G as the observation-design ablation and F as the bounded-state candidate; do not combine them in the first test and do not encode known JSON/Sprintf locations in any input."
+}
