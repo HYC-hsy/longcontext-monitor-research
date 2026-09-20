@@ -45,7 +45,7 @@ R10 V1 的直接 JSON 证据条件 2/2 拒绝、局部支持条件 1/2 拒绝、
 
 失效解剖见 `R11_SELECTOR_FAILURE_ANATOMY_20260921.md`。后续候选必须分别说明：选择哪个目标、设计什么观察、怎样分配控制预算。
 
-## 第二批：由 R11 失效机制生成，尚未实现
+## 第二批：由 R11 失效机制生成，R12 已完成首次筛选
 
 ### E. Decision-Discriminating Frontier
 
@@ -56,6 +56,7 @@ R10 V1 的直接 JSON 证据条件 2/2 拒绝、局部支持条件 1/2 拒绝、
 - 最小对照：O 的 6 次普通调查 vs E 的 1+5；错误根状态与正确控制都必须保留。
 - 直接淘汰：仍选择已修目标、任务声明或库存，两个结果不能改变决定，或正确控制继续退化。
 - 竞争解释：结构化输出本身、额外推理或单纯保守化可能解释变化。
+- R12 结果：`screened out for current form`。R7 两次中 selector 分别直接调用旧 `code_run` / `file_read`，没有提交结构化 premise/outcomes/action；一次父调查仍错误批准，一次预算耗尽。正确控制虽成功提交 premise，却以 `file_list` 尝试验证函数签名、行为与测试，最终把完整任务判为未决。没有观察到 E 相对 G 或 O 的增益。
 
 ### F. Coverage-Gap Frontier
 
@@ -65,6 +66,7 @@ R10 V1 的直接 JSON 证据条件 2/2 拒绝、局部支持条件 1/2 拒绝、
 - 最小对照：同一短视图与 1+5 下，无 frontier vs 盲化生成的 frontier。
 - 直接淘汰：仍选择已直接覆盖前提、漏掉决定性薄弱点，或只有研究者注入已知缺陷才有效。
 - 竞争解释：顺序变化、泄漏或 disguised checklist 可能带来假收益。
+- 当前状态：保持关闭。R12 的 R7 selector 在形成目标之前即发生协议失败，不能证明它在知道 coverage 的情况下再次选择已覆盖目标；正确控制的库存式动作属于 observation design/control allocation 失败，也不足以触发 F。
 
 ### G. Counterfactual Observation Selection
 
@@ -74,8 +76,9 @@ R10 V1 的直接 JSON 证据条件 2/2 拒绝、局部支持条件 1/2 拒绝、
 - 最小对照：保持可见上下文不变，只比较旧动作接口与 counterfactual-bound action 接口。
 - 直接淘汰：输出泛化反事实后仍读 claim/list，或只增加未决而不增加有效证据。
 - 竞争解释：更长推理而非反事实结构可能解释收益；G 也无法单独修复 coverage 缺失。
+- R12 结果：`screened out for current form`。R7 两次 selector 都直接调用旧 `file_read` 而未提交反事实结构，父调查均耗尽；其中一次父调查随后找到真实 JSON 签名冲突，但没有剩余调用提交裁决，属于控制预算损失，不能归因于 G。正确控制中的反事实文字彼此不同，但实际 `file_list` 只能观察库存，不能观察其声称的签名与行为差异，最终错误保留未决。
 
-当前研究侧优先级：`E > G > F`。E 同时覆盖目标与观察、且仍为单调用；G 是较干净的观察设计消融；F 虽直接解释 B 的状态缺口，但工程和泄漏风险更高。三者均只完成设计，未经用户确认不得实现或调用模型。
+R12 预注册比较结果为：O 在错误根状态 0/2、正确控制 1/1；G 为 0/2、0/1；E 为 0/2、0/1。G/E 都没有改善错误状态，并明显拖坏正确控制。当前停止结构化 selector 路线，不继续增加字段；F/C/D仍关闭。完整逐记录审计见 `R12_DISCRIMINATING_SELECTOR_SCREEN_RESULT_20260921.md`。
 
 ### theoretical_inspiration（设计依据，不是效果证明）
 
