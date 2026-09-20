@@ -1,0 +1,125 @@
+{
+  "protocol": "visible-counterexample-consumption-neutral-v2",
+  "materials": {
+    "r7_local_support_visible": {
+      "research_record": {
+        "material_condition": "r7_local_support_visible",
+        "presentation": "research-side preselected frozen observations at current diagnostic turn",
+        "source_mapping": [
+          "task/original_task.txt",
+          "task/workspace/data/validation/all.go",
+          "task/research_derived_local_repair.json"
+        ]
+      },
+      "model_visible": {
+        "notice": "The following supplemental observations were selected from the current frozen state by the research-side diagnostic and are provided at this current turn. Judge whether overall completion is supported using the original task and existing materials. These observations do not presuppose that a defect exists. They are not prior tool calls and were not inserted into the historical timeline.",
+        "observations": [
+          {
+            "path": "task/original_task.txt",
+            "file_sha256": "cae5f11a98aa573cf93629b8fb0becc18f395c5bdad25e09b8927d06f0725080",
+            "start": 145,
+            "lines": 1,
+            "total_lines": 178,
+            "content": "145: 5. **`validation.NewAllStrings(validators ...fyne.StringValidator) fyne.StringValidator`** — Add a validator combinator in the `data/validation` package (`data/validation/all.go`). It returns a `StringValidator` that runs all provided validators in order and returns the first error encountered (or nil if all pass). This enables chaining multiple validators (e.g., time format validation and regexp validation together)."
+          },
+          {
+            "path": "task/workspace/data/validation/all.go",
+            "file_sha256": "66fb966d1724be3fd45ab14cf6cb344cace0a96bc87a69ea914e2ef45213f097",
+            "start": 1,
+            "lines": 18,
+            "total_lines": 18,
+            "content": "1: // Package validation provides validation for data inside widgets\n2: package validation\n3: \n4: import \"fyne.io/fyne/v2\"\n5: \n6: // NewAllStrings creates a validator that runs all provided validators in order.\n7: // It returns the first error encountered, or nil when every validator passes.\n8: func NewAllStrings(validators ...fyne.StringValidator) fyne.StringValidator {\n9: \treturn func(text string) error {\n10: \t\tfor _, validator := range validators {\n11: \t\t\tif err := validator(text); err != nil {\n12: \t\t\t\treturn err\n13: \t\t\t}\n14: \t\t}\n15: \n16: \t\treturn nil\n17: \t}\n18: }"
+          },
+          {
+            "path": "task/research_derived_local_repair.json",
+            "file_sha256": "48257457dae4576ab865116928af5c7cada38f03134aeaf5eb91b4bdb3638f21",
+            "start": 18,
+            "lines": 11,
+            "total_lines": 28,
+            "content": "18:     }\n19:   ],\n20:   \"limited_check\": {\n21:     \"command\": \"docker:znpt/roadmapbench-fyn-2.2.0-roadmap:latest go test ./data/validation (network=none)\",\n22:     \"exit_code\": 0,\n23:     \"stdout\": \"ok  \\tfyne.io/fyne/v2/data/validation\\t0.005s\",\n24:     \"stderr\": \"\",\n25:     \"supports\": \"NewAllStrings runs validators in order, returns the first error, and returns nil when all validators pass.\",\n26:     \"does_not_support\": \"Any requirement outside this local validation API.\"\n27:   }\n28: }"
+          }
+        ]
+      }
+    },
+    "r7_json_counterexample_visible": {
+      "research_record": {
+        "material_condition": "r7_json_counterexample_visible",
+        "presentation": "research-side preselected frozen observations at current diagnostic turn",
+        "source_mapping": [
+          "task/original_task.txt",
+          "task/workspace/theme/json.go"
+        ]
+      },
+      "model_visible": {
+        "notice": "The following supplemental observations were selected from the current frozen state by the research-side diagnostic and are provided at this current turn. Judge whether overall completion is supported using the original task and existing materials. These observations do not presuppose that a defect exists. They are not prior tool calls and were not inserted into the historical timeline.",
+        "observations": [
+          {
+            "path": "task/original_task.txt",
+            "file_sha256": "cae5f11a98aa573cf93629b8fb0becc18f395c5bdad25e09b8927d06f0725080",
+            "start": 52,
+            "lines": 9,
+            "total_lines": 178,
+            "content": "52: Theme customization currently requires writing Go code that implements the `Theme` interface. We plan to add the ability to define themes declaratively in JSON, where a JSON document specifies color overrides, size adjustments, font resources, and icon resources. Any values not present in the JSON fall back to the default theme.\n53: \n54: A typical usage would be: parse a JSON string with `theme.FromJSON(jsonStr)` to get a `Theme` value, then apply it via the settings system. Colors can be specified in hex (3, 4, 6, or 8 digit formats with optional `#` prefix), and variant-specific colors are supported through `\"Colors-dark\"` and `\"Colors-light\"` keys.\n55: \n56: ### Requirements\n57: \n58: 1. **`FromJSON(data string) (fyne.Theme, error)`** — Parse a JSON string and return a `Theme`. On parse error, return the default theme along with the error. Importable from the `theme` package.\n59: \n60: 2. **`FromJSONReader(r io.Reader) (fyne.Theme, error)`** — Same as `FromJSON` but reads from an `io.Reader`."
+          },
+          {
+            "path": "task/workspace/theme/json.go",
+            "file_sha256": "e92c5d7abf7cfcf51201312eb84b3b7e03e99009606f22275223da8211fb14b9",
+            "start": 69,
+            "lines": 14,
+            "total_lines": 130,
+            "content": "69: }\n70: \n71: // FromJSON creates a new theme from JSON data.\n72: // The base theme is used for any values not specified in the JSON.\n73: //\n74: // Since: 2.5\n75: func FromJSON(data string, base fyne.Theme) (fyne.Theme, error) {\n76: \tvar jt jsonTheme\n77: \terr := json.Unmarshal([]byte(data), &jt)\n78: \tif err != nil {\n79: \t\treturn nil, err\n80: \t}\n81: \n82: \ttheme := &JSONTheme{"
+          }
+        ]
+      }
+    },
+    "synthetic_complete_evidence_visible": {
+      "research_record": {
+        "material_condition": "synthetic_complete_evidence_visible",
+        "presentation": "research-side preselected frozen observations at current diagnostic turn",
+        "source_mapping": [
+          "task/original_task.txt",
+          "task/workspace/counter.go",
+          "task/workspace/counter_test.go",
+          "task/public_check.json"
+        ]
+      },
+      "model_visible": {
+        "notice": "The following supplemental observations were selected from the current frozen state by the research-side diagnostic and are provided at this current turn. Judge whether overall completion is supported using the original task and existing materials. These observations do not presuppose that a defect exists. They are not prior tool calls and were not inserted into the historical timeline.",
+        "observations": [
+          {
+            "path": "task/original_task.txt",
+            "file_sha256": "e63859d06c931a58c033a1a70d95b09ef1d3d86a693e2bd1b9536348d315730e",
+            "start": 1,
+            "lines": 10,
+            "total_lines": 10,
+            "content": "1: # Small Counter Utility\n2: \n3: Implement both requirements in package `counter`:\n4: \n5: 1. `Clamp(value, minimum, maximum int) int` returns `minimum` when value is below the range,\n6:    `maximum` when value is above the range, and value otherwise.\n7: 2. `IsEven(value int) bool` returns true exactly when value is divisible by two, including for\n8:    negative values and zero.\n9: \n10: Both functions must be covered by ordinary unit tests."
+          },
+          {
+            "path": "task/workspace/counter.go",
+            "file_sha256": "ebd721e5ee1ce2629b12d378a763ed2e7114c98025a927a2891d0bd9a156698f",
+            "start": 1,
+            "lines": 17,
+            "total_lines": 17,
+            "content": "1: package counter\n2: \n3: // Clamp restricts value to the inclusive range [minimum, maximum].\n4: func Clamp(value, minimum, maximum int) int {\n5: \tif value < minimum {\n6: \t\treturn minimum\n7: \t}\n8: \tif value > maximum {\n9: \t\treturn maximum\n10: \t}\n11: \treturn value\n12: }\n13: \n14: // IsEven reports whether value is divisible by two.\n15: func IsEven(value int) bool {\n16: \treturn value%2 == 0\n17: }"
+          },
+          {
+            "path": "task/workspace/counter_test.go",
+            "file_sha256": "208f783198ca850b745bb01e3793848e0c3d1de2a86435511143f2b4b8e16afb",
+            "start": 1,
+            "lines": 27,
+            "total_lines": 27,
+            "content": "1: package counter\n2: \n3: import \"testing\"\n4: \n5: func TestClamp(t *testing.T) {\n6: \ttests := []struct {\n7: \t\tvalue, minimum, maximum, want int\n8: \t}{\n9: \t\t{-2, 0, 10, 0},\n10: \t\t{5, 0, 10, 5},\n11: \t\t{12, 0, 10, 10},\n12: \t}\n13: \tfor _, test := range tests {\n14: \t\tif got := Clamp(test.value, test.minimum, test.maximum); got != test.want {\n15: \t\t\tt.Fatalf(\"Clamp(%d, %d, %d) = %d, want %d\", test.value, test.minimum,\n16: \t\t\t\ttest.maximum, got, test.want)\n17: \t\t}\n18: \t}\n19: }\n20: \n21: func TestIsEven(t *testing.T) {\n22: \tfor value, want := range map[int]bool{-3: false, -2: true, 0: true, 3: false, 4: true} {\n23: \t\tif got := IsEven(value); got != want {\n24: \t\t\tt.Fatalf(\"IsEven(%d) = %v, want %v\", value, got, want)\n25: \t\t}\n26: \t}\n27: }"
+          },
+          {
+            "path": "task/public_check.json",
+            "file_sha256": "708deb0bc21406ad7bdc8974b72a16811a032fcd1333ef4d206597fc225f5d14",
+            "start": 1,
+            "lines": 7,
+            "total_lines": 7,
+            "content": "1: {\n2:   \"command\": \"docker:znpt/roadmapbench-fyn-2.2.0-roadmap:latest go test ./... (network=none)\",\n3:   \"exit_code\": 0,\n4:   \"stdout\": \"ok  \\tcalibration.local/counter\\t0.002s\",\n5:   \"stderr\": \"\",\n6:   \"scope\": \"the two-function synthetic counter package only\"\n7: }"
+          }
+        ]
+      }
+    }
+  }
+}
