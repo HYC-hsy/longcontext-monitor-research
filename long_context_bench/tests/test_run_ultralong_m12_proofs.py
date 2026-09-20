@@ -33,7 +33,8 @@ def test_clean_launch_refuses_legacy_public_network(monkeypatch):
                                  'GA_MONITOR_ROOT_CAPTURE_REQUIRED',
                                  'GA_MODEL_CONTRACT_FILE',
                                  'GA_MONITOR_INDEPENDENT_C_PROFILE',
-                                 'GA_MONITOR_INDEPENDENT_C_CONFIG'])
+                                 'GA_MONITOR_INDEPENDENT_C_CONFIG',
+                                 'GA_MONITOR_DCEC', 'GA_MONITOR_DCEC_WORKING_CHARS'])
 def test_active_working_context_reaches_container_and_is_reset_between_conditions(flag):
     import ast
     tree = ast.parse((ROOT / 'adapters/harbor_ga_agent.py').read_text(encoding='utf-8'))

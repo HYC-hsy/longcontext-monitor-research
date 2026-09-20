@@ -385,6 +385,8 @@ def test_adapter_forwards_clean_monitor_environment(monkeypatch, tmp_path):
     monkeypatch.setenv("GA_MONITOR_FEEDBACK_FOCUS", "1")
     monkeypatch.setenv("GA_MONITOR_HANDOFF_VALIDATION", "1")
     monkeypatch.setenv("GA_MONITOR_ADVICE_REVISION", "1")
+    monkeypatch.setenv("GA_MONITOR_DCEC", "0")
+    monkeypatch.setenv("GA_MONITOR_DCEC_WORKING_CHARS", "4000")
     adapter = _load_adapter(monkeypatch)
     agent = adapter.M4GenericAgent(
         logs_dir=tmp_path, model_name="model-x", run_id="clean-monitor",
@@ -403,6 +405,8 @@ def test_adapter_forwards_clean_monitor_environment(monkeypatch, tmp_path):
     assert env["GA_MONITOR_HANDOFF_VALIDATION"] == "1"
     assert env["GA_MONITOR_ADVICE_REVISION"] == "1"
     assert env["GA_MONITOR_FEEDBACK_FOCUS"] == "1"
+    assert env["GA_MONITOR_DCEC"] == "0"
+    assert env["GA_MONITOR_DCEC_WORKING_CHARS"] == "4000"
     assert env["GA_MONITOR_CONFIG"] == "native_oai_cc_vibe_gpt56_sol_high"
     assert env["GA_MONITOR_ARTIFACT_DIR"] == "/logs/agent/monitor"
     assert "GA_M0_MONITOR_ENABLED" not in env

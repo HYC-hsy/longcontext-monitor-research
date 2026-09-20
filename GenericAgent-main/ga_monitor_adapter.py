@@ -60,6 +60,7 @@ class GenericAgentMonitorAdapter:
             ("GA_MONITOR_ROOT_DECISION_CONTRACT", "monitor_root_decision_contract"),
             ("GA_MONITOR_ROOT_SIMPLE_CHECK", "monitor_root_simple_check"),
             ("GA_MONITOR_TASK_MODEL", "monitor_task_model"),
+            ("GA_MONITOR_DCEC", "monitor_dcec"),
         ):
             value = os.environ.get(environment)
             if value is not None:
@@ -67,6 +68,14 @@ class GenericAgentMonitorAdapter:
                     raise ValueError(environment + " must be 0 or 1")
                 runtime_options["model_config"] = dict(runtime_options["model_config"],
                                                        **{setting: value == "1"})
+        dcec_chars = os.environ.get("GA_MONITOR_DCEC_WORKING_CHARS")
+        if dcec_chars is not None:
+            try:
+                dcec_chars = int(dcec_chars)
+            except ValueError as exc:
+                raise ValueError("GA_MONITOR_DCEC_WORKING_CHARS must be an integer") from exc
+            runtime_options["model_config"] = dict(
+                runtime_options["model_config"], monitor_dcec_working_chars=dcec_chars)
         original = Path(runtime_options['task_workspace']) / f'.monitor_original_task_{uuid.uuid4().hex}.txt'
         with original.open('x', encoding='utf-8') as stream:
             stream.write(runtime_options['public_task'])
@@ -79,6 +88,9 @@ class GenericAgentMonitorAdapter:
                 os.environ.get('GA_MONITOR_INDEPENDENT_C_TOTAL_REQUESTS', '6'))
             runtime_options['independent_probe_max_requests'] = int(
                 os.environ.get('GA_MONITOR_INDEPENDENT_C_MAX_REQUESTS', '3'))
+        if (runtime_options['model_config'].get('monitor_dcec')
+                and os.environ.get('GA_PMA_ENABLED', '0') != '0'):
+            raise ValueError('GA_MONITOR_DCEC cannot be stacked with GA_PMA_ENABLED')
         try:
             self.runtime = MonitorRuntime(**runtime_options)
         except Exception:

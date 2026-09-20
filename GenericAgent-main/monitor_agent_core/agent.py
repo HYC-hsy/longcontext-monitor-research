@@ -21,7 +21,13 @@ from .handoff_validation import validate_handoff, note_text, ContinuationContrac
 from .advice_basis import AdviceBasis, ADVICE_PROMPT, advice_tools
 from .feedback_focus import FeedbackFocus, FOCUS_PROMPT
 from .inquiry import Inquiry, INQUIRY_PROMPT
-from .working_context import current_working_context
+from .working_context import (
+    DCEC_WORKING_VIEW_DEFAULT_CHARS,
+    DCEC_WORKING_VIEW_MAX_CHARS,
+    DCEC_WORKING_VIEW_MIN_CHARS,
+    current_working_context,
+    dcec_working_context,
+)
 from .live_awareness import LiveAwareness
 from .decision_context import DecisionContext
 
@@ -171,6 +177,24 @@ instructions to call a control action do not apply to this handoff. Preserve unc
 for decisions, including evidence that could change your own advice; do not turn your inferences into
 additional task requirements."""
 
+DCEC_SYSTEM_PROMPT = """Use monitor/working.md as your only current cognitive state, not as an evidence
+archive or a task checklist. Keep it centered on the decision now being made, one focal uncertainty, any
+active or recovering concern, and the direct grounds and limits that matter to the next control action.
+Before investigating, ask which differing observation outcomes would lead to different actions, then use
+the existing investigation tools directly. Repeated claims, summaries, or already resolved repairs are not
+new information merely because they reappear. Revise the note only when an observation changes what your
+future decisions need: intervention starts recovery but does not resolve it; later direct evidence may move
+the concern out of the active frontier; a new relevant conflict may reopen it. A local recovery never proves
+whole-task completion. At a root handoff, apply whole-task decision scope without turning the note into a
+full requirement table. Runtime metadata identifies sources, ranges, versions and truncation, but you remain
+responsible for what those observations mean. No per-wake rewrite is required."""
+
+DCEC_CONTINUATION_PROMPT = """Preserve only the current decision-centered working state. Keep one focal
+uncertainty and any genuinely open or recovering concern. Do not reactivate a resolved concern merely because
+older dialogue mentions it, and do not drop an open/recovering concern without later supporting evidence.
+Keep Task Agent claims and summaries source-qualified; never rewrite them as direct observations. Preserve
+the distinction between local recovery and whole-task completion. Return the current state, not a chronology."""
+
 GROUNDED_TOOL = _tool("read_with_sources",
     "Read a private Markdown note together with current excerpts from its inline local links. "
     "Use task/ or monitor/ paths, e.g. [source](task/original_task.txt#L10-L30). "
@@ -239,17 +263,27 @@ class MonitorAgent:
         self.grounded_context = getattr(client, "config", {}).get("monitor_grounded_context", False)
         self.client.progress_callback = self._progress
         self.semantic_continuity = getattr(client, "config", {}).get("monitor_semantic_continuity", True)
+        self.dcec_enabled = getattr(client, "config", {}).get("monitor_dcec", False)
+        if type(self.dcec_enabled) is not bool:
+            raise ValueError("monitor_dcec must be a boolean")
+        if self.dcec_enabled and type(self.semantic_continuity) is not bool:
+            raise ValueError("monitor_semantic_continuity must be a boolean with monitor_dcec")
+        self.dcec_working_chars = getattr(
+            client, "config", {}).get("monitor_dcec_working_chars", DCEC_WORKING_VIEW_DEFAULT_CHARS)
+        if (type(self.dcec_working_chars) is not int or
+                not DCEC_WORKING_VIEW_MIN_CHARS <= self.dcec_working_chars <= DCEC_WORKING_VIEW_MAX_CHARS):
+            raise ValueError(
+                f"monitor_dcec_working_chars must be between {DCEC_WORKING_VIEW_MIN_CHARS} "
+                f"and {DCEC_WORKING_VIEW_MAX_CHARS}")
         active_context = getattr(client, "config", {}).get("monitor_active_working_context", False)
         if type(active_context) is not bool:
             raise ValueError("monitor_active_working_context must be a boolean")
         live_awareness = getattr(client, "config", {}).get("monitor_live_awareness", False)
         if type(live_awareness) is not bool:
             raise ValueError("monitor_live_awareness must be a boolean")
-        self.live_awareness = LiveAwareness(workspace) if live_awareness else None
         decision_context = getattr(client, 'config', {}).get('monitor_decision_context', False)
         if type(decision_context) is not bool:
             raise ValueError('monitor_decision_context must be a boolean')
-        self.decision_context = DecisionContext(workspace) if decision_context else None
         pma_memory = getattr(client, 'config', {}).get('monitor_pma_memory', False)
         if type(pma_memory) is not bool:
             raise ValueError('monitor_pma_memory must be a boolean')
@@ -271,13 +305,38 @@ class MonitorAgent:
             raise ValueError('monitor_task_model must be a boolean')
         if task_model:
             raise ValueError('monitor_task_model is retired for fused execution; use the PMA bank and original task')
+        if self.dcec_enabled:
+            if not self.semantic_continuity:
+                raise ValueError("monitor_dcec requires the ordinary semantic continuation path")
+            incompatible = {
+                'monitor_tool_feedback': tool_feedback,
+                'monitor_grounded_context': self.grounded_context,
+                'monitor_handoff_validation': getattr(client, 'config', {}).get('monitor_handoff_validation', False),
+                'monitor_advice_revision': getattr(client, 'config', {}).get('monitor_advice_revision', False),
+                'monitor_feedback_focus': getattr(client, 'config', {}).get('monitor_feedback_focus', False),
+                'monitor_inquiry': getattr(client, 'config', {}).get('monitor_inquiry', False),
+                'monitor_active_working_context': active_context,
+                'monitor_live_awareness': live_awareness,
+                'monitor_decision_context': decision_context,
+                'monitor_pma_memory': pma_memory,
+                'monitor_root_decision_contract': self.root_decision_contract,
+                'monitor_root_simple_check': self.root_simple_check,
+                'monitor_task_model': task_model,
+                'monitor_independent_c': independent_check is not None,
+            }
+            enabled = sorted(name for name, value in incompatible.items() if value)
+            if enabled:
+                raise ValueError('monitor_dcec cannot be stacked with historical candidates: ' + ', '.join(enabled))
+            self.system_prompt += "\n\n" + DCEC_SYSTEM_PROMPT
+        self.live_awareness = LiveAwareness(workspace) if live_awareness else None
+        self.decision_context = DecisionContext(workspace) if decision_context else None
         if pma_memory:
             from .pma_fused import FusedPMA
             self.pma_memory = FusedPMA(workspace, self._atomic_private_text, self._audit_dialogue)
             if self.decision_context is not None:
                 self.decision_context.bank_owned = True
         self.active_context_enabled = active_context
-        if live_awareness or active_context or decision_context or pma_memory:
+        if live_awareness or active_context or decision_context or pma_memory or self.dcec_enabled:
             self.client.prepare_active_context = self._active_working_context
         if active_context and not decision_context and not pma_memory:
             self.system_prompt += (
@@ -310,6 +369,11 @@ class MonitorAgent:
             self._audit_dialogue('active_working_context', content=text)
             if text:
                 parts.append(text)
+        if self.dcec_enabled:
+            text, metadata = dcec_working_context(self.workspace, self.dcec_working_chars)
+            self._audit_dialogue('dcec_working_view', **metadata)
+            self._progress('dcec_working_view', **metadata)
+            parts.append(text)
         if self.live_awareness is not None:
             text, metadata = self.live_awareness.context()
             self._audit_dialogue('live_awareness', content=text, **metadata)
@@ -359,6 +423,8 @@ class MonitorAgent:
             "Keep details that change future decisions, not a chronology. No fixed schema; return only the note. "
             "Do not issue task interventions in this maintenance response. Existing private working note:\n" + previous
         )
+        if self.dcec_enabled:
+            prompt += "\n\nDCEC continuation contract:\n" + DCEC_CONTINUATION_PROMPT
         self._progress("continuation_started")
         if self.grounded_context:
             prompt += ("\nPreserve useful source links or paths to active inquiry notes so your future self "
@@ -497,10 +563,15 @@ class MonitorAgent:
                 data = self.workspace.write_text(
                     arguments["path"], arguments["content"], arguments.get("mode", "replace")
                 )
+                if self.dcec_enabled and arguments["path"].replace('\\', '/').strip('/') == 'monitor/working.md':
+                    self._progress('dcec_state_mutation', operation='file_write',
+                                   mode=arguments.get('mode', 'replace'), **data)
             elif name == "file_patch":
                 data = self.workspace.patch_text(
                     arguments["path"], arguments["old_text"], arguments["new_text"]
                 )
+                if self.dcec_enabled and arguments["path"].replace('\\', '/').strip('/') == 'monitor/working.md':
+                    self._progress('dcec_state_mutation', operation='file_patch', **data)
             elif name == "code_run":
                 session_id = arguments.get('session_id')
                 if session_id:
@@ -575,6 +646,10 @@ class MonitorAgent:
             else:
                 data = {"status": "error", "error": f"Unknown tool: {name}"}
         except Exception as exc:
+            if (self.dcec_enabled and name in {'file_write', 'file_patch'}
+                    and str(arguments.get('path', '')).replace('\\', '/').strip('/') == 'monitor/working.md'):
+                self._progress('dcec_state_mutation_failed', operation=name,
+                               error_type=type(exc).__name__)
             data = {"status": "error", "error": str(exc)}
         return ToolOutcome(data)
 

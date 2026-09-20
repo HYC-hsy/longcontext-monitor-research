@@ -6,6 +6,8 @@
 
 ### R10 后当前研究状态与协作边界（2026-09-20）
 
+- 2026-09-21 DCEC-v0 最小工程实现已完成，权威实现报告见 `method_discovery/docs/DCEC_V0_ENGINEERING_IMPLEMENTATION_20260921.md`。唯一当前状态载体仍是 `monitor/working.md`；DCEC 只增加同一 persistent Supervisor 的有界 active view、decision/单一 focal concern/grounds 修订合同和确定性遥测，不新增模型阶段、selector/verifier、第二状态、完整 checklist 或 runtime 语义裁判。DCEC 开启时旧 inquiry/PMA/task-model/decision-context/grounded/feedback/independent-C 等候选组合必须 fail-fast；ordinary semantic continuation 保留并受专门回归约束。小型判别 manifest 已冻结为 `method_discovery/artifacts/dcec_v0_20260921/discriminating_manifest.json`，状态 `prepared_not_executed`；未经独立审计与启动确认不得调用模型或运行实验，工程测试不得表述为效果成立。
+
 - 2026-09-21 R7–R14 微观诊断阶段已收束，权威合成见 `method_discovery/docs/R7_R14_METHOD_DISCOVERY_SYNTHESIS_20260921.md`。当前唯一主机制设计是 Decision-Centered Epistemic Control v0：同一持续 Supervisor 只维护当前决定锚点、active concern 的修复/退出生命周期和少量带来源/范围/版本边界的当前 grounds，并在原工具循环中完成 observe/investigate/intervene/recovery/wait/complete。ordinary persistent Supervisor 是唯一比较对象；A/B/C/D/E/F/G/H/P/RACC 均转为历史诊断证据，不再逐个迭代。第一版不加入独立 selector/verifier、额外模型阶段、完整 checklist/TMS 或 closure reserve。下一步只有一次小型判别实验；通过后直接进入完整 method_dev 长程对照，不再新增 R15 式 checkpoint 微观审计。
 
 - 调查策略候选必须分别说明三个内部环节：选择哪个待核验目标、设计什么能区分相关状态的观察、如何分配有限控制预算；不得再把三者统称为 `tool selection`。R11 离线解剖见 `method_discovery/docs/R11_SELECTOR_FAILURE_ANATOMY_20260921.md`；G/E 首次真实筛选见 `method_discovery/docs/R12_DISCRIMINATING_SELECTOR_SCREEN_RESULT_20260921.md`。其中已知 JSON/Sprintf 缺陷只属于研究侧评价，不得进入候选输入。
