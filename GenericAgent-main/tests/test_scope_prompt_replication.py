@@ -139,3 +139,27 @@ def test_frozen_order_contains_twelve_unique_records():
                for item in config["run_order"]]
     assert len(triples) == len(set(triples)) == 12
     assert {item[2] for item in triples} == {1, 2}
+
+
+def test_supplement_is_current_neutral_input_not_r8_guidance():
+    module = _load("scope_prompt_replication_supplement", "method_discovery/scope_prompt_replication.py")
+    spec = module.condition_spec(
+        case="r7_root_completion", condition="ordinary_investigation",
+        parent_system="Original", initial_paths=("task/original_task.txt",),
+        descriptor={"scope": "task/workspace/", "indexed_files": 3}, total_calls=6,
+        supplemental_observation='{"path":"task/original_task.txt","content":"raw"}')
+    assert module.SUPPLEMENTAL_NEUTRAL_INSTRUCTION in spec["prompt"]
+    assert '"content":"raw"' in spec["prompt"]
+    assert module.R8_SCOPE_GUIDANCE not in spec["prompt"]
+    assert module.R8_SCOPE_GUIDANCE not in spec["system"]
+    assert all(tool["function"]["name"] != "finish_scoped_decision" for tool in spec["tools"])
+
+
+def test_visible_counterexample_config_has_six_fixed_runs():
+    config = json.loads((ROOT / "method_discovery/runs/dual_opus_20260919/"
+                         "r10_visible_counterexample_config.json").read_text(encoding="utf-8"))
+    pairs = [(item["material"], item["repeat"]) for item in config["run_order"]]
+    assert len(pairs) == len(set(pairs)) == 6
+    assert config["protocol"]["scope_prompt"] is False
+    assert config["protocol"]["scoped_interface"] is False
+    assert config["protocol"]["independent_c"] is False

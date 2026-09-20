@@ -23,8 +23,11 @@ from run_recovery_scope_diagnostic import validate_derivation  # noqa: E402
 from run_scoped_decision_diagnostic import prepare_case, usage  # noqa: E402
 from scope_prompt_replication import (  # noqa: E402
     CASES, CONDITIONS, PROTOCOL_ID, R8_NATURAL_ORGANIZATION, R8_SCOPE_GUIDANCE,
-    condition_spec, run_scope_prompt_condition,
+    SUPPLEMENTAL_NEUTRAL_INSTRUCTION, condition_spec, run_scope_prompt_condition,
 )
+
+
+EVIDENCE_VISIBILITY_PROTOCOL = "visible-counterexample-consumption-v1"
 
 
 def append_json(path: Path, item: dict) -> None:
@@ -89,6 +92,207 @@ def _difference_summary(config: dict, prepared: dict, requests: dict,
     }
 
 
+def _frozen_excerpt(checkpoint: dict, path: str, start: int, count: int) -> dict:
+    normalized = path.replace("\\", "/")
+    expected = checkpoint["manifest"]["files"].get(normalized)
+    if not expected:
+        raise ValueError(f"supplement source is not manifest-listed: {normalized}")
+    source = checkpoint["root"] / normalized
+    actual = hashlib.sha256(source.read_bytes()).hexdigest()
+    if actual != expected:
+        raise ValueError(f"supplement source hash mismatch: {normalized}")
+    lines = source.read_text(encoding="utf-8").splitlines()
+    if start < 1 or count < 1 or start > len(lines):
+        raise ValueError(f"invalid supplement range: {normalized}:{start}+{count}")
+    selected = lines[start - 1:start - 1 + count]
+    return {
+        "path": normalized, "file_sha256": actual, "start": start,
+        "lines": len(selected), "total_lines": len(lines),
+        "content": "\n".join(f"{start + index}: {line}" for index, line in enumerate(selected)),
+    }
+
+
+def _supplement(checkpoint: dict, material: str) -> dict:
+    if material == "r7_local_support_visible":
+        excerpts = [
+            _frozen_excerpt(checkpoint, "task/original_task.txt", 145, 1),
+            _frozen_excerpt(checkpoint, "task/workspace/data/validation/all.go", 1, 18),
+            _frozen_excerpt(checkpoint, "task/research_derived_local_repair.json", 18, 11),
+        ]
+    elif material == "r7_json_counterexample_visible":
+        excerpts = [
+            _frozen_excerpt(checkpoint, "task/original_task.txt", 52, 9),
+            _frozen_excerpt(checkpoint, "task/workspace/theme/json.go", 69, 14),
+        ]
+    elif material == "synthetic_complete_evidence_visible":
+        excerpts = [
+            _frozen_excerpt(checkpoint, "task/original_task.txt", 1, 10),
+            _frozen_excerpt(checkpoint, "task/workspace/counter.go", 1, 17),
+            _frozen_excerpt(checkpoint, "task/workspace/counter_test.go", 1, 27),
+            _frozen_excerpt(checkpoint, "task/public_check.json", 1, 20),
+        ]
+    else:
+        raise ValueError(f"unknown evidence-visibility material: {material}")
+    return {
+        "material_condition": material,
+        "presentation": "research-side preselected frozen observations at current diagnostic turn",
+        "neutral_instruction": SUPPLEMENTAL_NEUTRAL_INSTRUCTION,
+        "excerpts": excerpts,
+    }
+
+
+def _run_evidence_visibility(args, config: dict) -> None:
+    materials = config.get("materials") or {}
+    order = config.get("run_order") or []
+    expected_materials = {
+        "r7_local_support_visible", "r7_json_counterexample_visible",
+        "synthetic_complete_evidence_visible",
+    }
+    if set(materials) != expected_materials:
+        raise ValueError("evidence visibility materials changed")
+    expected_runs = {(material, repeat) for material in expected_materials for repeat in (1, 2)}
+    actual_runs = {(item.get("material"), item.get("repeat")) for item in order}
+    if len(order) != 6 or actual_runs != expected_runs:
+        raise ValueError("run_order must contain each material/repeat exactly once")
+
+    source = load_root_checkpoint(args.source_checkpoint)
+    repaired = load_root_checkpoint(args.repaired_checkpoint)
+    synthetic = load_root_checkpoint(args.synthetic_checkpoint)
+    derivation = validate_derivation(source, repaired)
+    checkpoints = {"repaired": repaired, "synthetic": synthetic}
+    provider = load_profile(args.profile, args.profile_file)
+    contract = validate_direct_profile_contract(
+        load_contract(args.model_contract), args.profile, provider)
+    for label, checkpoint in checkpoints.items():
+        if checkpoint["identity"].get("config_name") != args.profile:
+            raise ValueError(f"{label} checkpoint profile mismatch")
+        MonitorProviderClient(f"visible_evidence_restore::{label}", dict(provider)).restore_request_snapshot(
+            restored_request(checkpoint["root"]))
+
+    prepared, requests, supplements = {}, {}, {}
+    temp_context = tempfile.TemporaryDirectory(prefix="visible-evidence-preflight-")
+    try:
+        for material, item in materials.items():
+            checkpoint = checkpoints[item["checkpoint"]]
+            base_case = item["base_case"]
+            local_config = {"cases": {base_case: {"initial_paths": item["initial_paths"]}}}
+            prepared[material] = prepare_case(
+                base_case, local_config, checkpoint, Path(temp_context.name) / material)
+            requests[material] = restored_request(checkpoint["root"])
+            supplements[material] = _supplement(checkpoint, material)
+        first = requests["r7_local_support_visible"]
+        second = requests["r7_json_counterexample_visible"]
+        if _sha(first) != _sha(second):
+            raise ValueError("the two R7 materials do not share the same parent request")
+        first_item, second_item = (materials["r7_local_support_visible"],
+                                   materials["r7_json_counterexample_visible"])
+        if first_item["initial_paths"] != second_item["initial_paths"]:
+            raise ValueError("the two R7 materials do not share the same initial evidence access")
+        preflight = {
+            "status": "passed", "protocol": EVIDENCE_VISIBILITY_PROTOCOL,
+            "provider_requests_sent": 0,
+            "profile": args.profile, "resolved_model": contract["runtime"],
+            "shared": {
+                "condition": "ordinary_investigation",
+                "finish_tool": "finish_parent_decision", "logical_call_limit": 6,
+                "r7_parent_request_sha256": _sha(first),
+                "r7_parent_state_and_workspace_identical": True,
+                "neutral_instruction_identical": True,
+                "query_capability_unchanged": True,
+            },
+            "materials": supplements, "frozen_run_order": order,
+            "derivation": derivation,
+        }
+        if args.dry_run:
+            print(json.dumps(preflight, ensure_ascii=False, indent=2))
+            return
+    finally:
+        temp_context.cleanup()
+
+    args.output.mkdir(parents=True)
+    (args.output / "preflight.json").write_text(
+        json.dumps(preflight, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (args.output / "supplement_sources.json").write_text(json.dumps({
+        "protocol": EVIDENCE_VISIBILITY_PROTOCOL, "materials": supplements,
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (args.output / "resolved_model_config.json").write_text(json.dumps({
+        "profile": args.profile, "source": contract["source"],
+        "resolved": contract["runtime"], "fallback_allowed": False,
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    prepared, requests = {}, {}
+    for material, item in materials.items():
+        checkpoint = checkpoints[item["checkpoint"]]
+        base_case = item["base_case"]
+        local_config = {"cases": {base_case: {"initial_paths": item["initial_paths"]}}}
+        prepared[material] = prepare_case(
+            base_case, local_config, checkpoint, args.output / "materials" / material)
+        requests[material] = restored_request(checkpoint["root"])
+
+    results = []
+    for sequence, item in enumerate(order, start=1):
+        material, repeat = item["material"], item["repeat"]
+        definition = materials[material]
+        base_case = definition["base_case"]
+        index, workspace, branches, _, initial = prepared[material]
+        request = requests[material]
+        record_name = f"{sequence:02d}-{material}-r{repeat}"
+        record_root = args.output / "records" / record_name
+        record_root.mkdir(parents=True)
+        audit_path, transport_path = record_root / "audit.jsonl", record_root / "transport.jsonl"
+        client = MonitorProviderClient(f"visible_evidence::{record_name}", dict(provider))
+
+        def transport(event, **fields):
+            allowed_fields = {"request_id", "attempt", "started_at", "duration_seconds",
+                              "purpose", "transaction_id", "outcome", "error_type",
+                              "error_chain", "retry_delay_seconds", "status_code", "lines",
+                              "bytes_or_characters", "seconds", "next_batch", "reason",
+                              "source", "usage", "provider_message_id", "metadata"}
+            append_json(transport_path, {
+                "event": "transport_" + event, "record": record_name,
+                "recorded_at": datetime.now(timezone.utc).isoformat(),
+                **{key: value for key, value in fields.items() if key in allowed_fields},
+            })
+        client.progress_callback = transport
+
+        def audit(event, **fields):
+            append_json(audit_path, {
+                "event": event, "record": record_name,
+                "recorded_at": datetime.now(timezone.utc).isoformat(), **fields,
+            })
+
+        try:
+            result = run_scope_prompt_condition(
+                case=base_case, condition="ordinary_investigation",
+                run_key=f"{material}-repeat-{repeat}", parent_client=client,
+                seed_workspace=workspace, branch_private_root=branches, index=index,
+                initial_paths=initial, parent_history=request["messages"],
+                parent_system=request["system"], total_calls=6,
+                supplemental_observation=json.dumps(
+                    supplements[material], ensure_ascii=False, indent=2), audit=audit)
+        except Exception as exc:
+            result = {"case": base_case, "condition": "ordinary_investigation",
+                      "material": material, "repeat": repeat,
+                      "protocol": EVIDENCE_VISIBILITY_PROTOCOL, "status": "error",
+                      "error_type": type(exc).__name__, "error": str(exc)}
+            append_json(audit_path, {"event": "record_exception",
+                                     "error_type": type(exc).__name__, "error": str(exc)})
+        result["material_condition"] = material
+        result["protocol"] = EVIDENCE_VISIBILITY_PROTOCOL
+        record = {"sequence": sequence, "repeat": repeat, "material": material,
+                  "result": result, "usage": usage(client),
+                  "audit_log": f"records/{record_name}/audit.jsonl",
+                  "transport_log": f"records/{record_name}/transport.jsonl"}
+        (record_root / "result.json").write_text(
+            json.dumps(record, ensure_ascii=False, indent=2, default=str) + "\n",
+            encoding="utf-8")
+        results.append(record)
+        (args.output / "results.json").write_text(json.dumps({
+            "protocol": EVIDENCE_VISIBILITY_PROTOCOL, "items": results,
+        }, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+        print(f"{sequence:02d}/6 {material}/r{repeat}: {result.get('status')}", flush=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, required=True)
@@ -104,7 +308,11 @@ def main() -> None:
     if args.output.exists():
         raise FileExistsError(f"Use a fresh output directory: {args.output}")
     config = json.loads(args.config.read_text(encoding="utf-8"))
-    if config.get("protocol", {}).get("id") != PROTOCOL_ID:
+    protocol = config.get("protocol", {}).get("id")
+    if protocol == EVIDENCE_VISIBILITY_PROTOCOL:
+        _run_evidence_visibility(args, config)
+        return
+    if protocol != PROTOCOL_ID:
         raise ValueError("wrong replication protocol")
     if tuple(config.get("conditions", ())) != CONDITIONS:
         raise ValueError("condition order changed")

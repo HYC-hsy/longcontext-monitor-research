@@ -17,6 +17,13 @@ from scoped_decision_diagnostic import CASES, EvidenceRegistry, case_question
 
 PROTOCOL_ID = "scope-prompt-replication-v1"
 CONDITIONS = ("ordinary_investigation", "scope_prompt_candidate")
+SUPPLEMENTAL_NEUTRAL_INSTRUCTION = (
+    "The following supplemental observations were selected from the current frozen state by "
+    "the research-side diagnostic and are provided at this current turn. Judge whether overall "
+    "completion is supported using the original task and existing materials. These observations "
+    "do not presuppose that a defect exists. They are not prior tool calls and were not inserted "
+    "into the historical timeline."
+)
 
 # Frozen verbatim from R8 scope_prompt_control.  Do not polish during replication.
 R8_SCOPE_GUIDANCE = (
@@ -33,7 +40,8 @@ R8_NATURAL_ORGANIZATION = (
 
 def condition_spec(*, case: str, condition: str, parent_system: str,
                    initial_paths: tuple[str, ...], descriptor: dict[str, Any],
-                   total_calls: int = 6) -> dict[str, Any]:
+                   total_calls: int = 6,
+                   supplemental_observation: str | None = None) -> dict[str, Any]:
     """Construct the frozen matched input.  Only R8 guidance differs."""
     if case not in CASES or condition not in CONDITIONS:
         raise ValueError("unknown scope-prompt replication case or condition")
@@ -59,6 +67,9 @@ def condition_spec(*, case: str, condition: str, parent_system: str,
     else:
         system = common_system
         prompt = question + named_evidence
+    if supplemental_observation is not None:
+        prompt += ("\n\n" + SUPPLEMENTAL_NEUTRAL_INSTRUCTION + "\n\n" +
+                   supplemental_observation)
     tools = [_read_tool(), file_list_tool(), text_search_tool(),
              _monitor_tool("file_write"), _monitor_tool("file_patch"), _finish_tool()]
     return {
@@ -75,12 +86,14 @@ def run_scope_prompt_condition(*, case: str, condition: str, run_key: str,
                                initial_paths: tuple[str, ...],
                                parent_history: list[dict[str, Any]], parent_system: str,
                                total_calls: int = 6,
+                               supplemental_observation: str | None = None,
                                audit: Callable[..., None] | None = None) -> dict[str, Any]:
     expected_scope, _ = case_question(case)
     descriptor = index.descriptor()
     spec = condition_spec(
         case=case, condition=condition, parent_system=parent_system,
-        initial_paths=initial_paths, descriptor=descriptor, total_calls=total_calls)
+        initial_paths=initial_paths, descriptor=descriptor, total_calls=total_calls,
+        supplemental_observation=supplemental_observation)
     workspace = _clone_parent_workspace(
         seed_workspace, Path(branch_private_root) / run_key / condition)
     parent_client.restore_history(parent_history)
