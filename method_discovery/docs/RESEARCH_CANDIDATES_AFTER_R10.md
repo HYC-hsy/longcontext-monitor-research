@@ -89,7 +89,25 @@ R10--R12 对照审计见 `R12_PARENT_INVESTIGATION_AND_BUDGET_AUDIT_20260921.md`
 3. **H4 Evidence-Linked Tool Affordance**：在现有 read/list/search 上可选携带当前核验对象，并让回执明确操作实际支持的证据类型与范围；不增加wrapper或调用。
 4. **H2 In-band Decision-Relevant Investigation**：在现有父循环和私有状态中维护一个可修订的当前决策前提；不设独立选题阶段或最终结构化裁决表。
 
-当前研究侧优先级为 `H1 > H3 > H4 > H2`。四者均未实现、未调用模型；应独立与普通O比较，不先组合。H1优先是因为它直接解释已观察到的闭环损失、工程确定性高且对正确控制侵扰最小；H2最后是因为其状态协议最容易重新制造R9式提示效应或G/E式协议摩擦。F/C/D继续关闭。
+R13 lineage 审计后，原 `H1 > H3 > H4 > H2` 只保留为 R12 时点的历史排序，不再作为当前实现顺序。四者仍均未实现、未调用模型；H1 的历史预算审计独立冻结。R13 显示 raw History/tool receipts 中来源、范围和版本大多仍可追溯，JSON/Sprintf 的主要失败是未选择或未消费已有直接证据，而不是缺少 provenance 数据；没有证据证明派生 claim 被最终判断当作多份独立支持。因此 H3 不晋级实现，P2/P3 推迟。只保留 P1 provenance tags 作为需另行确认的低成本 instrumentation/消融候选；它不能替代调查选择。F/C/D继续关闭。
+
+### R13：轻量 provenance-aware epistemic state 审计
+
+完整审计见 `R13_EVIDENCE_LINEAGE_AND_PROVENANCE_AUDIT_20260921.md`，机器可读谱系见 `../runs/r13_evidence_lineage/evidence_lineage.json`。
+
+- **AppMetadata**：有完整的 direct inspection → intervention → repair → post-repair reads；但 `working.md` 没有随修复更新，R7--R12 检查到的副本 hash 全相同。重复关注更符合 stale private state 与显著性/控制失败。
+- **JSON**：task claim/compaction 会弱化来源限定；多数错误批准未读实现。一旦读取实际 API 并回看原要求，模型能识别冲突。主因是 retrieval/control，伴随派生表面的 source/scope loss。
+- **Sprintf**：原要求一直保留，任务 summary 甚至明确写 `Set() is no-op`，但仍很少进入调查。该反例不支持“缺少 provenance 才无法判断”，反而支持 target selection/consumption failure。
+- **duplicate inflation**：未证实。claim、summary、root claim 重复存在，但没有轨迹证明最终裁决将其当作相互独立的支持计权。
+- **version**：pre/post App 修复变化可由 runtime 确定；JSON/Sprintf 及 post-repair App 在 R7--R12 冻结材料中未变化。runtime 只能标 `version_changed_since_observation`，不能自动标 `semantically_stale`。
+
+当前表示候选状态：
+
+1. **P1 Provenance tags only**：`deferred instrumentation candidate`。只为当前已显示材料附确定性的 source/version/read-range 标签，0 新调用、不建 KB、不列 requirement checklist。只有另行批准并在等预算对照中减少无资格 claim 消费时才可晋级。
+2. **P2 Bounded evidence view**：`not justified`。它必然混入“哪些材料相关”的 retrieval policy，当前不能把收益归因于 representation。
+3. **P3 Minimal lineage state**：`do not implement`。没有 duplicate inflation 证据，且语义派生关系不能由 runtime 可靠自动生成。
+
+H1 与这些候选保持独立：H1 是 closure/control safeguard，P1--P3 是 epistemic representation；当前没有组合实验依据。
 
 ### theoretical_inspiration（设计依据，不是效果证明）
 
