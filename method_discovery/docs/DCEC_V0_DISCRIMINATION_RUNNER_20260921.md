@@ -13,8 +13,8 @@ preflight。
 python method_discovery/run_dcec_v0_discrimination.py
 ```
 
-默认命令只执行 dry-run/preflight，不建立真实 provider 连接。最终 launch preflight 输出位于
-`method_discovery/runs/dcec_v0_launch_preflight_r1_20260921/`。真实执行入口虽已接线，但在 manifest 仍为
+默认命令只执行 dry-run/preflight，不建立真实 provider 连接。最终 wall-deadline launch preflight 输出位于
+`method_discovery/runs/dcec_v0_final_preflight_wall_r1_20260921/`。真实执行入口虽已接线，但在 manifest 仍为
 `execution_authorized=false` 时会在创建 provider 前拒绝：
 
 ```powershell
@@ -27,6 +27,11 @@ python method_discovery/run_dcec_v0_discrimination.py --execute
 正式执行不复用 preflight 目录。manifest 冻结的唯一输出是
 `method_discovery/runs/dcec_v0_discrimination_r1_launchprep/`；`--execute` 未显式给出 `--output` 时自动
 选择该目录，显式给出其它目录会被拒绝，目录已存在也会在首个模型请求前拒绝。
+
+manifest 的 `record_wall_seconds` 同时进入两层执行边界：worker 在创建 Supervisor client 后设置同一
+`recovery_deadline` 与 stop event，使 provider/continuation recovery 服从截止时间；host 对整个 worker
+进程实施最终 watchdog，超时后终止 worker 并清理 gateway、容器和 volume。实验 elapsed 与 cleanup
+时间分别记录，超时 record 保留 partial artifacts、明确标为 timeout，且不会自动重跑。
 
 ## 冻结执行语义
 

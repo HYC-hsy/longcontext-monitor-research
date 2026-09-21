@@ -99,8 +99,22 @@ def install_state_telemetry(client, private: Path) -> None:
         client.prepare_continuation = tracked_continuation
 
 
-def make_agent(dcec: bool, offline: bool, turns: int = 1):
+def install_record_deadline(client, wall_seconds: float):
+    if wall_seconds <= 0:
+        raise ValueError("wall_seconds must be positive")
+    stop = threading.Event()
+    client.recovery_stop = stop
+    client.recovery_deadline = time.monotonic() + wall_seconds
+    timer = threading.Timer(wall_seconds, stop.set)
+    timer.daemon = True
+    timer.start()
+    return timer
+
+
+def make_agent(dcec: bool, offline: bool, turns: int = 1, wall_seconds: float | None = None):
     client = MonitorProviderClient("claude_monitor_opus48", config(dcec, offline))
+    client.record_deadline_timer = (
+        install_record_deadline(client, wall_seconds) if wall_seconds is not None else None)
     agent = MonitorAgent(client, workspace(), max_review_turns=turns)
     return client, agent
 
@@ -206,9 +220,24 @@ def start_local_transport():
     raise RuntimeError("isolated local inference transport did not become ready")
 
 
-def execute(dcec: bool, max_turns: int) -> None:
+def deadline_probe(wall_seconds: float) -> None:
+    client, agent = make_agent(False, True, wall_seconds=wall_seconds)
+    try:
+        emit("deadline_probe", {
+            "budget_seconds": wall_seconds,
+            "recovery_deadline_configured": isinstance(client.recovery_deadline, float),
+            "recovery_stop_configured": callable(getattr(client.recovery_stop, "is_set", None)),
+            "remaining_seconds": client.recovery_deadline - time.monotonic(),
+        })
+    finally:
+        client.record_deadline_timer.cancel()
+        client.recovery_stop.set()
+        agent.analysis.close()
+
+
+def execute(dcec: bool, max_turns: int, wall_seconds: float) -> None:
     transport = start_local_transport()
-    client, agent = make_agent(dcec, False, max_turns)
+    client, agent = make_agent(dcec, False, max_turns, wall_seconds)
     install_state_telemetry(client, RECORD / "monitor")
     interventions = []
 
@@ -241,10 +270,18 @@ def execute(dcec: bool, max_turns: int) -> None:
             result["root_action"] = {"kind": final.kind, "payload": final.payload}
             result.update(status="completed", stop_reason="root_review_finished")
     except Exception as exc:
-        result.update(status="error", stop_reason="worker_review_error",
-                      error_type=type(exc).__name__, error=str(exc))
+        deadline_exceeded = (
+            client.recovery_stop.is_set() or time.monotonic() >= client.recovery_deadline)
+        result.update(
+            status="timeout" if deadline_exceeded else "error",
+            stop_reason=("record_wall_deadline_exceeded" if deadline_exceeded
+                         else "worker_review_error"),
+            deadline_exceeded=deadline_exceeded,
+            error_type=type(exc).__name__, error=str(exc))
     finally:
         try:
+            client.record_deadline_timer.cancel()
+            client.recovery_stop.set()
             agent.analysis.close()
         finally:
             transport.terminate()
@@ -255,6 +292,8 @@ def execute(dcec: bool, max_turns: int) -> None:
         result.update(
             logical_model_calls=client.complete_calls,
             supervisor_wall_seconds=time.monotonic() - started,
+            record_wall_budget_seconds=wall_seconds,
+            provider_deadline_exceeded=time.monotonic() >= client.recovery_deadline,
             task_blocking_latency={
                 "applicable": False,
                 "reason": "scripted frozen task-side fixture; no concurrently running Task Agent",
@@ -268,16 +307,26 @@ def execute(dcec: bool, max_turns: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("request", "filesystem", "execute"))
+    parser.add_argument("mode", choices=("request", "filesystem", "deadline", "hang", "execute"))
     parser.add_argument("--dcec", choices=("0", "1"), default="0")
     parser.add_argument("--max-turns", type=int, default=20)
+    parser.add_argument("--wall-seconds", type=float)
     args = parser.parse_args()
     if args.mode == "request":
         request_probe(args.dcec == "1")
     elif args.mode == "filesystem":
         filesystem_probe()
+    elif args.mode == "deadline":
+        if args.wall_seconds is None:
+            parser.error("deadline mode requires --wall-seconds")
+        deadline_probe(args.wall_seconds)
+    elif args.mode == "hang":
+        while True:
+            time.sleep(60)
     else:
-        execute(args.dcec == "1", args.max_turns)
+        if args.wall_seconds is None:
+            parser.error("execute mode requires --wall-seconds")
+        execute(args.dcec == "1", args.max_turns, args.wall_seconds)
 
 
 if __name__ == "__main__":

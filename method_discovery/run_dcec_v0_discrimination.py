@@ -28,13 +28,15 @@ from monitor_agent_core.provider import MonitorProviderClient  # noqa: E402
 from dcec_record_isolation import (  # noqa: E402
     filesystem_probe as isolated_filesystem_probe,
     prepare_runtime as prepare_isolated_runtime,
+    provider_deadline_probe as isolated_provider_deadline_probe,
     request_probe as isolated_request_probe,
     run_record as run_isolated_record,
+    watchdog_probe as isolated_watchdog_probe,
 )
 
 
 DEFAULT_MANIFEST = ROOT / "method_discovery/artifacts/dcec_v0_20260921/discriminating_manifest.json"
-DEFAULT_PREFLIGHT_OUTPUT = ROOT / "method_discovery/runs/dcec_v0_launch_preflight_r1_20260921"
+DEFAULT_PREFLIGHT_OUTPUT = ROOT / "method_discovery/runs/dcec_v0_final_preflight_wall_r1_20260921"
 RUNNER_RELATIVE = "method_discovery/run_dcec_v0_discrimination.py"
 MODEL_CONTRACT = ROOT / "method_discovery/runs/dual_opus_20260919/dual_opus_model_contract.json"
 
@@ -350,6 +352,11 @@ def preflight(manifest_path: Path, output: Path, monitor_config: Path) -> dict:
         probe_root = scratch / "filesystem-slot"
         materialize_visible(probe_root, model_visible_projection(spec, "latent_defect"))
         filesystem = isolated_filesystem_probe(output / "isolated_runtime", probe_root)
+        wall_seconds = manifest["execution_constraints"]["record_wall_seconds"]
+        provider_deadline = isolated_provider_deadline_probe(
+            output / "isolated_runtime", probe_root, wall_seconds)
+        host_watchdog = isolated_watchdog_probe(
+            output / "isolated_runtime", probe_root)
     required_filesystem = {
         "forbidden_name_hits": [], "forbidden_content_hits": [], "other_record_paths": [],
         "original_task_readable": True, "workspace_readable": True,
@@ -363,6 +370,15 @@ def preflight(manifest_path: Path, output: Path, monitor_config: Path) -> dict:
             raise ValueError(
                 f"code_run filesystem isolation failed: {field} expected={expected!r} "
                 f"actual={filesystem.get(field)!r}")
+    if (provider_deadline.get("budget_seconds") != wall_seconds
+            or not provider_deadline.get("recovery_deadline_configured")
+            or not provider_deadline.get("recovery_stop_configured")
+            or not 0 < provider_deadline.get("remaining_seconds", 0) <= wall_seconds):
+        raise ValueError(f"provider deadline propagation failed: {provider_deadline}")
+    if (host_watchdog.get("status") != "timeout"
+            or host_watchdog.get("stop_reason") != "record_wall_deadline_exceeded"
+            or not host_watchdog.get("deadline_exceeded")):
+        raise ValueError(f"host watchdog probe failed: {host_watchdog}")
     execution_output = (ROOT / manifest["execution_output"]).resolve()
     if execution_output.exists():
         raise FileExistsError(f"frozen execution output already exists: {execution_output}")
@@ -377,6 +393,14 @@ def preflight(manifest_path: Path, output: Path, monitor_config: Path) -> dict:
         } for item in records],
         "same_variant_parity": parity, "research_metadata_isolation": anti_leakage,
         "code_run_filesystem_isolation": filesystem,
+        "record_wall_deadline_enforcement": {
+            "manifest_budget_seconds": wall_seconds,
+            "provider": provider_deadline,
+            "host_watchdog": host_watchdog,
+            "same_budget_for_all_records": all(
+                wall_seconds == manifest["execution_constraints"]["record_wall_seconds"]
+                for _ in manifest["runs"]),
+        },
         "isolation_runtime": isolation,
         "resolved_models": models, "historical_candidate_switches": manifest["historical_candidate_switches"],
         "constraints": manifest["execution_constraints"],
@@ -443,6 +467,7 @@ def execute_record(slot: Path, source: Path, manifest: dict, spec: dict, run: di
     result = run_isolated_record(
         source, slot, profile, dcec,
         manifest["execution_constraints"]["max_review_turns_per_review"],
+        manifest["execution_constraints"]["record_wall_seconds"],
         deliver, root_ready)
     usage_rows = jsonl_rows(private / "audit/provider_usage.jsonl")
     attempt_rows = jsonl_rows(private / "audit/request_attempts.jsonl")

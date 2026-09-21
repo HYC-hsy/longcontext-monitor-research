@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import queue
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -150,6 +152,120 @@ def filesystem_probe(source: Path, record: Path) -> dict:
     return _worker_event(result.stdout, "filesystem_probe")
 
 
+def provider_deadline_probe(source: Path, record: Path, wall_seconds: float) -> dict:
+    result = subprocess.run(
+        [*_base(source, record), "deadline", "--wall-seconds", str(wall_seconds)],
+        capture_output=True, text=True, timeout=90)
+    if result.returncode:
+        raise RuntimeError("isolated provider deadline probe failed: " + result.stderr[-4000:])
+    return _worker_event(result.stdout, "deadline_probe")
+
+
+def _stop_process(process, grace_seconds: float = 2.0) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=grace_seconds)
+
+
+def _drive_worker(process, wall_seconds: float, on_intervention, on_root_ready) -> tuple[dict, list[str]]:
+    if wall_seconds <= 0:
+        raise ValueError("wall_seconds must be positive")
+    lines: queue.Queue = queue.Queue()
+
+    def read_stdout() -> None:
+        try:
+            for line in process.stdout:
+                lines.put(line)
+        finally:
+            lines.put(None)
+
+    threading.Thread(target=read_stdout, daemon=True).start()
+    started = time.monotonic()
+    deadline = started + wall_seconds
+    output, result = [], None
+    stream_finished = False
+    while not stream_finished:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            _stop_process(process)
+            return ({
+                "status": "timeout",
+                "stop_reason": "record_wall_deadline_exceeded",
+                "budget_seconds": wall_seconds,
+                "elapsed_seconds": time.monotonic() - started,
+                "deadline_exceeded": True,
+                "partial_artifacts_preserved": True,
+            }, output)
+        try:
+            line = lines.get(timeout=min(0.1, remaining))
+        except queue.Empty:
+            if process.poll() is not None:
+                continue
+            continue
+        if line is None:
+            stream_finished = True
+            continue
+        output.append(line)
+        if not line.startswith("DCEC_WORKER "):
+            continue
+        event = json.loads(line[len("DCEC_WORKER "):])
+        if event["event"] == "intervention":
+            on_intervention(event["message"])
+            process.stdin.write(json.dumps({"ack": "intervention"}) + "\n")
+            process.stdin.flush()
+        elif event["event"] == "root_ready":
+            on_root_ready()
+            process.stdin.write(json.dumps({"ack": "root_ready"}) + "\n")
+            process.stdin.flush()
+        elif event["event"] == "result":
+            result = event["result"]
+    remaining = max(0.001, deadline - time.monotonic())
+    try:
+        code = process.wait(timeout=remaining)
+    except subprocess.TimeoutExpired:
+        _stop_process(process)
+        return ({
+            "status": "timeout",
+            "stop_reason": "record_wall_deadline_exceeded",
+            "budget_seconds": wall_seconds,
+            "elapsed_seconds": time.monotonic() - started,
+            "deadline_exceeded": True,
+            "partial_artifacts_preserved": True,
+        }, output)
+    if code or result is None:
+        raise RuntimeError("isolated record worker failed: " + "".join(output)[-8000:])
+    result.update(
+        budget_seconds=wall_seconds,
+        elapsed_seconds=time.monotonic() - started,
+        deadline_exceeded=bool(result.get("deadline_exceeded", False)),
+    )
+    return result, output
+
+
+def watchdog_probe(source: Path, record: Path, wall_seconds: float = 0.25) -> dict:
+    name = "dcec-watchdog-" + uuid.uuid4().hex[:12]
+    command = [*_run_prefix(source, record), "--name", name, IMAGE, PYTHON,
+               "/source/dcec_isolated_record_worker.py", "hang"]
+    process = subprocess.Popen(
+        command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, bufsize=1)
+    cleanup_started = None
+    try:
+        result, _ = _drive_worker(process, wall_seconds, lambda _: None, lambda: None)
+    finally:
+        cleanup_started = time.monotonic()
+        _stop_process(process)
+        docker("rm", "-f", name, check=False, timeout=30)
+        cleanup_seconds = time.monotonic() - cleanup_started
+    result.update(cleanup_seconds=cleanup_seconds)
+    return result
+
+
 def _gateway_config(profile: dict) -> dict:
     endpoint = urlsplit(str(profile["apibase"]))
     if endpoint.scheme != "https" or not endpoint.hostname:
@@ -164,7 +280,7 @@ def _gateway_config(profile: dict) -> dict:
 
 
 def run_record(source: Path, record: Path, profile: dict, dcec: bool, max_turns: int,
-               on_intervention, on_root_ready) -> dict:
+               wall_seconds: float, on_intervention, on_root_ready) -> dict:
     token = uuid.uuid4().hex[:12]
     volume, gateway, main = f"dcec-channel-{token}", f"dcec-gateway-{token}", f"dcec-main-{token}"
     docker("volume", "create", volume)
@@ -173,6 +289,8 @@ def run_record(source: Path, record: Path, profile: dict, dcec: bool, max_turns:
         (gateway_root / "config.json").write_text(
             json.dumps(_gateway_config(profile)), encoding="utf-8")
         shutil.copy2(TRANSPORT, gateway_root / "transport.py")
+        result = None
+        cleanup_seconds = None
         try:
             docker("run", "-d", "--rm", "--name", gateway, "--network", "bridge",
                    "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
@@ -194,32 +312,22 @@ def run_record(source: Path, record: Path, profile: dict, dcec: bool, max_turns:
             command = [*_run_prefix(source, record), "--name", main,
                        "--mount", f"type=volume,src={volume},dst=/run/model-channel,readonly",
                        IMAGE, PYTHON, "/source/dcec_isolated_record_worker.py",
-                       "execute", "--dcec", "1" if dcec else "0", "--max-turns", str(max_turns)]
+                       "execute", "--dcec", "1" if dcec else "0", "--max-turns", str(max_turns),
+                       "--wall-seconds", str(wall_seconds)]
             process = subprocess.Popen(
                 command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, bufsize=1)
-            result = None
-            output = []
-            for line in process.stdout:
-                output.append(line)
-                if not line.startswith("DCEC_WORKER "):
-                    continue
-                event = json.loads(line[len("DCEC_WORKER "):])
-                if event["event"] == "intervention":
-                    on_intervention(event["message"])
-                    process.stdin.write(json.dumps({"ack": "intervention"}) + "\n")
-                    process.stdin.flush()
-                elif event["event"] == "root_ready":
-                    on_root_ready()
-                    process.stdin.write(json.dumps({"ack": "root_ready"}) + "\n")
-                    process.stdin.flush()
-                elif event["event"] == "result":
-                    result = event["result"]
-            code = process.wait(timeout=30)
-            if code or result is None:
-                raise RuntimeError("isolated record worker failed: " + "".join(output)[-8000:])
-            return result
+            result, _ = _drive_worker(
+                process, wall_seconds, on_intervention, on_root_ready)
         finally:
+            cleanup_started = time.monotonic()
+            if "process" in locals():
+                _stop_process(process)
             docker("rm", "-f", main, check=False, timeout=30)
             docker("rm", "-f", gateway, check=False, timeout=30)
             docker("volume", "rm", "-f", volume, check=False, timeout=30)
+            cleanup_seconds = time.monotonic() - cleanup_started
+        if result is None:
+            raise RuntimeError("isolated record did not produce a result")
+        result["cleanup_seconds"] = cleanup_seconds
+        return result

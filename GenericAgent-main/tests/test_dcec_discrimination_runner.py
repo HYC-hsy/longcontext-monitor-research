@@ -1,5 +1,8 @@
 import importlib.util
 import json
+import subprocess
+import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -25,6 +28,10 @@ def prepare_isolated_source(runner, tmp_path, manifest):
         profiles[manifest["shared_contract"]["supervisor_profile"]],
         manifest["historical_candidate_config_keys"],
     )
+
+
+def isolation_module(runner):
+    return runner.sys.modules[runner.run_isolated_record.__module__]
 
 
 def test_visible_projection_and_materialization_do_not_expose_research_metadata(tmp_path):
@@ -126,7 +133,97 @@ def test_preflight_materializes_four_isolated_records_without_api(tmp_path, monk
     assert result["code_run_filesystem_isolation"]["forbidden_name_hits"] == []
     assert result["code_run_filesystem_isolation"]["forbidden_content_hits"] == []
     assert result["code_run_filesystem_isolation"]["task_workspace_write_blocked"] is True
+    deadline = result["record_wall_deadline_enforcement"]
+    assert deadline["manifest_budget_seconds"] == 900
+    assert deadline["provider"]["budget_seconds"] == 900
+    assert deadline["provider"]["recovery_deadline_configured"] is True
+    assert deadline["provider"]["recovery_stop_configured"] is True
+    assert deadline["host_watchdog"]["deadline_exceeded"] is True
+    assert deadline["same_budget_for_all_records"] is True
     assert result["formal_execution_output"]["exists"] is False
+
+
+def test_run_record_host_watchdog_terminates_once_and_cleans_all_resources(tmp_path, monkeypatch):
+    runner = load_runner()
+    isolation = isolation_module(runner)
+    source, record = tmp_path / "source", tmp_path / "record"
+    source.mkdir()
+    (record / "task").mkdir(parents=True)
+    (record / "monitor").mkdir(parents=True)
+    docker_calls = []
+
+    def fake_docker(*args, **kwargs):
+        docker_calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    real_popen = subprocess.Popen
+    worker_starts = []
+
+    def hanging_popen(command, **kwargs):
+        worker_starts.append(command)
+        return real_popen(
+            [sys.executable, "-u", "-c", "import time; time.sleep(60)"], **kwargs)
+
+    monkeypatch.setattr(isolation, "docker", fake_docker)
+    monkeypatch.setattr(isolation.subprocess, "Popen", hanging_popen)
+    result = isolation.run_record(
+        source, record,
+        {"apibase": "https://example.invalid", "apikey": "offline", "model": "test"},
+        False, 20, 0.1, lambda _: None, lambda: None)
+    assert result["status"] == "timeout"
+    assert result["deadline_exceeded"] is True
+    assert result["budget_seconds"] == 0.1
+    assert result["elapsed_seconds"] < 3
+    assert len(worker_starts) == 1
+    assert sum(call[:2] == ("rm", "-f") for call in docker_calls) == 2
+    assert sum(call[:3] == ("volume", "rm", "-f") for call in docker_calls) == 1
+
+
+def test_run_record_fast_worker_finishes_without_false_watchdog_timeout(tmp_path, monkeypatch):
+    runner = load_runner()
+    isolation = isolation_module(runner)
+    source, record = tmp_path / "source", tmp_path / "record"
+    source.mkdir()
+    (record / "task").mkdir(parents=True)
+    (record / "monitor").mkdir(parents=True)
+    monkeypatch.setattr(isolation, "docker", lambda *args, **kwargs: SimpleNamespace(
+        returncode=0, stdout="", stderr=""))
+    real_popen = subprocess.Popen
+
+    def fast_popen(command, **kwargs):
+        script = (
+            "import json; print('DCEC_WORKER '+json.dumps("
+            "{'event':'result','result':{'status':'completed'}}), flush=True)"
+        )
+        return real_popen([sys.executable, "-u", "-c", script], **kwargs)
+
+    monkeypatch.setattr(isolation.subprocess, "Popen", fast_popen)
+    result = isolation.run_record(
+        source, record,
+        {"apibase": "https://example.invalid", "apikey": "offline", "model": "test"},
+        True, 20, 2.0, lambda _: None, lambda: None)
+    assert result["status"] == "completed"
+    assert result["deadline_exceeded"] is False
+    assert result["budget_seconds"] == 2.0
+
+
+def test_ordinary_and_dcec_receive_identical_manifest_wall_budget(tmp_path, monkeypatch):
+    runner = load_runner()
+    manifest = runner.load_json(MANIFEST_PATH)
+    spec = runner.load_json(ROOT / manifest["fixture_spec"])
+    observed = []
+
+    def fake_run(source, slot, profile, dcec, max_turns, wall_seconds, deliver, root_ready):
+        observed.append((dcec, wall_seconds))
+        return {"status": "completed", "budget_seconds": wall_seconds,
+                "elapsed_seconds": 0.01, "deadline_exceeded": False}
+
+    monkeypatch.setattr(runner, "run_isolated_record", fake_run)
+    ordinary = next(run for run in manifest["runs"] if run["condition"] == "ordinary")
+    dcec = next(run for run in manifest["runs"] if run["condition"] == "dcec_v0")
+    runner.execute_record(tmp_path / "ordinary", tmp_path / "source", manifest, spec, ordinary, {})
+    runner.execute_record(tmp_path / "dcec", tmp_path / "source", manifest, spec, dcec, {})
+    assert observed == [(False, 900), (True, 900)]
 
 
 def test_execution_lock_rejects_before_provider_creation(tmp_path, monkeypatch):
