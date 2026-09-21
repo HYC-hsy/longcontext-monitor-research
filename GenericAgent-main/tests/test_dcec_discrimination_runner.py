@@ -18,6 +18,15 @@ def load_runner():
     return module
 
 
+def prepare_isolated_source(runner, tmp_path, manifest):
+    profiles = runner.load_json(CONFIG_PATH)
+    return runner.prepare_isolated_runtime(
+        tmp_path / "isolated-runtime",
+        profiles[manifest["shared_contract"]["supervisor_profile"]],
+        manifest["historical_candidate_config_keys"],
+    )
+
+
 def test_visible_projection_and_materialization_do_not_expose_research_metadata(tmp_path):
     runner = load_runner()
     spec = runner.load_json(ROOT / runner.load_json(MANIFEST_PATH)["fixture_spec"])
@@ -31,6 +40,9 @@ def test_visible_projection_and_materialization_do_not_expose_research_metadata(
     assert "latent_defect" not in text
     assert "research_only" not in text
     assert materialized["private_initial_files"] == []
+    paths = [item["path"] for item in materialized["visible_files"]]
+    assert len(paths) == len(set(paths))
+    assert paths.count("workspace/neutral_ops.py") == 1
     assert not (tmp_path / "case/task").joinpath("fixture_spec.json").exists()
 
 
@@ -40,10 +52,10 @@ def test_frozen_transition_uses_real_intervention_and_claim_not_research_conclus
     projection = runner.model_visible_projection(spec, "latent_defect")
     root = tmp_path / "case"
     runner.materialize_visible(root, projection)
-    before = (root / "workspace/neutral_ops.py").read_text(encoding="utf-8")
+    before = (root / "task/workspace/neutral_ops.py").read_text(encoding="utf-8")
     assert "strip" not in before
     repair = runner.apply_repair(root, projection, "Please repair normalize_key using the requirement.")
-    after = (root / "workspace/neutral_ops.py").read_text(encoding="utf-8")
+    after = (root / "task/workspace/neutral_ops.py").read_text(encoding="utf-8")
     events = (root / "task/public_events.jsonl").read_text(encoding="utf-8")
     assert 'strip(" ")' in after
     assert repair["semantic_validity"] == "not_judged_online"
@@ -55,7 +67,9 @@ def test_production_request_metadata_invariance_hidden_object_and_treatment_delt
     runner = load_runner()
     manifest = runner.load_json(MANIFEST_PATH)
     spec = runner.load_json(ROOT / manifest["fixture_spec"])
-    audit = runner.anti_leakage_audit(manifest, spec, tmp_path)
+    prepare_isolated_source(runner, tmp_path, manifest)
+    audit = runner.anti_leakage_audit(
+        manifest, spec, tmp_path / "scratch", tmp_path / "isolated-runtime")
     assert audit["metadata_rename_model_request_deep_equal"] is True
     assert audit["hidden_research_terms_absent"] is True
     assert audit["ordinary_vs_dcec_only_registered_mechanism_difference"] is True
@@ -109,12 +123,16 @@ def test_preflight_materializes_four_isolated_records_without_api(tmp_path, monk
     assert len(result["records"]) == 4
     assert all(item["private_initial_files"] == [] for item in result["records"])
     assert all(item["initial_visible_tree_equal"] for item in result["same_variant_parity"].values())
+    assert result["code_run_filesystem_isolation"]["forbidden_name_hits"] == []
+    assert result["code_run_filesystem_isolation"]["forbidden_content_hits"] == []
+    assert result["code_run_filesystem_isolation"]["task_workspace_write_blocked"] is True
+    assert result["formal_execution_output"]["exists"] is False
 
 
 def test_execution_lock_rejects_before_provider_creation(tmp_path, monkeypatch):
     runner = load_runner()
-    monkeypatch.setattr(runner, "MonitorProviderClient", lambda *args, **kwargs: (_ for _ in ()).throw(
-        AssertionError("provider must not be created while execution is unauthorized")))
+    monkeypatch.setattr(runner, "run_isolated_record", lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("isolated worker must not start while execution is unauthorized")))
     with pytest.raises(PermissionError, match="execution_authorized=false"):
         runner.execute(MANIFEST_PATH, tmp_path / "run", CONFIG_PATH)
 
@@ -123,6 +141,7 @@ def test_manifest_freezes_order_and_disables_historical_candidates():
     manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     assert manifest["implementation_commit"] == "1cd7048c5742ca7415937ec5142cc28fd2bcaf22"
     assert manifest["execution_authorized"] is False
+    assert manifest["execution_output"] == "method_discovery/runs/dcec_v0_discrimination_r1_launchprep"
     assert [(item["sequence"], item["condition"]) for item in manifest["runs"]] == [
         ("latent_defect", "ordinary"),
         ("latent_defect", "dcec_v0"),

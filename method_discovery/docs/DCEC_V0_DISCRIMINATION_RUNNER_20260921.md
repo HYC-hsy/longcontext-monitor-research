@@ -13,8 +13,8 @@ preflight。
 python method_discovery/run_dcec_v0_discrimination.py
 ```
 
-默认命令只执行 dry-run/preflight，不建立真实 provider 连接。输出位于
-`method_discovery/runs/dcec_v0_preflight_1cd7048_r2_20260921/`。真实执行入口虽已接线，但在 manifest 仍为
+默认命令只执行 dry-run/preflight，不建立真实 provider 连接。最终 launch preflight 输出位于
+`method_discovery/runs/dcec_v0_launch_preflight_r1_20260921/`。真实执行入口虽已接线，但在 manifest 仍为
 `execution_authorized=false` 时会在创建 provider 前拒绝：
 
 ```powershell
@@ -23,6 +23,10 @@ python method_discovery/run_dcec_v0_discrimination.py --execute
 
 不得通过临时改内存对象或环境变量绕过这一版本化门禁。最终 launch audit 通过后，应先形成新的明确
 授权提交，再按冻结顺序仅运行一次。
+
+正式执行不复用 preflight 目录。manifest 冻结的唯一输出是
+`method_discovery/runs/dcec_v0_discrimination_r1_launchprep/`；`--execute` 未显式给出 `--output` 时自动
+选择该目录，显式给出其它目录会被拒绝，目录已存在也会在首个模型请求前拒绝。
 
 ## 冻结执行语义
 
@@ -54,6 +58,25 @@ runner 用显式白名单从 fixture 构造：原题、当前 variant 的真实�
 - 相同初始状态下 ordinary 与 DCEC 的差异只能由已审计的 DCEC system contract 和 bounded active
   view 解释。
 
+### `code_run` 的 OS 文件边界
+
+最终 Supervisor 进程运行在复用项目既有隔离原则的 Linux 容器中，而不是宿主 Python 进程中：
+
+- `--network none`、drop all capabilities、`no-new-privileges`、只读容器根与无 Docker socket；
+- 只挂载冻结 Python/Monitor runtime、当前 record 的 `task/`（含 `task/workspace/`，只读）以及当前
+  record 的 `monitor/`（可写）；
+- 其它 record、宿主仓库、fixture、manifest、runner、preflight/results 均不挂载；
+- provider 凭据只存在于独立 gateway 容器，Supervisor 通过既有固定 Unix-socket inference gateway
+  访问配置好的模型端点。
+
+`code_run` 不换工具 schema，也不改 `AnalysisSessions`；其普通 Python/Bash 子进程继承 Supervisor
+容器的 OS 边界。宿主 runner 只在收到真实 intervention 后应用冻结 repair，并通过控制管道确认；研究
+spec 与 variant 名不会进入容器。
+
+零 API preflight 使用同一容器、同一 production dispatch 执行确定性探针，验证任务与源码可读、
+monitor 可写、task/workspace 不可写，并搜索确认研究文件名、研究标签、其它 record 路径和宿主仓库
+均不可见。
+
 ## 状态与成本留档
 
 真实执行时，每个正常请求前保存 working-state SHA256、active-view SHA256/字符数；另存
@@ -63,6 +86,13 @@ runner 用显式白名单从 fixture 构造：原题、当前 variant 的真实�
 
 每份记录还保存完整 audit、provider history、usage、request attempts、抽取的 transport 事件、最终
 workspace、逻辑调用数和 Supervisor wall time。transport retry 与 logical call 分开。
+
+此 scripted fixture 没有并发运行的 Task Agent，因此不伪造部署态阻塞延迟。结果固定记录：
+
+```text
+task_blocking_latency.applicable = false
+task_blocking_latency.reason = scripted frozen task-side fixture; no concurrently running Task Agent
+```
 
 ## 确定性验收
 
