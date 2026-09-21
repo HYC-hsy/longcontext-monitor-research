@@ -20,11 +20,11 @@ RUNTIME = ROOT / "bench_runtime" / "m2"
 RUNTIME_LINUX = RUNTIME / "linux"
 MANIFEST = (
     ROOT / "method_discovery" / "runs" / "dcec_v1_generalization_20260921"
-    / "claw_swe_sphinx8551_manifest.json"
+    / "claw_swe_sphinx8551_r2_replacement_manifest.json"
 )
-RUN_ID = "dcec-v1-generalization-claw-swe-sphinx8551-r1"
+RUN_ID = "dcec-v1-generalization-claw-swe-sphinx8551-r2-replacement"
 INSTANCE_ID = "sphinx-doc__sphinx-8551"
-CAMPAIGN_ROOT = BENCH / "output" / "dcec_v1_generalization_20260921"
+CAMPAIGN_ROOT = BENCH / "output" / "dcec_v1_generalization_r2_replacement_20260921"
 M3_ROOT = CAMPAIGN_ROOT / "claw_swe"
 LOCKS = CAMPAIGN_ROOT / "claw_swe_method_locks.jsonl"
 BUNDLE_ROOT = CAMPAIGN_ROOT / "isolated_bundles" / RUN_ID
@@ -47,7 +47,7 @@ MECHANISM_HASHES = {
 DCEC_ENV = {
     "GA_RUN_ISOLATION": "no-network-unix-inference-v1",
     "GA_BASELINE_CONDITION": "original",
-    "GA_EXPERIMENT_ID": "dcec-v1-generalization-claw-swe-sphinx8551-r1",
+    "GA_EXPERIMENT_ID": "dcec-v1-generalization-claw-swe-sphinx8551-r2-replacement",
     "GA_CONDITION_ID": "dcec-v1",
     "GA_LLM_CONFIG_NAME": "native_claude_cc_vibe",
     "GA_MAX_TURNS": "300",
