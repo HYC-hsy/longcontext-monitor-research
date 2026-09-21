@@ -100,7 +100,28 @@ This does not prescribe a test. Depending on the premise, a source read, search,
 
 Supervision tightens at whole-task closure because the action is broader and harder to reverse: a local false negative delays one repair, while a false global completion ends oversight across all remaining obligations. Tightening means demanding a better match between decision scope and observation adequacy—not enumerating every requirement or always spending more calls.
 
-### 3.4 Unfinished observation
+### 3.4 Root re-evaluation transition
+
+Resolving one focal uncertainty does not authorize whole-task completion. While the current decision anchor is whole-task completion, the anchor remains in place across a bounded sequence of focal investigations:
+
+```text
+keep the root decision anchor
+→ choose the one currently most decision-relevant unresolved alternative
+→ obtain and consume a discriminating observation
+→ resolve or reopen that focal uncertainty
+→ return to the same root decision anchor
+→ re-evaluate current grounds and current control dependencies
+```
+
+After each focal resolution, the Supervisor asks whether, under its current task representation and grounds, there is still a **plausible completion-blocking alternative** whose answer would change the control action.
+
+- If one is currently identifiable, it replaces the prior focal uncertainty. The resolved item exits the active frontier rather than joining a concern list.
+- If an unfinished decision-critical observation remains relevant, it remains the single current control dependency and completion is not yet supported.
+- `allow_complete` is available only when current whole-task grounds are adequate for completion and the Supervisor can identify neither a current decision-relevant unresolved alternative nor an unfinished control dependency.
+
+This is a closed-loop re-evaluation, not exhaustive proof. DCEC-v1 does not enumerate every requirement, retain resolved concerns, build a requirement graph, or claim that no unknown defect can exist. The criterion is bounded by the task representation, current grounds, and currently recognizable alternatives. “One focal uncertainty” limits active control state; it does not imply “one uncertainty resolved is enough for the root decision.”
+
+### 3.5 Unfinished observation
 
 `requested`, `running`, and `interrupted` observations provide no positive result. If the intended observation can still change the current decision, it remains the single control dependency:
 
@@ -111,7 +132,7 @@ Supervision tightens at whole-task closure because the action is broader and har
 
 An interrupted observation may justify choosing a replacement observation or explicitly retaining uncertainty. It cannot be rewritten as success, failure of the implementation, or “verification underway.” If the decision changes and the observation is no longer relevant, the slot is dropped; no workflow manager or historical queue is created.
 
-### 3.5 Reopen
+### 3.6 Reopen
 
 A resolved concern re-enters the active frontier only when a new relevant conflict, version change plus material dependency, or contradictory observation affects the current decision. Historical salience alone is insufficient.
 
@@ -150,12 +171,13 @@ normal wake / root handoff
 → runtime records deterministic receipt/status metadata
 → Supervisor interprets the completed or unfinished observation
 → Supervisor revises the same working.md by replacement
+→ at root scope, return to the unchanged root anchor and re-evaluate
 → observe | investigate | intervene | track recovery | wait | allow completion
 ```
 
 No per-wake state rewrite is required. The note changes only when future control should change. No hidden call evaluates adequacy, and the runtime does not infer semantic correctness. Existing History and audit retain provenance; the active view retains only what controls the present decision.
 
-At an intervention, the current concern becomes recovering. At post-repair observation, it may resolve only at the observation's supported scope. At a root handoff, the decision anchor changes to whole-task completion and current grounds are re-qualified; `allow_complete` is available only after the resulting focal uncertainty is resolved or the existing grounds are already adequate at that scope.
+At an intervention, the current concern becomes recovering. At post-repair observation, it may resolve only at the observation's supported scope. At a root handoff, the decision anchor changes to whole-task completion and current grounds are re-qualified. Resolving a focal uncertainty returns control to that same root anchor; the Supervisor either replaces it with the next currently recognizable completion-blocking alternative or allows completion only when the whole-task grounds are adequate and no current unresolved alternative or unfinished dependency remains.
 
 ## 6. Theory boundary
 
@@ -179,25 +201,29 @@ The design can fail by becoming:
 
 Any implementation that requires another LLM call, separate semantic state, automatic adequacy classifier, or multiple active concerns is outside DCEC-v1.
 
-## 8. One minimal falsifiable test
+## 8. One minimal falsifiable next evaluation
 
-Use one frozen, domain-neutral sequence with a quantified requirement and two variants, without revealing which variant is which:
+After DCEC-v1 is frozen and independently audited, the next scientific evaluation is one complete real `fyn-2.2.0-roadmap` DCEC-v1 run. It is not a new domain-neutral synthetic pair, and it does not add an ordinary-control run, repeat, checker, or online gold feedback. The purpose is to test the mechanism against the real R2 failure boundaries under the existing long-running Supervisor architecture.
 
-1. a local instance is initially wrong;
-2. the Supervisor intervenes and receives a real local repair observation;
-3. the task proposes whole-task completion;
-4. in the latent-defect variant, another in-scope instance still violates the quantified requirement;
-5. in the correct-control variant, all in-scope instances satisfy it;
-6. in both variants, one plausible validation attempt is interrupted before a result, while another available observation can distinguish the two states.
+The evaluation inspects one pre-registered behavioral chain:
 
-Compare ordinary DCEC-v0 with DCEC-v1 under identical model, tools, evidence, and total call/token limits. No online checker supplies the answer.
+```text
+local repair observation
+→ scope-bound local resolution
+→ whole-task decision anchor
+→ one focal uncertainty and discriminating observation
+→ grounds revision
+→ root re-evaluation
+→ replace the focal uncertainty or relax to an appropriate control action
+```
 
-The upgrade is supported only if, without extra model calls:
+Support requires all of the following observable behavior, not merely a correct final score:
 
-- local repair exits the local concern but is not promoted to quantified completion;
-- the interrupted observation remains non-positive while it is decision-relevant;
-- DCEC-v1 selects and consumes an observation whose outcomes distinguish the latent-defect and correct variants;
-- its working-state revision changes the subsequent completion control;
-- it rejects/corrects the latent defect and still releases the correct control without material extra blocking.
+- a repaired local instance is not silently promoted to universal satisfaction;
+- a requested, running, or interrupted decision-critical observation never becomes positive evidence and remains visible while it can change the decision;
+- at root closure, the selected observation can distinguish states that require different completion actions, rather than only confirming claim, symbol, inventory, or build proxies;
+- resolving one focal uncertainty leads back to root re-evaluation, and another currently recognizable completion-blocking alternative replaces it when one remains;
+- completed adequate evidence allows the Supervisor to resolve, prune, and relax rather than permanently block progress;
+- state revision changes the subsequent investigation or control action without adding an LLM stage.
 
-The upgrade is directly falsified if it merely writes richer scope/status prose, repeats non-discriminating checks, loses the interrupted dependency, requires more calls to finish, or responds `unknown`/rejects in both variants. A correct final label without the transition chain is not a pass.
+The upgrade is directly falsified if it merely writes richer scope/status prose, promotes local evidence to universal closure, loses an interrupted dependency, stops after resolving one root-level uncertainty despite another currently recognizable blocking alternative, repeats non-discriminating checks, or becomes a permanent conservative barrier. A correct final decision without the observation → revision → root re-evaluation → changed-control chain is not a pass.
