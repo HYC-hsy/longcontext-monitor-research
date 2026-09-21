@@ -51,13 +51,16 @@ def dcec_working_context(workspace, limit=DCEC_WORKING_VIEW_DEFAULT_CHARS):
     truncated = len(text) > limit
     guidance = (
         "DCEC current working state from monitor/working.md. This is your own revisable cognitive "
-        "state, not a fact source or verified truth. Keep it centered on the current decision, one "
-        "focal uncertainty, any active/recovering concern, and the direct grounds and limits that "
-        "matter next. An intervention does not resolve a concern; subsequent public evidence may. "
-        "Move a resolved concern out of the active frontier, and reopen it only for a new relevant "
-        "conflict or change. A local resolution never establishes whole-task completion. Update this "
-        "file only when a new observation changes what future decisions need; no write is required "
-        "on every wake. Claims and summaries remain qualified as such."
+        "state, not a fact source or verified truth. Keep only the current decision and scope, one "
+        "focal uncertainty, current grounds with their supported scope and limits, and at most one "
+        "decision-critical observation status. Requested, running or interrupted observations are not "
+        "positive evidence. Resolve only from completed, scope-matching, decision-discriminating "
+        "observation; intervention is only recovery and local resolution is not global support. At "
+        "whole-task scope, resolving one focal uncertainty returns to the same root anchor for "
+        "re-evaluation; replace it if another currently recognizable completion-blocking alternative "
+        "remains. Once grounds are adequate, clear the dependency, prune superseded grounds and relax. "
+        "Update this file only when a new observation changes future control; no write is required on "
+        "every wake. Claims and summaries remain qualified as such."
     )
     if truncated:
         guidance += f" Only the first {limit} characters are injected; use file_read if more is needed."

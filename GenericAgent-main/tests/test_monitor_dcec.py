@@ -1,4 +1,4 @@
-"""Deterministic DCEC-v0 contract and production assembly regressions."""
+"""Deterministic DCEC contract and production assembly regressions."""
 
 import json
 import hashlib
@@ -78,6 +78,42 @@ def test_bounded_view_is_single_state_and_reports_transport_cost(tmp_path):
     assert metadata["injected_characters"] == len(text)
     assert metadata["estimated_tokens"] > 0
     assert not (ws.private_root / "decision_state.json").exists()
+
+
+def test_v1_contract_is_scope_bound_and_root_re_evaluates_before_completion(tmp_path):
+    ws = workspace(tmp_path)
+    ws.write_text("monitor/working.md", "Current decision\n- whole-task completion")
+    view, _metadata = dcec_working_context(ws)
+    combined = "\n".join((DCEC_SYSTEM_PROMPT, DCEC_CONTINUATION_PROMPT, view)).lower()
+    normalized = " ".join(combined.split())
+
+    assert "local evidence can resolve only local scope" in normalized
+    assert "requested, running and interrupted are not positive evidence" in normalized
+    assert "return to the same root decision anchor and re-evaluate" in normalized
+    assert "resolving one uncertainty never by itself authorizes allow_complete" in normalized
+    assert "another currently recognizable completion-blocking alternative" in normalized
+    assert "clear the dependency, prune superseded grounds and relax" in normalized
+
+
+def test_v1_uses_only_working_note_and_existing_model_stage(tmp_path, monkeypatch):
+    ws = workspace(tmp_path)
+    ws.write_text("monitor/working.md", "Current decision\n- local recovery")
+    client = provider({"monitor_dcec": True})
+    monitor = MonitorAgent(client, ws)
+    requests = []
+
+    def request_once(tools):
+        requests.append(client.assembled_request_snapshot(tools))
+        return ([{"type": "tool_use", "id": "wait", "name": "wait",
+                  "input": {"after_turns": 1}}], {})
+
+    monkeypatch.setattr(client, "_request_once", request_once)
+    assert monitor.review("Normal wake").kind == "wait"
+    assert len(requests) == client.complete_calls == 1
+    assert not (ws.private_root / "decision_state.json").exists()
+    assert not (ws.private_root / "epistemic_state.json").exists()
+    assert [tool["function"]["name"] for tool in requests[0]["tools"]] == [
+        "file_read", "file_write", "file_patch", "code_run", "wait", "intervene", "allow_complete"]
 
 
 def test_production_request_injects_view_once_and_does_not_persist_copy(tmp_path, monkeypatch):

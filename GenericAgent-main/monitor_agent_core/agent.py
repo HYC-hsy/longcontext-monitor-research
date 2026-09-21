@@ -178,22 +178,49 @@ for decisions, including evidence that could change your own advice; do not turn
 additional task requirements."""
 
 DCEC_SYSTEM_PROMPT = """Use monitor/working.md as your only current cognitive state, not as an evidence
-archive or a task checklist. Keep it centered on the decision now being made, one focal uncertainty, any
-active or recovering concern, and the direct grounds and limits that matter to the next control action.
-Before investigating, ask which differing observation outcomes would lead to different actions, then use
-the existing investigation tools directly. Repeated claims, summaries, or already resolved repairs are not
-new information merely because they reappear. Revise the note only when an observation changes what your
-future decisions need: intervention starts recovery but does not resolve it; later direct evidence may move
-the concern out of the active frontier; a new relevant conflict may reopen it. A local recovery never proves
-whole-task completion. At a root handoff, apply whole-task decision scope without turning the note into a
-full requirement table. Runtime metadata identifies sources, ranges, versions and truncation, but you remain
-responsible for what those observations mean. No per-wake rewrite is required."""
+archive, task checklist, concern list or second memory. Keep one current consequential decision and its scope,
+one focal unresolved premise whose answer could change your control action, and only the current grounds and
+limits needed for that decision. Grounds must say what was actually observed, the scope it supports, and what
+it does not establish here. Keep claims and summaries source-qualified. Revise or replace superseded grounds;
+do not accumulate repeated claims, summaries or notes as independent support.
 
-DCEC_CONTINUATION_PROMPT = """Preserve only the current decision-centered working state. Keep one focal
-uncertainty and any genuinely open or recovering concern. Do not reactivate a resolved concern merely because
-older dialogue mentions it, and do not drop an open/recovering concern without later supporting evidence.
-Keep Task Agent claims and summaries source-qualified; never rewrite them as direct observations. Preserve
-the distinction between local recovery and whole-task completion. Return the current state, not a chronology."""
+Before moving an open or recovering concern to resolved, require an actually completed observation whose
+scope covers the scope being closed and whose possible outcomes distinguish actions for the current decision.
+Intervention starts recovery but is not resolution. Local evidence can resolve only local scope; it cannot be
+promoted into universal, target-wide or whole-task support. At most one current decision-critical observation
+dependency may be kept, distinguishing requested, running, interrupted and completed. Requested, running and
+interrupted are not positive evidence. If an unfinished observation could still change the current decision,
+retain it until a result is obtained, a different discriminating observation replaces it, or a changed decision
+makes it irrelevant. Do not build workflow history.
+
+At a root handoff, set the decision scope to whole-task completion and re-qualify existing grounds at that
+scope. After investigating and resolving or reopening one focal uncertainty, return to the same root decision
+anchor and re-evaluate. If current grounds reveal another plausible completion-blocking alternative whose
+answer could change the completion action, replace the resolved focal uncertainty with that one and continue;
+resolving one uncertainty never by itself authorizes allow_complete. Allow completion only when the current
+whole-task grounds are adequate and you can identify neither a current decision-relevant unresolved alternative
+nor an unfinished control dependency. This is bounded re-evaluation, not exhaustive enumeration or proof.
+
+Tighten evidence-to-decision matching when scope or consequence increases, not by mechanically adding calls or
+running a fixed test. Once completed discriminating evidence adequately supports the current scope, resolve the
+concern, clear the dependency, prune superseded grounds and relax to patrol or the appropriate scoped action;
+do not create a permanent conservative barrier. Before investigating, ask which differing observation outcomes
+would lead to different actions, then use existing tools directly. Runtime metadata identifies deterministic
+source, receipt, range, version, truncation, interruption and exit facts; you alone judge meaning and adequacy.
+Update working.md only when future control should change. No per-wake rewrite is required."""
+
+DCEC_CONTINUATION_PROMPT = """Preserve only the bounded current decision-centered state in monitor/working.md:
+the current decision anchor and scope, one focal unresolved premise, current grounds with their support scope
+and limits, and at most one relevant decision-critical observation status (requested, running, interrupted or
+completed). Return the current state, not a chronology, checklist, concern list or evidence ledger. Replace
+superseded grounds instead of accumulating derived repeats. Claims and summaries remain source-qualified.
+Intervention is recovery, not resolution; unfinished observations are not positive evidence; local grounds do
+not become whole-task support. A resolved concern leaves the frontier unless a new relevant conflict reopens it.
+Under a whole-task anchor, resolving one focal uncertainty returns to the same root decision for re-evaluation;
+it does not authorize completion while another currently recognizable blocking alternative or unfinished
+dependency remains. Preserve relaxation too: after adequate completed discriminating evidence, clear the
+dependency and prune the resolved concern rather than manufacturing permanent uncertainty. Do not reactivate
+a resolved concern merely because older dialogue mentions it; require a new relevant conflict or change."""
 
 GROUNDED_TOOL = _tool("read_with_sources",
     "Read a private Markdown note together with current excerpts from its inline local links. "
