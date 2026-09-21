@@ -6,9 +6,41 @@ import shutil
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from requests.certs import where as requests_ca_where
+
 
 PORT = 18765
 PROFILE = 'no-network-unix-inference-v1'
+CONTAINER_CA_PREFIX = '/gateway/ca'
+
+
+def production_tls_semantics(profile, *, ca_file):
+    """Mirror the audited production requests TLS/proxy contract for one route."""
+    if profile.get('proxy'):
+        raise ValueError('External provider proxies need explicit isolation review')
+    verify = profile.get('verify', True)
+    if verify is True:
+        ca_path = Path(requests_ca_where()).resolve()
+        source_kind = 'production_requests_certifi'
+    elif verify is False:
+        ca_path = None
+        source_kind = 'production_profile_verify_false'
+    elif isinstance(verify, str) and verify:
+        ca_path = Path(verify).expanduser().resolve()
+        source_kind = 'production_profile_ca_path'
+    else:
+        raise ValueError(f'Unsupported production verify setting: {type(verify).__name__}')
+    if ca_path is not None and not ca_path.is_file():
+        raise FileNotFoundError(f'Production CA bundle is missing: {ca_path}')
+    return ({
+        'verification_enabled': verify is not False,
+        'verify_value_class': 'bool' if isinstance(verify, bool) else 'path',
+        'ca_source_kind': source_kind,
+        'ca_file': ca_file if ca_path is not None else None,
+        'ca_bundle_sha256': hashlib.sha256(ca_path.read_bytes()).hexdigest()
+            if ca_path is not None else None,
+        'production_proxy_present': False,
+    }, ca_path)
 
 
 def digest_tree(root):
@@ -55,13 +87,15 @@ def build_bundle(root, source, runtime, python_home, task_config, monitor_config
     client_configs = {}
     independent = json.loads(Path(monitor_profile_path).read_text(encoding='utf-8')) if monitor_profile_path else None
     monitor_clients = {}
+    ca_sources = {}
     for role, name in [('task', task_config), ('monitor', monitor_config)]:
         cfg = dict(independent[name] if role == 'monitor' and independent is not None else configs[name])
         endpoint = urlsplit(cfg['apibase'])
         if endpoint.scheme != 'https' or not endpoint.hostname or endpoint.query or endpoint.fragment:
             raise ValueError('Gateway requires a fixed HTTPS inference base')
-        if cfg.get('proxy'):
-            raise ValueError('External provider proxies need explicit isolation review')
+        container_ca = f'{CONTAINER_CA_PREFIX}-{role}.pem'
+        tls, ca_path = production_tls_semantics(cfg, ca_file=container_ca)
+        ca_sources[role] = ca_path
         model = cfg['model']
         route_id = 'monitor' if role == 'monitor' and independent is not None else model
         if route_id in gateway['models']:
@@ -69,7 +103,10 @@ def build_bundle(root, source, runtime, python_home, task_config, monitor_config
         key = cfg['apikey']
         headers = {'x-api-key': key} if key.startswith('sk-ant-') else {'Authorization': 'Bearer ' + key}
         paths = ['/v1/messages'] if 'claude' in model.lower() else ['/v1/responses']
-        gateway['models'][route_id] = {'base': cfg['apibase'], 'headers': headers, 'paths': paths, 'model': model}
+        gateway['models'][route_id] = {
+            'base': cfg['apibase'], 'headers': headers, 'paths': paths,
+            'model': model, 'tls': tls,
+        }
         cfg.update(apikey='isolated-local-channel', apibase=f'http://127.0.0.1:{PORT}')
         cfg.pop('proxy', None)
         if role == 'monitor' and independent is not None:
@@ -82,6 +119,9 @@ def build_bundle(root, source, runtime, python_home, task_config, monitor_config
         (copied / 'monitor_agent_core' / 'models.local.json').write_text(json.dumps(monitor_clients), encoding='utf-8')
     private = root / 'gateway'
     private.mkdir()
+    for role, ca_path in ca_sources.items():
+        if ca_path is not None:
+            shutil.copy2(ca_path, private / f'ca-{role}.pem')
     (private / 'config.json').write_text(json.dumps(gateway), encoding='utf-8')
     transport = Path(__file__).resolve().parents[1] / 'adapters/isolated_transport.py'
     shutil.copy2(transport, private / 'transport.py')

@@ -200,6 +200,14 @@ def test_bundle_has_no_source_checkout_or_credentials_in_task(tmp_path):
     assert not (copied / 'mykey.py').exists()
     assert 'SECRET' not in (copied / 'mykey.json').read_text()
     assert not any('gateway' in x for x in data['services']['main']['volumes'])
+    gateway = json.loads((compose.parent / 'gateway/config.json').read_text())
+    for route in gateway['models'].values():
+        assert route['tls']['verification_enabled'] is True
+        assert route['tls']['ca_source_kind'] == 'production_requests_certifi'
+        assert route['tls']['ca_bundle_sha256']
+        assert route['tls']['ca_file'].startswith('/gateway/ca-')
+    assert (compose.parent / 'gateway/ca-task.pem').is_file()
+    assert (compose.parent / 'gateway/ca-monitor.pem').is_file()
     with pytest.raises(FileExistsError):
         b.build_bundle(tmp_path / 'bundle', source, tmp_path / 'runtime',
                        'python', 'task', 'monitor', 15340)
@@ -222,4 +230,33 @@ def test_independent_monitor_bundle_same_model(tmp_path):
     assert monitor['monitor']['apikey'] == 'isolated-local-channel'
     assert gateway['models']['monitor']['headers']['Authorization'] == 'Bearer MONITORSECRET'
     assert gateway['models']['claude-test']['headers']['Authorization'] == 'Bearer TASKSECRET'
+    assert gateway['models']['monitor']['tls']['verification_enabled'] is True
+    assert gateway['models']['claude-test']['tls']['verification_enabled'] is True
     assert 'MONITORSECRET' not in ''.join(p.read_text() for p in copied.rglob('*.json'))
+
+
+def test_bundle_preserves_explicit_verify_false_without_ca(tmp_path):
+    source = tmp_path / 'src'
+    (source / 'monitor_agent_core').mkdir(parents=True)
+    (source / 'mykey.py').write_text(
+        "task={'model':'claude-test','apikey':'TASKSECRET','apibase':'https://example.invalid','verify':False}\n"
+        "monitor={'model':'monitor-test','apikey':'MONITORSECRET','apibase':'https://example.invalid','verify':False}")
+    _, compose = b.build_bundle(tmp_path / 'bundle', source, tmp_path / 'runtime',
+                                'python', 'task', 'monitor', 15340)
+    gateway = json.loads((compose.parent / 'gateway/config.json').read_text())
+    assert all(route['tls']['verification_enabled'] is False
+               for route in gateway['models'].values())
+    assert not list((compose.parent / 'gateway').glob('ca-*.pem'))
+
+
+def test_generic_bundle_tls_semantics_match_audited_dcec_helper(tmp_path):
+    dcec = load('dcec_record_isolation_for_bundle_test',
+                '../method_discovery/dcec_record_isolation.py')
+    profile = {'apibase': 'https://example.invalid', 'verify': True}
+    generic, generic_ca = b.production_tls_semantics(
+        profile, ca_file='/gateway/ca-task.pem')
+    audited, audited_ca = dcec.production_tls_semantics(profile)
+    for key in ('verification_enabled', 'verify_value_class', 'ca_source_kind',
+                'ca_bundle_sha256', 'production_proxy_present'):
+        assert generic[key] == audited[key]
+    assert generic_ca == audited_ca
