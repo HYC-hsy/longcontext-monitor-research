@@ -231,4 +231,7 @@ def test_discriminating_manifest_is_frozen_unexecuted_and_isolates_candidates():
     assert manifest["shared_contract"]["dcec_additional_model_calls"] == 0
     fixture = Path(__file__).resolve().parents[2] / manifest["fixture_spec"]
     assert hashlib.sha256(fixture.read_bytes()).hexdigest() == manifest["fixture_spec_sha256"]
-    assert json.loads(fixture.read_text(encoding="utf-8"))["status"] == "frozen_not_materialized"
+    assert json.loads(fixture.read_text(encoding="utf-8"))["status"] == "frozen_executable_spec"
+    assert manifest["implementation_commit"] == "1cd7048c5742ca7415937ec5142cc28fd2bcaf22"
+    runner = Path(__file__).resolve().parents[2] / manifest["runner_path"]
+    assert hashlib.sha256(runner.read_bytes()).hexdigest() == manifest["runner_sha256"]

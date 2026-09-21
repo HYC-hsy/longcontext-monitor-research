@@ -3,9 +3,12 @@
   "experiment_id": "dcec-v0-minimal-discrimination-r1-20260921",
   "status": "prepared_not_executed",
   "source_baseline": "9c5cb16",
+  "implementation_commit": "1cd7048c5742ca7415937ec5142cc28fd2bcaf22",
   "mechanism_version": "dcec-v0-engineering-r1",
+  "runner_path": "method_discovery/run_dcec_v0_discrimination.py",
+  "runner_sha256": "6337387e09ded085ce31e873450f6b12a54b673b6ca7e05a9812268fcb5aa890",
   "fixture_spec": "method_discovery/artifacts/dcec_v0_20260921/fixture_spec.json",
-  "fixture_spec_sha256": "ad22578f7b15798d46159353ad0ac7c188c222dc82a300eb5efac2b661557579",
+  "fixture_spec_sha256": "d5e5980bedd178cc111ed355e56137a8d819063cf8f877e7381181f1c9e07748",
   "execution_authorized": false,
   "model_api_calls_made_during_preparation": 0,
   "research_question": "Does bounded consumption and revision of the persistent Supervisor's existing monitor/working.md change concern exit and the next decision-relevant investigation, rather than merely making final prose more cautious?",
@@ -14,7 +17,7 @@
     "task_agent_model": "claude-opus-4-8",
     "supervisor_profile": "claude_monitor_opus48",
     "supervisor_model": "claude-opus-4-8",
-    "same_provider_and_generation_parameters": true,
+    "same_supervisor_provider_and_generation_parameters_across_conditions": true,
     "same_public_evidence_and_tools": true,
     "same_concurrent_control_and_root_completion_protocol": true,
     "same_review_call_and_token_limits": true,
@@ -40,6 +43,21 @@
     "GA_MONITOR_ROOT_DECISION_CONTRACT": "0",
     "GA_MONITOR_ROOT_SIMPLE_CHECK": "0"
   },
+  "historical_candidate_config_keys": [
+    "monitor_tool_feedback",
+    "monitor_grounded_context",
+    "monitor_handoff_validation",
+    "monitor_advice_revision",
+    "monitor_feedback_focus",
+    "monitor_inquiry",
+    "monitor_active_working_context",
+    "monitor_live_awareness",
+    "monitor_decision_context",
+    "monitor_pma_memory",
+    "monitor_task_model",
+    "monitor_root_decision_contract",
+    "monitor_root_simple_check"
+  ],
   "conditions": {
     "ordinary": {
       "GA_MONITOR_DCEC": "0",
@@ -57,7 +75,7 @@
       "A is initially wrong",
       "Supervisor observes and corrects A",
       "Task Agent repairs A",
-      "a direct post-repair observation supports A",
+      "the workspace contains repaired A; only the Supervisor's own normal tools can turn it into direct evidence",
       "Task Agent proposes whole-task completion"
     ],
     "latent_defect": "B remains wrong and is discoverable using the ordinary read/search tools",
@@ -70,6 +88,70 @@
     {"order": 3, "sequence": "correct_control", "condition": "dcec_v0"},
     {"order": 4, "sequence": "correct_control", "condition": "ordinary"}
   ],
+  "resolved_models": {
+    "task_agent": {
+      "profile": "native_claude_cc_vibe_opus48",
+      "model": "claude-opus-4-8",
+      "provider": "anthropic",
+      "api_mode": "messages",
+      "thinking_type": "adaptive",
+      "reasoning_effort": null,
+      "temperature": 1,
+      "max_tokens": 64000,
+      "context_win": 30000,
+      "timeout": 60,
+      "read_timeout": 300,
+      "max_retries": 8,
+      "transport_route": "task",
+      "stream": true,
+      "endpoint_host": "127.0.0.1"
+    },
+    "supervisor": {
+      "profile": "claude_monitor_opus48",
+      "model": "claude-opus-4-8",
+      "provider": "anthropic",
+      "api_mode": "messages",
+      "thinking_type": "adaptive",
+      "reasoning_effort": "high",
+      "temperature": 1,
+      "max_tokens": 8192,
+      "context_win": 200000,
+      "timeout": 30,
+      "read_timeout": 300,
+      "max_retries": 8,
+      "transport_route": "monitor",
+      "stream": true,
+      "endpoint_host": "cc-vibe.com"
+    },
+    "independent_c": {
+      "enabled": false
+    }
+  },
+  "mechanism_source_sha256": {
+    "GenericAgent-main/monitor_agent_core/agent.py": "51c45058835ac7b77938c3902fc56f3800213199a2654c49246ea349e92dc5ad",
+    "GenericAgent-main/monitor_agent_core/working_context.py": "c18ff2dfd8d0dcec1c92a8c4d04c4c45ce473721465f9dc3d945e03eac590d4f",
+    "GenericAgent-main/monitor_agent_core/provider.py": "58e70a6a040591d5dc701d9ee0767e820cc6a604a8d42181b2a72c2e24187ee2",
+    "GenericAgent-main/monitor_agent_core/loop.py": "62dd73063c197495bc043381b74b4c00689d9321160dbda858f7ca1fac1f9548",
+    "GenericAgent-main/monitor_agent_core/workspace.py": "52272d83626aa561e7fe0aa2e4fc04d90707d8320f20ffffefef0ad1a990f40d",
+    "GenericAgent-main/monitor_agent_core/handoff_validation.py": "2a0c521d636b29067d62a04cf8e965d3310f0e3a7b0ac63f1061ad2a6f5d42e3",
+    "GenericAgent-main/monitor_agent_core/actions.py": "9b26d28a5d1adfe98a24afda0819bc26c7ca4ce072ab22cf8cc2a635b9637ea3",
+    "GenericAgent-main/monitor_agent_core/process_runner.py": "cebc138ff0a31fa952d37e585a33e587908cd0da2c0fb07ad62c4e1ce2793ec7"
+  },
+  "execution_constraints": {
+    "max_review_turns_per_review": 20,
+    "max_reviews_per_record": 2,
+    "max_total_logical_calls_per_record": 40,
+    "record_wall_seconds": 900,
+    "supervisor_context_window": 200000,
+    "supervisor_max_output_tokens": 8192,
+    "provider_transport_retries": 8,
+    "task_agent_model_calls": 0,
+    "repair_trigger": "first real intervention of any semantics; semantic correctness is offline-only",
+    "no_intervention_stop": "record ends as mechanism_sequence_failure without researcher repair",
+    "repeats": 1,
+    "run_order_frozen": true
+  },
+  "materialization_hash_rule": "SHA256 each model-visible file, then SHA256 the canonical sorted manifest; same-variant ordinary/DCEC initial trees must match exactly",
   "required_trace_checks": [
     "A exits the active investigation frontier after direct post-repair evidence",
     "at root scope, an unsupported decision-relevant B can become the single focal inquiry",
