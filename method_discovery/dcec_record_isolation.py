@@ -361,6 +361,29 @@ def _gateway_config(profile: dict) -> dict:
     }}, "telemetry": "http://127.0.0.1:9/v1/traces"}
 
 
+def _collect_gateway_diagnostics(container: str, destination: Path) -> list[dict]:
+    """Archive only the gateway's explicitly safe structured stage events."""
+    completed = docker("logs", container, check=False, timeout=30)
+    allowed = {
+        "event", "timestamp", "thread", "stage", "status",
+        "exception_type", "http_status",
+    }
+    records = []
+    for line in (completed.stdout + "\n" + completed.stderr).splitlines():
+        try:
+            item = json.loads(line)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(item, dict) or item.get("event") != "gateway_transport":
+            continue
+        records.append({key: item[key] for key in allowed if key in item})
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in records),
+        encoding="utf-8")
+    return records
+
+
 def run_record(source: Path, record: Path, profile: dict, dcec: bool, max_turns: int,
                wall_seconds: float, on_intervention, on_root_ready) -> dict:
     token = uuid.uuid4().hex[:12]
@@ -376,6 +399,8 @@ def run_record(source: Path, record: Path, profile: dict, dcec: bool, max_turns:
             shutil.copy2(ca_path, gateway_root / "ca-bundle.pem")
         result = None
         cleanup_seconds = None
+        gateway_diagnostics = []
+        gateway_started = False
         try:
             docker("run", "-d", "--rm", "--name", gateway, "--network", "bridge",
                    "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
@@ -384,6 +409,7 @@ def run_record(source: Path, record: Path, profile: dict, dcec: bool, max_turns:
                    "--mount", f"type=bind,src={gateway_root.resolve()},dst=/gateway,readonly",
                    "--mount", f"type=volume,src={volume},dst=/run/model-channel",
                    IMAGE, PYTHON, "/gateway/transport.py", "gateway", "--config", "/gateway/config.json")
+            gateway_started = True
             deadline = time.monotonic() + 30
             while time.monotonic() < deadline:
                 check = docker("exec", gateway, PYTHON, "-c",
@@ -408,6 +434,9 @@ def run_record(source: Path, record: Path, profile: dict, dcec: bool, max_turns:
             cleanup_started = time.monotonic()
             if "process" in locals():
                 _stop_process(process)
+            if gateway_started:
+                gateway_diagnostics = _collect_gateway_diagnostics(
+                    gateway, record / "monitor/audit/gateway_transport.jsonl")
             docker("rm", "-f", main, check=False, timeout=30)
             docker("rm", "-f", gateway, check=False, timeout=30)
             docker("volume", "rm", "-f", volume, check=False, timeout=30)
@@ -415,4 +444,5 @@ def run_record(source: Path, record: Path, profile: dict, dcec: bool, max_turns:
         if result is None:
             raise RuntimeError("isolated record did not produce a result")
         result["cleanup_seconds"] = cleanup_seconds
+        result["gateway_transport_diagnostic_events"] = len(gateway_diagnostics)
         return result

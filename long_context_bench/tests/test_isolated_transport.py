@@ -1,4 +1,6 @@
 import importlib.util
+import contextlib
+import io
 import json
 from pathlib import Path
 import threading
@@ -24,7 +26,8 @@ b = load('isolated_run_bundle', 'scripts/isolated_run_bundle.py')
 @pytest.fixture
 def config():
     return {'models': {'test-model': {'base': 'https://example.invalid/v1',
-        'headers': {'Authorization': 'Bearer PRIVATE'}, 'paths': ['/v1/responses']}},
+        'headers': {'Authorization': 'Bearer PRIVATE'}, 'paths': ['/v1/responses'],
+        'tls': {'verification_enabled': False}}},
         'telemetry': 'http://collector:15340/v1/traces'}
 
 
@@ -103,6 +106,9 @@ def test_stream_and_credentials_are_forwarded_without_url_control(monkeypatch, c
         def __init__(self, host, port, **kwargs):
             captured['host'] = host
 
+        def connect(self):
+            captured['connected'] = True
+
         def request(self, method, target, body, headers):
             captured.update(method=method, target=target, body=body, headers=headers)
 
@@ -125,9 +131,44 @@ def test_stream_and_credentials_are_forwarded_without_url_control(monkeypatch, c
         assert response.status == 200
         assert response.read() == b'data: first\n\ndata: last\n\n'
         assert captured['host'] == 'example.invalid'
+        assert captured['connected'] is True
         assert captured['headers']['Authorization'] == 'Bearer PRIVATE'
         assert 'Host' not in captured['headers']
         conn.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_gateway_failure_diagnostic_records_stage_and_type_without_message(monkeypatch, config):
+    class Connection:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def connect(self):
+            raise ConnectionError('SECRET credential-like diagnostic content')
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(t.http.client, 'HTTPSConnection', Connection)
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), t.Handler)
+    server.mode, server.config = 'gateway', config
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    diagnostic = io.StringIO()
+    thread.start()
+    try:
+        conn = http.client.HTTPConnection(*server.server_address)
+        with contextlib.redirect_stderr(diagnostic):
+            conn.request('POST', '/v1/responses', b'{"model":"test-model"}',
+                         {'x-model-route': 'test-model'})
+            response = conn.getresponse()
+            response.read()
+        assert response.status == 502
+        events = [json.loads(line) for line in diagnostic.getvalue().splitlines()]
+        assert events[-1]['stage'] == 'connect'
+        assert events[-1]['exception_type'] == 'ConnectionError'
+        assert 'SECRET' not in diagnostic.getvalue()
     finally:
         server.shutdown()
         server.server_close()

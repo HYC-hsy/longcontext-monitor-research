@@ -2,6 +2,7 @@ import datetime
 import importlib.util
 import socket
 import ssl
+import sys
 import threading
 from pathlib import Path
 
@@ -14,10 +15,18 @@ from cryptography.x509.oid import NameOID
 
 ROOT = Path(__file__).resolve().parents[2]
 TRANSPORT_PATH = ROOT / "long_context_bench/adapters/isolated_transport.py"
+PREFLIGHT_PATH = ROOT / "method_discovery/run_dcec_transport_equivalence_preflight.py"
 
 
 def load_transport():
     spec = importlib.util.spec_from_file_location("isolated_transport_tls_test", TRANSPORT_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_preflight():
+    spec = importlib.util.spec_from_file_location("dcec_transport_equivalence_test", PREFLIGHT_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -111,3 +120,40 @@ def test_verified_tls_context_rejects_hostname_mismatch(tmp_path):
     with pytest.raises(ssl.SSLCertVerificationError):
         handshake(context, port, "wrong.example")
     thread.join(timeout=5)
+
+
+@pytest.mark.parametrize("base,operation", [
+    ("https://example.test", "messages"),
+    ("https://example.test/v1", "messages"),
+    ("https://example.test/v2", "messages"),
+    ("https://example.test/v1/messages", "messages"),
+    ("https://example.test/custom$", "messages"),
+])
+def test_gateway_url_builder_matches_production_special_cases(base, operation):
+    transport = load_transport()
+    sys.path.insert(0, str(ROOT / "GenericAgent-main"))
+    from monitor_agent_core.provider import _url
+    assert transport.provider_url(base, operation) == _url(base, operation)
+
+
+def test_full_gateway_handler_forwards_frozen_application_semantics():
+    preflight = load_preflight()
+    profile = {
+        "provider": "anthropic", "api_mode": "messages", "apikey": "FIXTURE",
+        "apibase": "https://example.invalid", "model": "claude-opus-4-8",
+        "transport_route": "monitor", "thinking_type": "adaptive",
+        "reasoning_effort": "high", "temperature": 1, "max_tokens": 8192,
+    }
+    snapshot = {
+        "system": "Frozen system", "messages": [{"role": "user", "content": [
+            {"type": "text", "text": "Frozen request"}]}], "tools": [],
+    }
+    result = preflight.full_forwarding_probe(profile, snapshot)
+    assert result["status"] == "passed"
+    assert result["x_model_route_forwarded"] is True
+    assert result["user_agent_forwarded"] is True
+    assert result["json_body_semantically_equal"] is True
+    assert result["safe_gateway_stages"] == [
+        "resolved", "connected", "request_sent",
+        "response_headers_received", "response_stream_completed",
+    ]

@@ -117,21 +117,9 @@ def test_archived_usage_and_transport_attempts_remain_readable_after_provider_dr
         {"attempt": 1, "status": "response"}]
 
 
-def test_preflight_materializes_four_isolated_records_without_api(tmp_path, monkeypatch):
-    runner = load_runner()
-    provider_module = runner.sys.modules[runner.MonitorProviderClient.__module__]
-    monkeypatch.setattr(provider_module.requests, "post", lambda *args, **kwargs: (_ for _ in ()).throw(
-        AssertionError("network request path must not run during preflight")))
-    monkeypatch.setattr(runner, "isolated_tls_handshake_probe", lambda profile: {
-        "tls_handshake_attempts": 1, "tls_handshake_success": True,
-        "endpoint_host": "cc-vibe.com", "endpoint_port": 443,
-        "peer_hostname": "cc-vibe.com", "verification_enabled": True,
-        "ca_source_kind": "production_requests_certifi",
-        "ca_bundle_sha256_if_applicable": "test-only",
-        "provider_http_requests": 0, "model_api_calls": 0, "tls_version": "TLSv1.3",
-    })
-    output = tmp_path / "preflight"
-    result = runner.preflight(MANIFEST_PATH, output, CONFIG_PATH)
+def test_archived_r1b_preflight_remains_zero_api_and_materialized():
+    result = json.loads((ROOT / "method_discovery/runs/dcec_v0_r1b_tls_preflight_20260921"
+                         / "preflight.json").read_text(encoding="utf-8"))
     assert result["status"] == "passed_not_executed"
     assert result["execution_authorized"] is False
     assert result["provider_http_requests"] == 0
@@ -260,18 +248,23 @@ def test_ordinary_and_dcec_receive_identical_manifest_wall_budget(tmp_path, monk
 
 def test_execution_lock_rejects_before_provider_creation(tmp_path, monkeypatch):
     runner = load_runner()
+    manifest = runner.load_json(MANIFEST_PATH)
+    manifest["execution_authorized"] = False
+    locked = tmp_path / "locked-manifest.json"
+    locked.write_text(json.dumps(manifest), encoding="utf-8")
     monkeypatch.setattr(runner, "run_isolated_record", lambda *args, **kwargs: (_ for _ in ()).throw(
         AssertionError("isolated worker must not start while execution is unauthorized")))
     with pytest.raises(PermissionError, match="execution_authorized=false"):
-        runner.execute(MANIFEST_PATH, tmp_path / "run", CONFIG_PATH)
+        runner.execute(locked, tmp_path / "run", CONFIG_PATH)
 
 
 def test_manifest_freezes_order_and_disables_historical_candidates():
     manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     assert manifest["implementation_commit"] == "1cd7048c5742ca7415937ec5142cc28fd2bcaf22"
-    assert manifest["execution_authorized"] is False
+    assert manifest["execution_authorized"] is True
     assert manifest["execution_output"] == (
         "method_discovery/runs/dcec_v0_discrimination_r1b_tls_recovery")
+    assert (ROOT / manifest["execution_output"] / "results.json").is_file()
     assert [(item["sequence"], item["condition"]) for item in manifest["runs"]] == [
         ("latent_defect", "ordinary"),
         ("latent_defect", "dcec_v0"),

@@ -223,7 +223,9 @@ def test_discriminating_manifest_is_frozen_unexecuted_and_isolates_candidates():
             / "discriminating_manifest.json")
     manifest = json.loads(path.read_text(encoding="utf-8"))
     assert manifest["status"] == "prepared_not_executed"
-    assert manifest["execution_authorized"] is False
+    assert manifest["execution_authorized"] is True
+    assert (Path(__file__).resolve().parents[2] / manifest["execution_output"]
+            / "results.json").is_file()
     assert manifest["model_api_calls_made_during_preparation"] == 0
     assert manifest["conditions"]["ordinary"]["GA_MONITOR_DCEC"] == "0"
     assert manifest["conditions"]["dcec_v0"]["GA_MONITOR_DCEC"] == "1"

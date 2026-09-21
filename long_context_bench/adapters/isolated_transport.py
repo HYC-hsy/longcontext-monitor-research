@@ -8,9 +8,13 @@ import http.client
 import http.server
 import json
 import os
+import re
 import socket
 import socketserver
 import ssl
+import sys
+import threading
+import time
 from urllib.parse import urlsplit
 
 
@@ -18,7 +22,7 @@ MAX_BODY = 32 * 1024 * 1024
 PATHS = {'/v1/messages', '/v1/messages?beta=true', '/v1/responses',
          '/v1/chat/completions', '/v1/traces'}
 FORWARD_HEADERS = {'content-type', 'accept', 'anthropic-version', 'anthropic-beta',
-                   'content-encoding', 'x-model-route'}
+                   'content-encoding', 'user-agent', 'x-model-route'}
 
 
 def create_tls_context(route):
@@ -54,11 +58,21 @@ def reject_remote_media(value):
             reject_remote_media(item)
 
 
-def resolve_request(path, body, config, route_id=None):
+def provider_url(base, operation):
+    """Mirror monitor_agent_core.provider._url without importing the Monitor runtime."""
+    base, operation = base.rstrip('/'), operation.strip('/')
+    if base.endswith('$'):
+        return base[:-1].rstrip('/')
+    if base.endswith(operation):
+        return base
+    return f'{base}/{operation}' if re.search(r'/v\d+(/|$)', base) else f'{base}/v1/{operation}'
+
+
+def _resolve_request(path, body, config, route_id=None):
     if path not in PATHS:
         raise ValueError('Only fixed inference endpoints and trace ingestion are available')
     if path == '/v1/traces':
-        return config['telemetry'], {}, body
+        return config['telemetry'], {}, body, None
     payload = json.loads(body)
     reject_remote_media(payload.get('input', payload.get('messages', [])))
     model = payload.get('model')
@@ -74,9 +88,31 @@ def resolve_request(path, body, config, route_id=None):
         raise ValueError('Remote session reuse is not permitted')
     if 'input' in payload:
         payload['store'] = False
-    base = route['base'].rstrip('/')
-    suffix = path[3:] if base.endswith('/v1') else path
-    return base + suffix, route['headers'], json.dumps(payload).encode()
+    requested = urlsplit(path)
+    operation = requested.path.rstrip('/').rsplit('/', 1)[-1]
+    url = provider_url(route['base'], operation)
+    if requested.query:
+        # Production request builders append their fixed query after _url().
+        url += '?' + requested.query
+    return url, route['headers'], json.dumps(payload).encode(), route
+
+
+def resolve_request(path, body, config, route_id=None):
+    """Compatibility wrapper used by existing callers and tests."""
+    return _resolve_request(path, body, config, route_id)[:3]
+
+
+def emit_transport_event(stage, *, status='ok', exception_type=None, http_status=None):
+    """Emit only whitelisted transport metadata; never payloads, URLs, or headers."""
+    event = {
+        'event': 'gateway_transport', 'timestamp': time.time(),
+        'thread': threading.get_ident(), 'stage': stage, 'status': status,
+    }
+    if exception_type:
+        event['exception_type'] = exception_type
+    if isinstance(http_status, int):
+        event['http_status'] = http_status
+    print(json.dumps(event, separators=(',', ':')), file=sys.stderr, flush=True)
 
 
 class UnixHTTPConnection(http.client.HTTPConnection):
@@ -99,6 +135,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         conn = None
         started = False
+        stage = 'resolve'
         try:
             if self.headers.get('Transfer-Encoding'):
                 raise ValueError('A fixed Content-Length is required')
@@ -111,7 +148,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body = self.rfile.read(size)
             if len(body) != size:
                 raise ValueError('Incomplete body')
-            headers = {k: v for k, v in self.headers.items()
+            headers = {k.lower(): v for k, v in self.headers.items()
                        if k.lower() in FORWARD_HEADERS}
             if self.server.mode == 'local':
                 if self.path not in PATHS:
@@ -119,8 +156,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 conn = UnixHTTPConnection(self.server.socket_path)
                 target = self.path
             else:
-                route_id = headers.pop('x-model-route', None)
-                url, credentials, body = resolve_request(self.path, body, self.server.config, route_id)
+                # The frozen route header is both an internal route selector and a
+                # production application header.  Validate it, but do not consume it.
+                route_id = headers.get('x-model-route')
+                url, credentials, body, route = _resolve_request(
+                    self.path, body, self.server.config, route_id)
                 parsed = urlsplit(url)
                 headers.update(credentials)
                 if parsed.scheme == 'https':
@@ -131,8 +171,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 else:
                     raise ValueError('Inference requires HTTPS')
                 target = parsed.path + ('?' + parsed.query if parsed.query else '')
+                emit_transport_event('resolved')
+            stage = 'connect'
+            conn.connect()
+            if self.server.mode == 'gateway':
+                emit_transport_event('connected')
+            stage = 'request_send'
             conn.request('POST', target, body=body, headers=headers)
+            if self.server.mode == 'gateway':
+                emit_transport_event('request_sent')
+            stage = 'response_headers'
             response = conn.getresponse()
+            if self.server.mode == 'gateway':
+                emit_transport_event('response_headers_received', http_status=response.status)
             # Redirects must never become a generic external fetch primitive.
             if 300 <= response.status < 400:
                 raise ValueError('Upstream redirects are forbidden')
@@ -144,13 +195,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header('Connection', 'close')
             self.end_headers()
             started = True
+            stage = 'response_stream'
             while chunk := response.read1(65536):
                 self.wfile.write(chunk)
                 self.wfile.flush()
+            if self.server.mode == 'gateway':
+                emit_transport_event('response_stream_completed', http_status=response.status)
         except (ValueError, KeyError, TypeError) as exc:
+            if self.server.mode == 'gateway':
+                emit_transport_event(stage, status='error', exception_type=type(exc).__name__)
             if not started:
                 self.send_error(400, str(exc))
-        except Exception:
+        except Exception as exc:
+            if self.server.mode == 'gateway':
+                emit_transport_event(stage, status='error', exception_type=type(exc).__name__)
             if not started:
                 self.send_error(502, 'Isolated transport failed')
         finally:
