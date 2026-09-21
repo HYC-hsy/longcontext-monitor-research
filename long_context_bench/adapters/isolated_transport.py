@@ -21,6 +21,20 @@ FORWARD_HEADERS = {'content-type', 'accept', 'anthropic-version', 'anthropic-bet
                    'content-encoding', 'x-model-route'}
 
 
+def create_tls_context(route):
+    """Reproduce the frozen production profile's certificate-verification semantics."""
+    tls = route.get('tls') or {}
+    enabled = tls.get('verification_enabled')
+    if enabled is True:
+        ca_file = tls.get('ca_file')
+        if not isinstance(ca_file, str) or not ca_file:
+            raise ValueError('Verified TLS requires an explicit CA bundle')
+        return ssl.create_default_context(cafile=ca_file)
+    if enabled is False:
+        return ssl._create_unverified_context()
+    raise ValueError('TLS verification semantics are not configured')
+
+
 def reject_remote_media(value):
     if isinstance(value, list):
         for item in value:
@@ -111,7 +125,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 headers.update(credentials)
                 if parsed.scheme == 'https':
                     conn = http.client.HTTPSConnection(parsed.hostname, parsed.port,
-                        timeout=1000, context=ssl.create_default_context())
+                        timeout=1000, context=create_tls_context(route))
                 elif self.path == '/v1/traces' and parsed.scheme == 'http':
                     conn = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=30)
                 else:

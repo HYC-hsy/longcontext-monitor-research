@@ -28,15 +28,17 @@ from monitor_agent_core.provider import MonitorProviderClient  # noqa: E402
 from dcec_record_isolation import (  # noqa: E402
     filesystem_probe as isolated_filesystem_probe,
     prepare_runtime as prepare_isolated_runtime,
+    production_tls_semantics,
     provider_deadline_probe as isolated_provider_deadline_probe,
     request_probe as isolated_request_probe,
     run_record as run_isolated_record,
+    tls_handshake_probe as isolated_tls_handshake_probe,
     watchdog_probe as isolated_watchdog_probe,
 )
 
 
 DEFAULT_MANIFEST = ROOT / "method_discovery/artifacts/dcec_v0_20260921/discriminating_manifest.json"
-DEFAULT_PREFLIGHT_OUTPUT = ROOT / "method_discovery/runs/dcec_v0_final_preflight_wall_r1_20260921"
+DEFAULT_PREFLIGHT_OUTPUT = ROOT / "method_discovery/runs/dcec_v0_r1b_tls_preflight_20260921"
 RUNNER_RELATIVE = "method_discovery/run_dcec_v0_discrimination.py"
 MODEL_CONTRACT = ROOT / "method_discovery/runs/dual_opus_20260919/dual_opus_model_contract.json"
 
@@ -320,6 +322,19 @@ def preflight(manifest_path: Path, output: Path, monitor_config: Path) -> dict:
         profiles[manifest["shared_contract"]["supervisor_profile"]],
         manifest["historical_candidate_config_keys"],
     )
+    profile = profiles[manifest["shared_contract"]["supervisor_profile"]]
+    tls_semantics, _ = production_tls_semantics(profile)
+    endpoint = urlparse(profile["apibase"])
+    production_tls = {
+        "provider": profile.get("provider"),
+        "apibase_host": endpoint.hostname,
+        "verify_type": tls_semantics["verify_value_class"],
+        "verification_enabled": tls_semantics["verification_enabled"],
+        "ca_source_kind": tls_semantics["ca_source_kind"],
+        "ca_bundle_sha256_if_applicable": tls_semantics["ca_bundle_sha256"],
+        "proxy_present": tls_semantics["production_proxy_present"],
+    }
+    tls_handshake = isolated_tls_handshake_probe(profile)
     records = []
     for run in manifest["runs"]:
         record_id = f"record-{int(run['order']):02d}"
@@ -357,6 +372,15 @@ def preflight(manifest_path: Path, output: Path, monitor_config: Path) -> dict:
             output / "isolated_runtime", probe_root, wall_seconds)
         host_watchdog = isolated_watchdog_probe(
             output / "isolated_runtime", probe_root)
+    expected_requests = manifest.get("expected_scientific_request_sha256") or {}
+    actual_requests = {
+        "ordinary": anti_leakage["ordinary_request_sha256"],
+        "dcec_v0": anti_leakage["dcec_request_sha256"],
+    }
+    if expected_requests and actual_requests != expected_requests:
+        raise ValueError(
+            f"scientific model request changed during transport repair: "
+            f"expected={expected_requests} actual={actual_requests}")
     required_filesystem = {
         "forbidden_name_hits": [], "forbidden_content_hits": [], "other_record_paths": [],
         "original_task_readable": True, "workspace_readable": True,
@@ -393,6 +417,13 @@ def preflight(manifest_path: Path, output: Path, monitor_config: Path) -> dict:
         } for item in records],
         "same_variant_parity": parity, "research_metadata_isolation": anti_leakage,
         "code_run_filesystem_isolation": filesystem,
+        "production_tls_semantics": production_tls,
+        "upstream_tls_handshake": tls_handshake,
+        "scientific_request_invariance": {
+            "expected": expected_requests,
+            "actual": actual_requests,
+            "unchanged": not expected_requests or actual_requests == expected_requests,
+        },
         "record_wall_deadline_enforcement": {
             "manifest_budget_seconds": wall_seconds,
             "provider": provider_deadline,
@@ -409,7 +440,7 @@ def preflight(manifest_path: Path, output: Path, monitor_config: Path) -> dict:
             "must_not_exist_before_launch": True,
         },
         "execution_authorized": manifest["execution_authorized"],
-        "api_requests_sent": 0, "model_api_calls": 0,
+        "provider_http_requests": 0, "api_requests_sent": 0, "model_api_calls": 0,
     }
     write_json(output / "preflight.json", result)
     return result

@@ -122,10 +122,19 @@ def test_preflight_materializes_four_isolated_records_without_api(tmp_path, monk
     provider_module = runner.sys.modules[runner.MonitorProviderClient.__module__]
     monkeypatch.setattr(provider_module.requests, "post", lambda *args, **kwargs: (_ for _ in ()).throw(
         AssertionError("network request path must not run during preflight")))
+    monkeypatch.setattr(runner, "isolated_tls_handshake_probe", lambda profile: {
+        "tls_handshake_attempts": 1, "tls_handshake_success": True,
+        "endpoint_host": "cc-vibe.com", "endpoint_port": 443,
+        "peer_hostname": "cc-vibe.com", "verification_enabled": True,
+        "ca_source_kind": "production_requests_certifi",
+        "ca_bundle_sha256_if_applicable": "test-only",
+        "provider_http_requests": 0, "model_api_calls": 0, "tls_version": "TLSv1.3",
+    })
     output = tmp_path / "preflight"
     result = runner.preflight(MANIFEST_PATH, output, CONFIG_PATH)
     assert result["status"] == "passed_not_executed"
     assert result["execution_authorized"] is False
+    assert result["provider_http_requests"] == 0
     assert result["api_requests_sent"] == 0
     assert len(result["records"]) == 4
     assert all(item["private_initial_files"] == [] for item in result["records"])
@@ -141,6 +150,29 @@ def test_preflight_materializes_four_isolated_records_without_api(tmp_path, monk
     assert deadline["host_watchdog"]["deadline_exceeded"] is True
     assert deadline["same_budget_for_all_records"] is True
     assert result["formal_execution_output"]["exists"] is False
+    assert result["production_tls_semantics"]["verification_enabled"] is True
+    assert result["production_tls_semantics"]["proxy_present"] is False
+    assert result["upstream_tls_handshake"]["tls_handshake_success"] is True
+    assert result["scientific_request_invariance"]["unchanged"] is True
+
+
+def test_production_tls_semantics_use_requests_ca_and_reject_proxy():
+    runner = load_runner()
+    isolation = isolation_module(runner)
+    profiles = runner.load_json(CONFIG_PATH)
+    profile = profiles[runner.load_json(MANIFEST_PATH)["shared_contract"]["supervisor_profile"]]
+    tls, ca_path = isolation.production_tls_semantics(profile)
+    assert profile.get("verify", True) is True
+    assert tls["verification_enabled"] is True
+    assert tls["verify_value_class"] == "bool"
+    assert tls["ca_source_kind"] == "production_requests_certifi"
+    assert tls["production_proxy_present"] is False
+    assert ca_path.is_file()
+    assert tls["ca_bundle_sha256"] == isolation.sha256_file(ca_path)
+    gateway = isolation._gateway_config(profile)
+    assert gateway["models"]["monitor"]["tls"] == tls
+    with pytest.raises(ValueError, match="proxy equivalence"):
+        isolation.production_tls_semantics({**profile, "proxy": "http://127.0.0.1:8080"})
 
 
 def test_run_record_host_watchdog_terminates_once_and_cleans_all_resources(tmp_path, monkeypatch):
@@ -238,7 +270,8 @@ def test_manifest_freezes_order_and_disables_historical_candidates():
     manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     assert manifest["implementation_commit"] == "1cd7048c5742ca7415937ec5142cc28fd2bcaf22"
     assert manifest["execution_authorized"] is False
-    assert manifest["execution_output"] == "method_discovery/runs/dcec_v0_discrimination_r1_launchprep"
+    assert manifest["execution_output"] == (
+        "method_discovery/runs/dcec_v0_discrimination_r1b_tls_recovery")
     assert [(item["sequence"], item["condition"]) for item in manifest["runs"]] == [
         ("latent_defect", "ordinary"),
         ("latent_defect", "dcec_v0"),

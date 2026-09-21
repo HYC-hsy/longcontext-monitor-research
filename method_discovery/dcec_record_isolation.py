@@ -13,6 +13,8 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from requests.certs import where as requests_ca_where
+
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE_LABEL = "debian:bookworm-slim"
@@ -21,6 +23,7 @@ RUNTIME = ROOT / "bench_runtime/m2/linux"
 PYTHON_HOME = "cpython-3.12.12-linux-x86_64-gnu"
 PYTHON = f"/opt/m4-runtime/python/{PYTHON_HOME}/bin/python3.12"
 SITE = "/opt/m4-runtime/ga-env/lib/python3.12/site-packages"
+CONTAINER_CA_BUNDLE = "/gateway/ca-bundle.pem"
 TRANSPORT = ROOT / "long_context_bench/adapters/isolated_transport.py"
 WORKER = ROOT / "method_discovery/dcec_isolated_record_worker.py"
 
@@ -55,7 +58,84 @@ def image_identity() -> str:
     return value
 
 
+def production_tls_semantics(profile: dict) -> tuple[dict, Path | None]:
+    proxy = profile.get("proxy")
+    if proxy:
+        raise ValueError("production proxy is configured; isolated gateway proxy equivalence is not implemented")
+    verify = profile.get("verify", True)
+    if verify is True:
+        ca_path = Path(requests_ca_where()).resolve()
+        source_kind = "production_requests_certifi"
+    elif verify is False:
+        ca_path = None
+        source_kind = "production_profile_verify_false"
+    elif isinstance(verify, str) and verify:
+        ca_path = Path(verify).expanduser().resolve()
+        source_kind = "production_profile_ca_path"
+    else:
+        raise ValueError(f"unsupported production verify setting: {type(verify).__name__}")
+    if ca_path is not None and not ca_path.is_file():
+        raise FileNotFoundError(f"production CA bundle is missing: {ca_path}")
+    return ({
+        "verification_enabled": verify is not False,
+        "verify_value_class": "bool" if isinstance(verify, bool) else "path",
+        "ca_source_kind": source_kind,
+        "ca_file": CONTAINER_CA_BUNDLE if ca_path is not None else None,
+        "ca_bundle_sha256": sha256_file(ca_path) if ca_path is not None else None,
+        "production_proxy_present": False,
+    }, ca_path)
+
+
+def tls_handshake_probe(profile: dict) -> dict:
+    endpoint = urlsplit(str(profile["apibase"]))
+    if endpoint.scheme != "https" or not endpoint.hostname:
+        raise ValueError("TLS probe requires the fixed HTTPS provider endpoint")
+    tls, ca_path = production_tls_semantics(profile)
+    script = (
+        "import importlib.util,json,socket,sys;"
+        "spec=importlib.util.spec_from_file_location('transport','/gateway/transport.py');"
+        "transport=importlib.util.module_from_spec(spec);spec.loader.exec_module(transport);"
+        "route=json.load(open('/gateway/config.json'))['models']['monitor'];"
+        "host=sys.argv[1];port=int(sys.argv[2]);"
+        "ctx=transport.create_tls_context(route);"
+        "raw=socket.create_connection((host,port),10);"
+        "conn=ctx.wrap_socket(raw,server_hostname=host);"
+        "print(json.dumps({'tls_version':conn.version(),"
+        "'peer_common_name':dict(x[0] for x in conn.getpeercert()['subject']).get('commonName')}));"
+        "conn.close()")
+    with tempfile.TemporaryDirectory(prefix="dcec-tls-probe-") as temporary:
+        root = Path(temporary)
+        config = _gateway_config(profile)
+        (root / "config.json").write_text(json.dumps(config), encoding="utf-8")
+        shutil.copy2(TRANSPORT, root / "transport.py")
+        if ca_path is not None:
+            shutil.copy2(ca_path, root / "ca-bundle.pem")
+        result = docker(
+            "run", "--rm", "--network", "bridge", "--cap-drop", "ALL",
+            "--security-opt", "no-new-privileges:true", "--read-only",
+            "--tmpfs", "/tmp:rw,nosuid,nodev",
+            "--mount", f"type=bind,src={RUNTIME.resolve()},dst=/opt/m4-runtime,readonly",
+            "--mount", f"type=bind,src={root.resolve()},dst=/gateway,readonly",
+            IMAGE, PYTHON, "-c", script, endpoint.hostname, str(endpoint.port or 443),
+            timeout=30)
+    observed = json.loads(result.stdout)
+    return {
+        "tls_handshake_attempts": 1,
+        "tls_handshake_success": True,
+        "endpoint_host": endpoint.hostname,
+        "endpoint_port": endpoint.port or 443,
+        "peer_hostname": observed.pop("peer_common_name", None),
+        "verification_enabled": tls["verification_enabled"],
+        "ca_source_kind": tls["ca_source_kind"],
+        "ca_bundle_sha256_if_applicable": tls["ca_bundle_sha256"],
+        "provider_http_requests": 0,
+        "model_api_calls": 0,
+        **observed,
+    }
+
+
 def prepare_runtime(destination: Path, supervisor: dict, disabled_keys: list[str]) -> dict:
+    tls, _ = production_tls_semantics(supervisor)
     if destination.exists():
         raise FileExistsError(f"isolated runtime already exists: {destination}")
     destination.mkdir(parents=True)
@@ -83,6 +163,7 @@ def prepare_runtime(destination: Path, supervisor: dict, disabled_keys: list[str
         "source_files": tree_manifest(destination),
         "worker_sha256": sha256_file(destination / WORKER.name),
         "transport_sha256": sha256_file(destination / TRANSPORT.name),
+        "production_tls": tls,
     }
 
 
@@ -273,9 +354,10 @@ def _gateway_config(profile: dict) -> dict:
     key = profile["apikey"]
     headers = {"x-api-key": key} if key.startswith("sk-ant-") else {
         "Authorization": "Bearer " + key}
+    tls, _ = production_tls_semantics(profile)
     return {"models": {"monitor": {
         "base": profile["apibase"], "headers": headers,
-        "paths": ["/v1/messages"], "model": profile["model"],
+        "paths": ["/v1/messages"], "model": profile["model"], "tls": tls,
     }}, "telemetry": "http://127.0.0.1:9/v1/traces"}
 
 
@@ -286,9 +368,12 @@ def run_record(source: Path, record: Path, profile: dict, dcec: bool, max_turns:
     docker("volume", "create", volume)
     with tempfile.TemporaryDirectory(prefix="dcec-gateway-") as temporary:
         gateway_root = Path(temporary)
+        _, ca_path = production_tls_semantics(profile)
         (gateway_root / "config.json").write_text(
             json.dumps(_gateway_config(profile)), encoding="utf-8")
         shutil.copy2(TRANSPORT, gateway_root / "transport.py")
+        if ca_path is not None:
+            shutil.copy2(ca_path, gateway_root / "ca-bundle.pem")
         result = None
         cleanup_seconds = None
         try:
