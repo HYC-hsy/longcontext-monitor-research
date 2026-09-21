@@ -119,6 +119,24 @@ def python_home() -> str:
     return homes[0].name
 
 
+def prepare_source_snapshot_mountpoints(source_snapshot: Path) -> dict[str, str]:
+    """Create mountpoints nested below the read-only GenericAgent snapshot.
+
+    Docker cannot create a missing nested bind target after the snapshot itself
+    has been mounted read-only.  ``memory`` is copied by the bundle builder;
+    ``temp`` is intentionally excluded from source snapshots and must therefore
+    be materialized as an empty directory before container creation.
+    """
+    memory = source_snapshot / "memory"
+    if not memory.is_dir():
+        raise RuntimeError("isolated GenericAgent snapshot is missing memory/")
+    temp = source_snapshot / "temp"
+    temp.mkdir(parents=False, exist_ok=True)
+    if not temp.is_dir():
+        raise RuntimeError("failed to materialize isolated GenericAgent temp/")
+    return {"temp": str(temp), "memory": str(memory)}
+
+
 def install_isolated_adapter(m3, source_snapshot: Path, volume: str):
     original = m3.configure_m2_for_lock
 
@@ -236,6 +254,7 @@ def execute() -> dict:
         "native_claude_cc_vibe", "claude_monitor_opus48", m3.COLLECTOR_PORT,
         monitor_profile_path=ROOT / "monitor_config" / "models.local.json",
     )
+    prepare_source_snapshot_mountpoints(source_snapshot)
     token = hashlib.sha256(RUN_ID.encode()).hexdigest()[:12]
     volume = f"dcec-v1-generalization-{token}"
     gateway = f"dcec-v1-gateway-{token}"
