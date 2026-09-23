@@ -95,6 +95,32 @@ def test_v1_contract_is_scope_bound_and_root_re_evaluates_before_completion(tmp_
     assert "clear the dependency, prune superseded grounds and relax" in normalized
 
 
+def test_pre_dev_set_boundary_contract_is_domain_neutral_and_partial_evidence_stays_partial(tmp_path):
+    ws = workspace(tmp_path)
+    ws.write_text("monitor/working.md", "Current decision\n- local recovery")
+    view, metadata = dcec_working_context(ws)
+    system = " ".join(DCEC_SYSTEM_PROMPT.lower().split())
+    continuation = " ".join(DCEC_CONTINUATION_PROMPT.lower().split())
+    guidance = view.split("<dcec_working_state>", 1)[0].lower()
+
+    assert "scope covers the scope being closed" in system
+    assert "possible outcomes distinguish actions" in system
+    assert "what part of the behavior did it actually measure" in system
+    assert "blocking behavior still exist while the observation returns the same favorable result" in system
+    assert "qualified partial ground" in system
+    assert "success in one component does not automatically establish the task-specified behavior" in system
+    assert "return to the same root decision anchor and re-evaluate" in system
+    assert "changing measurement placement or abstraction level" in system
+    assert "prune superseded grounds and relax" in system
+    assert "what boundary a current ground measured" in continuation
+    assert "completed evidence that bypassed the relevant behavioral boundary" in continuation
+    assert "partial support" in guidance and "relevant behavioral boundary" in guidance
+    assert metadata["limit_characters"] == 4000
+    for forbidden in ("fyne", "appmetadata", "desktop.app", "sphinx", "find_obj",
+                      "pending_xref", "py:module", "implicit xref", "integration test"):
+        assert forbidden not in "\n".join((system, continuation, guidance))
+
+
 def test_v1_uses_only_working_note_and_existing_model_stage(tmp_path, monkeypatch):
     ws = workspace(tmp_path)
     ws.write_text("monitor/working.md", "Current decision\n- local recovery")
@@ -136,6 +162,8 @@ def test_production_request_injects_view_once_and_does_not_persist_copy(tmp_path
     assert monitor.review("Normal wake").kind == "wait"
     assert len(snapshots) == client.complete_calls == 1
     assert "<dcec_working_state>" not in json.dumps(client.history, ensure_ascii=False)
+    assert "observation boundary" in snapshots[0]["system"]
+    assert "distinguishing path was bypassed" in json.dumps(snapshots[0]["messages"])
     events = [json.loads(line) for line in
               (ws.private_root / "audit/progress.jsonl").read_text(encoding="utf-8").splitlines()]
     view = next(event for event in events if event["event"] == "dcec_working_view")
@@ -209,7 +237,8 @@ def test_valid_continuation_replaces_old_state_and_next_view_uses_only_current_n
     monitor = MonitorAgent(client, ws)
     revised = ("Current decision\n- decide whether recovery evidence is sufficient\n"
                "Active concern\n- recovering: wait for direct result\n"
-               "Current grounds and limits\n- Task Agent reports a fix; not direct evidence")
+               "Current grounds and limits\n- Task Agent reports a fix; not direct evidence\n"
+               "- Current read covers one component; it bypasses the behavior required for this decision")
 
     def request(_tools):
         assert DCEC_CONTINUATION_PROMPT in client.history[-1]["content"][0]["text"]
@@ -222,6 +251,7 @@ def test_valid_continuation_replaces_old_state_and_next_view_uses_only_current_n
     assert revised in visible
     assert "resolved item incorrectly remains active" not in visible
     assert "Task Agent reports a fix; not direct evidence" in visible
+    assert "bypasses the behavior required for this decision" in visible
 
 
 @pytest.mark.parametrize("value", ["0", "1", "bad"])

@@ -186,6 +186,14 @@ do not accumulate repeated claims, summaries or notes as independent support.
 
 Before moving an open or recovering concern to resolved, require an actually completed observation whose
 scope covers the scope being closed and whose possible outcomes distinguish actions for the current decision.
+Also check the observation boundary: what part of the behavior did it actually measure, and did it bypass
+the path that produces, propagates or exposes the distinction relevant to this decision? Could the blocking
+behavior still exist while the observation returns the same favorable result because that boundary was
+bypassed? If so, retain the result as a qualified partial ground, state what it does and does not establish,
+and keep or replace the one focal uncertainty. Choose a measurement at a more relevant boundary before a
+broader resolution or allow_complete; success in one component does not automatically establish the
+task-specified behavior. This calls for the smallest boundary needed for the current decision, not a full
+path model or a fixed end-to-end check.
 Intervention starts recovery but is not resolution. Local evidence can resolve only local scope; it cannot be
 promoted into universal, target-wide or whole-task support. At most one current decision-critical observation
 dependency may be kept, distinguishing requested, running, interrupted and completed. Requested, running and
@@ -202,7 +210,9 @@ whole-task grounds are adequate and you can identify neither a current decision-
 nor an unfinished control dependency. This is bounded re-evaluation, not exhaustive enumeration or proof.
 
 Tighten evidence-to-decision matching when scope or consequence increases, not by mechanically adding calls or
-running a fixed test. Once completed discriminating evidence adequately supports the current scope, resolve the
+running a fixed test. If the measured boundary misses the relevant distinction, tighten by changing
+measurement placement or abstraction level rather than repeating checks at the same boundary. Once completed
+evidence covers the relevant boundary and adequately supports the current scope, resolve the
 concern, clear the dependency, prune superseded grounds and relax to patrol or the appropriate scoped action;
 do not create a permanent conservative barrier. Before investigating, ask which differing observation outcomes
 would lead to different actions, then use existing tools directly. Runtime metadata identifies deterministic
@@ -211,11 +221,15 @@ Update working.md only when future control should change. No per-wake rewrite is
 
 DCEC_CONTINUATION_PROMPT = """Preserve only the bounded current decision-centered state in monitor/working.md:
 the current decision anchor and scope, one focal unresolved premise, current grounds with their support scope
-and limits, and at most one relevant decision-critical observation status (requested, running, interrupted or
-completed). Return the current state, not a chronology, checklist, concern list or evidence ledger. Replace
+and limits (including what boundary a current ground measured and which decision-relevant distinction it
+bypassed, only when this still affects future control), and at most one relevant decision-critical observation
+status (requested, running, interrupted or completed). Return the current state, not a chronology, checklist,
+concern list or evidence ledger. Replace
 superseded grounds instead of accumulating derived repeats. Claims and summaries remain source-qualified.
 Intervention is recovery, not resolution; unfinished observations are not positive evidence; local grounds do
-not become whole-task support. A resolved concern leaves the frontier unless a new relevant conflict reopens it.
+not become whole-task support. Completed evidence that bypassed the relevant behavioral boundary remains
+qualified partial support, not a reason by itself to close a broader decision. A resolved concern leaves the
+frontier unless a new relevant conflict reopens it.
 Under a whole-task anchor, resolving one focal uncertainty returns to the same root decision for re-evaluation;
 it does not authorize completion while another currently recognizable blocking alternative or unfinished
 dependency remains. Preserve relaxation too: after adequate completed discriminating evidence, clear the
