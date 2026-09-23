@@ -199,8 +199,8 @@ task-specified behavior. This calls for the smallest boundary needed for the cur
 path model or a fixed end-to-end check.
 Intervention starts recovery but is not resolution. Local evidence can resolve only local scope; it cannot be
 promoted into universal, target-wide or whole-task support. At most one current decision-critical observation
-dependency may be kept, distinguishing requested, running, interrupted and completed. Requested, running and
-interrupted are not positive evidence. If an unfinished observation could still change the current decision,
+dependency may be kept, distinguishing requested, running, interrupted, unavailable and completed. Requested,
+running, interrupted and unavailable observations are not positive evidence. If an unfinished observation could still change the current decision,
 retain it until a result is obtained, a different discriminating observation replaces it, or a changed decision
 makes it irrelevant. Do not build workflow history.
 
@@ -226,7 +226,7 @@ When DCEC is enabled, keep the first line of working.md as the canonical bounded
 `DCEC-CONTROL/1` JSON slot. It declares at most one decision-critical observation
 dependency: create it, retain the same id, replace it with a different id, or
 explicitly discharge it. Use receipt_id values returned by ordinary evidence tools
-when useful. A requested, running, interrupted or completed dependency remains
+when useful. A requested, running, interrupted, unavailable or completed dependency remains
 active until explicitly discharged or replaced. Runtime validates only syntax,
 lifecycle and receipt identity, never the truth or adequacy of your reasoning.
 Do not remove the slot through prose-only edits. Completion is procedurally rejected
@@ -237,7 +237,7 @@ DCEC_CONTINUATION_PROMPT = """Preserve only the bounded current decision-centere
 the current decision anchor and scope, one focal unresolved premise, current grounds with their support scope
 and limits (including what boundary a current ground measured and which decision-relevant distinction it
 bypassed, only when this still affects future control), and at most one relevant decision-critical observation
-status (requested, running, interrupted or completed). Return the current state, not a chronology, checklist,
+status (requested, running, interrupted, unavailable or completed). Return the current state, not a chronology, checklist,
 concern list or evidence ledger. Replace
 superseded grounds instead of accumulating derived repeats. Claims and summaries remain source-qualified.
 Intervention is recovery, not resolution; unfinished observations are not positive evidence; local grounds do
@@ -479,14 +479,32 @@ class MonitorAgent:
                            accepted_slot=accepted)
             return warning
 
-    def _dcec_prepare_working(self, proposed, operation):
+    def _dcec_prepare_working(self, proposed, operation, *, continuation=False):
         """Validate a complete candidate against process-memory authority."""
         if not self.dcec_enabled:
             return proposed
         self._dcec_check_integrity()
-        proposed = ensure_slot(proposed, self._dcec_accepted_slot)
-        new_slot = parse_slot(proposed)
-        transition = validate_transition(self._dcec_accepted_slot, new_slot, set(self._dcec_receipts))
+        try:
+            proposed = ensure_slot(proposed, self._dcec_accepted_slot)
+            new_slot = parse_slot(proposed)
+        except Exception as exc:
+            self._progress('dcec_dependency_transition_rejected', operation=operation,
+                           reason_code='malformed_slot', error_type=type(exc).__name__,
+                           old_id=self._dcec_accepted_slot.get('id'))
+            raise
+        if continuation and new_slot != self._dcec_accepted_slot:
+            self._progress('dcec_dependency_transition_rejected', operation=operation,
+                           reason_code='continuation_lifecycle_change',
+                           old_id=self._dcec_accepted_slot.get('id'), new_id=new_slot.get('id'))
+            raise ValueError('continuation must preserve the accepted DCEC control slot exactly')
+        try:
+            transition = validate_transition(self._dcec_accepted_slot, new_slot, set(self._dcec_receipts))
+        except Exception as exc:
+            self._progress('dcec_dependency_transition_rejected', operation=operation,
+                           reason_code='invalid_transition',
+                           error_type=type(exc).__name__,
+                           old_id=self._dcec_accepted_slot.get('id'), new_id=new_slot.get('id'))
+            raise
         self._dcec_pending_transition = transition
         self._progress('dcec_control_transition_validated', operation=operation,
                        transition=transition, old_id=self._dcec_accepted_slot.get('id'),
@@ -514,6 +532,10 @@ class MonitorAgent:
         if getattr(self, '_dcec_pending_transition', None) not in {'unchanged', 'prose_only'}:
             self._progress('dcec_dependency_transition', operation=operation,
                            old_id=old.get('id'), new_id=new.get('id'), status=new.get('status'))
+            self._progress('dcec_dependency_transition_accepted', operation=operation,
+                           transition=getattr(self, '_dcec_pending_transition', None),
+                           old_id=old.get('id'), new_id=new.get('id'), status=new.get('status'),
+                           receipts=list(new.get('receipts', [])))
         self._dcec_pending_transition = None
         return self.workspace._receipt('monitor/working.md', path, len(proposed))
 
@@ -678,7 +700,7 @@ class MonitorAgent:
             }, ensure_ascii=False) + "\n", mode="append")
             if self.pma_memory is None:
                 if self.dcec_enabled:
-                    proposed = self._dcec_prepare_working(note, 'continuation')
+                    proposed = self._dcec_prepare_working(note, 'continuation', continuation=True)
                     self._dcec_commit_working(proposed, 'continuation')
                 else:
                     self._atomic_private_text("working.md", note)
@@ -714,8 +736,6 @@ class MonitorAgent:
         try:
             outcome = self._dispatch(name, arguments)
             if self.dcec_enabled and name in {'file_read', 'file_write', 'file_patch', 'code_run'}:
-                if isinstance(outcome.data, dict) and outcome.data.get('status') == 'error':
-                    return outcome
                 outcome.data = self._dcec_register_receipt(name, outcome.data)
             return outcome
         finally:
@@ -833,8 +853,18 @@ class MonitorAgent:
                 if self.dcec_enabled:
                     self._dcec_check_integrity()
                     if self._dcec_integrity_warning:
+                        self._progress('dcec_completion_guard_rejected',
+                                       reason_code='integrity_mismatch',
+                                       active_id=self._dcec_accepted_slot.get('id'),
+                                       status=self._dcec_accepted_slot.get('status'),
+                                       integrity_warning=True)
                         raise ValueError("DCEC dependency integrity mismatch; restore the accepted control slot before completion")
                     if self._dcec_accepted_slot.get('id') is not None:
+                        self._progress('dcec_completion_guard_rejected',
+                                       reason_code='active_dependency',
+                                       active_id=self._dcec_accepted_slot.get('id'),
+                                       status=self._dcec_accepted_slot.get('status'),
+                                       integrity_warning=False)
                         raise ValueError(
                             "DCEC active dependency blocks completion: "
                             f"{self._dcec_accepted_slot['id']} status={self._dcec_accepted_slot['status']}; "

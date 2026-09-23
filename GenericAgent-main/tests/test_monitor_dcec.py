@@ -89,7 +89,7 @@ def test_v1_contract_is_scope_bound_and_root_re_evaluates_before_completion(tmp_
     normalized = " ".join(combined.split())
 
     assert "local evidence can resolve only local scope" in normalized
-    assert "requested, running and interrupted are not positive evidence" in normalized
+    assert "requested, running, interrupted and unavailable observations are not positive evidence" in normalized
     assert "return to the same root decision anchor and re-evaluate" in normalized
     assert "resolving one uncertainty never by itself authorizes allow_complete" in normalized
     assert "another currently recognizable completion-blocking alternative" in normalized
@@ -237,6 +237,64 @@ def test_dcec_replace_prepend_and_unknown_receipt_are_bounded(tmp_path):
     out = monitor.dispatch("file_write", {"path": "monitor/working.md", "content": "new\n", "mode": "prepend"})
     assert out.data["receipt_id"]
     assert (monitor.workspace.private_root / "working.md").read_text(encoding="utf-8").startswith("DCEC-CONTROL/1 ")
+
+
+def test_dcec_full_status_transitions_replace_and_discharge_receipts(tmp_path):
+    client = SequenceClient([]); client.config = {"monitor_dcec": True}
+    monitor = MonitorAgent(client, workspace(tmp_path))
+    receipt = monitor.dispatch("file_read", {"path": "task/original_task.txt"}).data["receipt_id"]
+    monitor.dispatch("file_write", {"path": "monitor/working.md",
+                                     "content": _slot("D1", "requested", "create", receipts=[receipt])})
+    for status in ("running", "interrupted", "unavailable", "completed"):
+        assert monitor.dispatch("file_write", {"path": "monitor/working.md",
+            "content": _slot("D1", status, "retain", source="D1", receipts=[receipt])}).data["receipt_id"]
+    replacement = _slot("D2", "requested", "replace", source="D1", receipts=[receipt])
+    assert monitor.dispatch("file_write", {"path": "monitor/working.md", "content": replacement}).data["receipt_id"]
+    discharge = _slot(None, "none", "discharge", source="D2", receipts=[receipt])
+    assert monitor.dispatch("file_write", {"path": "monitor/working.md", "content": discharge}).data["receipt_id"]
+
+
+def test_dcec_failed_and_running_tools_still_receive_receipts(tmp_path):
+    client = SequenceClient([]); client.config = {"monitor_dcec": True}
+    monitor = MonitorAgent(client, workspace(tmp_path))
+    failed_read = monitor.dispatch("file_read", {"path": "task/missing.txt"}).data
+    assert failed_read["status"] == "error" and failed_read["receipt_id"]
+    running = monitor.dispatch("code_run", {"code": "import time; time.sleep(30)", "wait_seconds": 0}).data
+    assert running["status"] == "running" and running["receipt_id"]
+    cancelled = monitor.dispatch("code_run", {"session_id": running["session_id"], "cancel": True,
+                                                 "wait_seconds": 1}).data
+    assert cancelled["status"] == "error" and cancelled["receipt_id"]
+    monitor.analysis.close()
+
+
+def test_dcec_completion_event_and_off_shape_regression(tmp_path):
+    client = SequenceClient([]); client.config = {"monitor_dcec": True}
+    monitor = MonitorAgent(client, workspace(tmp_path))
+    monitor.dispatch("file_write", {"path": "monitor/working.md",
+                                     "content": _slot("D1", "unavailable", "create")})
+    result = monitor.dispatch("allow_complete", {}).data
+    assert result["status"] == "error"
+    progress = (monitor.workspace.private_root / "audit/progress.jsonl").read_text(encoding="utf-8")
+    assert '"event": "dcec_completion_guard_rejected"' in progress
+    off = MonitorAgent(SequenceClient([]), workspace(tmp_path / "off"))
+    normal = off.dispatch("file_read", {"path": "task/original_task.txt"}).data
+    assert "receipt_id" not in normal
+
+
+def test_dcec_continuation_cannot_change_lifecycle(tmp_path, monkeypatch):
+    ws = workspace(tmp_path)
+    client = provider({"monitor_dcec": True})
+    monitor = MonitorAgent(client, ws)
+    monitor.dispatch("file_write", {"path": "monitor/working.md",
+                                     "content": _slot("D1", "requested", "create")})
+    replacement = _slot(None, "none", "discharge", source="D1") + "\nchanged by maintenance"
+    def request(_tools):
+        client.last_response_metadata = {"stop_reason": "end_turn", "stream_complete": True}
+        return [{"type": "text", "text": replacement}], {}
+    monkeypatch.setattr(client, "_request", request)
+    with pytest.raises(Exception):
+        monitor._prepare_continuation()
+    assert '"id":"D1"' in (ws.private_root / "working.md").read_text(encoding="utf-8")
 
 
 def test_dcec_out_of_band_and_audit_tampering_keep_authority_and_recover(tmp_path):

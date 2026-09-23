@@ -70,7 +70,7 @@ def dcec_working_context(workspace, limit=DCEC_WORKING_VIEW_DEFAULT_CHARS,
         "This is your own revisable cognitive "
         "state, not a fact source or verified truth. Keep only the current decision and scope, one "
         "focal uncertainty, current grounds with their supported scope and limits, and at most one "
-        "decision-critical observation status. Requested, running or interrupted observations are not "
+        "decision-critical observation status. Requested, running, interrupted and unavailable observations are not "
         "positive evidence. For the current decision, ask what boundary an observation actually measured "
         "and whether blocking behavior could still exist despite the same favorable result because the "
         "distinguishing path was bypassed. Keep such a result as partial support with its boundary limit; "

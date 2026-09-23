@@ -48,14 +48,14 @@ def validate_slot_shape(slot: dict) -> None:
     required = {"v", "id", "status", "op", "from", "receipts"}
     if set(slot) != required or slot["v"] != 1:
         raise ValueError("DCEC control slot fields are not exactly v,id,status,op,from,receipts")
-    if slot["status"] not in {"none", "requested", "running", "interrupted", "completed"}:
+    if slot["status"] not in {"none", "requested", "running", "interrupted", "unavailable", "completed"}:
         raise ValueError("invalid DCEC dependency status")
     if slot["op"] not in {"none", "create", "retain", "replace", "discharge"}:
         raise ValueError("invalid DCEC dependency operation")
     if slot["status"] == "none":
-        if slot["id"] is not None or slot["receipts"]:
+        if slot["id"] is not None or len(slot["receipts"]) > MAX_RECEIPTS:
             raise ValueError("inactive DCEC slot cannot carry id or receipts")
-        if slot["op"] != "discharge" and slot["from"] is not None:
+        if slot["op"] != "discharge" and (slot["from"] is not None or slot["receipts"]):
             raise ValueError("inactive DCEC slot may carry from only for discharge")
     else:
         if not isinstance(slot["id"], str) or not ID_RE.fullmatch(slot["id"]):
