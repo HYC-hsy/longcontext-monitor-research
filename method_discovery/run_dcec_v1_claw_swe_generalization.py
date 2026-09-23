@@ -44,12 +44,15 @@ MECHANISM_HASHES = {
     "monitor_agent_core/process_runner.py": "cebc138ff0a31fa952d37e585a33e587908cd0da2c0fb07ad62c4e1ce2793ec7",
 }
 
+TASK_AGENT_PROFILE = "native_claude_cc_vibe"
+SUPERVISOR_PROFILE = "claude_monitor_opus48"
+
 DCEC_ENV = {
     "GA_RUN_ISOLATION": "no-network-unix-inference-v1",
     "GA_BASELINE_CONDITION": "original",
     "GA_EXPERIMENT_ID": "dcec-v1-generalization-claw-swe-sphinx8551-r2-replacement",
     "GA_CONDITION_ID": "dcec-v1",
-    "GA_LLM_CONFIG_NAME": "native_claude_cc_vibe",
+    "GA_LLM_CONFIG_NAME": TASK_AGENT_PROFILE,
     "GA_MAX_TURNS": "300",
     "GA_MONITOR_ENABLED": "1",
     "GA_MONITOR_CONFIG": "claude_monitor_opus48",
@@ -251,7 +254,7 @@ def execute() -> dict:
 
     source_snapshot, _ = build_bundle(
         BUNDLE_ROOT, GA_ROOT, RUNTIME_LINUX, python_home(),
-        "native_claude_cc_vibe", "claude_monitor_opus48", m3.COLLECTOR_PORT,
+        TASK_AGENT_PROFILE, SUPERVISOR_PROFILE, m3.COLLECTOR_PORT,
         monitor_profile_path=ROOT / "monitor_config" / "models.local.json",
     )
     prepare_source_snapshot_mountpoints(source_snapshot)
@@ -315,8 +318,8 @@ def execute() -> dict:
         "error": error,
         "retry_count": 0,
         "ordinary_control": False,
-        "task_agent_profile": "native_claude_cc_vibe / claude-opus-4-6",
-        "supervisor_profile": "claude_monitor_opus48 / claude-opus-4-8",
+        "task_agent_profile": TASK_AGENT_PROFILE,
+        "supervisor_profile": SUPERVISOR_PROFILE,
         "task_network_mode": "none",
     }
     RESULT_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
