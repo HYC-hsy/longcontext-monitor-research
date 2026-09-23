@@ -26,6 +26,7 @@ def load_base():
 def execute() -> dict:
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     base = load_base()
+    base.MANIFEST = MANIFEST
     base.TASK_AGENT_PROFILE = manifest["task_agent"]["profile"]
     base.DCEC_ENV["GA_LLM_CONFIG_NAME"] = base.TASK_AGENT_PROFILE
     base.RUN_ID = manifest["run_id"]
