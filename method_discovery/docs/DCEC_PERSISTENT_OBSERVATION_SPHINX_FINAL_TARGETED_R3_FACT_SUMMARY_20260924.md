@@ -25,8 +25,8 @@ It was not an infrastructure-invalid run.
 ## Cost and transport facts
 
 - Supervisor reviews: 11.
-- Provider usage records: 66.
-- Request-attempt records: 67; all recorded attempts succeeded.
+- Provider usage records: 66 successful provider requests.
+- Request-attempt records: 67: 66 successes and one `retryable_error`; the same request then succeeded on its second attempt. This is provider recovery within the single scientific run, not a rerun.
 - Task duration: 1,419.3 seconds; Task Agent duration: 1,396.9 seconds.
 - OTel export completed: 104/104 exports succeeded, 0 failures.
 - No continuation transition was observed.
@@ -53,6 +53,19 @@ The failed native test is consistent with the final completion decision: the Sup
 
 This result does not justify another Sphinx retry or an in-run mechanism modification. Fyne and Sphinx remain development/discovery cases; no freeze-for-dev-set claim is made here.
 
+## Archive correction
+
+The committed archive contains a non-empty `monitor_audit/dialogue.jsonl`
+(1,149,972 bytes). It is retained as-is; it is not treated as the sole
+authority for reconstructing the Supervisor trajectory. The primary
+cross-checkable sources remain `provider_history.json`, `progress.jsonl`,
+`reviews.jsonl`, `working.md`, and runtime receipts.
+
+The formal native-evaluation report was searched after the run, but the
+original report was not available as a copyable file in the current workspace.
+No synthetic replacement was created; the native outcome above remains the
+archived run fact and the missing raw report is an archive limitation.
+
 ## Raw artifact locations
 
 The generated raw run archive remains locally under:
@@ -60,4 +73,3 @@ The generated raw run archive remains locally under:
 `long_context_bench/output/dcec_persistent_observation_sphinx_final_20260924/`
 
 Key files include the immutable manifest and identity validation, task patch/output, OTel trace, Task Agent research events, Supervisor `dialogue.jsonl`, `reviews.jsonl`, `progress.jsonl`, `provider_usage.jsonl`, `request_attempts.jsonl`, `provider_history.json`, `working.md`, and runtime receipts.
-
