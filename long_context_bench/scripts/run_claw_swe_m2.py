@@ -179,6 +179,7 @@ def resolve_model_identity(llm_no: int) -> dict:
     cmd = [
         "docker", "run", "--rm", "-v", f"{RUNTIME_HOST.resolve()}:{CONTAINER_RUNTIME}:ro",
         "-v", f"{GA_HOST.resolve()}:{CONTAINER_GA}:ro", "-e", f"M2_LLM_NO={llm_no}",
+        "-e", f"GA_LLM_CONFIG_NAME={os.environ.get('GA_LLM_CONFIG_NAME', 'native_claude_cc_vibe')}",
         "-e", f"PYTHONPATH={site_packages}:{CONTAINER_GA}", "debian:bookworm-slim",
         python_bin, "-c", resolver,
     ]
