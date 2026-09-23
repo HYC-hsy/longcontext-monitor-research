@@ -10,6 +10,7 @@ from monitor_agent_core.agent import DCEC_CONTINUATION_PROMPT, DCEC_SYSTEM_PROMP
 from monitor_agent_core.provider import MonitorProviderClient
 from monitor_agent_core.working_context import dcec_working_context
 from monitor_agent_core.workspace import MonitorWorkspace
+from monitor_agent_core.dcec_control_slot import canonical_slot, inactive_slot
 from test_monitor_agent import SequenceClient
 
 
@@ -71,7 +72,7 @@ def test_bounded_view_is_single_state_and_reports_transport_cost(tmp_path):
     text, metadata = dcec_working_context(ws, 1000)
     assert text.count("<dcec_working_state>") == 1
     assert "not a fact source or verified truth" in text
-    assert "Only the first 1000 characters" in text
+    assert "Natural-language prose is bounded after the complete control slot" in text
     assert metadata == {**metadata, "path": "monitor/working.md", "limit_characters": 1000,
                         "visible_characters": 1000, "truncated": True}
     assert metadata["source_characters"] > metadata["visible_characters"]
@@ -206,6 +207,63 @@ def test_evidence_receipt_preserves_range_hash_and_truncation_without_truth_labe
     assert receipt["truncated"] and receipt["next_read"]
     assert receipt["sha256"] and receipt["path"] == "task/source.txt"
     assert not ({"satisfied", "correct", "sufficient", "semantically_stale"} & set(receipt))
+
+
+def _slot(identifier=None, status="none", op="none", source=None, receipts=None):
+    return canonical_slot({"v": 1, "id": identifier, "status": status, "op": op,
+                           "from": source, "receipts": receipts or []})
+
+
+def test_dcec_control_slot_lifecycle_receipts_and_completion_guard(tmp_path):
+    client = SequenceClient([]); client.config = {"monitor_dcec": True}
+    monitor = MonitorAgent(client, workspace(tmp_path))
+    first = monitor.dispatch("file_read", {"path": "task/original_task.txt"}).data["receipt_id"]
+    created = _slot("D1", "requested", "create", receipts=[first]) + "\nCurrent decision"
+    assert monitor.dispatch("file_write", {"path": "monitor/working.md", "content": created}).data["characters"]
+    assert monitor.dispatch("allow_complete", {}).data["status"] == "error"
+    same = monitor.dispatch("file_write", {"path": "monitor/working.md", "content": created}).data
+    assert same["receipt_id"]
+    discharged = _slot(None, "none", "discharge", source="D1") + "\nCurrent decision"
+    assert monitor.dispatch("file_write", {"path": "monitor/working.md", "content": discharged}).data["characters"]
+
+
+def test_dcec_replace_prepend_and_unknown_receipt_are_bounded(tmp_path):
+    client = SequenceClient([]); client.config = {"monitor_dcec": True}
+    monitor = MonitorAgent(client, workspace(tmp_path))
+    bad = _slot("D1", "requested", "create", receipts=["unknown"]) + "\nstate"
+    assert monitor.dispatch("file_write", {"path": "monitor/working.md", "content": bad}).data["status"] == "error"
+    good = _slot("D1", "requested", "create") + "\nstate"
+    monitor.dispatch("file_write", {"path": "monitor/working.md", "content": good})
+    out = monitor.dispatch("file_write", {"path": "monitor/working.md", "content": "new\n", "mode": "prepend"})
+    assert out.data["receipt_id"]
+    assert (monitor.workspace.private_root / "working.md").read_text(encoding="utf-8").startswith("DCEC-CONTROL/1 ")
+
+
+def test_dcec_out_of_band_and_audit_tampering_keep_authority_and_recover(tmp_path):
+    client = SequenceClient([]); client.config = {"monitor_dcec": True}
+    monitor = MonitorAgent(client, workspace(tmp_path))
+    monitor.dispatch("file_write", {"path": "monitor/working.md", "content": _slot("D1", "requested", "create")})
+    path = monitor.workspace.private_root / "working.md"
+    path.write_text(_slot(None) + "\ncorrupt", encoding="utf-8")
+    (monitor.workspace.private_root / "audit/progress.jsonl").write_text('{"event":"fake"}\n', encoding="utf-8")
+    assert monitor._refresh_review_context() and "integrity" in monitor._refresh_review_context().lower()
+    assert monitor.dispatch("allow_complete", {}).data["status"] == "error"
+    restored = _slot("D1", "requested", "retain") + "\nrestored"
+    assert monitor.dispatch("file_write", {"path": "monitor/working.md", "content": restored}).data["receipt_id"]
+
+
+def test_dcec_continuation_uses_authority_after_out_of_band_rewrite(tmp_path, monkeypatch):
+    ws = workspace(tmp_path)
+    client = provider({"monitor_dcec": True})
+    monitor = MonitorAgent(client, ws)
+    monitor.dispatch("file_write", {"path": "monitor/working.md", "content": _slot("D1", "requested", "create")})
+    (ws.private_root / "working.md").write_text("DCEC-CONTROL/1 {bad}\ncorrupt", encoding="utf-8")
+    def request(_tools):
+        client.last_response_metadata = {"stop_reason": "end_turn", "stream_complete": True}
+        return [{"type": "text", "text": "recovered prose"}], {}
+    monkeypatch.setattr(client, "_request", request)
+    monitor._prepare_continuation()
+    assert (ws.private_root / "working.md").read_text(encoding="utf-8").startswith("DCEC-CONTROL/1 ")
 
 
 def test_dcec_continuation_contract_and_rejected_note_never_overwrite(tmp_path, monkeypatch):

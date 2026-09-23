@@ -30,6 +30,9 @@ from .working_context import (
 )
 from .live_awareness import LiveAwareness
 from .decision_context import DecisionContext
+from .dcec_control_slot import (
+    canonical_slot, ensure_slot, inactive_slot, parse_slot, validate_transition,
+)
 
 
 def _tool(name, description, properties, required):
@@ -217,7 +220,18 @@ concern, clear the dependency, prune superseded grounds and relax to patrol or t
 do not create a permanent conservative barrier. Before investigating, ask which differing observation outcomes
 would lead to different actions, then use existing tools directly. Runtime metadata identifies deterministic
 source, receipt, range, version, truncation, interruption and exit facts; you alone judge meaning and adequacy.
-Update working.md only when future control should change. No per-wake rewrite is required."""
+Update working.md only when future control should change. No per-wake rewrite is required.
+
+When DCEC is enabled, keep the first line of working.md as the canonical bounded
+`DCEC-CONTROL/1` JSON slot. It declares at most one decision-critical observation
+dependency: create it, retain the same id, replace it with a different id, or
+explicitly discharge it. Use receipt_id values returned by ordinary evidence tools
+when useful. A requested, running, interrupted or completed dependency remains
+active until explicitly discharged or replaced. Runtime validates only syntax,
+lifecycle and receipt identity, never the truth or adequacy of your reasoning.
+Do not remove the slot through prose-only edits. Completion is procedurally rejected
+while your accepted dependency is active or its integrity is unresolved; repair the
+lifecycle first, then reassess the same decision anchor."""
 
 DCEC_CONTINUATION_PROMPT = """Preserve only the bounded current decision-centered state in monitor/working.md:
 the current decision anchor and scope, one focal unresolved premise, current grounds with their support scope
@@ -234,7 +248,12 @@ Under a whole-task anchor, resolving one focal uncertainty returns to the same r
 it does not authorize completion while another currently recognizable blocking alternative or unfinished
 dependency remains. Preserve relaxation too: after adequate completed discriminating evidence, clear the
 dependency and prune the resolved concern rather than manufacturing permanent uncertainty. Do not reactivate
-a resolved concern merely because older dialogue mentions it; require a new relevant conflict or change."""
+a resolved concern merely because older dialogue mentions it; require a new relevant conflict or change.
+
+The first line is the canonical DCEC-CONTROL/1 slot. Preserve it exactly or
+declare a legal create, retain, replace or discharge transition; prose rationale
+does not itself change lifecycle state. A malformed or rejected candidate must
+leave the previously accepted slot intact."""
 
 GROUNDED_TOOL = _tool("read_with_sources",
     "Read a private Markdown note together with current excerpts from its inline local links. "
@@ -307,6 +326,11 @@ class MonitorAgent:
         self.dcec_enabled = getattr(client, "config", {}).get("monitor_dcec", False)
         if type(self.dcec_enabled) is not bool:
             raise ValueError("monitor_dcec must be a boolean")
+        self._dcec_accepted_slot = inactive_slot() if self.dcec_enabled else None
+        self._dcec_accepted_hash = None
+        self._dcec_integrity_warning = None
+        self._dcec_receipts = {}
+        self._dcec_receipt_counter = 0
         if self.dcec_enabled and type(self.semantic_continuity) is not bool:
             raise ValueError("monitor_semantic_continuity must be a boolean with monitor_dcec")
         self.dcec_working_chars = getattr(
@@ -411,7 +435,10 @@ class MonitorAgent:
             if text:
                 parts.append(text)
         if self.dcec_enabled:
-            text, metadata = dcec_working_context(self.workspace, self.dcec_working_chars)
+            text, metadata = dcec_working_context(
+                self.workspace, self.dcec_working_chars,
+                authoritative_slot=self._dcec_accepted_slot,
+                integrity_warning=self._dcec_integrity_warning)
             self._audit_dialogue('dcec_working_view', **metadata)
             self._progress('dcec_working_view', **metadata)
             parts.append(text)
@@ -424,6 +451,116 @@ class MonitorAgent:
             self._audit_dialogue('decision_attention', content=text)
             parts.append(text)
         return '\n\n'.join(parts) or None
+
+    @staticmethod
+    def _working_path(arguments):
+        return str(arguments.get('path', '')).replace('\\', '/').strip('/') == 'monitor/working.md'
+
+    def _dcec_check_integrity(self):
+        if not self.dcec_enabled:
+            return None
+        path = self.workspace.private_root / 'working.md'
+        accepted = canonical_slot(self._dcec_accepted_slot)
+        try:
+            disk = path.read_text(encoding='utf-8', errors='replace') if path.exists() else ''
+            disk_slot = parse_slot(disk) if disk else inactive_slot()
+            disk_hash = hashlib.sha256(disk.encode('utf-8')).hexdigest()
+            if disk_slot == self._dcec_accepted_slot:
+                self._dcec_accepted_hash = disk_hash
+                self._dcec_integrity_warning = None
+                return None
+            raise ValueError('control slot differs from accepted in-memory authority')
+        except Exception as exc:
+            warning = (f"DCEC integrity failure: working.md control slot is out-of-band or malformed ({type(exc).__name__}). "
+                       f"Authoritative accepted slot remains {accepted!r}; restore, retain, replace or "
+                       "discharge it through the validated file tools before completion.")
+            self._dcec_integrity_warning = warning
+            self._progress('dcec_dependency_integrity_failure', error_type=type(exc).__name__,
+                           accepted_slot=accepted)
+            return warning
+
+    def _dcec_prepare_working(self, proposed, operation):
+        """Validate a complete candidate against process-memory authority."""
+        if not self.dcec_enabled:
+            return proposed
+        self._dcec_check_integrity()
+        proposed = ensure_slot(proposed, self._dcec_accepted_slot)
+        new_slot = parse_slot(proposed)
+        transition = validate_transition(self._dcec_accepted_slot, new_slot, set(self._dcec_receipts))
+        self._dcec_pending_transition = transition
+        self._progress('dcec_control_transition_validated', operation=operation,
+                       transition=transition, old_id=self._dcec_accepted_slot.get('id'),
+                       new_id=new_slot.get('id'))
+        self._dcec_pending_slot = new_slot
+        path = self.workspace.private_root / 'working.md'
+        current = path.read_text(encoding='utf-8', errors='replace') if path.exists() else ''
+        self._dcec_prepare_hash = hashlib.sha256(current.encode('utf-8')).hexdigest()
+        return proposed
+
+    def _dcec_commit_working(self, proposed, operation):
+        old = self._dcec_accepted_slot
+        path = self.workspace.private_root / 'working.md'
+        current = path.read_text(encoding='utf-8', errors='replace') if path.exists() else ''
+        current_hash = hashlib.sha256(current.encode('utf-8')).hexdigest()
+        if current_hash != getattr(self, '_dcec_prepare_hash', current_hash):
+            self._dcec_integrity_warning = 'DCEC integrity failure: working.md changed during validated write.'
+            self._progress('dcec_dependency_integrity_failure', error_type='concurrent_write')
+            raise ValueError('working.md changed during validated write; retry with the accepted slot')
+        self.workspace.write_text('monitor/working.md', proposed, mode='replace')
+        new = parse_slot(proposed)
+        self._dcec_accepted_slot = new
+        self._dcec_accepted_hash = hashlib.sha256(proposed.encode('utf-8')).hexdigest()
+        self._dcec_integrity_warning = None
+        if getattr(self, '_dcec_pending_transition', None) not in {'unchanged', 'prose_only'}:
+            self._progress('dcec_dependency_transition', operation=operation,
+                           old_id=old.get('id'), new_id=new.get('id'), status=new.get('status'))
+        self._dcec_pending_transition = None
+        return self.workspace._receipt('monitor/working.md', path, len(proposed))
+
+    def _dcec_write_working(self, content, mode):
+        path = self.workspace.private_root / 'working.md'
+        old = path.read_text(encoding='utf-8', errors='replace') if path.exists() else ''
+        if mode == 'replace':
+            proposed = content
+        elif mode == 'append':
+            proposed = old + content
+        elif mode == 'prepend':
+            # Keep the control line first; prepend only applies to prose.
+            try:
+                parse_slot(old)
+                lines = old.splitlines()
+                proposed = lines[0] + "\n" + content + ("\n" + "\n".join(lines[1:]) if len(lines) > 1 else "")
+            except ValueError:
+                proposed = content + old
+        else:
+            raise ValueError('mode must be replace, append, or prepend')
+        proposed = self._dcec_prepare_working(proposed, 'file_write')
+        return self._dcec_commit_working(proposed, 'file_write')
+
+    def _dcec_patch_working(self, old_text, new_text):
+        path = self.workspace.private_root / 'working.md'
+        current = path.read_text(encoding='utf-8', errors='replace')
+        if not old_text or current.count(old_text) != 1:
+            raise ValueError(f"old_text must match exactly once; found {current.count(old_text)}")
+        proposed = current.replace(old_text, new_text, 1)
+        proposed = self._dcec_prepare_working(proposed, 'file_patch')
+        return self._dcec_commit_working(proposed, 'file_patch')
+
+    def _dcec_register_receipt(self, name, data):
+        if not self.dcec_enabled or name not in {'file_read', 'file_write', 'file_patch', 'code_run'}:
+            return data
+        self._dcec_receipt_counter += 1
+        receipt_id = f"r{self._dcec_receipt_counter:06d}"
+        self._dcec_receipts[receipt_id] = {
+            'tool': name, 'status': data.get('status') if isinstance(data, dict) else 'completed',
+            'path': data.get('path') if isinstance(data, dict) else None,
+        }
+        if isinstance(data, dict):
+            data = dict(data)
+            data['receipt_id'] = receipt_id
+        else:
+            data = {'result': data, 'receipt_id': receipt_id}
+        return data
 
     def _atomic_private_text(self, relative_path, text):
         path = self.workspace.private_root / relative_path
@@ -454,6 +591,7 @@ class MonitorAgent:
     def _prepare_continuation(self):
         """Same model, existing history, no tool actions during pre-compaction handoff."""
         note_path = self.workspace.private_root / "working.md"
+        integrity_warning = self._dcec_check_integrity() if self.dcec_enabled else None
         previous = (self.pma_memory.context() if self.pma_memory is not None else
                     note_path.read_text(encoding="utf-8") if note_path.exists() else "")
         prompt = (
@@ -466,6 +604,10 @@ class MonitorAgent:
         )
         if self.dcec_enabled:
             prompt += "\n\nDCEC continuation contract:\n" + DCEC_CONTINUATION_PROMPT
+            if integrity_warning:
+                prompt += ("\n\nDeterministic integrity warning: " + integrity_warning +
+                           "\nThe accepted control slot above is authoritative; repair it through the "
+                           "same lifecycle contract in the returned note.")
         self._progress("continuation_started")
         if self.grounded_context:
             prompt += ("\nPreserve useful source links or paths to active inquiry notes so your future self "
@@ -535,7 +677,11 @@ class MonitorAgent:
                 "timestamp": time.time(), "review_id": self.review_id, "note": note,
             }, ensure_ascii=False) + "\n", mode="append")
             if self.pma_memory is None:
-                self._atomic_private_text("working.md", note)
+                if self.dcec_enabled:
+                    proposed = self._dcec_prepare_working(note, 'continuation')
+                    self._dcec_commit_working(proposed, 'continuation')
+                else:
+                    self._atomic_private_text("working.md", note)
             self._progress("continuation_saved", transaction_id=transaction)
             return note
         except Exception as exc:
@@ -566,7 +712,12 @@ class MonitorAgent:
         started = time.monotonic()
         self._progress('tool_started', tool_id=tool_id, name=name)
         try:
-            return self._dispatch(name, arguments)
+            outcome = self._dispatch(name, arguments)
+            if self.dcec_enabled and name in {'file_read', 'file_write', 'file_patch', 'code_run'}:
+                if isinstance(outcome.data, dict) and outcome.data.get('status') == 'error':
+                    return outcome
+                outcome.data = self._dcec_register_receipt(name, outcome.data)
+            return outcome
         finally:
             self._progress('tool_finished', tool_id=tool_id, name=name,
                            duration_seconds=time.monotonic() - started)
@@ -601,18 +752,22 @@ class MonitorAgent:
             elif name == 'inquiry' and self.inquiry is not None:
                 data = self.inquiry.call(**arguments)
             elif name == "file_write":
-                data = self.workspace.write_text(
-                    arguments["path"], arguments["content"], arguments.get("mode", "replace")
-                )
-                if self.dcec_enabled and arguments["path"].replace('\\', '/').strip('/') == 'monitor/working.md':
+                if self.dcec_enabled and self._working_path(arguments):
+                    data = self._dcec_write_working(arguments["content"], arguments.get("mode", "replace"))
                     self._progress('dcec_state_mutation', operation='file_write',
                                    mode=arguments.get('mode', 'replace'), **data)
+                else:
+                    data = self.workspace.write_text(
+                        arguments["path"], arguments["content"], arguments.get("mode", "replace")
+                    )
             elif name == "file_patch":
-                data = self.workspace.patch_text(
-                    arguments["path"], arguments["old_text"], arguments["new_text"]
-                )
-                if self.dcec_enabled and arguments["path"].replace('\\', '/').strip('/') == 'monitor/working.md':
+                if self.dcec_enabled and self._working_path(arguments):
+                    data = self._dcec_patch_working(arguments["old_text"], arguments["new_text"])
                     self._progress('dcec_state_mutation', operation='file_patch', **data)
+                else:
+                    data = self.workspace.patch_text(
+                        arguments["path"], arguments["old_text"], arguments["new_text"]
+                    )
             elif name == "code_run":
                 session_id = arguments.get('session_id')
                 if session_id:
@@ -675,6 +830,15 @@ class MonitorAgent:
                 self._remember_advice(message, arguments)
                 return ToolOutcome(None, False, MonitorAction("intervene", {"message": message}))
             elif name == "allow_complete":
+                if self.dcec_enabled:
+                    self._dcec_check_integrity()
+                    if self._dcec_integrity_warning:
+                        raise ValueError("DCEC dependency integrity mismatch; restore the accepted control slot before completion")
+                    if self._dcec_accepted_slot.get('id') is not None:
+                        raise ValueError(
+                            "DCEC active dependency blocks completion: "
+                            f"{self._dcec_accepted_slot['id']} status={self._dcec_accepted_slot['status']}; "
+                            "retain, replace or discharge it first")
                 if self.completion_state is not None:
                     current = self.completion_state()
                     if (not self._seen_completion or current != self._seen_completion
@@ -721,6 +885,8 @@ class MonitorAgent:
 
     def _refresh_review_context(self):
         updates = [self._refresh_completion()]
+        if self.dcec_enabled:
+            updates.append(self._dcec_check_integrity())
         if self.advice_basis is not None:
             try:
                 updates.append(self.advice_basis.refresh())
