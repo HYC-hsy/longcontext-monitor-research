@@ -297,6 +297,36 @@ def test_dcec_continuation_cannot_change_lifecycle(tmp_path, monkeypatch):
     assert '"id":"D1"' in (ws.private_root / "working.md").read_text(encoding="utf-8")
 
 
+def test_dcec_continuation_prompt_freezes_slot_lifecycle():
+    prompt = " ".join(DCEC_CONTINUATION_PROMPT.lower().split())
+    assert "preserve the currently accepted dcec-control/1 slot exactly" in prompt
+    for phrase in ("do not create", "change its status", "replace it", "discharge it"):
+        assert phrase in prompt
+    assert "ordinary supervisor review through validated file tools" in prompt
+
+
+@pytest.mark.parametrize("candidate", [
+    _slot("D1", "running", "retain", source="D1") + "\nchanged status",
+    _slot("D2", "requested", "replace", source="D1") + "\nreplacement",
+    _slot(None, "none", "discharge", source="D1") + "\ndischarge",
+])
+def test_dcec_continuation_rejects_every_lifecycle_change(tmp_path, monkeypatch, candidate):
+    ws = workspace(tmp_path)
+    client = provider({"monitor_dcec": True})
+    monitor = MonitorAgent(client, ws)
+    monitor.dispatch("file_write", {"path": "monitor/working.md",
+                                     "content": _slot("D1", "requested", "create") + "\ninitial"})
+    def request(_tools):
+        client.last_response_metadata = {"stop_reason": "end_turn", "stream_complete": True}
+        return [{"type": "text", "text": candidate}], {}
+    monkeypatch.setattr(client, "_request", request)
+    with pytest.raises(Exception):
+        monitor._prepare_continuation()
+    disk = (ws.private_root / "working.md").read_text(encoding="utf-8")
+    assert '"id":"D1"' in disk and '"status":"requested"' in disk
+    assert monitor._dcec_accepted_slot["id"] == "D1"
+
+
 def test_dcec_out_of_band_and_audit_tampering_keep_authority_and_recover(tmp_path):
     client = SequenceClient([]); client.config = {"monitor_dcec": True}
     monitor = MonitorAgent(client, workspace(tmp_path))

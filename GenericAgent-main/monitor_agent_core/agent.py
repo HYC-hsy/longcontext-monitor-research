@@ -250,10 +250,13 @@ dependency remains. Preserve relaxation too: after adequate completed discrimina
 dependency and prune the resolved concern rather than manufacturing permanent uncertainty. Do not reactivate
 a resolved concern merely because older dialogue mentions it; require a new relevant conflict or change.
 
-The first line is the canonical DCEC-CONTROL/1 slot. Preserve it exactly or
-declare a legal create, retain, replace or discharge transition; prose rationale
-does not itself change lifecycle state. A malformed or rejected candidate must
-leave the previously accepted slot intact."""
+Continuation is maintenance only: preserve the currently accepted
+DCEC-CONTROL/1 slot exactly. Do not create a dependency, change its status,
+replace it, or discharge it in continuation mode. Lifecycle transitions belong
+to ordinary Supervisor review through validated file tools. Rewrite only the
+bounded natural-language reasoning/prose; if the disk copy is corrupt, use the
+authoritative accepted slot supplied by runtime. A malformed or rejected
+candidate must leave the previously accepted slot intact."""
 
 GROUNDED_TOOL = _tool("read_with_sources",
     "Read a private Markdown note together with current excerpts from its inline local links. "
