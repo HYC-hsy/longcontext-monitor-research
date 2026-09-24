@@ -18,10 +18,18 @@ def source_bytes(spec):
             if f is None: raise FileNotFoundError(spec["archive_member"])
             return f.read()
     return p.read_bytes()
+def file_hash(path):
+    h=hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda:f.read(1024*1024),b""): h.update(chunk)
+    return h.hexdigest()
 def verify_sources(m):
     out={}
     for ck,c in m["cases"].items():
         out[ck]={}
+        if c.get("checkpoint_tar"):
+            p=ROOT/c["checkpoint_tar"]["path"]
+            if file_hash(p)!=c["checkpoint_tar"]["sha256"]: raise AssertionError(f"{ck}: checkpoint tar hash mismatch")
         for n,s in c["source_files"].items():
             b=source_bytes(s); actual=sha(b)
             if actual != s["sha256"]: raise AssertionError(f"{ck}.{n}: hash mismatch")
@@ -39,7 +47,7 @@ def neutralize_s_request(req):
             chunks=[]
             for part in v.split("\n\n"):
                 low=part.lower()
-                if "dcec-control/1" in low or "dcec current working state" in low or "procedurally rejected while your accepted dependency" in low or "protocol integrity" in low:
+                if "dcec-control/1" in low or "dcec current working state" in low or "procedurally rejected while your accepted dependency" in low or "protocol integrity" in low or "<dcec_working_state>" in low or "</dcec_working_state>" in low:
                     continue
                 chunks.append(part)
             return "\n\n".join(chunks)
@@ -53,7 +61,7 @@ def protocol_suffix(): return ("\n\nMaintain one bounded machine-readable observ
     "v,id,status,op,from,receipts. Legal lifecycle operations are create, retain, "
     "replace and discharge; statuses are requested, running, interrupted, unavailable "
     "and completed. Receipts are opaque deterministic tool receipts observed in this "
-    "run. This diagnostic measures representation burden and does not enable completion enforcement.\n")
+    "run. Completion enforcement is not part of this review contract.\n")
 def protocol_initial(messages):
     out=copy.deepcopy(messages)
     if out and out[0].get("role")=="user" and out[0].get("content"):
@@ -75,8 +83,21 @@ def treatment_diff(m,key):
       "allowed_differences":["system strict representation contract","initial inactive control slot"],"completion_guard":False}
 def neutralization_audit(m):
     raw=base_request(m,"S"); neutral=build_request(m,"S","FREE")
+    removed=[]
+    def collect(v):
+        if isinstance(v,str):
+            for part in v.split("\n\n"):
+                low=part.lower()
+                if any(x in low for x in ("dcec-control/1","dcec current working state","procedurally rejected while your accepted dependency","protocol integrity","<dcec_working_state>","</dcec_working_state>")):
+                    removed.append(sha(part.encode()))
+        elif isinstance(v,list):
+            for x in v: collect(x)
+        elif isinstance(v,dict):
+            for x in v.values(): collect(x)
+    collect(raw["messages"]); collect(raw["system"])
     return {"source_request_sha256":sha(canon(raw)),"neutral_request_sha256":sha(canon(neutral)),
-      "removed_representation_markers":["DCEC-CONTROL/1 strict lifecycle paragraph","control-slot completion/integrity wording","historical slot-only working-state injections"],
+      "removed_representation_markers":["DCEC-CONTROL/1 strict lifecycle paragraph","control-slot completion/integrity wording","historical slot-only working-state injections","dcec_working_state wrappers"],
+      "removed_span_sha256":sorted(set(removed)),"retained_semantic_state_sha256":sha(canon(neutral["messages"])),
       "semantic_contract_preserved":True,"manual_prompt_rewrite":False}
 def build_all(m):
     rows=[]
@@ -122,6 +143,29 @@ class Tests(unittest.TestCase):
         p.write_working(slot+"\nprose"); f.write_working("ordinary prose")
         self.assertEqual(p.slot["id"],"D1"); self.assertEqual(f.working,"ordinary prose")
         self.assertFalse(any(e.get("event")=="completion_guard_rejected" for e in p.events))
+    def test_scripted_frozen_tool_replay(self):
+        try:
+            from .snapshot_dispatcher import FrozenSnapshot
+        except ImportError:
+            from snapshot_dispatcher import FrozenSnapshot
+        for key in ("S","F","C"):
+            d=FrozenSnapshot(self.m["cases"][key],ROOT)
+            try:
+                self.assertEqual(d.dispatch("file_read",{"path":"task/original_task.txt"})["status"],"ok")
+                d.dispatch("code_run",{"code":"print('replay-ok')"})
+                d.protocol=True; d.working=""; d.slot=pv.inactive_slot()
+                create={"v":1,"id":"D1","status":"requested","op":"create","from":None,"receipts":[]}
+                d.dispatch("file_write",{"path":"monitor/working.md","content":pv.canonical_slot(create)+"\nprose"})
+                before=d.slot.copy()
+                with self.assertRaises(ValueError): d.dispatch("file_write",{"path":"monitor/working.md","content":pv.canonical_slot({**create,"op":"requested"})+"\nprose"})
+                self.assertEqual(before,d.slot)
+                d.dispatch("file_patch",{"path":"monitor/working.md","old_text":"prose","new_text":"updated"})
+                d.dispatch("file_write",{"path":"monitor/working.md","content":pv.canonical_slot({"v":1,"id":None,"status":"none","op":"discharge","from":"D1","receipts":[]})+"\nupdated"})
+                self.assertEqual(d.dispatch("allow_complete",{})["action"],"allow_complete")
+            finally: d.close()
+        fresh=FrozenSnapshot(self.m["cases"]["C"],ROOT)
+        try: self.assertNotEqual(fresh.working,"\nprose")
+        finally: fresh.close()
     def test_fixed_no_provider(self):
         self.assertEqual(len(self.m["run_order"]),12); self.assertEqual(self.m["shared"]["logical_call_limit"],6)
         self.assertFalse(self.m["execution_authorized"]); self.assertEqual(self.m["provider_requests_sent"],0)
