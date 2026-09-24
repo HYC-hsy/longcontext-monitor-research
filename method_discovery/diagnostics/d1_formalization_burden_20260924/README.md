@@ -37,13 +37,16 @@ client and never sends a request.
   the original task, public events/check, workspace files, and request.
 
 The protocol validator under `vendor/` is a byte-for-byte copy of the frozen
-production validator. The local dry-run dispatcher applies it only to
-`monitor/working.md` writes; FREE uses the same seven-tool surface without the
-validator. Completion guard remains disabled. `run_d1.py --execute` checks a
-separate authorization artifact, re-hashes immutable checkpoint manifests,
-creates a fresh dispatcher per record, and uses the existing
-`MonitorProviderClient` loop with a six-call counter. No authorization artifact
-is present in this preparation commit, so execution remains fail-closed.
+production validator. The diagnostic-local dispatcher materializes a fresh
+mutable snapshot per record, applies it only to `monitor/working.md` writes,
+and returns recoverable tool errors; FREE uses the same seven-tool surface
+without the validator. Completion guard remains disabled. Every logical call
+reinjects the current working-state view. `run_d1.py --execute` checks a
+separate authorization artifact bound to a canonical bundle hash, re-hashes
+immutable checkpoint manifests, creates a fresh dispatcher per record, and
+uses the existing `MonitorProviderClient` loop with a six-call counter. No
+authorization artifact is present in this preparation commit, so execution
+remains fail-closed.
 
 Case labels, expected outcomes, and research scoring are not emitted in the
 model-visible envelope.
@@ -62,3 +65,13 @@ request parity, the diagnostic-local strict lifecycle validator (including
 records, six-call budgets, no completion guard, and zero provider-request
 behavior. The protocol validator is copied from the frozen production source
 only for this diagnostic; production code is not imported or modified.
+
+The runner path is also tested without a provider:
+
+```text
+python method_discovery/diagnostics/d1_formalization_burden_20260924/test_run_d1.py
+```
+
+The deterministic fake provider uses the same `execute_records()` path and
+exercises valid create, invalid-transition tool error, recovery on the next
+logical call, current-state reinjection, and terminal approval.

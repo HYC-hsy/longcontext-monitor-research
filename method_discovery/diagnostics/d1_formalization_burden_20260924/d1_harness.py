@@ -54,19 +54,20 @@ def verify_snapshot_files(m):
 def load_json_source(s): return json.loads(source_bytes(s).decode("utf-8"))
 def base_request(m,key): return load_json_source(m["cases"][key]["request"])
 def neutralize_s_request(req):
-    """Remove only representation/control-slot material from the S checkpoint."""
+    """Remove representation machinery while retaining the semantic working prose."""
     out=copy.deepcopy(req)
     strict=re.compile(r"\n\nWhen DCEC is enabled,.*?then reassess the same decision anchor\.\n",re.S)
     out["system"]=strict.sub("\n",out["system"])
     def clean(v):
         if isinstance(v,str):
-            chunks=[]
-            for part in v.split("\n\n"):
-                low=part.lower()
-                if "dcec-control/1" in low or "dcec current working state" in low or "procedurally rejected while your accepted dependency" in low or "protocol integrity" in low or "<dcec_working_state>" in low or "</dcec_working_state>" in low:
-                    continue
-                chunks.append(part)
-            return "\n\n".join(chunks)
+            v=re.sub(r"(?im)^DCEC-CONTROL/1\s+\{.*?\}\s*\n?", "", v)
+            v=v.replace("<dcec_working_state>\n","").replace("</dcec_working_state>","")
+            v=re.sub(r"(?s)DCEC current working state from monitor/working\.md\. The first line is the bounded canonical DCEC-CONTROL/1 lifecycle slot; preserve or explicitly transition it using ordinary file tools\. This is your own revisable cognitive state, not a fact source or verified truth\. Keep only the current decision anchor, one focal uncertainty, current grounds and limits, and at most one unfinished observation dependency\.\s*", "", v)
+            v=re.sub(r"(?s)When DCEC is enabled, keep the first line of working\.md as the canonical bounded.*?Do not create a second state file\.\s*", "", v)
+            v=re.sub(r"(?s)If the control slot is missing or corrupt.*?same decision anchor\.\s*", "", v)
+            v=v.replace("The system will reject allow_complete while your accepted dependency is active.","")
+            v=v.replace("DCEC-CONTROL/1","").replace("DCEC working state","working state")
+            return v
         if isinstance(v,list): return [clean(x) for x in v]
         if isinstance(v,dict): return {k:clean(x) for k,x in v.items()}
         return v
@@ -77,21 +78,18 @@ def protocol_suffix(): return ("\n\nMaintain one bounded machine-readable observ
     "v,id,status,op,from,receipts. Legal lifecycle operations are create, retain, "
     "replace and discharge; statuses are requested, running, interrupted, unavailable "
     "and completed. Receipts are opaque deterministic tool receipts observed in this "
-    "run. Completion enforcement is not part of this review contract.\n")
+    "run. Keep this control representation consistent with the current private working "
+    "state while making ordinary review decisions.\n")
 def protocol_initial(messages):
-    out=copy.deepcopy(messages)
-    if out and out[0].get("role")=="user" and out[0].get("content"):
-        content=out[0]["content"]
-        if isinstance(content,str): out[0]["content"] = content + "\nInitial private working state:\n" + pv.canonical_slot(pv.inactive_slot())
-        elif isinstance(content,list) and content and isinstance(content[0],dict) and content[0].get("type")=="text":
-            content[0]["text"] += "\nInitial private working state:\n"+pv.canonical_slot(pv.inactive_slot())
-    return out
+    # Retained only for compatibility with older materialized artifacts; new replay
+    # requests inject the slot through the mutable working-state view instead.
+    return copy.deepcopy(messages)
 def build_request(m,key,condition):
     req=base_request(m,key)
     if key=="S": req=neutralize_s_request(req)
     if condition=="FREE": return req
     if condition!="PROTOCOL": raise ValueError(condition)
-    req["system"] += protocol_suffix(); req["messages"]=protocol_initial(req["messages"]); return req
+    req["system"] += protocol_suffix(); return req
 def treatment_diff(m,key):
     f,p=build_request(m,key,"FREE"),build_request(m,key,"PROTOCOL")
     return {"free_request_sha256":sha(canon(f)),"protocol_request_sha256":sha(canon(p)),
@@ -173,7 +171,8 @@ class Tests(unittest.TestCase):
                 create={"v":1,"id":"D1","status":"requested","op":"create","from":None,"receipts":[]}
                 d.dispatch("file_write",{"path":"monitor/working.md","content":pv.canonical_slot(create)+"\nprose"})
                 before=d.slot.copy()
-                with self.assertRaises(ValueError): d.dispatch("file_write",{"path":"monitor/working.md","content":pv.canonical_slot({**create,"op":"requested"})+"\nprose"})
+                rejected=d.dispatch("file_write",{"path":"monitor/working.md","content":pv.canonical_slot({**create,"op":"requested"})+"\nprose"})
+                self.assertEqual(rejected["status"],"error")
                 self.assertEqual(before,d.slot)
                 d.dispatch("file_patch",{"path":"monitor/working.md","old_text":"prose","new_text":"updated"})
                 d.dispatch("file_write",{"path":"monitor/working.md","content":pv.canonical_slot({"v":1,"id":None,"status":"none","op":"discharge","from":"D1","receipts":[]})+"\nupdated"})
