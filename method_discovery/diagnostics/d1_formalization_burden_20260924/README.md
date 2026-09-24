@@ -21,7 +21,8 @@ and receipts). D1 intentionally does not enable a runtime completion guard.
 The materializer reads actual provider-ready checkpoint requests (system,
 messages, exact tool schemas, root handoff, and model parameters), verifies
 all referenced bytes and SHA256 values, and emits deterministic replay inputs.
-Case S is read from its immutable checkpoint tar; it is not reconstructed from
+Case S is read from its immutable checkpoint tar and deterministically
+neutralized; it is not reconstructed from
 a later archive plus a cutoff field. The materializer never imports a provider
 client and never sends a request.
 
@@ -34,6 +35,12 @@ client and never sends a request.
   `request_sequence=57`, request hash recorded in the manifest).
 - `C`: the original `synthetic_root_complete` checkpoint from R8, including
   the original task, public events/check, workspace files, and request.
+
+The protocol validator under `vendor/` is a byte-for-byte copy of the frozen
+production validator. The local dry-run dispatcher applies it only to
+`monitor/working.md` writes; FREE uses the same seven-tool surface without the
+validator. Completion guard remains disabled. `run_d1.py --execute` fails
+closed because this is still preparation-only.
 
 Case labels, expected outcomes, and research scoring are not emitted in the
 model-visible envelope.

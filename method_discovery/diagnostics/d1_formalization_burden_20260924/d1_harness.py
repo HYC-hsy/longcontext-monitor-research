@@ -1,11 +1,11 @@
 """Offline-only D1 provider-ready replay materializer and tests."""
 from __future__ import annotations
-import argparse, copy, hashlib, json, tarfile, unittest
+import argparse, copy, hashlib, json, re, tarfile, unittest
 from pathlib import Path
 try:
-    from . import protocol_validator as pv
+    from .vendor import dcec_control_slot as pv
 except ImportError:
-    import protocol_validator as pv
+    from vendor import dcec_control_slot as pv
 HERE=Path(__file__).resolve().parent; ROOT=HERE.parents[2]; MANIFEST=HERE/"manifest.json"
 def canon(x): return json.dumps(x,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()
 def sha(b): return hashlib.sha256(b).hexdigest()
@@ -29,20 +29,42 @@ def verify_sources(m):
     return out
 def load_json_source(s): return json.loads(source_bytes(s).decode("utf-8"))
 def base_request(m,key): return load_json_source(m["cases"][key]["request"])
-def protocol_suffix(): return ("\n\nD1 PROTOCOL: monitor/working.md first line is canonical DCEC-CONTROL/1 JSON with exactly "
-    "v,id,status,op,from,receipts. Use op=create for inactive-to-active, retain, replace or discharge; "
-    "statuses requested/running/interrupted/unavailable/completed; op=requested is invalid. Receipts are "
-    "opaque deterministic tool receipts. This diagnostic does not enable a completion guard.\n")
+def neutralize_s_request(req):
+    """Remove only representation/control-slot material from the S checkpoint."""
+    out=copy.deepcopy(req)
+    strict=re.compile(r"\n\nWhen DCEC is enabled,.*?then reassess the same decision anchor\.\n",re.S)
+    out["system"]=strict.sub("\n",out["system"])
+    def clean(v):
+        if isinstance(v,str):
+            chunks=[]
+            for part in v.split("\n\n"):
+                low=part.lower()
+                if "dcec-control/1" in low or "dcec current working state" in low or "procedurally rejected while your accepted dependency" in low or "protocol integrity" in low:
+                    continue
+                chunks.append(part)
+            return "\n\n".join(chunks)
+        if isinstance(v,list): return [clean(x) for x in v]
+        if isinstance(v,dict): return {k:clean(x) for k,x in v.items()}
+        return v
+    out["messages"]=clean(out["messages"])
+    return out
+def protocol_suffix(): return ("\n\nMaintain one bounded machine-readable observation-dependency control slot "
+    "at the start of monitor/working.md. The canonical slot has fields "
+    "v,id,status,op,from,receipts. Legal lifecycle operations are create, retain, "
+    "replace and discharge; statuses are requested, running, interrupted, unavailable "
+    "and completed. Receipts are opaque deterministic tool receipts observed in this "
+    "run. This diagnostic measures representation burden and does not enable completion enforcement.\n")
 def protocol_initial(messages):
     out=copy.deepcopy(messages)
     if out and out[0].get("role")=="user" and out[0].get("content"):
         content=out[0]["content"]
-        if isinstance(content,str): out[0]["content"] = content + "\nInitial private working state (PROTOCOL):\n" + pv.canonical(pv.inactive())
+        if isinstance(content,str): out[0]["content"] = content + "\nInitial private working state:\n" + pv.canonical_slot(pv.inactive_slot())
         elif isinstance(content,list) and content and isinstance(content[0],dict) and content[0].get("type")=="text":
-            content[0]["text"] += "\nInitial private working state (PROTOCOL):\n"+pv.canonical(pv.inactive())
+            content[0]["text"] += "\nInitial private working state:\n"+pv.canonical_slot(pv.inactive_slot())
     return out
 def build_request(m,key,condition):
     req=base_request(m,key)
+    if key=="S": req=neutralize_s_request(req)
     if condition=="FREE": return req
     if condition!="PROTOCOL": raise ValueError(condition)
     req["system"] += protocol_suffix(); req["messages"]=protocol_initial(req["messages"]); return req
@@ -51,6 +73,11 @@ def treatment_diff(m,key):
     return {"free_request_sha256":sha(canon(f)),"protocol_request_sha256":sha(canon(p)),
       "shared_fields_equal":{k:f.get(k)==p.get(k) for k in ("tools","root_handoff","model_parameters")},
       "allowed_differences":["system strict representation contract","initial inactive control slot"],"completion_guard":False}
+def neutralization_audit(m):
+    raw=base_request(m,"S"); neutral=build_request(m,"S","FREE")
+    return {"source_request_sha256":sha(canon(raw)),"neutral_request_sha256":sha(canon(neutral)),
+      "removed_representation_markers":["DCEC-CONTROL/1 strict lifecycle paragraph","control-slot completion/integrity wording","historical slot-only working-state injections"],
+      "semantic_contract_preserved":True,"manual_prompt_rewrite":False}
 def build_all(m):
     rows=[]
     for rid in m["run_order"]:
@@ -67,11 +94,34 @@ class Tests(unittest.TestCase):
             f,p=build_request(self.m,k,"FREE"),build_request(self.m,k,"PROTOCOL")
             for x in ("tools","root_handoff","model_parameters"): self.assertEqual(f[x],p[x])
             self.assertNotIn("completion_guard",json.dumps(p))
+            names={x["function"]["name"] for x in f["tools"]}
+            self.assertEqual(names,{"file_read","file_write","file_patch","code_run","wait","intervene","allow_complete"})
+            self.assertEqual(names,{x["function"]["name"] for x in p["tools"]})
+    def test_s_neutralization_and_no_labels(self):
+        raw=base_request(self.m,"S"); neutral=build_request(self.m,"S","FREE")
+        self.assertNotEqual(sha(canon(raw)),sha(canon(neutral)))
+        blob=canon(neutral).decode(); self.assertNotIn("DCEC-CONTROL/1",blob); self.assertNotIn("procedurally rejected",blob)
+        protocol=canon(build_request(self.m,"S","PROTOCOL")).decode()
+        for label in ("D1 PROTOCOL","(PROTOCOL)","op=requested is invalid","FREE"):
+            self.assertNotIn(label,protocol)
+    def test_vendored_validator_hash(self):
+        p=HERE/"vendor"/"dcec_control_slot.py"
+        self.assertEqual(sha(p.read_bytes()),"339f24c8d0d741e177002142efdc9f5ce32da249f4c6b06d525e64171c4a8661")
     def test_protocol_validator(self):
-        old=pv.inactive(); new={"v":1,"id":"D1","status":"requested","op":"create","from":None,"receipts":[]}
-        self.assertEqual(pv.validate_transition(old,new),"create")
-        with self.assertRaises(ValueError): pv.validate_transition(old,{**new,"op":"requested"})
+        old=pv.inactive_slot(); new={"v":1,"id":"D1","status":"requested","op":"create","from":None,"receipts":[]}
+        self.assertEqual(pv.validate_transition(old,new,set()),"create")
+        with self.assertRaises(ValueError): pv.validate_transition(old,{**new,"op":"requested"},set())
         self.assertEqual(pv.validate_transition(new,{"v":1,"id":None,"status":"none","op":"discharge","from":"D1","receipts":["r1"]},["r1"]),"discharge")
+    def test_guard_absent_and_free_write(self):
+        try:
+            from .replay_harness import DryRunDispatcher
+        except ImportError:
+            from replay_harness import DryRunDispatcher
+        p=DryRunDispatcher(True); f=DryRunDispatcher(False)
+        slot=pv.canonical_slot({"v":1,"id":"D1","status":"requested","op":"create","from":None,"receipts":[]})
+        p.write_working(slot+"\nprose"); f.write_working("ordinary prose")
+        self.assertEqual(p.slot["id"],"D1"); self.assertEqual(f.working,"ordinary prose")
+        self.assertFalse(any(e.get("event")=="completion_guard_rejected" for e in p.events))
     def test_fixed_no_provider(self):
         self.assertEqual(len(self.m["run_order"]),12); self.assertEqual(self.m["shared"]["logical_call_limit"],6)
         self.assertFalse(self.m["execution_authorized"]); self.assertEqual(self.m["provider_requests_sent"],0)
@@ -82,6 +132,7 @@ def main():
     if a.materialize:
         a.materialize.mkdir(parents=True,exist_ok=False); m=load_manifest(); verify_sources(m)
         (a.materialize/"requests.json").write_bytes(canon(build_all(m)))
-        (a.materialize/"treatment_diffs.json").write_text(json.dumps({k:treatment_diff(m,k) for k in m["cases"]},indent=2),encoding="utf-8"); return 0
+        (a.materialize/"treatment_diffs.json").write_text(json.dumps({k:treatment_diff(m,k) for k in m["cases"]},indent=2),encoding="utf-8")
+        (a.materialize/"s_neutralization_audit.json").write_text(json.dumps(neutralization_audit(m),indent=2),encoding="utf-8"); return 0
     ap.error("use --self-test or --materialize")
 if __name__=="__main__": raise SystemExit(main())
