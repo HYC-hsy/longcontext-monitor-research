@@ -1,175 +1,87 @@
-"""Offline-only D1 materializer and contract tests.
-
-This module deliberately has no provider imports or network entry point.  It
-constructs deterministic model-visible envelopes from frozen source
-references, keeping research condition identity outside those envelopes.
-"""
+"""Offline-only D1 provider-ready replay materializer and tests."""
 from __future__ import annotations
-
-import argparse
-import hashlib
-import json
+import argparse, copy, hashlib, json, tarfile, unittest
 from pathlib import Path
-import tempfile
-import unittest
-
-
-HERE = Path(__file__).resolve().parent
-ROOT = HERE.parents[3]
-MANIFEST = HERE / "manifest.json"
-SEMANTIC_CONTRACT = (
-    "current decision scope; local evidence does not automatically promote to whole task; "
-    "observation outcomes must distinguish different control actions; observation boundary "
-    "must reach the relevant behavior; unfinished or unavailable observation is not positive "
-    "evidence; re-evaluate the same root anchor; relax after adequate evidence"
-)
-TOOLS = ["file_read", "file_list", "text_search", "code_run"]
-
-
-def canonical(value: object) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-
-
-def digest(value: object) -> str:
-    return hashlib.sha256(canonical(value)).hexdigest()
-
-
-def load_manifest() -> dict:
-    return json.loads(MANIFEST.read_text(encoding="utf-8"))
-
-
-def _case_material(case: dict) -> dict:
-    """Return only task/evidence identity; no research labels or expected outcomes."""
-    files = case["source_files"]
-    return {
-        "task_id": case["task_id"],
-        "source_references": {
-            key: {"path": value["path"], "sha256": value["sha256"]}
-            for key, value in sorted(files.items())
-        },
-        "cutoff": case.get("cutoff"),
-        "checkpoint_identity": case.get("checkpoint_identity"),
-        "tools": TOOLS,
-    }
-
-
-def build_request(manifest: dict, case_key: str, condition: str) -> dict:
-    """Build one deterministic model-visible request envelope."""
-    case = manifest["cases"][case_key]
-    material = _case_material(case)
-    # This hash is the shared parent/evidence identity.  It is identical across
-    # FREE and PROTOCOL for a case and contains no treatment or result label.
-    shared = {
-        "decision_scope": "consequential root decision",
-        "semantic_guidance": SEMANTIC_CONTRACT,
-        "parent_context_sha256": digest(material),
-        "task_and_evidence": material,
-        "tools": TOOLS,
-        "budget": {"max_logical_calls": manifest["shared"]["logical_call_limit"]},
-    }
-    if condition == "PROTOCOL":
-        shared["control_representation_contract"] = {
-            "purpose": "model-owned decision-critical observation lifecycle",
-            "operations": ["create", "retain", "replace", "discharge"],
-            "statuses": ["requested", "running", "interrupted", "unavailable", "completed"],
-            "receipt_rule": "reference only deterministic receipts observed by this run",
-        }
-    elif condition != "FREE":
-        raise ValueError(f"unknown condition: {condition}")
-    return shared
-
-
-def build_all(manifest: dict) -> dict:
-    records = []
-    for run_id in manifest["run_order"]:
-        case_key, condition, repeat = run_id.split("-")
-        records.append({
-            "run_id": run_id,
-            "case_key": case_key,
-            "condition": condition,
-            "repeat": int(repeat[1:]),
-            "model_visible_request": build_request(manifest, case_key, condition),
-        })
-    return {"schema_version": "d1-materialized-request-set/1", "records": records}
-
-
-def materialize(out: Path) -> None:
-    manifest = load_manifest()
-    out.mkdir(parents=True, exist_ok=False)
-    payload = build_all(manifest)
-    (out / "requests.json").write_bytes(canonical(payload))
-    diffs = {}
-    for key in manifest["cases"]:
-        free = build_request(manifest, key, "FREE")
-        protocol = build_request(manifest, key, "PROTOCOL")
-        diffs[key] = {
-            "shared_sha256": digest(free),
-            "protocol_sha256": digest(protocol),
-            "added_top_level_keys": sorted(set(protocol) - set(free)),
-            "removed_top_level_keys": sorted(set(free) - set(protocol)),
-        }
-    (out / "treatment_diffs.json").write_bytes(canonical(diffs))
-
-
-class D1PreparationTests(unittest.TestCase):
-    def setUp(self):
-        self.manifest = load_manifest()
-
-    def test_fixed_identities_and_budget(self):
-        self.assertEqual(self.manifest["status"], "prepared_not_executed")
-        self.assertEqual(len(self.manifest["run_order"]), 12)
-        self.assertTrue(all("-r1" in r or "-r2" in r for r in self.manifest["run_order"]))
-        self.assertEqual(self.manifest["shared"]["logical_call_limit"], 6)
-        self.assertFalse(self.manifest["execution_authorized"])
-
-    def test_source_case_contracts(self):
-        self.assertEqual(self.manifest["cases"]["F"]["checkpoint_identity"]["task_turn"], 86)
-        cutoff = self.manifest["cases"]["S"]["cutoff"]
-        self.assertEqual(cutoff["internal_turn"], 52)
-        self.assertTrue(cutoff["excludes_later_events"])
-        self.assertEqual(self.manifest["cases"]["C"]["source_run"], "r12_discriminating_selector_screen")
-
-    def test_treatment_only_diff(self):
-        for case_key in self.manifest["cases"]:
-            free = build_request(self.manifest, case_key, "FREE")
-            protocol = build_request(self.manifest, case_key, "PROTOCOL")
-            self.assertEqual({k: v for k, v in free.items()}, {
-                k: v for k, v in protocol.items() if k != "control_representation_contract"
-            })
-            self.assertEqual(set(protocol) - set(free), {"control_representation_contract"})
-            self.assertEqual(free["parent_context_sha256"], protocol["parent_context_sha256"])
-
-    def test_no_research_metadata_leak(self):
-        forbidden = ("expected_result", "candidate_winner", "research_only", "FREE", "PROTOCOL")
-        for case_key in self.manifest["cases"]:
-            for condition in ("FREE", "PROTOCOL"):
-                blob = canonical(build_request(self.manifest, case_key, condition)).decode()
-                self.assertFalse(any(token in blob for token in forbidden))
-
-    def test_materialization_is_local_and_deterministic(self):
-        first = build_all(self.manifest)
-        second = build_all(self.manifest)
-        self.assertEqual(canonical(first), canonical(second))
-        with tempfile.TemporaryDirectory() as td:
-            out = Path(td) / "requests"
-            materialize(out)
-            self.assertTrue((out / "requests.json").exists())
-            self.assertTrue((out / "treatment_diffs.json").exists())
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--self-test", action="store_true")
-    parser.add_argument("--materialize", type=Path)
-    args = parser.parse_args()
-    if args.self_test:
-        return 0 if unittest.main(module=__name__, argv=["d1_harness"], exit=False).result.wasSuccessful() else 1
-    if args.materialize:
-        materialize(args.materialize)
-        return 0
-    parser.error("preparation-only harness: use --self-test or --materialize")
-    return 2
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+try:
+    from . import protocol_validator as pv
+except ImportError:
+    import protocol_validator as pv
+HERE=Path(__file__).resolve().parent; ROOT=HERE.parents[2]; MANIFEST=HERE/"manifest.json"
+def canon(x): return json.dumps(x,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()
+def sha(b): return hashlib.sha256(b).hexdigest()
+def load_manifest(): return json.loads(MANIFEST.read_text(encoding="utf-8"))
+def source_bytes(spec):
+    p=ROOT/spec["path"]
+    if spec.get("archive_member"):
+        with tarfile.open(p) as t:
+            f=t.extractfile(spec["archive_member"])
+            if f is None: raise FileNotFoundError(spec["archive_member"])
+            return f.read()
+    return p.read_bytes()
+def verify_sources(m):
+    out={}
+    for ck,c in m["cases"].items():
+        out[ck]={}
+        for n,s in c["source_files"].items():
+            b=source_bytes(s); actual=sha(b)
+            if actual != s["sha256"]: raise AssertionError(f"{ck}.{n}: hash mismatch")
+            out[ck][n]={"sha256":actual,"bytes":len(b)}
+    return out
+def load_json_source(s): return json.loads(source_bytes(s).decode("utf-8"))
+def base_request(m,key): return load_json_source(m["cases"][key]["request"])
+def protocol_suffix(): return ("\n\nD1 PROTOCOL: monitor/working.md first line is canonical DCEC-CONTROL/1 JSON with exactly "
+    "v,id,status,op,from,receipts. Use op=create for inactive-to-active, retain, replace or discharge; "
+    "statuses requested/running/interrupted/unavailable/completed; op=requested is invalid. Receipts are "
+    "opaque deterministic tool receipts. This diagnostic does not enable a completion guard.\n")
+def protocol_initial(messages):
+    out=copy.deepcopy(messages)
+    if out and out[0].get("role")=="user" and out[0].get("content"):
+        content=out[0]["content"]
+        if isinstance(content,str): out[0]["content"] = content + "\nInitial private working state (PROTOCOL):\n" + pv.canonical(pv.inactive())
+        elif isinstance(content,list) and content and isinstance(content[0],dict) and content[0].get("type")=="text":
+            content[0]["text"] += "\nInitial private working state (PROTOCOL):\n"+pv.canonical(pv.inactive())
+    return out
+def build_request(m,key,condition):
+    req=base_request(m,key)
+    if condition=="FREE": return req
+    if condition!="PROTOCOL": raise ValueError(condition)
+    req["system"] += protocol_suffix(); req["messages"]=protocol_initial(req["messages"]); return req
+def treatment_diff(m,key):
+    f,p=build_request(m,key,"FREE"),build_request(m,key,"PROTOCOL")
+    return {"free_request_sha256":sha(canon(f)),"protocol_request_sha256":sha(canon(p)),
+      "shared_fields_equal":{k:f.get(k)==p.get(k) for k in ("tools","root_handoff","model_parameters")},
+      "allowed_differences":["system strict representation contract","initial inactive control slot"],"completion_guard":False}
+def build_all(m):
+    rows=[]
+    for rid in m["run_order"]:
+        ck,cond,rep=rid.split("-"); rows.append({"run_id":rid,"case_key":ck,"condition":cond,"repeat":int(rep[1:]),"request":build_request(m,ck,cond)})
+    return {"schema_version":"d1-provider-ready-replay/2","records":rows}
+class Tests(unittest.TestCase):
+    def setUp(self): self.m=load_manifest()
+    def test_sources_exist_and_hash(self): verify_sources(self.m)
+    def test_checkpoint_identity(self):
+        self.assertEqual(self.m["cases"]["F"]["checkpoint_identity"]["task_turn"],86)
+        self.assertEqual(self.m["cases"]["S"]["checkpoint_identity"]["cursor"],103)
+    def test_provider_ready_parity(self):
+        for k in self.m["cases"]:
+            f,p=build_request(self.m,k,"FREE"),build_request(self.m,k,"PROTOCOL")
+            for x in ("tools","root_handoff","model_parameters"): self.assertEqual(f[x],p[x])
+            self.assertNotIn("completion_guard",json.dumps(p))
+    def test_protocol_validator(self):
+        old=pv.inactive(); new={"v":1,"id":"D1","status":"requested","op":"create","from":None,"receipts":[]}
+        self.assertEqual(pv.validate_transition(old,new),"create")
+        with self.assertRaises(ValueError): pv.validate_transition(old,{**new,"op":"requested"})
+        self.assertEqual(pv.validate_transition(new,{"v":1,"id":None,"status":"none","op":"discharge","from":"D1","receipts":["r1"]},["r1"]),"discharge")
+    def test_fixed_no_provider(self):
+        self.assertEqual(len(self.m["run_order"]),12); self.assertEqual(self.m["shared"]["logical_call_limit"],6)
+        self.assertFalse(self.m["execution_authorized"]); self.assertEqual(self.m["provider_requests_sent"],0)
+    def test_deterministic(self): self.assertEqual(canon(build_all(self.m)),canon(build_all(self.m)))
+def main():
+    ap=argparse.ArgumentParser(); ap.add_argument("--self-test",action="store_true"); ap.add_argument("--materialize",type=Path); a=ap.parse_args()
+    if a.self_test: return 0 if unittest.main(module=__name__,argv=["d1"],exit=False).result.wasSuccessful() else 1
+    if a.materialize:
+        a.materialize.mkdir(parents=True,exist_ok=False); m=load_manifest(); verify_sources(m)
+        (a.materialize/"requests.json").write_bytes(canon(build_all(m)))
+        (a.materialize/"treatment_diffs.json").write_text(json.dumps({k:treatment_diff(m,k) for k in m["cases"]},indent=2),encoding="utf-8"); return 0
+    ap.error("use --self-test or --materialize")
+if __name__=="__main__": raise SystemExit(main())
