@@ -35,6 +35,22 @@ def verify_sources(m):
             if actual != s["sha256"]: raise AssertionError(f"{ck}.{n}: hash mismatch")
             out[ck][n]={"sha256":actual,"bytes":len(b)}
     return out
+def verify_snapshot_files(m):
+    """Recompute every file hash listed by immutable tar checkpoint manifests."""
+    checked={}
+    for ck,c in m["cases"].items():
+        if not c.get("checkpoint_tar"): continue
+        tar_path=ROOT/c["checkpoint_tar"]["path"]
+        with tarfile.open(tar_path) as t:
+            manifest_name="checkpoint-0001/manifest.json"
+            fm=json.loads(t.extractfile(manifest_name).read().decode("utf-8"))
+            checked[ck]=0
+            for rel,expected in fm.get("files",{}).items():
+                member="checkpoint-0001/"+rel
+                item=t.extractfile(member)
+                if item is None or sha(item.read()) != expected: raise AssertionError(f"{ck}: snapshot hash mismatch {rel}")
+                checked[ck]+=1
+    return checked
 def load_json_source(s): return json.loads(source_bytes(s).decode("utf-8"))
 def base_request(m,key): return load_json_source(m["cases"][key]["request"])
 def neutralize_s_request(req):

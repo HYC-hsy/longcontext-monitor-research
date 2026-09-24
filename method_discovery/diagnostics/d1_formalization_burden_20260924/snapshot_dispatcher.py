@@ -25,13 +25,15 @@ class FrozenSnapshot:
         if self.tar:
             try: self.tar.getmember(self._member(virtual)); return True
             except KeyError: return False
-        return (self.root/self.spec.get("directory","")/virtual).is_file()
+        local="monitor/state/"+virtual[len("monitor/"):] if virtual.startswith("monitor/") else virtual
+        return (self.root/self.spec.get("directory","")/local).is_file()
     def _read_virtual(self, virtual):
         if self.tar:
             f=self.tar.extractfile(self._member(virtual))
             if f is None: raise FileNotFoundError(virtual)
             return f.read().decode("utf-8",errors="replace")
-        return (self.root/self.spec.get("directory","")/virtual).read_text(encoding="utf-8")
+        local="monitor/state/"+virtual[len("monitor/"):] if virtual.startswith("monitor/") else virtual
+        return (self.root/self.spec.get("directory","")/local).read_text(encoding="utf-8")
     def _receipt(self, tool, data):
         rid="r"+hashlib.sha256(json.dumps(data,sort_keys=True).encode()).hexdigest()[:12]
         self.receipts[rid]={"tool":tool,"status":data.get("status","ok"),"sha256":hashlib.sha256(json.dumps(data,sort_keys=True).encode()).hexdigest()}

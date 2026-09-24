@@ -39,8 +39,11 @@ client and never sends a request.
 The protocol validator under `vendor/` is a byte-for-byte copy of the frozen
 production validator. The local dry-run dispatcher applies it only to
 `monitor/working.md` writes; FREE uses the same seven-tool surface without the
-validator. Completion guard remains disabled. `run_d1.py --execute` fails
-closed because this is still preparation-only.
+validator. Completion guard remains disabled. `run_d1.py --execute` checks a
+separate authorization artifact, re-hashes immutable checkpoint manifests,
+creates a fresh dispatcher per record, and uses the existing
+`MonitorProviderClient` loop with a six-call counter. No authorization artifact
+is present in this preparation commit, so execution remains fail-closed.
 
 Case labels, expected outcomes, and research scoring are not emitted in the
 model-visible envelope.
