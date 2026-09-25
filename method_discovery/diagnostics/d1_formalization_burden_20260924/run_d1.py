@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse, hashlib, json, sys, time
 from pathlib import Path
 HERE=Path(__file__).resolve().parent; ROOT=HERE.parents[2]
+NO_TOOL_CONTINUATION="Continue using the available tools as needed. Follow the current system instructions for when to send input and when to end this review."
 try:
     from .d1_harness import load_manifest, verify_sources, verify_snapshot_files, build_all, canon, sha
     from .snapshot_dispatcher import FrozenSnapshot
@@ -45,7 +46,9 @@ def execute_records(manifest,output_root,provider_factory=None):
                 finally: client.prepare_active_context=old_prepare
                 raw["logical_calls"]=logical; raw["requests"].append({"logical_call":logical,"request_sha256":request_hash,"request":request_payload,"working_sha256":hashlib.sha256(snap.working.encode()).hexdigest(),"blocks":blocks,"usage":usage})
                 client.history.append({"role":"assistant","content":blocks}); calls=[b for b in blocks if b.get("type")=="tool_use"]
-                if not calls: raw["terminal"]={"action":"defer","reason":"model_text_without_control"}; break
+                if not calls:
+                    client.history.append({"role":"user","content":[{"type":"text","text":NO_TOOL_CONTINUATION}]})
+                    continue
                 results=[]; terminal=None
                 for call in calls:
                     name=call.get("name"); args=call.get("input") or {}; before=snap.working

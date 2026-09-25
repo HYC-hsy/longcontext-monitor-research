@@ -24,8 +24,25 @@ class FrozenSnapshot:
             self.working_path.write_text(self.working,encoding="utf-8")
         self.workspace_path=self._path("task/workspace")
         if not self.workspace_path.is_dir(): raise FileNotFoundError("frozen task/workspace is absent")
-        mapped=str(self.workspace_path).replace("\\","/")
-        self.path_mapping={"/testbed":mapped,"/app":mapped}
+        def mapped(path): return str(path).replace("\\","/")
+        self.tmp_path=self.temp_root/"tmp"
+        self.tmp_path.mkdir()
+        self.path_mapping={"/tmp":mapped(self.tmp_path)}
+        family=self.spec["family"]
+        if family=="sphinx_first_completion":
+            self.path_mapping.update({
+                "/testbed":mapped(self.workspace_path),
+                "/opt/m2-artifacts/monitor/task_evidence":mapped(self._path("task")),
+                "/opt/m2-artifacts/monitor/monitor_private":mapped(self._path("monitor")),
+            })
+        elif family=="fyne_capability_preservation":
+            self.path_mapping.update({
+                "/app":mapped(self.workspace_path),
+                "/logs/agent/monitor/task_evidence":mapped(self._path("task")),
+                "/logs/agent/monitor/monitor_private":mapped(self._path("monitor")),
+            })
+        elif family!="correct_small_control":
+            raise ValueError("unknown frozen case family")
         sys.path.insert(0,str(self.root/"GenericAgent-main"))
         from monitor_agent_core.workspace import MonitorWorkspace
         from monitor_agent_core.process_runner import AnalysisSessions
@@ -89,7 +106,8 @@ class FrozenSnapshot:
                     out=self.analysis.read(args["session_id"],wait_seconds=args.get("wait_seconds",1),cancel=args.get("cancel",False))
                 else:
                     code=args.get("code","")
-                    for old,new in self.path_mapping.items(): code=code.replace(old,new)
+                    for old,new in sorted(self.path_mapping.items(),key=lambda item:-len(item[0])):
+                        code=code.replace(old,new)
                     out=self.analysis.start(code,code_type=args.get("type","python"),timeout=args.get("timeout",60),wait_seconds=args.get("wait_seconds",1))
                 return self._receipt(name,out)
             if name=="wait": return {"status":"terminal","action":"defer"}

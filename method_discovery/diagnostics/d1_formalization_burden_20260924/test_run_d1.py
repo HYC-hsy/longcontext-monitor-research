@@ -21,6 +21,13 @@ class ExhaustClient(FakeClient):
         self.n+=1
         return ([{"type":"tool_use","id":f"t{self.n}","name":"file_read","input":{"path":"task/original_task.txt"}}],{})
 
+class TextThenToolClient(FakeClient):
+    def _request(self,tools):
+        self.n+=1
+        if self.n==1: return ([{"type":"text","text":"I should inspect the evidence."}],{})
+        if self.n==2: return ([{"type":"tool_use","id":"evidence","name":"file_read","input":{"path":"task/original_task.txt"}}],{})
+        return ([{"type":"tool_use","id":"approve","name":"allow_complete","input":{}}],{})
+
 class RunnerTests(unittest.TestCase):
     def test_fake_full_loop_and_recoverable_protocol_error(self):
         m=run_d1.load_manifest()
@@ -60,5 +67,55 @@ class RunnerTests(unittest.TestCase):
             out=Path(td)/"out"; run_d1.execute_records(m,out,provider_factory=lambda cfg,record: ExhaustClient(cfg,record))
             raw=json.loads(next(out.glob("*.json")).read_text(encoding="utf-8")); self.assertEqual(raw["logical_calls"],6); self.assertEqual(raw["terminal"]["action"],"diagnostic_incomplete_budget"); self.assertEqual(len(raw["requests"]),6)
         m["run_order"]=old
+
+    def test_no_tool_text_continues_to_evidence_and_control(self):
+        m=run_d1.load_manifest(); m["run_order"]=["C-FREE-r1"]
+        with tempfile.TemporaryDirectory() as td:
+            out=Path(td)/"out"
+            run_d1.execute_records(m,out,provider_factory=lambda cfg,record: TextThenToolClient(cfg,record))
+            raw=json.loads(next(out.glob("*.json")).read_text(encoding="utf-8"))
+            self.assertEqual(raw["logical_calls"],3)
+            self.assertEqual(raw["terminal"]["action"],"allow_complete")
+            self.assertEqual(raw["tool_calls"][0]["name"],"file_read")
+            self.assertEqual(raw["tool_calls"][0]["result"]["status"],"ok")
+            self.assertIn(run_d1.NO_TOOL_CONTINUATION,str(raw["requests"][1]["request"]["messages"]))
+
+    def test_all_historical_path_mappings_and_record_local_tmp(self):
+        from snapshot_dispatcher import FrozenSnapshot
+        m=run_d1.load_manifest()
+        families={
+            "S":("/opt/m2-artifacts/monitor/task_evidence/original_task.txt", "/opt/m2-artifacts/monitor/monitor_private/working.md"),
+            "F":("/logs/agent/monitor/task_evidence/original_task.txt", "/logs/agent/monitor/monitor_private/working.md"),
+        }
+        for key,(task_path,monitor_path) in families.items():
+            snap=FrozenSnapshot(dict(m["cases"][key],protocol=False),run_d1.ROOT)
+            try:
+                task=snap.dispatch("code_run",{"type":"python","code":f"print(open('{task_path}').read(30))"})
+                self.assertEqual(task["status"],"success",task)
+                marker=f"{key}-record-local-state"
+                self.assertEqual(snap.dispatch("file_write",{"path":"monitor/working.md","content":marker})["status"],"ok")
+                monitor=snap.dispatch("code_run",{"type":"python","code":f"print(open('{monitor_path}').read())"})
+                self.assertEqual(monitor["status"],"success",monitor)
+                self.assertIn(marker,monitor["stdout"])
+                workspace_alias="/testbed" if key=="S" else "/app"
+                workspace=snap.dispatch("code_run",{"type":"python","code":f"import os; print(os.path.isdir('{workspace_alias}'))"})
+                self.assertEqual(workspace["status"],"success",workspace)
+                self.assertIn("True",workspace["stdout"])
+            finally: snap.close()
+        for key in ("S","F","C"):
+            spec=dict(m["cases"][key],protocol=False)
+            first=FrozenSnapshot(spec,run_d1.ROOT)
+            try:
+                write=first.dispatch("code_run",{"type":"python","code":"open('/tmp/d1_probe','w').write('first-record')"})
+                self.assertEqual(write["status"],"success",write)
+                self.assertTrue((first.tmp_path/"d1_probe").is_file())
+            finally: first.close()
+            second=FrozenSnapshot(spec,run_d1.ROOT)
+            try:
+                self.assertFalse((second.tmp_path/"d1_probe").exists())
+                probe=second.dispatch("code_run",{"type":"python","code":"import os; print(os.path.exists('/tmp/d1_probe'))"})
+                self.assertEqual(probe["status"],"success",probe)
+                self.assertIn("False",probe["stdout"])
+            finally: second.close()
 
 if __name__=="__main__": unittest.main()
