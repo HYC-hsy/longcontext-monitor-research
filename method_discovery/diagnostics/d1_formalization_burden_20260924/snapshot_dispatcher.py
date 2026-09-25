@@ -1,6 +1,6 @@
 """Diagnostic-local mutable frozen replay filesystem and tool dispatcher."""
 from __future__ import annotations
-import hashlib, os, shutil, subprocess, tarfile, tempfile
+import hashlib, os, shutil, subprocess, sys, tarfile, tempfile, threading
 from pathlib import Path
 try:
     from .vendor import dcec_control_slot as validator
@@ -22,6 +22,15 @@ class FrozenSnapshot:
         if self.protocol:
             self.working=validator.canonical_slot(validator.inactive_slot())+"\n"+self.working
             self.working_path.write_text(self.working,encoding="utf-8")
+        self.workspace_path=self._path("task/workspace")
+        if not self.workspace_path.is_dir(): raise FileNotFoundError("frozen task/workspace is absent")
+        mapped=str(self.workspace_path).replace("\\","/")
+        self.path_mapping={"/testbed":mapped,"/app":mapped}
+        sys.path.insert(0,str(self.root/"GenericAgent-main"))
+        from monitor_agent_core.workspace import MonitorWorkspace
+        from monitor_agent_core.process_runner import AnalysisSessions
+        self.monitor_workspace=MonitorWorkspace(self._path("task"),self._path("monitor"),task_mounts={"workspace":self.workspace_path})
+        self.analysis=AnalysisSessions(self.workspace_path,threading.Event())
 
     def _materialize(self):
         if self.spec.get("checkpoint_tar"):
@@ -43,22 +52,29 @@ class FrozenSnapshot:
 
     def _commit_working(self,text,op):
         if self.protocol:
-            try: proposed=validator.parse_slot(text); kind=validator.validate_transition(self.slot,proposed,set(self.receipts))
+            try:
+                text=validator.ensure_slot(text,self.slot)
+                proposed=validator.parse_slot(text); kind=validator.validate_transition(self.slot,proposed,set(self.receipts))
             except Exception as exc:
                 self.events.append({"event":"dcec_dependency_transition_rejected","operation":op,"error_type":type(exc).__name__}); raise
             old_id=self.slot.get("id"); self.slot=proposed; self.events.append({"event":"dcec_dependency_transition_accepted","operation":op,"kind":kind,"old_id":old_id,"new_id":proposed.get("id")})
-        self.working=text; self.working_path.write_text(text,encoding="utf-8")
+        self.monitor_workspace._atomic_write(self.working_path,text)
+        self.working=text
 
     def dispatch(self,name,args):
         if name not in TOOLS: return self._error(name,"unknown tool")
         try:
             if name=="file_read":
-                path=args["path"]; content=self._path(path).read_text(encoding="utf-8",errors="replace"); offset=int(args.get("offset",0)); max_chars=int(args.get("max_chars",20000)); view=content[offset:offset+max_chars]; lines=view.splitlines(True); start=int(args.get("start",1)); count=int(args.get("count",200)); selected=lines[-count:] if args.get("tail") else lines[start-1:start-1+count]
-                return self._receipt(name,{"status":"ok","path":path,"content":"".join(selected),"start":start,"total_lines":len(content.splitlines()),"truncated":offset+len(view)<len(content) or len(selected)<len(lines)})
+                read_args=dict(args); read_args["virtual_path"]=read_args.pop("path")
+                out=self.monitor_workspace.read_text(**read_args); return self._receipt(name,{"status":"ok",**out})
             if name in {"file_write","file_patch"}:
                 path=args["path"]; p=self._path(path); p.parent.mkdir(parents=True,exist_ok=True); old=p.read_text(encoding="utf-8") if p.exists() else ""
                 if name=="file_write":
-                    mode=args.get("mode","replace"); content=args.get("content",""); new=content if mode=="replace" else old+content if mode=="append" else content+old
+                    mode=args.get("mode","replace"); content=args.get("content","")
+                    if self.protocol and path=="monitor/working.md" and mode=="prepend":
+                        first,prose=validator.slot_and_prose(old)
+                        new=first+"\n"+content+prose
+                    else: new=content if mode=="replace" else old+content if mode=="append" else content+old
                 else:
                     mode="patch"; old_text=args.get("old_text",""); new_text=args.get("new_text","")
                     if not old_text or old.count(old_text)!=1: return self._error(name,"old_text must match exactly once",path=path)
@@ -66,15 +82,22 @@ class FrozenSnapshot:
                 if path=="monitor/working.md":
                     try: self._commit_working(new,mode)
                     except Exception as exc: return self._error(name,str(exc),path=path)
-                else: p.write_text(new,encoding="utf-8")
+                else: self.monitor_workspace.write_text(path,new,mode="replace")
                 return self._receipt(name,{"status":"ok","path":path,"sha256":hashlib.sha256(new.encode()).hexdigest()})
             if name=="code_run":
-                cwd=self.fs/"workspace" if (self.fs/"workspace").exists() else self.fs; typ=args.get("type","python"); cmd=["bash","-lc",args.get("code","")] if typ=="bash" else ["python","-c",args.get("code","")]
-                p=subprocess.run(cmd,cwd=str(cwd),capture_output=True,text=True,timeout=int(args.get("timeout",60)),env={**os.environ,"NO_PROXY":"*","no_proxy":"*"}); return self._receipt(name,{"status":"success" if p.returncode==0 else "error","exit_code":p.returncode,"stdout":p.stdout[-4000:],"stderr":p.stderr[-4000:]})
+                if args.get("session_id"):
+                    out=self.analysis.read(args["session_id"],wait_seconds=args.get("wait_seconds",1),cancel=args.get("cancel",False))
+                else:
+                    code=args.get("code","")
+                    for old,new in self.path_mapping.items(): code=code.replace(old,new)
+                    out=self.analysis.start(code,code_type=args.get("type","python"),timeout=args.get("timeout",60),wait_seconds=args.get("wait_seconds",1))
+                return self._receipt(name,out)
             if name=="wait": return {"status":"terminal","action":"defer"}
             if name=="intervene": return {"status":"terminal","action":"continue","message":args.get("message","")}
             return {"status":"terminal","action":"allow_complete"}
         except subprocess.TimeoutExpired: return self._receipt(name,{"status":"error","reason":"timeout"})
         except Exception as exc: return self._error(name,str(exc),exception_type=type(exc).__name__)
 
-    def close(self): shutil.rmtree(self.temp_root,ignore_errors=True)
+    def close(self):
+        if hasattr(self,"analysis"): self.analysis.close()
+        shutil.rmtree(self.temp_root,ignore_errors=True)

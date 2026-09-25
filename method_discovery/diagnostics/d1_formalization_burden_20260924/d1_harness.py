@@ -87,9 +87,28 @@ def protocol_initial(messages):
 def build_request(m,key,condition):
     req=base_request(m,key)
     if key=="S": req=neutralize_s_request(req)
+    req=strip_dynamic_working_injections(req)
     if condition=="FREE": return req
     if condition!="PROTOCOL": raise ValueError(condition)
     req["system"] += protocol_suffix(); return req
+
+def strip_dynamic_working_injections(req):
+    out=copy.deepcopy(req)
+    def clean_messages(messages):
+        result=[]
+        for msg in messages:
+            if not isinstance(msg,dict) or msg.get("role")!="user": result.append(msg); continue
+            content=msg.get("content")
+            if isinstance(content,str):
+                if "DCEC current working state from monitor/working.md" in content or "<dcec_working_state>" in content:
+                    continue
+            elif isinstance(content,list):
+                kept=[b for b in content if not (isinstance(b,dict) and "DCEC current working state from monitor/working.md" in str(b.get("text","")))]
+                if not kept: continue
+                msg=dict(msg); msg["content"]=kept
+            result.append(msg)
+        return result
+    out["messages"]=clean_messages(out.get("messages",[])); return out
 def treatment_diff(m,key):
     f,p=build_request(m,key,"FREE"),build_request(m,key,"PROTOCOL")
     return {"free_request_sha256":sha(canon(f)),"protocol_request_sha256":sha(canon(p)),

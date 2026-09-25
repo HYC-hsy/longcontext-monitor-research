@@ -19,10 +19,10 @@ def bundle_hash():
     return hashlib.sha256(canon(rows)).hexdigest(), rows
 def current_working_view(snap,limit=4000):
     text=snap.working
-    if not snap.protocol: return text[:limit]
+    if not snap.protocol: return "Current replay working state:\n"+text[:limit]
     first=text.splitlines(True)[0] if text.splitlines(True) else ""
     prose=text[len(first):] if first else text
-    return first[:512]+prose[:max(0,limit-len(first))]
+    return "Current replay working state:\n"+first[:512]+prose[:max(0,limit-len(first)-29)]
 def execute_records(manifest,output_root,provider_factory=None):
     output_root=Path(output_root)
     if output_root.exists(): raise SystemExit("D1 output already exists")
@@ -38,11 +38,12 @@ def execute_records(manifest,output_root,provider_factory=None):
             client=(provider_factory(cfg,record) if provider_factory else MonitorProviderClient(manifest["shared"]["supervisor_profile"],cfg)); client.restore_request_snapshot(record["request"]); tools=record["request"]["tools"]
             for logical in range(1,int(manifest["shared"]["logical_call_limit"])+1):
                 snap.working=snap.working_path.read_text(encoding="utf-8"); view=current_working_view(snap)
-                request_hash=hashlib.sha256(canon({"system":client.system,"messages":client.history+[{"role":"user","content":[{"type":"text","text":view}]}],"tools":tools,"model_parameters":record["request"].get("model_parameters") })).hexdigest()
+                request_payload={"system":client.system,"messages":client.history+[{"role":"user","content":[{"type":"text","text":view}]}],"tools":tools,"model_parameters":record["request"].get("model_parameters")}
+                request_hash=hashlib.sha256(canon(request_payload)).hexdigest()
                 old_prepare=getattr(client,"prepare_active_context",None); client.prepare_active_context=lambda:view
                 try: blocks,usage=client._request(tools)
                 finally: client.prepare_active_context=old_prepare
-                raw["logical_calls"]=logical; raw["requests"].append({"logical_call":logical,"request_sha256":request_hash,"working_sha256":hashlib.sha256(snap.working.encode()).hexdigest(),"blocks":blocks,"usage":usage})
+                raw["logical_calls"]=logical; raw["requests"].append({"logical_call":logical,"request_sha256":request_hash,"request":request_payload,"working_sha256":hashlib.sha256(snap.working.encode()).hexdigest(),"blocks":blocks,"usage":usage})
                 client.history.append({"role":"assistant","content":blocks}); calls=[b for b in blocks if b.get("type")=="tool_use"]
                 if not calls: raw["terminal"]={"action":"defer","reason":"model_text_without_control"}; break
                 results=[]; terminal=None
