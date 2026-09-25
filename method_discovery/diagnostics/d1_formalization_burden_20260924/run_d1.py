@@ -33,7 +33,7 @@ def execute_records(manifest,output_root,provider_factory=None):
     cfg=load_profile(manifest["shared"]["supervisor_profile"], ROOT/"monitor_config/models.local.json")
     for record in build_all(manifest)["records"]:
         started=time.time(); case=dict(manifest["cases"][record["case_key"]]); case["protocol"]=record["condition"]=="PROTOCOL"; snap=FrozenSnapshot(case,ROOT)
-        raw={"run_id":record["run_id"],"case":record["case_key"],"condition":record["condition"],"logical_calls":0,"requests":[],"tool_calls":[],"working_timeline":[],"events":[]}
+        raw={"run_id":record["run_id"],"case":record["case_key"],"condition":record["condition"],"logical_calls":0,"requests":[],"tool_calls":[],"working_timeline":[],"events":[],"path_mapping":dict(snap.path_mapping)}
         try:
             client=(provider_factory(cfg,record) if provider_factory else MonitorProviderClient(manifest["shared"]["supervisor_profile"],cfg)); client.restore_request_snapshot(record["request"]); tools=record["request"]["tools"]
             for logical in range(1,int(manifest["shared"]["logical_call_limit"])+1):
