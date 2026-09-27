@@ -1,10 +1,11 @@
-# D2 — Measurement Substitution (design only)
+# D2 — Measurement Substitution (forward design only)
 
 Status: **design material only; not implemented, not executed**.
 
 This design preserves the D1-R1 final verdict and raw records. It does not
 repair or rerun D1, alter PROTOCOL, implement Action-Native control, or modify
-production Monitor code.
+production Monitor code. FBR archival material is indexed separately at
+`method_discovery/evidence/fbr_cors_public_20260927/`.
 
 ## 1. Scientific question
 
@@ -15,7 +16,15 @@ outcomes still distinguish the control-relevant states?
 
 The intervention is restricted to the availability of one complete measurement
 event. It is not a new state representation, selector, checker, or additional
-LLM stage.
+LLM stage. The design separates two questions that must not be conflated:
+
+* A — when the researcher supplies a measurement with different discriminating
+  power, can the Supervisor use it and change control?
+* B — when the preferred measurement is unavailable, can the Supervisor
+  autonomously design and execute a suitable replacement?
+
+The current forward document is primarily a design for B; A is a necessary
+calibration comparison, not evidence that B is solved.
 
 ## 2. Frozen common condition
 
@@ -31,7 +40,10 @@ to both measurement conditions. No DCEC-CONTROL protocol is added.
 
 Research labels, state labels, expected outcomes, and candidate names are
 research-side only. Model-visible material is a whitelist projection of the
-public task, frozen workspace, and public events.
+public task, frozen workspace, and public events. The ordinary M1 loop already
+provides a current `working.md`, ordinary evidence tools, tool results/history,
+and the next review request. D2 must first test whether that existing path is
+enough; a new direct-link layer is not assumed.
 
 ## 3. Candidate public fixture A — FBR CORS wildcard
 
@@ -74,7 +86,8 @@ observable output. It must preserve the distinction “literal wildcard versus
 request-origin echo”; a grep of a symbol or a build alone is insufficient.
 
 The existing branch state, public task, and public result documents that are
-present above are available now. A paired replay workspace and deterministic
+present above are available now. The assembled subset and hashes are indexed
+in the FBR evidence package. A paired replay workspace and deterministic
 unavailable-event boundary are **planned**, not yet materialized. The missing
 failure-analysis document is an explicit source limitation, not a substituted
 result.
@@ -117,16 +130,17 @@ substitute for performance or correctness.
 
 The public task, full stream, adjudication rows, and success-control inputs are
 available now. A two-state cutoff and a deterministic unavailable preferred
-measurement event are **planned**, not yet materialized.
+measurement event are **planned**, not yet materialized. If those sources do
+not support a bounded public distinction after review, DuckDB remains a
+candidate only and is not forced into the panel.
 
 ## 5. Proposed panel and budget
 
-Proposed diagnostic panel: two fixture families × two states (defect/correct or
-intermediate/success) × two measurement regimes (preferred available / preferred
-unavailable with replacement opportunity) × two independent repeats = 16
-records. Each record would use at most six logical Supervisor calls, with
-provider retries reported separately. This is a proposal only; no records are
-authorized by this document.
+No panel is frozen by this document. A possible future panel is two fixture
+families × two states × two measurement regimes × two repeats, but its size,
+budget, and even inclusion of DuckDB remain subject to source closure and
+independent audit. The old 16-record/6-call suggestion was never authorized
+and is not restored here.
 
 The central paired comparison is within the same frozen state and evidence
 boundary. The only intervention is whether the complete preferred measurement
@@ -151,7 +165,25 @@ record is never rerun; no tuning follows an observed result. The panel stops
 after the fixed records, or earlier only for a pre-registered systemic
 infrastructure failure, which is preserved for independent adjudication.
 
-## 7. What is available versus planned
+## 7. M1 equivalence and single-difference test
+
+M1 already keeps a current decision/grounds in one bounded, model-owned
+`working.md`, executes ordinary tools, records deterministic tool receipts and
+history, and presents the refreshed working context in the next normal review.
+That is an existing semantic-to-action-to-feedback loop. The proposed phrase
+“decision context directly associated with observation receipts” is therefore
+an unproven hypothesis, not a selected mechanism. Before any implementation,
+an audit must determine whether the existing next-request data flow already
+contains the required connection. If it does, adding a second layer would be a
+duplicate candidate and must be rejected.
+
+The only admissible D2 mechanism contrast is consequently one controlled
+measurement-availability change, with M1 otherwise fixed. It must not add a
+schema, receipt lifecycle, selector, checker, extra call, or production
+guard. A result that shows no substantive difference from M1 is a negative
+mechanism result, not a reason to add another layer.
+
+## 8. What is available versus planned
 
 Available now: public task text, source/workspace references, FBR public branch
 and result documents, DuckDB full public stream and adjudication artifacts,
@@ -162,4 +194,5 @@ measurement-unavailable events, replacement-operation scripts, isolation tests,
 runner implementation, authorization, and any model execution.
 
 No held-out task, hidden verifier detail, Sphinx hidden assertion, or post-hoc
-gold label is used in this design.
+gold label is used in this design. D1 remains closed and its twelve raw
+records are untouched.
