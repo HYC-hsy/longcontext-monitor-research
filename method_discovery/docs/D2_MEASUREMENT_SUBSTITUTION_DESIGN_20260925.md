@@ -1,6 +1,6 @@
 # D2 — Measurement Substitution (forward design only)
 
-Status: **design material only; not implemented, not executed**.
+Status: **DEFERRED / NOT AUTHORIZED; design material only; not implemented, not executed**.
 
 This design preserves the D1-R1 final verdict and raw records. It does not
 repair or rerun D1, alter PROTOCOL, implement Action-Native control, or modify
@@ -199,10 +199,13 @@ difference is currently approved.
 
 ## 8. Why D2 may still be necessary
 
-Existing R10 evidence shows that indexed conflict reconciliation can improve a
-local CORS decision, while the Fyne-v1 and Sphinx records show distinct
-failures involving completion scope, interrupted or unavailable verification,
-and weaker evidence substitution. Those records leave two open explanations:
+Existing R10 evidence (`R10_NEUTRAL_CALIBRATION_RESULT_20260920.md`) concerns
+Fyne-derived JSON direct-counterexample consumption, NewAllStrings local
+support, and a correct small control under the `b1e67e4` baseline; it is not
+FBR CORS and not M1/DCEC-v1. The separate historical FBR R1 record, Fyne-v1
+anchor, and Sphinx records must retain their own identities. Together they
+leave two open explanations involving completion scope, interrupted or
+unavailable verification, and weaker evidence substitution:
 
 1. M1 can already consume a researcher-provided discriminating observation and
    the remaining weakness is autonomous replacement measurement design; or
@@ -210,9 +213,12 @@ and weaker evidence substitution. Those records leave two open explanations:
    the limitation is evidence consumption/control rather than substitution.
 
 D2 is useful only if a bounded public fixture can distinguish these explanations
-without hidden evaluation, labels, or a new mechanism. If existing sources
-cannot produce that distinction without reconstruction or a fixed domain
-command, the correct outcome is to defer D2 rather than force a panel.
+without hidden evaluation, labels, or a new mechanism. Measurement availability,
+actual result acquisition, model-visible delivery, and correct consumption into
+control are separate links; a failure under an available measurement cannot be
+assigned directly to consumption without checking the earlier links. If
+existing sources cannot distinguish them without reconstruction or a fixed
+domain command, D2 remains deferred rather than forcing a panel.
 
 ## 9. What is available versus planned
 
@@ -223,6 +229,14 @@ M1 identity, model/tool identity, and the D1 raw archive/audit pointer.
 Planned only: D2 request materialization, exact state cutoffs, paired
 measurement-unavailable events, replacement-operation scripts, isolation tests,
 runner implementation, authorization, and any model execution.
+
+## 10. Current stop state
+
+`D2 = DEFERRED / NOT AUTHORIZED`. There is no frozen panel, budget, request
+package, or new mechanism. A calibration A run is not required, and B is not
+automatically started. M1/DCEC-v1 remains the anchor; D1 remains closed with
+no C1 verdict and no rerun/retake. FBR local positive and negative evidence is
+preserved without repairing historical task code.
 
 No held-out task, hidden verifier detail, Sphinx hidden assertion, or post-hoc
 gold label is used in this design. D1 remains closed and its twelve raw

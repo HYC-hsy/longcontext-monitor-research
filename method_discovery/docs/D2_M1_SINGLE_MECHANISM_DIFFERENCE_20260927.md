@@ -1,7 +1,7 @@
 # D2 / M1 single mechanism-difference note
 
-Status: design and source audit only. No implementation, model call, test, or
-new experiment is authorized.
+Status: `D2 = DEFERRED / NOT AUTHORIZED`. Design and source audit only; no
+implementation, model call, test, or new experiment is authorized.
 
 ## Anchor
 
@@ -87,17 +87,17 @@ the CORS phase after an indexed public conflict, while the failure-analysis
 document cited by earlier D2 drafts is missing from this checkout. No hidden
 verifier or fabricated receipt is used.
 
-## What would support or reject the candidate
+## D2 interpretation boundary
 
-Support requires the unavailable-event condition to cause a reproducible change
-in the first useful observation or subsequent control, with the replacement
-still testing the public decision-relevant distinction. A mere extra natural-
-language reminder is not a mechanism effect.
-
-Reject if M1 already exposes equivalent information/action/feedback and the
-paired measurement intervention produces no substantive control distinction;
-also reject if any apparent gain depends on research labels, hidden evaluation,
-fixed domain commands, or an added schema/agent/checker.
+The preferred-available/unavailable comparison is a fixed-M1 measurement
+environment diagnostic, not a comparison of Supervisor mechanisms. If both
+conditions obtain sufficient evidence and correct control, that is compatible
+with M1 already having the relevant replacement capability. If unavailability
+causes degradation, it localizes a weak link in the existing loop; it is not a
+new-mechanism gain. A result must still be judged by whether the observation
+actually reaches the public decision-relevant distinction; labels, hidden
+evaluation, fixed domain commands, and added schema/agent/checker are not
+permitted.
 
 No implementation or execution follows from this note. Main-thread audit is
 required before any future materialization.
