@@ -28,19 +28,27 @@ The defect observation is available in the public R2 audit and checkpoint
 source: the credentials branch retained request-origin echoing rather than the
 literal wildcard required by the public Target 4 text.
 
+The historical R1 branch removed that credentials-conditioned origin-echo
+exception and its later Phase 4 evaluation passed. The public source still
+permits a scope limitation: an earlier concrete-origin match may break before
+a later wildcard entry is reached. Therefore this is evidence for a local
+branch repair and Phase 4 historical result (the complete run scored 5/7), not
+a complete Target 4 or whole-task correct state.
+
 The public corrected branch/result is available in:
 
 `method_discovery/artifacts/stage6d/stage-r2-presentation-live-v1/i0/branch_bundle/`
 
 and the valid R1 evidence-reconcile run is copied under `trajectory/r1/`.
 The copied result reports the native Phase 4 CORS outcome; it is a historical
-result, not a new measurement here.
+result, not a new measurement here. The PMA audit is retained only as a
+negative/failure audit and is not correct-state evidence.
 
 The previously cited
 `method_discovery/docs/STAGE6D_F1_FAILURE_CAUSE_ANALYSIS_20260820.md` is absent
 from the current checkout and is not reconstructed.
-`PMA_NATIVE_FBR_R2_AUDIT_20260912.md` is retained as a failure audit only; it
-is not used as correct-state evidence.
+`PMA_NATIVE_FBR_R2_AUDIT_20260912.md` is a failure audit only; it is not used
+as correct-state evidence.
 
 ## Copied files and hashes
 
@@ -54,4 +62,7 @@ are not included.
 The historical R1 run contains actual agent/tool/verifier artifacts under
 `trajectory/r1/`. It does not provide a frozen paired preferred/unavailable
 measurement design. D2 paired measurement materialization remains planned;
-this package contains no fabricated receipt, output, or PASS label.
+this package contains no fabricated receipt, output, or PASS label. The copied
+resume prompt, branch gate, method state, reward, and verifier files are
+research-side historical artifacts; they are not a neutral M1 input projection
+and must not be treated as evidence that the whole package was model-visible.

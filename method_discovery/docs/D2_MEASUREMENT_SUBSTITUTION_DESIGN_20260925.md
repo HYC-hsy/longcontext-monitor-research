@@ -23,8 +23,10 @@ LLM stage. The design separates two questions that must not be conflated:
 * B — when the preferred measurement is unavailable, can the Supervisor
   autonomously design and execute a suitable replacement?
 
-The current forward document is primarily a design for B; A is a necessary
-calibration comparison, not evidence that B is solved.
+The current forward document keeps A and B analytically separate. A is not a
+required second mechanism or mandatory calibration run; B is not an approved
+unique execution task. No panel, budget, or prerequisite experiment is frozen
+by this document.
 
 ## 2. Frozen common condition
 
@@ -64,15 +66,23 @@ available source and is not reconstructed here.
 ### Defect and correct states
 
 The public defect state is the branch in which the credentials branch echoes
-the requesting origin instead of preserving the literal wildcard. The public
-correct-state evidence is the subsequent requirement-grounded revision and
-public Phase-4 result described in:
+the requesting origin instead of preserving the literal wildcard. A historical
+R1 branch removed the credentials-conditioned origin-echo exception and its
+later Phase 4 evaluation passed; that is a local historical repair fact, not a
+claim that the complete Target 4 implementation is correct. The public
+correct-state evidence is limited to the subsequent requirement-grounded
+revision and public Phase-4 result described in:
 
 - `method_discovery/docs/STAGE6D_R2_EVIDENCE_GUIDED_REVISIT_REAL_GATE_20260821.md`
-- `method_discovery/docs/PMA_NATIVE_FBR_R2_AUDIT_20260912.md`
+- `method_discovery/evidence/fbr_cors_public_20260927/trajectory/r1/result.json`
 
-These sources are public development evidence; no hidden test assertion is
-used here.
+The PMA audit at `method_discovery/docs/PMA_NATIVE_FBR_R2_AUDIT_20260912.md`
+is retained only as a failure audit, not as correct-state evidence. The public
+R1 source observation can still leave an ordering limitation: a
+match on an earlier concrete origin may break before a later wildcard entry is
+reached. That limits the conclusion to the observed local branch; it does not
+establish full Target 4 correctness or whole-task correctness. These are public
+development materials, not hidden verifier evidence.
 
 ### Paired measurement operations
 
@@ -180,10 +190,31 @@ duplicate candidate and must be rejected.
 The only admissible D2 mechanism contrast is consequently one controlled
 measurement-availability change, with M1 otherwise fixed. It must not add a
 schema, receipt lifecycle, selector, checker, extra call, or production
-guard. A result that shows no substantive difference from M1 is a negative
-mechanism result, not a reason to add another layer.
+guard. A and B are diagnostic interpretations, not competing Supervisor
+mechanisms. If both conditions obtain sufficient evidence and control
+correctly, that is consistent with M1 already providing the needed replacement
+capability. If unavailability causes degradation, it localizes a weak link in
+the existing loop; it is not by itself a new-mechanism gain. No substantive M1
+difference is currently approved.
 
-## 8. What is available versus planned
+## 8. Why D2 may still be necessary
+
+Existing R10 evidence shows that indexed conflict reconciliation can improve a
+local CORS decision, while the Fyne-v1 and Sphinx records show distinct
+failures involving completion scope, interrupted or unavailable verification,
+and weaker evidence substitution. Those records leave two open explanations:
+
+1. M1 can already consume a researcher-provided discriminating observation and
+   the remaining weakness is autonomous replacement measurement design; or
+2. the same M1 loop fails even when a suitable observation is available, so
+   the limitation is evidence consumption/control rather than substitution.
+
+D2 is useful only if a bounded public fixture can distinguish these explanations
+without hidden evaluation, labels, or a new mechanism. If existing sources
+cannot produce that distinction without reconstruction or a fixed domain
+command, the correct outcome is to defer D2 rather than force a panel.
+
+## 9. What is available versus planned
 
 Available now: public task text, source/workspace references, FBR public branch
 and result documents, DuckDB full public stream and adjudication artifacts,

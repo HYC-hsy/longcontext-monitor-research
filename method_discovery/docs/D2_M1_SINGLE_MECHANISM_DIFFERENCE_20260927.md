@@ -30,9 +30,10 @@ source does not prove that every semantic decision premise is optimally linked
 to every observation, but it does show that “direct association” is not absent
 as a basic plumbing capability.
 
-## Single admissible D2 contrast
+## D2 diagnostic boundary (not an approved new mechanism)
 
-The only proposed causal change is controlled availability of one complete
+No new mechanism difference is approved in this note. The only diagnostic
+contrast under consideration is controlled availability of one complete
 preferred measurement event. The Supervisor, model, tools, semantic state,
 history, request construction, and budget remain M1. When the preferred event
 is unavailable, the Supervisor may select an ordinary replacement observation;
@@ -48,9 +49,9 @@ versus:
 `M1 + the same preferred measurement event deterministically unavailable,
 with ordinary tools still available for replacement`.
 
-This is a measurement-availability intervention, not a new “decision-context
-and receipt-link” module. If source/request inspection shows M1 already exposes
-the same relevant context and feedback in both cases, there is no substantive
+This is a measurement-availability diagnostic, not a new “decision-context and
+receipt-link” module. If source/request inspection shows M1 already exposes the
+same relevant context and feedback in both cases, there is no substantive
 mechanism difference to implement.
 
 ## Observed facts, inference, and open hypothesis
