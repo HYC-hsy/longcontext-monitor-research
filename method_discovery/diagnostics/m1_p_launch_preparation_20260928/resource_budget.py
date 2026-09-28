@@ -52,6 +52,14 @@ class ResourceBudget:
                     fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
     def begin(self, role, purpose, review, input_reserve, output_reserve):
+        # Reserve the entire permitted retry envelope before admitting a call.
+        # These caller-supplied estimates are NOT provider-enforced upper bounds.
+        attempt_limit = self.limits['attempts_per_call']
+        if attempt_limit < 1 or input_reserve < 0 or output_reserve < 0:
+            raise ValueError('invalid reservation')
+        per_input, per_output = input_reserve, output_reserve
+        input_reserve *= attempt_limit
+        output_reserve *= attempt_limit
         rejected = None
         ident = uuid.uuid4().hex
         with self.transaction() as d:
@@ -65,7 +73,9 @@ class ResourceBudget:
             review_count = r['reviews'].get(str(review), 0)
             if role == 'monitor':
                 r['review_starts'].setdefault(str(review), time.monotonic())
-            if r['blocked']:
+            if d.get('panel_paused'):
+                rejected = 'panel_resource_paused'
+            elif r['blocked']:
                 rejected = 'unknown_usage_or_previous_limit'
             elif r['calls'][role] >= self.limits[role + '_calls']:
                 rejected = 'record_logical_call_limit'
@@ -99,6 +109,9 @@ class ResourceBudget:
                 d['pending'][ident] = {'record': self.record, 'role': role,
                     'purpose': purpose, 'review': review, 'attempts': 0,
                     'input_reserve': input_reserve, 'output_reserve': output_reserve,
+                    'per_attempt_input_reserve': per_input,
+                    'per_attempt_output_reserve': per_output,
+                    'attempt_limit': attempt_limit,
                     'started': time.monotonic(), 'usage_records': []}
                 d['events'].append({'event': 'logical_call_started', 'id': ident,
                     'record': self.record, 'role': role, 'purpose': purpose, 'review': review})
@@ -107,11 +120,16 @@ class ResourceBudget:
         return ident
 
     def attempt(self, ident):
-        rejected = False
+        rejected = None
         with self.transaction() as d:
             p = d['pending'][ident]
-            if p['attempts'] >= self.limits['attempts_per_call']:
-                rejected = True
+            if p['attempts'] > len(p['usage_records']):
+                self._pause(d, ident, 'previous_attempt_usage_unknown')
+            if d.get('panel_paused'):
+                rejected = 'panel_resource_paused'
+                d['events'].append({'event': 'provider_attempt_denied', 'id': ident, 'reason': rejected})
+            elif p['attempts'] >= p['attempt_limit']:
+                rejected = 'attempt_limit'
                 d['events'].append({'event': 'attempt_limit_denied', 'id': ident})
             else:
                 p['attempts'] += 1
@@ -119,7 +137,20 @@ class ResourceBudget:
                 d['events'].append({'event': 'provider_attempt_started', 'id': ident,
                     'attempt': p['attempts'], 'time': time.monotonic()})
         if rejected:
-            raise BudgetStop('attempt_limit')
+            raise BudgetStop(rejected)
+
+    @staticmethod
+    def _pause(data, ident, reason):
+        data['panel_paused'] = True
+        data['events'].append({'event': 'panel_resource_paused', 'id': ident, 'reason': reason})
+
+    @staticmethod
+    def _known(usage):
+        return all(isinstance(usage.get(k, 0), int) and not isinstance(usage.get(k, 0), bool)
+                   and usage.get(k, 0) >= 0 for k in ('input_tokens', 'output_tokens')) and all(
+            usage.get(k) is None or (isinstance(usage[k], int) and not isinstance(usage[k], bool)
+                                    and usage[k] >= 0)
+            for k in ('cache_read_input_tokens', 'cache_creation_input_tokens'))
 
     def usage(self, ident, usage):
         # Anthropic input_tokens excludes separate cache buckets. Report each
@@ -127,7 +158,17 @@ class ResourceBudget:
         # NOT a claim that all buckets have the same monetary rate.
         keys = ('input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens')
         with self.transaction() as d:
-            d['pending'][ident]['usage_records'].append({k: usage.get(k) for k in keys})
+            p = d['pending'][ident]
+            u = {k: usage.get(k) for k in keys}
+            p['usage_records'].append(u)
+            d['events'].append({'event': 'provider_usage_received', 'id': ident, 'raw_usage': dict(usage)})
+            if not self._known(u) or len(p['usage_records']) > p['attempts']:
+                self._pause(d, ident, 'unreconciled_usage')
+            elif (u['input_tokens'] + (u['cache_read_input_tokens'] or 0)
+                  + (u['cache_creation_input_tokens'] or 0) > p['per_attempt_input_reserve']
+                  or u['output_tokens'] > p['per_attempt_output_reserve']):
+                p['reservation_breached'] = True
+                self._pause(d, ident, 'actual_usage_exceeded_reservation')
 
     def finish(self, ident, error=None):
         blocked = False
@@ -136,14 +177,21 @@ class ResourceBudget:
             r = d['records'][self.record]
             elapsed = time.monotonic() - p['started']
             r['provider_seconds'][p['role']] += elapsed
-            known = (len(p['usage_records']) == p['attempts'] and p['attempts'] > 0
-                and all(isinstance(u['input_tokens'], int) and isinstance(u['output_tokens'], int)
-                        for u in p['usage_records']))
+            known = (len(p['usage_records']) == p['attempts']
+                and all(self._known(u) for u in p['usage_records']))
             if not known:
                 r['blocked'] = True
+                self._pause(d, ident, 'sent_request_usage_unknown')
+                # Forensic unresolved envelope, never silently released as zero.
+                d.setdefault('unresolved', {})[ident] = p
             for u in p['usage_records']:
-                read, write = u.get('cache_read_input_tokens') or 0, u.get('cache_creation_input_tokens') or 0
-                inp, out = (u.get('input_tokens') or 0) + read + write, u.get('output_tokens') or 0
+                # Add only observed valid portions. Missing buckets are still
+                # unresolved, not evidence of zero total consumption.
+                def portion(key):
+                    value = u.get(key)
+                    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+                read, write = portion('cache_read_input_tokens'), portion('cache_creation_input_tokens')
+                inp, out = portion('input_tokens') + read + write, portion('output_tokens')
                 r['input'] += inp; r['output'] += out
                 r['cache_read'] += read; r['cache_write'] += write
                 d['panel_input'] += inp; d['panel_output'] += out
@@ -151,11 +199,17 @@ class ResourceBudget:
                 or d['panel_input'] > self.limits['panel_input'] or d['panel_output'] > self.limits['panel_output'])
             if over:
                 r['blocked'] = True
+                self._pause(d, ident, 'actual_total_limit_exceeded')
+            if p.get('reservation_breached'):
+                r['blocked'] = True
             if r['provider_seconds'][p['role']] > self.limits[p['role'] + '_provider_seconds']:
                 r['blocked'] = True
-            blocked = r['blocked']
+            blocked = r['blocked'] or d.get('panel_paused', False)
+            d.setdefault('finished', {})[ident] = dict(p, error_type=error)
             d['events'].append({'event': 'logical_call_finished', 'id': ident,
                 'record': self.record, 'purpose': p['purpose'], 'attempts': p['attempts'],
                 'usage_known': known, 'exceeded_after_receipt': over,
+                'reservation_breached': p.get('reservation_breached', False),
+                'panel_paused': d.get('panel_paused', False),
                 'elapsed_seconds': elapsed, 'error_type': error})
         return blocked

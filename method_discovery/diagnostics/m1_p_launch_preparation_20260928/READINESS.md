@@ -109,13 +109,27 @@ truth, evidence adequacy or completion judgement is produced.
   reset or create free logical budget. Native retry receipts remain in audit.
 - Anthropic input, cache-read, cache-creation and output are retained separately.
   Input cap applies to their processed-input sum (not equal-dollar pricing).
-  Proposed record 4M input/1M output; batch 16M/4M. Active requests reserve
-  context/output maxima against both scopes to cover delayed receipts.
+  Proposed record 4M input/1M output; batch 16M/4M. Before a logical admission,
+  reserve the caller's per-attempt context/output estimates multiplied by the
+  permitted attempt count, against both scopes and other pending envelopes.
+  Estimates are not trustworthy provider-enforced upper bounds: admission
+  protects declared envelopes, not a guarantee that actual consumption cannot
+  exceed the cap. Retries use the frozen envelope, not fresh logical allowance.
 - Missing usage, failed attempts with unknown usage, or actual receipt exceeding
   reservation/cap cause explicit blocked-resource state and no later provider
   admission. Known portions remain recorded; unknown is not imputed as zero.
-  Unknown/over-limit successful responses raise BudgetStop before returning a
-  completed control result. There is no automatic allow_complete or repair call.
+  A missing sent-attempt usage receipt pauses the entire panel (including
+  retries of other pending calls); finish retains its unresolved envelope,
+  received usage and failure type. Known portions remain accounted separately.
+  Per-attempt estimate breach pauses the panel at receipt time even below total
+  caps; already sent requests may still finish and retain their results. No
+  automatic unpause or corrective model call is provided.
+  Monitor wrapper settlement precedes return of a successful completed response.
+  Task raw_ask is streaming: content may already have been yielded upstream
+  before settlement raises BudgetStop. The synthetic wrapper order test proves
+  this limitation; it does not prove absence of earlier Task actions or retract
+  delivered content. Full Task control-loop stop order remains NOT COVERED.
+  There is no automatic allow_complete or repair call.
 - Clock spans: logical call begins at wrapper admission and ends after native
   parsing/retry/error cleanup. This includes retry/backoff, not wire-only latency.
   Record and panel clocks begin at first admission. Review clock begins at its

@@ -1,0 +1,55 @@
+..F..........                                                            [100%]
+================================== FAILURES ===================================
+________ test_budget_unified_purposes_retries_cache_unknown_and_limits ________
+
+tmp_path = WindowsPath('C:/Users/hsy/AppData/Local/Temp/pytest-of-hsy/pytest-1115/test_budget_unified_purposes_r0')
+
+    def test_budget_unified_purposes_retries_cache_unknown_and_limits(tmp_path):
+        limits = dict(LIMITS, monitor_calls=3, task_calls=2, panel_calls=5)
+        a = ResourceBudget(tmp_path / 'audit.json', 'one', limits)
+        for purpose in ('review', 'continuation', 'format_repair'):
+            ident = a.begin('monitor', purpose, 'review-1', 100, 10)
+            a.attempt(ident)
+            a.usage(ident, dict(input_tokens=2, output_tokens=1, cache_read_input_tokens=3, cache_creation_input_tokens=4))
+            a.finish(ident)
+        with pytest.raises(BudgetStop): a.begin('monitor', 'review', 'review-2', 100, 10)
+        d = json.loads((tmp_path / 'audit.json').read_text())
+        assert d['records']['one']['calls']['monitor'] == 3
+        assert d['records']['one']['input'] == 27
+        assert d['records']['one']['cache_read'] == 9
+        assert d['records']['one']['cache_write'] == 12
+        b = ResourceBudget(tmp_path / 'audit.json', 'two', limits)
+        ident = b.begin('task', 'task', None, 100, 10)
+>       for _ in range(3): b.attempt(ident)
+
+method_discovery\diagnostics\m1_p_launch_preparation_20260928\test_launch_preparation.py:135: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <resource_budget.ResourceBudget object at 0x000002118F1F4160>
+ident = '1662528ee08d46478f55383e142ff159'
+
+    def attempt(self, ident):
+        rejected = None
+        with self.transaction() as d:
+            p = d['pending'][ident]
+            if p['attempts'] > len(p['usage_records']):
+                self._pause(d, ident, 'previous_attempt_usage_unknown')
+            if d.get('panel_paused'):
+                rejected = 'panel_resource_paused'
+                d['events'].append({'event': 'provider_attempt_denied', 'id': ident, 'reason': rejected})
+            elif p['attempts'] >= p['attempt_limit']:
+                rejected = 'attempt_limit'
+                d['events'].append({'event': 'attempt_limit_denied', 'id': ident})
+            else:
+                p['attempts'] += 1
+                d['records'][self.record]['attempts'] += 1
+                d['events'].append({'event': 'provider_attempt_started', 'id': ident,
+                    'attempt': p['attempts'], 'time': time.monotonic()})
+        if rejected:
+>           raise BudgetStop(rejected)
+E           resource_budget.BudgetStop: panel_resource_paused
+
+method_discovery\diagnostics\m1_p_launch_preparation_20260928\resource_budget.py:140: BudgetStop
+=========================== short test summary info ===========================
+FAILED method_discovery/diagnostics/m1_p_launch_preparation_20260928/test_launch_preparation.py::test_budget_unified_purposes_retries_cache_unknown_and_limits
+1 failed, 12 passed in 20.97s
