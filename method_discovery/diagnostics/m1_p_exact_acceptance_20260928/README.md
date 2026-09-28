@@ -53,7 +53,10 @@ compaction commit and subsequent review are all captured.
 tool/control events, in-memory effective configuration/source identity, and
 all generated monitor-private text artifacts (including continuation response,
 history archive, dialogue and progress). The file manifest is generated from
-actual artifact bytes. Native and candidate-off requests are compared in full;
+actual artifact bytes. Published archive identity additionally records actual
+Git-blob SHA256 separately from runtime CRLF bytes: Git normalized outer JSON
+file newlines to LF. Captured string values and research content were not
+rewritten. Native and candidate-off requests are compared in full;
 P is allowed exactly one declared body insertion into system at every request.
 
 Only explicit per-trace temp root and native history archive filename mappings

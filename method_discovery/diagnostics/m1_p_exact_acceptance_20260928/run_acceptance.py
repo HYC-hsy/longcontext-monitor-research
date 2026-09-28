@@ -194,7 +194,9 @@ def main() -> None:
                     "old_c6e2_prototype_not_reused_as_exact_baseline": True,
                     "engineering_fixture_not_scientific_record": True})
     (output / "acceptance_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    manifest = {file.name: {'sha256': hashlib.sha256(file.read_bytes()).hexdigest(), 'bytes': file.stat().st_size}
+    manifest = {file.name: {'runtime_sha256': hashlib.sha256(file.read_bytes()).hexdigest(),
+                           'runtime_bytes': file.stat().st_size,
+                           'lf_normalized_sha256': hashlib.sha256(file.read_bytes().replace(b'\r\n', b'\n')).hexdigest()}
                 for file in sorted(output.iterdir()) if file.is_file()}
     (output / 'file_manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
     print(json.dumps(summary, ensure_ascii=False, indent=2))
