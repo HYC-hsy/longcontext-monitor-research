@@ -1,0 +1,142 @@
+{
+  "steps": [
+    {
+      "command": [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--entrypoint",
+        "/bin/bash",
+        "sha256:77f476927410992943a8d2744aea86b3e0c50d8773b61e56ebba9dd0fd4b9db1",
+        "-lc",
+        "cd /testbed && /opt/miniconda3/envs/testbed/bin/python -c 'import sys,pytest,docutils; print(sys.executable); print(pytest.__version__,pytest.__file__); print(docutils.__version__,docutils.__file__)' && /opt/miniconda3/envs/testbed/bin/python -m pytest --collect-only -q tests/test_util.py"
+      ],
+      "returncode": 0,
+      "stdout": "/opt/miniconda3/envs/testbed/bin/python\n8.3.3 /opt/miniconda3/envs/testbed/lib/python3.9/site-packages/pytest/__init__.py\n0.21.2 /opt/miniconda3/envs/testbed/lib/python3.9/site-packages/docutils/__init__.py\ntests/test_util.py::test_encode_uri\ntests/test_util.py::test_ensuredir\ntests/test_util.py::test_display_chunk\ntests/test_util.py::test_import_object\ntests/test_util.py::test_status_iterator\ntests/test_util.py::test_parselinenos\ntests/test_util.py::test_progress_message\ntests/test_util.py::test_xmlname_check\n\n=============================== warnings summary ===============================\nsphinx/util/docutils.py:45\n  /testbed/sphinx/util/docutils.py:45: DeprecationWarning: distutils Version classes are deprecated. Use packaging.version instead.\n    __version_info__ = tuple(LooseVersion(docutils.__version__).version)\n\nsphinx/registry.py:22\n  /testbed/sphinx/registry.py:22: DeprecationWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html\n    from pkg_resources import iter_entry_points\n\n../opt/miniconda3/envs/testbed/lib/python3.9/site-packages/pkg_resources/__init__.py:3154\n../opt/miniconda3/envs/testbed/lib/python3.9/site-packages/pkg_resources/__init__.py:3154\n../opt/miniconda3/envs/testbed/lib/python3.9/site-packages/pkg_resources/__init__.py:3154\n../opt/miniconda3/envs/testbed/lib/python3.9/site-packages/pkg_resources/__init__.py:3154\n  /opt/miniconda3/envs/testbed/lib/python3.9/site-packages/pkg_resources/__init__.py:3154: DeprecationWarning: Deprecated call to `pkg_resources.declare_namespace('sphinxcontrib')`.\n  Implementing implicit namespace packages (as specified in PEP 420) is preferred to `pkg_resources.declare_namespace`. See https://setuptools.pypa.io/en/latest/references/keywords.html#keyword-namespace-packages\n    declare_namespace(pkg)\n\nsphinx/directives/patches.py:14\n  /testbed/sphinx/directives/patches.py:14: DeprecationWarning: The `docutils.parsers.rst.directive.html` module will be removed in Docutils 2.0. Since Docutils 0.18, the \"Meta\" node is defined in `docutils.parsers.rst.directives.misc`.\n    from docutils.parsers.rst.directives import html, images, tables\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n8 tests collected in 0.05s\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "docker",
+        "create",
+        "--name",
+        "m1-core4-ratatui-cache-preparation-v2",
+        "--entrypoint",
+        "/bin/bash",
+        "sha256:6f9da0a2c21293e8e0d2bac70947260da9edd9e3de0bcb09af3008218bbcc18d",
+        "-lc",
+        "sleep infinity"
+      ],
+      "returncode": 0,
+      "stdout": "a1e52ca8df01544a99e88e9b3e84708923d6a18c692b7c5c5f248b31983982a9\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "docker",
+        "start",
+        "m1-core4-ratatui-cache-preparation-v2"
+      ],
+      "returncode": 0,
+      "stdout": "m1-core4-ratatui-cache-preparation-v2\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "docker",
+        "exec",
+        "m1-core4-ratatui-cache-preparation-v2",
+        "bash",
+        "-lc",
+        "export PATH=/usr/local/cargo/bin:$PATH; cd /app && git rev-parse HEAD && git status --porcelain && sha256sum Cargo.toml Cargo.lock && grep -A 4 'name = \"unicode-segmentation\"' Cargo.lock && cargo metadata --offline --locked --format-version 1 >/tmp/initial_metadata.json"
+      ],
+      "returncode": 101,
+      "stdout": "21ca38d9e91c8e69291d645b973a135ddde6a5d7\n4e71f71600b139a9c0d2dd276152543ddcbe3f98aff0dad8c05663420dd35f0e  Cargo.toml\n16a43560e3dc47d306b0a905307a28b05776d7394e35ab1c233ad3e37e45fbce  Cargo.lock\nname = \"unicode-segmentation\"\nversion = \"1.13.2\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"9629274872b2bfaf8d66f5f15725007f635594914870f65218920345aa11aa8c\"\n\n",
+      "stderr": "error: failed to download `bitflags v2.11.0`\n\nCaused by:\n  attempting to make an HTTP request, but --offline was specified\n"
+    },
+    {
+      "command": [
+        "docker",
+        "exec",
+        "m1-core4-ratatui-cache-preparation-v2",
+        "bash",
+        "-lc",
+        "export PATH=/usr/local/cargo/bin:$PATH; mkdir -p /tmp/core4-cache-fetch/src && printf '[package]\nname=\"core4_cache_fetch\"\nversion=\"0.0.0\"\nedition=\"2021\"\n[dependencies]\nunicode-segmentation=\"=1.12.0\"\n' > /tmp/core4-cache-fetch/Cargo.toml && printf 'fn main() {}\n' > /tmp/core4-cache-fetch/src/main.rs && mv /root/.cargo/config.toml /tmp/original_cargo_config.toml && cd /tmp/core4-cache-fetch && cargo fetch && cd /app && cargo fetch --locked"
+      ],
+      "returncode": 101,
+      "stdout": "",
+      "stderr": "    Updating crates.io index\n     Locking 2 packages to latest compatible versions\n      Adding unicode-segmentation v1.12.0 (latest: v1.13.3)\n Downloading crates ...\n  Downloaded unicode-segmentation v1.12.0\n Downloading crates ...\n  Downloaded thiserror v1.0.69\n  Downloaded num_threads v0.1.7\n  Downloaded powerfmt v0.2.0\n  Downloaded time-core v0.1.8\nerror: failed to parse manifest at `/usr/local/cargo/registry/src/index.crates.io-6f17d22bba15001f/time-core-0.1.8/Cargo.toml`\n\nCaused by:\n  feature `edition2024` is required\n\n  The package requires the Cargo feature called `edition2024`, but that feature is not stabilized in this version of Cargo (1.82.0 (8f40fc59f 2024-08-21)).\n  Consider trying a newer version of Cargo (this may require the nightly release).\n  See https://doc.rust-lang.org/nightly/cargo/reference/unstable.html#edition-2024 for more information about the status of this feature.\n"
+    },
+    {
+      "command": [
+        "docker",
+        "exec",
+        "m1-core4-ratatui-cache-preparation-v2",
+        "bash",
+        "-lc",
+        "test ! -f /tmp/original_cargo_config.toml || mv /tmp/original_cargo_config.toml /root/.cargo/config.toml; cd /app; git status --porcelain; sha256sum Cargo.toml Cargo.lock; find /usr/local/cargo/registry/cache -type f -name \"*.crate\" -exec sha256sum {} +"
+      ],
+      "returncode": 0,
+      "stdout": "4e71f71600b139a9c0d2dd276152543ddcbe3f98aff0dad8c05663420dd35f0e  Cargo.toml\n16a43560e3dc47d306b0a905307a28b05776d7394e35ab1c233ad3e37e45fbce  Cargo.lock\n57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/paste-1.0.15.crate\n7694e1cfe791f8d31026952abf09c69ca6f6fa4e1a1229e18988f06a04a12dca  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/time-core-0.1.8.crate\nb6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/thiserror-1.0.69.crate\nf6ccf251212114b54433ec949fd6a7841275f9ada20dddd2f29e9ceea4501493  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/unicode-segmentation-1.12.0.crate\n439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/powerfmt-0.2.0.crate\n5c7398b9c8b70908f6371f47ed36737907c87c52af34c268fed0bf0ceb92ead9  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/num_threads-0.1.7.crate\n79cf5c93f93228cf8efb3ba362535fb11199ac548a09ce117c9b1adc3030d706  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/indoc-2.0.7.crate\n41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/serde_core-1.0.228.crate\ne6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/rand_chacha-0.3.1.crate\nff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/getrandom-0.2.17.crate\ne6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/unicode-ident-1.0.24.crate\n8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/proc-macro2-1.0.106.crate\n41f2619966050689382d2b44f664f4bc593e129785a36d6ee376ddf37259b924  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/quote-1.0.45.crate\nc442a9d18cef5dde467405d27d461d080d68972d6d0dfd0408265b6749ec427d  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/argh_derive-0.1.19.crate\ne665b8803e7b1d2a727f4023456bbbbe74da67099c585258af0ad9c5013b9b99  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/syn-2.0.117.crate\nec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/rand_core-0.6.4.crate\nb39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/rustversion-1.0.22.crate\n34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/rand-0.8.5.crate\n85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/ppv-lite86-0.2.21.crate\ne5ade012bac4db278517a0132c8c10c6427025868dca16c801087c28d5a411f1  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/argh_shared-0.1.19.crate\n9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/serde-1.0.228.crate\need437bf9d6692032087e337407a86f04cd8d6a16a37199ed57949d415bd68e9  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/zerocopy-0.8.48.crate\n211818e820cda9ca6f167a64a5c808837366a6dfd807157c64c1304c486cd033  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/argh-0.1.19.crate\nd540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/serde_derive-1.0.228.crate\nc4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/signal-hook-registry-1.4.8.crate\nbef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/bitflags-1.3.2.crate\n48f5d2a454e16a5ea0f4ced81bd44e4cfc7bd3a507b61887c99fd3538b28e4af  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/libc-0.2.184.crate\n7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/unicode-width-0.1.14.crate\n5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/log-0.4.29.crate\n93857453250e3077bd71ff98b6a65ea6621a19bb0f559a85248955ac12c45a1a  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/parking_lot-0.12.5.crate\n9629274872b2bfaf8d66f5f15725007f635594914870f65218920345aa11aa8c  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/unicode-segmentation-1.13.2.crate\n67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/smallvec-1.15.1.crate\na84cda67535339806297f1b331d6dd6320470d2a0fe65381e79ee9e156dd3d13  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/crossterm-0.26.1.crate\n9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/cfg-if-1.0.4.crate\n224399e74b87b5f3557511d98dff8b14089b3dadafcab6bb93eab67d3aace965  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/lock_api-0.4.14.crate\nb75a19a7a740b25bc7944bdee6172368f988763b744e3d4dfe753f6b4ece40cc  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/signal-hook-mio-0.2.5.crate\n39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/errno-0.3.14.crate\n94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/scopeguard-1.2.0.crate\n2621685985a2ebf1c516881c026032ac7deafcda1a2c9b7850dc81e3dfcb64c1  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/parking_lot_core-0.9.12.crate\ndf8670b8c7b9dae1793364eafadf7239c40d669904660c5960d74cfd80b46a53  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/cassowary-0.3.0.crate\na4a650543ca06a924e8b371db273b2756685faae30f8487da1b56505a8f78b0c  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/mio-0.8.11.crate\nd881a16cf4426aa584979d30bd82cb33429027e42122b169753d6ef1085ed6e2  /usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f/signal-hook-0.3.18.crate\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "docker",
+        "network",
+        "disconnect",
+        "bridge",
+        "m1-core4-ratatui-cache-preparation-v2"
+      ],
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "docker",
+        "exec",
+        "m1-core4-ratatui-cache-preparation-v2",
+        "bash",
+        "-lc",
+        "export PATH=/usr/local/cargo/bin:$PATH; cd /app && cargo metadata --locked --offline --format-version 1 >/tmp/prepared_metadata.json && cargo test --locked --offline --lib --no-run"
+      ],
+      "returncode": 101,
+      "stdout": "",
+      "stderr": "error: failed to download `bitflags v2.11.0`\n\nCaused by:\n  attempting to make an HTTP request, but --offline was specified\n"
+    },
+    {
+      "command": [
+        "docker",
+        "exec",
+        "m1-core4-ratatui-cache-preparation-v2",
+        "bash",
+        "-lc",
+        "cd /app && git diff --exit-code && test -z \"$(git status --porcelain)\" && rm -rf /tmp/core4-cache-fetch /tmp/initial_metadata.json /tmp/prepared_metadata.json"
+      ],
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "docker",
+        "stop",
+        "m1-core4-ratatui-cache-preparation-v2"
+      ],
+      "returncode": 0,
+      "stdout": "m1-core4-ratatui-cache-preparation-v2\n",
+      "stderr": ""
+    }
+  ],
+  "sphinx_loading_ready": true,
+  "ratatui_ready": false,
+  "ratatui_parent": "sha256:6f9da0a2c21293e8e0d2bac70947260da9edd9e3de0bcb09af3008218bbcc18d",
+  "ratatui_image": null,
+  "source_registry": "https://index.crates.io / https://static.crates.io",
+  "preparation_container": "m1-core4-ratatui-cache-preparation-v2",
+  "real_model_calls": 0,
+  "evaluator_calls": 0
+}
