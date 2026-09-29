@@ -43,9 +43,10 @@ def install(root):
     from resource_budget import ResourceBudget
     budget_path = os.environ.get('PILOT_BUDGET_PATH')
     record = os.environ.get('PILOT_RECORD_ID')
-    if not budget_path or not record:
+    budget_enabled = binding.get('budget_enabled', True)
+    if budget_enabled and (not budget_path or not record):
         raise RuntimeError('explicit common budget path and record ID required')
-    ledger = ResourceBudget(budget_path, record, binding['budget_limits'])
+    ledger = ResourceBudget(budget_path, record, binding['budget_limits']) if budget_enabled else None
     original = MonitorAgent.__init__
 
     def initialize(self, *args, **kwargs):
@@ -53,7 +54,8 @@ def install(root):
         if not self.dcec_enabled or not self.semantic_continuity:
             raise RuntimeError('pilot requires native DCEC-v1 and semantic continuity')
         apply_strategy(self, policy)
-        install_monitor_budget(self.client, ledger)
+        if ledger is not None:
+            install_monitor_budget(self.client, ledger)
         self._progress('pilot_source_identity', monitor_commit=binding['monitor_commit'],
             task_commit=binding['task_commit'], imported_agent=str(sys.modules[MonitorAgent.__module__].__file__),
             policy_sha256=binding['policy_sha256'] if policy else None)
@@ -70,6 +72,8 @@ def install_task(root):
     import requests
     from resource_budget import ResourceBudget
     binding = json.loads((Path(root) / 'pilot_binding.json').read_text())
+    if not binding.get('budget_enabled', True):
+        return
     ledger = ResourceBudget(os.environ['PILOT_BUDGET_PATH'], os.environ['PILOT_RECORD_ID'], binding['budget_limits'])
     current = threading.local()
     raw = llmcore.NativeClaudeSession.raw_ask

@@ -1,0 +1,208 @@
+diff --git a/src/harbor/models/task/config.py b/src/harbor/models/task/config.py
+index d6a42ba..43a05d8 100644
+--- a/src/harbor/models/task/config.py
++++ b/src/harbor/models/task/config.py
+@@ -337,6 +337,14 @@ class AgentConfig(PhaseNetworkPolicyConfig):
+         default=None,
+         description="Username or UID to run the agent as. None uses the environment's default USER (e.g., root).",
+     )
++    continue_until_timeout: bool = Field(
++        default=False,
++        description=(
++            "When true, run interim verification after each completed agent phase "
++            "and continue the same agent session until verification passes or the "
++            "overall agent timeout elapses."
++        ),
++    )
+ 
+ 
+ class HealthcheckConfig(BaseModel):
+diff --git a/src/harbor/trial/single_step.py b/src/harbor/trial/single_step.py
+index f5e234d..d0389e7 100644
+--- a/src/harbor/trial/single_step.py
++++ b/src/harbor/trial/single_step.py
+@@ -1,20 +1,89 @@
+ from typing import override
+ import asyncio
++import time
+ 
+ from harbor.agents.installed.base import NonZeroAgentExitCodeError
++from harbor.models.agent.context import AgentContext
+ from harbor.models.task.task import Task
+ from harbor.models.task.verifier_mode import (
+     VerifierEnvironmentMode,
+     resolve_task_verifier_mode,
+ )
+ from harbor.models.trial.config import TrialConfig
+-from harbor.models.trial.result import TimingInfo
++from harbor.models.trial.result import StepResult, TimingInfo
+ from harbor.tasks.client import TaskDownloadResult
+ from harbor.trial.errors import AgentTimeoutError, VerifierTimeoutError
+ from harbor.trial.hooks import TrialEvent
+ from harbor.trial.trial import Trial
+ 
+ 
++def _merge_agent_contexts(
++    accumulated: AgentContext | None, phase: AgentContext | None
++) -> AgentContext | None:
++    if phase is None:
++        return accumulated
++    if accumulated is None:
++        return phase.model_copy(deep=True)
++
++    def add_optional(left, right):
++        if left is None and right is None:
++            return None
++        return (left or 0) + (right or 0)
++
++    metadata = dict(accumulated.metadata or {})
++    metadata.update(phase.metadata or {})
++    return AgentContext(
++        n_input_tokens=add_optional(
++            accumulated.n_input_tokens, phase.n_input_tokens
++        ),
++        n_cache_tokens=add_optional(
++            accumulated.n_cache_tokens, phase.n_cache_tokens
++        ),
++        n_output_tokens=add_optional(
++            accumulated.n_output_tokens, phase.n_output_tokens
++        ),
++        cost_usd=add_optional(accumulated.cost_usd, phase.cost_usd),
++        rollout_details=[
++            *(accumulated.rollout_details or []),
++            *(phase.rollout_details or []),
++        ]
++        or None,
++        metadata=metadata or None,
++    )
++
++
++def _verifier_passed(result) -> bool:
++    if result is None or not result.rewards:
++        return False
++    try:
++        return float(result.rewards.get("reward", 0)) >= 1.0
++    except (TypeError, ValueError):
++        return False
++
++
++def _continuation_instruction(
++    base_instruction: str,
++    *,
++    phase: int,
++    remaining_sec: int,
++    rewards: dict | None,
++) -> str:
++    reward_text = ", ".join(
++        f"{key}={value}" for key, value in sorted((rewards or {}).items())
++    )
++    if not reward_text:
++        reward_text = "no numeric reward was produced"
++    return (
++        f"{base_instruction.rstrip()}\n\n"
++        "---\n"
++        "## INTERIM VERIFICATION DID NOT PASS\n\n"
++        f"Phase {phase} completed with {remaining_sec} seconds remaining. "
++        "Continue working in the same session and workspace. Do not stop until "
++        "the verifier passes or the trial timeout is reached.\n\n"
++        f"Interim verifier result: {reward_text}\n"
++    )
++
++
+ class SingleStepTrial(Trial):
+     """A trial with one instruction, one agent run, and one optional verifier."""
+ 
+@@ -38,7 +107,10 @@ class SingleStepTrial(Trial):
+     async def _run(self) -> None:
+         mode = resolve_task_verifier_mode(self.task.config)
+ 
+-        await self._run_agent()
++        if self.task.config.agent.continue_until_timeout:
++            await self._run_agent_until_verified(mode)
++        else:
++            await self._run_agent()
+         await self._upload_agent_logs()
+         # In separate mode the agent env has no further use after collection,
+         # so the main service is stopped before sidecar evidence is pulled.
+@@ -54,6 +126,81 @@ class SingleStepTrial(Trial):
+         if mode == VerifierEnvironmentMode.SHARED:
+             await self._stop_agent_environment()
+ 
++    async def _run_agent_until_verified(
++        self, mode: VerifierEnvironmentMode
++    ) -> None:
++        if mode != VerifierEnvironmentMode.SHARED:
++            raise ValueError(
++                "continue_until_timeout currently requires shared verifier mode"
++            )
++        if self._agent_timeout_sec is None:
++            raise ValueError(
++                "continue_until_timeout requires agent.timeout_sec"
++            )
++
++        deadline = time.monotonic() + self._agent_timeout_sec
++        base_instruction = self.task.instruction
++        instruction = base_instruction
++        phase = 0
++        accumulated = None
++        interim_rewards = []
++
++        while (remaining := deadline - time.monotonic()) > 0:
++            phase_result = StepResult(step_name=f"continuation-{phase}")
++            try:
++                await self._run_agent_phase(
++                    target=phase_result,
++                    instruction=instruction,
++                    timeout_sec=remaining,
++                    user=self.task.config.agent.user,
++                )
++            except (AgentTimeoutError, NonZeroAgentExitCodeError) as exc:
++                self._record_exception(exc)
++                break
++
++            accumulated = _merge_agent_contexts(
++                accumulated, phase_result.agent_result
++            )
++            self.result.agent_result = accumulated
++
++            try:
++                interim = await self._run_shared_verifier(
++                    timeout_sec=self._verifier_timeout_sec,
++                    user=self.task.config.verifier.user,
++                )
++            finally:
++                await self.agent_environment.reset_dirs(
++                    remove_dirs=[self.agent_env_paths.tests_dir],
++                    create_dirs=[],
++                )
++
++            interim_rewards.append(dict(interim.rewards or {}))
++            if _verifier_passed(interim):
++                break
++
++            phase += 1
++            remaining = max(0, int(deadline - time.monotonic()))
++            instruction = _continuation_instruction(
++                base_instruction,
++                phase=phase,
++                remaining_sec=remaining,
++                rewards=interim.rewards,
++            )
++
++        if accumulated is None:
++            accumulated = AgentContext()
++        metadata = dict(accumulated.metadata or {})
++        metadata.update(
++            {
++                "continue_until_timeout": True,
++                "continue_until_timeout_phases": phase + 1,
++                "interim_verifier_rewards": interim_rewards,
++            }
++        )
++        accumulated.metadata = metadata
++        self.result.agent_result = accumulated
++        await self._sync_agent_output(self.result)
++
+     @override
+     async def _recover_outputs(self) -> None:
+         await self._sync_agent_output(self.result)

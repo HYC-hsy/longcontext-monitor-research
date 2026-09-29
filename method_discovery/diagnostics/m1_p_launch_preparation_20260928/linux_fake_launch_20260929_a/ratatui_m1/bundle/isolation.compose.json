@@ -1,0 +1,102 @@
+{
+  "services": {
+    "main": {
+      "network_mode": "none",
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "volumes": [
+        "model-channel:/run/model-channel:ro",
+        "E:/LongContext/method_discovery/diagnostics/m1_p_launch_preparation_20260928/linux_fake_launch_20260929_a/ratatui_m1/bundle/virtual_monitor_profiles.json:/pilot-config/models.json:ro",
+        "E:/LongContext/method_discovery/diagnostics/m1_p_launch_preparation_20260928/linux_fake_launch_20260929_a/ratatui_m1/bundle/source:/opt/genericagent-source:ro",
+        "E:/LongContext/bench_runtime/m2/linux:/opt/m4-runtime:ro",
+        "E:/LongContext/method_discovery/diagnostics/m1_p_launch_preparation_20260928:/checks:ro",
+        "E:/LongContext/method_discovery/diagnostics/m1_p_launch_preparation_20260928/linux_fake_launch_20260929_a/ratatui_m1/logs:/logs:rw"
+      ],
+      "depends_on": {
+        "model-gateway": {
+          "condition": "service_healthy"
+        }
+      },
+      "environment": {
+        "MONITOR_CONFIG_FILE": "/pilot-config/models.json",
+        "GA_MONITOR_ENABLED": "1",
+        "GA_MONITOR_CONFIG": "claude_monitor_opus48",
+        "GA_LLM_CONFIG_NAME": "native_claude_cc_vibe_opus48",
+        "GA_MONITOR_DCEC": "1",
+        "GA_MONITOR_DCEC_WORKING_CHARS": "4000",
+        "GA_PROVIDER_MAX_RETRIES": "8",
+        "GA_MAX_TURNS": "300",
+        "PILOT_RECORD_ID": "engineering-fixture",
+        "GA_PMA_ENABLED": "0",
+        "GA_MONITOR_GROUNDED_CONTEXT": "0",
+        "GA_MONITOR_HANDOFF_VALIDATION": "0",
+        "GA_MONITOR_ADVICE_REVISION": "0",
+        "GA_MONITOR_FEEDBACK_FOCUS": "0",
+        "GA_MONITOR_INQUIRY": "0",
+        "GA_MONITOR_TOOL_FEEDBACK": "0",
+        "GA_MONITOR_ACTIVE_WORKING_CONTEXT": "0",
+        "GA_MONITOR_LIVE_AWARENESS": "0",
+        "GA_MONITOR_DECISION_CONTEXT": "0",
+        "GA_MONITOR_PMA_MEMORY": "0",
+        "GA_MONITOR_ROOT_DECISION_CONTRACT": "0",
+        "GA_MONITOR_ROOT_SIMPLE_CHECK": "0",
+        "GA_MONITOR_TASK_MODEL": "0",
+        "GA_MONITOR_INDEPENDENT_C": "0",
+        "GA_MONITOR_HYBRID_CONTROL": "0",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONPATH": "/opt/m4-runtime/ga-env/lib/python3.12/site-packages:/opt/genericagent-source"
+      },
+      "image": "sha256:6f9da0a2c21293e8e0d2bac70947260da9edd9e3de0bcb09af3008218bbcc18d",
+      "read_only": true,
+      "working_dir": "/logs",
+      "entrypoint": [
+        "/opt/m4-runtime/python/cpython-3.12.12-linux-x86_64-gnu/bin/python3.12",
+        "/checks/container_entry.py"
+      ]
+    },
+    "model-gateway": {
+      "image": "sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171",
+      "network_mode": "none",
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "read_only": true,
+      "environment": {
+        "SSL_CERT_FILE": "/opt/m4-runtime/ga-env/lib/python3.12/site-packages/certifi/cacert.pem",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "volumes": [
+        "E:/LongContext/bench_runtime/m2/linux:/opt/m4-runtime:ro",
+        "E:/LongContext/method_discovery/diagnostics/m1_p_launch_preparation_20260928/linux_fake_launch_20260929_a/ratatui_m1/bundle/gateway:/gateway:ro",
+        "model-channel:/run/model-channel",
+        "E:/LongContext/method_discovery/diagnostics/m1_p_launch_preparation_20260928:/checks:ro",
+        "E:/LongContext/method_discovery/diagnostics/m1_p_launch_preparation_20260928/linux_fake_launch_20260929_a/ratatui_m1/gateway_logs:/gateway-logs:rw"
+      ],
+      "entrypoint": [
+        "/opt/m4-runtime/python/cpython-3.12.12-linux-x86_64-gnu/bin/python3.12",
+        "/checks/fake_gateway.py"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "/opt/m4-runtime/python/cpython-3.12.12-linux-x86_64-gnu/bin/python3.12",
+          "-c",
+          "import socket; s=socket.socket(socket.AF_UNIX); s.connect('/run/model-channel/gateway.sock'); s.close()"
+        ],
+        "interval": "1s",
+        "timeout": "3s",
+        "retries": 30
+      }
+    }
+  },
+  "volumes": {
+    "model-channel": {}
+  }
+}

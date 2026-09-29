@@ -44,7 +44,8 @@ def export(commit, prefix, dest):
 
 
 def prepare(output, supervisor_source, policy=False, *, budget_root=None, record_id='engineering-fixture',
-            runtime_source=None, python_home='UNVERIFIED_PYTHON_HOME', collector_port=15340):
+            runtime_source=None, python_home='UNVERIFIED_PYTHON_HOME', collector_port=15340,
+            budget_enabled=True, historical_config=False, role_profiles=None, gateway_image=None):
     source = Path(supervisor_source).resolve(strict=True)
     if subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip() != M1:
         raise RuntimeError('explicit Supervisor source is not M1')
@@ -62,12 +63,22 @@ def prepare(output, supervisor_source, policy=False, *, budget_root=None, record
         configs = {}
         for role in ('task_agent', 'supervisor'):
             cfg = dict(roles[role])
-            cfg.update(apikey='offline-virtual-key', apibase='https://offline.invalid',
-                max_tokens=8192, max_retries=2)
+            cfg.update(apikey='offline-virtual-key', apibase='https://offline.invalid')
+            if not historical_config:
+                cfg.update(max_tokens=8192, max_retries=2)
             if role == 'supervisor':
                 cfg.update(monitor_dcec=True, monitor_semantic_continuity=True,
                     monitor_dcec_working_chars=4000)
             configs[cfg['profile']] = cfg
+        if role_profiles is not None:
+            if not historical_config:
+                raise ValueError('explicit provider profiles require archived common settings')
+            for name, expected in configs.items():
+                supplied = role_profiles[name]
+                for field, value in expected.items():
+                    if field not in ('apikey', 'apibase') and supplied.get(field) != value:
+                        raise ValueError('provider profile changes common setting: ' + field)
+                configs[name] = dict(supplied)
         (task / 'mykey.py').write_text('\n'.join(k + ' = ' + repr(v) for k, v in configs.items()), encoding='utf-8')
         virtual = stage / 'monitor.json'
         virtual.write_text(json.dumps(configs), encoding='utf-8')
@@ -126,7 +137,10 @@ def prepare(output, supervisor_source, policy=False, *, budget_root=None, record
             monitor_git_blob_sha256={rel: sha(blob(M1, 'GenericAgent-main/monitor_agent_core/' + rel))
                 for rel in monitor_files},
             policy_enabled=bool(policy), policy_sha256=sha(policy_bytes), budget_limits=LIMITS,
-            configs=configs, adapter_sha256=sha((copied / 'experimental_adapter.py').read_bytes()),
+            budget_enabled=bool(budget_enabled), historical_common_config=bool(historical_config),
+            configs={name: {k: v for k, v in cfg.items() if k not in ('apikey', 'apibase')}
+                for name, cfg in configs.items()},
+            adapter_sha256=sha((copied / 'experimental_adapter.py').read_bytes()),
             launcher_sha256=sha(blob(TASK, 'long_context_bench/scripts/run_ultralong_m12_proofs.py')),
             bundle_builder_sha256=sha(utility_file.read_bytes()),
             transport_sha256=sha(blob(TASK, 'long_context_bench/adapters/isolated_transport.py')),
@@ -142,17 +156,22 @@ def prepare(output, supervisor_source, policy=False, *, budget_root=None, record
         resources = Path(budget_root).resolve() if budget_root else output / 'resource-accounting'
         resources.mkdir(parents=True, exist_ok=True)
         topology = json.loads(compose.read_text())
-        topology['services']['main'].setdefault('volumes', []).extend([
-            f'{profile_path.as_posix()}:/pilot-config/models.json:ro',
-            f'{resources.as_posix()}:/pilot-resource:rw'])
+        if gateway_image is not None:
+            topology['services']['model-gateway']['image'] = gateway_image
+        topology['services']['main'].setdefault('volumes', []).append(
+            f'{profile_path.as_posix()}:/pilot-config/models.json:ro')
+        if budget_enabled:
+            topology['services']['main']['volumes'].append(f'{resources.as_posix()}:/pilot-resource:rw')
         topology['services']['main']['environment'] = {
             'MONITOR_CONFIG_FILE': '/pilot-config/models.json',
             'GA_MONITOR_ENABLED': '1', 'GA_MONITOR_CONFIG': 'claude_monitor_opus48',
             'GA_LLM_CONFIG_NAME': 'native_claude_cc_vibe_opus48',
             'GA_MONITOR_DCEC': '1', 'GA_MONITOR_DCEC_WORKING_CHARS': '4000',
-            'GA_PROVIDER_MAX_RETRIES': '2', 'GA_MAX_TURNS': '300',
+            'GA_PROVIDER_MAX_RETRIES': str(8 if historical_config else 2), 'GA_MAX_TURNS': '300',
             'PILOT_BUDGET_PATH': '/pilot-resource/resource_audit.json',
             'PILOT_RECORD_ID': record_id}
+        if not budget_enabled:
+            topology['services']['main']['environment'].pop('PILOT_BUDGET_PATH')
         for switch in ('GA_PMA_ENABLED', 'GA_MONITOR_GROUNDED_CONTEXT',
             'GA_MONITOR_HANDOFF_VALIDATION', 'GA_MONITOR_ADVICE_REVISION', 'GA_MONITOR_FEEDBACK_FOCUS',
             'GA_MONITOR_INQUIRY', 'GA_MONITOR_TOOL_FEEDBACK', 'GA_MONITOR_ACTIVE_WORKING_CONTEXT',
@@ -170,7 +189,8 @@ def prepare(output, supervisor_source, policy=False, *, budget_root=None, record
         return copied, compose
 
 
-def bind_roadmap_builder(runner, *, supervisor_source, policy, budget_root, record_id):
+def bind_roadmap_builder(runner, *, supervisor_source, policy, budget_root, record_id,
+                         budget_enabled=True, historical_config=False, role_profiles=None, gateway_image=None):
     """Explicit opt-in seam at the original run_proof -> build_bundle call.
 
     This preparation binding deliberately uses virtual credentials. It can
@@ -186,7 +206,8 @@ def bind_roadmap_builder(runner, *, supervisor_source, policy, budget_root, reco
             raise RuntimeError('unexpected role profiles at Roadmap bundle boundary')
         return prepare(root, supervisor_source, policy, budget_root=budget_root,
             record_id=record_id, runtime_source=runtime, python_home=python_home,
-            collector_port=collector_port)
+            collector_port=collector_port, budget_enabled=budget_enabled,
+            historical_config=historical_config, role_profiles=role_profiles, gateway_image=gateway_image)
     runner.build_bundle = configured
     runner._pilot_builder_bound = True
     return original

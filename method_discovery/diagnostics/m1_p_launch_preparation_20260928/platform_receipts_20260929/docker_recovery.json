@@ -1,0 +1,44 @@
+{
+  "purpose": "local Docker recovery and read-only platform inspection; NOT pilot execution",
+  "date": "2026-09-29",
+  "engine": {
+    "chunk_id": "66bb99",
+    "wall_time_seconds": 3.6990410000000002,
+    "exit_code": 0,
+    "original_token_count": 26,
+    "output": "Server=29.6.1 OS=linux Kernel=6.18.33.2-microsoft-standard-WSL2 CPUs=12 Memory=16702377984 Running=0\n"
+  },
+  "read_only_container_checks": [
+    {
+      "task": "kitex",
+      "image": "sha256:7ffcd70e49d77031b8e67eaa99226dc8468fa046f33e615118e8922b89fff32e",
+      "command": "docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges --read-only --mount 'type=bind,source=E:\\LongContext\\bench_runtime\\m2\\linux,target=/opt/m4-runtime,readonly' --entrypoint /bin/bash sha256:7ffcd70e49d77031b8e67eaa99226dc8468fa046f33e615118e8922b89fff32e -c 'set -e; pwd; go version; python3 --version; /opt/m4-runtime/python/cpython-3.12.12-linux-x86_64-gnu/bin/python3.12 --version; test -d /opt/m4-runtime/ga-env/lib/python3.12/site-packages; echo runtime_mount_readable=yes; go env GOPATH GOMODCACHE; test -d /go/pkg/mod/cache/download; echo go_cache_directory=yes; find /go/pkg/mod/cache/download -mindepth 1 -maxdepth 1 -type d | head -n 5'",
+      "result": {
+        "chunk_id": "43cc90",
+        "wall_time_seconds": 3.6832358,
+        "exit_code": 0,
+        "original_token_count": 82,
+        "output": "/app\ngo version go1.23.12 linux/amd64\nPython 3.11.2\nPython 3.12.12\nruntime_mount_readable=yes\n/go\n/go/pkg/mod\ngo_cache_directory=yes\n/go/pkg/mod/cache/download/google.golang.org\n/go/pkg/mod/cache/download/gopkg.in\n/go/pkg/mod/cache/download/github.com\n/go/pkg/mod/cache/download/golang.org\n/go/pkg/mod/cache/download/honnef.co\n"
+      }
+    },
+    {
+      "task": "ratatui",
+      "image": "sha256:6f9da0a2c21293e8e0d2bac70947260da9edd9e3de0bcb09af3008218bbcc18d",
+      "command": "docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges --read-only --mount 'type=bind,source=E:\\LongContext\\bench_runtime\\m2\\linux,target=/opt/m4-runtime,readonly' --entrypoint /bin/bash sha256:6f9da0a2c21293e8e0d2bac70947260da9edd9e3de0bcb09af3008218bbcc18d -c 'set -e; pwd; rustc --version; cargo --version; /opt/m4-runtime/python/cpython-3.12.12-linux-x86_64-gnu/bin/python3.12 --version; test -d /opt/m4-runtime/ga-env/lib/python3.12/site-packages; echo runtime_mount_readable=yes; echo CARGO_HOME=$CARGO_HOME; test -d /usr/local/cargo/registry/cache; echo cargo_cache_directory=yes; find /usr/local/cargo/registry/cache -mindepth 1 -maxdepth 1 -type d'",
+      "result": {
+        "chunk_id": "753786",
+        "wall_time_seconds": 3.7906906,
+        "exit_code": 0,
+        "original_token_count": 60,
+        "output": "/app\nrustc 1.82.0 (f6e511eec 2024-10-15)\ncargo 1.82.0 (8f40fc59f 2024-08-21)\nPython 3.12.12\nruntime_mount_readable=yes\nCARGO_HOME=/usr/local/cargo\ncargo_cache_directory=yes\n/usr/local/cargo/registry/cache/index.crates.io-6f17d22bba15001f\n"
+      }
+    }
+  ],
+  "scope_limits": [
+    "No model requests, benchmark, task implementation, test suite or verifier executed.",
+    "Cache directory presence is not proof of complete offline dependencies.",
+    "Only /opt/m4-runtime read-only mount checked; full M1/P bundle/transport mount topology not checked here.",
+    "Login bash (-lc) previously failed to locate Go/Rust; non-login bash (-c) using image PATH located them. No frozen source or policy modified."
+  ],
+  "pilot_started": false
+}

@@ -1,0 +1,46 @@
+diff --git a/src/harbor/trial/single_step.py b/src/harbor/trial/single_step.py
+index 63bc00a..3cf1301 100644
+--- a/src/harbor/trial/single_step.py
++++ b/src/harbor/trial/single_step.py
+@@ -1,5 +1,6 @@
+ from typing import override
+ import asyncio
++import json
+ import time
+ 
+ from harbor.agents.installed.base import NonZeroAgentExitCodeError
+@@ -160,7 +161,9 @@ class SingleStepTrial(Trial):
+                 )
+ 
+             interim_rewards.append(dict(interim.rewards or {}))
+-            if _verifier_passed(interim):
++            if _verifier_passed(
++                interim
++            ) or await self._structured_verifier_passed():
+                 break
+ 
+             phase += 1
+@@ -187,6 +190,21 @@ class SingleStepTrial(Trial):
+         self.result.agent_result = accumulated
+         await self._sync_agent_output(self.result)
+ 
++    async def _structured_verifier_passed(self) -> bool:
++        """Honor a task-owned pass signal when its reward is continuous."""
++        result = await self.agent_environment.exec(
++            "cat /app/output/verification_result.json 2>/dev/null || true",
++            timeout_sec=30,
++        )
++        stdout = result.stdout or ""
++        if result.return_code or not stdout.strip():
++            return False
++        try:
++            payload = json.loads(stdout)
++        except (TypeError, json.JSONDecodeError):
++            return False
++        # This file is task output produced by the native verifier. It is not a
++        # benchmark-wide threshold and does not reinterpret partial rewards.
++        return payload.get("passed") is True
++
+     @override
+     async def _recover_outputs(self) -> None:
+         await self._sync_agent_output(self.result)

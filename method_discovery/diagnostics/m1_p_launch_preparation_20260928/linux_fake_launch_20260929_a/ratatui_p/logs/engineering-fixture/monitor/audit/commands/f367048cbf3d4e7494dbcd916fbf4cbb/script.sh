@@ -1,0 +1,1 @@
+pwd; command -v bash; test -r /app/go.mod || test -r /app/Cargo.toml
