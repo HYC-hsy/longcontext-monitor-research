@@ -36,12 +36,15 @@ def main():
         # The sole fake is the online execution boundary. Preparation, source
         # export, opt-in binding and original build_bundle all execute normally.
         def fake_run_proof(source, run_id, llm_no, seconds, task):
+            assert (runner.m4.GA_ROOT / 'temp').is_dir()
+            assert not any((runner.m4.GA_ROOT / 'temp').iterdir())
             copied, compose = runner.build_bundle(Path(directory) / 'checked-bundle',
                 runner.m4.GA_ROOT, runner.m4.GA_RUNTIME,
                 'cpython-3.12.12-linux-x86_64-gnu', 'native_claude_cc_vibe_opus48',
                 'claude_monitor_opus48', runner.COLLECTOR_PORT)
             binding = json.loads((copied / 'pilot_binding.json').read_text())
             topology = json.loads(compose.read_text())
+            assert not (copied / 'temp').exists()
             assert binding['monitor_commit'] == M1 and binding['task_commit'] == TASK
             assert not binding['budget_enabled'] and binding['historical_common_config']
             assert binding['policy_enabled'] == (args.record == 'kitex-m1-p')

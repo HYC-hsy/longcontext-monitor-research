@@ -96,6 +96,10 @@ def main():
     runner.SOURCES['roadmapbench']['proposal'] = ROOT / 'long_context_bench/tasks/ultralong_m12_roadmapbench_proposal.jsonl'
     export(TASK, 'GenericAgent-main', dest / 'task-source')
     task_source = dest / 'task-source/GenericAgent-main'
+    # The original read-only identity resolver constructs GenericAgent, whose
+    # constructor requires this transient directory to exist. Git archives omit
+    # empty directories; the final isolated builder still excludes temp/.
+    (task_source / 'temp').mkdir()
     # Same explicit M1 package for native source-resolution/preflight imports.
     shutil.rmtree(task_source / 'monitor_agent_core')
     export(M1, 'GenericAgent-main/monitor_agent_core', dest / 'm1-source')
