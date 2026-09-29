@@ -1,0 +1,1 @@
+grep -r "impl.*Stylize for" /app/src/text/ /app/src/widgets/ 2>/dev/null | head -10

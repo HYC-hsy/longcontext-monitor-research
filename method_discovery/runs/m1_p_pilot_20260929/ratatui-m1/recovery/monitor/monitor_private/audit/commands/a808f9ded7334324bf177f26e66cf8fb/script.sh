@@ -1,0 +1,1 @@
+test -f /app/src/prelude.rs && echo "exists" || echo "missing"

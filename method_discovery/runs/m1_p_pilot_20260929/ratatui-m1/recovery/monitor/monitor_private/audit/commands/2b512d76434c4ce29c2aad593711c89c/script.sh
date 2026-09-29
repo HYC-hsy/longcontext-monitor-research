@@ -1,0 +1,1 @@
+grep -c "impl Styled for" /app/src/style/stylize.rs

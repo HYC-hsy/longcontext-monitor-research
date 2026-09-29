@@ -1,0 +1,1 @@
+grep "pub const fn add_modifier\|pub const fn remove_modifier" /app/src/style/mod.rs

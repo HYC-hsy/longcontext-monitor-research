@@ -1,0 +1,1 @@
+grep -n "titles_style\|titles_alignment\|titles_position" /app/src/widgets/block/mod.rs | head -20

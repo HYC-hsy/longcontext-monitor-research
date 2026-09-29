@@ -1,0 +1,1 @@
+grep -n "impl.*Stylize for" /app/src/style/stylize.rs | head -10

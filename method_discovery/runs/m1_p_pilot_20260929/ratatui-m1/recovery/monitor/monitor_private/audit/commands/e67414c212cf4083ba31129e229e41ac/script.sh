@@ -1,0 +1,1 @@
+grep -A 3 "pub.*fn add_modifier\|pub.*fn remove_modifier" /app/src/style/mod.rs | head -10

@@ -1,0 +1,1 @@
+grep -n "impl.*Styled" /app/src/style/stylize.rs | wc -l

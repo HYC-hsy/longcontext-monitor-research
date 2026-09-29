@@ -1,0 +1,1 @@
+grep -n "pub trait Styled\|impl Styled for" /app/src/style/stylize.rs | head -10

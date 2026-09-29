@@ -1,0 +1,182 @@
+[config]
+skip_core_tasks = true
+
+[tasks.ci]
+run_task = [
+    { name = "ci-unix", condition = { platforms = ["linux", "mac"] } },
+    { name = "ci-windows", condition = { platforms = ["windows"] } },
+]
+
+[tasks.ci-unix]
+private = true
+dependencies = [
+    "fmt",
+    "check-crossterm",
+    "check-termion",
+    "check-termwiz",
+    "test-crossterm",
+    "test-termion",
+    "test-termwiz",
+    "clippy-crossterm",
+    "clippy-termion",
+    "clippy-termwiz",
+    "test-doc",
+]
+
+[tasks.ci-windows]
+private = true
+dependencies = [
+    "fmt",
+    "check-crossterm",
+    "check-termwiz",
+    "test-crossterm",
+    "test-termwiz",
+    "clippy-crossterm",
+    "clippy-termwiz",
+    "test-doc",
+]
+
+[tasks.fmt]
+command = "cargo"
+args = [
+  "fmt",
+  "--all",
+  "--",
+  "--check",
+]
+
+[tasks.check-crossterm]
+env = { TUI_FEATURES = "serde,crossterm" }
+run_task = "check"
+
+[tasks.check-termion]
+env = { TUI_FEATURES = "serde,termion" }
+run_task = "check"
+
+[tasks.check-termwiz]
+env = { TUI_FEATURES = "serde,termwiz" }
+run_task = "check"
+
+[tasks.check]
+command = "cargo"
+condition = { env_set = ["TUI_FEATURES"] }
+args = [
+  "check",
+  "--no-default-features",
+  "--features",
+  "${TUI_FEATURES}",
+  "--all-targets",
+]
+
+[tasks.build-crossterm]
+env = { TUI_FEATURES = "serde,crossterm" }
+run_task = "build"
+
+[tasks.build-termion]
+env = { TUI_FEATURES = "serde,termion" }
+run_task = "build"
+
+[tasks.build-termwiz]
+env = { TUI_FEATURES = "serde,termwiz" }
+run_task = "build"
+
+[tasks.build]
+command = "cargo"
+condition = { env_set = ["TUI_FEATURES"] }
+args = [
+  "build",
+  "--no-default-features",
+  "--features",
+  "${TUI_FEATURES}",
+  "--all-targets",
+]
+
+[tasks.clippy-crossterm]
+env = { TUI_FEATURES = "serde,crossterm" }
+run_task = "clippy"
+
+[tasks.clippy-termion]
+env = { TUI_FEATURES = "serde,termion" }
+run_task = "clippy"
+
+[tasks.clippy-termwiz]
+env = { TUI_FEATURES = "serde,termwiz" }
+run_task = "clippy"
+
+[tasks.clippy]
+command = "cargo"
+condition = { env_set = ["TUI_FEATURES"] }
+args = [
+  "clippy",
+  "--all-targets",
+  "--no-default-features",
+  "--features",
+  "${TUI_FEATURES}",
+  "--",
+  "-D",
+  "warnings",
+]
+
+[tasks.test-crossterm]
+env = { TUI_FEATURES = "serde,crossterm,all-widgets,macros" }
+run_task = "test"
+
+[tasks.test-termion]
+env = { TUI_FEATURES = "serde,termion,all-widgets,macros" }
+run_task = "test"
+
+[tasks.test-termwiz]
+env = { TUI_FEATURES = "serde,termwiz,all-widgets,macros" }
+run_task = "test"
+
+[tasks.test]
+command = "cargo"
+condition = { env_set = ["TUI_FEATURES"] }
+args = [
+  "test",
+  "--no-default-features",
+  "--features",
+  "${TUI_FEATURES}",
+  "--lib",
+  "--tests",
+  "--examples",
+]
+
+[tasks.test-doc]
+command = "cargo"
+args = [
+  "test",
+  "--doc",
+]
+
+[tasks.run-example]
+private = true
+condition = { env_set = ["TUI_EXAMPLE_NAME"] }
+command = "cargo"
+args = [
+    "run",
+    "--release",
+    "--example",
+    "${TUI_EXAMPLE_NAME}"
+]
+
+[tasks.build-examples]
+command = "cargo"
+args = [
+    "build",
+    "--examples",
+    "--release"
+]
+
+[tasks.run-examples]
+dependencies = ["build-examples"]
+script = '''
+#!@duckscript
+files = glob_array ./examples/*.rs
+for file in ${files}
+  name = basename ${file}
+  name = substring ${name} -3
+  set_env TUI_EXAMPLE_NAME ${name}
+  cm_run_task run-example
+end
+'''
