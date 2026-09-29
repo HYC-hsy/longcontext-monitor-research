@@ -6,6 +6,7 @@ separate main-thread authorization file; none is supplied in preparation.
 import argparse
 import json
 import os
+import subprocess
 from pathlib import Path
 import sys
 
@@ -16,6 +17,14 @@ ORDER = [('kitex-m1', 'ktx-0.13.0-roadmap', False),
          ('kitex-m1-p', 'ktx-0.13.0-roadmap', True),
          ('ratatui-m1-p', 'rat-0.22.0-roadmap', True),
          ('ratatui-m1', 'rat-0.22.0-roadmap', False)]
+BATCH_ID = 'm1-p-kitex-b02-20260929'
+BATCH_RUNS = {'kitex-m1': 'pilot-b02-20260929-01',
+              'kitex-m1-p': 'pilot-b02-20260929-02'}
+
+
+def validate_identity(batch_id, record, run_id):
+    if batch_id != BATCH_ID or BATCH_RUNS.get(record) != run_id:
+        raise RuntimeError('unapproved batch/record/run identity')
 
 
 def common_profiles():
@@ -29,13 +38,18 @@ def common_profiles():
     return result
 
 
-def authorize(path, record):
+def authorize(path, record, batch_id=None, run_id=None):
     if path is None:
         raise RuntimeError('pilot not authorized: separate authorization file required')
     auth = json.loads(Path(path).read_text())
+    validate_identity(batch_id, record, run_id)
     if (auth.get('authorization') is not True or record not in auth.get('records', [])
+            or auth.get('batch_id') != batch_id or auth.get('record_run_ids') != BATCH_RUNS
             or auth.get('supervisor_commit') != M1 or auth.get('task_commit') != TASK
             or auth.get('policy_sha256') != sha(blob(POLICY_COMMIT, POLICY_PATH))
+            or auth.get('archive_adapter_sha256') != sha((HERE / 'pilot_archive_agent.py').read_bytes())
+            or auth.get('execution_commit') != subprocess.check_output(
+                ['git', '-C', str(ROOT), 'rev-parse', 'HEAD']).decode().strip()
             or auth.get('launcher_sha256') != sha(Path(__file__).read_bytes())):
         raise RuntimeError('pilot authorization does not bind this entry/source/policy/record')
     return auth
@@ -44,6 +58,8 @@ def authorize(path, record):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--record', required=True, choices=[r[0] for r in ORDER])
+    parser.add_argument('--batch-id', required=True)
+    parser.add_argument('--run-id', required=True)
     parser.add_argument('--supervisor-source', required=True)
     parser.add_argument('--output-root', required=True)
     parser.add_argument('--profiles', help='private operator-supplied JSON; only read after authorization')
@@ -51,10 +67,11 @@ def main():
     parser.add_argument('--execute', action='store_true')
     args = parser.parse_args()
     record, task, policy = next(r for r in ORDER if r[0] == args.record)
-    run_id = 'pilot-20260929-' + str([r[0] for r in ORDER].index(record) + 1).zfill(2)
+    run_id = args.run_id
+    validate_identity(args.batch_id, record, run_id)
     common = common_profiles()
     if not args.execute:
-        print(json.dumps({'mode': 'plan_only', 'run_id': run_id,
+        print(json.dumps({'mode': 'plan_only', 'batch_id': args.batch_id, 'run_id': run_id,
             'task': 'roadmapbench:' + task, 'policy_enabled': policy,
             'supervisor_commit': M1, 'task_commit': TASK, 'common_profiles': common,
             'precision_budget_wrapper_enabled': False, 'task_wall_seconds': 7200,
@@ -62,7 +79,7 @@ def main():
             'native_verifier_post_termination_only': True, 'model_requests': 0,
             'execution_authorized': False}, indent=2))
         return
-    authorize(args.authorization, record)  # Fail before credentials/containers.
+    authorize(args.authorization, record, args.batch_id, run_id)  # Fail before credentials/containers.
     pause_path = Path(args.output_root).resolve() / 'archive_pause.json'
     if pause_path.exists():
         raise RuntimeError('prior archive failure pauses subsequent records: ' + str(pause_path))
@@ -151,7 +168,8 @@ def main():
         budget_root=dest / 'unused-resource-path', record_id=record, budget_enabled=False,
         historical_config=True, role_profiles=supplied,
         gateway_image='sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171')
-    (dest / 'launch_identity.json').write_text(json.dumps({'supervisor_commit': M1, 'task_commit': TASK,
+    (dest / 'launch_identity.json').write_text(json.dumps({'batch_id': args.batch_id, 'run_id': run_id,
+        'supervisor_commit': M1, 'task_commit': TASK,
         'policy_enabled': policy, 'policy_sha256': sha(blob(POLICY_COMMIT, POLICY_PATH)),
         'launcher_imports': imports, 'common_profiles_without_credentials': common,
         'archive_adapter_sha256': sha((HERE / 'pilot_archive_agent.py').read_bytes()),
