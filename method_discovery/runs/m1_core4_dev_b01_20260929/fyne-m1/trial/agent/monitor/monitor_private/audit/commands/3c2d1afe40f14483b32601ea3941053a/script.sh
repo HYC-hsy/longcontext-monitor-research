@@ -1,0 +1,1 @@
+grep -n "SetMinRowsVisible" /app/widget/entry.go | head -5

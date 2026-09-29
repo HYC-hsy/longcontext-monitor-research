@@ -1,0 +1,1 @@
+grep -r "fyne.App" /app/test --include="*.go" 2>/dev/null | head -20
