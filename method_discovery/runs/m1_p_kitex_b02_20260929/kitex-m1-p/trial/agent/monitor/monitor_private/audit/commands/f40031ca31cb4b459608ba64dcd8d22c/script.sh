@@ -1,0 +1,1 @@
+ls -la /app/pkg/endpoint/cep/ 2>&1

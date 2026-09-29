@@ -1,0 +1,1 @@
+grep -A 1 "type EventHandler" /app/pkg/streaming/streaming.go

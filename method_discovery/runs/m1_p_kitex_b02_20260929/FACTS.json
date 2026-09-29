@@ -1,0 +1,283 @@
+[
+  {
+    "record": "kitex-m1",
+    "run_id": "pilot-b02-20260929-01",
+    "policy_enabled": false,
+    "native_reward": {
+      "reward": 0.3,
+      "phases_passed": 1,
+      "total_phases": 6
+    },
+    "native_exception": null,
+    "original_runner_valid_not_scientific_verdict": true,
+    "original_validation_errors": [],
+    "task_chat_spans": 87,
+    "observed_task_request_models": [
+      "claude-opus-4-8"
+    ],
+    "task_usage_from_otel": {
+      "gen_ai.usage.input_tokens": 122244,
+      "gen_ai.usage.output_tokens": 41715,
+      "ga.usage.cache_read_input_tokens": 1460242,
+      "ga.usage.cache_creation_input_tokens": 146044
+    },
+    "supervisor_attempt_records": 95,
+    "supervisor_attempt_outcomes": {
+      "success": 94,
+      "retryable_error": 1
+    },
+    "supervisor_usage_rows": 94,
+    "supervisor_usage": {
+      "cache_creation_input_tokens": 3604235,
+      "cache_read_input_tokens": 1108576,
+      "input_tokens": 40237,
+      "output_tokens": 27956
+    },
+    "supervisor_review_actions": {
+      "wait": 15,
+      "allow_complete": 1
+    },
+    "delivery_feedback": [
+      {
+        "kind": "intervention",
+        "cursor": 35,
+        "request_id": "e7b895e0d6b0460781107e24e34a0b81",
+        "message": "Target 1 has an incorrect type signature that needs correction before proceeding:\n\n**EventHandler type is wrong**: The implementation in pkg/streaming/streaming.go defines EventHandler as:\n```go\ntype EventHandler func(ctx context.Context, evt interface{}, err error)\n```\n\nBut the requirement (original task line 77) specifies:\n```go\ntype EventHandler func(ctx context.Context, evt stats.Event, err error)\n```\n\nThe `evt` parameter must be `stats.Event` (from pkg/stats package), not `interface{}`. Please correct this in streaming.go before continuing with Target 2.",
+        "delivery": "handed_to_task_interrupt_interface",
+        "receipt": "InterruptionRequest(sequence=1, message='Target 1 has an incorrect type signature that needs correction before proceeding:\\n\\n**EventHandler type is wrong**: The implementation in pkg/streaming/streaming.go defines EventHandler as:\\n```go\\ntype EventHandler func(ctx context.Context, evt interface{}, err error)\\n```\\n\\nBut the requirement (original task line 77) specifies:\\n```go\\ntype EventHandler func(ctx context.Context, evt stats.Event, err error)\\n```\\n\\nThe `evt` parameter must be `stats.Event` (from pkg/stats package), not `interface{}`. Please correct this in streaming.go before continuing with Target 2.', source='monitor', created_at=1790687815.1244767)",
+        "resumed_completion_requests": []
+      },
+      {
+        "kind": "intervention",
+        "cursor": 97,
+        "request_id": "e31f63b7d360493fa273340d08fdc70e",
+        "message": "Target 5 implementation is incorrect. The requirements do not match what was implemented.\n\n**Target 5 requirements** (from original task lines 184-213) specify:\n1. New option type aliases in `client/option.go`: UnaryOption, StreamOption, TTHeaderStreamingOption\n2. Unary option functions in `client/option_unary.go`: WithUnaryOptions, WithUnaryRPCTimeout, WithUnaryMiddleware, WithUnaryMiddlewareBuilder\n3. Stream option functions in `client/option_stream.go`: WithStreamOptions, WithStreamRecvTimeout, WithStreamMiddleware, etc.\n4. TTHeader streaming option functions in `client/option_ttstream.go`\n5. TailOption mechanism in client/option.go\n6. WithRecvTimeout in client/callopt/streamcall\n7. Retry/fallback field migration to UnaryOptions\n\n**What was implemented**: Created \"option_groups.go\" categorizing options into \"Core, Performance, Observability, and Governance groups\"\n\nThis is completely different from the requirements. The task requires creating three separate namespace files (option_unary.go, option_stream.go, option_ttstream.go) with specific option types and functions that separate unary, streaming, and TTHeader-streaming options. There is no mention of \"option_groups.go\" or categorizing into \"Core/Performance/Observability/Governance\" groups.\n\nPlease implement Target 5 according to the actual requirements in the original task.",
+        "delivery": "handed_to_task_interrupt_interface",
+        "receipt": "InterruptionRequest(sequence=2, message='Target 5 implementation is incorrect. The requirements do not match what was implemented.\\n\\n**Target 5 requirements** (from original task lines 184-213) specify:\\n1. New option type aliases in `client/option.go`: UnaryOption, StreamOption, TTHeaderStreamingOption\\n2. Unary option functions in `client/option_unary.go`: WithUnaryOptions, WithUnaryRPCTimeout, WithUnaryMiddleware, WithUnaryMiddlewareBuilder\\n3. Stream option functions in `client/option_stream.go`: WithStreamOptions, WithStreamRecvTimeout, WithStreamMiddleware, etc.\\n4. TTHeader streaming option functions in `client/option_ttstream.go`\\n5. TailOption mechanism in client/option.go\\n6. WithRecvTimeout in client/callopt/streamcall\\n7. Retry/fallback field migration to UnaryOptions\\n\\n**What was implemented**: Created \"option_groups.go\" categorizing options into \"Core, Performance, Observability, and Governance groups\"\\n\\nThis is completely different from the requirements. The task requires creating three separate namespace files (option_unary.go, option_stream.go, option_ttstream.go) with specific option types and functions that separate unary, streaming, and TTHeader-streaming options. There is no mention of \"option_groups.go\" or categorizing into \"Core/Performance/Observability/Governance\" groups.\\n\\nPlease implement Target 5 according to the actual requirements in the original task.', source='monitor', created_at=1790688189.940916)",
+        "resumed_completion_requests": []
+      },
+      {
+        "kind": "completion",
+        "decision": "continue",
+        "cursor": 131,
+        "request_id": "completion-1",
+        "message": "Target 3 protocol constants are incorrectly implemented, blocking completion.\n\n**The requirement** (original task lines 149-150) specifies:\n- \"TTHeaderStreaming must be a **dedicated power-of-2 flag (value 64)**, not a composite of other flags\"\n- \"Add GRPCStreaming as a **new dedicated power-of-2 flag (value 128)**\"\n\n**Current implementation** in transport/keys.go lines 36-38:\n```go\nTTHeaderStreaming = TTHeader | STREAMING   // 1 | 64 = 65\nGRPCStreaming     = GRPC | STREAMING       // 8 | 64 = 72\n```\n\n**Problems:**\n1. TTHeaderStreaming is defined as a composite (TTHeader | STREAMING) instead of a dedicated flag\n2. TTHeaderStreaming value is 65 instead of 64\n3. GRPCStreaming is defined as a composite (GRPC | STREAMING) instead of a dedicated flag  \n4. GRPCStreaming value is 72 instead of 128\n\n**Correct implementation should be:**\n```go\nconst (\n    PurePayload Protocol = 0\n    TTHeader Protocol = 2\n    Framed Protocol = 4\n    HTTP Protocol = 8\n    GRPC Protocol = 16\n    HESSIAN2 Protocol = 32\n    TTHeaderStreaming Protocol = 64   // Dedicated flag\n    GRPCStreaming Protocol = 128       // Dedicated flag\n    \n    TTHeaderFramed = TTHeader | Framed  // Composite is OK\n)\n```\n\nPlease fix transport/keys.go to use dedicated power-of-2 flags with correct values (64 and 128) before claiming completion.",
+        "delivery": "handed_to_completion_boundary"
+      },
+      {
+        "kind": "completion",
+        "decision": "continue",
+        "cursor": 143,
+        "request_id": "completion-2",
+        "message": "Target 3 String() method is incomplete, blocking completion.\n\n**The requirement** (original task lines 155-157) specifies the String() method must:\n- For individual flags: return the flag name\n- **For composite values: return pipe-separated names of all set flags in ascending order of their numeric bit values**\n- Example: `(GRPC | Framed).String()` should return `\"Framed|GRPC\"` (since Framed=4 < GRPC=16)\n- Example: `TTHeaderFramed.String()` should return `\"TTHeader|Framed\"`\n\n**Current implementation** in transport/keys.go uses a switch statement with only hardcoded cases:\n```go\ncase TTHeaderFramed:\n    return \"TTHeaderFramed\"  // Wrong - should return \"TTHeader|Framed\"\n```\n\nThis approach:\n1. Returns \"TTHeaderFramed\" instead of \"TTHeader|Framed\" for the composite\n2. Cannot handle arbitrary composite values like `(HTTP | Framed)` or `(GRPC | HESSIAN2)` - these will return \"Unknown\"\n\n**Required implementation**: The String() method needs dynamic logic that:\n1. Checks if value is zero \u2192 return \"PurePayload\"\n2. Iterates through all individual flags in ascending bit order\n3. Collects names of flags that are set in the value\n4. Returns pipe-separated list of those names\n\nPlease fix the String() method to implement dynamic composite value handling as specified in the requirements.",
+        "delivery": "handed_to_completion_boundary"
+      },
+      {
+        "kind": "intervention",
+        "cursor": 153,
+        "request_id": "758c8a86bbdd4de2a0b4e6b7fd158d5b",
+        "message": "Target 3 protocol constant values are incorrect, blocking completion.\n\n**The requirement** (original task line 152) explicitly states:\n\"The existing constants (PurePayload = 0, **TTHeader = 2**, **Framed = 4**, **HTTP = 8**, **GRPC = 16**, **HESSIAN2 = 32**) **must retain their current values**\"\n\n**Current implementation** in transport/keys.go lines 28-32:\n```go\nTTHeader Protocol = 1 << iota // Starts at 1 (bit 0)\n_                             // Skip bit 1 (reserved for Framed)\nHTTP    // = 4\nGRPC    // = 8\nHESSIAN2 // = 16\n```\n\nThis produces: **TTHeader=1, Framed=2, HTTP=4, GRPC=8, HESSIAN2=16**\n\n**All values are wrong** (shifted down by factor of 2). The correct values are:\n- TTHeader = 2 (not 1)\n- Framed = 4 (not 2)\n- HTTP = 8 (not 4)\n- GRPC = 16 (not 8)\n- HESSIAN2 = 32 (not 16)\n- TTHeaderStreaming = 64 (currently correct)\n- GRPCStreaming = 128 (currently correct)\n\n**Correct implementation:**\n```go\nconst (\n    PurePayload Protocol = 0\n    TTHeader Protocol = 2\n    Framed Protocol = 4\n    HTTP Protocol = 8\n    GRPC Protocol = 16\n    HESSIAN2 Protocol = 32\n    TTHeaderStreaming Protocol = 64\n    GRPCStreaming Protocol = 128\n    \n    TTHeaderFramed = TTHeader | Framed  // 2 | 4 = 6\n)\n```\n\nPlease fix the protocol constants to use the required values before claiming completion.",
+        "delivery": "handed_to_task_interrupt_interface",
+        "receipt": "InterruptionRequest(sequence=3, message='Target 3 protocol constant values are incorrect, blocking completion.\\n\\n**The requirement** (original task line 152) explicitly states:\\n\"The existing constants (PurePayload = 0, **TTHeader = 2**, **Framed = 4**, **HTTP = 8**, **GRPC = 16**, **HESSIAN2 = 32**) **must retain their current values**\"\\n\\n**Current implementation** in transport/keys.go lines 28-32:\\n```go\\nTTHeader Protocol = 1 << iota // Starts at 1 (bit 0)\\n_                             // Skip bit 1 (reserved for Framed)\\nHTTP    // = 4\\nGRPC    // = 8\\nHESSIAN2 // = 16\\n```\\n\\nThis produces: **TTHeader=1, Framed=2, HTTP=4, GRPC=8, HESSIAN2=16**\\n\\n**All values are wrong** (shifted down by factor of 2). The correct values are:\\n- TTHeader = 2 (not 1)\\n- Framed = 4 (not 2)\\n- HTTP = 8 (not 4)\\n- GRPC = 16 (not 8)\\n- HESSIAN2 = 32 (not 16)\\n- TTHeaderStreaming = 64 (currently correct)\\n- GRPCStreaming = 128 (currently correct)\\n\\n**Correct implementation:**\\n```go\\nconst (\\n    PurePayload Protocol = 0\\n    TTHeader Protocol = 2\\n    Framed Protocol = 4\\n    HTTP Protocol = 8\\n    GRPC Protocol = 16\\n    HESSIAN2 Protocol = 32\\n    TTHeaderStreaming Protocol = 64\\n    GRPCStreaming Protocol = 128\\n    \\n    TTHeaderFramed = TTHeader | Framed  // 2 | 4 = 6\\n)\\n```\\n\\nPlease fix the protocol constants to use the required values before claiming completion.', source='monitor', created_at=1790688911.0484369)",
+        "resumed_completion_requests": [
+          "completion-3"
+        ]
+      },
+      {
+        "kind": "completion",
+        "decision": "allow",
+        "cursor": 171,
+        "request_id": "completion-4",
+        "delivery": "handed_to_completion_boundary"
+      }
+    ],
+    "continuation_event_count": 0,
+    "actual_supervisor_source": {
+      "timestamp": 1790687263.6200497,
+      "review_id": null,
+      "event": "pilot_source_identity",
+      "monitor_commit": "746a695adac4325d6440941d384d543d1364fef9",
+      "task_commit": "8b67de43cebf51d73b4327065713428cb049f161",
+      "imported_agent": "/opt/genericagent/monitor_agent_core/agent.py",
+      "policy_sha256": null
+    },
+    "agent_execution": {
+      "started_at": "2026-09-29T13:07:30.388153Z",
+      "finished_at": "2026-09-29T13:39:28.997820Z"
+    },
+    "verifier_timing": {
+      "started_at": "2026-09-29T13:39:28.999600Z",
+      "finished_at": "2026-09-29T13:40:45.885189Z"
+    },
+    "actual_start": "2026-09-29T13:07:22.514574Z",
+    "actual_finish": "2026-09-29T13:41:07.157085Z",
+    "dollars": null,
+    "missing_dollars_reason": "no invented rate/account settlement; raw usage preserved",
+    "supervisor_core_files": {
+      "dialogue.jsonl": {
+        "bytes": 1000001,
+        "sha256": "1d9740dc5fa652f2252c9a41b00676bc388b7286f483a44a24df06cc320f14ae"
+      },
+      "progress.jsonl": {
+        "bytes": 260023,
+        "sha256": "df69d97887868552d3a4c2a499f2deacb45a8bc0b2ef5924fd68b69a4539434f"
+      },
+      "request_attempts.jsonl": {
+        "bytes": 17709,
+        "sha256": "457282dbb53ff5b1cb6e0aef88e9a55d6a3f0ff68442e9b00de7e5dd789e53d9"
+      },
+      "provider_usage.jsonl": {
+        "bytes": 10635,
+        "sha256": "84099af723e48c4433673eea1f07ecb21404b51853b4207bb4d866b838a2d84f"
+      },
+      "provider_history.json": {
+        "bytes": 409805,
+        "sha256": "2434ae086d73555a332fb5e7b6abaa8912091bbb9c1b617697e5dd5f51cdfc2e"
+      },
+      "reviews.jsonl": {
+        "bytes": 6667,
+        "sha256": "88863ac8448e2251528d5c5f7a840b6578c5861912827d62bae4b2b6f975ec0e"
+      }
+    },
+    "source_hash_mismatches": []
+  },
+  {
+    "record": "kitex-m1-p",
+    "run_id": "pilot-b02-20260929-02",
+    "policy_enabled": true,
+    "native_reward": {
+      "reward": 0.3,
+      "phases_passed": 1,
+      "total_phases": 6
+    },
+    "native_exception": null,
+    "original_runner_valid_not_scientific_verdict": true,
+    "original_validation_errors": [],
+    "task_chat_spans": 117,
+    "observed_task_request_models": [
+      "claude-opus-4-8"
+    ],
+    "task_usage_from_otel": {
+      "gen_ai.usage.input_tokens": 161411,
+      "gen_ai.usage.output_tokens": 53228,
+      "ga.usage.cache_read_input_tokens": 2115706,
+      "ga.usage.cache_creation_input_tokens": 223437
+    },
+    "supervisor_attempt_records": 102,
+    "supervisor_attempt_outcomes": {
+      "success": 102
+    },
+    "supervisor_usage_rows": 102,
+    "supervisor_usage": {
+      "cache_creation_input_tokens": 3618535,
+      "cache_read_input_tokens": 2137832,
+      "input_tokens": 37492,
+      "output_tokens": 37282
+    },
+    "supervisor_review_actions": {
+      "wait": 17,
+      "allow_complete": 1
+    },
+    "delivery_feedback": [
+      {
+        "kind": "intervention",
+        "cursor": 35,
+        "request_id": "0cce3ba1d249415e98ccc002d4787884",
+        "message": "Target 3 implementation has critical issues in transport/keys.go:\n\n**Value collision**: Both STREAMING and TTHeaderStreaming equal 64. The iota sequence makes STREAMING the 7th flag (1<<6=64), and TTHeaderStreaming is explicitly set to 64. These collide.\n\nThe requirement states TTHeaderStreaming must be a dedicated flag at value 64. The old STREAMING flag is not in the list of \"existing constants that must retain values\" (PurePayload=0, TTHeader=2, Framed=4, HTTP=8, GRPC=16, HESSIAN2=32). \n\nThe STREAMING flag should likely be removed from the iota sequence, or the constant definitions restructured to avoid the collision.\n\nAdditionally, the String() method's flags array for composite decomposition includes STREAMING but not TTHeaderStreaming or GRPCStreaming, which will cause incorrect behavior when these dedicated streaming flags appear in composite values.\n\nPlease review and fix the transport protocol constants before proceeding to Target 4.",
+        "delivery": "handed_to_task_interrupt_interface",
+        "receipt": "InterruptionRequest(sequence=1, message='Target 3 implementation has critical issues in transport/keys.go:\\n\\n**Value collision**: Both STREAMING and TTHeaderStreaming equal 64. The iota sequence makes STREAMING the 7th flag (1<<6=64), and TTHeaderStreaming is explicitly set to 64. These collide.\\n\\nThe requirement states TTHeaderStreaming must be a dedicated flag at value 64. The old STREAMING flag is not in the list of \"existing constants that must retain values\" (PurePayload=0, TTHeader=2, Framed=4, HTTP=8, GRPC=16, HESSIAN2=32). \\n\\nThe STREAMING flag should likely be removed from the iota sequence, or the constant definitions restructured to avoid the collision.\\n\\nAdditionally, the String() method\\'s flags array for composite decomposition includes STREAMING but not TTHeaderStreaming or GRPCStreaming, which will cause incorrect behavior when these dedicated streaming flags appear in composite values.\\n\\nPlease review and fix the transport protocol constants before proceeding to Target 4.', source='monitor', created_at=1790689867.4878666)",
+        "resumed_completion_requests": []
+      },
+      {
+        "kind": "intervention",
+        "cursor": 43,
+        "request_id": "d5f0219f81d840788ed158393e84a550",
+        "message": "Good fix on the collision - STREAMING removed and TTHeaderStreaming=64 is now unique.\n\nHowever, the String() method still has an issue. The flags array for composite decomposition is ordered [64, 128, 2, 4, 8, 16, 32], but the requirement states: \"pipe-separated names of all set flags in ascending order of their numeric bit values.\"\n\nThe requirement example shows: `(GRPC | Framed).String()` \u2192 `\"Framed|GRPC\"` since Framed=4 < GRPC=16\n\nThe flags array should be sorted in ascending bit order: [2, 4, 8, 16, 32, 64, 128] so composites output correctly. Currently a value like (TTHeader | TTHeaderStreaming) would output \"TTHeaderStreaming|TTHeader\" instead of the correct \"TTHeader|TTHeaderStreaming\".",
+        "delivery": "handed_to_task_interrupt_interface",
+        "receipt": "InterruptionRequest(sequence=2, message='Good fix on the collision - STREAMING removed and TTHeaderStreaming=64 is now unique.\\n\\nHowever, the String() method still has an issue. The flags array for composite decomposition is ordered [64, 128, 2, 4, 8, 16, 32], but the requirement states: \"pipe-separated names of all set flags in ascending order of their numeric bit values.\"\\n\\nThe requirement example shows: `(GRPC | Framed).String()` \u2192 `\"Framed|GRPC\"` since Framed=4 < GRPC=16\\n\\nThe flags array should be sorted in ascending bit order: [2, 4, 8, 16, 32, 64, 128] so composites output correctly. Currently a value like (TTHeader | TTHeaderStreaming) would output \"TTHeaderStreaming|TTHeader\" instead of the correct \"TTHeader|TTHeaderStreaming\".', source='monitor', created_at=1790689980.811077)",
+        "resumed_completion_requests": []
+      },
+      {
+        "kind": "intervention",
+        "cursor": 119,
+        "request_id": "721cc03f2db548349d361f7cb229a51d",
+        "message": "Target 1 requirement 10 states: \"Extend the existing Args struct to include ServerStream ServerStream and ClientStream ClientStream fields (in addition to the existing Stream field). Apply the same extension to the Result struct.\"\n\nCurrently streaming.go has Args and Result with ONLY the Stream field. The ServerStream and ClientStream fields are missing - they were removed at turn 56.\n\nThese fields must be restored. The requirement is to add fields to the structs, not type declarations. The fields should reference the ServerStream and ClientStream interfaces defined earlier in stream_types.go:\n\n```go\ntype Args struct {\n    Stream       Stream\n    ServerStream ServerStream\n    ClientStream ClientStream\n}\n\ntype Result struct {\n    Stream       Stream\n    ServerStream ServerStream\n    ClientStream ClientStream\n}\n```",
+        "delivery": "handed_to_task_interrupt_interface",
+        "receipt": "InterruptionRequest(sequence=3, message='Target 1 requirement 10 states: \"Extend the existing Args struct to include ServerStream ServerStream and ClientStream ClientStream fields (in addition to the existing Stream field). Apply the same extension to the Result struct.\"\\n\\nCurrently streaming.go has Args and Result with ONLY the Stream field. The ServerStream and ClientStream fields are missing - they were removed at turn 56.\\n\\nThese fields must be restored. The requirement is to add fields to the structs, not type declarations. The fields should reference the ServerStream and ClientStream interfaces defined earlier in stream_types.go:\\n\\n```go\\ntype Args struct {\\n    Stream       Stream\\n    ServerStream ServerStream\\n    ClientStream ClientStream\\n}\\n\\ntype Result struct {\\n    Stream       Stream\\n    ServerStream ServerStream\\n    ClientStream ClientStream\\n}\\n```', source='monitor', created_at=1790690525.3536198)",
+        "resumed_completion_requests": []
+      },
+      {
+        "kind": "completion",
+        "decision": "continue",
+        "cursor": 179,
+        "request_id": "completion-1",
+        "message": "Target 2 is incomplete. Requirement 4 explicitly states: \"**Deprecated types (`pkg/endpoint`)**: Create deprecated type aliases (in a `deprecated.go` file)\"\n\nThe deprecated.go file does not exist in pkg/endpoint. This file must be created with 8 type aliases:\n- RecvEndpoint, RecvMiddleware, RecvMiddlewareBuilder, RecvChain\n- SendEndpoint, SendMiddleware, SendMiddlewareBuilder, SendChain\n\nThese should reference the old streaming.Stream interface (not the new ClientStream/ServerStream interfaces) to maintain backward compatibility.\n\nPlease create pkg/endpoint/deprecated.go with these deprecated type aliases before claiming completion.",
+        "delivery": "handed_to_completion_boundary"
+      },
+      {
+        "kind": "completion",
+        "decision": "continue",
+        "cursor": 205,
+        "request_id": "completion-2",
+        "message": "Target 6 is incomplete. Requirement 2 explicitly states: \"Replace the standalone readFrameHeader(r netpoll.Reader) function with a method (fr *Framer) readAndCheckFrameHeader() (http2.FrameHeader, error)\"\n\nVerified frame_reader.go:\n- Line 439: `func readFrameHeader(r netpoll.Reader)` still exists as standalone function\n- Line 148: Still calling `readFrameHeader(fr.reader)`\n\nThe requirement says to REPLACE the function with a METHOD on *Framer named readAndCheckFrameHeader. This structural change is required:\n\n```go\n// Remove the standalone function and create a method:\nfunc (fr *Framer) readAndCheckFrameHeader() (http2.FrameHeader, error) {\n    // implementation with enhanced error reporting including hex dumps\n}\n```\n\nPlease convert readFrameHeader from a standalone function to a Framer method named readAndCheckFrameHeader before claiming completion.",
+        "delivery": "handed_to_completion_boundary"
+      },
+      {
+        "kind": "completion",
+        "decision": "allow",
+        "cursor": 217,
+        "request_id": "completion-3",
+        "delivery": "handed_to_completion_boundary"
+      }
+    ],
+    "continuation_event_count": 0,
+    "actual_supervisor_source": {
+      "timestamp": 1790689322.5749865,
+      "review_id": null,
+      "event": "pilot_source_identity",
+      "monitor_commit": "746a695adac4325d6440941d384d543d1364fef9",
+      "task_commit": "8b67de43cebf51d73b4327065713428cb049f161",
+      "imported_agent": "/opt/genericagent/monitor_agent_core/agent.py",
+      "policy_sha256": "c172d76ee872c8e34293c9c4db6fe58580b2d389201588ef4ef0b3d290e53ae8"
+    },
+    "agent_execution": {
+      "started_at": "2026-09-29T13:41:50.970906Z",
+      "finished_at": "2026-09-29T14:18:28.682117Z"
+    },
+    "verifier_timing": {
+      "started_at": "2026-09-29T14:18:28.683929Z",
+      "finished_at": "2026-09-29T14:18:48.923147Z"
+    },
+    "actual_start": "2026-09-29T13:41:43.751602Z",
+    "actual_finish": "2026-09-29T14:19:10.283539Z",
+    "dollars": null,
+    "missing_dollars_reason": "no invented rate/account settlement; raw usage preserved",
+    "supervisor_core_files": {
+      "dialogue.jsonl": {
+        "bytes": 1056690,
+        "sha256": "c177affb22d0f399c06718e0323f39b1702270a8ec540aab719f1c50680ab54b"
+      },
+      "progress.jsonl": {
+        "bytes": 285273,
+        "sha256": "b501c3b8e4af115e7d636fa9918818655b0c347e0d4d8d6c868a0bcb32d32e51"
+      },
+      "request_attempts.jsonl": {
+        "bytes": 18861,
+        "sha256": "5dfd88f300fc970d3a907861ca3651998926aa7f6ede1012b3db09c1a6bbf73b"
+      },
+      "provider_usage.jsonl": {
+        "bytes": 11551,
+        "sha256": "98462e9f3f59253d840f04e883b58056538bada7b540f62e40fecb572f380f51"
+      },
+      "provider_history.json": {
+        "bytes": 456873,
+        "sha256": "0722eadfaeccc680cc223ab26c0c96f4a5a7afdd0b1d74f64f84337658e0798c"
+      },
+      "reviews.jsonl": {
+        "bytes": 7506,
+        "sha256": "268489f5bb9ef2a5e13487a6116115437b245d8e231a673175305305befc2607"
+      }
+    },
+    "source_hash_mismatches": []
+  }
+]
