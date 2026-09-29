@@ -63,6 +63,9 @@ def main():
             'execution_authorized': False}, indent=2))
         return
     authorize(args.authorization, record)  # Fail before credentials/containers.
+    pause_path = Path(args.output_root).resolve() / 'archive_pause.json'
+    if pause_path.exists():
+        raise RuntimeError('prior archive failure pauses subsequent records: ' + str(pause_path))
     if not args.profiles:
         raise RuntimeError('approved private provider profiles required')
     supplied = json.loads(Path(args.profiles).read_text())
@@ -83,6 +86,19 @@ def main():
     bench = dest / 'launcher/long_context_bench'
     export(TASK, 'long_context_bench/adapters', dest / 'launcher')
     import shutil
+    shutil.copyfile(HERE / 'pilot_archive_agent.py', bench / 'adapters/pilot_archive_agent.py')
+    runner.SOURCES['roadmapbench']['adapter'] = 'adapters.pilot_archive_agent:PilotArchiveAgent'
+    original_kwargs = runner.stage4_agent_kwargs
+    def final_kwargs():
+        values = original_kwargs()
+        expected = dict(baseline_condition='original', max_turns=300,
+            llm_config_name='native_claude_cc_vibe_opus48', monitor_enabled=True,
+            monitor_config='claude_monitor_opus48')
+        if any(values.get(k) != v for k, v in expected.items()):
+            raise RuntimeError('frozen final Harbor parameters were not forwarded')
+        values['pilot_archive_pause_path'] = str(pause_path)
+        return values
+    runner.stage4_agent_kwargs = final_kwargs
     substrate = HERE / 'launch_substrate_originals'
     substrate_index = json.loads((substrate / 'source_index.json').read_text())
     for item in substrate_index['files']:
@@ -118,7 +134,7 @@ def main():
     for key in list(os.environ):
         if key.startswith('GA_'):
             del os.environ[key]
-    os.environ.update(GA_RUN_ISOLATION='no-network-unix-inference-v1', GA_MONITOR_ENABLED='1',
+    os.environ.update(GA_BASELINE_CONDITION='original', GA_RUN_ISOLATION='no-network-unix-inference-v1', GA_MONITOR_ENABLED='1',
         GA_MONITOR_CONFIG='claude_monitor_opus48', GA_LLM_CONFIG_NAME='native_claude_cc_vibe_opus48',
         GA_MONITOR_DCEC='1', GA_MONITOR_DCEC_WORKING_CHARS='4000',
         GA_PROVIDER_MAX_RETRIES='8', GA_MAX_TURNS='300', GA_MONITOR_EXPECTED_MODEL='claude-opus-4-8')
@@ -138,6 +154,7 @@ def main():
     (dest / 'launch_identity.json').write_text(json.dumps({'supervisor_commit': M1, 'task_commit': TASK,
         'policy_enabled': policy, 'policy_sha256': sha(blob(POLICY_COMMIT, POLICY_PATH)),
         'launcher_imports': imports, 'common_profiles_without_credentials': common,
+        'archive_adapter_sha256': sha((HERE / 'pilot_archive_agent.py').read_bytes()),
         'precision_budget_wrapper_enabled': False}, indent=2))
     # Original runner retains native Task execution, concurrency, watchdog,
     # post-termination verification, OTel and result archival. No new loop.
