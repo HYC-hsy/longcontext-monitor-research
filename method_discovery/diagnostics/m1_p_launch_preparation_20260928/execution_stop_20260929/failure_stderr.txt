@@ -1,0 +1,20 @@
+Traceback (most recent call last):
+  File "E:\LongContext\method_discovery\diagnostics\m1_p_launch_preparation_20260928\launch_pilot.py", line 144, in <module>
+    if __name__ == '__main__': main()
+  File "E:\LongContext\method_discovery\diagnostics\m1_p_launch_preparation_20260928\launch_pilot.py", line 140, in main
+    result = runner.run_proof('roadmapbench', run_id, 0, 7200, task)
+  File "E:\LongContext\method_discovery\diagnostics\m1_p_launch_preparation_20260928\formal_pilot_20260929\kitex-m1\launcher\long_context_bench\scripts\run_ultralong_m12_proofs.py", line 697, in run_proof
+    identity = preflight(source, llm_no, selected)
+  File "E:\LongContext\method_discovery\diagnostics\m1_p_launch_preparation_20260928\formal_pilot_20260929\kitex-m1\launcher\long_context_bench\scripts\run_ultralong_m12_proofs.py", line 547, in preflight
+    "model": m4.resolve_model(llm_no),
+  File "E:\LongContext\method_discovery\diagnostics\m1_p_launch_preparation_20260928\formal_pilot_20260929\kitex-m1\launcher\long_context_bench\scripts\run_harbor_tb2_m4.py", line 205, in resolve_model
+    output = checked([
+  File "E:\LongContext\method_discovery\diagnostics\m1_p_launch_preparation_20260928\formal_pilot_20260929\kitex-m1\launcher\long_context_bench\scripts\run_harbor_tb2_m4.py", line 60, in checked
+    raise RuntimeError(f"command failed ({result.returncode}): {' '.join(cmd)}\n{result.stderr.strip()}")
+RuntimeError: command failed (1): docker run --rm -v E:\LongContext\bench_runtime\m2\linux:/opt/m4-runtime:ro -v E:\LongContext\method_discovery\diagnostics\m1_p_launch_preparation_20260928\formal_pilot_20260929\kitex-m1\task-source\GenericAgent-main:/opt/genericagent:ro -e M4_LLM_NO=0 -e GA_LLM_CONFIG_NAME=native_claude_cc_vibe_opus48 -e PYTHONPATH=/opt/m4-runtime/ga-env/lib/python3.12/site-packages:/opt/genericagent debian:bookworm-slim /opt/m4-runtime/python/cpython-3.12.12-linux-x86_64-gnu/bin/python3.12 -c import hashlib,json,pathlib,os;from agentmain import GenericAgent;a=GenericAgent();n=int(os.environ['M4_LLM_NO']);count=len(a.llmclients);assert 0<=n<count,f'llm_no {n} out of range';a.next_llm(n);b=a.llmclient.backend;cfg=pathlib.Path('/opt/genericagent/mykey.py').read_bytes();print('M4_IDENTITY='+json.dumps({'requested_llm_no':n,'effective_llm_no':a.llm_no,'model':b.model.lower(),'backend_type':type(b).__name__,'backend_name':b.name,'available_models':count,'config_sha256':hashlib.sha256(cfg).hexdigest()},sort_keys=True))
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/opt/genericagent/agentmain.py", line 98, in __init__
+    os.makedirs(os.path.join(script_dir, 'temp'), exist_ok=True)
+  File "<frozen os>", line 225, in makedirs
+OSError: [Errno 30] Read-only file system: '/opt/genericagent/temp'
