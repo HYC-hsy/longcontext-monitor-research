@@ -105,7 +105,40 @@ def test_ader_contract_regulates_decision_evidence_and_root_completion(tmp_path)
     assert "at most one focal" in normalized
 
 
-def test_v1_uses_only_working_note_and_existing_model_stage(tmp_path, monkeypatch):
+def test_ader_v2_information_state_contract_is_bounded_and_action_conditioned(tmp_path):
+    ws = workspace(tmp_path)
+    ws.write_text("monitor/working.md", "Current decision: ordinary patrol; no action-changing gap.")
+    view, metadata = dcec_working_context(ws)
+    system = " ".join(DCEC_SYSTEM_PROMPT.lower().split())
+    continuation = " ".join(DCEC_CONTINUATION_PROMPT.lower().split())
+
+    assert "action-relevant information state" in system
+    assert "action-equivalent" in system
+    assert "unresolved even without an identified concrete defect" in system
+    assert "absence of a recognized defect is not evidence" in system
+    assert "both satisfaction and material violation remain compatible" in system
+    assert "could this observation remain substantially the same" in system
+    assert "does not by itself reach that obligation" in system
+    assert "do not mechanically check every requirement one by one" in system
+    assert "one observation can have joint reach over several obligations" in system
+    assert "ordinary patrol may remain loose amid unknowns" in system
+    assert "inability to measure does not shrink the information state" in system
+    assert "no specific defect identified" in system
+    assert "makes the public completion reference action-determined" in system
+    assert "no remembered defect" in continuation
+    assert "no residual decision gap" in continuation
+    assert "uncovered material part of the public reference" in continuation
+    assert "action-equivalent" in continuation
+    assert "what action-changing possibilities remain compatible" in view
+    assert "not required headings or a fixed form" in view
+    assert metadata["limit_characters"] == 4000
+    assert not (ws.private_root / "epistemic_state.json").exists()
+    assert not (ws.private_root / "decision_state.json").exists()
+    for task_name in ("fyne", "kitex", "ratatui", "sphinx", "newallstrings"):
+        assert task_name not in system + continuation + view.lower()
+
+
+def test_ader_v2_uses_only_working_note_and_existing_model_stage(tmp_path, monkeypatch):
     ws = workspace(tmp_path)
     ws.write_text("monitor/working.md", "Current decision\n- local recovery")
     client = provider({"monitor_dcec": True})
@@ -286,16 +319,16 @@ def test_discriminating_manifest_is_frozen_unexecuted_and_isolates_candidates():
     assert hashlib.sha256(runner.read_bytes().replace(b"\r\n", b"\n")).hexdigest() == manifest["runner_sha256"]
 
 
-M1_BASE = "746a695adac4325d6440941d384d543d1364fef9"
+ADER_V1_BASE = "16ddee55ead5f48ef955e5b76bbfae0f7e7698a5"
 
 
-def test_ader_has_exact_m1_parent_and_only_allowed_production_changes():
+def test_ader_v2_has_exact_v1_parent_and_only_allowed_production_changes():
     root = Path(__file__).resolve().parents[2]
     def git(*args):
         return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
     head = git("rev-parse", "HEAD")
-    assert head == M1_BASE or git("rev-parse", "HEAD^") == M1_BASE
-    changed = set(git("diff", "--name-only", M1_BASE).splitlines())
+    assert head == ADER_V1_BASE or git("rev-parse", "HEAD^") == ADER_V1_BASE
+    changed = set(git("diff", "--name-only", ADER_V1_BASE).splitlines())
     production = {p for p in changed if p.startswith("GenericAgent-main/monitor_agent_core/")}
     assert production == {
         "GenericAgent-main/monitor_agent_core/agent.py",
@@ -303,11 +336,11 @@ def test_ader_has_exact_m1_parent_and_only_allowed_production_changes():
     }
 
 
-def test_dcec_off_exact_provider_ready_equality_to_frozen_m1(tmp_path):
+def test_dcec_off_exact_provider_ready_equality_to_frozen_ader_v1(tmp_path):
     """Run each real assembly in a fresh interpreter; fake only the transport."""
     root = Path(__file__).resolve().parents[2]
-    base = Path(os.environ["ADER_M1_SOURCE"]).resolve()
-    assert subprocess.check_output(["git", "-C", str(base), "rev-parse", "HEAD"], text=True).strip() == M1_BASE
+    base = Path(os.environ["ADER_V1_SOURCE"]).resolve()
+    assert subprocess.check_output(["git", "-C", str(base), "rev-parse", "HEAD"], text=True).strip() == ADER_V1_BASE
     evidence = tmp_path / "evidence"
     private = tmp_path / "private"
     evidence.mkdir()
