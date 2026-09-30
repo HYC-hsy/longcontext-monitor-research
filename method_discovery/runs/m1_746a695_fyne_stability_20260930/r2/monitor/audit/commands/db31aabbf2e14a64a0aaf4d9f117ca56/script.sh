@@ -1,0 +1,1 @@
+grep -r "type.*App.*interface" /app/driver/desktop/*.go 2>&1 | head -20

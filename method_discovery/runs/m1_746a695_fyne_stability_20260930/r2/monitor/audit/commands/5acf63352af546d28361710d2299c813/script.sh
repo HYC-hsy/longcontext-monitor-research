@@ -1,0 +1,1 @@
+ls -la /app/widget/password*.go 2>&1

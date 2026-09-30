@@ -1,0 +1,1 @@
+grep -n "NewAllStrings\|func Chain" /app/data/validation/validators.go
