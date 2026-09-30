@@ -1,0 +1,64 @@
+RPC config initialization:
+/app/pkg/rpcinfo/tracer_test.go:62:		NewRPCConfig(),
+/app/pkg/rpcinfo/tracer_test.go:88:		NewRPCConfig(),
+/app/pkg/rpcinfo/stats_util_test.go:35:		NewRPCConfig(),
+/app/pkg/rpcinfo/mutable.go:48:	SetTransportProtocol(tp transport.Protocol) error
+/app/pkg/rpcinfo/mocks_test.go:37:	TransportProtocolFunc func() transport.Protocol
+/app/pkg/rpcinfo/mocks_test.go:86:func (m *MockRPCConfig) TransportProtocol() (r transport.Protocol) {
+/app/pkg/rpcinfo/interface.go:85:	TransportProtocol() transport.Protocol
+/app/pkg/rpcinfo/ctx_test.go:63:		rpcinfo.NewRPCConfig(),
+/app/pkg/rpcinfo/convert_test.go:119:	c1 := rpcinfo.NewRPCConfig()
+/app/pkg/rpcinfo/rpcconfig.go:166:func (r *rpcConfig) TransportProtocol() transport.Protocol {
+/app/pkg/rpcinfo/rpcconfig.go:171:func (r *rpcConfig) SetTransportProtocol(tp transport.Protocol) error {
+/app/pkg/rpcinfo/rpcconfig.go:235:// NewRPCConfig creates a default RPCConfig.
+/app/pkg/rpcinfo/rpcconfig.go:236:func NewRPCConfig() RPCConfig {
+/app/pkg/rpcinfo/rpcconfig_test.go:28:	c := rpcinfo.NewRPCConfig()
+/app/pkg/rpcinfo/rpcconfig_test.go:39:		c := rpcinfo.NewRPCConfig()
+/app/pkg/rpcinfo/rpcconfig_test.go:41:		test.Assert(t, c.TransportProtocol()&transport.TTHeader == transport.TTHeader, c.TransportProtocol())
+/app/pkg/rpcinfo/rpcconfig_test.go:44:		c := rpcinfo.NewRPCConfig()
+/app/pkg/rpcinfo/rpcconfig_test.go:46:		test.Assert(t, c.TransportProtocol()&transport.Framed == transport.Framed, c.TransportProtocol())
+/app/pkg/rpcinfo/rpcconfig_test.go:49:		c := rpcinfo.NewRPCConfig()
+/app/pkg/rpcinfo/rpcconfig_test.go:53:		test.Assert(t, c.TransportProtocol() == transport.PurePayload, c.TransportProtocol())
+/app/pkg/rpcinfo/rpcconfig_test.go:56:		c := rpcinfo.NewRPCConfig()
+/app/pkg/rpcinfo/rpcconfig_test.go:58:		test.Assert(t, c.TransportProtocol()&transport.TTHeaderFramed == transport.TTHeaderFramed, c.TransportProtocol())
+/app/pkg/rpcinfo/rpcconfig_test.go:61:		c := rpcinfo.NewRPCConfig()
+/app/pkg/rpcinfo/rpcconfig_test.go:63:		test.Assert(t, c.T
+
+
+Client Options struct/initialization:
+	remote.PutPayloadCode(serviceinfo.Thrift, thrift.NewThriftCodec())
+	remote.PutPayloadCode(serviceinfo.Protobuf, protobuf.NewProtobufCodec())
+}
+
+// Options is used to initialize a client.
+type Options struct {
+	Cli     *rpcinfo.EndpointBasicInfo
+	Svr     *rpcinfo.EndpointBasicInfo
+	Configs rpcinfo.RPCConfig
+	Locks   *ConfigLocks
+	Once    *configutil.OptionOnce
+--
+type Option struct {
+	F func(o *Options, di *utils.Slice)
+}
+
+// NewOptions creates a new option.
+func NewOptions(opts []Option) *Options {
+	o := &Options{
+		Cli:          &rpcinfo.EndpointBasicInfo{Tags: make(map[string]string)},
+		Svr:          &rpcinfo.EndpointBasicInfo{Tags: make(map[string]string)},
+		MetaHandlers: []remote.MetaHandler{transmeta.MetainfoClientHandler},
+		RemoteOpt:    newClientRemoteOption(),
+--
+		o.CloseCallbacks = append(o.CloseCallbacks, o.RetryContainer.Close)
+	}
+}
+
+// StreamXOptions define the client options
+type StreamXOptions struct {
+	RecvTimeout   time.Duration
+	StreamMWs     []streamx.StreamMiddleware
+	StreamRecvMWs []streamx.StreamRecvMiddleware
+	StreamSendMWs []streamx.StreamSendMiddleware
+}
+

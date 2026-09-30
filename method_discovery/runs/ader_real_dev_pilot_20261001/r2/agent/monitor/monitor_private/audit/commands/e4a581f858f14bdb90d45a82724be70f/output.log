@@ -1,0 +1,70 @@
+Git diff for rpcconfig.go (Framed/PurePayload):
+usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
+           [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]
+           [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--bare]
+           [--git-dir=<path>] [--work-tree=<path>] [--namespace=<name>]
+           [--super-prefix=<path>] [--config-env=<name>=<envvar>]
+           <command> [<args>]
+
+These are common Git commands used in various situations:
+
+start a working area (see also: git help tutorial)
+   clone     Clone a repository into a new directory
+   init      Create an empty Git repository or reinitialize an existing one
+
+work on the current change (see also: git help everyday)
+   add       Add file contents to the index
+   mv        Move or rename a file, a directory, or a symlink
+   restore   Restore working tree files
+   rm        Remove files from the working tree and from the index
+
+examine the history and state (see also: git help revisions)
+   bisect    Use binary search 
+
+
+rpcConfigPool initialization:
+	rpcConfigPool sync.Pool
+)
+
+// default values.
+var (
+	defaultRPCTimeout       = time.Duration(0)
+	defaultConnectTimeout   = time.Millisecond * 50
+	defaultReadWriteTimeout = time.Second * 5
+	defaultBufferSize       = 4096
+	defaultInteractionMode  = PingPong
+)
+--
+	rpcConfigPool.New = newRPCConfig
+}
+
+func newRPCConfig() interface{} {
+	c := &rpcConfig{}
+	c.initialize()
+	return c
+}
+
+// LockConfig sets the bits of readonly mask to prevent sequential modification on certain configs.
+func (r *rpcConfig) LockConfig(bits int) {
+--
+	r2 := rpcConfigPool.Get().(*rpcConfig)
+	*r2 = *r
+	return r2
+}
+
+func (r *rpcConfig) CopyFrom(from RPCConfig) {
+	f := from.(*rpcConfig)
+	*r = *f
+}
+
+func (r *rpcConfig) initialize() {
+--
+	rpcConfigPool.Put(r)
+}
+
+// NewRPCConfig creates a default RPCConfig.
+func NewRPCConfig() RPCConfig {
+	r := rpcConfigPool.Get().(*rpcConfig)
+	return r
+}
+
