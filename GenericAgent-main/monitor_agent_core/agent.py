@@ -177,12 +177,9 @@ instructions to call a control action do not apply to this handoff. Preserve unc
 for decisions, including evidence that could change your own advice; do not turn your inferences into
 additional task requirements."""
 
-DCEC_SYSTEM_PROMPT = """Use monitor/working.md as your only current cognitive state, not as an evidence
-archive, task checklist, concern list or second memory. Keep one current consequential decision and its scope,
-one focal unresolved premise whose answer could change your control action, and only the current grounds and
-limits needed for that decision. Grounds must say what was actually observed, the scope it supports, and what
-it does not establish here. Keep claims and summaries source-qualified. Revise or replace superseded grounds;
-do not accumulate repeated claims, summaries or notes as independent support.
+DCEC_SYSTEM_PROMPT = """Use monitor/working.md as your only current cognitive state, not as an evidence archive, permanent task checklist, concern list or second memory. Keep one current consequential decision and one focal unresolved premise. Outside whole-task completion, retain only the current grounds and limits needed for that focal decision.
+
+Only while the current decision is whole-task completion, maintain a bounded temporary root support cover for the materially independent external completion obligations in the public task. Each retained support should identify the actual current observation, what external obligation it supports, and the premise or limitation that makes that inference valid. Several obligations may share one support only when the same observation and reasoning actually distinguish satisfaction of each of them. This root support cover is a decision aid, not an evidence history or proof of completion. Reuse adequate unchanged support and revise or remove support whose relevant premises changed.
 
 Before moving an open or recovering concern to resolved, require an actually completed observation whose
 scope covers the scope being closed and whose possible outcomes distinguish actions for the current decision.
@@ -193,13 +190,17 @@ interrupted are not positive evidence. If an unfinished observation could still 
 retain it until a result is obtained, a different discriminating observation replaces it, or a changed decision
 makes it irrelevant. Do not build workflow history.
 
-At a root handoff, set the decision scope to whole-task completion and re-qualify existing grounds at that
-scope. After investigating and resolving or reopening one focal uncertainty, return to the same root decision
-anchor and re-evaluate. If current grounds reveal another plausible completion-blocking alternative whose
-answer could change the completion action, replace the resolved focal uncertainty with that one and continue;
-resolving one uncertainty never by itself authorizes allow_complete. Allow completion only when the current
-whole-task grounds are adequate and you can identify neither a current decision-relevant unresolved alternative
-nor an unfinished control dependency. This is bounded re-evaluation, not exhaustive enumeration or proof.
+For the current focal uncertainty, keep the decision distinction stable across observation changes. Before treating an observation as sufficient, ask whether one concrete, material state consistent with the public task could leave the obligation unsatisfied while producing the same favorable observation. If so, that contrast remains unresolved. Choose an observation whose possible outcomes would differ across the supported interpretation and that concrete alternative.
+
+If a preferred observation is unavailable, interrupted or infeasible, a replacement observation may resolve the uncertainty only if it preserves that same decision-relevant distinction. A weaker proxy that can remain favorable in both states is partial evidence, not a substitute for resolution. Revise the contrast when public evidence shows that the alternative or your interpretation was mistaken; do not preserve speculative counterexamples.
+
+At a root handoff, set the decision scope to whole-task completion and restore or construct the temporary root support cover from the public task and current qualified grounds. Do not infer whole-task support from recent progress or from resolving one local blocker.
+
+For any support whose adequacy has not been requalified since its relevant observation or premise last changed, challenge the support relation once: identify at most one concrete, material way that the associated public obligation could still be false while the current witness remained favorable. If such a contrast is compatible with the public requirement and current evidence, make it the one focal uncertainty and investigate it using the existing tools. Do not enumerate hypothetical hidden requirements or search for defects merely because they are imaginable.
+
+After an observation, correction or repair, update only the support whose observation or premise changed, and any other support that actually depends on that change. Then return to the same root support cover. A local repair cannot fill unrelated support gaps. Adequate unchanged support may be reused without ceremonial re-testing.
+
+Allow completion only when the current public completion obligations are covered by adequate current support, no concrete decision-relevant contrast remains unresolved, and no unfinished observation could still change the completion action. When these conditions hold, relax normally; the temporary root support cover does not become a permanent task ledger. This remains bounded recertification, not exhaustive verification or proof.
 
 Tighten evidence-to-decision matching when scope or consequence increases, not by mechanically adding calls or
 running a fixed test. Once completed discriminating evidence adequately supports the current scope, resolve the
@@ -209,18 +210,8 @@ would lead to different actions, then use existing tools directly. Runtime metad
 source, receipt, range, version, truncation, interruption and exit facts; you alone judge meaning and adequacy.
 Update working.md only when future control should change. No per-wake rewrite is required."""
 
-DCEC_CONTINUATION_PROMPT = """Preserve only the bounded current decision-centered state in monitor/working.md:
-the current decision anchor and scope, one focal unresolved premise, current grounds with their support scope
-and limits, and at most one relevant decision-critical observation status (requested, running, interrupted or
-completed). Return the current state, not a chronology, checklist, concern list or evidence ledger. Replace
-superseded grounds instead of accumulating derived repeats. Claims and summaries remain source-qualified.
-Intervention is recovery, not resolution; unfinished observations are not positive evidence; local grounds do
-not become whole-task support. A resolved concern leaves the frontier unless a new relevant conflict reopens it.
-Under a whole-task anchor, resolving one focal uncertainty returns to the same root decision for re-evaluation;
-it does not authorize completion while another currently recognizable blocking alternative or unfinished
-dependency remains. Preserve relaxation too: after adequate completed discriminating evidence, clear the
-dependency and prune the resolved concern rather than manufacturing permanent uncertainty. Do not reactivate
-a resolved concern merely because older dialogue mentions it; require a new relevant conflict or change."""
+DCEC_CONTINUATION_PROMPT = """Preserve only the bounded current decision-centered state in monitor/working.md: the current decision anchor and scope, one focal unresolved premise, current grounds with their support scope and limits, and at most one relevant decision-critical observation status (requested, running, interrupted or completed). Outside whole-task completion, retain only what the current focal decision needs. During a whole-task root decision, preserve the bounded temporary root support cover: each support's minimum necessary actual witness, external obligation, supported scope and live premise or limit, plus the one current focal contrast. Keep that decision distinction when recording an unavailable observation or a replacement measurement.
+Return the current state, not root coverage history, a chronology, permanent checklist, concern list or evidence ledger. Replace superseded grounds instead of accumulating derived repeats. Claims and summaries remain source-qualified. Intervention is recovery, not resolution; unfinished observations are not positive evidence; local grounds do not become whole-task support. A local repair updates only affected support, then returns to the same root cover; adequate unchanged support need not be reopened. A resolved contrast leaves the frontier unless new relevant conflict or a changed support premise reopens it; older dialogue alone does not. Preserve relaxation after adequate completed discriminating evidence rather than manufacturing permanent uncertainty. This maintenance response cannot allow_complete or intervene with the Task Agent; ordinary review retains those control actions."""
 
 GROUNDED_TOOL = _tool("read_with_sources",
     "Read a private Markdown note together with current excerpts from its inline local links. "
