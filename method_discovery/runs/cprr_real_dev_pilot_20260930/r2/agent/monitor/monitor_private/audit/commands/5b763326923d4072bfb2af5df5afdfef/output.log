@@ -1,0 +1,13 @@
+	if fonts, ok := raw["Fonts"].(map[string]interface{}); ok {
+		for styleName, value := range fonts {
+			if uriStr, ok := value.(string); ok {
+				if res, err := fyne.LoadResourceFromURI(storage.NewURI(uriStr)); err == nil {
+					var style fyne.TextStyle
+					switch styleName {
+---
+	if icons, ok := raw["Icons"].(map[string]interface{}); ok {
+		for name, value := range icons {
+			if uriStr, ok := value.(string); ok {
+				if res, err := fyne.LoadResourceFromURI(storage.NewURI(uriStr)); err == nil {
+					jt.icons[fyne.ThemeIconName(name)] = res
+				}

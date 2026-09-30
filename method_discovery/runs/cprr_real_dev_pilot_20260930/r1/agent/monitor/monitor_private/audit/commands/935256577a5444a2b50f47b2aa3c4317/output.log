@@ -1,0 +1,24 @@
+-rw-r--r-- 1 root root 514 Sep 30 08:26 /app/data/validation/all.go
+5:// NewAllStrings creates a new validator combinator that runs all provided validators in order.
+9:func NewAllStrings(validators ...fyne.StringValidator) fyne.StringValidator {
+package validation
+
+import "fyne.io/fyne/v2"
+
+// NewAllStrings creates a new validator combinator that runs all provided validators in order.
+// It returns the first error encountered, or nil if all validators pass.
+//
+// Since: 2.2
+func NewAllStrings(validators ...fyne.StringValidator) fyne.StringValidator {
+	return func(text string) error {
+		for _, validator := range validators {
+			if validator == nil {
+				continue
+			}
+			if err := validator(text); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}

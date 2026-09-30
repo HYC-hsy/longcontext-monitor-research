@@ -1,0 +1,29 @@
+=== Target verification ===
+Target 1: Streaming types
+-rw-r--r-- 1 root root 4426 Sep 30 09:12 /app/pkg/streaming/factories.go
+-rw-r--r-- 1 root root 4472 Sep 30 09:12 /app/pkg/streaming/types.go
+
+Target 2: Endpoint packages
+/app/pkg/endpoint/cep
+/app/pkg/endpoint/deprecated.go
+/app/pkg/endpoint/sep
+
+Target 3: Transport protocol
+	TTHeader    Protocol = 2
+	TTHeaderStreaming Protocol = 64  // Dedicated flag for TTHeader streaming
+
+Target 4: Thrift fallback
+		// For Basic codec, fall back to apache if available
+		if typecodec.Apache {
+			return apacheMarshalData(data)
+		}
+
+Target 5: Client options
+/app/client/option_stream.go
+/app/client/option_ttstream.go
+/app/client/option_unary.go
+
+Target 6: gRPC diagnostics
+/app/pkg/remote/trans/nphttp2/grpc/grpcframe/frame_reader.go:148:	fh, err := fr.readAndCheckFrameHeader()
+/app/pkg/remote/trans/nphttp2/grpc/grpcframe/frame_reader.go:373:// readAndCheckFrameHeader reads and validates a frame header from the underlying reader.
+/app/pkg/remote/trans/nphttp2/grpc/grpcframe/frame_reader.go:375:func (fr *Framer) readAndCheckFrameHeader() (http2.FrameHeader, error) {

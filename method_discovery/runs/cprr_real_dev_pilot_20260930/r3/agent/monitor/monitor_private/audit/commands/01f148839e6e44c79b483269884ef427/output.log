@@ -1,0 +1,26 @@
+	if c.IsSet(FastWrite) && typecodec.FastCodec {
+		return fastMarshalData(data)
+	}
+	if typecodec.Apache {
+		return apacheMarshalData(data)
+	}
+	if c.CodecType != Basic {
+		// try fallback to frugal or fastcodec
+		// case: typecodec.Frugal=false but typecodec.FastCodec=true
+		if typecodec.FastCodec {
+			return fastMarshalData(data)
+		}
+		// case: typecodec.FastCodec=false but typecodec.Frugal=true
+		if typecodec.Frugal {
+			return frugalMarshalData(data)
+		}
+	} else {
+		// For Basic codec, fall back to apache if available
+		if typecodec.Apache {
+			return apacheMarshalData(data)
+		}
+	}
+	return nil, errEncodeMismatchMsgType
+}
+
+func unmarshalThriftException(in bufiox.Reader) error {

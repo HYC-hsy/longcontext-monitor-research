@@ -1,0 +1,38 @@
+8:type Container struct {
+9-	size     Size     // The current size of the Container
+10-	position Position // The current position of the Container
+11-	Hidden   bool     // Is this Container hidden
+12-
+13-	Layout  Layout         // The Layout algorithm for arranging child CanvasObjects
+55:func (c *Container) Add(add CanvasObject) {
+56-	c.Objects = append(c.Objects, add)
+57-	c.layout()
+58-}
+59-
+60-// AddObject adds another CanvasObject to the set this Container holds.
+61-//
+62-// Deprecated: Use replacement Add() function
+63:func (c *Container) AddObject(o CanvasObject) {
+64-	c.Add(o)
+65-}
+66-
+67-// MinSize calculates the minimum size of a Container.
+68-// This is delegated to the Layout, if specified, otherwise it will mimic MaxLayout.
+69-func (c *Container) MinSize() Size {
+70-	if c.Layout != nil {
+71-		return c.Layout.MinSize(c.Objects)
+72-	}
+73-
+-rw-rw-r-- 1 root root 6009 Apr 16 11:10 /app/widget/hyperlink.go
+18:type Hyperlink struct {
+19-	BaseWidget
+20-	Text      string
+21-	URL       *url.URL
+22-	Alignment fyne.TextAlign // The alignment of the Text
+23-	Wrapping  fyne.TextWrap  // The wrapping of the Text
+24-	TextStyle fyne.TextStyle // The style of the hyperlink text
+25-
+26-	focused, hovered bool
+27-	provider         *RichText
+28-}
+-rw-rw-r-- 1 root root 46442 Apr 16 11:10 /app/widget/entry.go

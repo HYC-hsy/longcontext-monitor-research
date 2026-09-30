@@ -1,0 +1,25 @@
+		// For Basic codec, fall back to apache if available
+		if typecodec.Apache {
+			return apacheMarshalData(data)
+		}
+	}
+	return nil, errEncodeMismatchMsgType
+}
+
+func unmarshalThriftException(in bufiox.Reader) error {
+	d := thrift.NewSkipDecoder(in)
+	defer d.Release()
+	b, err := d.Next(thrift.STRUCT)
+	if err != nil {
+		return err
+	}
+	ex := thrift.NewApplicationException(thrift.UNKNOWN_APPLICATION_EXCEPTION, "")
+--
+		// For Basic codec, fall back to available alternatives
+		if typecodec.Apache {
+			return apacheUnmarshal(trans, data)
+		}
+		// Try FastCodec/Frugal fallback if dataLen is deterministic
+		if dataLenOK {
+			if typecodec.FastCodec {
+				return fastUnmarshal(trans, data, dataLen)

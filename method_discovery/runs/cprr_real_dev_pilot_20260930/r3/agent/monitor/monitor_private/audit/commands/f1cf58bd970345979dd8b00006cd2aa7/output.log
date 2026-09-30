@@ -1,0 +1,44 @@
+diff --git a/pkg/remote/codec/thrift/thrift.go b/pkg/remote/codec/thrift/thrift.go
+index 96d9633..2885648 100644
+--- a/pkg/remote/codec/thrift/thrift.go
++++ b/pkg/remote/codec/thrift/thrift.go
+@@ -163,6 +163,11 @@ func (c thriftCodec) Marshal(ctx context.Context, message remote.Message, out re
+ 		if typecodec.Frugal {
+ 			return frugalMarshal(out, methodName, msgType, seqID, data)
+ 		}
++	} else {
++		// For Basic codec, fall back to apache if available
++		if typecodec.Apache {
++			return apacheMarshal(out, ctx, methodName, msgType, seqID, data)
++		}
+ 	}
+ 	return errEncodeMismatchMsgType
+ }
+diff --git a/pkg/remote/codec/thrift/thrift_data.go b/pkg/remote/codec/thrift/thrift_data.go
+index 2c871fe..7aabf0f 100644
+--- a/pkg/remote/codec/thrift/thrift_data.go
++++ b/pkg/remote/codec/thrift/thrift_data.go
+@@ -73,6 +73,11 @@ func (c thriftCodec) marshalThriftData(ctx context.Context, data interface{}) ([
+ 		if typecodec.Frugal {
+ 			return frugalMarshalData(data)
+ 		}
++	} else {
++		// For Basic codec, fall back to apache if available
++		if typecodec.Apache {
++			return apacheMarshalData(data)
++		}
+ 	}
+ 	return nil, errEncodeMismatchMsgType
+ }
+@@ -128,6 +133,11 @@ func (c thriftCodec) unmarshalThriftData(trans bufiox.Reader, data interface{},
+ 		if typecodec.Frugal {
+ 			return frugalUnmarshal(trans, data, dataLen)
+ 		}
++	} else if c.CodecType == Basic {
++		// For Basic codec, fall back to apache if available
++		if typecodec.Apache {
++			return apacheUnmarshal(trans, data)
++		}
+ 	}
+ 	return errDecodeMismatchMsgType
+ }
