@@ -2,6 +2,7 @@
 
 import json
 import hashlib
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -50,11 +51,11 @@ def test_dcec_rejects_historical_semantic_candidates(tmp_path, setting):
         MonitorAgent(client, workspace(tmp_path))
 
 
-def test_dcec_rejects_independent_c_and_invalid_bound(tmp_path):
+def test_dcec_accepts_root_scoped_independent_c_and_rejects_invalid_bound(tmp_path):
     client = SequenceClient([])
     client.config = {"monitor_dcec": True}
-    with pytest.raises(ValueError, match="monitor_independent_c"):
-        MonitorAgent(client, workspace(tmp_path / "child"), independent_check=lambda *_: None)
+    monitor = MonitorAgent(client, workspace(tmp_path / "child"), independent_check=lambda *_: None)
+    assert monitor.dcec_enabled and monitor.independent_check is not None
     client = SequenceClient([])
     client.config = {"monitor_dcec": True, "monitor_dcec_working_chars": 9000}
     with pytest.raises(ValueError, match="between 512 and 8000"):
@@ -267,9 +268,18 @@ def test_discriminating_manifest_is_frozen_unexecuted_and_isolates_candidates():
     assert manifest["conditions"]["dcec_v0"]["GA_MONITOR_DCEC"] == "1"
     assert set(manifest["historical_candidate_switches"].values()) == {"0"}
     assert manifest["shared_contract"]["dcec_additional_model_calls"] == 0
-    fixture = Path(__file__).resolve().parents[2] / manifest["fixture_spec"]
-    assert hashlib.sha256(fixture.read_bytes()).hexdigest() == manifest["fixture_spec_sha256"]
+    root = Path(__file__).resolve().parents[2]
+    # The frozen manifest hashes Git bytes; a Windows checkout may translate LF to CRLF.
+    fixture_bytes = subprocess.check_output([
+        "git", "-C", str(root), "show",
+        "746a695adac4325d6440941d384d543d1364fef9:" + manifest["fixture_spec"],
+    ])
+    assert hashlib.sha256(fixture_bytes).hexdigest() == manifest["fixture_spec_sha256"]
+    fixture = root / manifest["fixture_spec"]
     assert json.loads(fixture.read_text(encoding="utf-8"))["status"] == "frozen_executable_spec"
     assert manifest["implementation_commit"] == "1cd7048c5742ca7415937ec5142cc28fd2bcaf22"
-    runner = Path(__file__).resolve().parents[2] / manifest["runner_path"]
-    assert hashlib.sha256(runner.read_bytes()).hexdigest() == manifest["runner_sha256"]
+    runner_bytes = subprocess.check_output([
+        "git", "-C", str(root), "show",
+        "746a695adac4325d6440941d384d543d1364fef9:" + manifest["runner_path"],
+    ])
+    assert hashlib.sha256(runner_bytes).hexdigest() == manifest["runner_sha256"]

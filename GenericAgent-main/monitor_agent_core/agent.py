@@ -209,6 +209,27 @@ would lead to different actions, then use existing tools directly. Runtime metad
 source, receipt, range, version, truncation, interruption and exit facts; you alone judge meaning and adequacy.
 Update working.md only when future control should change. No per-wake rewrite is required."""
 
+RISC_ROOT_PROMPT = """At a pending whole-task completion, distinguish direct observation from an
+interpretation of what that observation establishes. If completion would otherwise rely materially on an
+evidence-to-requirement inference whose adequacy is still interpretation-dependent, use at most one
+independent_check in this review for the support relation whose failure would most change the completion
+action and whose current basis is least direct. Do not delegate a question that existing direct evidence
+already settles.
+
+Ask the fresh verifier whether the listed task evidence establishes one explicit public obligation in the
+stated scope. Give only the task/ evidence paths needed for that local question. The verifier does not see
+your working state or parent history and cannot approve, intervene or control the task.
+
+Treat its result as scoped, defeasible evidence rather than authority. contradicted reopens or challenges
+the current support. unresolved, unfinished or unavailable independent verification supplies no positive
+support for that inference; obtain another discriminating observation or retain the uncertainty.
+supported_in_scope supports only the local obligation actually checked and never whole-task completion by
+itself. If public task evidence shows the child was mistaken, revise its conclusion explicitly rather than
+ignoring it because it conflicts with your prior belief.
+
+Use independent verification only when its answer can change this root decision; it is not a ceremonial
+completion step and not a substitute for ordinary direct observation."""
+
 DCEC_CONTINUATION_PROMPT = """Preserve only the bounded current decision-centered state in monitor/working.md:
 the current decision anchor and scope, one focal unresolved premise, current grounds with their support scope
 and limits, and at most one relevant decision-critical observation status (requested, running, interrupted or
@@ -282,6 +303,8 @@ class MonitorAgent:
         self._intervened_generation = None
         self.stop_event = stop_event if stop_event is not None else threading.Event()
         self.independent_check = independent_check
+        self._risc_root_review = False
+        self._risc_probe_used = False
         self.analysis = AnalysisSessions(workspace.private_root, self.stop_event)
         self.review_id = None
         self._progress_warning = False
@@ -349,7 +372,6 @@ class MonitorAgent:
                 'monitor_root_decision_contract': self.root_decision_contract,
                 'monitor_root_simple_check': self.root_simple_check,
                 'monitor_task_model': task_model,
-                'monitor_independent_c': independent_check is not None,
             }
             enabled = sorted(name for name, value in incompatible.items() if value)
             if enabled:
@@ -614,6 +636,15 @@ class MonitorAgent:
             elif name == "independent_check":
                 if self.independent_check is None:
                     raise ValueError("independent verification is disabled")
+                if self.dcec_enabled:
+                    if not self._risc_root_review or not self.completion_pending:
+                        raise ValueError("independent_check is available only at a pending root completion")
+                    if self.completion_state is not None:
+                        current = self.completion_state()
+                        if (not current or current["generation"] == self._intervened_generation):
+                            raise ValueError("The pending root completion is no longer current")
+                    if self._risc_probe_used:
+                        raise ValueError("independent_check has already been used in this root review")
                 question = str(arguments.get("question", "")).strip()
                 paths = arguments.get("paths")
                 if not question or not isinstance(paths, list) or not paths:
@@ -621,6 +652,8 @@ class MonitorAgent:
                 if len(paths) > 8 or any(not isinstance(path, str) or not path.startswith("task/")
                                          for path in paths):
                     raise ValueError("independent evidence paths must be task/ paths")
+                if self.dcec_enabled:
+                    self._risc_probe_used = True
                 data = self.independent_check(question, tuple(paths))
             elif name == "wait":
                 pending = self.completion_pending
@@ -723,6 +756,8 @@ class MonitorAgent:
         self._progress('review_started', completion_pending=bool(completion_pending))
         before = self.client.history_measure()
         self.completion_pending = bool(completion_pending)
+        self._risc_root_review = bool(self.dcec_enabled and completion_pending)
+        self._risc_probe_used = False
         self._sent_messages.clear()
         action = None
         try:
@@ -750,8 +785,10 @@ class MonitorAgent:
                         "After an intervention that completion proposal is no longer pending.")
             system = self.system_prompt + "\n\n" + mode
             tools = MONITOR_TOOLS
-            if self.independent_check is not None:
+            if self.independent_check is not None and (not self.dcec_enabled or self._risc_root_review):
                 tools = [*tools, INDEPENDENT_CHECK_TOOL]
+                if self.dcec_enabled:
+                    system += "\n\n" + RISC_ROOT_PROMPT
             if self.decision_context is not None:
                 system += (
                     '\n\nmonitor/overview.md is a refreshed file entry to ongoing work and original materials, '

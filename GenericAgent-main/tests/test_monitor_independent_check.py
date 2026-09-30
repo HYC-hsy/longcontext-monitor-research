@@ -4,6 +4,7 @@ from monitor_agent_core.agent import INDEPENDENT_CHECK_TOOL, MonitorAgent
 def _monitor(callback):
     monitor = object.__new__(MonitorAgent)
     monitor.independent_check = callback
+    monitor.dcec_enabled = False
     return monitor
 
 
