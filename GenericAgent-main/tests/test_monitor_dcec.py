@@ -2,6 +2,9 @@
 
 import json
 import hashlib
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -80,19 +83,26 @@ def test_bounded_view_is_single_state_and_reports_transport_cost(tmp_path):
     assert not (ws.private_root / "decision_state.json").exists()
 
 
-def test_v1_contract_is_scope_bound_and_root_re_evaluates_before_completion(tmp_path):
+def test_ader_contract_regulates_decision_evidence_and_root_completion(tmp_path):
     ws = workspace(tmp_path)
     ws.write_text("monitor/working.md", "Current decision\n- whole-task completion")
     view, _metadata = dcec_working_context(ws)
     combined = "\n".join((DCEC_SYSTEM_PROMPT, DCEC_CONTINUATION_PROMPT, view)).lower()
     normalized = " ".join(combined.split())
 
-    assert "local evidence can resolve only local scope" in normalized
+    assert "evidential reference" in normalized
+    assert "actual evidence reach" in normalized
+    assert "residual decision gap" in normalized
+    assert "change the measurement scheme" in normalized
+    assert "a new observation adds control-relevant information only if it reduces the gap" in normalized
+    assert "difficulty or infeasibility changes the feasible control action or task-side outcome" in normalized
     assert "requested, running and interrupted are not positive evidence" in normalized
-    assert "return to the same root decision anchor and re-evaluate" in normalized
-    assert "resolving one uncertainty never by itself authorizes allow_complete" in normalized
-    assert "another currently recognizable completion-blocking alternative" in normalized
+    assert "return to the same root decision" in normalized
+    assert "a local repair alone never authorizes allow_complete" in normalized
+    assert "immediately recondition the evidential reference" in normalized
     assert "clear the dependency, prune superseded grounds and relax" in normalized
+    assert "task checklist" in normalized
+    assert "at most one focal" in normalized
 
 
 def test_v1_uses_only_working_note_and_existing_model_stage(tmp_path, monkeypatch):
@@ -268,8 +278,154 @@ def test_discriminating_manifest_is_frozen_unexecuted_and_isolates_candidates():
     assert set(manifest["historical_candidate_switches"].values()) == {"0"}
     assert manifest["shared_contract"]["dcec_additional_model_calls"] == 0
     fixture = Path(__file__).resolve().parents[2] / manifest["fixture_spec"]
-    assert hashlib.sha256(fixture.read_bytes()).hexdigest() == manifest["fixture_spec_sha256"]
+    # Git's LF blob is authoritative; this Windows worktree may materialize CRLF.
+    assert hashlib.sha256(fixture.read_bytes().replace(b"\r\n", b"\n")).hexdigest() == manifest["fixture_spec_sha256"]
     assert json.loads(fixture.read_text(encoding="utf-8"))["status"] == "frozen_executable_spec"
     assert manifest["implementation_commit"] == "1cd7048c5742ca7415937ec5142cc28fd2bcaf22"
     runner = Path(__file__).resolve().parents[2] / manifest["runner_path"]
-    assert hashlib.sha256(runner.read_bytes()).hexdigest() == manifest["runner_sha256"]
+    assert hashlib.sha256(runner.read_bytes().replace(b"\r\n", b"\n")).hexdigest() == manifest["runner_sha256"]
+
+
+M1_BASE = "746a695adac4325d6440941d384d543d1364fef9"
+
+
+def test_ader_has_exact_m1_parent_and_only_allowed_production_changes():
+    root = Path(__file__).resolve().parents[2]
+    def git(*args):
+        return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
+    head = git("rev-parse", "HEAD")
+    assert head == M1_BASE or git("rev-parse", "HEAD^") == M1_BASE
+    changed = set(git("diff", "--name-only", M1_BASE).splitlines())
+    production = {p for p in changed if p.startswith("GenericAgent-main/monitor_agent_core/")}
+    assert production == {
+        "GenericAgent-main/monitor_agent_core/agent.py",
+        "GenericAgent-main/monitor_agent_core/working_context.py",
+    }
+
+
+def test_dcec_off_exact_provider_ready_equality_to_frozen_m1(tmp_path):
+    """Run each real assembly in a fresh interpreter; fake only the transport."""
+    root = Path(__file__).resolve().parents[2]
+    base = Path(os.environ["ADER_M1_SOURCE"]).resolve()
+    assert subprocess.check_output(["git", "-C", str(base), "rev-parse", "HEAD"], text=True).strip() == M1_BASE
+    evidence = tmp_path / "evidence"
+    private = tmp_path / "private"
+    evidence.mkdir()
+    (evidence / "original_task.txt").write_text("A neutral public task.\n", encoding="utf-8")
+    script = """
+import json, sys
+from monitor_agent_core.agent import MonitorAgent
+from monitor_agent_core.provider import MonitorProviderClient
+from monitor_agent_core.workspace import MonitorWorkspace
+client = MonitorProviderClient('anthropic', {
+    'apikey': 'virtual-test', 'apibase': 'https://offline.invalid',
+    'model': 'claude-test', 'max_retries': 0, 'monitor_dcec': False})
+monitor = MonitorAgent(client, MonitorWorkspace(sys.argv[1], sys.argv[2]))
+def fake(tools):
+    print(json.dumps(client.assembled_request_snapshot(tools), sort_keys=True))
+    return ([{'type': 'tool_use', 'id': 'wait-1', 'name': 'wait',
+              'input': {'after_turns': 1}}], {})
+client._request_once = fake
+assert monitor.review('Ordinary synthetic wake.').kind == 'wait'
+"""
+    def capture(source):
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(source / "GenericAgent-main")
+        out = subprocess.check_output([sys.executable, "-c", script, str(evidence), str(private)],
+                                      env=env, cwd=str(source / "GenericAgent-main"), text=True)
+        payload = json.loads(out.strip().splitlines()[-1])
+        # The only non-deterministic request identity is generated per review.
+        payload["review_id"] = "<review-id>"
+        return payload
+    assert capture(base) == capture(root)
+
+
+def test_ader_ordinary_and_pending_root_requests_keep_native_tools(tmp_path, monkeypatch):
+    for pending in (False, True):
+        ws = workspace(tmp_path / str(pending))
+        ws.write_text("monitor/working.md", "Current decision: inspect public evidence.")
+        client = provider({"monitor_dcec": True})
+        monitor = MonitorAgent(client, ws)
+        snapshots = []
+        if pending:
+            monitor.completion_state = lambda: {"generation": 1, "request_id": "completion-1", "cursor": 3}
+        def fake(tools):
+            snapshots.append(client.assembled_request_snapshot(tools))
+            name = "allow_complete" if pending else "wait"
+            args = {} if pending else {"after_turns": 1}
+            return ([{"type": "tool_use", "id": "control", "name": name, "input": args}], {})
+        monkeypatch.setattr(client, "_request_once", fake)
+        assert monitor.review("Synthetic wake", completion_pending=pending).kind == (
+            "allow_complete" if pending else "wait")
+        assert client.complete_calls == 1
+        request = snapshots[0]
+        assert "evidential reference" in request["system"]
+        assert "residual decision gap" in request["system"]
+        assert [tool["function"]["name"] for tool in request["tools"]] == [
+            "file_read", "file_write", "file_patch", "code_run", "wait", "intervene", "allow_complete"]
+        assert "independent_check" not in json.dumps(request)
+        assert request["root_handoff"] == (
+            {"generation": 1, "request_id": "completion-1", "cursor": 3} if pending else None)
+        assert "<dcec_working_state>" in json.dumps(request)
+
+
+def test_ader_mid_review_completion_reconditions_next_real_request(tmp_path, monkeypatch):
+    ws = workspace(tmp_path)
+    ws.write_text("monitor/working.md", "Current decision: local recovery; direct observation pending.")
+    client = provider({"monitor_dcec": True})
+    monitor = MonitorAgent(client, ws)
+    state = {"pending": None}
+    monitor.completion_state = lambda: state["pending"]
+    snapshots = []
+    def fake(tools):
+        snapshots.append(client.assembled_request_snapshot(tools))
+        if len(snapshots) == 1:
+            state["pending"] = {"generation": 2, "request_id": "completion-2", "cursor": 7}
+            return ([{"type": "tool_use", "id": "read-1", "name": "file_read",
+                      "input": {"path": "task/original_task.txt"}}], {})
+        return ([{"type": "tool_use", "id": "approval", "name": "allow_complete", "input": {}}], {})
+    monkeypatch.setattr(client, "_request_once", fake)
+    action = monitor.review("Ordinary follow wake", completion_pending=False)
+    assert action.kind == "allow_complete" and action.payload["request_id"] == "completion-2"
+    assert client.complete_calls == len(snapshots) == 2
+    assert snapshots[0]["root_handoff"] is None
+    assert snapshots[1]["root_handoff"] == state["pending"]
+    assert "Runtime update: the Task Agent is waiting" in json.dumps(snapshots[1]["messages"])
+    assert "immediately recondition the evidential reference" in snapshots[1]["system"]
+    assert "local recovery adequacy is not whole-task adequacy" in snapshots[1]["system"]
+    assert snapshots[0]["tools"] == snapshots[1]["tools"]
+    assert "independent_check" not in json.dumps(snapshots[1])
+
+
+def test_ader_continuation_and_view_are_semantic_not_parser(tmp_path):
+    ws = workspace(tmp_path)
+    note = "Decision: local correction. Witness: source range. Gap: result not yet returned."
+    ws.write_text("monitor/working.md", note)
+    view, metadata = dcec_working_context(ws)
+    assert note in view and metadata["limit_characters"] == 4000
+    assert "not required headings or a fixed form" in view
+    assert "actual evidence reach" in view
+    assert "unavailable" in view
+    assert "evidential reference" in DCEC_CONTINUATION_PROMPT
+    assert "actual evidence reach" in DCEC_CONTINUATION_PROMPT
+    assert "residual decision gap" in DCEC_CONTINUATION_PROMPT
+    assert "prune the resolved" in DCEC_CONTINUATION_PROMPT
+    assert not (ws.private_root / "decision_state.json").exists()
+
+
+def test_ader_keeps_m1_intervention_and_completion_identity_boundary(tmp_path):
+    client = provider({"monitor_dcec": True})
+    monitor = MonitorAgent(client, workspace(tmp_path))
+    state = {"current": {"generation": 1, "request_id": "completion-1", "cursor": 5}}
+    monitor.completion_state = lambda: state["current"]
+    monitor.intervention_callback = lambda message: {"delivered": message}
+    monitor._refresh_completion()
+    sent = monitor.dispatch("intervene", {"message": "A public requirement is still open."})
+    assert sent.data["status"] == "submitted"
+    stale = monitor.dispatch("allow_complete", {})
+    assert stale.data["status"] == "error"
+    state["current"] = {"generation": 2, "request_id": "completion-2", "cursor": 9}
+    monitor._refresh_completion()
+    current = monitor.dispatch("allow_complete", {})
+    assert current.action.kind == "allow_complete"
+    assert current.action.payload == {"request_id": "completion-2"}

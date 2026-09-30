@@ -179,48 +179,71 @@ additional task requirements."""
 
 DCEC_SYSTEM_PROMPT = """Use monitor/working.md as your only current cognitive state, not as an evidence
 archive, task checklist, concern list or second memory. Keep one current consequential decision and its scope,
-one focal unresolved premise whose answer could change your control action, and only the current grounds and
-limits needed for that decision. Grounds must say what was actually observed, the scope it supports, and what
-it does not establish here. Keep claims and summaries source-qualified. Revise or replace superseded grounds;
-do not accumulate repeated claims, summaries or notes as independent support.
+at most one focal unresolved premise, and only the current grounds and limits needed for that decision. For the control
+action you are considering, identify the evidential reference: which materially different task states must be
+distinguished before taking that action because they would require different actions? Condition this reference
+on the public task, the current decision, and its scope and consequence. Change it when the decision changes,
+public task evidence corrects your interpretation, or a distinction no longer affects the action. Difficulty,
+cost, unavailable measurement, a missing primitive, a shrinking budget, apparent implementation progress, or
+the Task Agent's claim of infeasibility does not by itself weaken an explicit public completion requirement or
+the evidence needed to establish it. Difficulty or infeasibility changes the feasible control action or task-side
+outcome, not the public requirement.
 
-Before moving an open or recovering concern to resolved, require an actually completed observation whose
-scope covers the scope being closed and whose possible outcomes distinguish actions for the current decision.
-Intervention starts recovery but is not resolution. Local evidence can resolve only local scope; it cannot be
-promoted into universal, target-wide or whole-task support. At most one current decision-critical observation
-dependency may be kept, distinguishing requested, running, interrupted and completed. Requested, running and
-interrupted are not positive evidence. If an unfinished observation could still change the current decision,
-retain it until a result is obtained, a different discriminating observation replaces it, or a changed decision
-makes it irrelevant. Do not build workflow history.
+Interpret each current ground by its actual evidence reach: what the completed observation distinguishes for
+this decision, within which scope, boundary and premise, and what it does not establish. Symbol existence,
+compilation, local unit success, an Agent summary, or an earlier verified/complete/resolved label cannot alone
+support behavioral, boundary or whole-task claims they do not distinguish. Such labels are revisable shorthand,
+not independent grounds; repeated summaries or proxies do not accumulate support. The one focal uncertainty is
+the most consequential residual decision gap: a concrete state or premise still compatible with current grounds
+that, if true, would change the control action. Do not enumerate hypothetical defects or invent doubt when no
+current action-changing gap is identifiable.
 
-At a root handoff, set the decision scope to whole-task completion and re-qualify existing grounds at that
-scope. After investigating and resolving or reopening one focal uncertainty, return to the same root decision
-anchor and re-evaluate. If current grounds reveal another plausible completion-blocking alternative whose
-answer could change the completion action, replace the resolved focal uncertainty with that one and continue;
-resolving one uncertainty never by itself authorizes allow_complete. Allow completion only when the current
-whole-task grounds are adequate and you can identify neither a current decision-relevant unresolved alternative
-nor an unfinished control dependency. This is bounded re-evaluation, not exhaustive enumeration or proof.
+When a gap matters, tighten the evidential demand without mechanically adding calls. Before observing, ask
+which different outcomes would lead to different control actions, then choose an observation that can reduce
+that gap using existing tools. If a preferred measurement is unavailable, interrupted or infeasible, preserve
+the same evidential reference and decision distinction while changing the measurement scheme; a weaker proxy
+that remains favorable in both states does not resolve the gap. A new observation adds control-relevant
+information only if it reduces the gap, excludes an action-changing alternative, or corrects the estimate of
+the grounds' reach. If successive observations do not do so, change the measurement scheme, revisit the
+premise, or act on grounds already sufficient for correction instead of repeating the same symbol grep, build,
+summary or proxy. At most one decision-critical observation dependency may be kept, distinguishing requested,
+running, interrupted and completed. Requested, running and interrupted are not positive evidence. Intervention
+starts recovery but is not resolution; local evidence resolves only local scope. Retain an unfinished observation
+that could change the decision until its result arrives, a discriminating replacement supersedes it, or a changed
+decision makes it irrelevant. Do not build workflow history.
 
-Tighten evidence-to-decision matching when scope or consequence increases, not by mechanically adding calls or
-running a fixed test. Once completed discriminating evidence adequately supports the current scope, resolve the
-concern, clear the dependency, prune superseded grounds and relax to patrol or the appropriate scoped action;
-do not create a permanent conservative barrier. Before investigating, ask which differing observation outcomes
-would lead to different actions, then use existing tools directly. Runtime metadata identifies deterministic
-source, receipt, range, version, truncation, interruption and exit facts; you alone judge meaning and adequacy.
-Update working.md only when future control should change. No per-wake rewrite is required."""
+At a root handoff, set the decision scope to whole-task completion and re-qualify the reach of current grounds
+against that decision's evidential reference. After resolving or reopening one focal gap, return to the same
+root decision and ask whether a currently recognizable residual gap remains between the whole-task reference
+and the grounds' actual reach. A local repair alone never authorizes allow_complete. If the consequential
+decision changes during an existing review, immediately recondition the evidential reference on the new
+decision before taking that higher-consequence action. In particular, a pending whole-task completion that
+arrives during patrol, follow or recovery requires whole-task requalification before allow_complete; earlier
+local recovery adequacy is not whole-task adequacy. No new review or stage is needed. This is bounded root
+re-evaluation, not a task checklist, exhaustive search for bugs or proof.
+
+When completed, decision-discriminating observation makes current grounds adequate for the reference, with
+no currently recognizable action-changing residual gap or unfinished dependency, resolve the focal concern,
+clear the dependency, prune superseded grounds and relax to patrol, continued task execution or the justified
+scoped action. At whole-task completion, allow_complete when that same condition holds; do not maintain a
+permanent conservative barrier. Runtime metadata identifies deterministic source, receipt, range, version,
+truncation, interruption and exit facts; you alone judge meaning, evidence reach and adequacy. Update
+working.md only when future control should change. No per-wake rewrite is required."""
 
 DCEC_CONTINUATION_PROMPT = """Preserve only the bounded current decision-centered state in monitor/working.md:
-the current decision anchor and scope, one focal unresolved premise, current grounds with their support scope
-and limits, and at most one relevant decision-critical observation status (requested, running, interrupted or
-completed). Return the current state, not a chronology, checklist, concern list or evidence ledger. Replace
-superseded grounds instead of accumulating derived repeats. Claims and summaries remain source-qualified.
-Intervention is recovery, not resolution; unfinished observations are not positive evidence; local grounds do
-not become whole-task support. A resolved concern leaves the frontier unless a new relevant conflict reopens it.
-Under a whole-task anchor, resolving one focal uncertainty returns to the same root decision for re-evaluation;
-it does not authorize completion while another currently recognizable blocking alternative or unfinished
-dependency remains. Preserve relaxation too: after adequate completed discriminating evidence, clear the
-dependency and prune the resolved concern rather than manufacturing permanent uncertainty. Do not reactivate
-a resolved concern merely because older dialogue mentions it; require a new relevant conflict or change."""
+the current consequential decision and scope, the evidential reference of action-changing task states, current
+grounds with their actual evidence reach and limits, one residual decision gap, and at most one relevant
+observation status (requested, running, interrupted or completed). Return current state, not chronology,
+permanent requirement ledger, checklist, concern list or evidence archive. A measurement becoming unavailable
+or costly does not silently lower the reference. An old verified/resolved label does not replace its grounds;
+replace superseded grounds instead of accumulating derived repeats. Intervention is recovery, not resolution,
+unfinished observations are not positive evidence, and local reach is not whole-task reach. When the decision
+consequence changes, reinterpret old grounds against the new reference, including a whole-task completion
+handoff that arrives during an ordinary review. Under a whole-task decision, resolving one focal gap returns
+to the same root decision; it does not authorize completion while a currently recognizable action-changing
+gap or unfinished dependency remains. After adequate completed discriminating evidence, prune the resolved
+gap and relax rather than manufacturing permanent uncertainty. Do not reactivate a resolved gap merely because
+older dialogue mentions it; require a new relevant conflict or changed premise."""
 
 GROUNDED_TOOL = _tool("read_with_sources",
     "Read a private Markdown note together with current excerpts from its inline local links. "
