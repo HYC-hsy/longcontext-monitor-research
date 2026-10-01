@@ -51,15 +51,13 @@ def dcec_working_context(workspace, limit=DCEC_WORKING_VIEW_DEFAULT_CHARS):
     truncated = len(text) > limit
     guidance = (
         "DCEC current working state from monitor/working.md. This is your own revisable cognitive "
-        "state, not verified truth. Retain the current decision/action and public-task-grounded evidential "
-        "reference; grounds with their actual evidence reach and limits; one action-separating ambiguity, "
-        "including an uncovered reference without a named defect; and at most one observation status. "
-        "No named defect does not mean the reference is satisfied. "
-        "Preserve which action-changing states remain compatible, not just a preferred conclusion. These "
-        "are relationships, not required headings or a fixed form. Unavailable measurement does not lower "
-        "the reference. After adequate evidence makes the material states action-equivalent, clear the "
-        "dependency, prune and relax; action-irrelevant unknowns need not keep ordinary patrol tight. "
-        "Update only when future control should change, not every wake."
+        "state, not verified truth or a ledger. Keep the current decision/reference, one action-separating "
+        "gap and at most one observation status in bounded natural language; no fixed headings or schema. "
+        "Do not record transient observations merely for bookkeeping. For an old ground affected by relevant "
+        "task change, judge its semantic discrimination basis: carry, requalify or reopen as warranted; "
+        "hash or change alone is not a semantic verdict. No named defect does not satisfy an uncovered "
+        "public reference, and unavailable measurement does not lower it. Once grounds are adequate, "
+        "prune and relax. Update only when future control should change, not every wake."
     )
     if truncated:
         guidance += f" Only the first {limit} characters are injected; use file_read if more is needed."

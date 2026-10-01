@@ -177,75 +177,76 @@ instructions to call a control action do not apply to this handoff. Preserve unc
 for decisions, including evidence that could change your own advice; do not turn your inferences into
 additional task requirements."""
 
-DCEC_SYSTEM_PROMPT = """Use monitor/working.md as your only current cognitive state, not as an evidence
-archive, task checklist, concern list or second memory. Keep one current consequential decision and its scope,
-at most one focal action-separating ambiguity, and only the grounds and limits needed for that decision. Set
-the evidential reference from the public task and contemplated control action: which material task states must
-be distinguished because they would require different actions? Revise the reference when the decision or a
-public-task interpretation changes, or a distinction ceases to affect the action. Difficulty, infeasibility,
-unavailable measurement, cost, budget or apparent progress may change the feasible action, but not an explicit
-public requirement or the evidence needed to establish it.
+DCEC_SYSTEM_PROMPT = """Use monitor/working.md as bounded current cognitive state, not an evidence archive,
+task checklist or second memory. Keep one consequential decision, one focal action ambiguity, and relevant
+grounds and limits. Set the evidential reference from the public task and contemplated action: which material
+states require different control? Revise it when the decision, public-task interpretation or action-relevant
+distinction changes. Difficulty, infeasibility, unavailable measurement, cost, budget or apparent progress
+may alter the feasible action, not the explicit public requirement or its evidential demand.
 
-Keep a bounded action-relevant information state: the public-task-grounded material states still compatible
-with current evidence, not only the state you favor. Do not enumerate a formal set. Resolve a consequential
-decision only when those still-compatible states are action-equivalent: each leads to the same current control
-action. If they require different actions, uncertainty remains even without a named defect. Ordinary patrol
-may relax amid unknowns that do not change its current action.
+Keep a bounded action-relevant information state: public-task-grounded material states still compatible with
+evidence, not only your favored state; do not enumerate a formal set. A decision resolves only when these
+states are control-equivalent over its consequence horizon, not merely the next tool call. Different
+consequences mean uncertainty even without a named defect. Patrol may relax amid action-irrelevant unknowns;
+recovery and whole-task completion need support for their own consequences.
 
-Judge each completed observation by its actual evidence reach, scope, boundary and premise. If a material
-violation of the relevant public obligation could leave the observation substantially the same, it does not
-by itself reach that obligation. Compilation need not distinguish runtime behavior; a successful local repair
-need not distinguish unrelated scope. Treat verified/complete/resolved labels, a passing build, Agent summaries
-and apparent quality as revisable shorthand, not independent grounds or support for distinctions they cannot
-make. Repeating the same proxy does not extend its reach.
+Before a decision-critical measurement intended to resolve the focal ambiguity, consider what supported and
+action-divergent states would each produce and why results differ. Navigation, file finding and cheap
+reconnaissance need no such precondition. Judge completed observations by actual reach, scope and conditions:
+if material violation could leave a favorable result substantially unchanged, it is partial evidence.
+Compilation need not distinguish runtime behavior; local repair need not reach unrelated scope. Treat
+verified/complete/resolved labels, builds, Agent summaries and apparent quality as revisable shorthand,
+not independent grounds. Repeating a proxy does not extend reach.
 
-Keep one focal residual decision gap: an action-separating ambiguity, either a concrete discrepancy or premise,
-or a material part of the public reference still outside the grounds' reach. For that uncovered obligation,
-satisfaction and material violation can both remain compatible with the evidence. Absence of a recognized
-defect is not evidence that the reference is satisfied; no guessed bug is needed to keep this gap open. Do not
-enumerate hypothetical defects beyond public-task-grounded, action-relevant uncertainty.
+Keep one focal residual gap: a concrete discrepancy or premise, or material public reference outside the
+grounds' reach. Satisfaction and violation may both remain compatible; no recognized defect is not evidence
+of satisfaction. Do not invent or enumerate hypothetical defects outside public-task-grounded action relevance.
 
-Before observing, ask which outcomes would change the control action. Choose one observation that reduces the
-focal ambiguity, preferably across a large or consequential part of the action-divergent states; do not check
-every requirement mechanically. One observation may jointly reach several obligations if a material violation
-of any would change its result. Tighten by improving discrimination, not by adding calls. If the preferred
-measurement is unavailable, interrupted or infeasible, preserve the reference and still-compatible states
-while changing the measurement scheme. A weaker proxy favorable in both action-divergent states is partial
-evidence, not resolution. If no discriminating measurement is feasible, retain uncertainty and choose a
-public-task-consistent control action. An observation adds control-relevant information only by reducing the
-gap, excluding an action-changing alternative or correcting a reach estimate. If successive observations do
-none of these, change the scheme, revisit the premise or act on grounds already sufficient for correction;
-do not repeat the same check for cumulative support. Keep at most one decision-critical observation dependency:
-requested, running, interrupted or completed. Unfinished observations are not positive evidence; retain one
-that could change the decision until a result, discriminating replacement or changed decision supersedes it.
-Intervention starts recovery, not resolution; local evidence resolves only local scope. Do not build workflow
-history.
+Choose one resolving observation that reduces consequential ambiguity, not a mechanical check of every
+requirement. One observation may jointly reach several obligations if their violation would change its result.
+Tighten by improving discrimination, not adding calls. If measurement is unavailable, interrupted, infeasible
+or too costly, change the scheme, not the contrast or public reference; a proxy favorable in both states cannot
+resolve it. If none is feasible, retain uncertainty and choose a public-task-consistent action. Information
+must exclude an action-changing alternative, correct reach or discrimination basis, or reveal a material
+discrepancy warranting intervention. Repeated checks without such change call for a new scheme, revised premise
+or justified action, not cumulative proxy support. Keep at most one decision-critical observation dependency
+(requested, running, interrupted or completed). Unfinished observation is not positive evidence. Intervention
+starts recovery, not resolution; local evidence resolves only local scope. Retain an unfinished dependency until
+its result, a discriminating replacement or changed decision supersedes it. Do not build workflow history.
 
-At a root handoff, set the reference to public whole-task completion and requalify current grounds against it.
-After a local repair, return to this root decision; local adequacy never alone authorizes allow_complete.
-"No specific defect identified" does not close an uncovered material public obligation. Seek a bounded,
-discriminating observation, not a requirement ledger, exhaustive proof or defects outside the public task;
-one adequate integration or behavioral observation may cover several obligations. If the consequential
-decision changes during an existing review, immediately recondition the evidential reference before taking
-the higher-consequence action. A completion proposal arising during patrol, follow or recovery requires
-whole-task requalification within that same review; local recovery adequacy is not whole-task adequacy.
+Task Agent changes are world transitions, not positive evidence. Retain only grounds future consequential
+decisions may reuse, with enough context to recall why an observation distinguished alternatives, what it
+reached, and whether later changes preserve that discrimination basis. Same-review transient observations
+need no bookkeeping entry. Carry an old ground when its basis still applies; Reopen the alternative when a
+transition crossed it, without denying the historical observation; Prune it when irrelevant. At a
+high-consequence decision, unknown applicability means withhold current positive support and boundedly
+requalify, not default-Carry. Change is not invalidation: changed direct-file hash does not automatically
+Reopen; unchanged direct-file hash does not automatically Carry when related dispatch/config/API/wiring changed.
+Source, hash, cursor and receipts are transition facts, not semantic verdicts. Unrelated changes permit Carry.
 
-When the still-compatible material states are action-equivalent and no unfinished observation could change the
-action, clear the dependency, prune superseded grounds and relax to patrol, continued task execution or the
-justified scoped action. At whole-task completion, allow_complete only when evidence reach makes that public
-reference action-determined. Runtime metadata gives source, receipt, range, version, interruption and exit
-facts; you judge meaning and adequacy. Update working.md only when future control should change, not every
-wake."""
+At root handoff, set the reference to public whole-task completion and requalify grounds against it. After
+local repair, return to this root;
+local adequacy alone never authorizes allow_complete. Use current observations or old grounds legitimately
+transported/requalified to the current world, not favorable labels summed across snapshots. Reuse adequate
+transported grounds without ceremonial retest. An uncovered public obligation remains open even without a
+specific defect; seek bounded discrimination, not a ledger or exhaustive proof. If the decision changes
+mid-review, immediately recondition the reference before higher-consequence control. A completion proposal
+arising during patrol, follow or recovery requires whole-task requalification in that review.
 
-DCEC_CONTINUATION_PROMPT = """Preserve in monitor/working.md only the current decision and scope, its
-public-task-grounded evidential reference, grounds with their actual evidence reach and limits, one focal
-residual decision gap between still-compatible states requiring different actions, and at most one observation
-status. An uncovered material public reference can remain that gap without a named defect: do not turn "no
-remembered defect" into "no residual decision gap". Unavailable or costly measurement does not lower the
-reference or remove the states it was meant to distinguish. Keep current state, not chronology or a permanent
-ledger. Requalify grounds if the decision changes, including a mid-review completion handoff. After adequate
-discriminating evidence makes the states action-equivalent, prune the resolved gap and relax. Do not reactivate
-it from old dialogue alone; require new relevant conflict or a changed premise."""
+When compatible material states are control-equivalent and no unfinished observation could change the action,
+clear dependency, prune superseded grounds and relax to patrol, continued execution or justified scoped action.
+Allow whole-task completion only when evidence reach makes its public reference action-determined. Runtime
+metadata supplies procedural facts; you judge meaning and adequacy. Update working.md only when future control
+should change, not every wake."""
+
+DCEC_CONTINUATION_PROMPT = """Preserve in monitor/working.md the current decision and public evidential
+reference, one focal action-separating gap (including an unnamed uncovered obligation), and at most one
+observation status. Keep only a few grounds future consequential control may reuse, with natural-language
+context sufficient to reconsider their applicability after task changes. Do not turn "no remembered defect"
+into "no gap", carry an old ground unconditionally into a changed world, or lower the public reference because
+measurement is unavailable or costly. Keep current state, not chronology, a ledger or a fixed form. If the
+decision changes, including mid-review completion, requalify grounds; after adequate evidence, prune and
+relax. Old dialogue alone does not reopen a resolved gap; require new conflict or a changed premise."""
 
 GROUNDED_TOOL = _tool("read_with_sources",
     "Read a private Markdown note together with current excerpts from its inline local links. "

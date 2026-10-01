@@ -91,18 +91,18 @@ def test_ader_contract_regulates_decision_evidence_and_root_completion(tmp_path)
     normalized = " ".join(combined.split())
 
     assert "evidential reference" in normalized
-    assert "actual evidence reach" in normalized
-    assert "residual decision gap" in normalized
-    assert "changing the measurement scheme" in normalized
-    assert "an observation adds control-relevant information only by reducing the gap" in normalized
-    assert "may change the feasible action, but not an explicit public requirement" in normalized
-    assert "unfinished observations are not positive evidence" in normalized
-    assert "after a local repair, return to this root decision" in normalized
-    assert "local adequacy never alone authorizes allow_complete" in normalized
-    assert "immediately recondition the evidential reference" in normalized
-    assert "clear the dependency, prune superseded grounds and relax" in normalized
+    assert "actual reach, scope and conditions" in normalized
+    assert "one focal residual gap" in normalized
+    assert "change the scheme, not the contrast or public reference" in normalized
+    assert "information must exclude an action-changing alternative" in normalized
+    assert "may alter the feasible action, not the explicit public requirement" in normalized
+    assert "unfinished observation is not positive evidence" in normalized
+    assert "after local repair, return to this root" in normalized
+    assert "local adequacy alone never authorizes allow_complete" in normalized
+    assert "immediately recondition the reference" in normalized
+    assert "prune superseded grounds and relax" in normalized
     assert "task checklist" in normalized
-    assert "at most one focal" in normalized
+    assert "one focal" in normalized
 
 
 def test_ader_v2_information_state_contract_is_bounded_and_action_conditioned(tmp_path):
@@ -113,24 +113,24 @@ def test_ader_v2_information_state_contract_is_bounded_and_action_conditioned(tm
     continuation = " ".join(DCEC_CONTINUATION_PROMPT.lower().split())
 
     assert "action-relevant information state" in system
-    assert "action-equivalent" in system
-    assert "uncertainty remains even without a named defect" in system
-    assert "absence of a recognized defect is not evidence" in system
-    assert "satisfaction and material violation can both remain compatible" in system
-    assert "could leave the observation substantially the same" in system
-    assert "does not by itself reach that obligation" in system
-    assert "do not check every requirement mechanically" in system
+    assert "control-equivalent" in system
+    assert "uncertainty even without a named defect" in system
+    assert "no recognized defect is not evidence" in system
+    assert "satisfaction and violation may both remain compatible" in system
+    assert "material violation could leave a favorable result substantially unchanged" in system
+    assert "it is partial evidence" in system
+    assert "not a mechanical check of every requirement" in system
     assert "one observation may jointly reach several obligations" in system
-    assert "ordinary patrol may relax amid unknowns" in system
-    assert "preserve the reference and still-compatible states" in system
-    assert "no specific defect identified" in system
-    assert "evidence reach makes that public reference action-determined" in system
+    assert "patrol may relax amid action-irrelevant unknowns" in system
+    assert "change the scheme, not the contrast or public reference" in system
+    assert "uncovered public obligation remains open even without a specific defect" in system
+    assert "evidence reach makes its public reference action-determined" in system
     assert "no remembered defect" in continuation
-    assert "no residual decision gap" in continuation
-    assert "an uncovered material public reference" in continuation
-    assert "action-equivalent" in continuation
-    assert "which action-changing states remain compatible" in view
-    assert "not required headings or a fixed form" in view
+    assert "no gap" in continuation
+    assert "unnamed uncovered obligation" in continuation
+    assert "after adequate evidence, prune and relax" in continuation
+    assert "action-separating gap" in view
+    assert "no fixed headings or schema" in view
     assert metadata["limit_characters"] == 4000
     assert not (ws.private_root / "epistemic_state.json").exists()
     assert not (ws.private_root / "decision_state.json").exists()
@@ -139,30 +139,29 @@ def test_ader_v2_information_state_contract_is_bounded_and_action_conditioned(tm
 
 
 @pytest.mark.parametrize("invariant, surface, fragments", [
-    (1, "system", ("set the evidential reference from the public task and contemplated control action",)),
-    (2, "system", ("unavailable measurement, cost, budget", "not an explicit public requirement")),
+    (1, "system", ("set the evidential reference from the public task and contemplated action",)),
+    (2, "system", ("unavailable measurement, cost, budget", "not the explicit public requirement")),
     (3, "system", ("bounded action-relevant information state",)),
-    (4, "system", ("still-compatible states are action-equivalent", "same current control action")),
-    (5, "system", ("absence of a recognized defect is not evidence that the reference is satisfied",)),
-    (6, "system", ("material violation of the relevant public obligation could leave the observation substantially the same",
-                    "does not by itself reach that obligation")),
-    (7, "system", ("one focal residual decision gap: an action-separating ambiguity",)),
-    (8, "system", ("material part of the public reference still outside the grounds' reach",
-                    "no guessed bug is needed")),
-    (9, "system", ("do not enumerate hypothetical defects",)),
-    (10, "system", ("choose one observation that reduces the focal ambiguity",)),
+    (4, "system", ("states are control-equivalent over its consequence horizon",)),
+    (5, "system", ("no recognized defect is not evidence of satisfaction",)),
+    (6, "system", ("material violation could leave a favorable result substantially unchanged",
+                    "it is partial evidence")),
+    (7, "system", ("one focal residual gap",)),
+    (8, "system", ("material public reference outside the grounds' reach",
+                    "no recognized defect is not evidence")),
+    (9, "system", ("do not invent or enumerate hypothetical defects",)),
+    (10, "system", ("choose one resolving observation that reduces consequential ambiguity",)),
     (11, "system", ("one observation may jointly reach several obligations",)),
-    (12, "system", ("preferred measurement is unavailable", "preserve the reference and still-compatible states")),
+    (12, "system", ("measurement is unavailable", "change the scheme, not the contrast or public reference")),
     (13, "system", ("intervention starts recovery, not resolution",)),
     (14, "system", ("local evidence resolves only local scope",)),
-    (15, "system", ("immediately recondition the evidential reference",
+    (15, "system", ("immediately recondition the reference",
                      "completion proposal arising during patrol, follow or recovery")),
-    (16, "system", ("no specific defect identified", "does not close an uncovered material public obligation")),
-    (17, "system", ("ordinary patrol may relax amid unknowns that do not change its current action",)),
-    (18, "system", ("clear the dependency, prune superseded grounds and relax",)),
-    (19, "working", ("not required headings or a fixed form",)),
-    (20, "continuation", ("an uncovered material public reference can remain that gap",
-                           "no remembered defect", "no residual decision gap")),
+    (16, "system", ("uncovered public obligation remains open even without a specific defect",)),
+    (17, "system", ("patrol may relax amid action-irrelevant unknowns",)),
+    (18, "system", ("prune superseded grounds and relax",)),
+    (19, "working", ("no fixed headings or schema",)),
+    (20, "continuation", ("unnamed uncovered obligation", "no remembered defect", "no gap")),
 ])
 def test_ader_v2c_preserves_each_information_state_invariant(tmp_path, invariant, surface, fragments):
     ws = workspace(tmp_path)
@@ -273,7 +272,7 @@ def test_dcec_continuation_contract_and_rejected_note_never_overwrite(tmp_path, 
     def truncated(_tools):
         calls.append(client.history[-1]["content"][0]["text"])
         assert DCEC_CONTINUATION_PROMPT in calls[-1]
-        assert "do not reactivate" in calls[-1].lower()
+        assert "old dialogue alone does not reopen" in calls[-1].lower()
         client.last_response_metadata = {"stop_reason": "max_tokens"}
         return [{"type": "text", "text": "partial"}], {}
 
@@ -365,9 +364,9 @@ def test_ader_v2c_has_exact_v2_parent_and_only_allowed_production_changes():
     root = Path(__file__).resolve().parents[2]
     def git(*args):
         return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
-    head = git("rev-parse", "HEAD")
-    assert head == ADER_V2_BASE or git("rev-parse", "HEAD^") == ADER_V2_BASE
-    changed = set(git("diff", "--name-only", ADER_V2_BASE).splitlines())
+    v2c = "c6f6cc8fac555b638303237b64881552e38d846b"
+    assert git("rev-parse", v2c + "^") == ADER_V2_BASE
+    changed = set(git("diff", "--name-only", ADER_V2_BASE, v2c).splitlines())
     production = {p for p in changed if p.startswith("GenericAgent-main/monitor_agent_core/")}
     assert production == {
         "GenericAgent-main/monitor_agent_core/agent.py",
@@ -432,7 +431,7 @@ def test_ader_ordinary_and_pending_root_requests_keep_native_tools(tmp_path, mon
         assert client.complete_calls == 1
         request = snapshots[0]
         assert "evidential reference" in request["system"]
-        assert "residual decision gap" in request["system"]
+        assert "residual gap" in request["system"]
         assert [tool["function"]["name"] for tool in request["tools"]] == [
             "file_read", "file_write", "file_patch", "code_run", "wait", "intervene", "allow_complete"]
         assert "independent_check" not in json.dumps(request)
@@ -463,8 +462,8 @@ def test_ader_mid_review_completion_reconditions_next_real_request(tmp_path, mon
     assert snapshots[0]["root_handoff"] is None
     assert snapshots[1]["root_handoff"] == state["pending"]
     assert "Runtime update: the Task Agent is waiting" in json.dumps(snapshots[1]["messages"])
-    assert "immediately recondition the evidential reference" in snapshots[1]["system"]
-    assert "local recovery adequacy is not whole-task adequacy" in snapshots[1]["system"]
+    assert "immediately recondition the reference" in snapshots[1]["system"]
+    assert "requires whole-task requalification in that review" in snapshots[1]["system"]
     assert snapshots[0]["tools"] == snapshots[1]["tools"]
     assert "independent_check" not in json.dumps(snapshots[1])
 
@@ -475,13 +474,13 @@ def test_ader_continuation_and_view_are_semantic_not_parser(tmp_path):
     ws.write_text("monitor/working.md", note)
     view, metadata = dcec_working_context(ws)
     assert note in view and metadata["limit_characters"] == 4000
-    assert "not required headings or a fixed form" in view
-    assert "actual evidence reach" in view
-    assert "Unavailable measurement" in view
-    assert "evidential reference" in DCEC_CONTINUATION_PROMPT
-    assert "actual evidence reach" in DCEC_CONTINUATION_PROMPT
-    assert "residual decision gap" in DCEC_CONTINUATION_PROMPT
-    assert "prune the resolved" in DCEC_CONTINUATION_PROMPT
+    assert "no fixed headings or schema" in view
+    assert "semantic discrimination basis" in view
+    assert "unavailable measurement" in view
+    assert "evidential reference" in " ".join(DCEC_CONTINUATION_PROMPT.split())
+    assert "grounds future consequential control may reuse" in DCEC_CONTINUATION_PROMPT
+    assert "focal action-separating gap" in DCEC_CONTINUATION_PROMPT
+    assert "prune and" in DCEC_CONTINUATION_PROMPT
     assert not (ws.private_root / "decision_state.json").exists()
 
 
