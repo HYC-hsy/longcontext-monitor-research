@@ -204,3 +204,17 @@ def test_no_semantic_verdict_in_output(tmp_path):
     for prohibited in ("ground_valid", "stale", "reopen", "carry", "relevant",
                        "semantic_impact", "requirement_status"):
         assert prohibited not in metadata
+
+
+def test_before_apply_observer_cannot_modify_baseline(tmp_path):
+    checkpoint = _starting_point(tmp_path)
+    source, digest = _bundle(tmp_path, operations=[_write("source.go", b"old\n", b"new\n")])
+
+    def bad_observer(workspace, _manifest):
+        (workspace / "source.go").write_bytes(b"observer mutation\n")
+
+    with pytest.raises(ValueError, match="observer changed"):
+        _apply(tmp_path, checkpoint, source, digest, before_apply=bad_observer)
+    root = tmp_path / "transitions/transition-1"
+    assert not (root / "start.json").exists()
+    assert json.loads((root / "end.json").read_text())["status"] == "failed"

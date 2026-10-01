@@ -15,6 +15,7 @@ import shutil
 import stat
 import time
 from pathlib import Path
+from typing import Callable
 
 from .checkpoint import _json_bytes, _sha_bytes, _sha_file, _tree_manifest, verify_checkpoint
 
@@ -135,7 +136,8 @@ def _apply(root: Path, operations: list[dict], log: Path) -> None:
 
 def apply_transition_fixture(*, checkpoint_dir, transition_source, transition_id,
                              expected_source_sha256, expected_checkpoint_id,
-                             output_root) -> Path:
+                             output_root,
+                             before_apply: Callable[[Path, dict], None] | None = None) -> Path:
     """Apply one preregistered content bundle to an independent X_t copy.
 
     The source file is frozen by its caller-supplied SHA-256. Every attempt gets
@@ -186,6 +188,10 @@ def apply_transition_fixture(*, checkpoint_dir, transition_source, transition_id
         _write_json(root / "before_manifest.json", before)
         record["before_workspace_manifest_sha256"] = _sha_file(root / "before_manifest.json")
         _check_preconditions(workspace, operations)
+        if before_apply is not None:
+            before_apply(workspace, before)
+            if _tree_manifest(workspace) != before:
+                raise ValueError("before-apply observer changed the workspace")
         _write_json(root / "start.json", {"schema": SCHEMA, "transition_id": transition_id,
                                           "checkpoint_id": expected_checkpoint_id,
                                           "source_sha256": source_hash,
