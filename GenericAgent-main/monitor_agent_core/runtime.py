@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import multiprocessing as mp
+import os
 import queue
 import hashlib
 import threading
@@ -25,6 +26,116 @@ class CompletionOutcome:
 def _append(path: Path, value: Mapping[str, Any]):
     with path.open("a", encoding="utf-8") as stream:
         stream.write(json.dumps(dict(value), ensure_ascii=False, default=str) + "\n")
+
+
+class WorkspaceTransitionSampler:
+    """Compare regular-file metadata at successive Supervisor review boundaries.
+
+    This is a path observation, not a judgment about any ground or task behavior.
+    An incomplete scan leaves the last complete sample intact.
+    """
+
+    PATH_CAP = 64
+
+    def __init__(self):
+        self._previous = None
+        self._previous_cursor = None
+        self._sequence = 0
+
+    @staticmethod
+    def _scan(root):
+        files = {}
+        errors = []
+
+        def visit(directory):
+            try:
+                with os.scandir(directory) as entries:
+                    for entry in entries:
+                        if entry.name == ".git":
+                            continue
+                        relative = Path(entry.path).relative_to(root).as_posix()
+                        try:
+                            if entry.is_symlink():
+                                continue
+                            if entry.is_dir(follow_symlinks=False):
+                                visit(entry.path)
+                            elif entry.is_file(follow_symlinks=False):
+                                info = entry.stat(follow_symlinks=False)
+                                files[relative] = (info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+                        except OSError as exc:
+                            errors.append({"path": relative, "error_type": type(exc).__name__})
+            except OSError as exc:
+                relative = Path(directory).relative_to(root).as_posix()
+                errors.append({"path": relative, "error_type": type(exc).__name__})
+
+        visit(root)
+        return files, errors
+
+    def sample(self, root, *, cursor, task_turn):
+        started = time.monotonic()
+        root = Path(root)  # MonitorWorkspace already resolved the supervised mount.
+        files, errors = self._scan(root)
+        initial = self._previous is None
+        complete = not errors
+        from_cursor = self._previous_cursor
+        added, modified, deleted = [], [], []
+        if complete:
+            if not initial:
+                before = self._previous
+                added = sorted(set(files) - set(before))
+                deleted = sorted(set(before) - set(files))
+                modified = sorted(path for path in files.keys() & before.keys()
+                                  if files[path] != before[path])
+            self._previous = files
+            self._previous_cursor = cursor
+        self._sequence += 1
+
+        def virtual(paths):
+            return [f"task/workspace/{path}" for path in paths]
+
+        changed = {"added": virtual(added), "modified": virtual(modified),
+                   "deleted": virtual(deleted)}
+        total = sum(len(paths) for paths in changed.values())
+        visible = []
+        for kind in ("added", "modified", "deleted"):
+            visible.extend((kind, path) for path in changed[kind])
+        truncated = len(visible) > self.PATH_CAP
+        if not complete:
+            kinds = ", ".join(sorted({error["error_type"] for error in errors}))
+            view = ("Workspace transition sample incomplete "
+                    f"at task cursor {cursor} ({kinds}); path delta unavailable. "
+                    "Do not infer that the workspace was unchanged.")
+        elif initial:
+            view = (f"Workspace transition baseline established at task cursor {cursor}; "
+                    "there is no previous Supervisor sample for comparison.")
+        else:
+            prefix = ("Workspace transition since the previous Supervisor sample "
+                      f"(task cursor {from_cursor} -> {cursor}):")
+            if not total:
+                view = prefix + " no path-level changes detected."
+            else:
+                lines = [prefix]
+                for kind in ("added", "modified", "deleted"):
+                    paths = [path for item_kind, path in visible[:self.PATH_CAP]
+                             if item_kind == kind]
+                    if paths:
+                        lines.append(f"{kind}:")
+                        lines.extend(f"- {path}" for path in paths)
+                if truncated:
+                    lines.append(f"view truncated: showing {self.PATH_CAP} of {total} changed paths; "
+                                 "undisplayed paths are not implied unchanged.")
+                view = "\n".join(lines)
+            view += ("\nMechanical path-transition facts only. Changed paths alone do not "
+                     "decide a prior ground's applicability; unchanged direct source does not "
+                     "establish its semantic basis.")
+
+        audit = {"event": "workspace_transition_sample", "sample_sequence": self._sequence,
+                 "from_cursor": from_cursor, "to_cursor": cursor, "task_turn": task_turn,
+                 "initial_baseline": initial, "sample_complete": complete,
+                 **changed, "total_changed": total, "model_visible_truncated": truncated,
+                 "sampling_duration_ms": round((time.monotonic() - started) * 1000, 3),
+                 "errors": errors, "error_types": sorted({e["error_type"] for e in errors})}
+        return view, audit
 
 
 def _coalesce_wake_command(commands, first, completion_is_active=None):
@@ -164,6 +275,7 @@ def _worker(config, commands, outputs):
         monitor = MonitorAgent(client, workspace, config["max_review_turns"],
                                stop_event=config['stop_event'],
                                independent_check=(independent_check if probe_total > 0 else None))
+        workspace_sampler = WorkspaceTransitionSampler() if monitor.dcec_enabled else None
     except Exception as exc:
         outputs.put({"kind": "failure", "error": repr(exc), "phase": "startup"})
         return
@@ -230,6 +342,15 @@ def _worker(config, commands, outputs):
             # Only actual review-ending actions define compaction boundaries.
             client.CONTROL_ACTIONS = {"wait", "allow_complete"}
         try:
+            if workspace_sampler is not None:
+                clock = config.get('latest_task_turn')
+                sampled_turn = max(task_turn, clock.value) if clock is not None else task_turn
+                transition_view, transition_audit = workspace_sampler.sample(
+                    workspace.task_mounts["workspace"], cursor=cursor, task_turn=sampled_turn)
+                audit_path = Path(config["private_root"]) / "audit" / "workspace_transitions.jsonl"
+                audit_path.parent.mkdir(parents=True, exist_ok=True)
+                _append(audit_path, transition_audit)
+                context += "\n" + transition_view
             next_receipt_offset = receipt_offset
             receipt_path = Path(config["private_root"]) / "delivery_feedback.jsonl"
             if receipt_path.exists():
