@@ -1,0 +1,2 @@
+
+cd /app && go build ./... 2>&1

@@ -20,6 +20,8 @@ def record_index(record):
     audit = record / "agent/monitor/monitor_private/audit"
     dialogue = list(numbered_jsonl(audit / "dialogue.jsonl"))
     progress = list(numbered_jsonl(audit / "progress.jsonl"))
+    feedback_path = record / "agent/monitor/monitor_private/delivery_feedback.jsonl"
+    feedback = list(numbered_jsonl(feedback_path)) if feedback_path.exists() else []
     calls = {entry[1].get("tool_id"): entry for entry in dialogue if entry[1].get("event") == "tool_call"}
     review_ids = [entry[1]["review_id"] for entry in progress if entry[1].get("event") == "review_started"]
     reviews = []
@@ -35,6 +37,12 @@ def record_index(record):
         mutations = [
             {"line": line, "operation": event.get("operation"), "sha256": event.get("sha256")}
             for line, event in pe if event.get("event") == "dcec_state_mutation"
+        ]
+        working_views = [
+            {"line": line, "source_sha256": event.get("source_sha256"),
+             "visible_characters": event.get("visible_characters"),
+             "truncated": event.get("truncated")}
+            for line, event in pe if event.get("event") == "dcec_working_view"
         ]
         tool_calls = []
         for line, event in de:
@@ -81,16 +89,32 @@ def record_index(record):
             for msg in event.get("messages", [])
             if isinstance(msg, dict) and "Runtime update:" in str(msg.get("content"))
         ]
+        controls = []
+        for line, event in de:
+            if event.get("event") != "control_result":
+                continue
+            for result in event.get("results", []):
+                try:
+                    content = json.loads(result.get("content") or "{}")
+                except json.JSONDecodeError:
+                    content = {"raw": result.get("content")}
+                controls.append({"line": line, "turn": event.get("turn"),
+                                 "tool_use_id": result.get("tool_use_id"),
+                                 "result": content})
         reviews.append({
             "review_id": review_id,
             "progress_start": started,
             "progress_finish": finished,
             "dialogue_lines": [de[0][0], de[-1][0]] if de else None,
+            "model_input_lines": [line for line, event in de if event.get("event") == "model_input"],
+            "review_context_lines": [line for line, event in de if event.get("event") == "review_context"],
             "checkpoints": checkpoints,
             "working_mutations": mutations,
+            "working_views": working_views,
             "tool_calls": tool_calls,
             "tool_errors": tool_results,
             "runtime_updates": runtime_updates,
+            "controls": controls,
         })
     repeated = collections.defaultdict(list)
     for review in reviews:
@@ -114,6 +138,12 @@ def record_index(record):
     return {
         "record": record.name,
         "reviews": reviews,
+        "delivery_feedback": [
+            {"line": line, "kind": event.get("kind"), "cursor": event.get("cursor"),
+             "request_id": event.get("request_id"), "delivery": event.get("delivery"),
+             "resumed_completion_requests": event.get("resumed_completion_requests")}
+            for line, event in feedback
+        ],
         "repeated_exact_file_reads": repeated_reads,
         "repeated_exact_code_scripts": repeated_scripts,
     }

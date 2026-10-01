@@ -1,0 +1,10 @@
+	if fh.Length > fr.maxReadSize {
+		// Read first 8 bytes for detailed error diagnostics
+		first4Bytes := binary.BigEndian.Uint32(buf[0:4])
+		second4Bytes := binary.BigEndian.Uint32(buf[4:8])
+		return http2.FrameHeader{}, fmt.Errorf("%s or invalid frame (first4Bytes=%#x, second4Bytes=%#x)", 
+			http2.ErrFrameTooLarge, first4Bytes, second4Bytes)
+	}
+	
+	return fh, nil
+}

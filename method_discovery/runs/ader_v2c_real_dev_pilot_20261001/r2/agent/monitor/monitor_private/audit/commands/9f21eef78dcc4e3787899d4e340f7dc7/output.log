@@ -1,0 +1,8 @@
+// WithRecvTimeout sets the receive timeout for streaming RPC calls.
+// It configures how long the client will wait when receiving messages from the stream.
+func WithRecvTimeout(d time.Duration) Option {
+	return Option{f: func(o *callopt.CallOptions, di *strings.Builder) {
+		di.WriteString("WithRecvTimeout(")
+		di.WriteString(d.String())
+		di.WriteString(")")
+		o.StreamOptions.RecvTimeout = d

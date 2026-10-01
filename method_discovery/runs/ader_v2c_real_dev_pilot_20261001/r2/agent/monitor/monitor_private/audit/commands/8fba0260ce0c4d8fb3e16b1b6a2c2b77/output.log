@@ -1,0 +1,16 @@
+func (fr *Framer) readAndCheckFrameHeader() (http2.FrameHeader, error) {
+	buf, err := fr.reader.Next(frameHeaderLen)
+	if err != nil {
+		return http2.FrameHeader{}, err
+	}
+	
+	fh := http2.FrameHeader{
+		Length:   uint32(buf[0])<<16 | uint32(buf[1])<<8 | uint32(buf[2]),
+		Type:     http2.FrameType(buf[3]),
+		Flags:    http2.Flags(buf[4]),
+		StreamID: binary.BigEndian.Uint32(buf[5:]) & (1<<31 - 1),
+	}
+	
+	// Check if frame size exceeds maximum allowed size
+	if fh.Length > fr.maxReadSize {
+		// Read first 8 bytes for detailed error diagnostics
