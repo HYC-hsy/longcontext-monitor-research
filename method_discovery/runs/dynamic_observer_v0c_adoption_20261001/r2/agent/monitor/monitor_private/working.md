@@ -1,0 +1,1 @@
+Turn 178: T1-3 verified. T5 builds. T6 implemented (Dump() t168, readAndCheckFrameHeader t174-175, both compile t176). Agent now verifying T4 thrift codec fallback t178. After T4 verification: final check all 6 targets functional, importable, requirements met before allowing completion.
