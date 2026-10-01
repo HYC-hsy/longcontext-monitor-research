@@ -73,7 +73,7 @@ def test_bounded_view_is_single_state_and_reports_transport_cost(tmp_path):
     ws.write_text("monitor/working.md", "Current decision\n" + "x" * 6000)
     text, metadata = dcec_working_context(ws, 1000)
     assert text.count("<dcec_working_state>") == 1
-    assert "not a fact source or verified truth" in text
+    assert "not verified truth" in text
     assert "Only the first 1000 characters" in text
     assert metadata == {**metadata, "path": "monitor/working.md", "limit_characters": 1000,
                         "visible_characters": 1000, "truncated": True}
@@ -93,12 +93,12 @@ def test_ader_contract_regulates_decision_evidence_and_root_completion(tmp_path)
     assert "evidential reference" in normalized
     assert "actual evidence reach" in normalized
     assert "residual decision gap" in normalized
-    assert "change the measurement scheme" in normalized
-    assert "a new observation adds control-relevant information only if it reduces the gap" in normalized
-    assert "difficulty or infeasibility changes the feasible control action or task-side outcome" in normalized
-    assert "requested, running and interrupted are not positive evidence" in normalized
-    assert "return to the same root decision" in normalized
-    assert "a local repair alone never authorizes allow_complete" in normalized
+    assert "changing the measurement scheme" in normalized
+    assert "an observation adds control-relevant information only by reducing the gap" in normalized
+    assert "may change the feasible action, but not an explicit public requirement" in normalized
+    assert "unfinished observations are not positive evidence" in normalized
+    assert "after a local repair, return to this root decision" in normalized
+    assert "local adequacy never alone authorizes allow_complete" in normalized
     assert "immediately recondition the evidential reference" in normalized
     assert "clear the dependency, prune superseded grounds and relax" in normalized
     assert "task checklist" in normalized
@@ -114,28 +114,67 @@ def test_ader_v2_information_state_contract_is_bounded_and_action_conditioned(tm
 
     assert "action-relevant information state" in system
     assert "action-equivalent" in system
-    assert "unresolved even without an identified concrete defect" in system
+    assert "uncertainty remains even without a named defect" in system
     assert "absence of a recognized defect is not evidence" in system
-    assert "both satisfaction and material violation remain compatible" in system
-    assert "could this observation remain substantially the same" in system
+    assert "satisfaction and material violation can both remain compatible" in system
+    assert "could leave the observation substantially the same" in system
     assert "does not by itself reach that obligation" in system
-    assert "do not mechanically check every requirement one by one" in system
-    assert "one observation can have joint reach over several obligations" in system
-    assert "ordinary patrol may remain loose amid unknowns" in system
-    assert "inability to measure does not shrink the information state" in system
+    assert "do not check every requirement mechanically" in system
+    assert "one observation may jointly reach several obligations" in system
+    assert "ordinary patrol may relax amid unknowns" in system
+    assert "preserve the reference and still-compatible states" in system
     assert "no specific defect identified" in system
-    assert "makes the public completion reference action-determined" in system
+    assert "evidence reach makes that public reference action-determined" in system
     assert "no remembered defect" in continuation
     assert "no residual decision gap" in continuation
-    assert "uncovered material part of the public reference" in continuation
+    assert "an uncovered material public reference" in continuation
     assert "action-equivalent" in continuation
-    assert "what action-changing possibilities remain compatible" in view
+    assert "which action-changing states remain compatible" in view
     assert "not required headings or a fixed form" in view
     assert metadata["limit_characters"] == 4000
     assert not (ws.private_root / "epistemic_state.json").exists()
     assert not (ws.private_root / "decision_state.json").exists()
     for task_name in ("fyne", "kitex", "ratatui", "sphinx", "newallstrings"):
         assert task_name not in system + continuation + view.lower()
+
+
+@pytest.mark.parametrize("invariant, surface, fragments", [
+    (1, "system", ("set the evidential reference from the public task and contemplated control action",)),
+    (2, "system", ("unavailable measurement, cost, budget", "not an explicit public requirement")),
+    (3, "system", ("bounded action-relevant information state",)),
+    (4, "system", ("still-compatible states are action-equivalent", "same current control action")),
+    (5, "system", ("absence of a recognized defect is not evidence that the reference is satisfied",)),
+    (6, "system", ("material violation of the relevant public obligation could leave the observation substantially the same",
+                    "does not by itself reach that obligation")),
+    (7, "system", ("one focal residual decision gap: an action-separating ambiguity",)),
+    (8, "system", ("material part of the public reference still outside the grounds' reach",
+                    "no guessed bug is needed")),
+    (9, "system", ("do not enumerate hypothetical defects",)),
+    (10, "system", ("choose one observation that reduces the focal ambiguity",)),
+    (11, "system", ("one observation may jointly reach several obligations",)),
+    (12, "system", ("preferred measurement is unavailable", "preserve the reference and still-compatible states")),
+    (13, "system", ("intervention starts recovery, not resolution",)),
+    (14, "system", ("local evidence resolves only local scope",)),
+    (15, "system", ("immediately recondition the evidential reference",
+                     "completion proposal arising during patrol, follow or recovery")),
+    (16, "system", ("no specific defect identified", "does not close an uncovered material public obligation")),
+    (17, "system", ("ordinary patrol may relax amid unknowns that do not change its current action",)),
+    (18, "system", ("clear the dependency, prune superseded grounds and relax",)),
+    (19, "working", ("not required headings or a fixed form",)),
+    (20, "continuation", ("an uncovered material public reference can remain that gap",
+                           "no remembered defect", "no residual decision gap")),
+])
+def test_ader_v2c_preserves_each_information_state_invariant(tmp_path, invariant, surface, fragments):
+    ws = workspace(tmp_path)
+    view, _ = dcec_working_context(ws)
+    surfaces = {
+        "system": DCEC_SYSTEM_PROMPT,
+        "continuation": DCEC_CONTINUATION_PROMPT,
+        "working": view,
+    }
+    normalized = " ".join(surfaces[surface].lower().split())
+    for fragment in fragments:
+        assert fragment in normalized, f"information-state invariant {invariant}: {fragment}"
 
 
 def test_ader_v2_uses_only_working_note_and_existing_model_stage(tmp_path, monkeypatch):
@@ -319,16 +358,16 @@ def test_discriminating_manifest_is_frozen_unexecuted_and_isolates_candidates():
     assert hashlib.sha256(runner.read_bytes().replace(b"\r\n", b"\n")).hexdigest() == manifest["runner_sha256"]
 
 
-ADER_V1_BASE = "16ddee55ead5f48ef955e5b76bbfae0f7e7698a5"
+ADER_V2_BASE = "e32cf2d66a854dcd274b25f804d6336c29e97789"
 
 
-def test_ader_v2_has_exact_v1_parent_and_only_allowed_production_changes():
+def test_ader_v2c_has_exact_v2_parent_and_only_allowed_production_changes():
     root = Path(__file__).resolve().parents[2]
     def git(*args):
         return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
     head = git("rev-parse", "HEAD")
-    assert head == ADER_V1_BASE or git("rev-parse", "HEAD^") == ADER_V1_BASE
-    changed = set(git("diff", "--name-only", ADER_V1_BASE).splitlines())
+    assert head == ADER_V2_BASE or git("rev-parse", "HEAD^") == ADER_V2_BASE
+    changed = set(git("diff", "--name-only", ADER_V2_BASE).splitlines())
     production = {p for p in changed if p.startswith("GenericAgent-main/monitor_agent_core/")}
     assert production == {
         "GenericAgent-main/monitor_agent_core/agent.py",
@@ -336,11 +375,11 @@ def test_ader_v2_has_exact_v1_parent_and_only_allowed_production_changes():
     }
 
 
-def test_dcec_off_exact_provider_ready_equality_to_frozen_ader_v1(tmp_path):
+def test_dcec_off_exact_provider_ready_equality_to_frozen_ader_v2(tmp_path):
     """Run each real assembly in a fresh interpreter; fake only the transport."""
     root = Path(__file__).resolve().parents[2]
-    base = Path(os.environ["ADER_V1_SOURCE"]).resolve()
-    assert subprocess.check_output(["git", "-C", str(base), "rev-parse", "HEAD"], text=True).strip() == ADER_V1_BASE
+    base = Path(os.environ["ADER_V2_SOURCE"]).resolve()
+    assert subprocess.check_output(["git", "-C", str(base), "rev-parse", "HEAD"], text=True).strip() == ADER_V2_BASE
     evidence = tmp_path / "evidence"
     private = tmp_path / "private"
     evidence.mkdir()
@@ -438,7 +477,7 @@ def test_ader_continuation_and_view_are_semantic_not_parser(tmp_path):
     assert note in view and metadata["limit_characters"] == 4000
     assert "not required headings or a fixed form" in view
     assert "actual evidence reach" in view
-    assert "unavailable" in view
+    assert "Unavailable measurement" in view
     assert "evidential reference" in DCEC_CONTINUATION_PROMPT
     assert "actual evidence reach" in DCEC_CONTINUATION_PROMPT
     assert "residual decision gap" in DCEC_CONTINUATION_PROMPT
