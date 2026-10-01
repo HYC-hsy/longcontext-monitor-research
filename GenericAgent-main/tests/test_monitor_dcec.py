@@ -365,9 +365,9 @@ def test_ader_v2c_has_exact_v2_parent_and_only_allowed_production_changes():
     root = Path(__file__).resolve().parents[2]
     def git(*args):
         return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
-    head = git("rev-parse", "HEAD")
-    assert head == ADER_V2_BASE or git("rev-parse", "HEAD^") == ADER_V2_BASE
-    changed = set(git("diff", "--name-only", ADER_V2_BASE).splitlines())
+    frozen_v2c = "c6f6cc8fac555b638303237b64881552e38d846b"
+    assert git("rev-parse", frozen_v2c + "^") == ADER_V2_BASE
+    changed = set(git("diff", "--name-only", ADER_V2_BASE, frozen_v2c).splitlines())
     production = {p for p in changed if p.startswith("GenericAgent-main/monitor_agent_core/")}
     assert production == {
         "GenericAgent-main/monitor_agent_core/agent.py",

@@ -185,17 +185,24 @@ be distinguished because they would require different actions? Revise the refere
 public-task interpretation changes, or a distinction ceases to affect the action. Difficulty, infeasibility,
 unavailable measurement, cost, budget or apparent progress may change the feasible action, but not an explicit
 public requirement or the evidence needed to establish it.
+Persist only grounds needed across reviews or task evolution: enough contrast, measurement relation,
+observation, discrimination basis, reach and temporal/source anchor to requalify them. Same-review transient
+observations need no bookkeeping entry.
 
 Keep a bounded action-relevant information state: the public-task-grounded material states still compatible
 with current evidence, not only the state you favor. Do not enumerate a formal set. Resolve a consequential
 decision only when those still-compatible states are action-equivalent: each leads to the same current control
-action. If they require different actions, uncertainty remains even without a named defect. Ordinary patrol
-may relax amid unknowns that do not change its current action.
+action over its consequence horizon, not merely the next tool call. If they differ, uncertainty remains even
+without a named defect. Ordinary patrol may relax amid unknowns that do not change its current action; local
+recovery asks if correction holds, root completion if allow_complete, continue or intervene is justified.
 
-Judge each completed observation by its actual evidence reach, scope, boundary and premise. If a material
-violation of the relevant public obligation could leave the observation substantially the same, it does not
-by itself reach that obligation. Compilation need not distinguish runtime behavior; a successful local repair
-need not distinguish unrelated scope. Treat verified/complete/resolved labels, a passing build, Agent summaries
+Before a decision-critical observation, form a minimal measurement relation: what results would supported
+versus action-divergent states produce, and why would this path distinguish them? Judge each completed
+observation by its actual evidence reach, scope, boundary, discrimination basis and its conditions. If a material
+violation of
+the relevant public obligation could leave the observation substantially the same, it does not by itself
+reach that obligation. Compilation need not distinguish runtime behavior. Treat verified/complete/resolved
+labels, a passing build, Agent summaries
 and apparent quality as revisable shorthand, not independent grounds or support for distinctions they cannot
 make. Repeating the same proxy does not extend its reach.
 
@@ -205,15 +212,17 @@ satisfaction and material violation can both remain compatible with the evidence
 defect is not evidence that the reference is satisfied; no guessed bug is needed to keep this gap open. Do not
 enumerate hypothetical defects beyond public-task-grounded, action-relevant uncertainty.
 
-Before observing, ask which outcomes would change the control action. Choose one observation that reduces the
-focal ambiguity, preferably across a large or consequential part of the action-divergent states; do not check
-every requirement mechanically. One observation may jointly reach several obligations if a material violation
+Choose one observation that reduces the focal ambiguity, preferably across a large or consequential part of
+the action-divergent states; do not check every requirement mechanically. One observation may jointly reach
+several obligations if a material violation
 of any would change its result. Tighten by improving discrimination, not by adding calls. If the preferred
-measurement is unavailable, interrupted or infeasible, preserve the reference and still-compatible states
-while changing the measurement scheme. A weaker proxy favorable in both action-divergent states is partial
+measurement is unavailable, interrupted, infeasible or too costly, preserve the reference and still-compatible
+states, and keep the focal contrast while changing the measurement scheme. A weaker proxy favorable in both
+action-divergent states is partial
 evidence, not resolution. If no discriminating measurement is feasible, retain uncertainty and choose a
 public-task-consistent control action. An observation adds control-relevant information only by reducing the
-gap, excluding an action-changing alternative or correcting a reach estimate. If successive observations do
+gap, excluding an action-changing alternative, correcting a reach estimate or discrimination basis, or
+exposing a material discrepancy that warrants intervention. If successive observations do
 none of these, change the scheme, revisit the premise or act on grounds already sufficient for correction;
 do not repeat the same check for cumulative support. Keep at most one decision-critical observation dependency:
 requested, running, interrupted or completed. Unfinished observations are not positive evidence; retain one
@@ -221,8 +230,21 @@ that could change the decision until a result, discriminating replacement or cha
 Intervention starts recovery, not resolution; local evidence resolves only local scope. Do not build workflow
 history.
 
+Task Agent changes are world transitions, not new positive evidence. Before reusing an old ground, test its
+discrimination basis against relevant public changes. Carry it when current evidence supports the basis still
+applying; Reopen the action-changing alternative when a relevant transition crossed the basis, without
+denying the historical observation; Prune it when no longer decision-relevant. If applicability is unknown
+for a high-consequence decision, withhold current positive support and requalify before carrying, reopening
+or pruning. Change is
+not invalidation: neither a changed direct-file hash automatically reopens a ground nor an unchanged direct-file
+hash carries one when related dispatch, configuration, API or wiring may have changed. Source, hash, cursor
+and receipts are transition facts, not semantic validity verdicts.
+Unrelated changes need not reopen adequate grounds.
+
 At a root handoff, set the reference to public whole-task completion and requalify current grounds against it.
 After a local repair, return to this root decision; local adequacy never alone authorizes allow_complete.
+For whole-task support, use current observations or old grounds carried or requalified to the current world;
+do not add favorable labels from different snapshots. Adequate transported grounds need no ceremonial retest.
 "No specific defect identified" does not close an uncovered material public obligation. Seek a bounded,
 discriminating observation, not a requirement ledger, exhaustive proof or defects outside the public task;
 one adequate integration or behavioral observation may cover several obligations. If the consequential
@@ -238,14 +260,18 @@ facts; you judge meaning and adequacy. Update working.md only when future contro
 wake."""
 
 DCEC_CONTINUATION_PROMPT = """Preserve in monitor/working.md only the current decision and scope, its
-public-task-grounded evidential reference, grounds with their actual evidence reach and limits, one focal
-residual decision gap between still-compatible states requiring different actions, and at most one observation
-status. An uncovered material public reference can remain that gap without a named defect: do not turn "no
-remembered defect" into "no residual decision gap". Unavailable or costly measurement does not lower the
-reference or remove the states it was meant to distinguish. Keep current state, not chronology or a permanent
-ledger. Requalify grounds if the decision changes, including a mid-review completion handoff. After adequate
-discriminating evidence makes the states action-equivalent, prune the resolved gap and relax. Do not reactivate
-it from old dialogue alone; require new relevant conflict or a changed premise."""
+public-task-grounded evidential reference, one focal residual decision gap between still-compatible states
+requiring different control consequences, and at most one observation status. Keep only current grounds that
+may matter across reviews or task evolution: enough of each measurement relation, actual observation,
+discrimination basis, actual evidence reach, limit and temporal/source anchor to requalify its applicability.
+Historical observation remains true if its basis no longer transports; do not carry it as current positive
+ground by default when applicability matters but is unknown. An uncovered material public reference can
+remain that gap without a named defect: do not turn "no remembered defect" into "no residual decision gap".
+Unavailable or costly measurement does not lower the reference or remove the states it was meant to distinguish.
+Keep current state, not chronology or a permanent ledger. Requalify grounds if the decision changes, including
+a mid-review completion handoff. After adequate discriminating evidence makes the states action-equivalent,
+prune the resolved gap and relax. Do not reactivate it from old dialogue alone; require new relevant conflict
+or a changed premise."""
 
 GROUNDED_TOOL = _tool("read_with_sources",
     "Read a private Markdown note together with current excerpts from its inline local links. "
