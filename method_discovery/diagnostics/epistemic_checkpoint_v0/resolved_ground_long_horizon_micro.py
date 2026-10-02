@@ -28,8 +28,10 @@ from .ground_formation_fixture import TASK_ROUTER, ROUTER_FILES
 
 
 SCHEMA = "resolved-ground-long-horizon-micro/0"
+CONTROL_SCHEMA = "resolved-ground-long-horizon-controls/0"
 PRODUCTION = "6c72477fce3350c82baf74a9ca8a96c87742be5b"
 ORDER = [1, 2, 3, 4]
+CONTROL_ORDER = [1, 2]
 GAP_TURNS = [10, 20, 30]
 ROOT_TURN_ADJACENT = 1
 ROOT_TURN_LONG = 40
@@ -88,7 +90,7 @@ def production_tree(repo: Path) -> dict:
 
 
 def prepare(*, archive_root: Path, live_parent: Path, profile_file: Path,
-            implementation_commit: str, repo: Path) -> Path:
+            implementation_commit: str, repo: Path, controls_only: bool = False) -> Path:
     """Freeze all inputs before any model request; does not create a runtime."""
     if archive_root.exists() or not neutral_path(live_parent):
         raise ValueError("archive exists or live parent is not neutral")
@@ -98,7 +100,9 @@ def prepare(*, archive_root: Path, live_parent: Path, profile_file: Path,
         reject_research_text(text)
     records = []
     archive_root.mkdir(parents=True)
-    for index in ORDER:
+    order = CONTROL_ORDER if controls_only else ORDER
+    for index in order:
+        transition_index = index + 2 if controls_only else index
         opaque = secrets.token_hex(12)
         live = live_parent / opaque
         if not neutral_path(live) or live.exists():
@@ -109,7 +113,7 @@ def prepare(*, archive_root: Path, live_parent: Path, profile_file: Path,
         for name, content in sorted(ROUTER_FILES.items()):
             (work / name).write_bytes(content.encode("utf-8"))
         (base / "original_task.txt").write_bytes(TASK_ROUTER.encode("utf-8"))
-        bundle = transition_bundle(index)
+        bundle = transition_bundle(transition_index)
         write_json(base / "transition_bundle.json", bundle)
         records.append({
             "index": index, "opaque_run_id": opaque, "live_root": str(live),
@@ -123,17 +127,20 @@ def prepare(*, archive_root: Path, live_parent: Path, profile_file: Path,
                                     "before_sha256": sha256_bytes(item["before"].encode("utf-8")),
                                     "after_sha256": sha256_bytes(item["after"].encode("utf-8"))}
                                    for item in bundle["changes"]],
-            "gap_task_turns": [] if index == 1 else GAP_TURNS,
-            "root_task_turn": ROOT_TURN_ADJACENT if index == 1 else ROOT_TURN_LONG,
-            "max_actual_reviews": MAX_REVIEWS[index],
+            "gap_task_turns": GAP_TURNS if controls_only or index != 1 else [],
+            "root_task_turn": ROOT_TURN_LONG if controls_only or index != 1 else ROOT_TURN_ADJACENT,
+            "max_actual_reviews": MAX_REVIEWS[transition_index],
         })
+        if controls_only:
+            records[-1]["transition_index"] = transition_index
     prereg = {
-        "schema": SCHEMA, "implementation_source_commit": implementation_commit,
+        "schema": CONTROL_SCHEMA if controls_only else SCHEMA,
+        "implementation_source_commit": implementation_commit,
         "frozen_production": contract, "profile": "claude_monitor_opus48",
         "model": safe_profile["model"], "redacted_effective_config": safe_profile,
         "redacted_effective_config_sha256": sha256_bytes(canonical_bytes(safe_profile)),
         "working_view_chars": 4000, "max_review_turns": 20,
-        "run_order": ORDER, "records": records,
+        "run_order": order, "records": records,
         "neutral_host_event": HOST_EVENT,
         "neutral_host_event_sha256": sha256_bytes(canonical_bytes(HOST_EVENT)),
         "root_completion_event": ROOT_EVENT,
@@ -144,19 +151,41 @@ def prepare(*, archive_root: Path, live_parent: Path, profile_file: Path,
         "independent_probe_total_requests": 0,
         "record_level_reruns": 0,
         "infra_only_batch_stop": True,
-        "max_records": 4,
+        "max_records": len(order),
         "hypotheses_research_side_only": {
             "H1": "Adjacent and long-gap semantic breaks receive current-world requalification/control; behavior-preserving source edit does not mechanically invalidate; no-change does not cause ceremonial recertification.",
             "H2": "Adjacent break is handled but long-gap applicability is missing or unstable, with historical-label/default carry or broad reinspection at root.",
         },
         "classification_policy": "No automatic H1/H2 or Carry/Reopen judgment; raw evidence for main-thread review. Long-gap records support an inactive/resolved-ground transport interpretation only if post-run raw working-state audit establishes that the relevant basis was no longer retained as the active/focal state before the final transition. If it remained explicitly current, classify the record only as long-gap current-basis continuity evidence.",
     }
+    if controls_only:
+        prereg.pop("hypotheses_research_side_only")
+        prereg["prior_batch"] = {
+            "archive_commit": "24d757600ebbb42084e6ec2f81b4cba7882acb0f",
+            "valid_related_controls": [1, 2],
+            "invalid_control_attempt": 3,
+            "invalid_stage": "before transition; no root review",
+            "not_started": [4],
+            "followup_scope": "Do not rerun valid records 01/02. Research scheduler synchronization only; scientific control inputs unchanged.",
+        }
+        prereg["control_purpose_research_side_only"] = [
+            "Same-path behavior-preserving change: observe whether path change is mechanically over-invalidated.",
+            "Root no-change: observe whether high-consequence root causes ceremonial reinspection.",
+        ]
+        prereg["classification_policy"] = (
+            "No automatic Carry/Reopen, validity or inactive/resolved-ground classification. "
+            "These records are long-gap current-basis controls; the separate inactive-ground question remains open."
+        )
     write_json(archive_root / "PREREGISTRATION.json", prereg)
     return archive_root / "PREREGISTRATION.json"
 
 
 def validate_prereg(archive_root: Path, prereg: dict, repo: Path) -> None:
-    if prereg["run_order"] != ORDER or prereg["frozen_production"] != production_tree(repo):
+    controls_only = prereg["schema"] == CONTROL_SCHEMA
+    order = CONTROL_ORDER if controls_only else ORDER
+    if prereg["schema"] not in (SCHEMA, CONTROL_SCHEMA):
+        raise ValueError("unknown preregistration schema")
+    if prereg["run_order"] != order or prereg["frozen_production"] != production_tree(repo):
         raise ValueError("production or order identity mismatch")
     implementation = prereg["implementation_source_commit"]
     subprocess.check_call(["git", "merge-base", "--is-ancestor", implementation, "HEAD"], cwd=repo)
@@ -169,16 +198,19 @@ def validate_prereg(archive_root: Path, prereg: dict, repo: Path) -> None:
     if (prereg["neutral_host_event"] != HOST_EVENT or prereg["root_completion_event"] != ROOT_EVENT
             or prereg["independent_probe_total_requests"] != 0):
         raise ValueError("host event or probe treatment changed")
-    if [r["index"] for r in prereg["records"]] != ORDER:
+    if [r["index"] for r in prereg["records"]] != order:
         raise ValueError("record identity mismatch")
     for record in prereg["records"]:
+        expected_transition_index = record["index"] + 2 if controls_only else record["index"]
+        if record.get("transition_index", record["index"]) != expected_transition_index:
+            raise ValueError("transition identity mismatch")
         base = archive_root / record["input_path"]
         if not neutral_path(Path(record["live_root"])):
             raise ValueError("nonneutral live root")
         if (file_hash(base / "original_task.txt") != record["task_sha256"]
                 or manifest_hash(base / "workspace") != record["initial_workspace_manifest_sha256"]
                 or file_hash(base / "transition_bundle.json") != record["transition_bundle_sha256"]
-                or read_json(base / "transition_bundle.json") != transition_bundle(record["index"])):
+                or read_json(base / "transition_bundle.json") != transition_bundle(expected_transition_index)):
             raise ValueError("registered public input changed")
 
 
@@ -256,31 +288,71 @@ def snapshot_working(monitor_root: Path, output: Path, number: int) -> dict:
             "bytes": target.stat().st_size, "path": str(target.relative_to(output))}
 
 
+def wait_for_ordinary_barrier(*, runtime, monitor_root: Path, review_count: int,
+                              next_host_turn: int | None, deadline: float,
+                              output: Path) -> dict:
+    """Wait for production's committed wait receipt, not just its review row."""
+    audit = monitor_root / "monitor_private/audit/reviews.jsonl"
+    receipts = monitor_root / "runtime_receipts.jsonl"
+    while time.monotonic() < deadline:
+        receipt_rows = rows(receipts)
+        if any(row.get("kind") == "failure" for row in receipt_rows):
+            raise RuntimeError("production Monitor reported failure")
+        silent = [row for row in receipt_rows if row.get("kind") == "review_silent"]
+        actual_reviews = len(rows(audit))
+        if actual_reviews >= review_count and len(silent) >= review_count:
+            if actual_reviews != review_count or len(silent) != review_count:
+                raise RuntimeError("ordinary review/control receipt count changed before next host boundary")
+            receipt = silent[review_count - 1]
+            if next_host_turn is not None and int(receipt["next_wake_turn"]) > next_host_turn:
+                raise RuntimeError("committed wait threshold exceeds registered next host turn")
+            barrier = {"review_count": review_count, "silent_count": len(silent),
+                       "next_host_turn": next_host_turn, "receipt": receipt}
+            with (output / "ordinary_barriers.jsonl").open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(barrier, sort_keys=True) + "\n")
+            return barrier
+        if not runtime._process.is_alive():
+            raise RuntimeError("Monitor worker exited before ordinary control commit")
+        time.sleep(.1)  # File-poll interval only; review_silent is the barrier.
+    raise TimeoutError("Monitor ordinary control commit did not arrive within fixed deadline")
+
+
 def execute_schedule(*, runtime, index: int, monitor_root: Path, deadline: float,
                      workspace: Path, checkpoint: Path, bundle_path: Path,
-                     bundle_sha256: str, output: Path, on_review):
+                     bundle_sha256: str, output: Path, on_review,
+                     transition_index: int | None = None, gap_turns: list[int] | None = None,
+                     root_turn: int | None = None, max_reviews: int | None = None):
     """Only the public runtime entry points can cause ordinary/root reviews."""
+    source_index = transition_index if transition_index is not None else index
+    turns = gap_turns if gap_turns is not None else ([] if index == 1 else GAP_TURNS)
+    completion_turn = root_turn if root_turn is not None else (
+        ROOT_TURN_ADJACENT if index == 1 else ROOT_TURN_LONG)
+    expected_reviews = max_reviews if max_reviews is not None else MAX_REVIEWS[index]
     expected = 1
-    if index != 1:
-        for turn in GAP_TURNS:
+    if turns:
+        for position, turn in enumerate(turns):
             packet = dict(HOST_EVENT, task_turn=turn)
             runtime.archive_boundary(packet)
             expected += 1
             _wait_for_reviews(runtime, monitor_root, expected, deadline)
+            wait_for_ordinary_barrier(
+                runtime=runtime, monitor_root=monitor_root, review_count=expected,
+                next_host_turn=turns[position + 1] if position + 1 < len(turns) else None,
+                deadline=deadline, output=output)
             if _tree_manifest(workspace) != read_json(checkpoint / "workspace_manifest.json"):
                 raise RuntimeError("workspace changed during the neutral review gap")
             on_review(expected)
     transition = apply_live_bundle(workspace=workspace, checkpoint=checkpoint,
                                    bundle_path=bundle_path, expected_bundle_sha256=bundle_sha256,
                                    output=output / "transition_application.json")
-    if index == 4 and transition["applied_paths"]:
+    if source_index == 4 and transition["applied_paths"]:
         raise RuntimeError("no-change bundle unexpectedly changed workspace")
-    root_packet = dict(ROOT_EVENT, task_turn=ROOT_TURN_ADJACENT if index == 1 else ROOT_TURN_LONG)
+    root_packet = dict(ROOT_EVENT, task_turn=completion_turn)
     outcome = runtime.request_completion(public_event=root_packet)
     expected += 1
     _wait_for_reviews(runtime, monitor_root, expected, deadline)
     on_review(expected)
-    if len(rows(monitor_root / "monitor_private/audit/reviews.jsonl")) != MAX_REVIEWS[index]:
+    if len(rows(monitor_root / "monitor_private/audit/reviews.jsonl")) != expected_reviews:
         raise RuntimeError("actual review count differs from fixed schedule")
     return transition, {"allowed": outcome.allow, "reason": outcome.reason,
                         "message": outcome.message, "incomplete": outcome.incomplete}
@@ -366,12 +438,19 @@ def run_record(*, archive_root: Path, record: dict, profile_file: Path,
             stream.write(json.dumps({"status": "queued_no_task_agent", "message": message}) + "\n")
         return "queued_no_task_agent"
 
+    def correction_begin(_identity):
+        return None
+
+    def correction_end(_identity):
+        return None
+
     runtime = MonitorRuntime(
         public_task=task, task_workspace=work, artifact_dir=monitor_root,
         config_name="claude_monitor_opus48", model_config=effective,
         interrupt_callback=receive_intervention, max_review_turns=20,
         task_id="dispatcher", run_id=record["opaque_run_id"],
         task_original_path=str(monitor_root / "task_evidence/original_task.txt"),
+        correction_begin=correction_begin, correction_end=correction_end,
         independent_probe_total_requests=0, root_checkpoint_required=True,
         run_timeout_seconds=deadline_seconds,
     )
@@ -385,6 +464,10 @@ def run_record(*, archive_root: Path, record: dict, profile_file: Path,
     try:
         deadline = time.monotonic() + deadline_seconds
         _wait_for_reviews(runtime, monitor_root, 1, deadline)
+        wait_for_ordinary_barrier(
+            runtime=runtime, monitor_root=monitor_root, review_count=1,
+            next_host_turn=record["gap_task_turns"][0] if record["gap_task_turns"] else None,
+            deadline=deadline, output=output)
         status = "first_review_finished"
         audit = monitor_root / "monitor_private/audit"
         dialogue = audit / "dialogue.jsonl"
@@ -447,7 +530,9 @@ def run_record(*, archive_root: Path, record: dict, profile_file: Path,
             workspace=work, checkpoint=checkpoint,
             bundle_path=source / "transition_bundle.json",
             bundle_sha256=record["transition_bundle_sha256"], output=output,
-            on_review=on_review)
+            on_review=on_review, transition_index=record.get("transition_index"),
+            gap_turns=record["gap_task_turns"], root_turn=record["root_task_turn"],
+            max_reviews=record["max_actual_reviews"])
         write_json(output / "completion_outcome.json", completion)
         verify_checkpoint(checkpoint, expected_identities=identities)
         history_after = read_json(audit / "provider_history.json")
@@ -501,7 +586,7 @@ def run_registered_batch(records, run_one):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("prepare", "run"))
+    parser.add_argument("command", choices=("prepare", "prepare-controls", "run"))
     parser.add_argument("--archive-root", required=True, type=Path)
     parser.add_argument("--live-parent", required=True, type=Path)
     parser.add_argument("--profile-file", required=True, type=Path)
@@ -509,9 +594,10 @@ def main():
     repo = Path(__file__).resolve().parents[3]
     sys.path.insert(0, str(repo / "GenericAgent-main"))
     source = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
-    if args.command == "prepare":
+    if args.command in ("prepare", "prepare-controls"):
         print(prepare(archive_root=args.archive_root, live_parent=args.live_parent,
-                      profile_file=args.profile_file, implementation_commit=source, repo=repo))
+                      profile_file=args.profile_file, implementation_commit=source, repo=repo,
+                      controls_only=args.command == "prepare-controls"))
         return
     prereg = read_json(args.archive_root / "PREREGISTRATION.json")
     validate_prereg(args.archive_root, prereg, repo)

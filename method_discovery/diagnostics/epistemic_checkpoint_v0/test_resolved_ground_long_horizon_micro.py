@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -172,6 +173,7 @@ def test_fixed_schedule_uses_native_ordinary_and_root_paths(tmp_path, monkeypatc
             stream.write(json.dumps({"review": count}) + "\n")
 
     monkeypatch.setattr(m, "_wait_for_reviews", fake_wait)
+    monkeypatch.setattr(m, "wait_for_ordinary_barrier", lambda **_kwargs: None)
     observed_reviews = []
     result, completion = m.execute_schedule(
         runtime=FakeRuntime(), index=index, monitor_root=monitor, deadline=100,
@@ -191,6 +193,120 @@ def test_fixed_schedule_uses_native_ordinary_and_root_paths(tmp_path, monkeypatc
     assert verify_checkpoint(checkpoint)["capture_status"] == "complete"
     assert (checkpoint / "binding.json").read_bytes() == before_binding
     assert _tree_manifest(work) != result["before_manifest"] if index != 4 else _tree_manifest(work) == result["before_manifest"]
+
+
+def test_review_row_alone_cannot_advance_next_host_tick(tmp_path, monkeypatch):
+    root, prereg = _prepared(tmp_path)
+    record = prereg["records"][3]  # Existing no-change bundle; no model is started.
+    work = tmp_path / "live"
+    shutil.copytree(root / record["input_path"] / "workspace", work)
+    checkpoint = _checkpoint(tmp_path, work)
+    monitor = tmp_path / "monitor"
+    audit = monitor / "monitor_private/audit"
+    audit.mkdir(parents=True)
+    reviews = audit / "reviews.jsonl"
+    receipts = monitor / "runtime_receipts.jsonl"
+    reviews.write_text(json.dumps({"review": 1}) + "\n", encoding="utf-8")
+    receipts.write_text(json.dumps({"kind": "review_silent", "next_wake_turn": 3}) + "\n",
+                        encoding="utf-8")
+    review_two_visible = threading.Event()
+    calls = []
+    errors = []
+
+    class FakeRuntime:
+        _process = SimpleNamespace(is_alive=lambda: True)
+
+        def archive_boundary(self, packet):
+            turn = packet["task_turn"]
+            calls.append(turn)
+            with reviews.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({"review": len(calls) + 1}) + "\n")
+            if turn == 10:
+                review_two_visible.set()  # Review row precedes control commit.
+            else:
+                with receipts.open("a", encoding="utf-8") as stream:
+                    stream.write(json.dumps({"kind": "review_silent",
+                                             "next_wake_turn": turn + 3}) + "\n")
+
+        def request_completion(self, public_event):
+            calls.append("root")
+            with reviews.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({"review": 5}) + "\n")
+            return SimpleNamespace(allow=False, reason="offline", message="", incomplete=False)
+
+    def fake_wait(_runtime, _monitor_root, count, _deadline):
+        assert len(m.rows(reviews)) >= count
+
+    monkeypatch.setattr(m, "_wait_for_reviews", fake_wait)
+
+    def run_schedule():
+        try:
+            m.execute_schedule(
+                runtime=FakeRuntime(), index=4, monitor_root=monitor,
+                deadline=m.time.monotonic() + 5, workspace=work, checkpoint=checkpoint,
+                bundle_path=root / record["input_path"] / "transition_bundle.json",
+                bundle_sha256=record["transition_bundle_sha256"], output=tmp_path,
+                on_review=lambda _number: None)
+        except Exception as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=run_schedule)
+    worker.start()
+    assert review_two_visible.wait(1)
+    assert calls == [10]
+    assert len(m.rows(reviews)) == 2
+    assert len([r for r in m.rows(receipts) if r.get("kind") == "review_silent"]) == 1
+    worker.join(timeout=.05)
+    assert worker.is_alive() and calls == [10]
+    with receipts.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps({"kind": "review_silent", "next_wake_turn": 13}) + "\n")
+    worker.join(timeout=3)
+    assert not worker.is_alive() and not errors
+    assert calls == [10, 20, 30, "root"]
+    assert len(m.rows(tmp_path / "ordinary_barriers.jsonl")) == 3
+    assert "time.sleep" not in inspect.getsource(m.execute_schedule)
+
+
+def test_committed_wait_threshold_must_reach_registered_next_tick(tmp_path):
+    monitor = tmp_path / "monitor"
+    audit = monitor / "monitor_private/audit"
+    audit.mkdir(parents=True)
+    (audit / "reviews.jsonl").write_text('{"review":1}\n', encoding="utf-8")
+    (monitor / "runtime_receipts.jsonl").write_text(
+        '{"kind":"review_silent","next_wake_turn":11}\n', encoding="utf-8")
+    runtime = SimpleNamespace(_process=SimpleNamespace(is_alive=lambda: True))
+    with pytest.raises(RuntimeError, match="committed wait threshold"):
+        m.wait_for_ordinary_barrier(runtime=runtime, monitor_root=monitor,
+                                    review_count=1, next_host_turn=10,
+                                    deadline=m.time.monotonic() + 1, output=tmp_path)
+
+
+def test_two_control_prereg_preserves_exact_public_inputs(tmp_path):
+    root = tmp_path / "controls"
+    source = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip()
+    m.prepare(archive_root=root, live_parent=Path("E:/runs"), profile_file=_profile(tmp_path),
+              implementation_commit=source, repo=REPO, controls_only=True)
+    prereg = m.read_json(root / "PREREGISTRATION.json")
+    assert prereg["schema"] == m.CONTROL_SCHEMA and prereg["run_order"] == [1, 2]
+    assert [row["transition_index"] for row in prereg["records"]] == [3, 4]
+    assert all(row["gap_task_turns"] == [10, 20, 30] and row["root_task_turn"] == 40
+               and row["max_actual_reviews"] == 5 for row in prereg["records"])
+    assert prereg["prior_batch"]["archive_commit"] == "24d757600ebbb42084e6ec2f81b4cba7882acb0f"
+    assert "hypotheses_research_side_only" not in prereg
+    assert prereg["task_agent_calls"] == prereg["native_verifier_calls"] == 0
+    assert prereg["independent_probe_total_requests"] == 0
+    assert prereg["neutral_host_event"] == m.HOST_EVENT
+    assert prereg["root_completion_event"] == m.ROOT_EVENT
+    assert [r["transition_bundle_sha256"] for r in prereg["records"]] == [
+        "385570aebdb9f18671fb8ee6f843c887755ad8592fe2be497fa2203f0894c240",
+        "4b2fca9f6ea4f55ca525ae00df3d24cbcd3306c3aacd647a0028e7795ae81bfd",
+    ]
+    for row in prereg["records"]:
+        base = root / row["input_path"]
+        assert (base / "original_task.txt").read_bytes() == TASK_ROUTER.encode("utf-8")
+        assert {p.name: p.read_text(encoding="utf-8") for p in (base / "workspace").iterdir()} == ROUTER_FILES
+        assert m.read_json(base / "transition_bundle.json") == m.transition_bundle(row["transition_index"])
+    m.validate_prereg(root, prereg, REPO)
 
 
 def test_contamination_audit_rejects_host_and_archive_leak_but_allows_production_wtv(tmp_path):
