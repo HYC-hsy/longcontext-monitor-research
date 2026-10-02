@@ -210,6 +210,54 @@ def test_contamination_audit_rejects_host_and_archive_leak_but_allows_production
         assert not m.input_contamination_audit(dialogue, **kwargs)["passed"]
 
 
+def test_opaque_live_token_is_allowed_in_normal_model_visible_paths(tmp_path):
+    token = "78d6f30e4a44b2b1ce18ebfe"
+    live = Path("E:/runs") / token
+    dialogue = tmp_path / "dialogue.jsonl"
+    lines = [
+        {"event": "review_context", "wake_context":
+         f'Live environment map: {{"task/workspace/": "E:\\runs\\{token}\\workspace"}}',
+         "task_original_path": f"E:\\runs\\{token}\\session\\task_evidence\\original_task.txt"},
+        {"event": "model_input", "messages": [{"role": "tool", "content":
+         f"workspace listing: E:\\runs\\{token}\\workspace\\wiring.py"}]},
+        {"event": "model_input", "messages": [{"role": "tool", "content":
+         f"Traceback: E:\\runs\\{token}\\workspace\\demo.py:1"}]},
+    ]
+    dialogue.write_text("\n".join(json.dumps(row) for row in lines) + "\n", encoding="utf-8")
+    result = m.input_contamination_audit(
+        dialogue, archive_root=Path("E:/research/archive"), live_root=live,
+        run_id=token, checkpoint_id="review-01-other", bundle_sha256="f" * 64)
+    assert result["passed"] and result["violations"] == []
+
+
+@pytest.mark.parametrize("leak", [
+    "E:/research/archive/records/01", "PREREGISTRATION.json", "f" * 64,
+    "review-01-other", "case_a", "case_01", "seed_123", "E:/research/fixture/input",
+])
+def test_research_identity_still_fails_contamination_audit(tmp_path, leak):
+    dialogue = tmp_path / "dialogue.jsonl"
+    dialogue.write_text("\n".join(json.dumps(row) for row in [
+        {"event": "review_context", "wake_context": "Ordinary public review."},
+        {"event": "model_input", "messages": [{"role": "tool", "content": leak}]},
+    ]) + "\n", encoding="utf-8")
+    assert not m.input_contamination_audit(
+        dialogue, archive_root=Path("E:/research/archive"), live_root=Path("E:/runs/opaque123"),
+        run_id="opaque123", checkpoint_id="review-01-other", bundle_sha256="f" * 64)["passed"]
+
+
+def test_nonneutral_live_path_and_host_condition_words_still_fail(tmp_path):
+    dialogue = tmp_path / "dialogue.jsonl"
+    dialogue.write_text(json.dumps({"event": "review_context", "wake_context":
+                                    "Inspect related source at E:\\runs\\case_a\\workspace"}) + "\n",
+                        encoding="utf-8")
+    result = m.input_contamination_audit(
+        dialogue, archive_root=Path("E:/research/archive"), live_root=Path("E:/runs/case_a"),
+        run_id="opaque123", checkpoint_id=None, bundle_sha256="f" * 64)
+    assert not result["passed"]
+    assert "live_root_non_neutral" in result["violations"]
+    assert any(item.startswith("review_1_host_marker:") for item in result["violations"])
+
+
 def test_no_restore_task_agent_verifier_probe_or_semantic_classifier():
     source = inspect.getsource(m)
     runner = inspect.getsource(m.run_record)

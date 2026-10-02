@@ -203,7 +203,9 @@ def input_contamination_audit(dialogue: Path, *, archive_root: Path, live_root: 
         if row.get("event") not in ("review_context", "model_input"):
             continue
         visible = json.dumps(row, ensure_ascii=False).replace("\\\\", "/").replace("\\", "/").lower()
-        for marker in (archive_text, run_id.lower(), (checkpoint_id or "").lower(), bundle_sha256.lower(),
+        # The opaque run ID is the neutral live-root basename and normally
+        # appears in production paths; it is not a research-condition label.
+        for marker in (archive_text, (checkpoint_id or "").lower(), bundle_sha256.lower(),
                        "preregistration", "fixture", "case_", "seed_"):
             if marker and marker in visible:
                 violations.append(f"line_{number}_research_identity")
