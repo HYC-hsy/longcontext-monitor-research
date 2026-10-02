@@ -149,7 +149,7 @@ def prepare(*, archive_root: Path, live_parent: Path, profile_file: Path,
             "H1": "Adjacent and long-gap semantic breaks receive current-world requalification/control; behavior-preserving source edit does not mechanically invalidate; no-change does not cause ceremonial recertification.",
             "H2": "Adjacent break is handled but long-gap applicability is missing or unstable, with historical-label/default carry or broad reinspection at root.",
         },
-        "classification_policy": "No automatic H1/H2 or Carry/Reopen judgment; raw evidence for main-thread review.",
+        "classification_policy": "No automatic H1/H2 or Carry/Reopen judgment; raw evidence for main-thread review. Long-gap records support an inactive/resolved-ground transport interpretation only if post-run raw working-state audit establishes that the relevant basis was no longer retained as the active/focal state before the final transition. If it remained explicitly current, classify the record only as long-gap current-basis continuity evidence.",
     }
     write_json(archive_root / "PREREGISTRATION.json", prereg)
     return archive_root / "PREREGISTRATION.json"
@@ -322,6 +322,16 @@ def event_locators(monitor_root: Path, completion: dict) -> dict:
             "completion_result": completion}
 
 
+class _InputBoundaryAbort(Exception):
+    """Stop this record after a failed model-input boundary audit."""
+
+
+def final_record_status(preliminary_status: str, final_audit: dict | None) -> str:
+    if final_audit is None or not final_audit.get("passed", False):
+        return "infra_invalid_input_boundary"
+    return preliminary_status
+
+
 def run_record(*, archive_root: Path, record: dict, profile_file: Path,
                implementation_commit: str, deadline_seconds: int = 1200) -> dict:
     """Separate, authorization-gated real execution; never called by prepare/tests."""
@@ -368,6 +378,8 @@ def run_record(*, archive_root: Path, record: dict, profile_file: Path,
     status = "started"
     working_snapshots = []
     completion = None
+    transition = None
+    formation = None
     try:
         deadline = time.monotonic() + deadline_seconds
         _wait_for_reviews(runtime, monitor_root, 1, deadline)
@@ -381,7 +393,7 @@ def run_record(*, archive_root: Path, record: dict, profile_file: Path,
         write_json(output / "input_audit_review_01.json", first_audit)
         if not first_audit["passed"]:
             status = "infra_invalid_input_boundary"
-            return {"status": "infra_invalid_input_boundary"}
+            raise _InputBoundaryAbort
         reviews = rows(audit / "reviews.jsonl")
         review_ids = [row["review_id"] for row in rows(audit / "progress.jsonl")
                       if row.get("event") == "review_started"]
@@ -446,8 +458,8 @@ def run_record(*, archive_root: Path, record: dict, profile_file: Path,
             checkpoint_binding_after=file_hash(checkpoint / "binding.json"))
         write_json(output / "same_session_proof.json", proof)
         status = "completed" if proof["passed"] else "same_session_identity_unconfirmed"
-        return {"status": status, "completion": completion, "transition": transition,
-                "formation_observation_present": formation["formation_observation_present"]}
+    except _InputBoundaryAbort:
+        pass
     finally:
         runtime.close()
         shutil.copytree(monitor_root, output / "monitor")
@@ -456,6 +468,7 @@ def run_record(*, archive_root: Path, record: dict, profile_file: Path,
         write_json(output / "working_snapshots_manifest.json", working_snapshots)
         audit_copy = output / "monitor/monitor_private/audit"
         dialogue_copy = audit_copy / "dialogue.jsonl"
+        contamination = None
         if dialogue_copy.is_file():
             contamination = input_contamination_audit(
                 dialogue_copy, archive_root=archive_root, live_root=live,
@@ -464,12 +477,24 @@ def run_record(*, archive_root: Path, record: dict, profile_file: Path,
                 bundle_sha256=record["transition_bundle_sha256"])
             write_json(output / "input_audit_final.json", contamination)
             write_json(output / "EVENT_LOCATORS.json", event_locators(output / "monitor", completion or {}))
+        status = final_record_status(status, contamination)
         write_json(output / "run_status.json", {
             "status": status, "source_commit": implementation_commit,
             "production_commit": PRODUCTION, "process_pid": pid,
             "task_agent_calls": 0, "native_verifier_calls": 0,
             "independent_probe_total_requests": 0,
             "checkpoint": str(checkpoint) if checkpoint else None})
+    return {"status": status, "completion": completion, "transition": transition,
+            "formation_observation_present": (formation or {}).get("formation_observation_present")}
+
+
+def run_registered_batch(records, run_one):
+    """Stop after the first non-completed record, including final audit failure."""
+    for record in records:
+        result = run_one(record)
+        yield record, result
+        if result["status"] != "completed":
+            break
 
 
 def main():
@@ -491,7 +516,7 @@ def main():
     _, safe = profile(args.profile_file)
     if sha256_bytes(canonical_bytes(safe)) != prereg["redacted_effective_config_sha256"]:
         raise ValueError("profile differs from preregistration")
-    for record in prereg["records"]:
+    def run_one(record):
         print(json.dumps({"event": "starting", "record": record["index"]}), flush=True)
         try:
             result = run_record(archive_root=args.archive_root, record=record,
@@ -501,8 +526,10 @@ def main():
             result = {"status": "infra_invalid", "error_type": type(exc).__name__, "error": str(exc)}
             write_json(args.archive_root / "records" / f"{record['index']:02d}" / "runner_error.json", result)
         print(json.dumps({"event": "finished", "record": record["index"], "status": result["status"]}), flush=True)
-        if result["status"] != "completed":
-            break
+        return result
+
+    for _record, _result in run_registered_batch(prereg["records"], run_one):
+        pass
 
 
 if __name__ == "__main__":

@@ -230,3 +230,19 @@ def test_infrastructure_error_and_semantic_observation_are_separate():
         "semantic_validity_not_assessed": True}
     with pytest.raises(ValueError):
         m.reject_research_text("case label")
+
+
+def test_final_input_audit_failure_overrides_completed_and_stops_batch():
+    assert m.final_record_status("completed", {"passed": False}) == "infra_invalid_input_boundary"
+    assert m.final_record_status("completed", None) == "infra_invalid_input_boundary"
+    assert m.final_record_status("completed", {"passed": True}) == "completed"
+    assert "status = final_record_status(status, contamination)" in inspect.getsource(m.run_record)
+    started = []
+
+    def run_one(record):
+        started.append(record)
+        return {"status": m.final_record_status("completed", {"passed": False})}
+
+    results = list(m.run_registered_batch([1, 2, 3, 4], run_one))
+    assert started == [1]
+    assert [result["status"] for _, result in results] == ["infra_invalid_input_boundary"]
