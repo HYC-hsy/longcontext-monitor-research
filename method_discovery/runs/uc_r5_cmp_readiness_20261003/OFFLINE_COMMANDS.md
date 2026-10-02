@@ -1,0 +1,13 @@
+# Offline command record
+
+No command below starts a model, Task Agent, native verifier, probe, inference gateway, or scientific slot.
+
+1. `git worktree add -b uc-r5-comparison-readiness-20261003 E:\longcontext-uc-r5-comparison-readiness-20261003 232281d650d062bdc6a6030f40ccb904c1ac0851` → created frozen independent worktree at `232281d`.
+2. `docker image inspect znpt/roadmapbench-fyn-2.2.0-roadmap --format '{{.Id}} {{.Architecture}} {{json .RepoDigests}}'` → failed: `failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine; ... The system cannot find the file specified.` Same result for `znpt/roadmapbench-ktx-0.13.0-roadmap`. No image identity was inferred from this failure.
+3. `E:\LongContext\bench_runtime\m4\harbor-env\Scripts\harbor.exe --version` → `0.20.0`. `git -C E:\LongContext\bench_runtime\m4\harbor-src rev-parse HEAD` → `459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc`; checkout contains the three documented M12 patch files as modifications.
+4. `python method_discovery/prepare_uc_r5_comparison_readiness.py --repo E:\longcontext-uc-r5-comparison-readiness-20261003 --historical E:\LongContext --private E:\uc_r5_cmp_private_20261003 --output E:\longcontext-uc-r5-comparison-readiness-20261003\method_discovery\runs\uc_r5_cmp_readiness_20261003` → `{"L1": "passed", "L2": "blocked_docker_unavailable", "conditions": 5, "slots": 30, "tasks": 2}`. Private deployment copies and gateway secrets were not placed in Git.
+5. `python tests/test_experimental_control_samples.py ..\method_discovery\runs\uc_r5_cmp_readiness_20261003\SCRIPTED_PROVIDER_READY_SAMPLES` from `GenericAgent-main` → exit 0, zero-network generator. An earlier direct checkout copy was discarded because CRLF-normalized working bytes did not match its embedded sample hashes; this generation created a new self-consistent manifest.
+6. `python -m pytest method_discovery/tests/test_uc_r5_comparison_readiness.py -q --tb=short --junitxml method_discovery/runs/uc_r5_cmp_readiness_20261003/OFFLINE_TESTS.xml` → **6 passed in 0.09s**. The first attempt before regenerating samples had 1 hash-check failure and 5 passes; it did not involve a model or scientific data.
+7. `python -m pytest tests/test_experimental_control.py tests/test_experimental_control_samples.py -q --tb=short --basetemp E:\uc_r5_readiness_tests --junitxml ..\method_discovery\runs\uc_r5_cmp_readiness_20261003\SCRIPTED_ASSEMBLY_TESTS.xml` from `GenericAgent-main` → **48 passed in 9.31s**. The JUnit XML files retain the final raw pytest results.
+
+The generated sample manifest and each complete provider-ready JSON give actual characters, UTF-8 bytes and SHA-256. These are scripted host requests, not L2 spawned-worker requests.
