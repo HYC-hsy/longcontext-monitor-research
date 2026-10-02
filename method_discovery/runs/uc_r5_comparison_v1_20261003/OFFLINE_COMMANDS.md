@@ -1,0 +1,9 @@
+# Zero-model freeze commands and results
+
+1. `python -m pytest method_discovery/tests/test_uc_r5_freeze_comparison.py -q --tb=short --basetemp E:\uc_r5_prereg_unit_tests` before code-freeze commit: `5 passed in 2.85s` (after correcting an overbroad research-test string assertion; no candidate/runtime change).
+2. Code-freeze commit: `5fb2ccff820aefffdffbfa3e884443cc37f666a1`, containing only `method_discovery/uc_r5_freeze_comparison.py` and its deterministic tests.
+3. `python method_discovery/uc_r5_freeze_comparison.py --prep method_discovery/runs/uc_r5_cmp_readiness_20261003 --output method_discovery/runs/uc_r5_comparison_v1_20261003 --private E:\uc_r5_cmp_private_20261003 --implementation-commit 5fb2ccff820aefffdffbfa3e884443cc37f666a1`: `{"prereg_sha256":"657ebd27c48f248bc6bcceb66d95e5040fafe1d3f6ff7b972ad8fa1390d52ce0","slot_count":30}`. This reads/hashes private profile/layout identities and writes only non-executable research JSON. It does not contact Docker or a provider.
+4. `python -m pytest method_discovery/tests/test_uc_r5_freeze_comparison.py method_discovery/tests/test_uc_r5_comparison_readiness.py method_discovery/tests/test_uc_r5_l2_readiness.py -q --tb=short --basetemp E:\uc_r5_prereg_final_tests --junitxml method_discovery/runs/uc_r5_comparison_v1_20261003/OFFLINE_TESTS.xml`: `17 passed in 2.93s`. Complete machine-readable result is `OFFLINE_TESTS.xml`.
+5. `MASTER_MANIFEST.json` file-byte SHA-256 verification: zero mismatches across the newly frozen artifacts and referenced accepted precheck artifacts. Production subtree checks relative to `232281d...` were empty. The accepted 30-slot draft was not modified.
+
+No scientific session, provider/model hello, Task Agent, native verifier, oracle, independent probe, Docker/L2 rerun or benchmark was performed in this freeze step. The 30-run resource ceiling is a proposed plan, not usage or authorization.
