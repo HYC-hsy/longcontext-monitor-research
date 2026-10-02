@@ -319,6 +319,15 @@ class MonitorAgent:
         self.dcec_enabled = getattr(client, "config", {}).get("monitor_dcec", False)
         if type(self.dcec_enabled) is not bool:
             raise ValueError("monitor_dcec must be a boolean")
+        research_view = getattr(client, "config", {}).get("monitor_research_view", "off")
+        research_intent = getattr(client, "config", {}).get("monitor_research_intent", "off")
+        if type(research_view) is not str or research_view not in {"off", "flat", "framed"}:
+            raise ValueError("monitor_research_view must be off, flat or framed")
+        if type(research_intent) is not str or research_intent not in {"off", "note", "routed"}:
+            raise ValueError("monitor_research_intent must be off, note or routed")
+        if (research_view != "off" or research_intent != "off") and not self.dcec_enabled:
+            raise ValueError("experimental working operations require monitor_dcec")
+        self.experimental_control = None
         if self.dcec_enabled and type(self.semantic_continuity) is not bool:
             raise ValueError("monitor_semantic_continuity must be a boolean with monitor_dcec")
         self.dcec_working_chars = getattr(
@@ -381,6 +390,12 @@ class MonitorAgent:
             if enabled:
                 raise ValueError('monitor_dcec cannot be stacked with historical candidates: ' + ', '.join(enabled))
             self.system_prompt += "\n\n" + DCEC_SYSTEM_PROMPT
+        if research_view != "off" or research_intent != "off":
+            from .experimental_control import ExperimentalControl
+            self.experimental_control = ExperimentalControl(
+                workspace, self.analysis, client, research_view, research_intent,
+                intent_window_requests=getattr(client, "config", {}).get(
+                    "monitor_research_intent_window_requests", 4))
         self.live_awareness = LiveAwareness(workspace) if live_awareness else None
         self.decision_context = DecisionContext(workspace) if decision_context else None
         if pma_memory:
@@ -427,6 +442,10 @@ class MonitorAgent:
             self._audit_dialogue('dcec_working_view', **metadata)
             self._progress('dcec_working_view', **metadata)
             parts.append(text)
+        if self.experimental_control is not None:
+            block = self.experimental_control.active_block()
+            if block:
+                parts.append(block)
         if self.live_awareness is not None:
             text, metadata = self.live_awareness.context()
             self._audit_dialogue('live_awareness', content=text, **metadata)
@@ -578,7 +597,17 @@ class MonitorAgent:
         started = time.monotonic()
         self._progress('tool_started', tool_id=tool_id, name=name)
         try:
-            return self._dispatch(name, arguments)
+            outcome = self._dispatch(name, arguments)
+            if self.experimental_control is not None and name not in {'work_context', 'work_intent'}:
+                try:
+                    self.experimental_control.audit(
+                        'ordinary_tool_outcome', name=name,
+                        outcome_status=(outcome.data or {}).get('status') if isinstance(outcome.data, dict) else None,
+                        control_action=outcome.action.kind if outcome.action is not None else None)
+                except Exception as exc:
+                    self._progress('experimental_registration_failed', name=name,
+                                   error_type=type(exc).__name__)
+            return outcome
         finally:
             self._progress('tool_finished', tool_id=tool_id, name=name,
                            duration_seconds=time.monotonic() - started)
@@ -595,6 +624,14 @@ class MonitorAgent:
 
     def _dispatch(self, name: str, arguments: dict) -> ToolOutcome:
         try:
+            if name == 'work_context' and self.experimental_control is not None:
+                if self.experimental_control.view == 'off':
+                    raise ValueError('work_context is disabled')
+                return ToolOutcome(self.experimental_control.context_tool(arguments))
+            if name == 'work_intent' and self.experimental_control is not None:
+                if self.experimental_control.intent == 'off':
+                    raise ValueError('work_intent is disabled')
+                return ToolOutcome(self.experimental_control.intent_tool(arguments))
             if name == 'allow_complete':
                 if arguments and set(arguments) != {'_noargs'}:
                     raise ValueError('allow_complete accepts no arguments')
@@ -699,6 +736,9 @@ class MonitorAgent:
             else:
                 data = {"status": "error", "error": f"Unknown tool: {name}"}
         except Exception as exc:
+            if self.experimental_control is not None and name in {'work_context', 'work_intent'}:
+                self.experimental_control.audit('operation_failed', name=name,
+                                                error_type=type(exc).__name__)
             if (self.dcec_enabled and name in {'file_write', 'file_patch'}
                     and str(arguments.get('path', '')).replace('\\', '/').strip('/') == 'monitor/working.md'):
                 self._progress('dcec_state_mutation_failed', operation=name,
@@ -778,6 +818,14 @@ class MonitorAgent:
             tools = MONITOR_TOOLS
             if self.independent_check is not None:
                 tools = [*tools, INDEPENDENT_CHECK_TOOL]
+            if self.experimental_control is not None:
+                from .experimental_control import GUIDANCE, WORK_CONTEXT_TOOL, WORK_INTENT_TOOL
+                system += "\n\n" + GUIDANCE
+                tools = [*tools]
+                if self.experimental_control.view != 'off':
+                    tools.append(WORK_CONTEXT_TOOL)
+                if self.experimental_control.intent != 'off':
+                    tools.append(WORK_INTENT_TOOL)
             if self.decision_context is not None:
                 system += (
                     '\n\nmonitor/overview.md is a refreshed file entry to ongoing work and original materials, '
@@ -818,6 +866,12 @@ class MonitorAgent:
                 except (OSError, ValueError) as exc:
                     self._progress('inquiry_restore_failed', error_type=type(exc).__name__)
                     wake_context += '\nSelected inquiry unavailable; original history and tools remain available.'
+            if self.experimental_control is not None:
+                self.experimental_control.audit(
+                    'review_contract',
+                    system_sha256=hashlib.sha256(system.encode('utf-8')).hexdigest(),
+                    tools_sha256=hashlib.sha256(json.dumps(
+                        tools, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest())
             action = run_review(
                 self.client, system, wake_context, tools,
                 self.dispatch, self.max_review_turns,
