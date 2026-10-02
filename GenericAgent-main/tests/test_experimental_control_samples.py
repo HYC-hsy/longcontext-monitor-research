@@ -15,9 +15,15 @@ from test_experimental_control import make_agent, tool, frozen_agent_class
 def _write_sample(destination, name, request, root):
     # Only a synthetic filesystem locator is redacted; no semantic text or tool
     # schema is removed. Provider-ready structure is otherwise complete.
+    root_forms = [str(root)]
+    for _ in range(3):
+        root_forms.append(json.dumps(root_forms[-1], ensure_ascii=False)[1:-1])
+
     def redact(value):
         if isinstance(value, str):
-            return value.replace(str(root), "<OFFLINE_ROOT>")
+            for form in reversed(root_forms):
+                value = value.replace(form, "<OFFLINE_ROOT>")
+            return value
         if isinstance(value, list):
             return [redact(item) for item in value]
         if isinstance(value, dict):
@@ -25,7 +31,7 @@ def _write_sample(destination, name, request, root):
         return value
     sanitized = redact(request)
     encoded = (json.dumps(sanitized, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
-    assert str(root) not in encoded.decode("utf-8")
+    assert all(form not in encoded.decode("utf-8") for form in root_forms)
     assert "apikey" not in encoded.decode("utf-8")
     assert "https://invalid.example" not in encoded.decode("utf-8")
     path = destination / f"{name}.json"
@@ -135,6 +141,21 @@ def test_complete_redacted_samples_have_recomputable_hashes(tmp_path, monkeypatc
         assert hashlib.sha256(content).hexdigest() == item["sha256"]
         parsed = json.loads(content)
         assert set(parsed) >= {"system", "messages", "tools", "model_parameters", "root_handoff"}
+
+
+def test_synthetic_root_is_redacted_inside_nested_json_strings(tmp_path):
+    root = Path("E:/offline-synthetic-root")
+    plain = str(root)
+    embedded = json.dumps({"task/workspace/": plain})
+    twice = json.dumps({"environment": embedded})
+    request = {"plain": plain, "environment": embedded, "nested": twice}
+    item = _write_sample(tmp_path, "nested", request, root)
+    raw = (tmp_path / item["file"]).read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == item["sha256"]
+    saved = json.loads(raw)
+    assert saved["plain"] == "<OFFLINE_ROOT>"
+    assert json.loads(saved["environment"])["task/workspace/"] == "<OFFLINE_ROOT>"
+    assert json.loads(json.loads(saved["nested"])["environment"])["task/workspace/"] == "<OFFLINE_ROOT>"
 
 
 if __name__ == "__main__":

@@ -403,17 +403,17 @@ class ExperimentalControl:
                         (self.render_source(packet, mode), intent_block) if part)) <= EXTRA_BLOCK_LIMIT
                        for mode in ("flat", "framed"))
 
-        empty = self._effective_packet(raw, 0)
-        if not fits(empty):
-            return None
-        low, high = 0, maximum
-        while low < high:
-            middle = (low + high + 1) // 2
-            if fits(self._effective_packet(raw, middle)):
-                low = middle
-            else:
-                high = middle - 1
-        return self._effective_packet(raw, low)
+        # Omission metadata (notably next_read) can make a shorter prefix
+        # larger than the complete packet.  Feasibility is not monotone, so
+        # neither a zero-body probe nor binary search is a sound bound.
+        complete = self._effective_packet(raw, maximum)
+        if fits(complete):
+            return complete
+        for keep in range(maximum - 1, -1, -1):
+            candidate = self._effective_packet(raw, keep)
+            if fits(candidate):
+                return candidate
+        return None
 
     def active_block(self):
         key = (self.client.review_id, int(getattr(self.client, "complete_calls", 0)))

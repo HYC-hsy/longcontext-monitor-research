@@ -100,6 +100,27 @@ def artifact(workspace, reference):
     return json.loads(raw)
 
 
+def virtual_path(length, index):
+    """A legal nested task pointer without relying on host long-path support."""
+    prefix = f"task/workspace/{index}/"
+    remaining = length - len(prefix)
+    parts = []
+    while remaining > 0:
+        size = min(remaining, 100)
+        parts.append("p" * size)
+        remaining -= size + (1 if remaining > size else 0)
+    return prefix + "/".join(parts)
+
+
+def virtual_read(contents):
+    def read(path, start, count, *, offset=0, max_chars=1500):
+        content = contents[path][offset:offset + max_chars]
+        return {"content": content, "sha256": hashlib.sha256(contents[path].encode()).hexdigest(),
+                "truncated": offset + len(content) < len(contents[path]),
+                "next_read": None, "more_lines_after_range": False}
+    return read
+
+
 def test_t01_t02_frozen_off_provider_ready_equality_and_no_state(tmp_path):
     frozen = frozen_agent_class()
     answer = tool("wait", after_turns=1)
@@ -587,6 +608,102 @@ def test_f2_shared_budget_preserves_same_effective_inventory_for_flat_and_framed
         results.append((effective, len(block)))
     assert results[0][0] == results[1][0]
     assert results[0][1] != results[1][1]
+
+
+@pytest.mark.parametrize("body_size,path_size", [(1500, 331), (1, 720)])
+def test_f2_nonmonotone_full_packet_survives_actual_provider_assembly(
+        tmp_path, monkeypatch, body_size, path_size):
+    monkeypatch.setattr("monitor_agent_core.experimental_control.adapter.time.time", lambda: 19.0)
+    paths = [virtual_path(path_size, index) for index in range(4)]
+    contents = {path: "x" * body_size for path in paths}
+    responses = [tool("work_context", action="select", question="Q" * 1200,
+                      sources=[{"path": path} for path in paths])
+                 + tool("work_intent", action="set", text="I" * 1200),
+                 tool("wait", after_turns=1)]
+    packets = []
+    for mode in ("flat", "framed"):
+        agent, _, sent, ws = make_agent(tmp_path / mode, responses,
+                                        view=mode, intent="note")
+        monkeypatch.setattr(ws, "read_text", virtual_read(contents))
+        assert agent.review("Public wake").kind == "wait"
+        row = candidate_events(ws, "request_block")[1]
+        rendered = artifact(ws, row["render_artifact"])["payload"]
+        raw = artifact(ws, rendered["raw_capture_artifact"])["payload"]["packet"]
+        full = agent.experimental_control._effective_packet(raw, raw["source_text_chars"])
+        empty = agent.experimental_control._effective_packet(raw, 0)
+        intent = agent.experimental_control.render_intent(rendered["intent_or_return_packet"])
+        full_lengths = [len("\n\n".join((agent.experimental_control.render_source(full, kind), intent)))
+                        for kind in ("flat", "framed")]
+        empty_lengths = [len("\n\n".join((agent.experimental_control.render_source(empty, kind), intent)))
+                         for kind in ("flat", "framed")]
+        print(f"full_packet body={body_size} path={path_size} mode={mode} "
+              f"full_lengths={full_lengths} empty_lengths={empty_lengths} "
+              f"rendered_chars={len(rendered['block'])} "
+              f"rendered_bytes={len(rendered['block'].encode('utf-8'))}")
+        assert max(full_lengths) <= EXTRA_BLOCK_LIMIT, (full_lengths, body_size, path_size)
+        if body_size == 1:
+            assert max(empty_lengths) > EXTRA_BLOCK_LIMIT, empty_lengths
+        assert rendered["effective_packet"] == full
+        assert [item["content"] for item in full["sources"]] == [contents[path] for path in paths]
+        assert agent.experimental_control.capture_counts == {path: 2 for path in paths}
+        assert rendered["block"] in active_text(sent[1])
+        assert "unavailable" not in rendered["block"]
+        packets.append(rendered["effective_packet"])
+    assert packets[0] == packets[1]
+
+
+def test_f2_multiline_offset_and_cross_source_prefix_in_provider_request(tmp_path, monkeypatch):
+    monkeypatch.setattr("monitor_agent_core.experimental_control.adapter.time.time", lambda: 19.0)
+    paths = [virtual_path(600, index) for index in range(4)]
+    contents = {paths[0]: "a" * 1500,
+                paths[1]: "skip\n" + ("first\nsecond\n" * 150),
+                paths[2]: "\\\n\t" * 600,
+                paths[3]: "\\\n\t" * 600}
+    scripted = [tool("work_context", action="select", question="Q" * 1200,
+                     sources=[{"path": path, "offset": 5 if index == 1 else 0,
+                               "count": 1000} for index, path in enumerate(paths)])
+                + tool("work_intent", action="set", text="I" * 1200),
+                tool("wait", after_turns=1)]
+    results = []
+    for mode in ("flat", "framed"):
+        agent, _, sent, ws = make_agent(tmp_path / mode, scripted,
+                                        view=mode, intent="note")
+        monkeypatch.setattr(ws, "read_text", virtual_read(contents))
+        assert agent.review("Wake").kind == "wait"
+        rendered = artifact(ws, candidate_events(ws, "request_block")[1]["render_artifact"])["payload"]
+        raw = artifact(ws, rendered["raw_capture_artifact"])["payload"]["packet"]
+        effective = rendered["effective_packet"]
+        assert max(len(agent.experimental_control.render_source(raw, kind) + "\n\n" +
+                       agent.experimental_control.render_intent(rendered["intent_or_return_packet"]))
+                   for kind in ("flat", "framed")) > EXTRA_BLOCK_LIMIT
+        assert len(rendered["block"]) <= EXTRA_BLOCK_LIMIT
+        assert rendered["block"] in active_text(sent[1])
+        assert "Q" * 1200 in rendered["block"] and "I" * 1200 in rendered["block"]
+        assert agent.experimental_control.capture_counts == {path: 2 for path in paths}
+        remaining = effective["source_text_chars"]
+        for original, item in zip(raw["sources"], effective["sources"]):
+            keep = min(len(original["content"]), remaining)
+            assert item["content"] == original["content"][:keep]
+            remaining -= keep
+        assert remaining == 0
+        print(f"cross_source mode={mode} effective_chars={effective['source_text_chars']} "
+              f"rendered_chars={len(rendered['block'])} "
+              f"rendered_bytes={len(rendered['block'].encode('utf-8'))} "
+              f"source_chars={[item['content_chars'] for item in effective['sources']]}")
+        assert effective["sources"][0]["content"] == raw["sources"][0]["content"]
+        partial = [item for item in effective["sources"] if item["omitted"]]
+        assert partial
+        for item in partial:
+            assert item["fragment_sha256"] == hashlib.sha256(item["content"].encode()).hexdigest()
+            prefix = item["content"]
+            original = item["range"]
+            lines = prefix.count("\n")
+            expected_offset = (original["offset"] if lines == 0 else 0) + len(prefix.rsplit("\n", 1)[-1])
+            assert item["next_read"]["start"] == original["start"] + lines
+            assert item["next_read"]["offset"] == expected_offset
+            assert item["omitted_chars"] == raw["sources"][item["selected_order"] - 1]["content_chars"] - len(prefix)
+        results.append(effective)
+    assert results[0] == results[1]
 
 
 def test_f3_return_snapshot_and_next_request_current_facts_are_distinct(tmp_path):
