@@ -86,6 +86,20 @@ def tool_names(request):
     return [item["function"]["name"] for item in request["tools"]]
 
 
+def candidate_events(workspace, event=None):
+    path = workspace.private_root / "audit" / "experimental_control.jsonl"
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    return [row for row in rows if row["event"] == event] if event else rows
+
+
+def artifact(workspace, reference):
+    path = workspace.private_root / Path(reference["path"]).relative_to("monitor")
+    raw = path.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == reference["sha256"]
+    assert len(raw) == reference["utf8_bytes"]
+    return json.loads(raw)
+
+
 def test_t01_t02_frozen_off_provider_ready_equality_and_no_state(tmp_path):
     frozen = frozen_agent_class()
     answer = tool("wait", after_turns=1)
@@ -480,3 +494,182 @@ def test_t04_t17_four_source_and_combined_block_budget(tmp_path):
     a.dispatch("work_intent", {"action": "set", "text": "Investigate"})
     client.complete_calls = 1
     assert len(a.experimental_control.active_block()) <= EXTRA_BLOCK_LIMIT
+
+
+def test_f1_select_auto_refresh_and_old_render_are_reconstructible(tmp_path):
+    answers = [tool("work_context", action="select", question="Which behavior?", sources=[
+        {"path": "task/workspace/component.py"}]),
+        tool("work_context", action="clear"), tool("wait", after_turns=1)]
+    a, _, sent, ws = make_agent(tmp_path, answers, view="framed")
+    source = ws.task_mounts["workspace"] / "component.py"
+    initial = source.read_text(encoding="utf-8")
+    original_dispatch = a.dispatch
+
+    def mutate_after_dispatch(name, args):
+        outcome = original_dispatch(name, args)
+        if name == "work_context" and args["action"] == "select":
+            source.write_text("second version\n", encoding="utf-8")
+        if name == "work_context" and args["action"] == "clear":
+            source.write_text("third version\n", encoding="utf-8")
+        return outcome
+
+    a.dispatch = mutate_after_dispatch
+    assert a.review("Public wake").kind == "wait"
+    captures = candidate_events(ws, "source_capture")
+    assert len(captures) == 2
+    first = artifact(ws, captures[0]["capture_artifact"])["payload"]["packet"]
+    refreshed = artifact(ws, captures[1]["capture_artifact"])["payload"]["packet"]
+    assert first["sources"][0]["content"] == initial
+    assert refreshed["sources"][0]["content"] == "second version\n"
+    renders = candidate_events(ws, "request_block")
+    second_render = artifact(ws, renders[1]["render_artifact"])["payload"]
+    assert second_render["raw_capture_artifact"] == captures[1]["capture_artifact"]
+    assert second_render["block_sha256"] == hashlib.sha256(
+        second_render["block"].encode("utf-8")).hexdigest()
+    assert "second version" in second_render["block"]
+    assert "third version" not in second_render["block"]
+    assert "second version" in active_text(sent[1])
+    assert "Optional selected-source view" not in active_text(sent[2])
+    assert source.read_text() == "third version\n"
+    assert renders[1]["review_id"] == captures[1]["review_id"]
+    assert renders[1]["request_sequence"] == 2
+    assert second_render["effective_packet"]["sources"][0]["content"] == "second version\n"
+
+
+def test_f2_shared_budget_preserves_same_effective_inventory_for_flat_and_framed(tmp_path, monkeypatch):
+    monkeypatch.setattr("monitor_agent_core.experimental_control.adapter.time.time", lambda: 19.0)
+    a, _, _, ws = make_agent(tmp_path / "one", [], view="flat")
+    for index in range(4):
+        (ws.task_mounts["workspace"] / f"part{index}.txt").write_text(
+            ('\\"\n\t' * 1100) + "多" * 500, encoding="utf-8")
+    sources = [{"path": f"task/workspace/part{index}.txt", "count": 1000} for index in range(4)]
+    scripted = [tool("work_context", action="select", question="Q" * 1200, sources=sources)
+                + tool("work_intent", action="set", text="I" * 1200, watch_session="s"),
+                tool("file_read", path="task/original_task.txt"),
+                tool("file_read", path="task/original_task.txt"),
+                tool("wait", after_turns=1)]
+
+    class Event:
+        def is_set(self): return False
+    class Process:
+        def poll(self): return None
+
+    results = []
+    for name, mode in (("R", "flat"), ("A", "framed")):
+        agent, client, sent, shared = make_agent(tmp_path / name, scripted,
+                                                 view=mode, intent="routed", window=1,
+                                                 same_workspace=ws)
+        output = tmp_path / f"{name}.log"
+        output.write_bytes(b"unread")
+        agent.analysis.sessions["s"] = {"done": Event(), "process": Process(), "output": output,
+                                         "cursor": 0, "reason": None}
+        assert agent.review("Public wake").kind == "wait"
+        rows = candidate_events(shared, "request_block")
+        # Shared audit directory contains both runs; filter this live review identity.
+        rows = [row for row in rows if row["review_id"] == agent.review_id]
+        assert len(rows) == 4
+        rendered = artifact(shared, rows[2]["render_artifact"])["payload"]
+        block = rendered["block"]
+        assert len(block) <= 14000
+        assert "window elapsed" in block and '"unread_bytes": 6' in block
+        assert "Selected material is not the whole public task" in block
+        assert "Q" * 1200 in block and "I" * 1200 in block
+        assert rendered["raw_capture_artifact"] is not None
+        raw = artifact(shared, rendered["raw_capture_artifact"])["payload"]["packet"]
+        effective = rendered["effective_packet"]
+        assert raw["source_text_chars"] == 6000
+        assert effective["source_text_chars"] < raw["source_text_chars"]
+        assert any(item["omitted"] and item["next_read"] for item in effective["sources"])
+        assert all(item["fragment_sha256"] == hashlib.sha256(
+            item["content"].encode()).hexdigest() for item in effective["sources"]
+                   if item["fragment_sha256"] is not None)
+        assert block in active_text(sent[2])
+        results.append((effective, len(block)))
+    assert results[0][0] == results[1][0]
+    assert results[0][1] != results[1][1]
+
+
+def test_f3_return_snapshot_and_next_request_current_facts_are_distinct(tmp_path):
+    scripted = [tool("work_intent", action="set", text="Observe", watch_session="s"),
+                tool("work_intent", action="return"), tool("allow_complete")]
+    a, client, sent, ws = make_agent(tmp_path, scripted, intent="routed")
+    pending = {"value": None}
+    a.completion_state = lambda: pending["value"]
+
+    class Event:
+        done = False
+        cancelled = False
+        def is_set(self): return self.done
+        def set(self): self.cancelled = True
+    class Process:
+        def poll(self): return 0 if done.done else None
+    done, cancel = Event(), Event()
+    output = tmp_path / "output.log"
+    output.write_bytes(b"unread")
+    a.analysis.sessions["s"] = {"done": done, "process": Process(), "output": output,
+                                 "cursor": 1, "reason": None, "cancel": cancel}
+    a.analysis.read = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("return must not consume stdout"))
+    original_dispatch = a.dispatch
+
+    def change_after_return(name, args):
+        outcome = original_dispatch(name, args)
+        if name == "work_intent" and args["action"] == "return":
+            pending["value"] = {"generation": 1, "request_id": "new-root", "cursor": 4}
+            done.done = True
+        return outcome
+
+    a.dispatch = change_after_return
+    assert a.review("Ordinary wake").kind == "allow_complete"
+    assert len(sent) == 3
+    rows = candidate_events(ws, "request_block")
+    rendered = artifact(ws, rows[2]["render_artifact"])["payload"]
+    packet = rendered["intent_or_return_packet"]
+    assert packet["at_return_snapshot"]["current_handoff"] is None
+    assert packet["at_return_snapshot"]["watch_state"]["done"] is False
+    assert packet["current_handoff"]["request_id"] == "new-root"
+    assert packet["current_watch_state"]["done"] is True
+    assert packet["current_watch_state"]["exit_code"] == 0
+    assert '"request_id": "new-root"' in active_text(sent[2])
+    assert a.analysis.sessions["s"]["cursor"] == 1 and not cancel.cancelled
+    assert a.experimental_control.return_once is None
+    before = len(candidate_events(ws, "request_block"))
+    assert a.experimental_control.active_block() == rendered["block"]
+    assert len(candidate_events(ws, "request_block")) == before
+    assert any("returned" in block.get("content", "")
+               for message in client.history for block in message.get("content", [])
+               if isinstance(block, dict) and block.get("type") == "tool_result")
+
+
+def test_f4_workspace_canonical_path_identity_and_traversal(tmp_path):
+    a, _, _, ws = make_agent(tmp_path, [], view="framed")
+    (ws.private_root / "working.md").write_text("own note", encoding="utf-8")
+    pointers = [{"path": "task//original_task.txt"},
+                {"path": "monitor//working.md"},
+                {"path": "task//workspace//component.py"}]
+    packet = a.dispatch("work_context", {"action": "select", "question": "q",
+                                          "sources": pointers}).data["packet"]
+    assert [item["path"] for item in packet["sources"]] == [x["path"] for x in pointers]
+    assert [item["provenance_kind"] for item in packet["sources"]] == [
+        "exact original_task", "exact working.md", "mounted workspace"]
+    assert "Original task text was not expanded" not in a.experimental_control.render_source(packet)
+    blocked = a.dispatch("work_context", {"action": "select", "question": "q", "sources": [
+        {"path": "task/../monitor/working.md"}]}).data["packet"]["sources"][0]
+    assert blocked["provenance_kind"] == "unavailable"
+    assert blocked["error"] and blocked["content"] == ""
+
+
+def test_f1_error_and_unavailable_render_artifacts_match_sent_text(tmp_path, monkeypatch):
+    a, _, sent, ws = make_agent(tmp_path, [tool("wait", after_turns=1)], view="flat")
+    selected = a.dispatch("work_context", {"action": "select", "question": "q", "sources": [
+        {"path": "task/workspace/missing.txt"}]}).data
+    raw = artifact(ws, selected["capture_artifact"])["payload"]["packet"]
+    assert raw["sources"][0]["error"]["type"] == "FileNotFoundError"
+    monkeypatch.setattr(a.experimental_control, "render_source", lambda *_args, **_kwargs: (
+        _ for _ in ()).throw(RuntimeError("offline render fault")))
+    assert a.review("Wake").kind == "wait"
+    block = candidate_events(ws, "request_block")[-1]
+    archived = artifact(ws, block["render_artifact"])["payload"]
+    assert archived["block_sha256"] == hashlib.sha256(archived["block"].encode()).hexdigest()
+    assert archived["block"] in active_text(sent[0])
+    assert archived["raw_capture_artifact"] is not None
