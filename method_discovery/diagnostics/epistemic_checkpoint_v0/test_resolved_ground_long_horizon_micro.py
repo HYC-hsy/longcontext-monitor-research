@@ -410,3 +410,130 @@ def test_final_input_audit_failure_overrides_completed_and_stops_batch():
     results = list(m.run_registered_batch([1, 2, 3, 4], run_one))
     assert started == [1]
     assert [result["status"] for _, result in results] == ["infra_invalid_input_boundary"]
+
+
+def _stub_run_record_dependencies(tmp_path, monkeypatch, *, controls_only, fault=None):
+    """Exercise run_record's real same-session call without a provider process."""
+    import monitor_agent_core.runtime as production_runtime
+
+    root = tmp_path / "archive"
+    profile_file = _profile(tmp_path)
+    source = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip()
+    m.prepare(archive_root=root, live_parent=Path("E:/runs"), profile_file=profile_file,
+              implementation_commit=source, repo=REPO, controls_only=controls_only)
+    prereg = m.read_json(root / "PREREGISTRATION.json")
+    for row in prereg["records"]:
+        row["live_root"] = str(tmp_path / f"live{row['index']}")
+    monkeypatch.setattr(m, "neutral_path", lambda _path: True)
+    monkeypatch.setattr(m, "_wait_for_reviews", lambda *_args: None)
+    monkeypatch.setattr(m, "wait_for_ordinary_barrier", lambda **_kwargs: None)
+
+    class FakeRuntime:
+        def __init__(self, **kwargs):
+            artifact = Path(kwargs["artifact_dir"])
+            audit = artifact / "monitor_private/audit"
+            audit.mkdir(parents=True)
+            (artifact / "monitor_private/working.md").write_text(
+                "Current router observation.\n", encoding="utf-8")
+            (artifact / "runtime_receipts.jsonl").write_text(
+                '{"kind":"ready"}\n', encoding="utf-8")
+            (audit / "dialogue.jsonl").write_text(json.dumps({
+                "event": "review_context", "review_id": "r1", "wake_context": "Ordinary public review.",
+                "system_prompt": "offline contract", "tools": [],
+            }) + "\n", encoding="utf-8")
+            (audit / "progress.jsonl").write_text(
+                '{"event":"review_started","review_id":"r1"}\n'
+                '{"event":"review_finished","review_id":"r1"}\n', encoding="utf-8")
+            (audit / "reviews.jsonl").write_text(
+                '{"action":{"kind":"wait"}}\n', encoding="utf-8")
+            (audit / "workspace_transitions.jsonl").write_text(json.dumps({
+                "added": [], "modified": [], "deleted": [], "to_cursor": 0,
+                "task_turn": 0, "sample_complete": True,
+            }) + "\n", encoding="utf-8")
+            m.write_json(audit / "provider_history.json", [{"role": "user", "content": "public task"}])
+            self._process = SimpleNamespace(pid=777, is_alive=lambda: True)
+            self._pending = {}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(production_runtime, "MonitorRuntime", FakeRuntime)
+
+    def fake_schedule(*, monitor_root, checkpoint, output, on_review, max_reviews, **_kwargs):
+        audit = monitor_root / "monitor_private/audit"
+        actual_count = max_reviews - 1 if fault == "count" else max_reviews
+        with (audit / "progress.jsonl").open("a", encoding="utf-8") as progress, \
+                (audit / "reviews.jsonl").open("a", encoding="utf-8") as reviews, \
+                (audit / "workspace_transitions.jsonl").open("a", encoding="utf-8") as samples:
+            for number in range(2, actual_count + 1):
+                review_id = "r1" if fault == "duplicate" and number == actual_count else f"r{number}"
+                progress.write(json.dumps({"event": "review_started", "review_id": review_id}) + "\n")
+                reviews.write('{"action":{"kind":"wait"}}\n')
+                samples.write(json.dumps({
+                    "added": [], "modified": [], "deleted": [], "to_cursor": number,
+                    "task_turn": number, "sample_complete": True,
+                }) + "\n")
+                on_review(number)
+        history = [{"role": "user", "content": "public task"},
+                   {"role": "assistant", "content": "observation"}]
+        if fault == "history":
+            history[0] = {"role": "user", "content": "different history"}
+        m.write_json(audit / "provider_history.json", history)
+        if fault == "binding":
+            with (checkpoint / "binding.json").open("ab") as stream:
+                stream.write(b" ")
+        return {"status": "offline"}, {"allowed": False, "reason": "offline",
+                                        "message": "", "incomplete": False}
+
+    monkeypatch.setattr(m, "execute_schedule", fake_schedule)
+    if fault == "binding":
+        monkeypatch.setattr(m, "verify_checkpoint", lambda *_args, **_kwargs: None)
+    seen = []
+    original_proof = m.same_session_proof
+
+    def proof_spy(**kwargs):
+        seen.append(kwargs["expected_reviews"])
+        return original_proof(**kwargs)
+
+    monkeypatch.setattr(m, "same_session_proof", proof_spy)
+    return root, prereg, profile_file, source, seen
+
+
+def test_actual_run_record_allows_both_five_review_controls_then_stops_on_real_failure(tmp_path,
+                                                                                          monkeypatch):
+    root, prereg, profile_file, source, seen = _stub_run_record_dependencies(
+        tmp_path, monkeypatch, controls_only=True)
+    started = []
+
+    def run_one(record):
+        started.append(record["index"])
+        return m.run_record(archive_root=root, record=record, profile_file=profile_file,
+                            implementation_commit=source)
+
+    results = list(m.run_registered_batch(prereg["records"], run_one))
+    assert started == [1, 2]
+    assert [result["status"] for _, result in results] == ["completed", "completed"]
+    assert seen == [5, 5]
+    attempted = []
+    stopped = list(m.run_registered_batch(prereg["records"], lambda record: (
+        attempted.append(record["index"]) or {"status": "infra_invalid"})))
+    assert attempted == [1] and len(stopped) == 1
+
+
+def test_actual_run_record_keeps_old_adjacent_two_review_count(tmp_path, monkeypatch):
+    root, prereg, profile_file, source, seen = _stub_run_record_dependencies(
+        tmp_path, monkeypatch, controls_only=False)
+    result = m.run_record(archive_root=root, record=prereg["records"][0],
+                          profile_file=profile_file, implementation_commit=source)
+    assert result["status"] == "completed" and seen == [2]
+
+
+@pytest.mark.parametrize("fault", ["count", "duplicate", "history", "binding"])
+def test_actual_run_record_rejects_invalid_same_session_evidence(tmp_path, monkeypatch, fault):
+    root, prereg, profile_file, source, seen = _stub_run_record_dependencies(
+        tmp_path, monkeypatch, controls_only=True, fault=fault)
+    result = m.run_record(archive_root=root, record=prereg["records"][0],
+                          profile_file=profile_file, implementation_commit=source)
+    assert result["status"] == "same_session_identity_unconfirmed"
+    assert seen == [5]
+    assert not m.read_json(root / "records/01/same_session_proof.json")["passed"]

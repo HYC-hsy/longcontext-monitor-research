@@ -540,7 +540,8 @@ def run_record(*, archive_root: Path, record: dict, profile_file: Path,
                       if row.get("event") == "review_started"]
         proof = same_session_proof(
             pid=pid, current_pid=runtime._process.pid, history_before=history_before,
-            history_after=history_after, review_ids=review_ids, expected_reviews=MAX_REVIEWS[index],
+            history_after=history_after, review_ids=review_ids,
+            expected_reviews=record["max_actual_reviews"],
             checkpoint_binding_before=binding_before,
             checkpoint_binding_after=file_hash(checkpoint / "binding.json"))
         write_json(output / "same_session_proof.json", proof)
