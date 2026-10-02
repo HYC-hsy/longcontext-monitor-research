@@ -28,8 +28,9 @@ def _profile(tmp_path):
 
 def _prepared(tmp_path):
     root = tmp_path / "archive"
+    source = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip()
     m.prepare(archive_root=root, live_parent=Path("E:/runs"),
-              profile_file=_profile(tmp_path), implementation_commit="offline-implementation", repo=REPO)
+              profile_file=_profile(tmp_path), implementation_commit=source, repo=REPO)
     prereg = m.read_json(root / "PREREGISTRATION.json")
     return root, prereg
 

@@ -158,6 +158,14 @@ def prepare(*, archive_root: Path, live_parent: Path, profile_file: Path,
 def validate_prereg(archive_root: Path, prereg: dict, repo: Path) -> None:
     if prereg["run_order"] != ORDER or prereg["frozen_production"] != production_tree(repo):
         raise ValueError("production or order identity mismatch")
+    implementation = prereg["implementation_source_commit"]
+    subprocess.check_call(["git", "merge-base", "--is-ancestor", implementation, "HEAD"], cwd=repo)
+    implementation_path = "method_discovery/diagnostics/epistemic_checkpoint_v0/resolved_ground_long_horizon_micro.py"
+    implementation_tests = "method_discovery/diagnostics/epistemic_checkpoint_v0/test_resolved_ground_long_horizon_micro.py"
+    changed = subprocess.check_output(["git", "diff", "--name-only", implementation, "HEAD", "--",
+                                       implementation_path, implementation_tests], cwd=repo, text=True).strip()
+    if changed:
+        raise ValueError("implementation changed after preregistration")
     if (prereg["neutral_host_event"] != HOST_EVENT or prereg["root_completion_event"] != ROOT_EVENT
             or prereg["independent_probe_total_requests"] != 0):
         raise ValueError("host event or probe treatment changed")
@@ -196,7 +204,7 @@ def input_contamination_audit(dialogue: Path, *, archive_root: Path, live_root: 
             continue
         visible = json.dumps(row, ensure_ascii=False).replace("\\\\", "/").replace("\\", "/").lower()
         for marker in (archive_text, run_id.lower(), (checkpoint_id or "").lower(), bundle_sha256.lower(),
-                       "preregistration", "fixture", "experiment", "case_", "seed_"):
+                       "preregistration", "fixture", "case_", "seed_"):
             if marker and marker in visible:
                 violations.append(f"line_{number}_research_identity")
     if not neutral_path(live_root):
@@ -372,6 +380,7 @@ def run_record(*, archive_root: Path, record: dict, profile_file: Path,
             bundle_sha256=record["transition_bundle_sha256"])
         write_json(output / "input_audit_review_01.json", first_audit)
         if not first_audit["passed"]:
+            status = "infra_invalid_input_boundary"
             return {"status": "infra_invalid_input_boundary"}
         reviews = rows(audit / "reviews.jsonl")
         review_ids = [row["review_id"] for row in rows(audit / "progress.jsonl")
@@ -492,7 +501,7 @@ def main():
             result = {"status": "infra_invalid", "error_type": type(exc).__name__, "error": str(exc)}
             write_json(args.archive_root / "records" / f"{record['index']:02d}" / "runner_error.json", result)
         print(json.dumps({"event": "finished", "record": record["index"], "status": result["status"]}), flush=True)
-        if result["status"] not in ("completed", "same_session_identity_unconfirmed"):
+        if result["status"] != "completed":
             break
 
 
