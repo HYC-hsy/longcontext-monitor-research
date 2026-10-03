@@ -29,7 +29,7 @@ def current_working_context(workspace, limit=8000):
     )
 
 
-def dcec_working_context(workspace, limit=DCEC_WORKING_VIEW_DEFAULT_CHARS):
+def dcec_working_context(workspace, limit=DCEC_WORKING_VIEW_DEFAULT_CHARS, guidance_override=None):
     """Return the one bounded DCEC state view and non-semantic telemetry.
 
     The file remains the model's natural-language state.  This function only
@@ -59,6 +59,8 @@ def dcec_working_context(workspace, limit=DCEC_WORKING_VIEW_DEFAULT_CHARS):
         "public reference, and unavailable measurement does not lower it. Once grounds are adequate, "
         "prune and relax. Update only when future control should change, not every wake."
     )
+    if guidance_override is not None:
+        guidance = guidance_override
     if truncated:
         guidance += f" Only the first {limit} characters are injected; use file_read if more is needed."
     if status != "present":

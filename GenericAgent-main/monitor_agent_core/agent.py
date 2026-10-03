@@ -30,6 +30,12 @@ from .working_context import (
 )
 from .live_awareness import LiveAwareness
 from .decision_context import DecisionContext
+from .path_control_v0 import (
+    SYSTEM_PROMPT as PATH_CONTROL_SYSTEM_PROMPT,
+    CONTINUATION_PROMPT as PATH_CONTROL_CONTINUATION_PROMPT,
+    WORKING_GUIDANCE as PATH_CONTROL_WORKING_GUIDANCE,
+    recent_public_events,
+)
 
 
 def _tool(name, description, properties, required):
@@ -319,6 +325,11 @@ class MonitorAgent:
         self.dcec_enabled = getattr(client, "config", {}).get("monitor_dcec", False)
         if type(self.dcec_enabled) is not bool:
             raise ValueError("monitor_dcec must be a boolean")
+        self.path_control_v0 = getattr(client, "config", {}).get("monitor_path_control_v0", False)
+        if type(self.path_control_v0) is not bool:
+            raise ValueError("monitor_path_control_v0 must be a boolean")
+        if self.path_control_v0 and not self.dcec_enabled:
+            raise ValueError("monitor_path_control_v0 requires monitor_dcec")
         research_view = getattr(client, "config", {}).get("monitor_research_view", "off")
         research_intent = getattr(client, "config", {}).get("monitor_research_intent", "off")
         if type(research_view) is not str or research_view not in {"off", "flat", "framed"}:
@@ -389,7 +400,10 @@ class MonitorAgent:
             enabled = sorted(name for name, value in incompatible.items() if value)
             if enabled:
                 raise ValueError('monitor_dcec cannot be stacked with historical candidates: ' + ', '.join(enabled))
-            self.system_prompt += "\n\n" + DCEC_SYSTEM_PROMPT
+            if self.path_control_v0 and (research_view != "off" or research_intent != "off"):
+                raise ValueError("monitor_path_control_v0 requires experimental view and intent off")
+            self.system_prompt += "\n\n" + (
+                PATH_CONTROL_SYSTEM_PROMPT if self.path_control_v0 else DCEC_SYSTEM_PROMPT)
         if research_view != "off" or research_intent != "off":
             from .experimental_control import ExperimentalControl
             self.experimental_control = ExperimentalControl(
@@ -438,10 +452,19 @@ class MonitorAgent:
             if text:
                 parts.append(text)
         if self.dcec_enabled:
-            text, metadata = dcec_working_context(self.workspace, self.dcec_working_chars)
+            if self.path_control_v0:
+                text, metadata = dcec_working_context(
+                    self.workspace, self.dcec_working_chars, PATH_CONTROL_WORKING_GUIDANCE)
+            else:
+                text, metadata = dcec_working_context(self.workspace, self.dcec_working_chars)
             self._audit_dialogue('dcec_working_view', **metadata)
             self._progress('dcec_working_view', **metadata)
             parts.append(text)
+            if self.path_control_v0:
+                window, window_metadata = recent_public_events(
+                    self.workspace, getattr(self.client, 'observed_root_handoff', None))
+                self._audit_dialogue('path_control_public_window', content=window, **window_metadata)
+                parts.append(window)
         if self.experimental_control is not None:
             block = self.experimental_control.active_block()
             if block:
@@ -496,7 +519,8 @@ class MonitorAgent:
             "Do not issue task interventions in this maintenance response. Existing private working note:\n" + previous
         )
         if self.dcec_enabled:
-            prompt += "\n\nDCEC continuation contract:\n" + DCEC_CONTINUATION_PROMPT
+            prompt += "\n\nDCEC continuation contract:\n" + (
+                PATH_CONTROL_CONTINUATION_PROMPT if self.path_control_v0 else DCEC_CONTINUATION_PROMPT)
         self._progress("continuation_started")
         if self.grounded_context:
             prompt += ("\nPreserve useful source links or paths to active inquiry notes so your future self "
