@@ -1,0 +1,1 @@
+ls -la /app/pkg/endpoint/sep 2>/dev/null || echo "sep does not exist"

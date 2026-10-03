@@ -1,0 +1,1 @@
+grep -n "WithStreamMiddleware\|cep.StreamMiddleware" /app/client/option_stream.go

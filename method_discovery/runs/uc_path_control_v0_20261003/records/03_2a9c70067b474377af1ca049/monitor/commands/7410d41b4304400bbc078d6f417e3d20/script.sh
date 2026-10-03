@@ -1,0 +1,1 @@
+grep -n "WithRecvTimeout" /app/client/callopt/streamcall/*.go 2>/dev/null || echo "Not found in streamcall"

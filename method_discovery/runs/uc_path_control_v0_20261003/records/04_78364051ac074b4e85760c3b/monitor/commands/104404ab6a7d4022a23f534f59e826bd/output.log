@@ -1,0 +1,21 @@
+func (p *connPool) Dump() interface{} {
+	defer func() {
+		if r := recover(); r != nil {
+			// Panic recovery to ensure diagnostic calls don't crash the system
+		}
+	}()
+
+	result := make(map[string]interface{})
+	result["pool_size"] = p.size
+	result["remote_service"] = p.remoteService
+
+	// Collect connection information
+	connections := make(map[string]interface{})
+	p.conns.Range(func(key, value interface{}) bool {
+		addr, ok := key.(string)
+		if !ok {
+			return true
+		}
+		trans, ok := value.(*transports)
+		if !ok {
+			return true

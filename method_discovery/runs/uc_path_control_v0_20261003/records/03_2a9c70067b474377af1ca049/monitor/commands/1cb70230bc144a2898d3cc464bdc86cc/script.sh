@@ -1,0 +1,1 @@
+grep -n "WithStreamMiddleware" /app/client/option_stream.go 2>/dev/null || echo "WithStreamMiddleware not found"

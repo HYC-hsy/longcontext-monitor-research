@@ -1,0 +1,1 @@
+ls -la /app/pkg/ 2>/dev/null || echo "pkg directory does not exist"

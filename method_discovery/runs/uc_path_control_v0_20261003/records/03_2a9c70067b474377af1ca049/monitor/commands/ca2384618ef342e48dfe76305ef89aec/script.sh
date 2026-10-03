@@ -1,0 +1,1 @@
+grep -A 3 "readFrameHeader.*netpoll.Reader" /app/pkg/remote/trans/nphttp2/grpc/grpcframe/frame_reader.go | grep -E "first4Bytes|second4Bytes" || echo "Enhanced error not found"

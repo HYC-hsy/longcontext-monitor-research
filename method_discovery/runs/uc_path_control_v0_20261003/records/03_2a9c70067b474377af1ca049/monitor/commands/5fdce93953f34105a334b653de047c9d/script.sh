@@ -1,0 +1,1 @@
+grep -n "WithFailureRetry\|WithBackupRequest" /app/client/option.go | head -3

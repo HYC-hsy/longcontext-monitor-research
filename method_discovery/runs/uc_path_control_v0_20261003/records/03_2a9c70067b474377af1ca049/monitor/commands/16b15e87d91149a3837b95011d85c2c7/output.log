@@ -1,0 +1,11 @@
+	fh, err := readAndCheckFrameHeader(fr.reader)
+	if err != nil {
+		return nil, err
+	}
+	if fh.Length > fr.maxReadSize {
+		return nil, http2.ErrFrameTooLarge
+	}
+	// payload := fr.getReadBuf(fh.Length)
+	var f http2.Frame
+	if fh.Type == http2.FrameData {
+		f, err = parseDataFrame(fr.frameCache, fh, fr.reader)

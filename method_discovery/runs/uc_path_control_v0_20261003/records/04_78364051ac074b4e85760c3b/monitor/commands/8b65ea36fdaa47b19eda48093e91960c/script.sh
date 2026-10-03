@@ -1,0 +1,1 @@
+ls -la /app/client/option*.go 2>&1

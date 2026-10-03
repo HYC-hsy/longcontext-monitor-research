@@ -1,0 +1,1 @@
+ls -la /app/client/option_ttstream.go 2>/dev/null || echo "option_ttstream.go not found"

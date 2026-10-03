@@ -1,0 +1,1 @@
+grep -n "WithStreamMiddleware\|WithStreamMiddlewareBuilder" /app/client/option_stream.go

@@ -1,0 +1,1 @@
+find /app/client/callopt -name "*.go" -type f | xargs grep -l "WithRecvTimeout" 2>/dev/null || echo "Not found in callopt"

@@ -1,0 +1,50 @@
+
+// Options is used to initialize a client.
+type Options = client.Options
+
+// A Suite is a collection of Options. It is useful to assemble multiple associated
+// Options as a single one to keep the order or presence in a desired manner.
+type Suite interface {
+	Options() []Option
+}
+
+// WithTransportProtocol sets the transport protocol for client.
+func WithTransportProtocol(tp transport.Protocol) Option {
+	return Option{F: func(o *client.Options, di *utils.Slice) {
+		tpName := tp.String()
+		if tpName == transport.Unknown {
+			panic(fmt.Errorf("WithTransportProtocol: invalid '%v'", tp))
+		}
+		di.Push(fmt.Sprintf("WithTransportProtocol(%s)", tpName))
+		rpcinfo.AsMutableRPCConfig(o.Configs).SetTransportProtocol(tp)
+	}}
+}
+
+// WithSuite adds an option suite for client.
+func WithSuite(suite Suite) Option {
+	return Option{F: func(o *client.Options, di *utils.Slice) {
+		var nested struct {
+			Suite   string
+			Options utils.Slice
+		}
+		nested.Suite = fmt.Sprintf("%T(%+v)", suite, suite)
+
+		for _, op := range suite.Options() {
+			op.F(o, &nested.Options)
+		}
+		di.Push(nested)
+	}}
+}
+
+// WithMiddleware adds middleware for client to handle request.
+func WithMiddleware(mw endpoint.Middleware) Option {
+	mwb := func(ctx context.Context) endpoint.Middleware {
+		return mw
+	}
+	return Option{F: func(o *client.Options, di *utils.Slice) {
+		di.Push(fmt.Sprintf("WithMiddleware(%+v)", utils.GetFuncName(mw)))
+		o.MWBs = append(o.MWBs, mwb)
+	}}
+}
+
+// WithMiddlewareBuilder adds middleware that depend on context for client to handle request

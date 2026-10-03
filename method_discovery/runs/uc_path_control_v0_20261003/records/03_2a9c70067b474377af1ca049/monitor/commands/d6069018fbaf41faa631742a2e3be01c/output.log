@@ -1,0 +1,13 @@
+	fh, err := readFrameHeader(fr.reader)
+	if err != nil {
+		return nil, err
+	}
+	if fh.Length > fr.maxReadSize {
+		return nil, http2.ErrFrameTooLarge
+--
+func readFrameHeader(r netpoll.Reader) (http2.FrameHeader, error) {
+	buf, err := r.Next(frameHeaderLen)
+	if err != nil {
+		return http2.FrameHeader{}, err
+	}
+	return http2.FrameHeader{
