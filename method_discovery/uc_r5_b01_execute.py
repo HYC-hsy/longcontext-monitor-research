@@ -76,7 +76,7 @@ def main() -> int:
         print(f"START {run_id} ({condition}) {entry['started_at']}", flush=True)
         with log_path.open("wb") as log:
             completed = subprocess.run(
-                [sys.executable, "-m", "method_discovery.uc_r5_execution_entry",
+                [sys.executable, "-m", "method_discovery.uc_r5_b01_bundle_entry",
                  "--run-id", run_id, "--authorization",
                  str((OUT / f"AUTH_{run_id}.json").resolve())],
                 cwd=REPO, stdout=log, stderr=subprocess.STDOUT,
