@@ -22,6 +22,9 @@ class MonitorWorkspace:
             raise MonitorPathError(f"Evidence root is not a directory: {self.evidence_root}")
         self.private_root.mkdir(parents=True, exist_ok=True)
         self.snapshot_root = self.private_root / ".task_view"
+        # A root decision can use the familiar virtual note name without
+        # overwriting the continuing monitor's note. Default remains unchanged.
+        self.working_note_target = "working.md"
         self.task_mounts = {}
         for name, value in (task_mounts or {}).items():
             if not name or any(token in name for token in ("/", "\\")) or name in {".", ".."}:
@@ -50,6 +53,8 @@ class MonitorWorkspace:
 
     def resolve_read(self, virtual_path: str) -> Path:
         namespace, parts = self._parts(virtual_path)
+        if namespace == "monitor" and parts == ("working.md",):
+            parts = (self.working_note_target,)
         root = self.evidence_root if namespace == "task" else self.private_root
         if namespace == "task" and parts and parts[0] in self.task_mounts:
             root, parts = self.task_mounts[parts[0]], parts[1:]
@@ -63,6 +68,8 @@ class MonitorWorkspace:
 
     def resolve_private(self, virtual_path: str) -> Path:
         namespace, parts = self._parts(virtual_path)
+        if namespace == "monitor" and parts == ("working.md",):
+            parts = (self.working_note_target,)
         if namespace != "monitor" or not parts:
             raise MonitorPathError("Writes require a file under monitor/")
         path = self._within(self.private_root, self.private_root.joinpath(*parts))

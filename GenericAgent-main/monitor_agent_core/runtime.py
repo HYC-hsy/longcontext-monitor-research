@@ -342,6 +342,7 @@ def _worker(config, commands, outputs):
             # Only actual review-ending actions define compaction boundaries.
             client.CONTROL_ACTIONS = {"wait", "allow_complete"}
         try:
+            transition_view = None
             if workspace_sampler is not None:
                 clock = config.get('latest_task_turn')
                 sampled_turn = max(task_turn, clock.value) if clock is not None else task_turn
@@ -362,7 +363,38 @@ def _worker(config, commands, outputs):
                 if complete:
                     context += "\nRuntime feedback on prior actions (handoff is not proof of uptake):\n" + feedback[:complete].decode("utf-8")
                     next_receipt_offset += complete
-            action = monitor.review(context, completion_pending=completion)
+            root = current_completion() if monitor.root_scope_v1 != 'off' else None
+            if root is not None:
+                completion, request_id = True, root['request_id']
+            action = monitor.review(
+                context, completion_pending=completion,
+                root_handoff=root, root_transition_view=transition_view)
+            if action.kind == 'root_route':
+                root = current_completion()
+                remaining_turns = monitor.max_review_turns - int(action.payload['prior_model_turns'])
+                if root is None:
+                    outputs.put({'kind': 'root_route_superseded', 'reason': 'handoff_no_longer_pending'})
+                    from .actions import MonitorAction
+                    action = MonitorAction('wait', {'after_turns': 1, 'mode': 'follow'})
+                elif remaining_turns <= 0:
+                    outputs.put({'kind': 'failure', 'error': 'Root review turn budget exhausted',
+                                 'completion': True, 'request_id': root['request_id']})
+                    return False
+                else:
+                    completion, request_id = True, root['request_id']
+                    root_transition_view = None
+                    if workspace_sampler is not None:
+                        clock = config.get('latest_task_turn')
+                        sampled_turn = max(task_turn, clock.value) if clock is not None else task_turn
+                        root_transition_view, root_transition_audit = workspace_sampler.sample(
+                            workspace.task_mounts['workspace'], cursor=root['cursor'],
+                            task_turn=sampled_turn)
+                        _append(Path(config['private_root']) / 'audit' /
+                                'workspace_transitions.jsonl', root_transition_audit)
+                    action = monitor.review(
+                        context, completion_pending=True, root_handoff=root,
+                        max_turns_override=remaining_turns,
+                        root_transition_view=root_transition_view)
             receipt_offset = next_receipt_offset
         except Exception as exc:
             from .provider import failure_chain
@@ -392,9 +424,17 @@ def _worker(config, commands, outputs):
                     "kind": "intervention", "message": action.payload["message"],
                     "cursor": cursor, "request_id": uuid.uuid4().hex,
                 })
+        elif action.kind == 'root_intervened':
+            close_watch = True
+            next_wake_turn = task_turn + 1
         elif action.kind == "allow_complete":
             approval_id = action.payload.get("request_id", request_id)
             current = current_completion()
+            if monitor.root_scope_v1 != 'off' and (
+                    current is None or current['request_id'] != approval_id
+                    or current['generation'] != action.payload.get('root_frame_generation')):
+                outputs.put({'kind': 'root_approval_superseded', 'request_id': approval_id})
+                return True
             key = ((current or {}).get("generation"), (current or {}).get("request_id"))
             if config.get("root_checkpoint_required") and key not in client.captured_root_handoffs:
                 outputs.put({"kind": "failure", "error": "Required root checkpoint was not captured",

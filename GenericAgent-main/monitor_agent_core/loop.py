@@ -13,7 +13,7 @@ class MonitorLoopError(RuntimeError):
 
 def run_review(client, system_prompt: str, wake_context: str, tools: list[dict],
                dispatch, max_turns: int = 20, audit=None, before_model=None,
-               on_text=None, system_for_model=None) -> MonitorAction:
+               on_text=None, system_for_model=None, route_before_model=None) -> MonitorAction:
     """Run one wake while the provider client preserves history across wakes."""
     messages = [
         {"role": "system", "content": system_prompt},
@@ -41,6 +41,12 @@ def run_review(client, system_prompt: str, wake_context: str, tools: list[dict],
                 raise
             if update:
                 messages.append({"role": "user", "content": update})
+        if route_before_model is not None and route_before_model():
+            preserve_results([result for message in messages
+                              for result in message.get('tool_results', [])],
+                             'root_route')
+            record('root_route', turn=_turn, prior_model_turns=_turn - 1)
+            return MonitorAction('root_route', {'prior_model_turns': _turn - 1})
         if system_for_model is not None:
             # Resolve after refreshing host state, including mid-review handoffs.
             # Provider replaces its system context; conversation is not reset.
@@ -150,4 +156,7 @@ def run_review(client, system_prompt: str, wake_context: str, tools: list[dict],
     # budget boundary there is no next iteration, but the next wake reuses history.
     preserve_results([result for message in messages
                       for result in message.get('tool_results', [])], 'review_turn_limit')
+    if route_before_model is not None and route_before_model():
+        record('root_route', turn=max_turns + 1, prior_model_turns=max_turns)
+        return MonitorAction('root_route', {'prior_model_turns': max_turns})
     raise MonitorLoopError(f"Monitor review exceeded {max_turns} turns without a control action")

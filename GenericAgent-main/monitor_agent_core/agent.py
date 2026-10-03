@@ -36,6 +36,7 @@ from .path_control_v0 import (
     WORKING_GUIDANCE as PATH_CONTROL_WORKING_GUIDANCE,
     recent_public_events,
 )
+from .root_scope_v1 import ROOT_SYSTEM_PROMPT, ROOT_NOTE_GUIDANCE, root_input
 
 
 def _tool(name, description, properties, required):
@@ -306,9 +307,13 @@ class MonitorAgent:
         if type(tool_feedback) is not bool:
             raise ValueError('monitor_tool_feedback must be a boolean')
         self.system_prompt = monitor_system_prompt(tool_feedback)
+        self.base_system_prompt = self.system_prompt
         self.workspace = workspace
         self.max_review_turns = int(max_review_turns)
         self.completion_pending = False
+        self.frame_kind = 'local'
+        self.root_frame_handoff = None
+        self._local_history_at_root = None
         self.completion_state = None
         self._seen_completion = None
         self._intervened_generation = None
@@ -330,6 +335,11 @@ class MonitorAgent:
             raise ValueError("monitor_path_control_v0 must be a boolean")
         if self.path_control_v0 and not self.dcec_enabled:
             raise ValueError("monitor_path_control_v0 requires monitor_dcec")
+        self.root_scope_v1 = getattr(client, 'config', {}).get('monitor_root_scope_v1', 'off')
+        if self.root_scope_v1 not in {'off', 'retained', 'isolated'}:
+            raise ValueError('monitor_root_scope_v1 must be off, retained or isolated')
+        if self.root_scope_v1 != 'off' and not self.path_control_v0:
+            raise ValueError('monitor_root_scope_v1 requires monitor_path_control_v0')
         research_view = getattr(client, "config", {}).get("monitor_research_view", "off")
         research_intent = getattr(client, "config", {}).get("monitor_research_intent", "off")
         if type(research_view) is not str or research_view not in {"off", "flat", "framed"}:
@@ -441,6 +451,11 @@ class MonitorAgent:
             self.client.archive_continuation_history = self._archive_continuation_history
 
     def _active_working_context(self):
+        if self.frame_kind == 'root':
+            text, metadata = dcec_working_context(
+                self.workspace, self.dcec_working_chars, ROOT_NOTE_GUIDANCE)
+            self._audit_dialogue('root_working_view', **metadata)
+            return text
         parts = []
         if self.task_understanding is not None:
             parts.append(self.task_understanding.context())
@@ -507,7 +522,7 @@ class MonitorAgent:
 
     def _prepare_continuation(self):
         """Same model, existing history, no tool actions during pre-compaction handoff."""
-        note_path = self.workspace.private_root / "working.md"
+        note_path = self.workspace.resolve_private("monitor/working.md")
         previous = (self.pma_memory.context() if self.pma_memory is not None else
                     note_path.read_text(encoding="utf-8") if note_path.exists() else "")
         prompt = (
@@ -518,7 +533,11 @@ class MonitorAgent:
             "Keep details that change future decisions, not a chronology. No fixed schema; return only the note. "
             "Do not issue task interventions in this maintenance response. Existing private working note:\n" + previous
         )
-        if self.dcec_enabled:
+        if self.frame_kind == 'root':
+            prompt += ("\n\nPreserve the current handoff question, observed public grounds and limits, "
+                       "and the next useful root decision. Do not turn prior local conclusions into "
+                       "a whole-task verdict.")
+        elif self.dcec_enabled:
             prompt += "\n\nDCEC continuation contract:\n" + (
                 PATH_CONTROL_CONTINUATION_PROMPT if self.path_control_v0 else DCEC_CONTINUATION_PROMPT)
         self._progress("continuation_started")
@@ -530,7 +549,9 @@ class MonitorAgent:
         transaction = uuid.uuid4().hex
         self.client.continuation_transaction_id = transaction
         self.client.request_purpose = 'continuation'
-        self.client.system = self.system_prompt + "\n\n" + CONTINUATION_MODE_PROMPT
+        active_system = (self.base_system_prompt + "\n\n" + ROOT_SYSTEM_PROMPT
+                         if self.frame_kind == 'root' else self.system_prompt)
+        self.client.system = active_system + "\n\n" + CONTINUATION_MODE_PROMPT
         self.client.history.append({"role": "user", "content": [{"type": "text", "text": prompt}]})
         stage = 'request'
         try:
@@ -590,7 +611,7 @@ class MonitorAgent:
                 "timestamp": time.time(), "review_id": self.review_id, "note": note,
             }, ensure_ascii=False) + "\n", mode="append")
             if self.pma_memory is None:
-                self._atomic_private_text("working.md", note)
+                self._atomic_private_text(self.workspace.working_note_target, note)
             self._progress("continuation_saved", transaction_id=transaction)
             return note
         except Exception as exc:
@@ -728,6 +749,13 @@ class MonitorAgent:
             elif name == "intervene":
                 message = str(arguments.get("message", "")).strip()
                 if not message: raise ValueError("message must not be empty")
+                if (self.frame_kind == 'root' and
+                        (self.completion_state is None or
+                         self.completion_state() != self.root_frame_handoff)):
+                    raise ValueError('This root handoff is no longer current; no correction was sent.')
+                if (self.root_scope_v1 != 'off' and self.frame_kind != 'root'
+                        and self.completion_state is not None and self.completion_state()):
+                    raise ValueError('A current handoff requires the root decision frame before control.')
                 if self.intervention_callback is not None:
                     if message in self._sent_messages:
                         return ToolOutcome({"status": "already_submitted",
@@ -742,19 +770,34 @@ class MonitorAgent:
                     if self._seen_completion:
                         self._intervened_generation = self._seen_completion["generation"]
                     self.completion_pending = False
+                    if self.frame_kind == 'root':
+                        return ToolOutcome(
+                            {"status": "submitted", "receipt": receipt,
+                             "note": "This handoff ended; later Task behavior remains to be observed."},
+                            False, MonitorAction('root_intervened', {
+                                'request_id': self.root_frame_handoff['request_id'],
+                                'generation': self.root_frame_handoff['generation']}))
                     return ToolOutcome({"status": "submitted", "receipt": receipt,
                                         "note": "Submission is not proof of delivery or uptake. Continue observing; wait when appropriate.",
                                         **self._remember_advice(message, arguments)})
                 self._remember_advice(message, arguments)
                 return ToolOutcome(None, False, MonitorAction("intervene", {"message": message}))
             elif name == "allow_complete":
+                if self.root_scope_v1 != 'off':
+                    current = self.completion_state() if self.completion_state else None
+                    if (self.frame_kind != 'root' or current != self.root_frame_handoff
+                            or not current or current['generation'] == self._intervened_generation):
+                        raise ValueError('Only the current root decision frame can approve this handoff.')
                 if self.completion_state is not None:
                     current = self.completion_state()
                     if (not self._seen_completion or current != self._seen_completion
                             or current["generation"] == self._intervened_generation):
                         raise ValueError("The observed handoff is no longer current. Inspect the runtime update before deciding.")
                     return ToolOutcome(None, False, MonitorAction(
-                        "allow_complete", {"request_id": current["request_id"]}))
+                        "allow_complete", {"request_id": current["request_id"],
+                                           "root_frame_generation": current['generation']}
+                        if self.root_scope_v1 != 'off' else
+                        {"request_id": current["request_id"]}))
                 if not self.completion_pending: raise ValueError("No root completion is pending")
                 return ToolOutcome(None, False, MonitorAction("allow_complete", {}))
             else:
@@ -806,10 +849,47 @@ class MonitorAgent:
                                + type(exc).__name__)
         return "\n\n".join(update for update in updates if update) or None
 
-    def review(self, wake_context: str, completion_pending=False) -> MonitorAction:
+    def _enter_root_frame(self, handoff):
+        if not handoff or self.completion_state is None or self.completion_state() != handoff:
+            raise ValueError('Root frame requires the current pending handoff')
+        self._local_history_at_root = self.client.export_history()
+        self.root_frame_handoff = dict(handoff)
+        self.frame_kind = 'root'
+        relative = f"root_working/{handoff['generation']}.md"
+        self.workspace.working_note_target = relative
+        local_note = self.workspace.private_root / 'working.md'
+        inherited = (local_note.read_text(encoding='utf-8')
+                     if self.root_scope_v1 == 'retained' and local_note.is_file() else '')
+        self._atomic_private_text(relative, inherited)
+        self.client.restore_history(self._local_history_at_root if self.root_scope_v1 == 'retained' else [])
+        self._progress('root_frame_entered', mode=self.root_scope_v1,
+                       generation=handoff['generation'], request_id=handoff['request_id'],
+                       inherited_history_items=len(self.client.history),
+                       inherited_note_characters=len(inherited))
+
+    def _leave_root_frame(self):
+        if self.frame_kind != 'root':
+            return
+        handoff = self.root_frame_handoff
+        self._atomic_private_text(
+            f"audit/root_frames/{handoff['generation']}/history.json",
+            json.dumps(self.client.export_history(), ensure_ascii=False))
+        self.client.restore_history(self._local_history_at_root)
+        self.workspace.working_note_target = 'working.md'
+        self.frame_kind = 'local'
+        self.root_frame_handoff = None
+        self._local_history_at_root = None
+        self._progress('root_frame_left', generation=handoff['generation'],
+                       request_id=handoff['request_id'])
+
+    def review(self, wake_context: str, completion_pending=False, *,
+               root_handoff=None, max_turns_override=None,
+               root_transition_view=None) -> MonitorAction:
         started = time.time()
         self.review_id = uuid.uuid4().hex
         self.client.review_id = self.review_id
+        if root_handoff is not None:
+            self._enter_root_frame(root_handoff)
         self._progress('review_started', completion_pending=bool(completion_pending))
         before = self.client.history_measure()
         self.completion_pending = bool(completion_pending)
@@ -838,7 +918,18 @@ class MonitorAgent:
                         "Read subsequent public behavior to assess uptake. End with wait when ready to be silent, "
                         "or allow_complete only for a still-pending, justified root completion. "
                         "After an intervention that completion proposal is no longer pending.")
-            system = self.system_prompt + "\n\n" + mode
+            active_system = (self.base_system_prompt + "\n\n" + ROOT_SYSTEM_PROMPT
+                             if self.frame_kind == 'root' else self.system_prompt)
+            system = active_system + "\n\n" + mode
+            if self.frame_kind == 'root':
+                remaining = getattr(self.client, 'recovery_deadline', None)
+                wake_context = root_input(
+                    self.workspace, self.root_frame_handoff,
+                    remaining_seconds=(remaining - time.monotonic()) if remaining is not None else None)
+                if root_transition_view:
+                    wake_context += "\n\n" + root_transition_view
+                self._audit_dialogue('root_frame_input', mode=self.root_scope_v1,
+                                     handoff=self.root_frame_handoff, content=wake_context)
             tools = MONITOR_TOOLS
             if self.independent_check is not None:
                 tools = [*tools, INDEPENDENT_CHECK_TOOL]
@@ -898,14 +989,19 @@ class MonitorAgent:
                         tools, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest())
             action = run_review(
                 self.client, system, wake_context, tools,
-                self.dispatch, self.max_review_turns,
+                self.dispatch, self.max_review_turns if max_turns_override is None else max_turns_override,
                 audit=self._audit_dialogue,
                 before_model=self._refresh_review_context,
+                route_before_model=(lambda: bool(self.completion_state and self.completion_state())
+                                    if self.root_scope_v1 != 'off' and self.frame_kind == 'local'
+                                    else None),
             )
             return action
         finally:
             self._progress('review_finished', action=action.kind if action else None,
-                           duration_seconds=time.time() - started)
+                           duration_seconds=time.time() - started,
+                           frame=self.frame_kind,
+                           handoff=self.root_frame_handoff)
             telemetry = self.client.drain_telemetry() if hasattr(self.client, "drain_telemetry") else {}
             self.workspace.write_text(
                 "monitor/audit/reviews.jsonl",
@@ -913,8 +1009,10 @@ class MonitorAgent:
                     "started_at": started, "duration_seconds": time.time() - started,
                     "history_before": before, "history_after": self.client.history_measure(),
                     "action": asdict(action) if action else None,
+                    "frame": self.frame_kind, "handoff": self.root_frame_handoff,
                 }, ensure_ascii=False) + "\n", mode="append",
             )
+            self._leave_root_frame()
             self.workspace.write_text(
                 "monitor/audit/provider_history.json",
                 json.dumps(self.client.export_history(), ensure_ascii=False), mode="replace",
