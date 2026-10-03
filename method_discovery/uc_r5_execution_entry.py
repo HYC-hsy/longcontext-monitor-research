@@ -27,6 +27,7 @@ ADDENDUM = HERE / "runs" / "uc_r5_comparison_v1_20261003" / "EXECUTION_ADDENDUM.
 
 
 def bridge_source_hash() -> str:
+    """Hash source content canonically across Windows Git LF/CRLF checkout modes."""
     paths = [HERE / name for name in (
         "uc_r5_bridge_gateway.py", "uc_r5_execution_bridge.py",
         "uc_r5_execution_entry.py", "uc_r5_bridge_harbor_cli.py",
@@ -34,7 +35,7 @@ def bridge_source_hash() -> str:
     digest = hashlib.sha256()
     for path in paths:
         relative = path.relative_to(HERE).as_posix().encode()
-        content = path.read_bytes()
+        content = path.read_bytes().replace(b"\r\n", b"\n")
         digest.update(len(relative).to_bytes(4, "big"))
         digest.update(relative)
         digest.update(len(content).to_bytes(8, "big"))

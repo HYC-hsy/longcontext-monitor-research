@@ -20,7 +20,7 @@ import pytest
 
 from method_discovery.uc_r5_bridge_gateway import gate_resolver, digest, install
 from method_discovery.uc_r5_execution_bridge import Bridge, frozen_task_tree_sha, manifest_identity, tar_manifest
-from method_discovery.uc_r5_execution_entry import load_authorized_slot, overlay_bundle
+from method_discovery.uc_r5_execution_entry import bridge_source_hash, load_authorized_slot, overlay_bundle
 
 
 def _resolved(path, body, config, route_id=None):
@@ -234,6 +234,24 @@ def test_frozen_prereg_does_not_authorize_any_slot(tmp_path):
     false_authorization.write_text(json.dumps({"execution_authorized": False}), encoding="utf-8")
     with pytest.raises(RuntimeError):
         load_authorized_slot("25f65dbd77c41d3a039c91f5", false_authorization)
+
+
+def test_bridge_source_hash_uses_canonical_text_bytes(monkeypatch):
+    # These are the only files included in the source hash; simulating a Git
+    # CRLF checkout must not change the identity used by the addendum.
+    from method_discovery import uc_r5_execution_entry as entry
+
+    baseline = bridge_source_hash()
+    original = Path.read_bytes
+
+    def crlf_read(path):
+        data = original(path)
+        if path.suffix == ".py" and path.name.startswith("uc_r5_"):
+            return data.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        return data
+
+    monkeypatch.setattr(Path, "read_bytes", crlf_read)
+    assert entry.bridge_source_hash() == baseline
 
 
 def test_harbor_cli_bootstrap_fails_before_original_cli_without_authorization():
