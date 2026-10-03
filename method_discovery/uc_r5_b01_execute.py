@@ -6,6 +6,7 @@ interpreter. This file does not implement a task, Monitor, or evaluator loop.
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 import subprocess
 import sys
@@ -58,6 +59,10 @@ def main() -> int:
     manifest = OUT / "RUNNER_MANIFEST.json"
     if sha(manifest) != EXPECTED_MANIFEST_SHA:
         raise RuntimeError("Frozen b01 runner manifest differs before launch")
+    resume_auth = json.loads((OUT / "RESUME_AUTHORIZATION.json").read_text(encoding="utf-8"))
+    serial_bytes = Path(__file__).read_bytes().replace(b"\r\n", b"\n")
+    if resume_auth.get("serial_entry_source_sha256") != hashlib.sha256(serial_bytes).hexdigest():
+        raise RuntimeError("Resumed serial entry differs from authorized source")
     # Check all five authorizations and unused roots before the first trial.
     for _, run_id in ORDER:
         slot, _ = load_authorized_slot(run_id, OUT / f"AUTH_{run_id}.json")
@@ -76,7 +81,7 @@ def main() -> int:
         print(f"START {run_id} ({condition}) {entry['started_at']}", flush=True)
         with log_path.open("wb") as log:
             completed = subprocess.run(
-                [sys.executable, "-m", "method_discovery.uc_r5_execution_entry",
+                [sys.executable, "-m", "method_discovery.uc_r5_b01_resume_entry",
                  "--run-id", run_id, "--authorization",
                  str((OUT / f"AUTH_{run_id}.json").resolve())],
                 cwd=REPO, stdout=log, stderr=subprocess.STDOUT,
