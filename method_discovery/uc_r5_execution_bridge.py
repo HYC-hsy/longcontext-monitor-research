@@ -316,7 +316,7 @@ class Bridge:
             raise RuntimeError("Task or Monitor process survived writer termination")
         self.capture = await self._capture_tar(self.archive / "pre_verification_app.tar")
         git_result = await environment.exec(
-            "git -C /app status --porcelain=v1 -uall", user="root", timeout_sec=30)
+            "git --no-optional-locks -C /app status --porcelain=v1 -uall", user="root", timeout_sec=30)
         self.receipt("pre_verification_capture", {
             "trial_id": str(self.trial.id), "container_id": after,
             "writer_termination": "docker-compose-stop-start-main",

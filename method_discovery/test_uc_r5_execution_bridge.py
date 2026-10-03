@@ -405,6 +405,29 @@ def test_evaluator_binding_rejects_changed_workspace(tmp_path, monkeypatch):
     assert not (archive / "verification_release.json").exists()
 
 
+def test_capture_git_status_does_not_refresh_stale_index(tmp_path):
+    repo = tmp_path / "workspace"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "offline@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "Offline Test"], check=True)
+    source = repo / "source.txt"
+    source.write_text("unchanged content\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "source.txt"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "baseline"], check=True)
+    index = repo / ".git" / "index"
+    before = index.read_bytes()
+    stat = source.stat()
+    os.utime(source, ns=(stat.st_atime_ns, stat.st_mtime_ns + 5_000_000_000))
+    assert source.stat().st_mtime_ns != stat.st_mtime_ns
+    result = subprocess.run(
+        ["git", "--no-optional-locks", "-C", str(repo), "status", "--porcelain=v1", "-uall"],
+        capture_output=True, text=True, check=True,
+    )
+    assert result.stdout == ""
+    assert index.read_bytes() == before
+
+
 def test_host_gate_validates_each_role_and_denies_cross_slot_or_input_error(tmp_path, monkeypatch):
     control = tmp_path / "control"
     control.mkdir()
@@ -541,7 +564,7 @@ def test_nonbenchmark_container_restart_kills_delayed_writer_and_preserves_captu
                 return SimpleNamespace(stdout="")
 
             async def exec(self, command_text, **_kwargs):
-                assert command_text == "git -C /app status --porcelain=v1 -uall"
+                assert command_text == "git --no-optional-locks -C /app status --porcelain=v1 -uall"
                 return SimpleNamespace(return_code=128, stdout="")
 
         bridge = Bridge(SimpleNamespace(id="offline", agent_environment=FakeEnvironment()), {
