@@ -4,6 +4,7 @@ import json
 import multiprocessing as mp
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,8 +12,12 @@ from monitor_agent_core.agent import MonitorAgent, verification_tools
 from monitor_agent_core.process_runner import AnalysisSessions
 from monitor_agent_core.provider import MonitorProviderClient
 from monitor_agent_core.runtime import MonitorRuntime
+from monitor_agent_core.runtime import _verification_boundary_valid
 from monitor_agent_core.verification_loop_v0 import SelectedVerification
 from monitor_agent_core.workspace import MonitorWorkspace
+from ga_monitor_adapter import GenericAgentMonitorAdapter
+from ga import GenericAgentHandler
+from agent_loop import StepOutcome, agent_runner_loop, exhaust
 
 
 def workspace(tmp_path):
@@ -154,14 +159,19 @@ def test_tool_names_and_off_path_are_unchanged(tmp_path):
 def test_manual_and_managed_share_primary_contract(tmp_path):
     ws, _ = workspace(tmp_path)
     prompts = []
+    modes = []
     for managed in (False, True):
         client = MonitorProviderClient('anthropic', {
             'apikey': 'offline', 'apibase': 'https://offline.invalid', 'model': 'offline',
             'max_retries': 0, 'monitor_dcec': True, 'monitor_path_control_v0': True,
             'monitor_verification_loop_v0': True,
             'monitor_verification_runtime_managed': managed})
-        prompts.append(MonitorAgent(client, ws).system_prompt)
+        monitor = MonitorAgent(client, ws)
+        prompts.append(monitor.system_prompt)
+        modes.append(monitor._active_working_context())
     assert prompts[0] == prompts[1]
+    assert 'manual single code_run execution' in modes[0]
+    assert 'runtime-managed selected checks' in modes[1]
 
 
 def verification_stub_worker(config, commands, outputs):
@@ -311,3 +321,132 @@ def test_input_changed_during_check_is_not_stable_support(tmp_path):
     request = definition(task, code='print("stable")')
     check.register(request, 6)  # a revised, non-mutating measurement
     assert check.run_due(7)['receipt']['input_changed_during_check'] is False
+
+
+def test_real_task_loop_and_handler_route_through_adapter(tmp_path):
+    _, task = workspace(tmp_path)
+    cancellations = []
+    runtime = MonitorRuntime(
+        public_task='Keep the route working.', task_workspace=task,
+        artifact_dir=tmp_path / 'runtime', task_id='offline', task_max_turns=2,
+        config_name='offline', interrupt_callback=cancellations.append,
+        model_config={'monitor_verification_loop_v0': True,
+                      'monitor_verification_runtime_managed': True},
+        worker_target=verification_stub_worker)
+    adapter = object.__new__(GenericAgentMonitorAdapter)
+    adapter.runtime = runtime
+    parent = SimpleNamespace(task_dir=None, extrakeyinfo=None, intervene=None,
+                             research_turn_offset=40, monitor_runtime=adapter)
+
+    class Handler(GenericAgentHandler):
+        def _in_plan_mode(self):
+            return False
+
+        def dispatch(self, *args, **kwargs):
+            if False:
+                yield None
+            return StepOutcome('tool finished', next_prompt='continue')
+
+    class Client:
+        last_tools = ''
+
+        def chat(self, **kwargs):
+            if False:
+                yield None
+            return SimpleNamespace(content='Used the tool.', thinking='', stop_reason='end_turn',
+                                   tool_calls=[SimpleNamespace(id='one', function=SimpleNamespace(
+                                       name='file_read', arguments='{}'))])
+
+    try:
+        runtime._verification_due_turn.value = 1
+        result = exhaust(agent_runner_loop(Client(), 'system', 'task', Handler(parent), [],
+                                           max_turns=2, verbose=False, turn_offset=40))
+        assert result['result'] == 'MAX_TURNS_EXCEEDED'
+        assert runtime._task_budget_turns_used.value == 2  # not global turns 41/42
+        assert runtime._task_max_turns == 2
+        assert runtime._verification_due_turn.value == -1  # natural post-tool boundary ran
+        assert not cancellations
+        assert any(row.get('kind') == 'verification_boundary_release'
+                   for row in [json.loads(line) for line in
+                               (runtime.artifact_dir / 'runtime_receipts.jsonl').read_text().splitlines()])
+    finally:
+        runtime.close()
+
+
+def delayed_boundary_worker(config, commands, outputs):
+    outputs.put({'kind': 'ready'})
+    while True:
+        command = commands.get()
+        if command['kind'] == 'close':
+            return
+        if command['kind'] == 'verification_boundary':
+            time.sleep(0.15)  # controlled dequeue delay; host deadline is shorter
+            valid = _verification_boundary_valid(config['verification_boundary_state'],
+                                                 command['generation'])
+            outputs.put({'kind': 'verification_boundary_release', 'ticket': command['ticket'],
+                         'generation': command['generation'],
+                         'result': {'status': 'observed' if valid else 'boundary_expired'}})
+
+
+def test_released_host_boundary_invalidates_queued_ticket(tmp_path):
+    _, task = workspace(tmp_path)
+    runtime = MonitorRuntime(public_task='Keep the route working.', task_workspace=task,
+        artifact_dir=tmp_path / 'runtime', task_id='offline', config_name='offline',
+        interrupt_callback=lambda _: None,
+        model_config={'monitor_verification_loop_v0': True},
+        worker_target=delayed_boundary_worker)
+    try:
+        runtime._verification_due_turn.value = 1
+        runtime._run_deadline = time.monotonic() + 0.05
+        assert runtime.verification_boundary(1)['error'] == 'monitor_unavailable_or_boundary_timeout'
+        assert runtime._verification_due_turn.value == -1
+        time.sleep(0.2)
+        assert runtime._verification_accepted_generation.value == 0
+    finally:
+        runtime.close()
+
+
+def test_boundary_expiry_during_analysis_cancels_only_selected_check(tmp_path):
+    check, _, task, _, events = selected(tmp_path)
+    accepted = mp.Value('q', 0)
+    check.accepted_generation = accepted
+    check.register(definition(task, code='import time; time.sleep(2); print("late")'), 1)
+    state = mp.Array('d', [1, time.monotonic() + 0.08])
+    started = time.monotonic()
+    result = check.run_due(1, boundary_valid=lambda: _verification_boundary_valid(state, 1),
+                           boundary_generation=1)
+    assert result['status'] == 'boundary_expired'
+    assert time.monotonic() - started < 1.5
+    assert check.receipt is None
+    assert any(name == 'verification_boundary_expired' for name, _ in events)
+    assert len(check.analysis.sessions) == 1
+    assert check.analysis.sessions[next(iter(check.analysis.sessions))]['done'].is_set()
+
+
+@pytest.mark.parametrize('managed', [False, True])
+def test_defer_is_incomplete_and_invalid_root_dispositions_do_not_mutate(tmp_path, managed):
+    ws, task = workspace(tmp_path)
+    client = MonitorProviderClient('anthropic', {
+        'apikey': 'offline', 'apibase': 'https://offline.invalid', 'model': 'offline',
+        'max_retries': 0, 'monitor_dcec': True, 'monitor_path_control_v0': True,
+        'monitor_verification_loop_v0': True, 'monitor_verification_runtime_managed': managed})
+    monitor = MonitorAgent(client, ws)
+    handoff = {'generation': 1, 'request_id': 'completion-1', 'cursor': 1}
+    monitor.completion_state = lambda: handoff
+    monitor._enter_root_frame(handoff)
+    monitor._refresh_completion()
+    try:
+        for invalid in ('withdraw', 'revise', 'anything'):
+            outcome = monitor.dispatch('allow_complete', {'result': invalid, 'reason': 'No'})
+            assert outcome.data['status'] == 'error'
+            assert monitor.verification is None or monitor.verification.current is None
+        limited = monitor.dispatch('allow_complete', {'result': 'defer', 'reason': 'Public check unavailable'})
+        assert limited.action.kind == 'incomplete_delivery'
+        if managed:
+            assert monitor.dispatch('allow_complete', {'result': 'resolve', 'reason': 'Assumed'}).data['status'] == 'error'
+            monitor.verification.register(definition(task, scope='root'), 1)
+            monitor.verification.run_due(1)
+            assert monitor.dispatch('allow_complete', {
+                'result': 'resolve', 'reason': 'Current root observation'}).action.kind == 'allow_complete'
+    finally:
+        monitor._leave_root_frame()

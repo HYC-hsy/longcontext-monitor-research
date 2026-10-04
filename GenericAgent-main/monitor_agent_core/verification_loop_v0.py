@@ -9,7 +9,7 @@ import time
 import uuid
 
 
-GUIDANCE = """Keep one ongoing understanding and working note across ordinary and root decisions. A substantive correction remains open until actual Task feedback and a selected public check, if one is needed, are considered. Select at most one executable check with code_run verification metadata; ordinary navigation needs no such metadata. Task owns implementation and task tests; your selected check observes and must not edit the implementation. A queued check is not a result. Its exit status and output support only the stated scope, and a changed input, timeout or failed check is not a pass. At a root handoff, consider unresolved local feedback before judging the whole task. Explicitly resolve, revise, withdraw or defer the current follow-up; local support does not establish whole-task completion. Use the seven ordinary tools, public requirements and actual artifacts; do not treat hidden evaluation as online evidence."""
+GUIDANCE = """Keep one ongoing understanding and working note across ordinary and root decisions. A substantive correction remains open until actual Task feedback and a public check, if one is needed, are considered. In runtime-managed mode, select at most one executable check with code_run verification metadata; ordinary navigation needs no such metadata. In manual mode, code_run executes once and you organize subsequent checks and follow-up. Task owns implementation and task tests; your check observes and must not edit the implementation. A queued check is not a result. Its exit status and output support only the stated scope, and a changed input, timeout or failed check is not a pass. At a root handoff, consider unresolved local feedback before judging the whole task. Explicitly resolve, revise, withdraw or defer the current follow-up; local support does not establish whole-task completion. Use the seven ordinary tools, public requirements and actual artifacts; do not treat hidden evaluation as online evidence."""
 
 
 def _sha(value):
@@ -17,11 +17,12 @@ def _sha(value):
 
 
 class SelectedVerification:
-    def __init__(self, workspace, analysis, audit, due_turn=None):
+    def __init__(self, workspace, analysis, audit, due_turn=None, accepted_generation=None):
         self.workspace = workspace
         self.analysis = analysis
         self.audit = audit
         self.due_turn = due_turn
+        self.accepted_generation = accepted_generation
         self.current = None
         self.receipt = None
         self.follow_pending = False
@@ -106,8 +107,10 @@ class SelectedVerification:
         self.follow_message = message
         self.audit('verification_follow_opened', message=message)
 
-    def run_due(self, task_turn, *, force=False):
+    def run_due(self, task_turn, *, force=False, boundary_valid=None, boundary_generation=None):
         current = self.current
+        if boundary_valid is not None and not boundary_valid():
+            return {'status': 'boundary_expired'}
         if current is None or self.running:
             return {'status': 'not_selected' if current is None else 'already_running'}
         inputs = self._inputs(current['artifacts'])
@@ -127,7 +130,16 @@ class SelectedVerification:
                 session = self.analysis.start(current['code'], current.get('type') or 'python',
                                               current.get('timeout') or 60, wait_seconds=0)
                 entry = self.analysis.sessions[session['session_id']]
-                entry['done'].wait((current.get('timeout') or 60) + 3)
+                if boundary_valid is None:
+                    entry['done'].wait((current.get('timeout') or 60) + 3)
+                else:
+                    while not entry['done'].wait(0.02):
+                        if not boundary_valid():
+                            self.analysis.read(session['session_id'], wait_seconds=0, cancel=True)
+                            entry['done'].wait(2.5)
+                            self.audit('verification_boundary_expired', verification_id=current['id'],
+                                       boundary_generation=boundary_generation)
+                            return {'status': 'boundary_expired', 'verification_id': current['id']}
                 observed = self.analysis.read(session['session_id'], wait_seconds=0)
                 full_output = entry['output'].read_bytes()
                 observed['output_excerpt'] = full_output[:12000].decode('utf-8', errors='replace')
@@ -137,13 +149,18 @@ class SelectedVerification:
                 session = None
                 observed = {'status': 'error', 'reason': type(exc).__name__, 'stdout': ''}
             after = self._inputs(current['artifacts'])
+            if boundary_valid is not None and not boundary_valid():
+                self.audit('verification_boundary_expired', verification_id=current['id'],
+                           boundary_generation=boundary_generation)
+                return {'status': 'boundary_expired', 'verification_id': current['id']}
             receipt = {'verification_id': current['id'], 'version': current['version'],
                        'definition_sha256': current['definition_sha256'],
                        'task_turn': task_turn, 'started_at': started, 'finished_at': time.time(),
                        'command': current['code'], 'type': current.get('type') or 'python',
                        'session_id': session['session_id'] if session else None, 'result': observed,
                        'inputs_before': inputs, 'inputs_after': after,
-                       'input_changed_during_check': inputs != after}
+                       'input_changed_during_check': inputs != after,
+                       'boundary_generation': boundary_generation}
             self.receipt = receipt
             self.last_run_turn = task_turn
             if self.due_turn is not None:
@@ -160,6 +177,10 @@ class SelectedVerification:
             receipt = self.receipt
             if not self.current or not receipt or receipt['verification_id'] != self.current['id']:
                 raise ValueError('No current verification receipt supports resolve')
+            if (receipt.get('boundary_generation') is not None and
+                    (self.accepted_generation is None or
+                     self.accepted_generation.value != receipt['boundary_generation'])):
+                raise ValueError('Verification boundary was not accepted; result cannot resolve')
             if receipt['result']['status'] != 'success' or receipt['input_changed_during_check']:
                 raise ValueError('A failed, running, changed or unavailable check cannot resolve')
             if any(item.get('status') != 'file' for item in receipt['inputs_after'].values()):

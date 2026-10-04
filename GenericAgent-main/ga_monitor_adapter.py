@@ -100,6 +100,12 @@ class GenericAgentMonitorAdapter:
     def archive_boundary(self, packet):
         return self.runtime.archive_boundary(public_observation(packet))
 
+    def note_task_turn(self, local_turn):
+        return self.runtime.note_task_turn(local_turn)
+
+    def verification_boundary(self, local_turn):
+        return self.runtime.verification_boundary(local_turn)
+
     def review_completion(self, proposal, turn, provider_link=None, response_content=None):
         payload = proposal.as_payload() if hasattr(proposal, "as_payload") else {}
         outcome = self.runtime.request_completion(public_observation({

@@ -161,6 +161,13 @@ def _coalesce_wake_command(commands, first, completion_is_active=None):
             return selected
 
 
+def _verification_boundary_valid(state, generation):
+    if state is None:
+        return False
+    with state.get_lock():
+        return int(state[0]) == generation and time.monotonic() < state[1]
+
+
 def _worker(config, commands, outputs):
     from .agent import MonitorAgent
     from .checkpoint import capture_live_root_checkpoint
@@ -171,6 +178,7 @@ def _worker(config, commands, outputs):
     try:
         client = MonitorProviderClient(config["config_name"], config["model_config"])
         client.verification_due_turn = config.get('verification_due_turn')
+        client.verification_accepted_generation = config.get('verification_accepted_generation')
         if 'run_deadline_epoch' in config:
             client.recovery_deadline = time.monotonic() + max(
                 0.0, config['run_deadline_epoch'] - time.time())
@@ -501,18 +509,25 @@ def _worker(config, commands, outputs):
         kind = command.get("kind")
         if kind == "close": return
         if kind == 'verification_boundary':
+            state = config.get('verification_boundary_state')
+            generation = command['generation']
+            def boundary_valid():
+                return _verification_boundary_valid(state, generation)
             try:
-                result = (monitor.verification.run_due(int(command['task_turn']))
-                          if monitor.verification is not None else {'status': 'disabled'})
+                result = (monitor.verification.run_due(
+                    int(command['task_turn']), boundary_valid=boundary_valid,
+                    boundary_generation=generation)
+                    if monitor.verification is not None and boundary_valid()
+                    else {'status': 'boundary_expired'})
                 outputs.put({'kind': 'verification_boundary_release', 'ticket': command['ticket'],
-                             'result': result})
+                             'generation': generation, 'result': result})
             except Exception as exc:
                 due = config.get('verification_due_turn')
                 if due is not None:
                     due.value = -1
                 monitor._progress('verification_execution_error', error_type=type(exc).__name__)
                 outputs.put({'kind': 'verification_boundary_release', 'ticket': command['ticket'],
-                             'error': repr(exc)})
+                             'generation': generation, 'error': repr(exc)})
             continue
         cursor = int(command.get("cursor") or cursor)
         task_turn = int(command.get("task_turn") or task_turn)
@@ -609,6 +624,8 @@ class MonitorRuntime:
                          model_config.get('monitor_verification_runtime_managed', True) is True)
         self._verification_due_turn = self._context.Value('q', -1) if managed_check else None
         self._verification_receipts = self._context.Queue() if managed_check else None
+        self._verification_boundary_state = self._context.Array('d', [0, 0]) if managed_check else None
+        self._verification_accepted_generation = self._context.Value('q', 0) if managed_check else None
         self._closed = threading.Event()
         process = process_factory or self._context.Process
         self._process = process(target=worker_target or _worker, args=({
@@ -624,6 +641,8 @@ class MonitorRuntime:
             "task_budget_turns_used": self._task_budget_turns_used,
             "task_max_turns": self._task_max_turns,
             "verification_due_turn": self._verification_due_turn,
+            "verification_boundary_state": self._verification_boundary_state,
+            "verification_accepted_generation": self._verification_accepted_generation,
             "run_deadline_epoch": time.time() + max(0.0, self._run_deadline - time.monotonic()),
             "stop_event": self._stop_event,
             "independent_probe_total_requests": int(independent_probe_total_requests),
@@ -682,9 +701,14 @@ class MonitorRuntime:
         if due is None or due.value < 0 or local_turn < due.value:
             return None
         ticket = uuid.uuid4().hex
-        self._commands.put({'kind': 'verification_boundary', 'ticket': ticket,
-                            'task_turn': int(local_turn)})
         deadline = min(self._run_deadline, time.monotonic() + 305)
+        state = self._verification_boundary_state
+        with state.get_lock():
+            state[0] += 1
+            generation = int(state[0])
+            state[1] = deadline
+        self._commands.put({'kind': 'verification_boundary', 'ticket': ticket,
+                            'generation': generation, 'task_turn': int(local_turn)})
         while not self._closed.is_set() and time.monotonic() < deadline:
             if not self._process.is_alive():
                 break
@@ -693,7 +717,18 @@ class MonitorRuntime:
             except queue.Empty:
                 continue
             if receipt.get('ticket') == ticket:
+                with state.get_lock():
+                    valid = int(state[0]) == generation and time.monotonic() < state[1]
+                    state[1] = 0
+                if valid and receipt.get('result', {}).get('status') == 'observed':
+                    self._verification_accepted_generation.value = generation
+                else:
+                    receipt = dict(receipt, error='verification_boundary_expired')
                 return receipt
+        with state.get_lock():
+            if int(state[0]) == generation:
+                state[1] = 0
+        due.value = -1
         receipt = {'kind': 'verification_boundary_release', 'ticket': ticket,
                    'error': 'monitor_unavailable_or_boundary_timeout'}
         self._append_receipt(receipt)

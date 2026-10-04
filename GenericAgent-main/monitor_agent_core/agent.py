@@ -105,8 +105,9 @@ def verification_tools():
             'prior_reason': {'type': 'string'},
         }, 'required': ['scope', 'basis', 'question', 'artifacts']}
     indexed['code_run']['description'] += (
-        ' Optional verification selects one public check and queues it for the next safe Task boundary; '
-        'scope, basis, question and artifact paths define its limited reach. '
+        ' In runtime-managed mode, optional verification metadata selects one public check and queues it '
+        'for the next safe Task boundary. In manual mode, code_run executes once and the Supervisor '
+        'organizes follow-up. Scope, basis, question and artifact paths define limited reach when selected. '
         'Analysis cwd remains monitor/; use the live task/workspace absolute path from the environment map in project commands.')
     indexed['wait']['parameters']['properties'].update({
         'result': {'type': 'string', 'enum': ['resolve', 'withdraw', 'revise', 'defer']},
@@ -377,7 +378,8 @@ class MonitorAgent:
         self.root_routed = self.root_scope_v1 != 'off' or self.verification_loop_v0
         self.verification = (SelectedVerification(
             workspace, self.analysis, self._progress,
-            getattr(client, 'verification_due_turn', None))
+            getattr(client, 'verification_due_turn', None),
+            getattr(client, 'verification_accepted_generation', None))
             if self.verification_loop_v0 and self.verification_runtime_managed else None)
         research_view = getattr(client, "config", {}).get("monitor_research_view", "off")
         research_intent = getattr(client, "config", {}).get("monitor_research_intent", "off")
@@ -498,6 +500,11 @@ class MonitorAgent:
             self._audit_dialogue('root_working_view', **metadata)
             return text
         parts = []
+        if self.verification_loop_v0:
+            parts.append('Verification mode: runtime-managed selected checks and follow-up.'
+                         if self.verification_runtime_managed else
+                         'Verification mode: manual single code_run execution; organize follow-up yourself; '
+                         'no automatic check queue or retest.')
         if self.task_understanding is not None:
             parts.append(self.task_understanding.context())
         if self.pma_memory is not None:
@@ -837,6 +844,8 @@ class MonitorAgent:
                 self._remember_advice(message, arguments)
                 return ToolOutcome(None, False, MonitorAction("intervene", {"message": message}))
             elif name == "allow_complete":
+                if self.verification_loop_v0 and arguments.get('result') not in {'resolve', 'defer'}:
+                    raise ValueError('allow_complete result must be resolve or defer')
                 if self.root_routed:
                     current = self.completion_state() if self.completion_state else None
                     if (self.frame_kind != 'root' or current != self.root_frame_handoff
@@ -850,9 +859,9 @@ class MonitorAgent:
                     if self.verification is not None:
                         disposition = arguments.get('result')
                         self.verification.dispose(disposition, arguments.get('reason'), root=True)
-                        if disposition == 'defer':
-                            return ToolOutcome(None, False, MonitorAction('incomplete_delivery', {
-                                'reason': arguments['reason'], 'request_id': current['request_id']}))
+                    if self.verification_loop_v0 and arguments['result'] == 'defer':
+                        return ToolOutcome(None, False, MonitorAction('incomplete_delivery', {
+                            'reason': arguments['reason'], 'request_id': current['request_id']}))
                     return ToolOutcome(None, False, MonitorAction(
                         "allow_complete", {"request_id": current["request_id"],
                                            "root_frame_generation": current['generation']}
