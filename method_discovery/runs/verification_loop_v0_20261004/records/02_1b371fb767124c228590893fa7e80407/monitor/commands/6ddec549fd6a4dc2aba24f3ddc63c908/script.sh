@@ -1,0 +1,1 @@
+cd /app && grep -E "^func (NewSprintf|StringToStringWithFormat)" data/binding/sprintf.go

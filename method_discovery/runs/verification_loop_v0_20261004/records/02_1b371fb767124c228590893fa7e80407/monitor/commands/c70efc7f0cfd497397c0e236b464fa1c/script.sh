@@ -1,0 +1,1 @@
+cd /app && grep -A 30 "func (e \*Entry) MinSize()" widget/entry.go | grep -A 20 "MinRows\|multiLineRows"

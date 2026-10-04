@@ -1,0 +1,1 @@
+cd /app && grep -A 3 "func (m \*MainMenu) Refresh()" menu.go

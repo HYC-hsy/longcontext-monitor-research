@@ -1,0 +1,37 @@
+=== TARGET 5: Retry/fallback migration check ===
+Checking if WithFailureRetry stores in UnaryOptions.RetryMethodPolicies:
+		if o.RetryMethodPolicies == nil {
+			o.RetryMethodPolicies = make(map[string]retry.Policy)
+		if o.RetryMethodPolicies[retry.Wildcard].MixedPolicy != nil ||
+			o.RetryMethodPolicies[retry.Wildcard].BackupPolicy != nil {
+
+=== TARGET 6: Final check ===
+readAndCheckFrameHeader method:
+0
+✗ Still missing
+
+readFrameHeader standalone (should be removed or refactored):
+376:func readFrameHeader(r netpoll.Reader) (http2.FrameHeader, error) {
+⚠ Still exists as standalone
+
+=== String() method for composite protocols (Target 3) ===
+		return "Framed"
+	case TTHeader:
+		return "TTHeader"
+	case PurePayload:
+		return "PurePayload"
+	case HTTP:
+		return "HTTP"
+	case TTHeaderFramed:
+		return "TTHeaderFramed"
+	case GRPC:
+		return "GRPC"
+	case HESSIAN2:
+		return "Hessian2"
+	case TTHeaderStreaming:
+		return "TTHeaderStreaming"
+	case GRPCStreaming:
+		return "GRPCStreaming"
+	}
+	return Unknown
+}

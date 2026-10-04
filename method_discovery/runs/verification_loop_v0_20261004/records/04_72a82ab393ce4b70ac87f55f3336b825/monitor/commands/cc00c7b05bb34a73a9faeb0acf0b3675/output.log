@@ -1,0 +1,38 @@
+=== TARGET 2: Verify corrected signatures ===
+cep StreamRecvEndpoint:
+type StreamRecvEndpoint func(ctx context.Context, stream streaming.ClientStream, message interface{}) (err error)
+
+cep StreamSendEndpoint:
+type StreamSendEndpoint func(ctx context.Context, stream streaming.ClientStream, message interface{}) (err error)
+
+cep StreamEndpoint:
+type StreamEndpoint func(ctx context.Context) (st streaming.ClientStream, err error)
+
+sep StreamRecvEndpoint:
+type StreamRecvEndpoint func(ctx context.Context, stream streaming.ServerStream, message interface{}) (err error)
+
+sep StreamEndpoint:
+type StreamEndpoint func(ctx context.Context, st streaming.ServerStream) (err error)
+
+=== TARGET 5: Check implementation completeness ===
+Created files:
+-rw-r--r-- 1 root root 4482 Oct  4 07:49 client/option_stream.go
+-rw-r--r-- 1 root root 2293 Oct  4 07:49 client/option_ttstream.go
+-rw-r--r-- 1 root root 2351 Oct  4 07:49 client/option_unary.go
+✓ All three files exist
+
+TailOption in option.go:
+549:func TailOption(opt Option) Option {
+
+callopt/streamcall directory:
+total 28
+drwxrwxr-x 1 root root 4096 Oct  4 07:50 .
+drwxrwxr-x 1 root root 4096 Apr 12 15:49 ..
+-rw-rw-r-- 1 root root 1617 Apr 12 15:21 call_options.go
+-rw-rw-r-- 1 root root 1825 Apr 12 15:21 definition.go
+-rw-rw-r-- 1 root root  877 Apr 12 15:21 grpc_options.go
+-rw-r--r-- 1 root root 1368 Oct  4 07:50 streamcall.go
+✓ Exists
+
+=== TARGET 6: Check readAndCheckFrameHeader ===
+✗ Still not implemented

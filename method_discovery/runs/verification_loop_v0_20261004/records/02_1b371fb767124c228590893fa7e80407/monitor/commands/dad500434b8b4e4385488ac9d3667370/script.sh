@@ -1,0 +1,1 @@
+cd /app && grep -n "multiLineRows" widget/entry.go

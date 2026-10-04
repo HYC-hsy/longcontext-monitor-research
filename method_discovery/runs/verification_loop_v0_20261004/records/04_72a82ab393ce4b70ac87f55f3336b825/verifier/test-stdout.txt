@@ -1,0 +1,150 @@
+=== Phase 1: Streaming Types and Generic Interfaces ===
+=== RUN   TestStreamingTypesHeaderTrailer
+--- PASS: TestStreamingTypesHeaderTrailer (0.00s)
+=== RUN   TestStreamingTypesServerStreamingClient
+--- PASS: TestStreamingTypesServerStreamingClient (0.00s)
+=== RUN   TestStreamingTypesServerStreamingServer
+--- PASS: TestStreamingTypesServerStreamingServer (0.00s)
+=== RUN   TestStreamingTypesClientStreamingClient
+=== RUN   TestStreamingTypesClientStreamingClient/Send_delegates_to_SendMsg
+=== RUN   TestStreamingTypesClientStreamingClient/CloseAndRecv_calls_CloseSend_then_RecvMsg
+=== RUN   TestStreamingTypesClientStreamingClient/CloseAndRecv_returns_error_if_CloseSend_fails
+--- PASS: TestStreamingTypesClientStreamingClient (0.00s)
+    --- PASS: TestStreamingTypesClientStreamingClient/Send_delegates_to_SendMsg (0.00s)
+    --- PASS: TestStreamingTypesClientStreamingClient/CloseAndRecv_calls_CloseSend_then_RecvMsg (0.00s)
+    --- PASS: TestStreamingTypesClientStreamingClient/CloseAndRecv_returns_error_if_CloseSend_fails (0.00s)
+=== RUN   TestStreamingTypesClientStreamingServer
+--- PASS: TestStreamingTypesClientStreamingServer (0.00s)
+=== RUN   TestStreamingTypesBidiStreamingClient
+--- PASS: TestStreamingTypesBidiStreamingClient (0.00s)
+=== RUN   TestStreamingTypesBidiStreamingServer
+--- PASS: TestStreamingTypesBidiStreamingServer (0.00s)
+=== RUN   TestStreamingTypesArgsResult
+--- PASS: TestStreamingTypesArgsResult (0.00s)
+=== RUN   TestStreamingTypesInterfaces
+--- PASS: TestStreamingTypesInterfaces (0.00s)
+PASS
+ok  	github.com/cloudwego/kitex/pkg/streaming	0.005s
+PASSED
+
+=== Phase 2: Endpoint Architecture Reorganization ===
+# github.com/cloudwego/kitex/pkg/endpoint [github.com/cloudwego/kitex/pkg/endpoint.test]
+pkg/endpoint/test_02_unary_endpoint_test.go:59:12: umw.ToMiddleware undefined (type UnaryMiddleware has no field or method ToMiddleware)
+pkg/endpoint/test_02_unary_endpoint_test.go:78:12: mw.ToUnaryMiddleware undefined (type Middleware has no field or method ToUnaryMiddleware)
+FAIL	github.com/cloudwego/kitex/pkg/endpoint [build failed]
+=== RUN   TestEndpointArchCepStreamChain
+--- PASS: TestEndpointArchCepStreamChain (0.00s)
+=== RUN   TestEndpointArchCepStreamRecvChain
+--- PASS: TestEndpointArchCepStreamRecvChain (0.00s)
+=== RUN   TestEndpointArchCepStreamSendChain
+--- PASS: TestEndpointArchCepStreamSendChain (0.00s)
+=== RUN   TestEndpointArchCepDummyMiddleware
+--- PASS: TestEndpointArchCepDummyMiddleware (0.00s)
+=== RUN   TestEndpointArchCepEqualsTo
+    test_02_cep_endpoint_test.go:166: same endpoint should be equal
+--- FAIL: TestEndpointArchCepEqualsTo (0.00s)
+FAIL
+FAIL	github.com/cloudwego/kitex/pkg/endpoint/cep	0.003s
+=== RUN   TestEndpointArchSepStreamChain
+--- PASS: TestEndpointArchSepStreamChain (0.00s)
+=== RUN   TestEndpointArchSepStreamRecvChain
+--- PASS: TestEndpointArchSepStreamRecvChain (0.00s)
+=== RUN   TestEndpointArchSepStreamSendChain
+--- PASS: TestEndpointArchSepStreamSendChain (0.00s)
+PASS
+ok  	github.com/cloudwego/kitex/pkg/endpoint/sep	0.003s
+FAIL
+FAILED
+
+=== Phase 3: Transport Protocol Reorganization ===
+=== RUN   TestTransportProtocolConstants
+--- PASS: TestTransportProtocolConstants (0.00s)
+=== RUN   TestTransportProtocolString
+--- PASS: TestTransportProtocolString (0.00s)
+=== RUN   TestTransportProtocolStringBitwise
+--- PASS: TestTransportProtocolStringBitwise (0.00s)
+PASS
+ok  	github.com/cloudwego/kitex/transport	0.003s
+=== RUN   TestTransportProtocolDefaultFramed
+    test_03_rpcconfig_test.go:25: default TransportProtocol should be Framed (4), got 0 (PurePayload)
+--- FAIL: TestTransportProtocolDefaultFramed (0.00s)
+FAIL
+FAIL	github.com/cloudwego/kitex/pkg/rpcinfo	0.012s
+testing: warning: no tests to run
+PASS
+ok  	github.com/cloudwego/kitex/pkg/rpcinfo/remoteinfo	0.011s [no tests to run]
+FAIL
+FAILED
+
+=== Phase 4: Thrift Codec Fallback Enhancement ===
+=== RUN   TestThriftCodecFallbackMarshalBasic
+--- PASS: TestThriftCodecFallbackMarshalBasic (0.00s)
+=== RUN   TestThriftCodecFallbackUnmarshalBasic
+--- PASS: TestThriftCodecFallbackUnmarshalBasic (0.00s)
+=== RUN   TestThriftCodecFallbackMarshalFrugalBasic
+--- PASS: TestThriftCodecFallbackMarshalFrugalBasic (0.00s)
+=== RUN   TestThriftCodecFallbackUnmarshalFrugalBasic
+--- PASS: TestThriftCodecFallbackUnmarshalFrugalBasic (0.00s)
+PASS
+ok  	github.com/cloudwego/kitex/pkg/remote/codec/thrift	0.020s
+PASSED
+
+=== Phase 5: Client Option Category System ===
+# github.com/cloudwego/kitex/client/callopt/streamcall [github.com/cloudwego/kitex/client/callopt/streamcall.test]
+client/callopt/streamcall/test_05_streamcall_test.go:22:31: WithRecvTimeout(testTimeout).f undefined (type callopt.Option has no field or method f)
+client/callopt/streamcall/test_05_streamcall_test.go:23:26: callOpts.StreamOptions undefined (type callopt.CallOptions has no field or method StreamOptions)
+client/callopt/streamcall/test_05_streamcall_test.go:38:31: WithRecvTimeout(tt.timeout).f undefined (type callopt.Option has no field or method f)
+client/callopt/streamcall/test_05_streamcall_test.go:39:27: callOpts.StreamOptions undefined (type callopt.CallOptions has no field or method StreamOptions)
+# github.com/cloudwego/kitex/client [github.com/cloudwego/kitex/client.test]
+client/test_05_client_options_test.go:26:31: undefined: UnaryOptions
+client/test_05_client_options_test.go:30:32: undefined: StreamOptions
+client/test_05_client_options_test.go:34:45: undefined: TTHeaderStreamingOptions
+client/test_05_client_options_test.go:84:19: o.UnaryOptions undefined (type *"github.com/cloudwego/kitex/internal/client".Options has no field or method UnaryOptions)
+client/test_05_client_options_test.go:85:23: o.UnaryOptions undefined (type *"github.com/cloudwego/kitex/internal/client".Options has no field or method UnaryOptions)
+client/test_05_client_options_test.go:92:15: undefined: client.StreamOptions
+FAIL	github.com/cloudwego/kitex/client [build failed]
+FAIL	github.com/cloudwego/kitex/client/callopt/streamcall [build failed]
+testing: warning: no tests to run
+PASS
+ok  	github.com/cloudwego/kitex/client/callopt	0.016s [no tests to run]
+?   	github.com/cloudwego/kitex/client/streamclient	[no test files]
+?   	github.com/cloudwego/kitex/client/streamxclient	[no test files]
+?   	github.com/cloudwego/kitex/client/streamxclient/streamxcallopt	[no test files]
+testing: warning: no tests to run
+PASS
+ok  	github.com/cloudwego/kitex/client/genericclient	0.014s [no tests to run]
+FAIL
+FAILED
+
+=== Phase 6: gRPC Diagnostics Enhancement ===
+=== RUN   TestGRPCDiagnosticsFrameReader
+=== RUN   TestGRPCDiagnosticsFrameReader/thrift_ApplicationException_produces_detailed_error
+--- FAIL: TestGRPCDiagnosticsFrameReader (0.00s)
+    --- FAIL: TestGRPCDiagnosticsFrameReader/thrift_ApplicationException_produces_detailed_error (0.00s)
+panic: runtime error: invalid memory address or nil pointer dereference [recovered]
+	panic: runtime error: invalid memory address or nil pointer dereference
+[signal SIGSEGV: segmentation violation code=0x1 addr=0x28 pc=0x59c75e]
+
+goroutine 12 [running]:
+testing.tRunner.func1.2({0x5c1400, 0x79d2b0})
+	/usr/local/go/src/testing/testing.go:1632 +0x230
+testing.tRunner.func1()
+	/usr/local/go/src/testing/testing.go:1635 +0x35e
+panic({0x5c1400?, 0x79d2b0?})
+	/usr/local/go/src/runtime/panic.go:791 +0x132
+github.com/cloudwego/kitex/pkg/remote/trans/nphttp2/grpc/grpcframe.(*benchMockNetpollReader).Peek(0xc00001c6c0?, 0x59ab52?)
+	<autogenerated>:1 +0x1e
+github.com/cloudwego/kitex/pkg/remote/trans/nphttp2/grpc/grpcframe.(*Framer).readAndCheckFrameHeader(0xc0000d6090)
+	/app/pkg/remote/trans/nphttp2/grpc/grpcframe/frame_reader.go:397 +0x173
+github.com/cloudwego/kitex/pkg/remote/trans/nphttp2/grpc/grpcframe.TestGRPCDiagnosticsFrameReader.func1(0xc0000c6820)
+	/app/pkg/remote/trans/nphttp2/grpc/grpcframe/test_06_grpc_diagnostics_test.go:60 +0xb3
+testing.tRunner(0xc0000c6820, 0xc000024520)
+	/usr/local/go/src/testing/testing.go:1690 +0xf4
+created by testing.(*T).Run in goroutine 11
+	/usr/local/go/src/testing/testing.go:1743 +0x390
+FAIL	github.com/cloudwego/kitex/pkg/remote/trans/nphttp2/grpc/grpcframe	0.008s
+FAIL
+FAILED
+
+=== Summary ===
+Result: 2/6 phases | Reward: 0.4

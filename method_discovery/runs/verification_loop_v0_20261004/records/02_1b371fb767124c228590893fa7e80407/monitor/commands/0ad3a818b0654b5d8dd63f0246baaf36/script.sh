@@ -1,0 +1,1 @@
+cd /app && grep -A 50 "type entryRenderer struct" widget/entry.go | grep -A 30 "func.*MinSize"

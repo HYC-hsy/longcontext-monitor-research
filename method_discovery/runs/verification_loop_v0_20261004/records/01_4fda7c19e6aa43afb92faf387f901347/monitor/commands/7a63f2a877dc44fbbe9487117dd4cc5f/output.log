@@ -1,0 +1,68 @@
+=== TARGET 5: Toolbar Enhancements ===
+1. ToolbarAction.SetIcon method:
+func (t *ToolbarAction) SetIcon(icon fyne.Resource) {
+	t.Icon = icon
+}
+
+
+2. Constructor return types (must be concrete, not ToolbarItem):
+func NewToolbarAction(icon fyne.Resource, onActivated func()) *ToolbarAction {
+func NewToolbarActionWithIcon(icon fyne.Resource, onActivated func()) *ToolbarAction {
+func NewToolbarSpacer() *ToolbarSpacer {
+func NewToolbarSeparator() *ToolbarSeparator {
+
+=== TARGET 6: Widget and Container Improvements ===
+1. Container.RemoveAll():
+func (c *Container) RemoveAll() {
+	c.Objects = nil
+	c.layout()
+}
+
+2. Container.Add() nil-safe:
+	// this is basically just canvas.Refresh(c) without the package loop
+	o := CurrentApp().Driver().CanvasForObject(c)
+	if o == nil {
+		return
+	}
+
+3. Hyperlink.OnTapped field:
+	OnTapped  func()         // Custom callback when hyperlink is tapped
+	if hl.OnTapped != nil {
+		hl.OnTapped()
+
+4. Entry.SetMinRowsVisible method:
+func (e *Entry) SetMinRowsVisible(rows int) {
+	if rows < 1 {
+		rows = 1
+	}
+
+5. validation.NewAllStrings in data/validation/all.go:
+-rw-r--r-- 1 root root 616 Oct  4 06:19 data/validation/all.go
+func NewAllStrings(validators ...fyne.StringValidator) fyne.StringValidator {
+
+=== TARGET 7: Desktop App Interface ===
+1. driver/desktop/app.go exists:
+-rw-r--r-- 1 root root 714 Oct  4 06:17 driver/desktop/app.go
+package desktop
+
+import "fyne.io/fyne/v2"
+
+// App interface extends the standard App interface with desktop-specific functionality.
+// This includes system tray integration and other desktop-specific features.
+//
+// Since: 2.2
+type App interface {
+	fyne.App
+
+	// SetSystemTrayMenu sets the menu to be displayed when the system tray icon is clicked.
+	// This allows the application to provide quick access to common functions from the system tray.
+	//
+	// Since: 2.2
+	SetSystemTrayMenu(menu *fyne.Menu)
+
+	// SetSystemTrayIcon sets the icon to be displayed in the system tray.
+	// This icon represents the application when it is running in the background.
+	//
+	// Since: 2.2
+	SetSystemTrayIcon(icon fyne.Resource)
+}

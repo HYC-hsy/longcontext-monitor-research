@@ -1,0 +1,1 @@
+cd /app && grep -n "MinRows" widget/entry.go | grep -v "^[0-9]*:\s*//"

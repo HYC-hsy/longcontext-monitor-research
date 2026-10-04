@@ -1,0 +1,65 @@
+=== Build Status ===
+# github.com/cloudwego/kitex/client/callopt/streamcall
+client/callopt/streamcall/streamcall.go:32:24: unknown field F in struct literal of type callopt.Option
+# github.com/cloudwego/kitex/server
+server/stream.go:57:9: cannot use func(stream streaming.Stream, resp interface{}) (err error) {…} (value of type func(stream "github.com/cloudwego/kitex/pkg/streaming".Stream, resp interface{}) (err error)) as endpoint.RecvEndpoint value in return statement
+server/stream.go:63:9: cannot use func(stream streaming.Stream, req interface{}) (err error) {…} (value of type func(stream "github.com/cloudwego/kitex/pkg/streaming".Stream, req interface{}) (err error)) as endpoint.SendEndpoint value in return statement
+# github.com/cloudwego/kitex/client
+client/option.go:340:8: o.UnaryOptions undefined (type *"github.com/cloudwego/kitex/internal/client".Options has no field or method UnaryOptions)
+client/option.go:341:6: o.UnaryOptions undefined (type *"github.com/cloudwego/kitex/internal/client".Options has no field or method UnaryOptions)
+client/option.go:341:29: undefined: client.UnaryOptions
+client/option.go:343:8: o.UnaryOptions undefined (type *"github.com/cloudwego/kitex/internal/client".Options has no field or method UnaryOptions)
+client/option.go:344:6: o.UnaryOptions undefined (type *"github.com/cloudwego/kitex/internal/client".Options has no field or method UnaryOptions)
+client/option.go:346:5: o.UnaryOptions undefined (type *"github.com/cloudwego/kitex/internal/client".Options has no field or method UnaryOptions)
+client/option.go:368:8: o.UnaryOptions undefined (type *"github.com/cloudwego/kitex/internal/client".Options has no field or method UnaryOptions)
+client/option.go:369:6: o.UnaryOptions undefined (type *"github.com/cloudwego/kitex/internal/client".Options has no field or method UnaryOptions)
+client/option.go:369:29: undefined: client.UnaryOptions
+client/option.go:371:8: o.UnaryOptions undefined (type *"github.com/cloudwego/kitex/internal/client".Options has no field or method UnaryOptions)
+client/option.go:371:8: too many errors
+
+=== TARGET 3: String() method verification ===
+Requirement: Composite protocols should show pipe-separated flags in ascending bit order
+Example: TTHeaderFramed should return 'TTHeader|Framed'
+
+Current String() implementation:
+func (tp Protocol) String() string {
+	switch tp {
+	case Framed:
+		return "Framed"
+	case TTHeader:
+		return "TTHeader"
+	case PurePayload:
+		return "PurePayload"
+	case HTTP:
+		return "HTTP"
+	case TTHeaderFramed:
+		return "TTHeaderFramed"
+	case GRPC:
+		return "GRPC"
+	case HESSIAN2:
+		return "Hessian2"
+	case TTHeaderStreaming:
+		return "TTHeaderStreaming"
+	case GRPCStreaming:
+		return "GRPCStreaming"
+	}
+	return Unknown
+}
+
+=== TARGET 5: Retry migration verification ===
+Requirement: WithFailureRetry should store in o.UnaryOptions.RetryMethodPolicies
+
+Current WithFailureRetry implementation:
+	return Option{F: func(o *client.Options, di *utils.Slice) {
+		if p == nil {
+			return
+		}
+		di.Push(fmt.Sprintf("WithFailureRetry(%+v)", p))
+		if o.RetryMethodPolicies == nil {
+			o.RetryMethodPolicies = make(map[string]retry.Policy)
+		}
+		if o.RetryMethodPolicies[retry.Wildcard].MixedPolicy != nil ||
+			o.RetryMethodPolicies[retry.Wildcard].BackupPolicy != nil {
+			panic("MixedPolicy or BackupPolicy has been setup, cannot support Failure Retry at same time")
+		}
+		policy := retry.BuildFailurePolicy(p)

@@ -1,0 +1,1 @@
+cd /app && grep -r "^type.*App.*struct" --include="*.go" | grep -v test | grep -v "_test.go"

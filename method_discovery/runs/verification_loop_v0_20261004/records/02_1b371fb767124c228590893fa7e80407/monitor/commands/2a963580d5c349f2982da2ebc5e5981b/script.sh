@@ -1,0 +1,1 @@
+cd /app && grep -r "MinRows" widget/ --include="*.go" | grep -v "test.go" | grep -v "^widget/entry.go:66:" | grep -v "^widget/entry.go:477:" | grep -v "^widget/entry.go:479:"

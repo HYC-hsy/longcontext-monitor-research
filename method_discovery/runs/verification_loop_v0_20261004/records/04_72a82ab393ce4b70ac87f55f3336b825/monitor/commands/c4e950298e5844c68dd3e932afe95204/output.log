@@ -1,0 +1,74 @@
+=== Target 3: String() method for composites ===
+func (tp Protocol) String() string {
+	switch tp {
+	case Framed:
+		return "Framed"
+	case TTHeader:
+		return "TTHeader"
+	case PurePayload:
+		return "PurePayload"
+	case HTTP:
+		return "HTTP"
+	case GRPC:
+		return "GRPC"
+	case HESSIAN2:
+		return "Hessian2"
+	case TTHeaderStreaming:
+		return "TTHeaderStreaming"
+	case GRPCStreaming:
+		return "GRPCStreaming"
+	}
+	
+	// For composite values: enumerate all set flags in ascending order of bit values
+	var parts []string
+	if tp&PurePayload != 0 {
+		parts = append(parts, "PurePayload")
+	}
+	if tp&TTHeader != 0 {
+		parts = append(parts, "TTHeader")
+	}
+	if tp&Framed != 0 {
+		parts = append(parts, "Framed")
+	}
+	if tp&HTTP != 0 {
+		parts = append(parts, "HTTP")
+	}
+	if tp&GRPC != 0 {
+		parts = append(parts, "GRPC")
+	}
+	if tp&HESSIAN2 != 0 {
+		parts = append(parts, "Hessian2")
+	}
+	if tp&TTHeaderStreaming != 0 {
+		parts = append(parts, "TTHeaderStreaming")
+	}
+	if tp&GRPCStreaming != 0 {
+		parts = append(parts, "GRPCStreaming")
+	}
+	
+	if len(parts) > 0 {
+		return strings.Join(parts, "|")
+	}
+	return Unknown
+
+=== Build Status ===
+# github.com/cloudwego/kitex/client/callopt/streamcall
+client/callopt/streamcall/streamcall.go:32:27: cannot use func(o *client.Options, di *utils.Slice) {…} (value of type func(o *client.Options, di *"github.com/cloudwego/kitex/pkg/utils".Slice)) as func(o *callopt.CallOptions, di *strings.Builder) value in argument to callopt.NewOption
+# github.com/cloudwego/kitex/client
+client/option_stream.go:57:18: cannot use make([]interface{}, 0) (value of type []interface{}) as []cep.StreamMiddleware value in assignment
+client/option_stream.go:68:25: cannot use make([]interface{}, 0) (value of type []interface{}) as []cep.StreamMiddlewareBuilder value in assignment
+client/option_ttstream.go:50:29: invalid operation: o.RemoteOpt.Option == nil (mismatched types remote.Option and untyped nil)
+client/option_ttstream.go:51:26: cannot use opt (variable of type remote.ClientOption) as remote.Option value in assignment
+client/option_ttstream.go:55:26: cannot use remote.ClientOption{…} (value of type remote.ClientOption) as remote.Option value in assignment
+client/option_ttstream.go:56:6: unknown field F in struct literal of type remote.ClientOption
+client/option_ttstream.go:57:15: prevOpt.F undefined (type remote.Option has no field or method F)
+client/option_ttstream.go:58:11: opt.F undefined (type remote.ClientOption has no field or method F)
+client/option_ttstream.go:64:8: o.TTHeaderStreamingEnabled undefined (type *"github.com/cloudwego/kitex/internal/client".Options has no field or method TTHeaderStreamingEnabled)
+client/option_ttstream.go:66:6: o.TTHeaderStreamingEnabled undefined (type *"github.com/cloudwego/kitex/internal/client".Options has no field or method TTHeaderStreamingEnabled)
+client/option_ttstream.go:66:6: too many errors
+
+=== Quick status check ===
+Remaining known issues:
+1. Target 3 String() - being fixed now
+2. Target 5 retry migration - may need simplification
+3. Build errors - being worked on

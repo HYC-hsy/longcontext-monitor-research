@@ -1,0 +1,26 @@
+package validation
+
+import (
+	"fmt"
+
+	"fyne.io/fyne/v2"
+)
+
+// NewAllStrings creates a StringValidator that runs multiple validators in sequence.
+// If any validator returns an error, that error is returned immediately.
+// All validators must pass for the combined validator to pass.
+//
+// Since: 2.2
+func NewAllStrings(validators ...fyne.StringValidator) fyne.StringValidator {
+	return func(text string) error {
+		for i, validator := range validators {
+			if validator == nil {
+				continue
+			}
+			if err := validator(text); err != nil {
+				return fmt.Errorf("validator %d: %w", i, err)
+			}
+		}
+		return nil
+	}
+}

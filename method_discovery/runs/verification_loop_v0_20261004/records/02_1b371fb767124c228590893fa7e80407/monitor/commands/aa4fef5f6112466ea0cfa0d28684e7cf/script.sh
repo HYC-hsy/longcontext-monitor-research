@@ -1,0 +1,1 @@
+cd /app && grep -B 2 -A 2 "MinRows\|Rows" widget/entry.go | head -20
