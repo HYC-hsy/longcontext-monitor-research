@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from .eis_v0 import append_index as append_eis_index
+
 
 @dataclass(frozen=True)
 class CompletionOutcome:
@@ -587,6 +589,9 @@ class MonitorRuntime:
         self.task_original_path = task_original_path
         self.synopsis_path = self.evidence_root / "synopsis.jsonl"
         self.events_path = self.evidence_root / "public_events.jsonl"
+        self._eis_enabled = model_config.get("monitor_executable_interpretation_surface", False)
+        if type(self._eis_enabled) is not bool:
+            raise ValueError("monitor_executable_interpretation_surface must be a boolean")
         self._archive_lock = threading.Lock()
         self._receipt_lock = threading.Lock()
         self._sequence = 0
@@ -668,6 +673,17 @@ class MonitorRuntime:
             sequence = self._sequence
             raw = dict(packet, archive_sequence=sequence, archived_at=time.time())
             _append(self.events_path, raw)
+            if self._eis_enabled:
+                try:
+                    append_eis_index(self.evidence_root, raw)
+                except OSError as exc:
+                    # EIS is navigation over the authoritative public archive.
+                    # An index failure must not recast or suppress that archive.
+                    try:
+                        _append(self.private_root / "eis_index_errors.jsonl", {
+                            "archive_sequence": sequence, "error_type": type(exc).__name__})
+                    except OSError:
+                        pass
             with self._latest_task_turn.get_lock():
                 self._latest_task_turn.value = max(
                     self._latest_task_turn.value, int(raw.get('task_turn') or 0))

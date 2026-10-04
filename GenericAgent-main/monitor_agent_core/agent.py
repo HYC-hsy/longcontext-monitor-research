@@ -38,6 +38,7 @@ from .path_control_v0 import (
 )
 from .root_scope_v1 import ROOT_SYSTEM_PROMPT, ROOT_NOTE_GUIDANCE, root_input, task_budget_view
 from .verification_loop_v0 import GUIDANCE as VERIFICATION_GUIDANCE, SelectedVerification
+from .eis_v0 import GUIDANCE as EIS_GUIDANCE, executable_interpretation_surface
 
 
 def _tool(name, description, properties, required):
@@ -375,6 +376,11 @@ class MonitorAgent:
             raise ValueError('verification loop switches must be boolean')
         if self.verification_loop_v0 and (not self.path_control_v0 or self.root_scope_v1 != 'off'):
             raise ValueError('verification_loop_v0 requires PATH and the old root scope off')
+        self.eis_v0 = getattr(client, 'config', {}).get('monitor_executable_interpretation_surface', False)
+        if type(self.eis_v0) is not bool:
+            raise ValueError('monitor_executable_interpretation_surface must be a boolean')
+        if self.eis_v0 and (not self.verification_loop_v0 or self.verification_runtime_managed):
+            raise ValueError('EIS-v0 requires continuous verification in manual mode')
         self.root_routed = self.root_scope_v1 != 'off' or self.verification_loop_v0
         self.verification = (SelectedVerification(
             workspace, self.analysis, self._progress,
@@ -457,6 +463,8 @@ class MonitorAgent:
                 PATH_CONTROL_SYSTEM_PROMPT if self.path_control_v0 else DCEC_SYSTEM_PROMPT)
         if self.verification_loop_v0:
             self.system_prompt += "\n\n" + VERIFICATION_GUIDANCE
+        if self.eis_v0:
+            self.system_prompt += "\n\n" + EIS_GUIDANCE
         if research_view != "off" or research_intent != "off":
             from .experimental_control import ExperimentalControl
             self.experimental_control = ExperimentalControl(
@@ -528,6 +536,10 @@ class MonitorAgent:
                     self.workspace, getattr(self.client, 'observed_root_handoff', None))
                 self._audit_dialogue('path_control_public_window', content=window, **window_metadata)
                 parts.append(window)
+            if self.eis_v0:
+                surface, surface_metadata = executable_interpretation_surface(self.workspace)
+                self._audit_dialogue('executable_interpretation_surface', content=surface, **surface_metadata)
+                parts.append(surface)
         if self.experimental_control is not None:
             block = self.experimental_control.active_block()
             if block:
