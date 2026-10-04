@@ -1,0 +1,33 @@
+=== Checking WithFailureRetry implementation ===
+func WithFailureRetry(p *retry.FailurePolicy) Option {
+		// Store in Unary.RetryMethodPolicies for unary-specific retry configuration
+		if o.Unary.RetryMethodPolicies == nil {
+			o.Unary.RetryMethodPolicies = make(map[string]retry.Policy)
+		if o.Unary.RetryMethodPolicies[retry.Wildcard].MixedPolicy != nil ||
+			o.Unary.RetryMethodPolicies[retry.Wildcard].BackupPolicy != nil {
+		o.Unary.RetryMethodPolicies[retry.Wildcard] = retry.BuildFailurePolicy(p)
+
+=== Checking if old storage location is still used ===
+352:		o.RetryMethodPolicies[retry.Wildcard] = retry.BuildFailurePolicy(p)
+366:		if o.RetryMethodPolicies[retry.Wildcard].MixedPolicy != nil ||
+367:			o.RetryMethodPolicies[retry.Wildcard].FailurePolicy != nil {
+
+=== Verifying UnaryOptions is used ===
+339:		if o.Unary.RetryMethodPolicies == nil {
+340:			o.Unary.RetryMethodPolicies = make(map[string]retry.Policy)
+342:		if o.Unary.RetryMethodPolicies[retry.Wildcard].MixedPolicy != nil ||
+
+=== Check all files mentioned in Target 5 exist ===
+-rw-r--r-- 1 root root 3432 Oct  4 19:03 /app/client/option_stream.go
+-rw-r--r-- 1 root root 1608 Oct  4 19:00 /app/client/option_ttstream.go
+-rw-r--r-- 1 root root 1839 Oct  4 19:03 /app/client/option_unary.go
+
+=== Verify final state summary ===
+Target 1: pkg/streaming/types.go exists?
+✓ YES
+Target 2: cep/sep packages exist?
+✓ YES
+Target 3: Protocol constants correct?
+✓ YES
+Target 6: Dump() method exists?
+✓ YES

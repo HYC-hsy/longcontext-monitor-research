@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import argparse
 import json
 from pathlib import Path
 
@@ -43,6 +44,15 @@ def augment_dcm(slot, summary):
                       'task_path': row.get('task_path'), 'session_id': row.get('session_id'),
                       'command_locator': row.get('command_locator')})
     counts = Counter(row.get('event') for _, row in indexed)
+    immediate_repeats = 0
+    for _, row in indexed:
+        if row.get('event') != 'dcm_release_confirmed':
+            continue
+        issued = boundaries.get(row.get('challenge_id'), {}).get('issued_at_model_turn')
+        if (isinstance(issued, int) and row.get('model_turn') == issued + 1
+                and not any(isinstance(tool.get('model_turn'), int)
+                            and tool['model_turn'] > issued for tool in row.get('observed_tools') or [])):
+            immediate_repeats += 1
     dispositions = Counter(row.get('disposition') for _, row in indexed
                            if row.get('event') in {'dcm_release_abandoned',
                                                    'dcm_review_ended_with_boundary_pending'})
@@ -65,6 +75,7 @@ def augment_dcm(slot, summary):
         'post_boundary_tools': tools,
         'counts': dict(counts), 'dispositions': dict(dispositions),
         'boundary_scopes': dict(Counter(row.get('release_kind') for row in boundaries.values())),
+        'immediate_repeat_releases': immediate_repeats,
         'same_response_tools': sum(item['relation'] == 'same_response' for item in tools),
         'post_receipt_file_reads': sum(item['relation'] == 'post_receipt'
                                        and item['tool_name'] == 'file_read' for item in tools),
@@ -75,7 +86,8 @@ def augment_dcm(slot, summary):
     }
     raw.write(destination / 'DCM_MECHANICAL_INDEX.json', index)
     summary['dcm_mechanical'] = {key: index[key] for key in (
-        'counts', 'dispositions', 'boundary_scopes', 'same_response_tools',
+        'counts', 'dispositions', 'boundary_scopes', 'immediate_repeat_releases',
+        'same_response_tools',
         'post_receipt_file_reads', 'post_receipt_code_runs',
         'extra_model_inputs_after_boundary_upper_bound')}
     raw.write(destination / 'MECHANICAL_SUMMARY.json', summary)
@@ -83,9 +95,23 @@ def augment_dcm(slot, summary):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--refresh-indexes', action='store_true')
+    args = parser.parse_args()
     plan = json.loads(PLAN.read_text(encoding='utf-8'))
     if len(plan['slots']) != 4 or [row['run_id'] for row in plan['slots']] != plan['run_order']:
         raise RuntimeError('Frozen DCM plan mismatch')
+    if args.refresh_indexes:
+        if not RECORDS.is_dir():
+            raise RuntimeError('No original archive records to reindex')
+        summaries = []
+        for slot in plan['slots']:
+            archive = RECORDS / f"{slot['position']:02d}_{slot['run_id']}"
+            original = json.loads((archive / 'MECHANICAL_SUMMARY.json').read_text(encoding='utf-8'))
+            summaries.append(augment_dcm(slot, original))
+        raw.write(ROOT / 'BLOCK_MECHANICAL_SUMMARY.json', {'records': summaries})
+        print(json.dumps({'refreshed_indexes': len(summaries)}, indent=2))
+        return
     if RECORDS.exists():
         raise RuntimeError('Archive records already exist; no overwrite')
     host = json.loads((CAMPAIGN / 'host_execution/progress.json').read_text(encoding='utf-8'))

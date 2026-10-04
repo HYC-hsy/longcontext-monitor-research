@@ -1,0 +1,16 @@
+=== Target 6: NewAllStrings (should take ...fyne.StringValidator) ===
+//
+// Since: 2.5
+func NewAllStrings(validators ...fyne.StringValidator) fyne.StringValidator {
+	return func(text string) error {
+		for _, validator := range validators {
+			if validator == nil {
+				continue
+			}
+			if err := validator(text); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}

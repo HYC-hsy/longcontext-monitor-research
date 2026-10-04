@@ -1,0 +1,3 @@
+
+cd /app
+grep -n "func.*testApp.*Metadata" test/testapp.go

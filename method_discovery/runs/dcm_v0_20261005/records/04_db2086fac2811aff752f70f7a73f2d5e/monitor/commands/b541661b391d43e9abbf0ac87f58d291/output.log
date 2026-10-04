@@ -1,0 +1,36 @@
+=== TARGET 5 VERIFICATION ===
+
+1. Type aliases in client/option.go:
+  50:type Option = client.Option
+  53:type Options = client.Options
+  56:type UnaryOption = client.Option
+  57:type UnaryOptions = client.UnaryOptions
+  58:type StreamOption = client.Option
+  59:type StreamOptions = client.StreamOptions
+  60:type TTHeaderStreamingOption = client.Option
+  61:type TTHeaderStreamingOptions = client.TTHeaderStreamOptions
+
+2. Wrapper functions:
+  ✓ option_unary.go: WithUnaryOptions
+  ✓ option_stream.go: WithStreamOptions
+  ✓ option_ttstream.go: WithTTHeaderStreamingOptions
+
+3. WithRecvTimeout in streamcall:
+  ✓ 50:func WithRecvTimeout(d time.Duration) Option {
+
+4. TailOption function:
+  ✓ TailOption in option.go
+
+5. Build verification:
+  ✓ go build ./client/... PASSES
+
+=== ORIGINAL REQUIREMENT CHECK ===
+
+Target 5 requirement 3 specifies:
+- WithStreamMiddleware(mw cep.StreamMiddleware) StreamOption
+- WithStreamMiddlewareBuilder(mwb cep.StreamMiddlewareBuilder) StreamOption
+
+These use cep types from pkg/endpoint/cep.
+
+Checking if these functions exist:
+  ✗ WithStreamMiddleware functions NOT FOUND

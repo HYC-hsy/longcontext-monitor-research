@@ -1,0 +1,54 @@
+/*
+ * Copyright 2021 CloudWeGo Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an
+...[Truncated]...
+eaming = 128 // dedicated power-of-2 flag
+
+	TTHeaderFramed = TTHeader | Framed
+)
+
+const Unknown = "Unknown"
+
+// String prints human-readable protocol.
+func (tp Protocol) String() string {
+	if tp == PurePayload {
+		return "PurePayload"
+	}
+	if tp == TTHeaderFramed {
+		return "TTHeaderFramed"
+	}
+
+	var flags []string
+	flagMap := []struct {
+		bit  Protocol
+		name string
+	}{
+		{TTHeader, "TTHeader"},
+		{Framed, "Framed"},
+		{HTTP, "HTTP"},
+		{GRPC, "GRPC"},
+		{HESSIAN2, "Hessian2"},
+		{TTHeaderStreaming, "TTHeaderStreaming"},
+		{GRPCStreaming, "GRPCStreaming"},
+	}
+
+	for _, f := range flagMap {
+		if tp&f.bit != 0 {
+			flags = append(flags, f.name)
+		}
+	}
+
+	if len(flags) > 0 {
+		return strings.Join(flags, "|")
+	}
+
+	return Unknown
+}
