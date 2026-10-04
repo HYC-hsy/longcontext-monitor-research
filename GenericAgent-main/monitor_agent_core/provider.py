@@ -571,8 +571,6 @@ class MonitorProviderClient:
             self.history.append(entry)
         try:
             appended = getattr(self, 'active_context_appended', None)
-            if entry is not None and appended is not None:
-                appended()
             callback = getattr(self, 'request_assembly_callback', None)
             handoff = getattr(self, 'observed_root_handoff', None)
             handoff_key = ((handoff or {}).get('generation'), (handoff or {}).get('request_id'))
@@ -584,7 +582,10 @@ class MonitorProviderClient:
                 captured = callback(snapshot)
                 (self.captured_root_handoffs if captured is not False
                  else self.failed_root_handoffs).add(handoff_key)
-            return self._request_with_recovery(tools)
+            response = self._request_with_recovery(tools)
+            if entry is not None and appended is not None:
+                appended()
+            return response
         finally:
             if entry is not None:
                 assert self.history[-1] is entry

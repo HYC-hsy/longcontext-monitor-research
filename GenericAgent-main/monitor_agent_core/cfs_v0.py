@@ -38,31 +38,43 @@ def _result(result):
 
 
 def code_run_outcomes(events):
-    """Pair only calls and returns from the same original public event."""
-    outcomes = []
+    """Pair calls and returns by tool identity across the observation interval."""
+    by_id = {}
     for event in events:
-        replies = {row.get("tool_use_id"): row for row in event.get("tool_results") or []
-                   if isinstance(row, dict) and isinstance(row.get("tool_use_id"), str)}
+        locator = f"task/public_events.jsonl#{event.get('archive_sequence')}"
         for call in event.get("tool_calls") or []:
             if not isinstance(call, dict) or call.get("name") != "code_run":
                 continue
             args = call.get("args")
-            if not isinstance(args, dict):
+            identity = call.get("id")
+            if not isinstance(args, dict) or not isinstance(identity, str):
                 continue
-            match = replies.get(call.get("id"))
-            payload = _result(match) if match is not None else None
-            outcomes.append({
-                "task_turn": event.get("task_turn"),
-                "event_locator": f"task/public_events.jsonl#{event.get('archive_sequence')}",
-                "tool_use_id": call.get("id"), "command": args.get("script"),
-                "result_present": match is not None,
-                "status": payload.get("status", "unknown") if payload is not None else "no_return_in_record",
-                "exit_code": payload.get("exit_code") if payload is not None else None,
-                "stdout": payload.get("stdout") if payload is not None else None,
-                "stderr": payload.get("stderr") if payload is not None else None,
-                "raw_result": payload.get("raw_result") if payload is not None else None,
-            })
-    return outcomes
+            if identity not in by_id:
+                by_id[identity] = {
+                    "task_turn": event.get("task_turn"),
+                    "call_event_locator": locator, "result_event_locator": None,
+                    "tool_use_id": identity, "command": args.get("script"),
+                    "call_args": args, "call_conflicts": [],
+                    "result_present": False, "status": "no_return_in_interval",
+                    "exit_code": None, "stdout": None, "stderr": None, "raw_result": None,
+                }
+            elif args != by_id[identity]["call_args"]:
+                by_id[identity]["call_conflicts"].append({"event_locator": locator, "args": args})
+    for event in events:
+        locator = f"task/public_events.jsonl#{event.get('archive_sequence')}"
+        for result in event.get("tool_results") or []:
+            if not isinstance(result, dict) or not isinstance(result.get("tool_use_id"), str):
+                continue
+            row = by_id.get(result.get("tool_use_id"))
+            if row is None or row["result_present"]:
+                continue
+            payload = _result(result)
+            row.update({"result_event_locator": locator, "result_present": True,
+                        "status": payload.get("status", "unknown"),
+                        "exit_code": payload.get("exit_code"),
+                        "stdout": payload.get("stdout"), "stderr": payload.get("stderr"),
+                        "raw_result": payload.get("raw_result")})
+    return list(by_id.values())
 
 
 def render_surface(*, baseline, from_cursor, to_cursor, events, changed, sample_complete,
@@ -106,12 +118,17 @@ def render_surface(*, baseline, from_cursor, to_cursor, events, changed, sample_
         if total > shown:
             parts.append(f"Path view truncated: showing {shown}/{total}; full list in manifest.\n")
     outcomes = code_run_outcomes(events)
-    parts.append(f"Task code_run calls in interval: {len(outcomes)}; latest up to 3 below. "
-                 "A call without a return in its record has no established outcome here.\n")
+    parts.append(f"Task code_run calls in interval: {len(outcomes)} unique tool identities; "
+                 "latest up to 3 below. A call without a return in this interval has no "
+                 "established outcome here.\n")
     for row in outcomes[-3:]:
-        parts.append(f"turn={row['task_turn']} {row['event_locator']} id={row['tool_use_id']} "
+        parts.append(f"turn={row['task_turn']} call={row['call_event_locator']} "
+                     f"result={row['result_event_locator']} id={row['tool_use_id']} "
                      f"command={_clip(row['command'], 220)} "
                      f"status={row['status']} exit_code={row['exit_code']}\n")
+        if row["call_conflicts"]:
+            parts.append(f"Conflicting call arguments for this identity: "
+                         f"{len(row['call_conflicts'])}; inspect manifest.\n")
         if row["result_present"]:
             parts.append(f"stdout={_clip(row['stdout'] or '', 180)} "
                          f"stderr={_clip(row['stderr'] or '', 140)}\n")
@@ -249,7 +266,7 @@ class SituationState:
                       "rendered_characters": len(text), "unchanged": False}
 
     def context_appended(self):
-        """Called only after this request's active context enters provider history."""
+        """Called only after this request receives a successful provider response."""
         if self.pending is None:
             return None
         shown = self.pending

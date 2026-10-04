@@ -71,7 +71,7 @@ def test_interval_paths_pairing_and_bounded_manifest(tmp_path):
     assert "added: task/workspace/add.go" in text
     assert "echo one" in text and "exit_code=0" in text
     assert "echo two" in text and "exit_code=2" in text
-    assert "echo not returned" in text and "no_return_in_record" in text
+    assert "echo not returned" in text and "no_return_in_interval" in text
     assert "verified" not in text.lower() and "coverage" not in text.lower()
     assert len(text) <= LIMIT
     manifest = json.loads((ws.private_root / "audit/cfs_deltas" /
@@ -80,6 +80,52 @@ def test_interval_paths_pairing_and_bounded_manifest(tmp_path):
     assert len(manifest["code_run_outcomes"]) == 3
     assert manifest["code_run_outcomes"][2]["result_present"] is False
     assert set(manifest["changed_paths"]) == {"added", "modified", "deleted"}
+
+
+def test_code_run_identity_pairs_across_events_and_deduplicates_surface(tmp_path):
+    ws = workspace(tmp_path)
+    call, result = run_call(1, "echo actual", {"status": "success", "exit_code": 0,
+                                                "stdout": "actual"})
+    before = event(ws, 1, calls=[call], boundary="pre_tool")
+    after = event(ws, 2, calls=[call], results=result)
+    rows = code_run_outcomes([before, after])
+    assert len(rows) == 1
+    assert rows[0]["call_event_locator"] == "task/public_events.jsonl#1"
+    assert rows[0]["result_event_locator"] == "task/public_events.jsonl#2"
+    assert rows[0]["status"] == "success" and rows[0]["exit_code"] == 0
+    state = SituationState(ws)
+    state.begin_review("r")
+    text, _ = state.build()
+    assert "1 unique tool identities" in text
+    assert text.count("command=echo actual") == 1
+    assert "no_return_in_interval" not in text
+
+
+def test_code_run_call_only_distinct_identities_and_conflicting_args(tmp_path):
+    ws = workspace(tmp_path)
+    first, _ = run_call(1, "echo first")
+    second, response = run_call(2, "echo second", {"status": "error", "exit_code": 2})
+    conflicting = {**first, "args": {"script": "echo changed", "cwd": "/app"}}
+    events = [event(ws, 1, calls=[first, second], boundary="pre_tool"),
+              event(ws, 2, calls=[first, second], results=response),
+              event(ws, 3, calls=[conflicting])]
+    rows = code_run_outcomes(events)
+    assert len(rows) == 2
+    assert rows[0]["tool_use_id"] == "c1"
+    assert rows[0]["status"] == "no_return_in_interval"
+    assert rows[0]["result_event_locator"] is None
+    assert rows[0]["command"] == "echo first"
+    assert rows[0]["call_conflicts"] == [{"event_locator": "task/public_events.jsonl#3",
+                                          "args": conflicting["args"]}]
+    assert rows[1]["tool_use_id"] == "c2"
+    assert rows[1]["status"] == "error" and rows[1]["result_event_locator"] == "task/public_events.jsonl#2"
+    state = SituationState(ws)
+    state.begin_review("r")
+    text, _ = state.build()
+    assert "2 unique tool identities" in text
+    assert text.count("command=echo first") == 1
+    assert text.count("command=echo second") == 1
+    assert "Conflicting call arguments" in text
 
 
 def test_follow_refresh_unshown_end_and_root_handoff(tmp_path):
@@ -173,11 +219,14 @@ def test_root_provider_input_and_no_retry_rebuild(tmp_path, monkeypatch):
     handoff = {"generation": 1, "request_id": "root-1", "cursor": 2, "task_turn": 2}
     monitor.completion_state = lambda: handoff
     attempts = []
+    root_captures = []
+    client.request_assembly_callback = lambda snapshot: root_captures.append(snapshot) or True
 
     from monitor_agent_core.provider import RetryableProviderError
 
     def offline_once(tools):
         attempts.append(client.assembled_request_snapshot(tools))
+        assert monitor.situation.shown_cursor == 0
         if len(attempts) == 1:
             raise RetryableProviderError("offline transient")
         return ([{"type": "tool_use", "id": "done", "name": "allow_complete",
@@ -188,10 +237,51 @@ def test_root_provider_input_and_no_retry_rebuild(tmp_path, monkeypatch):
     assert monitor.review("Root review", completion_pending=True, root_handoff=handoff).kind == "incomplete_delivery"
     assert len(attempts) == 2
     assert attempts[0]["messages"] == attempts[1]["messages"]
+    assert len(root_captures) == 1
+    assert root_captures[0]["messages"] == attempts[0]["messages"]
     assert monitor.situation.committed_cursor == 2
     text = json.dumps(attempts[0], ensure_ascii=False)
     assert "Supervisory Situation" in text and "task/public_events.jsonl#2" in text
     assert "current handoff" in text and "Recent public Task events" not in text
+    audit = (ws.private_root / "audit/dialogue.jsonl").read_text(encoding="utf-8")
+    assert audit.count('"event": "supervisory_situation_injected"') == 1
+
+
+def test_failed_provider_recovery_does_not_commit_and_next_review_reshows(tmp_path, monkeypatch):
+    from monitor_agent_core.provider import ProviderRecoveryExhausted
+
+    ws = workspace(tmp_path)
+    event(ws, 1, text="unobserved task update")
+    config = {"apikey": "offline", "apibase": "https://offline.invalid", "model": "offline",
+              "max_retries": 0, "monitor_dcec": True, "monitor_path_control_v0": True,
+              "monitor_verification_loop_v0": True, "monitor_verification_runtime_managed": False,
+              "monitor_coarse_to_fine_surface": True}
+    client = MonitorProviderClient("anthropic", config)
+    monitor = MonitorAgent(client, ws)
+    attempts = []
+
+    def exhausted(tools):
+        attempts.append(client.assembled_request_snapshot(tools))
+        assert monitor.situation.shown_cursor == 0
+        raise ProviderRecoveryExhausted("offline transport exhausted")
+
+    monkeypatch.setattr(client, "_request_with_recovery", exhausted)
+    import pytest
+    with pytest.raises(ProviderRecoveryExhausted):
+        monitor.review("Ordinary review")
+    assert monitor.situation.shown_cursor == monitor.situation.committed_cursor == 0
+    assert "interval=(0, 1]" in json.dumps(attempts[0])
+
+    def success(tools):
+        attempts.append(client.assembled_request_snapshot(tools))
+        assert monitor.situation.shown_cursor == 0
+        return ([{"type": "tool_use", "id": "done", "name": "wait",
+                  "input": {"after_turns": 1}}], {})
+
+    monkeypatch.setattr(client, "_request_with_recovery", success)
+    assert monitor.review("Next ordinary review").kind == "wait"
+    assert "interval=(0, 1]" in json.dumps(attempts[1])
+    assert monitor.situation.shown_cursor == monitor.situation.committed_cursor == 1
     audit = (ws.private_root / "audit/dialogue.jsonl").read_text(encoding="utf-8")
     assert audit.count('"event": "supervisory_situation_injected"') == 1
 

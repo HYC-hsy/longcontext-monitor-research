@@ -76,13 +76,21 @@ def main():
     event118 = [row for row in kitex if "task/public_events.jsonl#118" in row["event_locators"]]
     assert len(event118) == 1
     echo = [row for row in event118[0]["code_run_outcomes"]
-            if row["event_locator"] == "task/public_events.jsonl#118"]
+            if row["result_event_locator"] == "task/public_events.jsonl#118"]
     assert len(echo) == 1 and "go test ./..." in echo[0]["command"]
+    assert echo[0]["call_event_locator"] == "task/public_events.jsonl#117"
+    assert echo[0]["result_present"]
+    for record in fyne + kitex:
+        identities = [row["tool_use_id"] for row in record["code_run_outcomes"]]
+        assert len(identities) == len(set(identities))
     assert "validation execution" not in event118[0]["rendered_surface"].lower()
     assert "test adequate" not in event118[0]["rendered_surface"].lower()
     summary["kitex_echo_event_118"] = {
         "interval": [event118[0]["from_cursor"], event118[0]["to_cursor"]],
-        "paired_code_run": True, "command_contains_printed_go_test": True,
+        "paired_code_run": True, "unique_code_run_identity": echo[0]["tool_use_id"],
+        "call_event_locator": echo[0]["call_event_locator"],
+        "result_event_locator": echo[0]["result_event_locator"],
+        "command_contains_printed_go_test": True,
         "runtime_test_classification": "not present",
         "full_command_locator": "task/public_events.jsonl#118"}
     (DEST / "SUMMARY.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n",
