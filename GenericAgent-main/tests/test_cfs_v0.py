@@ -128,6 +128,50 @@ def test_code_run_call_only_distinct_identities_and_conflicting_args(tmp_path):
     assert "Conflicting call arguments" in text
 
 
+def test_code_run_result_crosses_successful_review_cursor(tmp_path, monkeypatch):
+    ws = workspace(tmp_path)
+    call = {"id": "X", "name": "code_run", "args": {"script": "go test ./...", "cwd": "/app"}}
+    event(ws, 1, calls=[call], boundary="post_model_pre_tool")
+    config = {"apikey": "offline", "apibase": "https://offline.invalid", "model": "offline",
+              "max_retries": 0, "monitor_dcec": True, "monitor_path_control_v0": True,
+              "monitor_verification_loop_v0": True, "monitor_verification_runtime_managed": False,
+              "monitor_coarse_to_fine_surface": True}
+    client = MonitorProviderClient("anthropic", config)
+    monitor = MonitorAgent(client, ws)
+    requests = []
+
+    def offline_once(tools):
+        requests.append(client.assembled_request_snapshot(tools))
+        return ([{"type": "tool_use", "id": f"wait-{len(requests)}", "name": "wait",
+                  "input": {"after_turns": 1}}], {})
+
+    monkeypatch.setattr(client, "_request_once", offline_once)
+    assert monitor.review("First review").kind == "wait"
+    assert monitor.situation.committed_cursor == 1
+    first = json.dumps(requests[0])
+    assert "go test ./..." in first and "no_return_in_interval" in first
+    assert "task/public_events.jsonl#2" not in first
+
+    event(ws, 2, results=[{"tool_use_id": "X", "content": json.dumps(
+        {"status": "success", "exit_code": 0, "stdout": "ok"})}])
+    assert monitor.review("Second review").kind == "wait"
+    assert monitor.situation.committed_cursor == 2
+    second = json.dumps(requests[1])
+    assert "1 unique tool identities" in second
+    assert "call=task/public_events.jsonl#1" in second
+    assert "result=task/public_events.jsonl#2" in second
+    assert "command=go test ./..." in second
+    assert "status=success exit_code=0" in second
+    assert "0 unique tool identities" not in second
+    assert "validation execution" not in second.lower()
+    assert "test adequate" not in second.lower()
+    manifests = [json.loads(path.read_text(encoding="utf-8"))
+                 for path in (ws.private_root / "audit/cfs_deltas").glob("*.json")]
+    manifest = next(row for row in manifests if row["from_cursor"] == 1)
+    assert len(manifest["code_run_outcomes"]) == 1
+    assert manifest["code_run_outcomes"][0]["tool_use_id"] == "X"
+
+
 def test_follow_refresh_unshown_end_and_root_handoff(tmp_path):
     ws = workspace(tmp_path)
     state = SituationState(ws)

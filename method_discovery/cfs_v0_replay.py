@@ -46,7 +46,8 @@ def replay_one(label, directory):
             changed=changed, sample_complete=transition["sample_complete"],
             sample_errors=transition["errors"], current_event=latest, root_handoff=None,
             control=None, used_turns=transition.get("task_turn"), max_turns=300,
-            remaining_seconds=None, manifest_locator=locator)
+            remaining_seconds=None, manifest_locator=locator,
+            known_events=[by_sequence[key] for key in sorted(by_sequence) if key <= after])
         output.append({"sample_sequence": transition["sample_sequence"],
                        "from_cursor": before, "to_cursor": after,
                        "event_locators": [f"task/public_events.jsonl#{row['archive_sequence']}"
@@ -63,6 +64,40 @@ def replay_one(label, directory):
             "samples": len(output), "command_outcomes": sum(len(row["code_run_outcomes"]) for row in output),
             "changed_paths": sum(sum(len(paths) for paths in row["changed_paths"].values())
                                  for row in output)}
+
+
+def replay_split(label, directory, call_cursor, result_cursor):
+    """Force one historical pre/post pair onto adjacent observed-cursor intervals."""
+    events_path = directory / "monitor/task_evidence/public_events.jsonl"
+    by_sequence = {row["archive_sequence"]: row for row in rows(events_path)}
+    pair = []
+    for cursor in (call_cursor, result_cursor):
+        prior = call_cursor - 1 if cursor == call_cursor else call_cursor
+        interval = [by_sequence[cursor]]
+        text, outcomes = render_surface(
+            baseline=prior, from_cursor=prior, to_cursor=cursor, events=interval,
+            changed={"added": [], "modified": [], "deleted": []}, sample_complete=True,
+            sample_errors=[], current_event=by_sequence[cursor], root_handoff=None,
+            control=None, used_turns=by_sequence[cursor].get("task_turn"), max_turns=300,
+            remaining_seconds=None, manifest_locator=f"offline_replay/split_{label}.json#{cursor}",
+            known_events=[by_sequence[key] for key in sorted(by_sequence) if key <= cursor])
+        pair.append({"from_cursor": prior, "to_cursor": cursor,
+                     "event_locator": f"task/public_events.jsonl#{cursor}",
+                     "code_run_outcomes": outcomes, "rendered_surface": text})
+    first, second = pair
+    assert len(first["code_run_outcomes"]) == len(second["code_run_outcomes"]) == 1
+    call, result = first["code_run_outcomes"][0], second["code_run_outcomes"][0]
+    assert call["tool_use_id"] == result["tool_use_id"]
+    assert call["status"] == "no_return_in_interval" and call["result_event_locator"] is None
+    assert result["result_present"] and result["status"] == "success"
+    assert result["call_event_locator"] == f"task/public_events.jsonl#{call_cursor}"
+    assert result["result_event_locator"] == f"task/public_events.jsonl#{result_cursor}"
+    assert result["command"] == call["command"]
+    for record in pair:
+        for forbidden in ("validation execution", "test adequate", "requirement covered"):
+            assert forbidden not in record["rendered_surface"].lower()
+    return {"source_public_events_sha256": hashlib.sha256(events_path.read_bytes()).hexdigest(),
+            "surfaces": pair}
 
 
 def main():
@@ -93,6 +128,14 @@ def main():
         "command_contains_printed_go_test": True,
         "runtime_test_classification": "not present",
         "full_command_locator": "task/public_events.jsonl#118"}
+    split = {
+        "kitex_117_118": replay_split("kitex_117_118", SOURCE / RUNS["kitex_eis"], 117, 118),
+        "fyne_53_54": replay_split("fyne_53_54", SOURCE / RUNS["fyne_eis"], 53, 54),
+    }
+    split_path = DEST / "SPLIT_BOUNDARY_REPLAY.json"
+    split_path.write_text(json.dumps(split, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                          encoding="utf-8")
+    summary["split_boundary_replay_sha256"] = hashlib.sha256(split_path.read_bytes()).hexdigest()
     (DEST / "SUMMARY.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n",
                                           encoding="utf-8")
     print(json.dumps(summary, indent=2, sort_keys=True))

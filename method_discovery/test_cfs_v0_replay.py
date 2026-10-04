@@ -1,5 +1,7 @@
 """Frozen historical CFS rendering vectors; no model or verifier."""
 
+import json
+
 from method_discovery.cfs_v0_replay import DEST, rows
 
 
@@ -36,3 +38,26 @@ def test_each_replay_interval_contains_unique_code_run_identities():
             assert len(identities) == len(set(identities))
             assert all(row["result_event_locator"] is not None or
                        row["status"] == "no_return_in_interval" for row in outcomes)
+
+
+def test_real_fyne_and_kitex_pairs_split_at_observed_cursor():
+    split = json.loads((DEST / "SPLIT_BOUNDARY_REPLAY.json").read_text(encoding="utf-8"))
+    for label, call_cursor, result_cursor in (("kitex_117_118", 117, 118),
+                                               ("fyne_53_54", 53, 54)):
+        first, second = split[label]["surfaces"]
+        assert first["to_cursor"] == call_cursor
+        assert second["from_cursor"] == call_cursor
+        assert second["to_cursor"] == result_cursor
+        assert len(first["code_run_outcomes"]) == len(second["code_run_outcomes"]) == 1
+        call = first["code_run_outcomes"][0]
+        result = second["code_run_outcomes"][0]
+        assert call["tool_use_id"] == result["tool_use_id"]
+        assert call["status"] == "no_return_in_interval" and not call["result_present"]
+        assert f"task/public_events.jsonl#{result_cursor}" not in first["rendered_surface"]
+        assert result["call_event_locator"] == f"task/public_events.jsonl#{call_cursor}"
+        assert result["result_event_locator"] == f"task/public_events.jsonl#{result_cursor}"
+        assert result["command"] == call["command"]
+        assert result["status"] == "success" and result["result_present"]
+        assert "1 unique tool identities" in second["rendered_surface"]
+        assert "validation execution" not in second["rendered_surface"].lower()
+    assert "go test ./..." in split["kitex_117_118"]["surfaces"][1]["code_run_outcomes"][0]["command"]

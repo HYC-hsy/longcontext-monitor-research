@@ -37,10 +37,11 @@ def _result(result):
     return {"raw_result": content}
 
 
-def code_run_outcomes(events):
-    """Pair calls and returns by tool identity across the observation interval."""
+def code_run_outcomes(events, known_events=None):
+    """Show identities with new interval facts; look up calls only through its cursor."""
+    known_events = events if known_events is None else known_events
     by_id = {}
-    for event in events:
+    for event in known_events:
         locator = f"task/public_events.jsonl#{event.get('archive_sequence')}"
         for call in event.get("tool_calls") or []:
             if not isinstance(call, dict) or call.get("name") != "code_run":
@@ -60,13 +61,20 @@ def code_run_outcomes(events):
                 }
             elif args != by_id[identity]["call_args"]:
                 by_id[identity]["call_conflicts"].append({"event_locator": locator, "args": args})
+    active_ids = {}
     for event in events:
+        for call in event.get("tool_calls") or []:
+            if isinstance(call, dict) and call.get("name") == "code_run" and call.get("id") in by_id:
+                active_ids.setdefault(call["id"], None)
         locator = f"task/public_events.jsonl#{event.get('archive_sequence')}"
         for result in event.get("tool_results") or []:
             if not isinstance(result, dict) or not isinstance(result.get("tool_use_id"), str):
                 continue
             row = by_id.get(result.get("tool_use_id"))
-            if row is None or row["result_present"]:
+            if row is None:
+                continue
+            active_ids.setdefault(result["tool_use_id"], None)
+            if row["result_present"]:
                 continue
             payload = _result(result)
             row.update({"result_event_locator": locator, "result_present": True,
@@ -74,12 +82,13 @@ def code_run_outcomes(events):
                         "exit_code": payload.get("exit_code"),
                         "stdout": payload.get("stdout"), "stderr": payload.get("stderr"),
                         "raw_result": payload.get("raw_result")})
-    return list(by_id.values())
+    return [by_id[identity] for identity in active_ids]
 
 
 def render_surface(*, baseline, from_cursor, to_cursor, events, changed, sample_complete,
                    sample_errors, current_event, root_handoff, control, used_turns,
-                   max_turns, remaining_seconds, manifest_locator, visible_boundary="complete"):
+                   max_turns, remaining_seconds, manifest_locator, visible_boundary="complete",
+                   known_events=None):
     """Render a fixed-allocation excerpt; full mechanical facts stay in the manifest."""
     turns = [row.get("task_turn") for row in events if type(row.get("task_turn")) is int]
     turn_range = f"{min(turns)}..{max(turns)}" if turns else "none in interval"
@@ -117,8 +126,8 @@ def render_surface(*, baseline, from_cursor, to_cursor, events, changed, sample_
                 shown += 1
         if total > shown:
             parts.append(f"Path view truncated: showing {shown}/{total}; full list in manifest.\n")
-    outcomes = code_run_outcomes(events)
-    parts.append(f"Task code_run calls in interval: {len(outcomes)} unique tool identities; "
+    outcomes = code_run_outcomes(events, known_events)
+    parts.append(f"Task code_run identities with new interval facts: {len(outcomes)} unique tool identities; "
                  "latest up to 3 below. A call without a return in this interval has no "
                  "established outcome here.\n")
     for row in outcomes[-3:]:
@@ -245,7 +254,8 @@ class SituationState:
             events=interval, changed=changed, sample_complete=complete, sample_errors=errors,
             current_event=selected, root_handoff=handoff, control=control,
             used_turns=used_turns, max_turns=max_turns, remaining_seconds=remaining_seconds,
-            manifest_locator=locator, visible_boundary=self.visible_boundary)
+            manifest_locator=locator, visible_boundary=self.visible_boundary,
+            known_events=[self.events[key] for key in sorted(self.events) if key <= current])
         manifest = {"review_id": self.review_id, "sequence": self.sequence,
                     "committed_baseline_cursor": self.committed_cursor,
                     "from_cursor": self.shown_cursor, "shown_through_cursor": current,
