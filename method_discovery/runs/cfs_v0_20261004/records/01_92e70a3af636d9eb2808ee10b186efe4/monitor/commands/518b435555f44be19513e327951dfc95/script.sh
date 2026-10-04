@@ -1,0 +1,1 @@
+cd /app && grep -n "func.*themedApp.*Metadata" theme/themedtestapp.go

@@ -1,0 +1,1 @@
+cd /app && grep -A 3 "type testApp struct" test/testapp.go

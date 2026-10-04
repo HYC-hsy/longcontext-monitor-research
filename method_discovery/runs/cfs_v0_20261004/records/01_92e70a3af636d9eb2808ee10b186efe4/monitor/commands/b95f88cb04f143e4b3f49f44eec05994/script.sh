@@ -1,0 +1,1 @@
+cd /app && grep -rn "^type.*struct" --include="*.go" | grep -i "app" | grep -v "^Binary" | head -30

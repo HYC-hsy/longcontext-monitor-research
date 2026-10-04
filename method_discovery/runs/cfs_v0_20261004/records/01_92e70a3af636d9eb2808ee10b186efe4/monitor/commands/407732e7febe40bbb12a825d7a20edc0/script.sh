@@ -1,0 +1,1 @@
+cd /app && go build -o /dev/null ./... 2>&1 | head -50

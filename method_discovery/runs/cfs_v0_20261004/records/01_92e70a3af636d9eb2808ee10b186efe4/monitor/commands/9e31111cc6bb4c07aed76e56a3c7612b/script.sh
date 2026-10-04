@@ -1,0 +1,1 @@
+cd /app && go build ./data/binding 2>&1 | head -20

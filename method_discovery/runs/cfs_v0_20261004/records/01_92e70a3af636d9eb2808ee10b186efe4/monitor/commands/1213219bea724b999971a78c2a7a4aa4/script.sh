@@ -1,0 +1,1 @@
+cd /app && grep -n "func.*Metadata.*AppMetadata" test/testapp.go app_test.go theme/themedtestapp.go 2>/dev/null | head -10

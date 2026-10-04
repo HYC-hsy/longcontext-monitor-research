@@ -1,0 +1,12 @@
+148:	fh, err := fr.readAndCheckFrameHeader()
+370:// readAndCheckFrameHeader reads a frame header from the Framer's reader and validates it.
+373:func (fr *Framer) readAndCheckFrameHeader() (http2.FrameHeader, error) {
+389:		var first4Bytes, second4Bytes [4]byte
+392:		return http2.FrameHeader{}, fmt.Errorf("%s or invalid frame (first4Bytes=%#x, second4Bytes=%#x)", 
+393:			http2.ErrFrameTooLarge, first4Bytes, second4Bytes)
+func WithFailureRetry(p *retry.FailurePolicy) Option {
+	return Option{F: func(o *client.Options, di *utils.Slice) {
+		if p == nil {
+			return
+		}
+		di.Push(fmt.Sprintf("WithFailureRetry(%+v)", p))

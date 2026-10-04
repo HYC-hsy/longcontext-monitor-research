@@ -1,0 +1,1 @@
+cd /app && grep -rn "ThemeVariant.*=" --include="*.go" | grep -v vendor | head -20

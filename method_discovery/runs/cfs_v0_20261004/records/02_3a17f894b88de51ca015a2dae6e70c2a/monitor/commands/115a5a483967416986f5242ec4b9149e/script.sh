@@ -1,0 +1,1 @@
+cd /app && grep -A3 "func StringToStringWithFormat" data/binding/sprintf.go

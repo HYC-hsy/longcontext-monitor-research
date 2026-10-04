@@ -1,0 +1,42 @@
+/logs/agent/monitor/monitor_private/audit/commands/719648792b3d4d63abfc4ac6eaa63638/script.py:6: SyntaxWarning: invalid escape sequence '\*'
+  ['grep', '-A', '30', 'func (fr \*Framer) readAndCheckFrameHeader', 
+readAndCheckFrameHeader implementation:
+================================================================================
+func (fr *Framer) readAndCheckFrameHeader() (http2.FrameHeader, error) {
+	buf, err := fr.reader.Next(frameHeaderLen)
+	if err != nil {
+		return http2.FrameHeader{}, err
+	}
+	
+	// Parse frame header fields
+	length := uint32(buf[0])<<16 | uint32(buf[1])<<8 | uint32(buf[2])
+	frameType := http2.FrameType(buf[3])
+	flags := http2.Flags(buf[4])
+	streamID := binary.BigEndian.Uint32(buf[5:]) & (1<<31 - 1)
+	
+	// Validate frame header
+	fh := http2.FrameHeader{
+		Length:   length,
+		Type:     frameType,
+		Flags:    flags,
+		StreamID: streamID,
+	}
+	
+	// Check for invalid frame type
+	if frameType > 0x9 && frameType < 0xf0 {
+		return fh, fr.connError(http2.ErrCodeProtocol,
+			fmt.Sprintf("invalid frame type 0x%x (header hex: %02x %02x %02x %02x %02x %02x %02x %02x %02x)",
+				frameType, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8]))
+	}
+	
+	// Check for reserved bit set in stream ID (should always be 0)
+	if buf[5]&0x80 != 0 {
+		return fh, fr.connError(http2.ErrCodeProtocol,
+			fmt.Sprintf("reserved bit set in stream ID (header hex: %02x %02x %02x %02x %02x %02x %02x %02x %02x)",
+
+
+================================================================================
+Hex format occurrences:
+================================================================================
+427:			fmt.Sprintf("invalid frame type 0x%x (header hex: %02x %02x %02x %02x %02x %02x %02x %02x %02x)",
+

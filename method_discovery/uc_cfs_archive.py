@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime
+import argparse
 import json
 from pathlib import Path
 import shutil
@@ -49,9 +51,10 @@ def copy_cfs_deltas(slot, destination):
     raw.write(manifest_path, manifest)
 
 
-def augment(slot, summary):
+def augment(slot, summary, *, copy_sources=True):
     destination = RECORDS / f"{slot['position']:02d}_{slot['run_id']}"
-    copy_cfs_deltas(slot, destination)
+    if copy_sources:
+        copy_cfs_deltas(slot, destination)
     dialogue = raw.rows(destination / 'monitor/audit/dialogue.jsonl')
     reviews = raw.rows(destination / 'monitor/audit/reviews.jsonl')
     progress = raw.rows(destination / 'monitor/audit/progress.jsonl')
@@ -68,9 +71,16 @@ def augment(slot, summary):
     injections = [(line, row) for line, row in enumerate(dialogue, 1)
                   if row.get('event') == 'supervisory_situation_injected']
     tool_counts = Counter(row.get('name') for _, row in tools)
-    wait_modes = Counter((row.get('arguments') or {}).get('mode')
-                         for _, row in tools if row.get('name') == 'wait'
-                         and isinstance(row.get('arguments'), dict))
+    def arguments(row):
+        value = row.get('arguments') or {}
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError:
+                return {}
+        return value if isinstance(value, dict) else {}
+    wait_modes = Counter(arguments(row).get('mode') or 'unspecified'
+                         for _, row in tools if row.get('name') == 'wait')
     intervals = []
     for path, row in deltas:
         changed = row.get('changed_paths') or {}
@@ -92,7 +102,17 @@ def augment(slot, summary):
             'event_locators': row.get('event_locators'), 'control': row.get('control'),
         })
     task_counts = Counter(row.get('event_type') for row in task)
+    started = summary.get('started_at')
+    finished = summary.get('finished_at')
+    def timestamp(value):
+        try:
+            return datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp()
+        except (AttributeError, ValueError):
+            return None
+    start_stamp, end_stamp = timestamp(started), timestamp(finished)
     summary.update({
+        'wall_seconds_observed': end_stamp - start_stamp if start_stamp is not None and end_stamp is not None else None,
+        'final_review_action': reviews[-1].get('action') if reviews else None,
         'task_turns_observed': max((row.get('task_turn') for row in public
                                     if isinstance(row.get('task_turn'), int)), default=None),
         'task_provider_requests': task_counts['provider_request_ready'],
@@ -102,11 +122,14 @@ def augment(slot, summary):
         'monitor_code_runs': tool_counts['code_run'], 'monitor_wait_modes': dict(wait_modes),
         'monitor_interventions': tool_counts['intervene'],
         'situation_surface_count': len(surfaces), 'situation_injection_count': len(injections),
+        'situation_review_count': len({row.get('review_id') for _, row in surfaces}),
         'situation_full_count': sum(not str(row.get('content', '')).startswith('Situation unchanged')
                                     for _, row in surfaces),
         'situation_unchanged_count': sum(str(row.get('content', '')).startswith('Situation unchanged')
                                          for _, row in surfaces),
         'situation_delta_manifest_count': len(deltas),
+        'situation_interval_size_distribution': dict(Counter(
+            item['interval_size'] for item in intervals if item['interval_size'] is not None)),
         'situation_changed_paths_total': sum(item['changed_path_count'] for item in intervals),
         'situation_unique_code_run_rows_total': sum(item['unique_code_run_identities'] for item in intervals),
         'situation_split_boundary_pairs_total': sum(item['split_boundary_pairs'] for item in intervals),
@@ -134,11 +157,23 @@ def augment(slot, summary):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--refresh-indexes', action='store_true')
+    args = parser.parse_args()
     plan = json.loads(PLAN.read_text(encoding='utf-8'))
     if len(plan['slots']) != 4 or [row['run_id'] for row in plan['slots']] != plan['run_order']:
         raise RuntimeError('Frozen plan mismatch')
-    if RECORDS.exists():
+    if RECORDS.exists() and not args.refresh_indexes:
         raise RuntimeError('Archive records already exist; no overwrite')
+    if args.refresh_indexes:
+        summaries = []
+        for slot in plan['slots']:
+            destination = RECORDS / f"{slot['position']:02d}_{slot['run_id']}"
+            original = json.loads((destination / 'MECHANICAL_SUMMARY.json').read_text(encoding='utf-8'))
+            summaries.append(augment(slot, original, copy_sources=False))
+        raw.write(ROOT / 'BLOCK_MECHANICAL_SUMMARY.json', {'records': summaries})
+        print(json.dumps({'refreshed_indexes': len(summaries)}, indent=2))
+        return
     host = json.loads((CAMPAIGN / 'host_execution/progress.json').read_text(encoding='utf-8'))
     slots = plan['slots'][:len(host)]
     if [row['run_id'] for row in slots] != [row['run_id'] for row in host]:

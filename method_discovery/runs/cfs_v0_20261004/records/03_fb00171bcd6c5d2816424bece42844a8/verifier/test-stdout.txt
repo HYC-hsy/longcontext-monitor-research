@@ -1,0 +1,145 @@
+=== Phase 1: Streaming Types and Generic Interfaces ===
+# github.com/cloudwego/kitex/pkg/streaming_test [github.com/cloudwego/kitex/pkg/streaming.test]
+pkg/streaming/test_01_streaming_types_test.go:56:33: cannot use "val" (untyped string constant) as []string value in map literal
+pkg/streaming/test_01_streaming_types_test.go:59:35: cannot use "tval" (untyped string constant) as []string value in map literal
+pkg/streaming/test_01_streaming_types_test.go:91:27: cannot use map[string]string{…} (value of type map[string]string) as streaming.Header value in variable declaration
+pkg/streaming/test_01_streaming_types_test.go:92:29: cannot use map[string]string{…} (value of type map[string]string) as streaming.Trailer value in variable declaration
+pkg/streaming/test_01_streaming_types_test.go:93:16: invalid operation: h["k1"] != "v1" (mismatched types []string and untyped string)
+pkg/streaming/test_01_streaming_types_test.go:96:16: invalid operation: h["k2"] != "v2" (mismatched types []string and untyped string)
+pkg/streaming/test_01_streaming_types_test.go:99:18: invalid operation: tr["tk1"] != "tv1" (mismatched types []string and untyped string)
+pkg/streaming/test_01_streaming_types_test.go:106:53: cannot use mock (variable of type *mockClientStream) as streaming.ClientStream value in argument to streaming.NewServerStreamingClient[struct{}]: *mockClientStream does not implement streaming.ClientStream (wrong type for method Trailer)
+		have Trailer() (streaming.Trailer, error)
+		want Trailer() streaming.Trailer
+pkg/streaming/test_01_streaming_types_test.go:122:17: invalid operation: h["key"] != "val" (mismatched types []string and untyped string)
+pkg/streaming/test_01_streaming_types_test.go:126:13: assignment mismatch: 2 variables but sc.Trailer returns 1 value
+pkg/streaming/test_01_streaming_types_test.go:126:13: too many errors
+FAIL	github.com/cloudwego/kitex/pkg/streaming [build failed]
+FAIL
+FAILED
+
+=== Phase 2: Endpoint Architecture Reorganization ===
+# github.com/cloudwego/kitex/pkg/endpoint/sep_test [github.com/cloudwego/kitex/pkg/endpoint/sep.test]
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:18:11: undefined: sep.StreamEndpoint
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:19:11: undefined: sep.StreamMiddleware
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:35:23: undefined: sep.StreamEndpoint
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:43:23: undefined: sep.StreamEndpoint
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:52:15: undefined: sep.StreamChain
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:73:10: cannot use func(ctx context.Context, stream streaming.ServerStream, message interface{}) error {…} (value of type func(ctx context.Context, stream streaming.ServerStream, message interface{}) error) as sep.StreamRecvEndpoint value in return statement
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:75:11: assignment mismatch: 1 variable but next returns 2 values
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:75:29: too many arguments in call to next
+	have (context.Context, streaming.ServerStream, interface{})
+	want (context.Context, interface{})
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:81:10: cannot use func(ctx context.Context, stream streaming.ServerStream, message interface{}) error {…} (value of type func(ctx context.Context, stream streaming.ServerStream, message interface{}) error) as sep.StreamRecvEndpoint value in return statement
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:83:29: too many arguments in call to next
+	have (context.Context, streaming.ServerStream, interface{})
+	want (context.Context, interface{})
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:83:29: too many errors
+# github.com/cloudwego/kitex/pkg/endpoint [github.com/cloudwego/kitex/pkg/endpoint.test]
+pkg/endpoint/test_02_unary_endpoint_test.go:17:7: undefined: UnaryEndpoint
+pkg/endpoint/test_02_unary_endpoint_test.go:22:9: undefined: UnaryMiddleware
+pkg/endpoint/test_02_unary_endpoint_test.go:22:35: undefined: UnaryEndpoint
+pkg/endpoint/test_02_unary_endpoint_test.go:23:10: undefined: UnaryEndpoint
+pkg/endpoint/test_02_unary_endpoint_test.go:30:9: undefined: UnaryMiddleware
+pkg/endpoint/test_02_unary_endpoint_test.go:30:35: undefined: UnaryEndpoint
+pkg/endpoint/test_02_unary_endpoint_test.go:31:10: undefined: UnaryEndpoint
+pkg/endpoint/test_02_unary_endpoint_test.go:39:11: undefined: UnaryChain
+pkg/endpoint/test_02_unary_endpoint_test.go:40:14: undefined: UnaryEndpoint
+pkg/endpoint/test_02_unary_endpoint_test.go:52:9: undefined: UnaryMiddleware
+pkg/endpoint/test_02_unary_endpoint_test.go:52:9: too many errors
+# github.com/cloudwego/kitex/pkg/endpoint/cep_test [github.com/cloudwego/kitex/pkg/endpoint/cep.test]
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:19:11: undefined: cep.StreamMiddleware
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:21:11: undefined: cep.StreamRecvMiddleware
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:23:11: undefined: cep.StreamSendMiddleware
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:39:10: cannot use func(ctx context.Context) (streaming.ClientStream, error) {…} (value of type func(ctx context.Context) (streaming.ClientStream, error)) as cep.StreamEndpoint value in return statement
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:41:15: assignment mismatch: 2 variables but next returns 1 value
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:47:10: cannot use func(ctx context.Context) (streaming.ClientStream, error) {…} (value of type func(ctx context.Context) (streaming.ClientStream, error)) as cep.StreamEndpoint value in return statement
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:49:15: assignment mismatch: 2 variables but next returns 1 value
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:55:15: undefined: cep.StreamChain
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:58:10: cannot use &mockCepClientStream{} (value of type *mockCepClientStream) as streaming.ClientStream value in return statement: *mockCepClientStream does not implement streaming.ClientStream (wrong type for method Trailer)
+		have Trailer() (streaming.Trailer, error)
+		want Trailer() streaming.Trailer
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:76:10: cannot use func(ctx context.Context, stream streaming.ClientStream, message interface{}) error {…} (value of type func(ctx context.Context, stream streaming.ClientStream, message interface{}) error) as cep.StreamRecvEndpoint value in return statement
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:76:10: too many errors
+FAIL	github.com/cloudwego/kitex/pkg/endpoint [build failed]
+FAIL	github.com/cloudwego/kitex/pkg/endpoint/cep [build failed]
+FAIL	github.com/cloudwego/kitex/pkg/endpoint/sep [build failed]
+FAIL
+FAILED
+
+=== Phase 3: Transport Protocol Reorganization ===
+=== RUN   TestTransportProtocolConstants
+--- PASS: TestTransportProtocolConstants (0.00s)
+=== RUN   TestTransportProtocolString
+--- PASS: TestTransportProtocolString (0.00s)
+=== RUN   TestTransportProtocolStringBitwise
+--- PASS: TestTransportProtocolStringBitwise (0.00s)
+PASS
+ok  	github.com/cloudwego/kitex/transport	0.003s
+=== RUN   TestTransportProtocolDefaultFramed
+--- PASS: TestTransportProtocolDefaultFramed (0.00s)
+PASS
+ok  	github.com/cloudwego/kitex/pkg/rpcinfo	0.010s
+testing: warning: no tests to run
+PASS
+ok  	github.com/cloudwego/kitex/pkg/rpcinfo/remoteinfo	0.011s [no tests to run]
+PASSED
+
+=== Phase 4: Thrift Codec Fallback Enhancement ===
+=== RUN   TestThriftCodecFallbackMarshalBasic
+--- PASS: TestThriftCodecFallbackMarshalBasic (0.00s)
+=== RUN   TestThriftCodecFallbackUnmarshalBasic
+--- PASS: TestThriftCodecFallbackUnmarshalBasic (0.00s)
+=== RUN   TestThriftCodecFallbackMarshalFrugalBasic
+--- PASS: TestThriftCodecFallbackMarshalFrugalBasic (0.00s)
+=== RUN   TestThriftCodecFallbackUnmarshalFrugalBasic
+--- PASS: TestThriftCodecFallbackUnmarshalFrugalBasic (0.00s)
+PASS
+ok  	github.com/cloudwego/kitex/pkg/remote/codec/thrift	0.019s
+PASSED
+
+=== Phase 5: Client Option Category System ===
+# github.com/cloudwego/kitex/client/callopt/streamcall [github.com/cloudwego/kitex/client/callopt/streamcall.test]
+client/callopt/streamcall/test_05_streamcall_test.go:23:26: callOpts.StreamOptions undefined (type callopt.CallOptions has no field or method StreamOptions)
+client/callopt/streamcall/test_05_streamcall_test.go:39:27: callOpts.StreamOptions undefined (type callopt.CallOptions has no field or method StreamOptions)
+# github.com/cloudwego/kitex/client [github.com/cloudwego/kitex/client.test]
+client/test_05_client_options_test.go:22:7: undefined: TTHeaderStreamingOption
+client/test_05_client_options_test.go:26:31: undefined: UnaryOptions
+client/test_05_client_options_test.go:30:32: undefined: StreamOptions
+client/test_05_client_options_test.go:34:10: undefined: TTHeaderStreamingOption
+client/test_05_client_options_test.go:34:45: undefined: TTHeaderStreamingOptions
+client/test_05_client_options_test.go:48:3: undefined: WithStreamRecvTimeout
+client/test_05_client_options_test.go:73:23: o.TailOptions undefined (type *"github.com/cloudwego/kitex/internal/client".Options has no field or method TailOptions)
+client/test_05_client_options_test.go:84:19: o.UnaryOptions undefined (type *"github.com/cloudwego/kitex/internal/client".Options has no field or method UnaryOptions)
+client/test_05_client_options_test.go:85:23: o.UnaryOptions undefined (type *"github.com/cloudwego/kitex/internal/client".Options has no field or method UnaryOptions)
+client/test_05_client_options_test.go:90:9: undefined: WithStreamRecvTimeout
+client/test_05_client_options_test.go:90:9: too many errors
+FAIL	github.com/cloudwego/kitex/client [build failed]
+FAIL	github.com/cloudwego/kitex/client/callopt/streamcall [build failed]
+testing: warning: no tests to run
+PASS
+ok  	github.com/cloudwego/kitex/client/callopt	0.014s [no tests to run]
+?   	github.com/cloudwego/kitex/client/streamclient	[no test files]
+?   	github.com/cloudwego/kitex/client/streamxclient	[no test files]
+?   	github.com/cloudwego/kitex/client/streamxclient/streamxcallopt	[no test files]
+testing: warning: no tests to run
+PASS
+ok  	github.com/cloudwego/kitex/client/genericclient	0.015s [no tests to run]
+FAIL
+FAILED
+
+=== Phase 6: gRPC Diagnostics Enhancement ===
+=== RUN   TestGRPCDiagnosticsFrameReader
+=== RUN   TestGRPCDiagnosticsFrameReader/thrift_ApplicationException_produces_detailed_error
+    test_06_grpc_diagnostics_test.go:63: http2: frame too large or invalid frame (first4Bytes=0x80010003, second4Bytes=0x00000004)
+=== RUN   TestGRPCDiagnosticsFrameReader/normal_HTTP2_FrameHeader_succeeds
+--- PASS: TestGRPCDiagnosticsFrameReader (0.00s)
+    --- PASS: TestGRPCDiagnosticsFrameReader/thrift_ApplicationException_produces_detailed_error (0.00s)
+    --- PASS: TestGRPCDiagnosticsFrameReader/normal_HTTP2_FrameHeader_succeeds (0.00s)
+=== RUN   TestGRPCDiagnosticsFrameReaderErrorFormat
+--- PASS: TestGRPCDiagnosticsFrameReaderErrorFormat (0.00s)
+PASS
+ok  	github.com/cloudwego/kitex/pkg/remote/trans/nphttp2/grpc/grpcframe	0.006s
+PASSED
+
+=== Summary ===
+Result: 3/6 phases | Reward: 0.3
