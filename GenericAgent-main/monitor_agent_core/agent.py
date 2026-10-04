@@ -36,7 +36,7 @@ from .path_control_v0 import (
     WORKING_GUIDANCE as PATH_CONTROL_WORKING_GUIDANCE,
     recent_public_events,
 )
-from .root_scope_v1 import ROOT_SYSTEM_PROMPT, ROOT_NOTE_GUIDANCE, root_input
+from .root_scope_v1 import ROOT_SYSTEM_PROMPT, ROOT_NOTE_GUIDANCE, root_input, task_budget_view
 
 
 def _tool(name, description, properties, required):
@@ -315,6 +315,7 @@ class MonitorAgent:
         self.root_frame_handoff = None
         self._local_history_at_root = None
         self.completion_state = None
+        self.task_budget_state = None
         self._seen_completion = None
         self._intervened_generation = None
         self.stop_event = stop_event if stop_event is not None else threading.Event()
@@ -840,6 +841,11 @@ class MonitorAgent:
 
     def _refresh_review_context(self):
         updates = [self._refresh_completion()]
+        if self.root_scope_v1 != 'off' and self.frame_kind == 'local':
+            used, limit = self.task_budget_state() if self.task_budget_state else (None, None)
+            deadline = getattr(self.client, 'recovery_deadline', None)
+            updates.append(task_budget_view(
+                used, limit, deadline - time.monotonic() if deadline is not None else None))
         if self.advice_basis is not None:
             try:
                 updates.append(self.advice_basis.refresh())
@@ -923,9 +929,11 @@ class MonitorAgent:
             system = active_system + "\n\n" + mode
             if self.frame_kind == 'root':
                 remaining = getattr(self.client, 'recovery_deadline', None)
+                used, limit = self.task_budget_state() if self.task_budget_state else (None, None)
                 wake_context = root_input(
                     self.workspace, self.root_frame_handoff,
-                    remaining_seconds=(remaining - time.monotonic()) if remaining is not None else None)
+                    remaining_seconds=(remaining - time.monotonic()) if remaining is not None else None,
+                    task_turns_used=used, task_max_turns=limit)
                 if root_transition_view:
                     wake_context += "\n\n" + root_transition_view
                 self._audit_dialogue('root_frame_input', mode=self.root_scope_v1,

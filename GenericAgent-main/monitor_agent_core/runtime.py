@@ -275,6 +275,10 @@ def _worker(config, commands, outputs):
         monitor = MonitorAgent(client, workspace, config["max_review_turns"],
                                stop_event=config['stop_event'],
                                independent_check=(independent_check if probe_total > 0 else None))
+        used_turns = config.get('task_budget_turns_used')
+        max_turns = config.get('task_max_turns')
+        monitor.task_budget_state = lambda: (
+            used_turns.value if used_turns is not None else None, max_turns)
         workspace_sampler = WorkspaceTransitionSampler() if monitor.dcec_enabled else None
     except Exception as exc:
         outputs.put({"kind": "failure", "error": repr(exc), "phase": "startup"})
@@ -510,7 +514,7 @@ class MonitorRuntime:
                  interrupt_pending=None, run_timeout_seconds=10000, run_deadline_epoch=None,
                  correction_begin=None, correction_end=None, task_original_path=None, task_id,
                  independent_probe_total_requests=0, independent_probe_max_requests=3,
-                 root_checkpoint_required=False, run_id=None):
+                 root_checkpoint_required=False, run_id=None, task_max_turns=None):
         if model_config.get('monitor_hybrid_control', False):
             raise ValueError('Model-requested hybrid pause is retired')
         self.artifact_dir = Path(artifact_dir).resolve()
@@ -572,6 +576,8 @@ class MonitorRuntime:
         self._active_completion = self._context.Value('q', 0)
         self._completion_cursor = self._context.Value('q', 0)
         self._latest_task_turn = self._context.Value('q', 0)
+        self._task_budget_turns_used = self._context.Value('q', 0)
+        self._task_max_turns = task_max_turns
         self._closed = threading.Event()
         process = process_factory or self._context.Process
         self._process = process(target=worker_target or _worker, args=({
@@ -584,6 +590,8 @@ class MonitorRuntime:
             "root_checkpoint_required": root_checkpoint_required,
             "run_id": run_id,
             "latest_task_turn": self._latest_task_turn,
+            "task_budget_turns_used": self._task_budget_turns_used,
+            "task_max_turns": self._task_max_turns,
             "run_deadline_epoch": time.time() + max(0.0, self._run_deadline - time.monotonic()),
             "stop_event": self._stop_event,
             "independent_probe_total_requests": int(independent_probe_total_requests),
@@ -629,6 +637,12 @@ class MonitorRuntime:
             "task_turn": int(packet.get("task_turn") or 0),
         })
         return True
+
+    def note_task_turn(self, local_turn):
+        """Publish the loop counter that is bounded by agent_runner_loop.max_turns."""
+        with self._task_budget_turns_used.get_lock():
+            self._task_budget_turns_used.value = max(
+                self._task_budget_turns_used.value, int(local_turn))
 
     def _pump_outputs(self):
         while not self._closed.is_set():

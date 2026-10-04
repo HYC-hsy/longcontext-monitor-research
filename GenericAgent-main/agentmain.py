@@ -354,6 +354,7 @@ class GenericAgent:
                     'GA_M0_MONITOR_ENABLED is a retired historical runtime. '
                     'Use the clean GA_MONITOR_ENABLED path.'
                 )
+            max_turns = int(os.environ.get('GA_MAX_TURNS', '180'))
             if os.environ.get('GA_MONITOR_ENABLED') == '1' and self.monitor_runtime is None:
                 from ga_monitor_adapter import GenericAgentMonitorAdapter
                 monitor_config_name = os.environ.get(
@@ -391,6 +392,7 @@ class GenericAgent:
                     correction_end=self.end_monitor_correction,
                     max_review_turns=int(os.environ.get('GA_MONITOR_MAX_REVIEW_TURNS', '20')),
                     completion_timeout=float(os.environ.get('GA_MONITOR_COMPLETION_TIMEOUT_SECONDS', '300')),
+                    task_max_turns=max_turns,
                 )
                 if contract is not None:
                     with open(os.path.join(artifact_dir, 'resolved_model_config.json'),
@@ -417,7 +419,6 @@ class GenericAgent:
             if self.force_non_stream:
                 self.llmclient.backend.stream = False
                 self.llmclient.backend.read_timeout = max(self.llmclient.backend.read_timeout, 1200)
-            max_turns = int(os.environ.get('GA_MAX_TURNS', '180'))
             gen = agent_runner_loop(self.llmclient, sys_prompt, raw_query, handler, TOOLS_SCHEMA,
                                     max_turns=max_turns, verbose=self.verbose, yield_info=True,
                                     turn_offset=self.research_turn_offset)

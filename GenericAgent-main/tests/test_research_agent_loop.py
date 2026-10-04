@@ -257,6 +257,18 @@ def test_continue_decision_skips_no_tool_and_runs_next_turn():
     assert [e["event_type"] for e in events].count("completion_proposal") == 2
 
 
+def test_monitor_budget_uses_local_loop_turn_not_offset_or_request_attempts():
+    decision = CompletionDecision(decision="CONTINUE", reason_codes=("TEST",), next_prompt="continue")
+    handler = Handler(decision)
+    used = []
+    handler.parent.monitor_runtime = SimpleNamespace(note_task_turn=used.append)
+    result = exhaust(agent_runner_loop(
+        Client(Response()), "system", "task", handler, [], max_turns=2,
+        verbose=False, turn_offset=40))
+    assert result["result"] == "MAX_TURNS_EXCEEDED"
+    assert used == [1, 2]
+
+
 def test_manual_continue_message_is_delivered_to_the_next_turn(tmp_path):
     handler = Handler()
     boundary = ManualCompletionBoundary(tmp_path, timeout_seconds=1, poll_seconds=0.001)

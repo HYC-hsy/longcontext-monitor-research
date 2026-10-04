@@ -66,6 +66,10 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
         if wait_correction is not None and not wait_correction():
             break
         local_turn += 1; turn = int(turn_offset) + local_turn
+        monitor_runtime = getattr(handler.parent, 'monitor_runtime', None)
+        note_task_turn = getattr(monitor_runtime, 'note_task_turn', None)
+        if note_task_turn is not None:
+            note_task_turn(local_turn)
         consume_resume = getattr(handler.parent, 'consume_resumable_interruption', None)
         if consume_resume is not None:
             resumed = consume_resume()

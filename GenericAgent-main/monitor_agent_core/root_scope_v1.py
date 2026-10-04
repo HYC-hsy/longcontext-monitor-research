@@ -45,7 +45,20 @@ def _excerpt(value, limit=700):
     return text[:limit] + f" [excerpt; {len(text) - limit} characters omitted; read cited original]"
 
 
-def root_input(workspace, handoff, *, remaining_seconds=None):
+def task_budget_view(used_turns=None, max_turns=None, remaining_seconds=None):
+    """Display the Task loop's bounded local-turn count, never request attempts."""
+    used = str(used_turns) if type(used_turns) is int and used_turns >= 0 else 'unknown'
+    limit = str(max_turns) if type(max_turns) is int and max_turns >= 0 else 'unknown'
+    left = (str(max(0, max_turns - used_turns))
+            if used != 'unknown' and limit != 'unknown' else 'unknown')
+    seconds = (f"{max(0, int(remaining_seconds))} seconds"
+               if remaining_seconds is not None else 'unknown')
+    return (f"Task turns used: {used}; limit: {limit}; remaining: {left}. "
+            f"Remaining shared run time: {seconds}.")
+
+
+def root_input(workspace, handoff, *, remaining_seconds=None,
+               task_turns_used=None, task_max_turns=None):
     """Build the same source-indexed root input for both modes."""
     task = workspace.resolve_read("task/original_task.txt").read_text(encoding="utf-8")
     cursor = handoff["cursor"]
@@ -90,6 +103,5 @@ def root_input(workspace, handoff, *, remaining_seconds=None):
         "cited paths. A past correction or failure is not automatically a current defect; a successful "
         "exit code does not alone establish required behavior."
     )
-    parts.append("Remaining shared run budget at frame entry: " +
-                 (f"{max(0, int(remaining_seconds))} seconds." if remaining_seconds is not None else "unavailable."))
+    parts.append(task_budget_view(task_turns_used, task_max_turns, remaining_seconds))
     return "\n\n".join(parts)

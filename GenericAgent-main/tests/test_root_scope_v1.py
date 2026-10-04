@@ -10,7 +10,7 @@ import pytest
 
 from monitor_agent_core.agent import MonitorAgent
 from monitor_agent_core.provider import MonitorProviderClient
-from monitor_agent_core.root_scope_v1 import ROOT_SYSTEM_PROMPT
+from monitor_agent_core.root_scope_v1 import ROOT_SYSTEM_PROMPT, task_budget_view
 from monitor_agent_core.workspace import MonitorWorkspace
 from monitor_agent_core.runtime import _worker
 
@@ -127,6 +127,40 @@ def test_default_off_rejects_root_mode_without_path_control(tmp_path):
     assert workspace.working_note_target == 'working.md'
 
 
+@pytest.mark.parametrize('mode', ['retained', 'isolated'])
+def test_task_turn_budget_in_ordinary_and_root_provider_requests(tmp_path, monkeypatch, mode):
+    monitor, client, workspace, handoff = make_monitor(tmp_path, mode)
+    used = [179]
+    monitor.task_budget_state = lambda: (used[0], 180)
+    client.recovery_deadline = time.monotonic() + 90
+    client.recovery_stop = threading.Event()
+    requests = []
+
+    def offline(tools):
+        requests.append(client.assembled_request_snapshot(tools))
+        name = 'allow_complete' if client.observed_root_handoff else 'wait'
+        arguments = {} if name == 'allow_complete' else {'after_turns': 1}
+        return ([{'type': 'tool_use', 'id': name, 'name': name, 'input': arguments}], {})
+
+    monkeypatch.setattr(client, '_request_once', offline)
+    monitor.completion_state = lambda: None
+    assert monitor.review('Ordinary wake').kind == 'wait'
+    assert 'Task turns used: 179; limit: 180; remaining: 1.' in json.dumps(requests[-1])
+    assert 'Remaining shared run time:' in json.dumps(requests[-1])
+    used[0] = 180
+    monitor.completion_state = lambda: handoff
+    assert monitor.review('Root wake', completion_pending=True, root_handoff=handoff).kind == 'allow_complete'
+    assert 'Task turns used: 180; limit: 180; remaining: 0.' in json.dumps(requests[-1])
+    assert 'Remaining shared run time:' in json.dumps(requests[-1])
+
+
+def test_task_turn_budget_unknown_is_not_inferred_from_public_event_turn():
+    assert task_budget_view(None, 180, 12).startswith(
+        'Task turns used: unknown; limit: 180; remaining: unknown.')
+    assert task_budget_view(179, None, None).startswith(
+        'Task turns used: 179; limit: unknown; remaining: unknown.')
+
+
 def test_runtime_root_dispatch_uses_actual_frame_and_handoff(tmp_path, monkeypatch):
     monitor, client, workspace, handoff = make_monitor(tmp_path, 'retained')
     task_workspace = tmp_path / 'task_workspace'
@@ -145,6 +179,7 @@ def test_runtime_root_dispatch_uses_actual_frame_and_handoff(tmp_path, monkeypat
     commands, outputs, receipts = queue.Queue(), queue.Queue(), queue.Queue()
     stopped = threading.Event()
     active, cursor, latest = mp.Value('q', 0), mp.Value('q', 1), mp.Value('q', 1)
+    task_budget_turns_used = mp.Value('q', 179)
     config = {
         'config_name': 'anthropic', 'model_config': client.config,
         'task_id': 'offline-task', 'evidence_root': str(workspace.evidence_root),
@@ -152,6 +187,7 @@ def test_runtime_root_dispatch_uses_actual_frame_and_handoff(tmp_path, monkeypat
         'max_review_turns': 4, 'task_original_path': None,
         'active_completion': active, 'completion_cursor': cursor,
         'latest_task_turn': latest, 'run_deadline_epoch': time.time() + 60,
+        'task_budget_turns_used': task_budget_turns_used, 'task_max_turns': 180,
         'stop_event': stopped, 'independent_probe_total_requests': 0,
         'completion_receipts': receipts, 'wake_receipts': None,
         'root_checkpoint_required': False, 'run_id': 'offline-run',
@@ -167,6 +203,8 @@ def test_runtime_root_dispatch_uses_actual_frame_and_handoff(tmp_path, monkeypat
         assert outcome['kind'] == 'completion' and outcome['decision'] == 'allow'
         assert outcome['request_id'] == 'completion-1'
         assert len(requests) == 2
+        assert 'Task turns used: 179; limit: 180; remaining: 1.' in json.dumps(requests[0])
+        assert 'Task turns used: 179; limit: 180; remaining: 1.' in json.dumps(requests[1])
         assert ROOT_SYSTEM_PROMPT in requests[1]['system']
         assert requests[1]['root_handoff'] == handoff
         receipts.put({'request_id': 'completion-1', 'accepted': False})
