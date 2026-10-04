@@ -42,6 +42,7 @@ from .verification_loop_v0 import GUIDANCE as VERIFICATION_GUIDANCE, SelectedVer
 from .eis_v0 import GUIDANCE as EIS_GUIDANCE, executable_interpretation_surface
 from .cfs_v0 import SituationState
 from .dcm_v0 import DecisionMeasurementBoundary
+from .rsh_v0 import ReleaseSupportHorizon
 
 
 def _tool(name, description, properties, required):
@@ -398,6 +399,14 @@ class MonitorAgent:
                             or self.verification_runtime_managed or self.eis_v0):
             raise ValueError('DCM-v0 requires CFS, manual continuous verification and EIS off')
         self.dcm = DecisionMeasurementBoundary(self._audit_dialogue) if self.dcm_v0 else None
+        self.rsh_v0 = getattr(client, 'config', {}).get('monitor_release_support_horizon', False)
+        if type(self.rsh_v0) is not bool:
+            raise ValueError('monitor_release_support_horizon must be a boolean')
+        if self.rsh_v0 and (not self.cfs_v0 or not self.dcm_v0 or not self.verification_loop_v0
+                            or self.verification_runtime_managed or self.eis_v0):
+            raise ValueError('RSH-v0 requires CFS, DCM, manual continuous verification and EIS off')
+        self.rsh = ReleaseSupportHorizon(workspace, self._audit_dialogue) if self.rsh_v0 else None
+        self._dialogue_line = None
         if self.situation is not None:
             self.client.active_context_appended = self._cfs_context_appended
         self.root_routed = self.root_scope_v1 != 'off' or self.verification_loop_v0
@@ -616,6 +625,13 @@ class MonitorAgent:
         with path.open('a', encoding='utf-8') as stream:
             stream.write(json.dumps(record, ensure_ascii=False, default=str) + '\n')
             stream.flush()
+        if self.rsh is not None:
+            if self._dialogue_line is None:
+                with path.open('rb') as stream:
+                    self._dialogue_line = sum(1 for _ in stream)
+            else:
+                self._dialogue_line += 1
+            self.rsh.observe(record, self._dialogue_line)
 
     def _prepare_continuation(self):
         """Same model, existing history, no tool actions during pre-compaction handoff."""
@@ -923,6 +939,10 @@ class MonitorAgent:
                         if arguments['result'] == 'resolve':
                             boundary = self.dcm.release('allow_complete', 'root', arguments)
                             if boundary is not None:
+                                if (self.rsh is not None and
+                                        boundary.get('proposed_action') == 'allow_complete(result=resolve)'):
+                                    boundary['release_support_horizon'] = self.rsh.render(
+                                        boundary['challenge_id'])
                                 return ToolOutcome(boundary)
                         else:
                             self.dcm.abandon('deferred')
@@ -1055,6 +1075,8 @@ class MonitorAgent:
             self.situation.begin_review(self.review_id)
         if root_handoff is not None:
             self._enter_root_frame(root_handoff)
+            if self.rsh is not None:
+                self.rsh.begin(self.review_id, root_handoff)
         self._progress('review_started', completion_pending=bool(completion_pending))
         before = self.client.history_measure()
         self.completion_pending = bool(completion_pending)
@@ -1175,6 +1197,8 @@ class MonitorAgent:
                 self.dcm.end_review(disposition)
             if self.situation is not None:
                 self.situation.end_review(action)
+            if self.rsh is not None:
+                self.rsh.end()
             self._progress('review_finished', action=action.kind if action else None,
                            duration_seconds=time.time() - started,
                            frame=self.frame_kind,
