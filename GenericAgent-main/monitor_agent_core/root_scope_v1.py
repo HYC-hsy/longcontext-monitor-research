@@ -58,7 +58,7 @@ def task_budget_view(used_turns=None, max_turns=None, remaining_seconds=None):
 
 
 def root_input(workspace, handoff, *, remaining_seconds=None,
-               task_turns_used=None, task_max_turns=None):
+               task_turns_used=None, task_max_turns=None, single_session=False):
     """Build the same source-indexed root input for both modes."""
     task = workspace.resolve_read("task/original_task.txt").read_text(encoding="utf-8")
     cursor = handoff["cursor"]
@@ -74,11 +74,12 @@ def root_input(workspace, handoff, *, remaining_seconds=None,
         "Current handoff original public event (task/public_events.jsonl):\n" +
         json.dumps(event, ensure_ascii=False, default=str),
         "Current live source: task/workspace/. Read actual files and execution evidence with existing tools.",
-        "Original evidence locations: task/public_events.jsonl; task/synopsis.jsonl; "
-        "monitor/audit/dialogue.jsonl; monitor/audit/provider_history.json; "
-        "monitor/audit/root_frames/; monitor/root_working/; monitor/delivery_feedback.jsonl; "
-        "monitor/audit/progress.jsonl; monitor/audit/request_attempts.jsonl. "
-        "These records include observations and prior root investigations; use the originals when needed.",
+        ("Original evidence locations: task/public_events.jsonl; task/synopsis.jsonl; "
+         "monitor/audit/dialogue.jsonl; monitor/audit/provider_history.json; "
+         + ("" if single_session else "monitor/audit/root_frames/; monitor/root_working/; ")
+         + "monitor/delivery_feedback.jsonl; monitor/audit/progress.jsonl; "
+         "monitor/audit/request_attempts.jsonl. These records include observations "
+         "and prior root investigations; use the originals when needed."),
     ]
     result_rows = [(index, row) for index, row in enumerate(rows, 1)
                    if row.get('tool_results')]

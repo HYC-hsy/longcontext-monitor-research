@@ -146,6 +146,10 @@ def _coalesce_wake_command(commands, first, completion_is_active=None):
         kind = candidate.get("kind")
         if kind == "close":
             return candidate
+        if kind == "verification_boundary":
+            if selected is not None:
+                commands.put(selected)
+            return candidate
         if kind == "completion":
             if completion_is_active is None or completion_is_active(candidate):
                 selected = candidate
@@ -166,6 +170,7 @@ def _worker(config, commands, outputs):
 
     try:
         client = MonitorProviderClient(config["config_name"], config["model_config"])
+        client.verification_due_turn = config.get('verification_due_turn')
         if 'run_deadline_epoch' in config:
             client.recovery_deadline = time.monotonic() + max(
                 0.0, config['run_deadline_epoch'] - time.time())
@@ -367,7 +372,7 @@ def _worker(config, commands, outputs):
                 if complete:
                     context += "\nRuntime feedback on prior actions (handoff is not proof of uptake):\n" + feedback[:complete].decode("utf-8")
                     next_receipt_offset += complete
-            root = current_completion() if monitor.root_scope_v1 != 'off' else None
+            root = current_completion() if monitor.root_routed else None
             if root is not None:
                 completion, request_id = True, root['request_id']
             action = monitor.review(
@@ -416,6 +421,10 @@ def _worker(config, commands, outputs):
             clock = config.get('latest_task_turn')
             current_turn = max(task_turn, clock.value) if clock is not None else task_turn
             next_wake_turn = current_turn + max(1, int(action.payload["after_turns"]))
+            if monitor.verification is not None and close_watch:
+                budget_used = config.get('task_budget_turns_used')
+                if budget_used is not None:
+                    monitor.verification.arm_follow(budget_used.value, action.payload['after_turns'])
             if release_wake:
                 outputs.put({'kind': 'review_silent', 'from_turn': current_turn,
                              'next_wake_turn': next_wake_turn,
@@ -431,10 +440,14 @@ def _worker(config, commands, outputs):
         elif action.kind == 'root_intervened':
             close_watch = True
             next_wake_turn = task_turn + 1
+        elif action.kind == 'incomplete_delivery':
+            outputs.put({'kind': 'completion', 'decision': 'incomplete', 'cursor': cursor,
+                         'request_id': action.payload.get('request_id', request_id),
+                         'message': action.payload['reason']})
         elif action.kind == "allow_complete":
             approval_id = action.payload.get("request_id", request_id)
             current = current_completion()
-            if monitor.root_scope_v1 != 'off' and (
+            if monitor.root_routed and (
                     current is None or current['request_id'] != approval_id
                     or current['generation'] != action.payload.get('root_frame_generation')):
                 outputs.put({'kind': 'root_approval_superseded', 'request_id': approval_id})
@@ -487,6 +500,20 @@ def _worker(config, commands, outputs):
             continue
         kind = command.get("kind")
         if kind == "close": return
+        if kind == 'verification_boundary':
+            try:
+                result = (monitor.verification.run_due(int(command['task_turn']))
+                          if monitor.verification is not None else {'status': 'disabled'})
+                outputs.put({'kind': 'verification_boundary_release', 'ticket': command['ticket'],
+                             'result': result})
+            except Exception as exc:
+                due = config.get('verification_due_turn')
+                if due is not None:
+                    due.value = -1
+                monitor._progress('verification_execution_error', error_type=type(exc).__name__)
+                outputs.put({'kind': 'verification_boundary_release', 'ticket': command['ticket'],
+                             'error': repr(exc)})
+            continue
         cursor = int(command.get("cursor") or cursor)
         task_turn = int(command.get("task_turn") or task_turn)
         if kind == "boundary" and task_turn >= next_wake_turn:
@@ -578,6 +605,10 @@ class MonitorRuntime:
         self._latest_task_turn = self._context.Value('q', 0)
         self._task_budget_turns_used = self._context.Value('q', 0)
         self._task_max_turns = task_max_turns
+        managed_check = (model_config.get('monitor_verification_loop_v0') is True and
+                         model_config.get('monitor_verification_runtime_managed', True) is True)
+        self._verification_due_turn = self._context.Value('q', -1) if managed_check else None
+        self._verification_receipts = self._context.Queue() if managed_check else None
         self._closed = threading.Event()
         process = process_factory or self._context.Process
         self._process = process(target=worker_target or _worker, args=({
@@ -592,6 +623,7 @@ class MonitorRuntime:
             "latest_task_turn": self._latest_task_turn,
             "task_budget_turns_used": self._task_budget_turns_used,
             "task_max_turns": self._task_max_turns,
+            "verification_due_turn": self._verification_due_turn,
             "run_deadline_epoch": time.time() + max(0.0, self._run_deadline - time.monotonic()),
             "stop_event": self._stop_event,
             "independent_probe_total_requests": int(independent_probe_total_requests),
@@ -644,6 +676,29 @@ class MonitorRuntime:
             self._task_budget_turns_used.value = max(
                 self._task_budget_turns_used.value, int(local_turn))
 
+    def verification_boundary(self, local_turn):
+        """Wait only at a completed Task-tool boundary; never cancel that tool."""
+        due = self._verification_due_turn
+        if due is None or due.value < 0 or local_turn < due.value:
+            return None
+        ticket = uuid.uuid4().hex
+        self._commands.put({'kind': 'verification_boundary', 'ticket': ticket,
+                            'task_turn': int(local_turn)})
+        deadline = min(self._run_deadline, time.monotonic() + 305)
+        while not self._closed.is_set() and time.monotonic() < deadline:
+            if not self._process.is_alive():
+                break
+            try:
+                receipt = self._verification_receipts.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            if receipt.get('ticket') == ticket:
+                return receipt
+        receipt = {'kind': 'verification_boundary_release', 'ticket': ticket,
+                   'error': 'monitor_unavailable_or_boundary_timeout'}
+        self._append_receipt(receipt)
+        return receipt
+
     def _pump_outputs(self):
         while not self._closed.is_set():
             if (self._correction_identity is not None and
@@ -678,6 +733,9 @@ class MonitorRuntime:
                         self._wake_receipts.put({'identity': value['identity'], 'accepted': accepted})
             elif kind == 'review_silent':
                 self._finish_correction()
+            elif kind == 'verification_boundary_release':
+                if self._verification_receipts is not None:
+                    self._verification_receipts.put(value)
             elif kind == "intervention":
                 try:
                     receipt = self._interrupt_callback(value["message"])
@@ -771,6 +829,9 @@ class MonitorRuntime:
                 if self._active_completion.value == generation:
                     self._active_completion.value = 0
         if value.get("decision") == "allow": return CompletionOutcome(True, reason="monitor_allowed")
+        if value.get("decision") == "incomplete":
+            return CompletionOutcome(False, value.get('message') or 'Verification limited.',
+                                     'verification_limited', True)
         if value.get("decision") == "continue" and value.get("message"):
             return CompletionOutcome(False, value["message"],
                                      value.get("reason") or "monitor_correction")

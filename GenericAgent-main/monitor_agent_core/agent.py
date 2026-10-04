@@ -37,6 +37,7 @@ from .path_control_v0 import (
     recent_public_events,
 )
 from .root_scope_v1 import ROOT_SYSTEM_PROMPT, ROOT_NOTE_GUIDANCE, root_input, task_budget_view
+from .verification_loop_v0 import GUIDANCE as VERIFICATION_GUIDANCE, SelectedVerification
 
 
 def _tool(name, description, properties, required):
@@ -89,6 +90,31 @@ MONITOR_TOOLS = [
     }, ["message"]),
     _tool("allow_complete", "Allow only the currently pending root completion.", {}, []),
 ]
+
+
+def verification_tools():
+    """Same seven tool names, with opt-in check metadata and dispositions."""
+    tools = json.loads(json.dumps(MONITOR_TOOLS))
+    indexed = {tool['function']['name']: tool['function'] for tool in tools}
+    indexed['code_run']['parameters']['properties']['verification'] = {
+        'type': 'object', 'additionalProperties': False, 'properties': {
+            'scope': {'type': 'string', 'enum': ['local', 'root']},
+            'basis': {'type': 'string'}, 'question': {'type': 'string'},
+            'artifacts': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1, 'maxItems': 8},
+            'prior_disposition': {'type': 'string', 'enum': ['withdraw', 'revise']},
+            'prior_reason': {'type': 'string'},
+        }, 'required': ['scope', 'basis', 'question', 'artifacts']}
+    indexed['code_run']['description'] += (
+        ' Optional verification selects one public check and queues it for the next safe Task boundary; '
+        'scope, basis, question and artifact paths define its limited reach. '
+        'Analysis cwd remains monitor/; use the live task/workspace absolute path from the environment map in project commands.')
+    indexed['wait']['parameters']['properties'].update({
+        'result': {'type': 'string', 'enum': ['resolve', 'withdraw', 'revise', 'defer']},
+        'reason': {'type': 'string'}})
+    indexed['allow_complete']['parameters']['properties'].update({
+        'result': {'type': 'string', 'enum': ['resolve', 'defer']},
+        'reason': {'type': 'string'}})
+    return tools
 
 INDEPENDENT_CHECK_TOOL = _tool(
     "independent_check",
@@ -341,6 +367,18 @@ class MonitorAgent:
             raise ValueError('monitor_root_scope_v1 must be off, retained or isolated')
         if self.root_scope_v1 != 'off' and not self.path_control_v0:
             raise ValueError('monitor_root_scope_v1 requires monitor_path_control_v0')
+        self.verification_loop_v0 = getattr(client, 'config', {}).get('monitor_verification_loop_v0', False)
+        self.verification_runtime_managed = getattr(
+            client, 'config', {}).get('monitor_verification_runtime_managed', True)
+        if type(self.verification_loop_v0) is not bool or type(self.verification_runtime_managed) is not bool:
+            raise ValueError('verification loop switches must be boolean')
+        if self.verification_loop_v0 and (not self.path_control_v0 or self.root_scope_v1 != 'off'):
+            raise ValueError('verification_loop_v0 requires PATH and the old root scope off')
+        self.root_routed = self.root_scope_v1 != 'off' or self.verification_loop_v0
+        self.verification = (SelectedVerification(
+            workspace, self.analysis, self._progress,
+            getattr(client, 'verification_due_turn', None))
+            if self.verification_loop_v0 and self.verification_runtime_managed else None)
         research_view = getattr(client, "config", {}).get("monitor_research_view", "off")
         research_intent = getattr(client, "config", {}).get("monitor_research_intent", "off")
         if type(research_view) is not str or research_view not in {"off", "flat", "framed"}:
@@ -415,6 +453,8 @@ class MonitorAgent:
                 raise ValueError("monitor_path_control_v0 requires experimental view and intent off")
             self.system_prompt += "\n\n" + (
                 PATH_CONTROL_SYSTEM_PROMPT if self.path_control_v0 else DCEC_SYSTEM_PROMPT)
+        if self.verification_loop_v0:
+            self.system_prompt += "\n\n" + VERIFICATION_GUIDANCE
         if research_view != "off" or research_intent != "off":
             from .experimental_control import ExperimentalControl
             self.experimental_control = ExperimentalControl(
@@ -452,7 +492,7 @@ class MonitorAgent:
             self.client.archive_continuation_history = self._archive_continuation_history
 
     def _active_working_context(self):
-        if self.frame_kind == 'root':
+        if self.frame_kind == 'root' and not self.verification_loop_v0:
             text, metadata = dcec_working_context(
                 self.workspace, self.dcec_working_chars, ROOT_NOTE_GUIDANCE)
             self._audit_dialogue('root_working_view', **metadata)
@@ -468,7 +508,7 @@ class MonitorAgent:
             if text:
                 parts.append(text)
         if self.dcec_enabled:
-            if self.path_control_v0:
+            if self.path_control_v0 and self.frame_kind != 'root':
                 text, metadata = dcec_working_context(
                     self.workspace, self.dcec_working_chars, PATH_CONTROL_WORKING_GUIDANCE)
             else:
@@ -534,7 +574,7 @@ class MonitorAgent:
             "Keep details that change future decisions, not a chronology. No fixed schema; return only the note. "
             "Do not issue task interventions in this maintenance response. Existing private working note:\n" + previous
         )
-        if self.frame_kind == 'root':
+        if self.frame_kind == 'root' and not self.verification_loop_v0:
             prompt += ("\n\nPreserve the current handoff question, observed public grounds and limits, "
                        "and the next useful root decision. Do not turn prior local conclusions into "
                        "a whole-task verdict.")
@@ -679,9 +719,10 @@ class MonitorAgent:
                     raise ValueError('work_intent is disabled')
                 return ToolOutcome(self.experimental_control.intent_tool(arguments))
             if name == 'allow_complete':
-                if arguments and set(arguments) != {'_noargs'}:
+                allowed = {'_noargs', 'result', 'reason'} if self.verification_loop_v0 else {'_noargs'}
+                if set(arguments) - allowed:
                     raise ValueError('allow_complete accepts no arguments')
-                arguments = {}
+                arguments = {key: value for key, value in arguments.items() if key != '_noargs'}
             if name == "file_read":
                 data = self.workspace.read_text(
                     arguments["path"], arguments.get("start", 1), arguments.get("count", 200),
@@ -711,15 +752,23 @@ class MonitorAgent:
             elif name == "code_run":
                 session_id = arguments.get('session_id')
                 if session_id:
-                    if any(k in arguments for k in ('code', 'type', 'timeout')):
+                    if any(k in arguments for k in ('code', 'type', 'timeout', 'verification')):
                         raise ValueError('Use session_id alone to read/cancel; do not submit new code with it')
                     data = self.analysis.read(session_id, arguments.get('wait_seconds', 1),
                                               arguments.get('cancel', False))
                 else:
                     if arguments.get('cancel'):
                         raise ValueError('cancel requires session_id')
-                    data = self.analysis.start(arguments.get('code'), arguments.get('type', 'python'),
-                                               arguments.get('timeout', 60), arguments.get('wait_seconds', 1))
+                    if self.verification is not None and arguments.get('verification') is not None:
+                        if (isinstance(arguments['verification'], dict)
+                                and arguments['verification'].get('scope') == 'root'
+                                and self.frame_kind != 'root'):
+                            raise ValueError('Root verification requires the current root decision frame')
+                        used, _ = self.task_budget_state() if self.task_budget_state else (None, None)
+                        data = self.verification.register(arguments, used or 0)
+                    else:
+                        data = self.analysis.start(arguments.get('code'), arguments.get('type', 'python'),
+                                                   arguments.get('timeout', 60), arguments.get('wait_seconds', 1))
             elif name == "independent_check":
                 if self.independent_check is None:
                     raise ValueError("independent verification is disabled")
@@ -744,6 +793,8 @@ class MonitorAgent:
                 mode = arguments.get('mode', 'follow')
                 if mode not in ('follow', 'patrol'):
                     raise ValueError('wait mode must be follow or patrol')
+                if self.verification is not None and mode == 'patrol' and self.verification.follow_pending:
+                    self.verification.dispose(arguments.get('result'), arguments.get('reason'))
                 return ToolOutcome(None, False, MonitorAction(
                     "wait", {"after_turns": max(1, int(arguments["after_turns"])), 'mode': mode}
                 ))
@@ -754,7 +805,7 @@ class MonitorAgent:
                         (self.completion_state is None or
                          self.completion_state() != self.root_frame_handoff)):
                     raise ValueError('This root handoff is no longer current; no correction was sent.')
-                if (self.root_scope_v1 != 'off' and self.frame_kind != 'root'
+                if (self.root_routed and self.frame_kind != 'root'
                         and self.completion_state is not None and self.completion_state()):
                     raise ValueError('A current handoff requires the root decision frame before control.')
                 if self.intervention_callback is not None:
@@ -768,6 +819,8 @@ class MonitorAgent:
                         except Exception as exc:
                             self._progress('decision_context_receipt_failed', error_type=type(exc).__name__)
                     self._sent_messages.add(message)
+                    if self.verification is not None:
+                        self.verification.on_intervention(message)
                     if self._seen_completion:
                         self._intervened_generation = self._seen_completion["generation"]
                     self.completion_pending = False
@@ -784,7 +837,7 @@ class MonitorAgent:
                 self._remember_advice(message, arguments)
                 return ToolOutcome(None, False, MonitorAction("intervene", {"message": message}))
             elif name == "allow_complete":
-                if self.root_scope_v1 != 'off':
+                if self.root_routed:
                     current = self.completion_state() if self.completion_state else None
                     if (self.frame_kind != 'root' or current != self.root_frame_handoff
                             or not current or current['generation'] == self._intervened_generation):
@@ -794,10 +847,16 @@ class MonitorAgent:
                     if (not self._seen_completion or current != self._seen_completion
                             or current["generation"] == self._intervened_generation):
                         raise ValueError("The observed handoff is no longer current. Inspect the runtime update before deciding.")
+                    if self.verification is not None:
+                        disposition = arguments.get('result')
+                        self.verification.dispose(disposition, arguments.get('reason'), root=True)
+                        if disposition == 'defer':
+                            return ToolOutcome(None, False, MonitorAction('incomplete_delivery', {
+                                'reason': arguments['reason'], 'request_id': current['request_id']}))
                     return ToolOutcome(None, False, MonitorAction(
                         "allow_complete", {"request_id": current["request_id"],
                                            "root_frame_generation": current['generation']}
-                        if self.root_scope_v1 != 'off' else
+                        if self.root_routed else
                         {"request_id": current["request_id"]}))
                 if not self.completion_pending: raise ValueError("No root completion is pending")
                 return ToolOutcome(None, False, MonitorAction("allow_complete", {}))
@@ -841,7 +900,12 @@ class MonitorAgent:
 
     def _refresh_review_context(self):
         updates = [self._refresh_completion()]
-        if self.root_scope_v1 != 'off' and self.frame_kind == 'local':
+        if self.verification is not None:
+            if self.frame_kind == 'root' and self.verification.current is not None:
+                used, _ = self.task_budget_state() if self.task_budget_state else (None, None)
+                self.verification.run_due(used or 0, force=True)
+            updates.append(self.verification.context())
+        if self.root_routed and self.frame_kind == 'local':
             used, limit = self.task_budget_state() if self.task_budget_state else (None, None)
             deadline = getattr(self.client, 'recovery_deadline', None)
             updates.append(task_budget_view(
@@ -861,6 +925,11 @@ class MonitorAgent:
         self._local_history_at_root = self.client.export_history()
         self.root_frame_handoff = dict(handoff)
         self.frame_kind = 'root'
+        if self.verification_loop_v0:
+            self._progress('root_frame_entered', mode='verification_loop_v0',
+                           generation=handoff['generation'], request_id=handoff['request_id'],
+                           inherited_history_items=len(self.client.history))
+            return
         relative = f"root_working/{handoff['generation']}.md"
         self.workspace.working_note_target = relative
         local_note = self.workspace.private_root / 'working.md'
@@ -877,6 +946,13 @@ class MonitorAgent:
         if self.frame_kind != 'root':
             return
         handoff = self.root_frame_handoff
+        if self.verification_loop_v0:
+            self.frame_kind = 'local'
+            self.root_frame_handoff = None
+            self._local_history_at_root = None
+            self._progress('root_frame_left', generation=handoff['generation'],
+                           request_id=handoff['request_id'])
+            return
         self._atomic_private_text(
             f"audit/root_frames/{handoff['generation']}/history.json",
             json.dumps(self.client.export_history(), ensure_ascii=False))
@@ -925,7 +1001,8 @@ class MonitorAgent:
                         "or allow_complete only for a still-pending, justified root completion. "
                         "After an intervention that completion proposal is no longer pending.")
             active_system = (self.base_system_prompt + "\n\n" + ROOT_SYSTEM_PROMPT
-                             if self.frame_kind == 'root' else self.system_prompt)
+                             if self.frame_kind == 'root' and not self.verification_loop_v0
+                             else self.system_prompt)
             system = active_system + "\n\n" + mode
             if self.frame_kind == 'root':
                 remaining = getattr(self.client, 'recovery_deadline', None)
@@ -933,12 +1010,13 @@ class MonitorAgent:
                 wake_context = root_input(
                     self.workspace, self.root_frame_handoff,
                     remaining_seconds=(remaining - time.monotonic()) if remaining is not None else None,
-                    task_turns_used=used, task_max_turns=limit)
+                    task_turns_used=used, task_max_turns=limit,
+                    single_session=self.verification_loop_v0)
                 if root_transition_view:
                     wake_context += "\n\n" + root_transition_view
                 self._audit_dialogue('root_frame_input', mode=self.root_scope_v1,
                                      handoff=self.root_frame_handoff, content=wake_context)
-            tools = MONITOR_TOOLS
+            tools = verification_tools() if self.verification_loop_v0 else MONITOR_TOOLS
             if self.independent_check is not None:
                 tools = [*tools, INDEPENDENT_CHECK_TOOL]
             if self.experimental_control is not None:
@@ -1001,7 +1079,7 @@ class MonitorAgent:
                 audit=self._audit_dialogue,
                 before_model=self._refresh_review_context,
                 route_before_model=(lambda: bool(self.completion_state and self.completion_state())
-                                    if self.root_scope_v1 != 'off' and self.frame_kind == 'local'
+                                    if self.root_routed and self.frame_kind == 'local'
                                     else None),
             )
             return action

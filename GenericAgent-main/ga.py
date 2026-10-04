@@ -600,6 +600,9 @@ class GenericAgentHandler(BaseHandler):
         )
         monitor_runtime = getattr(self.parent, 'monitor_runtime', None)
         if monitor_runtime is not None and not exit_reason:
+            verification_boundary = getattr(monitor_runtime, 'verification_boundary', None)
+            if verification_boundary is not None:
+                verification_boundary(turn - getattr(self.parent, 'research_turn_offset', 0))
             monitor_runtime.archive_boundary({
                 'boundary': 'post_tool_pre_next_llm', 'internal_turn': turn,
                 'next_prompt': next_prompt, 'tool_calls': tool_calls, 'tool_results': tool_results,
