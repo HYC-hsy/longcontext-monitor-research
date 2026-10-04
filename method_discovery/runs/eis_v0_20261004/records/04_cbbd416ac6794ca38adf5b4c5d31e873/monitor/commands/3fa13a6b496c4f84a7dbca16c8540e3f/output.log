@@ -1,0 +1,23 @@
+Files in /app/client/callopt/streamcall:
+  grpc_options.go
+  definition.go
+  call_options.go
+
+✗ WithRecvTimeout NOT found in streamcall package
+
+
+Checking retry/fallback migration:
+✗ WithFailureRetry NOT migrated to UnaryOptions
+Current implementation:
+// WithFailureRetry sets the failure retry policy for client, it will take effect for all methods.
+func WithFailureRetry(p *retry.FailurePolicy) Option {
+	return Option{F: func(o *client.Options, di *utils.Slice) {
+		if p == nil {
+			return
+		}
+		di.Push(fmt.Sprintf("WithFailureRetry(%+v)", p))
+		if o.RetryMethodPolicies == nil {
+			o.RetryMethodPolicies = make(map[string]retry.Policy)
+		}
+		if o.RetryMethodPolicies[retry.Wildcard].MixedPolicy != nil ||
+			o.RetryMethodPolicies[retry.Wildcard].B

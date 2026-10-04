@@ -1,0 +1,100 @@
+type Entry struct {
+	DisableableWidget
+	shortcut fyne.ShortcutHandler
+	Text     string
+	// Since: 2.0
+	TextStyle   fyne.TextStyle
+	PlaceHolder string
+	OnChanged   func(string) `json:"-"`
+	// Since: 2.0
+	OnSubmitted func(string) `json:"-"`
+	Password    bool
+	MultiLine   bool
+	Wrapping    fyne.TextWrap
+	// MinRowsVisible is used to control the minimum number of rows that a multi-line entry should show
+	//
+	// Since: 2.2
+	MinRowsVisible int
+
+	// Set a validator that this entry will check against
+	// Since: 1.4
+	Validator           fyne.StringValidator `json:"-"`
+	validationStatus    *validationStatus
+	onValidationChanged func(error)
+	validationError     error
+
+	CursorRow, CursorColumn int
+	OnCursorChanged         func() `json:"-"`
+
+	cursorAnim *entryCursorAnimation
+
+	dirty       bool
+	focused     bool
+	text        *RichText
+	placeholder *RichText
+	content     *entryContent
+	scroll      *widget.Scroll
+
+	// useful for Form validation (as the error text should only be shown when
+	// the entry is unfocused)
+	onFocusChanged func(bool)
+
+	// selectRow and selectColumn represent the selection start location
+	// The selection will span from selectRow/Column to CursorRow/Column -- note that the cursor
+	// position may occur before or after the select start position in the text.
+	selectRow, selectColumn int
+
+	// selectKeyDown indicates whether left shift or right shift is currently held down
+	selectKeyDown bool
+
+	// selecting indicates whether the cursor has moved since it was at the selection start location
+	selecting bool
+	popUp     *PopUpMenu
+	// TODO: Add OnSelectChanged
+
+	// ActionItem is a small item which is displayed at the outer right of the entry (like a password revealer)
+	ActionItem      fyne.CanvasObject `json:"-"`
+	binder          basicBinder
+	conversionError error
+}
+
+// NewEntry creates a new single line entry widget.
+func NewEntry() *Entry {
+	e := &Entry{Wrapping: fyne.TextTruncate}
+	e.ExtendBaseWidget(e)
+	return e
+}
+
+// NewEntryWithData returns an Entry widget connected to the specified data source.
+//
+// Since: 2.0
+func NewEntryWithData(data binding.String) *Entry {
+	entry := NewEntry()
+	entry.Bind(data)
+
+	return entry
+}
+
+// NewMultiLineEntry creates a new entry that allows multiple lines
+func NewMultiLineEntry() *Entry {
+	e := &Entry{MultiLine: true, Wrapping: fyne.TextTruncate}
+	e.ExtendBaseWidget(e)
+	return e
+}
+
+// NewPasswordEntry creates a new entry password widget
+func NewPasswordEntry() *Entry {
+	e := &Entry{Password: true, Wrapping: fyne.TextTruncate}
+	e.ExtendBaseWidget(e)
+	e.ActionItem = newPasswordRevealer(e)
+	return e
+}
+
+// AcceptsTab returns if Entry accepts the Tab key or not.
+//
+// Implements: fyne.Tabbable
+//
+// Since: 2.1
+func (e *Entry) AcceptsTab() bool {
+	return e.MultiLine
+}

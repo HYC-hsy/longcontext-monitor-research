@@ -1,0 +1,38 @@
+=== Target 1: AppMetadata ===
+type AppMetadata struct {
+	// ID is the unique application identifier (e.g., "com.example.myapp")
+	ID string
+	// Name is the human-friendly application name
+	Name string
+	// Version is the application version string (e.g., "1.0.0")
+
+=== Target 1: App.Metadata() method in interface ===
+	Metadata() AppMetadata
+}
+
+=== Target 1: GetMetadata function ===
+func GetMetadata() fyne.AppMetadata {
+	return appMetadata
+}
+
+=== Target 7: desktop.App interface ===
+package desktop
+
+import "fyne.io/fyne/v2"
+
+// App represents a desktop application with extended system integration capabilities.
+//
+// Since: 2.5
+type App interface {
+	// SetSystemTrayMenu sets the menu that appears when interacting with the system tray icon.
+	// This allows applications to provide quick access to common actions from the system tray.
+	SetSystemTrayMenu(menu *fyne.Menu)
+
+	// SystemTrayMenu returns the menu currently set for the system tray icon, or nil if none is set.
+	SystemTrayMenu() *fyne.Menu
+
+	// SetSystemTrayIcon sets the icon displayed in the system tray.
+	//
+	// Since: 2.5
+	SetSystemTrayIcon(icon fyne.Resource)
+}

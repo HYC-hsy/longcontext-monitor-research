@@ -1,0 +1,46 @@
+=== TARGET 4: Thrift Codec Fallback Verification ===
+
+Files in /app/pkg/remote/codec/thrift:
+  codec.go
+  codec_apache.go
+  codec_apache_test.go
+  codec_fast.go
+  codec_frugal.go
+  codec_frugal_test.go
+  thrift.go
+  thrift_data.go
+  thrift_data_test.go
+  thrift_test.go
+
+--- Checking for Marshal/Unmarshal functions ---
+Functions found in thrift_data.go:
+46:func MarshalThriftData(ctx context.Context, codec remote.PayloadCodec, data interface{}) ([]byte, error) {
+97:func UnmarshalThriftData(ctx context.Context, codec remote.PayloadCodec, method string, buf []byte, data interface{}) error {
+
+
+--- Checking for Basic codec fallback ---
+✓ Fallback logic found in thrift_data.go
+	if c.CodecType != Basic {
+		// try fallback to frugal or fastcodec
+		// case: typecodec.Frugal=false but typecodec.FastCodec=true
+		if typecodec.FastCodec {
+			return fastMarshalData(data)
+		}
+		// case: typecodec.FastCodec=false but typecodec.Frugal=true
+		if typecodec.Frugal {
+			return frugalMarshalData(data)
+		}
+	}
+--
+	if dataLenOK && c.CodecType != Basic {
+		// try fallback to frugal or fastcodec
+		// case: typecodec.Frugal=false but typecodec.FastCodec=true
+		if typecodec.FastCodec {
+			return fastUnmarshal(trans, data, dataLen)
+		}
+		// case: typecodec.FastCodec=false but typecodec.Frugal=true
+		if typecodec.Frugal {
+			return frugalUnmarshal(trans, data, dataLen)
+		}
+	}
+

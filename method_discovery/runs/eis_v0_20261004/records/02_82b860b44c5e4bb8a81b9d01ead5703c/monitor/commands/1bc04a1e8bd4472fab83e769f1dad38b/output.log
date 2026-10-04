@@ -1,0 +1,31 @@
+func (e *Entry) MinSize() fyne.Size {
+	e.ExtendBaseWidget(e)
+
+	min := e.BaseWidget.MinSize()
+	if e.ActionItem != nil {
+		min = min.Add(fyne.NewSize(theme.IconInlineSize()+theme.Padding(), 0))
+	}
+	if e.Validator != nil {
+		min = min.Add(fyne.NewSize(theme.IconInlineSize()+theme.Padding(), 0))
+	}
+
+	return min
+}
+
+// MouseDown called on mouse click, this triggers a mouse click which can move the cursor,
+// update the existing selection (if shift is held), or start a selection dragging operation.
+//
+// Implements: desktop.Mouseable
+func (e *Entry) MouseDown(m *desktop.MouseEvent) {
+	e.propertyLock.Lock()
+	if e.selectKeyDown {
+		e.selecting = true
+	}
+	if e.selecting && !e.selectKeyDown && m.Button == desktop.MouseButtonPrimary {
+		e.selecting = false
+	}
+	e.propertyLock.Unlock()
+
+	if !e.Disabled() {
+		e.requestFocus()
+	}

@@ -1,0 +1,73 @@
+=== VERIFICATION OF ALL 7 TARGETS ===
+
+=== T1: AppMetadata struct fields ===
+type AppMetadata struct {
+	// ID is the unique application identifier (e.g., "com.example.myapp")
+	ID string
+	// Name is the human-friendly application name
+	Name string
+	// Version is the application version string (e.g., "1.0.0")
+	Version string
+	// Build is the build number
+	Build int
+	// Icon is the application icon resource
+	Icon Resource
+
+=== T1: SetMetadata function location ===
+-rw-r--r-- 1 root root 455 Oct  4 09:49 /app/internal/app/meta.go
+
+=== T2: JSON theme functions ===
+func FromJSON(data string) (fyne.Theme, error) {
+func FromJSONReader(r io.Reader) (fyne.Theme, error) {
+
+=== T3: Data binding functions ===
+func NewSprintf(format string, bindings ...DataItem) String {
+func StringToStringWithFormat(str String, format string) String {
+
+=== T4: MenuItem fields ===
+	// Icon is an optional icon to display alongside the menu item.
+	Icon Resource
+	// Shortcut is an optional keyboard shortcut for the menu item.
+
+=== T4: Menu Refresh methods ===
+func (m *Menu) Refresh() {
+func (m *MainMenu) Refresh() {
+
+=== T5: Toolbar return types ===
+func NewToolbarAction(icon fyne.Resource, onActivated func()) *ToolbarAction {
+func NewToolbarSpacer() *ToolbarSpacer {
+func NewToolbarSeparator() *ToolbarSeparator {
+
+=== T5: SetIcon method ===
+func (t *ToolbarAction) SetIcon(icon fyne.Resource) {
+	t.Icon = icon
+}
+
+=== T6: Container methods ===
+func (c *Container) Add(add CanvasObject) {
+func (c *Container) AddObject(o CanvasObject) {
+func (c *Container) RemoveAll() {
+
+=== T6: Hyperlink.OnTapped ===
+	//
+	// Since: 2.5
+	OnTapped func()
+
+=== T6: Entry.SetMinRowsVisible ===
+func (e *Entry) SetMinRowsVisible(rows int) {
+	e.minRowsVisible = rows
+	e.Refresh()
+
+=== T6: NewAllStrings validator ===
+func NewAllStrings(validators ...fyne.StringValidator) fyne.StringValidator {
+	return func(text string) error {
+		for _, validator := range validators {
+
+=== T7: desktop.App both required methods ===
+	// SetSystemTrayMenu sets the menu that appears when interacting with the system tray icon.
+	SetSystemTrayMenu(menu *fyne.Menu)
+	// SetSystemTrayIcon sets the icon displayed in the system tray.
+	SetSystemTrayIcon(icon fyne.Resource)
+
+=== BUILD STATUS ===
+BUILD: SUCCESS

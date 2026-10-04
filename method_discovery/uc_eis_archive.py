@@ -67,6 +67,14 @@ def augment(slot, summary):
     counts = Counter(row.get('kind') for row in rows)
     task_counts = Counter(row.get('event_type') for row in task)
     tool_counts = Counter(row.get('name') for _, row in tools)
+    def tool_path(row):
+        arguments = row.get('arguments') or {}
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except json.JSONDecodeError:
+                return ''
+        return str(arguments.get('path', '')) if isinstance(arguments, dict) else ''
     def tokens(entries):
         if not entries:
             return None
@@ -78,7 +86,7 @@ def augment(slot, summary):
         'candidate_validation_execution_rows': counts['task_validation_execution'],
         'eis_surface_injections': len(surfaces),
         'monitor_test_file_reads': sum(row.get('name') == 'file_read' and
-                                       any(token in str((row.get('arguments') or {}).get('path', '')).lower()
+                                       any(token in tool_path(row).lower()
                                            for token in ('_test.', 'test_', '.spec.', '.test.', '/test/', '/tests/'))
                                        for _, row in tools),
         'monitor_code_run_calls': tool_counts['code_run'],
