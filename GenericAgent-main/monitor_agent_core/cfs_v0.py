@@ -37,6 +37,11 @@ def _result(result):
     return {"raw_result": content}
 
 
+def _comparable_call_args(args):
+    """Exclude only GA's confirmed post-tool bookkeeping fields."""
+    return {key: value for key, value in args.items() if key not in ("_index", "_tool_num")}
+
+
 def code_run_outcomes(events, known_events=None):
     """Show identities with new interval facts; look up calls only through its cursor."""
     known_events = events if known_events is None else known_events
@@ -59,7 +64,7 @@ def code_run_outcomes(events, known_events=None):
                     "result_present": False, "status": "no_return_in_interval",
                     "exit_code": None, "stdout": None, "stderr": None, "raw_result": None,
                 }
-            elif args != by_id[identity]["call_args"]:
+            elif _comparable_call_args(args) != _comparable_call_args(by_id[identity]["call_args"]):
                 by_id[identity]["call_conflicts"].append({"event_locator": locator, "args": args})
     active_ids = {}
     for event in events:

@@ -93,6 +93,7 @@ def replay_split(label, directory, call_cursor, result_cursor):
     assert result["call_event_locator"] == f"task/public_events.jsonl#{call_cursor}"
     assert result["result_event_locator"] == f"task/public_events.jsonl#{result_cursor}"
     assert result["command"] == call["command"]
+    assert call["call_conflicts"] == result["call_conflicts"] == []
     for record in pair:
         for forbidden in ("validation execution", "test adequate", "requirement covered"):
             assert forbidden not in record["rendered_surface"].lower()
@@ -136,6 +137,9 @@ def main():
     split_path.write_text(json.dumps(split, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
                           encoding="utf-8")
     summary["split_boundary_replay_sha256"] = hashlib.sha256(split_path.read_bytes()).hexdigest()
+    summary["split_boundary_conflict_counts"] = {
+        label: [len(row["code_run_outcomes"][0]["call_conflicts"]) for row in record["surfaces"]]
+        for label, record in split.items()}
     (DEST / "SUMMARY.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n",
                                           encoding="utf-8")
     print(json.dumps(summary, indent=2, sort_keys=True))

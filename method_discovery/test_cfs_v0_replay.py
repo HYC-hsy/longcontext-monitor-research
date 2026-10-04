@@ -58,6 +58,7 @@ def test_real_fyne_and_kitex_pairs_split_at_observed_cursor():
         assert result["result_event_locator"] == f"task/public_events.jsonl#{result_cursor}"
         assert result["command"] == call["command"]
         assert result["status"] == "success" and result["result_present"]
+        assert call["call_conflicts"] == result["call_conflicts"] == []
         assert "1 unique tool identities" in second["rendered_surface"]
         assert "validation execution" not in second["rendered_surface"].lower()
     assert "go test ./..." in split["kitex_117_118"]["surfaces"][1]["code_run_outcomes"][0]["command"]

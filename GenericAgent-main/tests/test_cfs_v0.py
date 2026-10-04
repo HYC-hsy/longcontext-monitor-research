@@ -87,18 +87,22 @@ def test_code_run_identity_pairs_across_events_and_deduplicates_surface(tmp_path
     call, result = run_call(1, "echo actual", {"status": "success", "exit_code": 0,
                                                 "stdout": "actual"})
     before = event(ws, 1, calls=[call], boundary="pre_tool")
-    after = event(ws, 2, calls=[call], results=result)
+    post_tool_call = {**call, "args": {**call["args"], "_index": 0, "_tool_num": 1}}
+    after = event(ws, 2, calls=[post_tool_call], results=result)
     rows = code_run_outcomes([before, after])
     assert len(rows) == 1
     assert rows[0]["call_event_locator"] == "task/public_events.jsonl#1"
     assert rows[0]["result_event_locator"] == "task/public_events.jsonl#2"
     assert rows[0]["status"] == "success" and rows[0]["exit_code"] == 0
+    assert rows[0]["call_conflicts"] == []
+    assert rows[0]["call_args"] == call["args"]
     state = SituationState(ws)
     state.begin_review("r")
     text, _ = state.build()
     assert "1 unique tool identities" in text
     assert text.count("command=echo actual") == 1
     assert "no_return_in_interval" not in text
+    assert "Conflicting call arguments" not in text
 
 
 def test_code_run_call_only_distinct_identities_and_conflicting_args(tmp_path):
@@ -126,6 +130,21 @@ def test_code_run_call_only_distinct_identities_and_conflicting_args(tmp_path):
     assert text.count("command=echo first") == 1
     assert text.count("command=echo second") == 1
     assert "Conflicting call arguments" in text
+
+
+def test_only_confirmed_host_bookkeeping_fields_are_ignored():
+    call = {"id": "X", "name": "code_run", "args": {
+        "script": "echo before", "cwd": "/app", "timeout": 10, "type": "shell"}}
+    for key, value in (("script", "echo after"), ("cwd", "/tmp"),
+                       ("timeout", 20), ("type", "python"), ("_other", 1)):
+        changed = {**call, "args": {**call["args"], key: value,
+                                     "_index": 0, "_tool_num": 1}}
+        rows = code_run_outcomes([
+            {"archive_sequence": 1, "task_turn": 1, "tool_calls": [call]},
+            {"archive_sequence": 2, "task_turn": 1, "tool_calls": [changed]}])
+        assert len(rows) == 1
+        assert rows[0]["call_conflicts"] == [{"event_locator": "task/public_events.jsonl#2",
+                                               "args": changed["args"]}]
 
 
 def test_code_run_result_crosses_successful_review_cursor(tmp_path, monkeypatch):
