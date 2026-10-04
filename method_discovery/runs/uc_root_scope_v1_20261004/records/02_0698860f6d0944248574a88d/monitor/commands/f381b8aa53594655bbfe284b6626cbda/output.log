@@ -1,0 +1,41 @@
+func parseHexColor(hex string) (color.Color, error) {
+	// Remove # prefix if present
+	hex = strings.TrimPrefix(hex, "#")
+
+	var r, g, b, a uint8
+	a = 0xff // default alpha
+
+	switch len(hex) {
+	case 3: // rgb
+		vals, err := parseHexDigits(hex, 1)
+		if err != nil {
+			return color.Transparent, err
+		}
+		r = vals[0] | (vals[0] << 4)
+		g = vals[1] | (vals[1] << 4)
+		b = vals[2] | (vals[2] << 4)
+
+	case 4: // rgba
+		vals, err := parseHexDigits(hex, 1)
+		if err != nil {
+			return color.Transparent, err
+		}
+		r = vals[0] | (vals[0] << 4)
+		g = vals[1] | (vals[1] << 4)
+		b = vals[2] | (vals[2] << 4)
+		a = vals[3] | (vals[3] << 4)
+
+	case 6: // rrggbb
+		vals, err := parseHexDigits(hex, 2)
+		if err != nil {
+			return color.Transparent, err
+		}
+		r = vals[0]
+		g = vals[1]
+		b = vals[2]
+
+	case 8: // rrggbbaa
+		vals, err := parseHexDigits(hex, 2)
+		if err != nil {
+			return color.Transparent, err
+		}

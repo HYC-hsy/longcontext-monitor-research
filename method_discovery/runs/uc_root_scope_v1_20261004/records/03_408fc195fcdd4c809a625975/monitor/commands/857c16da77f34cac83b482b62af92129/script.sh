@@ -1,0 +1,1 @@
+cd /app && grep -n "ToMiddleware\|ToUnaryMiddleware" pkg/endpoint/endpoint.go

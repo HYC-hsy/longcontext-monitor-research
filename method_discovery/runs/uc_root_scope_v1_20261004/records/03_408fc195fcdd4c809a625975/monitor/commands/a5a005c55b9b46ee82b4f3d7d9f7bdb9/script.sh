@@ -1,0 +1,1 @@
+cd /app && ls -la pkg/endpoint/sep/

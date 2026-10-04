@@ -1,0 +1,1 @@
+grep -B 2 "minRows" /app/widget/entry.go | head -20

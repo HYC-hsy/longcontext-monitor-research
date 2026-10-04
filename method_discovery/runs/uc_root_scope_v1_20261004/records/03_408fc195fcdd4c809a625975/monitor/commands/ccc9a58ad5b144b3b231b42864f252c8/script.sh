@@ -1,0 +1,1 @@
+cd /app && go build -o /dev/null ./pkg/endpoint/... 2>&1 | head -20

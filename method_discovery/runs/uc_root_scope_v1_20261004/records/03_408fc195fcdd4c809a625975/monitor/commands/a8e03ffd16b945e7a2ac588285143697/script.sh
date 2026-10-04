@@ -1,0 +1,1 @@
+cd /app && grep -rn "type Protocol" pkg/ transport/ 2>/dev/null | grep -v test | grep -v ".pb.go" | head -20

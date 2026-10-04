@@ -1,0 +1,1 @@
+ls -la /app/pkg/endpoint/*.go

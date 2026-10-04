@@ -1,0 +1,1 @@
+cd /app && find . -path "*/client/callopt/streamcall/*.go" 2>/dev/null

@@ -1,0 +1,1 @@
+grep -A 40 "func parseHexColor" /app/theme/json.go

@@ -1,0 +1,1 @@
+cd /app && grep -n "MarshalThriftData\|UnmarshalThriftData" pkg/remote/codec/thrift/*.go

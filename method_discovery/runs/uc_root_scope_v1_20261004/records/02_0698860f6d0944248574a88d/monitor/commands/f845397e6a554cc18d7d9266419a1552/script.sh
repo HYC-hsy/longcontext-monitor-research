@@ -1,0 +1,1 @@
+cd /app && grep -n "SetMinRowsVisible" widget/entry.go

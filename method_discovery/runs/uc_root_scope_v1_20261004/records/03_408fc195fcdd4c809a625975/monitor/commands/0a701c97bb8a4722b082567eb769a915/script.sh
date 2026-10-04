@@ -1,0 +1,1 @@
+cd /app && grep -n "type.*Option.*struct" client/option.go | head -20

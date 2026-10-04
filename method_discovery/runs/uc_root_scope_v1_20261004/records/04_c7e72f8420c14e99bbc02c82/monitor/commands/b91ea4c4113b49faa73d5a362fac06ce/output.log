@@ -1,0 +1,25 @@
+func (fr *Framer) readAndCheckFrameHeader() (http2.FrameHeader, error) {
+	buf, err := fr.reader.Next(frameHeaderLen)
+	if err != nil {
+		return http2.FrameHeader{}, err
+	}
+
+	// Parse frame header fields
+	length := uint32(buf[0])<<16 | uint32(buf[1])<<8 | uint32(buf[2])
+	
+	// Check for frame size violations with enhanced error message
+	if length > fr.maxReadSize {
+		// Provide hex dump of frame header for debugging
+		first4Bytes := binary.BigEndian.Uint32(buf[:4])
+		second4Bytes := binary.BigEndian.Uint32(buf[4:8])
+		return http2.FrameHeader{}, fmt.Errorf("%s or invalid frame (first4Bytes=%#x, second4Bytes=%#x)", 
+			http2.ErrFrameTooLarge, first4Bytes, second4Bytes)
+	}
+
+	return http2.FrameHeader{
+		Length:   length,
+		Type:     http2.FrameType(buf[3]),
+		Flags:    http2.Flags(buf[4]),
+		StreamID: binary.BigEndian.Uint32(buf[5:]) & (1<<31 - 1),
+	}, nil
+}

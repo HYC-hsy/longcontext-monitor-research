@@ -1,0 +1,1 @@
+cd /app && find . -path "*/pkg/remote/trans/nphttp2/conn_pool.go" 2>/dev/null

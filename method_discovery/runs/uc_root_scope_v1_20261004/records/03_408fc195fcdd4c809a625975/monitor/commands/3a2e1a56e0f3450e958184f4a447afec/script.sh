@@ -1,0 +1,1 @@
+cd /app && grep -A5 "WithFailureRetry\|WithBackupRequest" client/option.go | grep -E "func|UnaryOptions" | head -10

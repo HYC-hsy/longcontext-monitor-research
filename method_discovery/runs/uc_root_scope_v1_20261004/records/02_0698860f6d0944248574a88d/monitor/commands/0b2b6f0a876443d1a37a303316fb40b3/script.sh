@@ -1,0 +1,1 @@
+grep -A 10 "func (t \*ToolbarAction) SetIcon" /app/widget/toolbar.go

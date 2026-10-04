@@ -1,0 +1,22 @@
+pkg/remote/codec/thrift/codec_frugal.go:87:	buf = safemcache.Malloc(objectLen) // see comment of MarshalThriftData
+pkg/remote/codec/thrift/codec_frugal_test.go:165:func TestMarshalThriftDataFrugal(t *testing.T) {
+pkg/remote/codec/thrift/codec_frugal_test.go:177:		buf, err := MarshalThriftData(context.Background(), codec, mockReqFrugal)
+pkg/remote/codec/thrift/codec_frugal_test.go:183:	_, err := MarshalThriftData(context.Background(), NewThriftCodecWithConfig(Basic), mockReqFrugal)
+pkg/remote/codec/thrift/codec_frugal_test.go:187:func TestUnmarshalThriftDataFrugal(t *testing.T) {
+pkg/remote/codec/thrift/codec_frugal_test.go:197:		err := UnmarshalThriftData(context.Background(), codec, "mock", mockReqThrift, req)
+pkg/remote/codec/thrift/codec_frugal_test.go:207:	err := UnmarshalThriftData(context.Background(), NewThriftCodecWithConfig(Basic), "mock", mockReqThrift, req)
+pkg/remote/codec/thrift/thrift_data.go:36:// MarshalThriftData only encodes the data (without the prepending methodName, msgType, seqId)
+pkg/remote/codec/thrift/thrift_data.go:48:func MarshalThriftData(ctx context.Context, codec remote.PayloadCodec, data interface{}) ([]byte, error) {
+pkg/remote/codec/thrift/thrift_data.go:56:// NOTE: only used by `MarshalThriftData`
+pkg/remote/codec/thrift/thrift_data.go:99:// UnmarshalThriftData only decodes the data (after methodName, msgType and seqId)
+pkg/remote/codec/thrift/thrift_data.go:102:func UnmarshalThriftData(ctx context.Context, codec remote.PayloadCodec, method string, buf []byte, data interface{}) error {
+pkg/remote/codec/thrift/thrift_data_test.go:43:func TestMarshalThriftData(t *testing.T) {
+pkg/remote/codec/thrift/thrift_data_test.go:45:		buf, err := MarshalThriftData(context.Background(), nil, mockReq)
+pkg/remote/codec/thrift/thrift_data_test.go:50:		buf, err := MarshalThriftData(context.Background(), NewThriftCodecWithConfig(FastRead|FastWrite), mockReq)
+pkg/remote/codec/thrift/thrift_data_test.go:55:		_, err := MarshalThriftData(context.Background(), NewThriftCodecWithConfig(Basic), mockReq)
+pkg/remote/codec/thrift/thrift_data_test.go:59:	// FrugalCodec: in thrift_frugal_amd64_test.go: TestMarshalThriftDataFrugal
+pkg/remote/codec/thrift/thrift_data_test.go:70:func TestUnmarshalThriftData(t *testing.T) {
+pkg/remote/codec/thrift/thrift_data_test.go:73:		err := UnmarshalThriftData(context.Background(), nil, "mock", mockReqThrift, req)
+pkg/remote/codec/thrift/thrift_data_test.go:78:		err := UnmarshalThriftData(context.Background(), NewThriftCodecWithConfig(FastRead|FastWrite), "mock", mockReqThrift, req)
+pkg/remote/codec/thrift/thrift_data_test.go:83:		err := UnmarshalThriftData(context.Background(), NewThriftCodecWithConfig(Basic), "mock", mockReqThrift, req)
+pkg/remote/codec/thrift/thrift_data_test.go:86:	// FrugalCodec: in thrift_frugal_amd64_test.go: TestUnmarshalThriftDataFrugal

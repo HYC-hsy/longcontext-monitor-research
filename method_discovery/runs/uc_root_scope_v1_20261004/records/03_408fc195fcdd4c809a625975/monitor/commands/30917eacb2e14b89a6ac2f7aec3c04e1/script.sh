@@ -1,0 +1,1 @@
+cd /app && grep -n "DummyDummyMiddleware" pkg/endpoint/cep/endpoint.go

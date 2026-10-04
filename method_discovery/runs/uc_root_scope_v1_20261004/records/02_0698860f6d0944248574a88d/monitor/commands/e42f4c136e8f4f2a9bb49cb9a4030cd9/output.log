@@ -1,0 +1,21 @@
+func NewToolbarSeparator() *ToolbarSeparator {
+	return &ToolbarSeparator{}
+}
+
+// Toolbar widget creates a horizontal list of tool buttons
+type Toolbar struct {
+	BaseWidget
+	Items []ToolbarItem
+}
+
+// CreateRenderer is a private method to Fyne which links this widget to its renderer
+func (t *Toolbar) CreateRenderer() fyne.WidgetRenderer {
+	t.ExtendBaseWidget(t)
+	r := &toolbarRenderer{toolbar: t, layout: layout.NewHBoxLayout()}
+	r.resetObjects()
+	return r
+}
+
+// Append a new ToolbarItem to the end of this Toolbar
+func (t *Toolbar) Append(item ToolbarItem) {
+	t.Items = append(t.Items, item)

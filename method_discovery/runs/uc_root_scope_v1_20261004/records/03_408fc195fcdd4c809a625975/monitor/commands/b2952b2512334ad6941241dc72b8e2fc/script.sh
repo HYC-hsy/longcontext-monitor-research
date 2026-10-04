@@ -1,0 +1,1 @@
+cd /app && grep -rn "type Protocol" pkg/ | grep -E "const|type.*int"

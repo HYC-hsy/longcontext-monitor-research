@@ -1,0 +1,1 @@
+cd /app && grep -A 30 "func (.*) Dump" pkg/remote/trans/nphttp2/conn_pool.go
