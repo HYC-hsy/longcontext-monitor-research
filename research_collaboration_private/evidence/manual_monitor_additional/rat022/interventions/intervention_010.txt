@@ -1,0 +1,23 @@
+HIGH-SEVERITY ASSET-LOSS RECOVERY — stop feature work and do not recreate the
+lost `src/widgets/barchart/` files from memory.
+
+The directory was untracked and was not protected by the stash before destructive
+worktree manipulation. Treat the lost implementation as a P0 process failure.
+
+Recovery protocol:
+
+1. Make no further checkout/clean/reset/stash-pop operations.
+2. Preserve the current stash and inspect all available GenericAgent/OTel/tool
+   event logs for the exact earlier file-write command payloads. The full
+   trajectory should contain the commands/content used to create `mod.rs`,
+   `bar.rs`, and `bar_group.rs`; recover from those records, not recollection.
+3. Also inspect safe Git object/stash trees and filesystem/log artifacts, but do
+   not assume untracked files are present.
+4. Restore each file byte-for-byte where exact payload exists. Record which files
+   are exact recovery versus reconstructed/UNKNOWN.
+5. Re-run the previously observed focused tests. Do not claim recovery merely
+   because the project compiles.
+6. Before any future worktree switching, make a verified recoverable snapshot
+   that includes untracked files, and confirm it without deleting the source.
+
+Report recovery evidence and test parity before resuming Target 2.

@@ -1,0 +1,17 @@
+{
+  "schema_version": "human-control-loop/1",
+  "episode_id": "rat022_r1",
+  "step_id": "step_004",
+  "observed_turns": [90, 91],
+  "decision": "SEPARATE_ORACLE_AND_IMPLEMENTATION_FAILURES",
+  "severity": "P1",
+  "confidence": "high",
+  "public_evidence": [
+    "The task requires no rendering when arrows leave fewer than one track cell, but the test expects arrows in a two-cell area.",
+    "The task requires DOUBLE_VERTICAL as the default, but a failing test expects the single-line track symbol.",
+    "The current thumb mapping divides position by content_length minus viewport, allowing a legal terminal position to map beyond the available track.",
+    "Style Reset versus None may be a representation detail and was not yet checked against existing patch semantics."
+  ],
+  "diagnosis": "Stronger tests exposed both real behavior defects and newly introduced oracle defects; treating all red tests as production failures would corrupt a contract-faithful implementation.",
+  "release_condition": "Correct contract-conflicting tests, independently repair terminal thumb mapping, validate style semantics, and rerun the strong suite with failure categories recorded."
+}

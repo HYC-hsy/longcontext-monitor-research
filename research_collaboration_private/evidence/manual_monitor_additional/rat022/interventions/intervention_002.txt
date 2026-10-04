@@ -1,0 +1,17 @@
+The new Scrollbar test file is a useful response, but it does not yet support the original behavioral clauses. Do not promote Target 1 based on test count or a green run with the current assertions.
+
+Several current tests are non-discriminating:
+- state clamping/navigation only asserts that calls do not panic;
+- each orientation accepts finding any one legal symbol anywhere on the edge;
+- zero content and too-small area assert only that rendering does not panic;
+- the viewport ratio test checks only `thumb_count > 0` rather than the required size;
+- custom symbol/style tests accept any one configured symbol/style, so partial rendering passes.
+
+Strengthen the existing tests using exact Buffer observations derived from the public contract. At minimum:
+1. Pre-fill the target area with a sentinel and assert content_length=0 and the two-cell arrow case leave it unchanged.
+2. For a known track length, assert exact begin/end cells, exact remaining track length, and exact thumb cell count for viewport=0 and a 1/2 viewport ratio.
+3. Assert the thumb's exact or bounded start/end at first and last valid state positions, so clamping/navigation and an out-of-track terminal thumb cannot pass silently.
+4. Assert the other three edges remain untouched while the selected edge contains the complete expected sequence for all four orientations.
+5. Check all configured symbols/styles in their applicable cells, not merely that one appears.
+
+Run the strengthened unchanged suite. If it exposes implementation defects, repair production code and rerun; do not weaken the assertions to match the implementation.

@@ -1,0 +1,13 @@
+Do not derive Target 2 tests only from the newly written API. The authoritative Target 2 contract is in the original public task, even if it is no longer salient in the compressed working context.
+
+Restore these independent obligations before writing tests:
+- `Bar` builders: value, `Line` label, style, value_style, and custom text_value.
+- `BarGroup`: optional `Line` label, copied bars, and backward-compatible From conversions for slice/array/Vec tuple inputs.
+- `BarChart::data(impl Into<BarGroup>)` must PUSH, so multiple calls retain multiple groups; group_gap is distinct from bar_gap.
+- Rendering reserves bottom rows for individual labels and optional group labels; numeric/custom values appear above bars, but value 0 and values wider than bar_width are not shown.
+- Group width is determined by bars, bar_width, and bar_gap; group_gap separates adjacent groups.
+- If a group would overflow, that group and all subsequent groups are not rendered.
+- The legacy single-group tuple path must remain visually consistent with the previous implementation.
+- Public exports include Bar and BarGroup alongside BarChart.
+
+Create discriminating Buffer/API tests from those clauses, including repeated `.data()` calls, group overflow, custom text_value, zero/too-wide suppression, group labels, per-bar style, and a legacy rendering fixture captured from the public pre-change implementation or another independent baseline. Do not call Target 2 complete on compilation alone or on tests copied from current control flow.

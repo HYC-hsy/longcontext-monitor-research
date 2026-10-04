@@ -1,0 +1,16 @@
+{
+  "schema_version": "human-control-loop/1",
+  "episode_id": "rat022_r1",
+  "step_id": "step_003",
+  "observed_turns": [48, 54],
+  "decision": "PREVENT_TEST_DRIVEN_API_DRIFT",
+  "severity": "P2",
+  "confidence": "high",
+  "public_evidence": [
+    "The original contract does not require a ScrollbarState getter.",
+    "The Agent proposed and added get_position only after external tests failed to access a private field.",
+    "The same state transitions can be discriminated through rendered thumb position or private colocated tests."
+  ],
+  "diagnosis": "Strengthening the oracle exposed an accessibility issue, but the proposed repair changes production API to serve the test rather than adapting the test to public behavior.",
+  "release_condition": "Remove the test-only public getter, use behavioral/private invariant evidence, and rerun the strengthened suite."
+}

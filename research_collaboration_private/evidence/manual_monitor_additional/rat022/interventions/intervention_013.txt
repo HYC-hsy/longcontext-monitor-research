@@ -1,0 +1,23 @@
+EXACT PRE-LOSS RECOVERY IS READY.
+
+A deterministic transcript replay recovered all three files at:
+`/tmp/recovered_barchart/{mod.rs,bar.rs,bar_group.rs}`.
+
+Evidence:
+- safe cutoff is the first `<summary>Stashed current work.` marker;
+- 11 ordered target actions were replayed: 3 complete writes plus 8 later
+  `mod.rs` patches;
+- replay aborted on non-unique/missing patches, and none occurred.
+
+Now:
+1. compute and record SHA-256 plus sizes for these files in a recovery manifest;
+2. make a verified snapshot of the current worktree including untracked files;
+3. replace the temporary legacy `src/widgets/barchart.rs` with the recovered
+   module directory, and restore `src/widgets/mod.rs` exports required by the new
+   API if your legacy experiment changed them;
+4. compile and run the focused 12-test BarChart suite;
+5. compare with the pre-loss profile, accounting explicitly for the one oracle
+   correction already made after the loss;
+6. report exact recovery versus any remaining mismatch before resuming features.
+
+Do not rewrite the recovered files from memory.

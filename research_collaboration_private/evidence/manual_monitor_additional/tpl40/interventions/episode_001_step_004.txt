@@ -1,0 +1,9 @@
+Do not release the audit as complete yet. You have repaired the target names, but you are now treating symbol presence as completion evidence. Public code contradicts several exact requirements:
+
+- `this_thread::get_index()` returns `concurrency_t`/0 rather than `optional_index`/`std::nullopt`, and `get_pool()` returns a raw pointer rather than `optional_pool`.
+- `get_thread_ids()` returns numeric indices, not the actual `std::thread::id` values.
+- `submit_loop`/`detach_loop` lack the required `num_blocks` parameter and currently submit one task per index, making them behaviorally the same as sequence submission instead of block-splitting internally.
+- `submit_loop` computes `last - first` without first rejecting reversed ranges, which can underflow for unsigned indices.
+- `wait_deadlock` is namespace-level rather than the required nested `thread_pool::wait_deadlock`; Target 7 is specifically optional wait deadlock detection, not generic wait enhancements.
+
+Reopen every affected target. Build focused public compile/runtime tests from the original signatures and semantics, including non-pool optional results, actual thread IDs, loop block-count behavior versus one-task-per-index sequence behavior, empty/reversed ranges, priority FIFO ties, init ordering, and nested exception naming. Fix what those tests contradict. Do not mark a target complete from grep or legacy tests alone. In the next summary, acknowledge which previous completion claims were invalidated and show the first exact test result so I can verify that our interpretation is now aligned.

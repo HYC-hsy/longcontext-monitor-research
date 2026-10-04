@@ -1,0 +1,13 @@
+SCROLLBAR RECOVERY SOURCE VERIFIED.
+
+The missing Target 1 untracked assets are preserved exactly in the third parent
+of the earlier all-inclusive stash, not the newest stash:
+
+- `stash@{1}^3:src/widgets/scrollbar.rs`
+- `stash@{1}^3:tests/scrollbar_tests.rs`
+
+`git ls-tree -r --name-only 'stash@{1}^3'` confirms both paths. Extract only
+these two blobs with `git show`/checkout-to-path; do not apply or pop the whole
+stash because it also contains post-loss Target 3 contamination. Then compile,
+run Scrollbar tests, and run the exact recovered BarChart suite. Preserve both
+stashes until the task is complete.

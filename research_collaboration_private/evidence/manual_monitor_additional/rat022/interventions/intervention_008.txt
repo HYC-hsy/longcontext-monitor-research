@@ -1,0 +1,24 @@
+PROCESS CORRECTION — your premise "no git history / no backup exists" is false.
+
+The pre-refactor implementation is independently available from Git HEAD as
+`src/widgets/barchart.rs` (for example, inspect it with
+`git show HEAD:src/widgets/barchart.rs`). Do not overwrite or restore the current
+worktree merely to inspect it.
+
+Before changing more expected buffers or implementation behavior:
+
+1. Use the HEAD version only as an independent reference for legacy BarChart
+   behavior that the roadmap did not ask to change.
+2. Use the public roadmap contract/property assertions for newly introduced
+   BarGroup behavior; do not derive those expected values from the current output.
+3. Separate each remaining failure into: legacy-regression evidence,
+   new-contract violation, test-oracle error, or still UNKNOWN.
+4. For the y=10 panic, establish the exact write site and violated bounds
+   invariant before applying another positional patch. Do not keep shifting row
+   offsets by trial and error.
+5. Report the classification and evidence, then make the smallest justified fix
+   and rerun focused tests plus the relevant legacy comparison.
+
+This is not a request to freeze old pixels where the new contract deliberately
+changes behavior. Preserve the distinction between legacy compatibility and new
+requirements.

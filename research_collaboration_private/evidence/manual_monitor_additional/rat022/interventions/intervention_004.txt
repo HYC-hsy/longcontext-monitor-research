@@ -1,0 +1,12 @@
+Do not treat all five strengthened-test failures as production defects. Reconcile each assertion with the original public contract before changing scrollbar.rs.
+
+Two reported expectations directly conflict with the task:
+1. The contract says that when the remaining track after begin/end arrows is less than one cell, **nothing renders**. For a length-2 edge with both arrows, expecting ▲ and ▼ is an oracle error; assert the area remains unchanged/space.
+2. `Default::default()` must use `DOUBLE_VERTICAL`; expecting the single-line `│` without explicitly selecting the VERTICAL set is an oracle error. Either expect `║` or explicitly configure the single-line set when that is what the test intends.
+
+Classify the remaining failures rather than patching blindly:
+- The terminal-position thumb failure is likely a real implementation defect: legal state position is clamped to `content_length - 1`, so the thumb must remain within and reach the end of the available track. Demonstrate first/last behavior with exact cells, then repair the mapping without changing the public state range.
+- For `Some(Reset)` versus `None`, inspect the library's existing Style/Buffer patch semantics. Assert the contractually relevant foreground/background/modifier outcome using a correctly constructed expected style; do not rewrite production code merely to match representation-level Option details.
+- Apply the same analysis to horizontal terminal position.
+
+After correcting only the oracle errors and repairing independently demonstrated implementation defects, rerun the unchanged strong suite and report the categories separately.

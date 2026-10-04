@@ -1,0 +1,7 @@
+Do not add a new public `get_position()` API solely to make the tests compile. The original contract intentionally specifies consuming state builders and mutable navigation, not a getter; test convenience is not evidence for expanding the production surface.
+
+Remove/revert that getter if it was just added. Verify clamping and navigation either:
+- behaviorally, by rendering the same known track after first/last/prev/next/scroll and asserting exact thumb positions; or
+- with a small private unit-test module colocated in scrollbar.rs if a direct invariant check is necessary.
+
+Fix the incorrect test call to the existing public `track_symbol(&str)` signature. Preserve the strengthened contract-derived Buffer assertions and rerun them unchanged. Do not make fields public or weaken assertions for accessibility.

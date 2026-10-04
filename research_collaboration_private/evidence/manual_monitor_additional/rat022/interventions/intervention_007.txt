@@ -1,0 +1,11 @@
+Pause before rewriting expected buffers from the newly captured output. Diagnostic output is evidence about what the current implementation does, not an oracle for what it should do. Copying it into expected fixtures would make implementation and test share the same errors.
+
+Keep the independently demonstrated out-of-bounds fix, but rebuild the remaining evidence as follows:
+
+1. Derive exact coordinates from the public layout rules (area, reserved label rows, bar_width, bar_gap, group_gap, group start) when the rule determines them.
+2. Where exact Unicode sub-cell shape is not independently specified, assert contract properties rather than copying a full current buffer: presence/absence, row, ordering, separation, width bounds, styles, and that overflowed group plus all later groups are absent.
+3. For legacy visual compatibility, run or inspect the public pre-change `barchart.rs` in an isolated baseline worktree/copy with a frozen input and save that output before comparing the refactored implementation. Do not use the refactored output as its own compatibility fixture.
+4. For custom text, zero value, and too-wide value, assert the required strings are present/absent independently of current bar glyphs.
+5. Record which earlier expectations were wrong because they contradicted a rule, versus merely different from current output. Do not bulk-update all 12 failures.
+
+Rerun the resulting discriminating tests and repair only failures that contradict those independent obligations.

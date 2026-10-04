@@ -1,0 +1,12 @@
+[HUMAN TEST-GATE REVIEW — pause implementation and reconcile tests first]
+
+I reviewed the test files as soon as they became available. Several tests have rewritten the public task contract and are now driving production code in the wrong direction. Do not continue feature work until you perform a contract-to-test reconciliation and show the corrected mapping.
+
+1. QueryBool: the task explicitly requires missing, empty, or invalid values with no default to return true. Restore that behavior. Delete or correct any test expecting false; revert production changes made only to satisfy that contrary expectation.
+2. CORS: when AllowedOrigins contains `*`, the response must use literal `*` and wildcard has priority. The task specifies no credentials exception. Remove the invented credentials/echo-Origin expectation and any implementation change supported only by it.
+3. Proxy helpers: the requested API is the three standalone functions `DoRedirects`, `DoTimeout`, and `DoDeadline`, with the stated redirect/error/header/client invariants. Do not substitute new Balancer Config fields. Remove tests and production changes for that invented API, then test the actual requested functions.
+4. MIME fallback: preserve existing known mappings and backward compatibility, then use the standard-library MIME database, with `application/octet-stream` only as the final fallback. A regression in the existing Accepts behavior is not permission to redesign unrelated content negotiation. Add bounded tests that distinguish these cases and repair without changing unrelated semantics.
+5. TLS/mTLS: symbol existence or compile-time checks are not adequate behavioral evidence. Exercise the public behavior using bounded, non-hanging tests where feasible. If a requirement cannot yet be behaviorally exercised, mark it unresolved rather than weakening/deleting a valid probe.
+6. General rule: a failing test may be wrong, but do not weaken or delete it merely to obtain green. Compare it against the original task first. For every target, report: exact contract clause -> test assertion -> observed result -> production change (if any).
+
+After reconciliation, rerun the unchanged corrected target tests and the full pre-existing suite. Only then resume completion assessment.

@@ -1,0 +1,7 @@
+Pause before treating Target 1 as complete. Compare the implementation and its tests against the public task contract, not merely compilation.
+
+Two concrete discrepancies are already visible:
+1. Object iteration is required to yield values with `key()`, but `lazy_json_view::iterator::advance()` still contains a TODO and returns an empty view for objects. The new tests do not exercise object iteration at all.
+2. The defining requirement is deferred byte processing, but `lazy_document` construction currently calls `find_value_end` over the complete root value. The test named `lazy_json_performance_no_full_parse` only proves that a field can be accessed; it does not distinguish lazy processing from an eager whole-root scan.
+
+Reopen Target 1 now. Add contract-focused tests that expose these gaps (and review the rest of the Target 1 requirements for similar untested claims), make the current implementation fail those tests, then repair it and run the relevant tests before moving to Target 2. Do not treat a test name or a successful compile as behavioral evidence.

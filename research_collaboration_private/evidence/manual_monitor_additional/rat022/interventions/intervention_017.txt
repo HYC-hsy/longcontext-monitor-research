@@ -1,0 +1,23 @@
+RECOVERY VERIFIED; DO NOT REPEAT RECOVERY OR START TARGET 3.
+
+While your model call was pending, the exact Target 1 files were restored from:
+- `stash@{1}^3:src/widgets/scrollbar.rs`
+- `stash@{1}^3:tests/scrollbar_tests.rs`
+
+Focused execution with `/usr/local/cargo/bin/cargo test --test
+scrollbar_tests --test barchart_tests` compiled successfully and reproduced the
+exact pre-loss BarChart profile: 9/12 pass, with only these failures:
+
+1. `test_legacy_array_format`
+2. `test_multiple_data_calls_push`
+3. `test_bargroup_without_label`
+
+Thus recovery parity is established. Continue Target 2 only:
+- legacy-array default-max semantics were independently proven against Git HEAD;
+- classify each of the other two remaining differences with contract/legacy
+  evidence, not current-output copying;
+- correct a test oracle only when that evidence warrants it;
+- remove temporary debug output and rerun both focused suites.
+
+Do not declare Target 2 complete until the original new BarGroup contract remains
+covered and all 12 tests pass for justified reasons. Do not resume Target 3.

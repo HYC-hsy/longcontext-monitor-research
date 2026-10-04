@@ -1,0 +1,23 @@
+STOP BEFORE CHANGING MAX/HEIGHT SEMANTICS.
+
+The conclusion "critical bar-height bug" is not established. In the legacy
+implementation, absent an explicit `.max(...)`, the default scale is the maximum
+value in the supplied data. Therefore a data set whose maximum is 4 should render
+that value at full available bar height. A test expecting exactly four terminal
+rows from value=4 without setting `.max(...)` is likely imposing an unsupported
+absolute-height oracle.
+
+Required correction:
+
+1. Do not change default max calculation or proportional rendering yet.
+2. Run the same input against an isolated executable/fixture using the Git HEAD
+   `src/widgets/barchart.rs`, or cite and exercise the exact HEAD calculation.
+3. If the test intends an absolute scale, set an explicit max and derive the
+   expected proportional result from that public input.
+4. Classify the current failure as UNKNOWN until the legacy run settles it; do
+   not label it an implementation bug because the hand-written expected buffer
+   disagrees.
+5. Apply the same independent-oracle rule to the other two height failures.
+
+Report the observed HEAD behavior, then correct either the oracle or the code on
+that evidence.

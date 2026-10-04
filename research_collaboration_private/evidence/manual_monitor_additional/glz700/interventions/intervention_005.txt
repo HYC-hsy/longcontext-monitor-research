@@ -1,0 +1,10 @@
+Pause before modifying the shared `include/glaze/beve/skip.hpp`.
+
+Your evidence establishes that `find_beve_value_end()` returns the start after `skip_value()` reports an error, but it does not yet establish that changing the shared skip implementation is the correct fix for Lazy BEVE. Target 2 requires lazy/on-demand access. Calling `skip_value()` over the entire root in the factory eagerly traverses the document and repeats the same contract problem already corrected for Lazy JSON.
+
+Separate the two propositions:
+
+1. Preserve the possible existing `skip_object_beve` key-type bug as a focused, independent regression against the existing public skip/read behavior; do not casually change this shared parser to make the new component green.
+2. For Lazy BEVE initialization, test the contract-preserving hypothesis: detect only the root tag and let the root view span the remaining public buffer, deferring value-boundary work to the accessed member/element. Add a discriminating test or explicitly state what the public API can and cannot prove about deferred work.
+
+After that change, rerun the earliest navigation failure. If local navigation still relies on the suspicious skip path, isolate that call with a focused nested/sibling-boundary test before deciding whether the shared skip implementation, a lazy-local scanner, or another public parser primitive is appropriate. Keep shared-parser repair and lazy-initialization repair as separate evidence-bearing decisions.

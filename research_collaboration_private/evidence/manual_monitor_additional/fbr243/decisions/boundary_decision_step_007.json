@@ -1,0 +1,10 @@
+{
+  "decision": "CONTINUE",
+  "reason_codes": [
+    "MIME_UNDOTTED_STDLIB_FALLBACK_MISSING",
+    "TARGET7_TEST_DOES_NOT_DISCRIMINATE_STATIC_MAP_FROM_STDLIB",
+    "QUERYBOOL_DOCUMENTATION_CONTRADICTS_IMPLEMENTATION",
+    "TLS_LISTENER_ERROR_CHECK_ORDER"
+  ],
+  "next_prompt": "Do not complete. Final diff review found a remaining explicit Target 7 violation: GetMIME only calls mime.TypeByExtension for dotted input, but the public requirement says standard-library fallback must work both with and without a leading dot. Normalize the input for the stdlib fallback (while keeping existing internal-map priority) and add a discriminating paired test using the same extension absent from the built-in map but known by Go's mime package, asserting both `ext` and `.ext` resolve identically and not to octet-stream. Preserve the old Accepts behavior at the Accepts call site or through its own offer semantics; do not weaken GetMIME's contract to satisfy an unrelated shorthand-offer test. Also correct the QueryBool doc comment that currently says invalid/no-default returns false although the contract and code return true. In ListenTLSWithCertificate, check the net.Listen error before wrapping the listener. Then rerun the focused MIME/Accepts/TLS tests and the full repository suite unchanged."
+}

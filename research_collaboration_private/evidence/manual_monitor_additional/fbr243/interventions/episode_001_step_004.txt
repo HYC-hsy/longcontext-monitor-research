@@ -1,0 +1,12 @@
+[HUMAN TEST-GATE REVIEW — validate the TLS probe before changing production]
+
+Do not modify `ListenMutualTLSWithCertificate` merely because `app.server.Serve(ln)` follows `tls.Listen`. Serving a `tls.Listener` is a standard valid composition; the current failures do not establish a production defect.
+
+First isolate and validate the test oracle:
+- For rejection cases, do not equate a successful `tls.Dial` return with application-level acceptance. Perform a bounded HTTP write and read (or explicit handshake plus read) and require an application response to claim acceptance; capture the actual TLS alert/read error otherwise.
+- Prove each client connected to the intended listener address. Avoid shared/global address discovery and parallel cross-talk among `:0` servers; temporarily run the mTLS probes serially if needed.
+- Validate the generated CA, client certificate chain, EKU, validity interval, and roots using `x509.Verify` with `ExtKeyUsageClientAuth` before using them as the test fixture.
+- Run a minimal direct `tls.Listen` control with the same config and certificates. Compare it with `ListenMutualTLSWithCertificate` under the same bounded client exchange.
+- Only change production code if the direct control passes and the Fiber path fails under an otherwise identical validated probe. Otherwise repair the test.
+
+Report evidence separating: test-fixture bug, rejection-observation bug, concurrency/address bug, and production bug. Keep UNKNOWN until this comparison resolves it.

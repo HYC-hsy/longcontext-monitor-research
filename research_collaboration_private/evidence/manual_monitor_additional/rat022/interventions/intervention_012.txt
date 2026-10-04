@@ -1,0 +1,21 @@
+PARSER CORRECTION — the transcript is Markdown-fenced JSON, not XML.
+
+Do not regex nested `{...}` and do not search `<parameter>` tags. Split/scan on
+these literal structural boundaries:
+
+1. tool header: `Tool: \`file_write\`` or `Tool: \`file_patch\``;
+2. opening fence: four backticks followed by `text` and newline;
+3. closing fence: newline followed by four backticks.
+
+The complete text between those fences is valid JSON; pass it to `json.loads`.
+Select decoded actions whose `path` equals one of the three lost paths. Preserve
+their transcript order. The initial `file_write` gives a full file; later
+`file_write` replaces it, while `file_patch` must be applied in sequence according
+to its decoded fields. Do not parse by closing brace because Rust content contains
+many braces.
+
+First print a dry-run table: transcript offset, tool type, path, and content/patch
+length. Confirm it includes creation and every later modification. Only then
+replay into a separate recovery directory, inspect the final files, and copy them
+into the worktree. If patch replay is ambiguous, mark that file UNKNOWN rather
+than inventing content.

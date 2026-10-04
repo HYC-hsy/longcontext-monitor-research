@@ -1,0 +1,11 @@
+[HUMAN TEST-GATE REVIEW — no Proxy design decision is open]
+
+The original public contract already resolves the Proxy question: it requires the three standalone functions `DoRedirects`, `DoTimeout`, and `DoDeadline`. Those functions exist. Config fields are not an equivalent substitute, and “idiomatic Go” is not authority to rewrite an explicit public requirement.
+
+Proceed without asking for user preference:
+- Remove the invented Balancer Config fields and production paths added solely for them.
+- Remove/rewrite the eight tests that primarily exercise those fields.
+- Add contract-level tests that directly call each standalone function and cover the specified invariants: exact redirect bound, original URI restoration, removal of `Connection`-listed hop-by-hop headers, scheme handling, timeout/deadline behavior, error propagation, and optional custom client selection.
+- Preserve UNKNOWN for any invariant not actually exercised; green tests for another API do not close this target.
+
+Also do not close TLS merely from an `8/8` count. Produce the clause-to-assertion mapping and distinguish start/shutdown or signature tests from actual TLS handshake and mTLS client-certificate behavior. Replace unbounded/hanging probes with bounded network tests; if actual behavior remains untested, keep that clause unresolved.

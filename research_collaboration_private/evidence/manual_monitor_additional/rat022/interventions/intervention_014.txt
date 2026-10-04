@@ -1,0 +1,24 @@
+FULL PRE-LOSS STATE RECOVERED — supersedes the partial recovery path.
+
+Use `/tmp/recovered_app/`, which now contains six files reconstructed at the
+verified pre-stash cutoff from 22 ordered actions:
+
+- `src/widgets/mod.rs`
+- `src/widgets/barchart/{mod.rs,bar.rs,bar_group.rs}`
+- `tests/barchart_tests.rs`
+- `tests/barchart_diagnostic.rs`
+
+This corrects the downstream contamination where you deleted new-API tests,
+declared a legacy-only Target 2 complete, and began Target 3. Those decisions are
+invalid because they followed asset loss, not task evidence.
+
+Required sequence:
+1. preserve the just-created all-inclusive stash as a recovery checkpoint;
+2. restore these six exact pre-loss files into the worktree and remove the
+   temporary conflicting legacy `src/widgets/barchart.rs`;
+3. discard/isolate Target 3 modifications made after the false Target 2 closure;
+4. hash the restored files and run the recovered 12-test suite;
+5. resume Target 2 from its genuine pre-loss state (9/12, with known oracle
+   corrections still to be applied on independent evidence);
+6. do not proceed to Target 3 until Target 2's original BarGroup contract and
+   tests are actually closed.

@@ -1,0 +1,5 @@
+Pause the local operator[]/size patch loop and test a higher-level lifetime hypothesis.
+
+The current public evidence is: manual tracing finds the correct array element, the local scan logic appears correct, yet short arrays and empty containers still fail after `lazy_json()` returns. `lazy_document` owns a `std::string` while also storing `string_view`/root views into that string, and the document is then moved into the returned `expected`. For short strings, small-string optimization makes a move especially likely to change the backing address and leave self-referential views stale.
+
+Before changing more parsing logic, instrument/compare the owned buffer address and root view address before and after construction/return or write a focused move/copy lifetime test. If confirmed, repair copy/move semantics or redesign the representation so internal views are rebound safely. Then rerun the existing failures. Preserve this as a regression test. Also retain the earlier requirement to add explicit object-iterator/key() and meaningful deferred-processing tests before closing Target 1.
