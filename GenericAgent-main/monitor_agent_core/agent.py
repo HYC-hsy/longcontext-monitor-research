@@ -39,6 +39,7 @@ from .path_control_v0 import (
 from .root_scope_v1 import ROOT_SYSTEM_PROMPT, ROOT_NOTE_GUIDANCE, root_input, task_budget_view
 from .verification_loop_v0 import GUIDANCE as VERIFICATION_GUIDANCE, SelectedVerification
 from .eis_v0 import GUIDANCE as EIS_GUIDANCE, executable_interpretation_surface
+from .cfs_v0 import SituationState
 
 
 def _tool(name, description, properties, required):
@@ -381,6 +382,15 @@ class MonitorAgent:
             raise ValueError('monitor_executable_interpretation_surface must be a boolean')
         if self.eis_v0 and (not self.verification_loop_v0 or self.verification_runtime_managed):
             raise ValueError('EIS-v0 requires continuous verification in manual mode')
+        self.cfs_v0 = getattr(client, 'config', {}).get('monitor_coarse_to_fine_surface', False)
+        if type(self.cfs_v0) is not bool:
+            raise ValueError('monitor_coarse_to_fine_surface must be a boolean')
+        if self.cfs_v0 and (not self.verification_loop_v0 or self.verification_runtime_managed
+                            or self.eis_v0):
+            raise ValueError('CFS-v0 requires manual continuous verification and EIS off')
+        self.situation = SituationState(workspace) if self.cfs_v0 else None
+        if self.situation is not None:
+            self.client.active_context_appended = self._cfs_context_appended
         self.root_routed = self.root_scope_v1 != 'off' or self.verification_loop_v0
         self.verification = (SelectedVerification(
             workspace, self.analysis, self._progress,
@@ -531,11 +541,20 @@ class MonitorAgent:
             self._audit_dialogue('dcec_working_view', **metadata)
             self._progress('dcec_working_view', **metadata)
             parts.append(text)
-            if self.path_control_v0:
+            if self.path_control_v0 and not self.cfs_v0:
                 window, window_metadata = recent_public_events(
                     self.workspace, getattr(self.client, 'observed_root_handoff', None))
                 self._audit_dialogue('path_control_public_window', content=window, **window_metadata)
                 parts.append(window)
+            if self.situation is not None:
+                used, limit = self.task_budget_state() if self.task_budget_state else (None, None)
+                deadline = getattr(self.client, 'recovery_deadline', None)
+                surface, metadata = self.situation.build(
+                    handoff=getattr(self.client, 'observed_root_handoff', None),
+                    used_turns=used, max_turns=limit,
+                    remaining_seconds=deadline - time.monotonic() if deadline is not None else None)
+                self._audit_dialogue('supervisory_situation_surface', content=surface, **metadata)
+                parts.append(surface)
             if self.eis_v0:
                 surface, surface_metadata = executable_interpretation_surface(self.workspace)
                 self._audit_dialogue('executable_interpretation_surface', content=surface, **surface_metadata)
@@ -553,6 +572,13 @@ class MonitorAgent:
             self._audit_dialogue('decision_attention', content=text)
             parts.append(text)
         return '\n\n'.join(parts) or None
+
+    def _cfs_context_appended(self):
+        shown = self.situation.context_appended()
+        if shown is not None:
+            self._audit_dialogue('supervisory_situation_injected',
+                                 shown_through_cursor=shown['cursor'],
+                                 manifest_locator=shown['manifest_locator'], content=shown['text'])
 
     def _atomic_private_text(self, relative_path, text):
         path = self.workspace.private_root / relative_path
@@ -991,6 +1017,8 @@ class MonitorAgent:
         started = time.time()
         self.review_id = uuid.uuid4().hex
         self.client.review_id = self.review_id
+        if self.situation is not None:
+            self.situation.begin_review(self.review_id)
         if root_handoff is not None:
             self._enter_root_frame(root_handoff)
         self._progress('review_started', completion_pending=bool(completion_pending))
@@ -1105,6 +1133,8 @@ class MonitorAgent:
             )
             return action
         finally:
+            if self.situation is not None:
+                self.situation.end_review(action)
             self._progress('review_finished', action=action.kind if action else None,
                            duration_seconds=time.time() - started,
                            frame=self.frame_kind,

@@ -294,7 +294,8 @@ def _worker(config, commands, outputs):
         max_turns = config.get('task_max_turns')
         monitor.task_budget_state = lambda: (
             used_turns.value if used_turns is not None else None, max_turns)
-        workspace_sampler = WorkspaceTransitionSampler() if monitor.dcec_enabled else None
+        workspace_sampler = (WorkspaceTransitionSampler()
+                             if monitor.dcec_enabled and not getattr(monitor, 'cfs_v0', False) else None)
     except Exception as exc:
         outputs.put({"kind": "failure", "error": repr(exc), "phase": "startup"})
         return

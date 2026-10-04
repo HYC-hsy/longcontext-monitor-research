@@ -570,6 +570,9 @@ class MonitorProviderClient:
         if entry is not None:
             self.history.append(entry)
         try:
+            appended = getattr(self, 'active_context_appended', None)
+            if entry is not None and appended is not None:
+                appended()
             callback = getattr(self, 'request_assembly_callback', None)
             handoff = getattr(self, 'observed_root_handoff', None)
             handoff_key = ((handoff or {}).get('generation'), (handoff or {}).get('request_id'))
