@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -40,6 +41,7 @@ from .root_scope_v1 import ROOT_SYSTEM_PROMPT, ROOT_NOTE_GUIDANCE, root_input, t
 from .verification_loop_v0 import GUIDANCE as VERIFICATION_GUIDANCE, SelectedVerification
 from .eis_v0 import GUIDANCE as EIS_GUIDANCE, executable_interpretation_surface
 from .cfs_v0 import SituationState
+from .dcm_v0 import DecisionMeasurementBoundary
 
 
 def _tool(name, description, properties, required):
@@ -389,6 +391,13 @@ class MonitorAgent:
                             or self.eis_v0):
             raise ValueError('CFS-v0 requires manual continuous verification and EIS off')
         self.situation = SituationState(workspace) if self.cfs_v0 else None
+        self.dcm_v0 = getattr(client, 'config', {}).get('monitor_decision_conditioned_measurement', False)
+        if type(self.dcm_v0) is not bool:
+            raise ValueError('monitor_decision_conditioned_measurement must be a boolean')
+        if self.dcm_v0 and (not self.cfs_v0 or not self.verification_loop_v0
+                            or self.verification_runtime_managed or self.eis_v0):
+            raise ValueError('DCM-v0 requires CFS, manual continuous verification and EIS off')
+        self.dcm = DecisionMeasurementBoundary(self._audit_dialogue) if self.dcm_v0 else None
         if self.situation is not None:
             self.client.active_context_appended = self._cfs_context_appended
         self.root_routed = self.root_scope_v1 != 'off' or self.verification_loop_v0
@@ -599,6 +608,8 @@ class MonitorAgent:
 
     def _audit_dialogue(self, event, **payload):
         """Persist completed observations immediately, independently of model input."""
+        if self.dcm is not None and event == 'tool_call':
+            self.dcm.model_turn = payload.get('turn')
         path = self.workspace.private_root / 'audit' / 'dialogue.jsonl'
         path.parent.mkdir(parents=True, exist_ok=True)
         record = dict(timestamp=time.time(), review_id=self.review_id, event=event, **payload)
@@ -726,6 +737,8 @@ class MonitorAgent:
     def dispatch(self, name: str, arguments: dict) -> ToolOutcome:
         tool_id = uuid.uuid4().hex
         started = time.monotonic()
+        if self.dcm is not None:
+            self.dcm.next_tool(name, arguments)
         self._progress('tool_started', tool_id=tool_id, name=name)
         try:
             outcome = self._dispatch(name, arguments)
@@ -838,10 +851,18 @@ class MonitorAgent:
                 mode = arguments.get('mode', 'follow')
                 if mode not in ('follow', 'patrol'):
                     raise ValueError('wait mode must be follow or patrol')
+                after_turns = max(1, int(arguments["after_turns"]))
+                if self.dcm is not None:
+                    if mode == 'patrol':
+                        boundary = self.dcm.release('patrol', 'local', arguments)
+                        if boundary is not None:
+                            return ToolOutcome(boundary)
+                    else:
+                        self.dcm.abandon('changed_to_follow')
                 if self.verification is not None and mode == 'patrol' and self.verification.follow_pending:
                     self.verification.dispose(arguments.get('result'), arguments.get('reason'))
                 return ToolOutcome(None, False, MonitorAction(
-                    "wait", {"after_turns": max(1, int(arguments["after_turns"])), 'mode': mode}
+                    "wait", {"after_turns": after_turns, 'mode': mode}
                 ))
             elif name == "intervene":
                 message = str(arguments.get("message", "")).strip()
@@ -864,6 +885,8 @@ class MonitorAgent:
                         except Exception as exc:
                             self._progress('decision_context_receipt_failed', error_type=type(exc).__name__)
                     self._sent_messages.add(message)
+                    if self.dcm is not None:
+                        self.dcm.abandon('intervened')
                     if self.verification is not None:
                         self.verification.on_intervention(message)
                     if self._seen_completion:
@@ -880,6 +903,8 @@ class MonitorAgent:
                                         "note": "Submission is not proof of delivery or uptake. Continue observing; wait when appropriate.",
                                         **self._remember_advice(message, arguments)})
                 self._remember_advice(message, arguments)
+                if self.dcm is not None:
+                    self.dcm.abandon('intervened')
                 return ToolOutcome(None, False, MonitorAction("intervene", {"message": message}))
             elif name == "allow_complete":
                 if self.verification_loop_v0 and arguments.get('result') not in {'resolve', 'defer'}:
@@ -894,6 +919,13 @@ class MonitorAgent:
                     if (not self._seen_completion or current != self._seen_completion
                             or current["generation"] == self._intervened_generation):
                         raise ValueError("The observed handoff is no longer current. Inspect the runtime update before deciding.")
+                    if self.dcm is not None:
+                        if arguments['result'] == 'resolve':
+                            boundary = self.dcm.release('allow_complete', 'root', arguments)
+                            if boundary is not None:
+                                return ToolOutcome(boundary)
+                        else:
+                            self.dcm.abandon('deferred')
                     if self.verification is not None:
                         disposition = arguments.get('result')
                         self.verification.dispose(disposition, arguments.get('reason'), root=True)
@@ -1017,6 +1049,8 @@ class MonitorAgent:
         started = time.time()
         self.review_id = uuid.uuid4().hex
         self.client.review_id = self.review_id
+        if self.dcm is not None:
+            self.dcm.begin_review(self.review_id)
         if self.situation is not None:
             self.situation.begin_review(self.review_id)
         if root_handoff is not None:
@@ -1133,6 +1167,12 @@ class MonitorAgent:
             )
             return action
         finally:
+            if self.dcm is not None:
+                error = sys.exc_info()[1]
+                disposition = ('review_exhausted' if error is not None and
+                               type(error).__name__ == 'MonitorLoopError' else
+                               'error' if error is not None else 'review_ended')
+                self.dcm.end_review(disposition)
             if self.situation is not None:
                 self.situation.end_review(action)
             self._progress('review_finished', action=action.kind if action else None,
