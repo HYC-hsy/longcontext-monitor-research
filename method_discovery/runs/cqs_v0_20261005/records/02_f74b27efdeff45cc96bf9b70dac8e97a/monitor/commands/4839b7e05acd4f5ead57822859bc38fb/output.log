@@ -1,0 +1,43 @@
+=== Checking Default Protocol in rpcconfig.go ===
+
+initialize() function:
+func (r *rpcConfig) initialize() {
+	r.readOnlyMask = 0
+	r.rpcTimeout = defaultRPCTimeout
+	r.connectTimeout = defaultConnectTimeout
+	r.readWriteTimeout = defaultReadWriteTimeout
+	r.ioBufferSize = defaultBufferSize
+	r.transportProtocol = transport.Framed // Default to Framed for better safety (buffered by default)
+	r.interactionMode = defaultInteractionMode
+}
+
+✓ Default is NOW Framed
+
+=== Checking SetTransportProtocol Logic ===
+
+SetTransportProtocol() function:
+func (r *rpcConfig) SetTransportProtocol(tp transport.Protocol) error {
+	// PurePayload overrides all bits
+	if tp == transport.PurePayload {
+		r.transportProtocol = tp
+		return nil
+	}
+	
+	// For protocols that should replace Framed (not compose with it), clear the default Framed bit first
+	// HTTP is independent and shouldn't compose with Framed
+	// HESSIAN2 is also independent
+	// TTHeaderStreaming and GRPCStreaming are dedicated streaming protocols
+	if tp == transport.HTTP || tp == transport.HESSIAN2 || 
+	   tp == transport.TTHeaderStreaming || tp == transport.GRPCStreaming {
+		// Clear Framed bit if it's just the default (not explicitly set with other protocols)
+		if r.transportProtocol == transport.Framed {
+			r.transportProtocol = tp
+			return nil
+		}
+	}
+	
+	// For TTHeader and GRPC, they compose naturally with Framed
+	// For Framed itself, just ensure the bit is set
+	r.transportProtocol |= tp
+	return nil
+}

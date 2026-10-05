@@ -1,0 +1,22 @@
+=== Investigating Potential False Negatives ===
+
+1. Checking sep/endpoint.go for StreamEndpoint signature:
+   Found: type StreamEndpoint func(ctx context.Context)
+   ✗ Issue: Does not take ServerStream parameter
+
+2. Checking transport/keys.go for GRPCStreaming:
+   Found: GRPCStreaming     Protocol = 128
+   ✓ Correct: Value is 128
+
+=== Detailed Check ===
+
+sep StreamEndpoint (first 200 chars):
+type StreamEndpoint func(ctx context.Context) (st streaming.ServerStream, err error)
+
+// StreamRecvEndpoint is invoked on each message received from the stream.
+type StreamRecvEndpoint func(ctx contex
+
+GRPCStreaming constant (context):
+    // Dedicated constant for TTHeader streaming
+	GRPCStreaming     Protocol = 128     // Dedicated constant for gRPC streaming
+	TTHeaderFramed       

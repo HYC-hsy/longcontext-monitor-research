@@ -1,0 +1,19 @@
+=== Verification of sep.StreamEndpoint Fix ===
+
+Found StreamEndpoint definition:
+  type StreamEndpoint func(ctx context.Context, st streaming.ServerStream) (err error)
+
+// StreamRecvEndpoint is invoked on each message received from the stream.
+type StreamRecvEndpoint func(ctx context.Context, stream streaming.ServerStream, message interface
+
+✓ CORRECT: Takes ServerStream parameter, returns only error
+
+=== Verification of cep.StreamEndpoint (should return ClientStream) ===
+
+Found StreamEndpoint definition:
+  type StreamEndpoint func(ctx context.Context) (st streaming.ClientStream, err error)
+
+// StreamRecvEndpoint is invoked on each message received from the stream.
+type StreamRecvEndpoint func(ctx context.Context, stream streaming.ClientStream, message interface
+
+✓ CORRECT: Returns ClientStream as expected

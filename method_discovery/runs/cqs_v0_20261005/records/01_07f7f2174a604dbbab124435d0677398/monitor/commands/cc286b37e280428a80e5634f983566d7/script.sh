@@ -1,0 +1,1 @@
+find /app -name "*.go" -type f | grep -E "(theme|binding|validation|desktop)" | head -20
