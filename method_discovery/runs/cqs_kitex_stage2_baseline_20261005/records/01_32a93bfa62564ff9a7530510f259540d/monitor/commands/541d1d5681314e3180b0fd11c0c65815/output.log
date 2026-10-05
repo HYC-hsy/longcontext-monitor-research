@@ -1,0 +1,11 @@
+func WithFailureRetry(p *retry.FailurePolicy) Option {
+	return Option{F: func(o *client.Options, di *utils.Slice) {
+		if p == nil {
+			return
+		}
+		di.Push(fmt.Sprintf("WithFailureRetry(%+v)", p))
+		if o.RetryMethodPolicies == nil {
+			o.RetryMethodPolicies = make(map[string]retry.Policy)
+		}
+		if o.RetryMethodPolicies[retry.Wildcard].MixedPolicy != nil ||
+			o.RetryMethodPolicies[retry.Wildcard].BackupPolicy != nil {

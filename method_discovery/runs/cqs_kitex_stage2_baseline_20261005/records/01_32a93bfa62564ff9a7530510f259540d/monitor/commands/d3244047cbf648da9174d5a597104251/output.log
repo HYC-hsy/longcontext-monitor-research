@@ -1,0 +1,21 @@
+	// if user only wants to use Basic we never try fallback to frugal or fastcodec
+	if c.CodecType != Basic {
+		// try FrugalWrite < - > FastWrite fallback
+		if typecodec.FastCodec {
+			return fastMarshal(out, methodName, msgType, seqID, data.(thrift.FastCodec))
+		}
+		if typecodec.Frugal {
+			return frugalMarshal(out, methodName, msgType, seqID, data)
+		}
+	}
+	return errEncodeMismatchMsgType
+}
+
+func encodeGenericThrift(out bufiox.Writer, ctx context.Context, method string, msgType remote.MessageType, seqID int32, msg generic.ThriftWriter) error {
+	binaryWriter := thrift.NewBufferWriter(out)
+	if err := binaryWriter.WriteMessageBegin(method, thrift.TMessageType(msgType), seqID); err != nil {
+		return perrors.NewProtocolErrorWithErrMsg(err, fmt.Sprintf("thrift marshal, Write failed: %s", err.Error()))
+	}
+	binaryWriter.Recycle()
+	if err := msg.Write(ctx, method, out); err != nil {
+		return perrors.NewProtocolErrorWithErrMsg(err, fmt.Sprintf("thrift marshal, Write failed: %s", err.Error()))
