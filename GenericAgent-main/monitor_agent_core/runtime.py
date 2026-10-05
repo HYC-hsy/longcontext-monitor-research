@@ -360,7 +360,8 @@ def _worker(config, commands, outputs):
         if config["model_config"].get("monitor_live_intervention", True):
             monitor.intervention_callback = send_now
             # Only actual review-ending actions define compaction boundaries.
-            client.CONTROL_ACTIONS = {"wait", "allow_complete"}
+            client.CONTROL_ACTIONS = ({"wait", "allow_complete", "local_intervened"}
+                                      if monitor.ase_v0 else {"wait", "allow_complete"})
         try:
             transition_view = None
             if workspace_sampler is not None:
@@ -451,6 +452,10 @@ def _worker(config, commands, outputs):
         elif action.kind == 'root_intervened':
             close_watch = True
             next_wake_turn = task_turn + 1
+        elif action.kind == 'local_intervened':
+            # The callback already queued the input and set the next wake.
+            # This is only the review boundary, never a second submission.
+            close_watch = True
         elif action.kind == 'incomplete_delivery':
             outputs.put({'kind': 'completion', 'decision': 'incomplete', 'cursor': cursor,
                          'request_id': action.payload.get('request_id', request_id),

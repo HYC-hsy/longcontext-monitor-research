@@ -12,7 +12,7 @@ from .dcm_v0 import DecisionMeasurementBoundary
 
 
 REFERENCE_LIMIT = 3600
-CONTINUITY_LIMIT = 1000
+CONTINUITY_LIMIT = 1400
 ANCHOR_LIMIT = 260
 FOLLOW_LIMIT = 160
 RATIONALE_LIMIT = 180
@@ -20,6 +20,8 @@ RATIONALE_LIMIT = 180
 SYSTEM_PROMPT = """You are the persistent Supervisor for the full public task. The public task is authoritative. At initialization, read task/original_task.txt and inspect the pristine task/workspace/ with the ordinary tools, investigate as needed, then write a short natural-language monitor/reference.md: required behavior and constraints that may change later control, important integration consequences, distinctions that could give false positive evidence, and observations that may distinguish consequential states. This is your revisable interpretation, not verified truth. Do not use reference.md as a progress or completion ledger: do not put Target X complete, 5/7 done, current repair status, or local resolution there. Revise it with the existing private file tools when your understanding changes; no headings, form, or per-review rewrite are required.
 
 Task tests, build results, and Agent claims are evidence only for what they actually show. Use current public feedback to decide whether to observe, send a useful correction for a material discrepancy, follow its recovery, or let work proceed. If an observation cannot distinguish states that would change control, you may change the measurement. After intervening, inspect the Task's actual understanding, action, and result; revise your advice when feedback undermines it. Release local supervision when its grounds are adequate without investigating every unknown. At completion, judge the whole public mission, not merely recent repairs. Use the seven ordinary tools directly; no fixed reasoning fields or output sections are required.
+
+When intervening, identify a concrete conflict between the public contract and observed behavior and the consequence or observation worth rechecking. The Task Agent owns implementation; avoid designing its internals unless the public task constrains that choice. New feedback can overturn your own advice.
 
 monitor/working.md remains private scratch and continuation state, not the automatically supplied task reference. Reference, prior local control, and recent public events are navigational inputs, never substitutes for original evidence. Task evidence is read-only under task/; private files are writable under monitor/. code_run starts in monitor/ and is not a filesystem sandbox."""
 
@@ -101,16 +103,41 @@ class LocalContinuity:
         self.pending_surface = None
         self.follow_count = 0
         self.episode_start_turn = None
+        self.latest_intervention_turn = None
+        self.intervention_count = 0
+        self.completed_follow_cycles = 0
+        self.follow_pending = False
+        self.file_read_count = 0
+        self.code_run_count = 0
+        self.duplicate_count = 0
+        self.observation_identities = {}
+        self.observation_trace = []
+        self.pending_observations = {}
+        self.reorientation_announced = False
+        self.current_task_turn = None
 
-    def begin_review(self, review_id):
+    def begin_review(self, review_id, task_turn=None):
         self.review_id = review_id
+        self.current_task_turn = task_turn
+        if self.anchor is not None and self.follow_pending:
+            self.completed_follow_cycles += 1
+            self.follow_pending = False
+            self.audit('ase_follow_feedback_cycle_completed',
+                       completed_follow_cycles=self.completed_follow_cycles,
+                       task_turn=task_turn)
+            if self.completed_follow_cycles >= 2:
+                self.audit('ase_control_reorientation_wake',
+                           first=not self.reorientation_announced,
+                           completed_follow_cycles=self.completed_follow_cycles,
+                           task_turn=task_turn)
+                self.reorientation_announced = True
         self.last_output = None
         self.last_call = None
         self.pending_surface = None
 
     @property
     def active(self):
-        return self.anchor is not None or self.follow is not None
+        return self.anchor is not None
 
     def observe(self, record, line):
         if record.get('review_id') != self.review_id:
@@ -126,18 +153,72 @@ class LocalContinuity:
                 args = {}
             self.last_call = {'name': record.get('name'), 'args': args,
                               'locator': locator, 'model_turn': record.get('turn')}
+            if self.active and record.get('name') in {'file_read', 'code_run'}:
+                name = record['name']
+                if name == 'file_read':
+                    identity = json.dumps({key: args.get(key, default) for key, default in (
+                        ('path', None), ('start', 1), ('count', 200), ('tail', False),
+                        ('offset', 0), ('max_chars', 20000))}, sort_keys=True)
+                    self.file_read_count += 1
+                    item = {'kind': name, 'path': excerpt(args.get('path'), 100),
+                            'range_sha256': digest(identity),
+                            'start': args.get('start', 1), 'count': args.get('count', 200),
+                            'offset': args.get('offset', 0), 'locator': locator}
+                else:
+                    identity = str(args.get('code') or '')
+                    self.code_run_count += 1
+                    item = {'kind': name, 'command_sha256': digest(identity),
+                            'command_excerpt': excerpt(identity, 100), 'locator': locator}
+                key = (name, identity)
+                prior = self.observation_identities.get(key, 0)
+                self.observation_identities[key] = prior + 1
+                if prior:
+                    self.duplicate_count += 1
+                item['exact_duplicate_count'] = prior
+                self.observation_trace.append(item)
+                self.observation_trace = self.observation_trace[-4:]
+                tool_id = record.get('tool_id')
+                if tool_id:
+                    self.pending_observations[tool_id] = item
+                self.audit('ase_episode_observation', **item,
+                           file_read_count=self.file_read_count,
+                           code_run_count=self.code_run_count,
+                           episode_exact_duplicate_count=self.duplicate_count)
+        elif record.get('event') == 'tool_result':
+            item = self.pending_observations.pop(record.get('tool_id'), None)
+            if item is not None:
+                result = record.get('data')
+                if isinstance(result, dict):
+                    item['status'] = result.get('status')
+                    item['exit_code'] = result.get('exit_code')
+                self.audit('ase_episode_observation_result', kind=item['kind'],
+                           call_locator=item['locator'], result_locator=locator,
+                           status=item.get('status'), exit_code=item.get('exit_code'))
 
     def submitted_intervention(self, message, task_turn=None):
         call, rationale = self.last_call or {}, self.last_output or {}
+        if self.anchor is None:
+            self.episode_start_turn = task_turn
+            self.intervention_count = 0
+            self.completed_follow_cycles = 0
+            self.file_read_count = self.code_run_count = self.duplicate_count = 0
+            self.observation_identities.clear()
+            self.observation_trace.clear()
+            self.pending_observations.clear()
+            self.reorientation_announced = False
+            self.audit('ase_control_episode_started', task_turn=task_turn)
         self.anchor = {'message': excerpt(message, ANCHOR_LIMIT), 'message_sha256': digest(message),
                        'rationale': excerpt(rationale.get('text'), RATIONALE_LIMIT),
                        'rationale_locator': rationale.get('locator'),
                        'action_locator': call.get('locator'), 'review_id': self.review_id}
         self.follow = None
-        self.follow_count = 0
-        self.episode_start_turn = task_turn
+        self.follow_pending = False
+        self.intervention_count += 1
+        self.latest_intervention_turn = task_turn
         self.audit('ase_continuity_updated', source='intervene', anchor=self.anchor,
-                   task_turn=task_turn, follow_count=0)
+                   task_turn=task_turn, intervention_count=self.intervention_count,
+                   episode_start_task_turn=self.episode_start_turn,
+                   completed_follow_cycles=self.completed_follow_cycles)
 
     def completed_wait(self, action, task_turn=None):
         if action.kind != 'wait':
@@ -145,21 +226,40 @@ class LocalContinuity:
         call, rationale = self.last_call or {}, self.last_output or {}
         mode = action.payload.get('mode')
         if mode == 'patrol':
-            prior = self.anchor is not None or self.follow is not None
+            prior = self.active
+            if prior:
+                self.audit('ase_control_episode_ended', task_turn=task_turn,
+                           episode_start_task_turn=self.episode_start_turn,
+                           intervention_count=self.intervention_count,
+                           completed_follow_cycles=self.completed_follow_cycles,
+                           file_read_count=self.file_read_count,
+                           code_run_count=self.code_run_count,
+                           exact_duplicate_count=self.duplicate_count)
             self.anchor = self.follow = None
             self.follow_count = 0
             self.episode_start_turn = None
+            self.latest_intervention_turn = None
+            self.intervention_count = self.completed_follow_cycles = 0
+            self.follow_pending = False
+            self.file_read_count = self.code_run_count = self.duplicate_count = 0
+            self.observation_identities.clear()
+            self.observation_trace.clear()
+            self.pending_observations.clear()
+            self.reorientation_announced = False
             self.audit('ase_continuity_cleared', source='wait_patrol', had_active=prior,
                        action_locator=call.get('locator'), task_turn=task_turn)
         elif mode == 'follow':
-            if self.episode_start_turn is None:
-                self.episode_start_turn = task_turn
+            if not self.active:
+                self.audit('ase_follow_without_episode', task_turn=task_turn,
+                           requested_after_turns=action.payload.get('after_turns'))
+                return
             reason = rationale.get('text')
             self.follow = {'reason': excerpt(reason, FOLLOW_LIMIT),
                            'reason_sha256': digest(reason),
                            'rationale': excerpt(rationale.get('text'), RATIONALE_LIMIT),
                            'action_locator': call.get('locator'), 'review_id': self.review_id}
             self.follow_count += 1
+            self.follow_pending = True
             age = (task_turn - self.episode_start_turn
                    if isinstance(task_turn, int) and isinstance(self.episode_start_turn, int) else None)
             self.audit('ase_continuity_updated', source='wait_follow', follow=self.follow,
@@ -169,7 +269,7 @@ class LocalContinuity:
                        requested_after_turns=action.payload.get('after_turns'))
 
     def render(self):
-        if self.anchor is None and self.follow is None:
+        if not self.active:
             self.pending_surface = None
             return None
         lines = ['Local Control Continuity — your prior action, not task truth.']
@@ -184,8 +284,32 @@ class LocalContinuity:
             elif self.follow['rationale'] and self.anchor is None:
                 lines.append('Follow context: ' + self.follow['rationale'])
             lines.append('Follow source: ' + str(self.follow['action_locator'] or 'unavailable'))
+        age = None
+        if isinstance(self.episode_start_turn, int) and isinstance(self.current_task_turn, int):
+            age = max(0, self.current_task_turn - self.episode_start_turn)
+        lines.append(f'Control episode: age={age if age is not None else "unknown"} task turns; '
+                     f'interventions={self.intervention_count}; completed follow cycles={self.completed_follow_cycles}; '
+                     f'observations={self.code_run_count} code runs / {self.file_read_count} file reads; '
+                     f'exact duplicates={self.duplicate_count}.')
+        if self.completed_follow_cycles >= 2:
+            self.audit('ase_control_reorientation_surface',
+                       completed_follow_cycles=self.completed_follow_cycles,
+                       episode_start_task_turn=self.episode_start_turn,
+                       current_task_turn=self.current_task_turn)
+            lines.append('Control Reorientation: this local control has crossed multiple Task feedback cycles. '
+                         'Reconsider whether the current observation still changes your control decision. '
+                         'You may change measurement or your premise, continue intervention, or return to broader patrol; '
+                         'neither continuation nor release is required.')
         lines.append('Current public feedback may confirm, revise, or invalidate this local concern.')
-        content = '\n'.join(lines)
+        trace = self.observation_trace[-4:]
+        content = '\n'.join(lines + (['Recent Supervisor observations (mechanical): ' +
+                                      json.dumps(trace, ensure_ascii=False, separators=(',', ':'))]
+                                     if trace else []))
+        while len(content) > CONTINUITY_LIMIT and trace:
+            trace = trace[1:]
+            content = '\n'.join(lines + (['Recent Supervisor observations (mechanical): ' +
+                                          json.dumps(trace, ensure_ascii=False, separators=(',', ':'))]
+                                         if trace else []))
         if len(content) > CONTINUITY_LIMIT:
             raise ValueError('ASE continuity surface exceeded its bound')
         self.pending_surface = {'content': content, 'sha256': digest(content),
@@ -199,6 +323,7 @@ class LocalContinuity:
             self.audit('ase_continuity_surface_injected', **shown,
                        rendered_characters=len(shown['content']))
         return shown
+
 
 
 class ReconsiderationBoundary(DecisionMeasurementBoundary):

@@ -107,7 +107,9 @@ def test_turn_zero_and_provider_ready_composition_no_working_ledger(tmp_path, mo
     assert len(sends) == 4
     assert [tool['function']['name'] for tool in sends[0]['tools']] == [
         'file_read', 'file_write', 'file_patch', 'code_run', 'wait', 'intervene', 'allow_complete']
-    assert sends[0]['tools'] == MONITOR_TOOLS
+    assert [tool['function']['parameters'] for tool in sends[0]['tools']] == [
+        tool['function']['parameters'] for tool in MONITOR_TOOLS]
+    assert 'self-authored text' in sends[0]['tools'][3]['function']['description']
     assert 'verification' not in json.dumps(sends[0]['tools'])
     assert 'result' not in sends[0]['tools'][-1]['function']['parameters']['properties']
     assert 'monitor/reference.md' in sends[0]['system']
@@ -158,11 +160,8 @@ def test_inactive_patrol_is_one_turn_but_active_patrol_reconsiders(tmp_path, mon
     assert len(sends) == 1
     assert not [r for r in rows(ws) if r['event'] == 'ase_reconsideration_boundary']
     monitor.intervention_callback = lambda message: {'delivery': 'queued'}
-    scripted(client, monkeypatch, [
-        ('Route discrepancy.', 'intervene', {'message': 'Check route response.'}),
-        ('Await update.', 'wait', {'after_turns': 1, 'mode': 'follow'}),
-    ])
-    assert monitor.review('Later').payload['mode'] == 'follow'
+    scripted(client, monkeypatch, [('Route discrepancy.', 'intervene', {'message': 'Check route response.'})])
+    assert monitor.review('Later').kind == 'local_intervened'
     sends = scripted(client, monkeypatch, [
         ('', 'wait', {'after_turns': 1, 'mode': 'patrol'}),
         ('', 'wait', {'after_turns': 1, 'mode': 'patrol'}),
@@ -177,12 +176,15 @@ def test_intervention_before_reference_does_not_waive_initialization(tmp_path, m
     monitor.intervention_callback = lambda message: {'delivery': 'queued'}
     sends = scripted(client, monkeypatch, [
         ('Observed route discrepancy.', 'intervene', {'message': 'Inspect route behavior.'}),
+    ])
+    assert monitor.review('Initialization').kind == 'local_intervened'
+    assert len(sends) == 1
+    scripted(client, monkeypatch, [
         ('', 'wait', {'after_turns': 1, 'mode': 'follow'}),
         ('', 'file_write', {'path': 'monitor/reference.md', 'content': 'Public route behavior matters.'}),
         ('', 'wait', {'after_turns': 1, 'mode': 'follow'}),
     ])
-    assert monitor.review('Initialization').payload['mode'] == 'follow'
-    assert len(sends) == 4
+    assert monitor.review('After feedback').payload['mode'] == 'follow'
     assert monitor.cqs.anchor['message'] == 'Inspect route behavior.'
     assert len([r for r in rows(ws) if r['event'] == 'ase_reference_initialization_pending']) == 1
 
@@ -193,12 +195,15 @@ def test_intervention_anchor_survives_follows_then_patrol_clears(tmp_path, monke
     monitor.intervention_callback = lambda message: {'delivery': 'queued'}
     sends = scripted(client, monkeypatch, [
         ('Route may be wrong.', 'intervene', {'message': 'Check actual route response.'}),
+    ])
+    assert monitor.review('Wake').kind == 'local_intervened'
+    sends = scripted(client, monkeypatch, [
         ('Await first edit.', 'wait', {'mode': 'follow', 'after_turns': 2}),
     ])
-    assert monitor.review('Wake').kind == 'wait'
-    assert 'Check actual route response.' in visible(sends[1])
-    assert visible(sends[1]).index('Supervisor Reference') < visible(sends[1]).index('Local Control Continuity')
-    assert visible(sends[1]).index('Local Control Continuity') < visible(sends[1]).index('Situation unchanged')
+    assert monitor.review('New Task feedback').kind == 'wait'
+    assert 'Check actual route response.' in visible(sends[0])
+    assert visible(sends[0]).index('Supervisor Reference') < visible(sends[0]).index('Local Control Continuity')
+    assert visible(sends[0]).index('Local Control Continuity') < visible(sends[0]).index('Supervisory Situation')
     assert monitor.cqs.anchor['message'] == 'Check actual route response.'
     for reason in ('Await test', 'Await result'):
         sends = scripted(client, monkeypatch, [
@@ -257,9 +262,8 @@ def test_boundary_can_change_to_follow_or_intervene(tmp_path, monkeypatch):
     monitor.intervention_callback = lambda message: {'delivery': 'queued'}
     scripted(client, monkeypatch, [
         ('Route concern.', 'intervene', {'message': 'Check route behavior.'}),
-        ('Await feedback.', 'wait', {'mode': 'follow', 'after_turns': 1}),
     ])
-    assert monitor.review('Initial').kind == 'wait'
+    assert monitor.review('Initial').kind == 'local_intervened'
     sends = scripted(client, monkeypatch, [
         ('', 'wait', {'mode': 'patrol', 'after_turns': 1}),
         ('Need response.', 'wait', {'mode': 'follow', 'after_turns': 1}),
@@ -271,9 +275,8 @@ def test_boundary_can_change_to_follow_or_intervene(tmp_path, monkeypatch):
     scripted(client, monkeypatch, [
         ('', 'wait', {'mode': 'patrol', 'after_turns': 1}),
         ('Now correct it.', 'intervene', {'message': 'Fix route handling.'}),
-        ('', 'wait', {'mode': 'follow', 'after_turns': 1}),
     ])
-    assert monitor.review('Next wake').payload['mode'] == 'follow'
+    assert monitor.review('Next wake').kind == 'local_intervened'
     assert any(r['event'] == 'ase_release_abandoned' and r['disposition'] == 'intervened'
                for r in rows(ws))
     assert monitor.cqs.anchor['message'] == 'Fix route handling.'
@@ -334,3 +337,124 @@ def test_failed_provider_request_does_not_claim_reference_exposure(tmp_path, mon
     assert monitor.review('Fresh wake').kind == 'wait'
     assert 'Task reference from Supervisor.' in visible(sends[0])
     assert len([r for r in rows(ws) if r['event'] == 'ase_context_injected']) == 1
+
+
+def test_follow_without_intervention_does_not_create_episode(tmp_path, monkeypatch):
+    monitor, client, ws = make_monitor(tmp_path)
+    ws.write_text('monitor/reference.md', 'Public route behavior matters.')
+    sends = scripted(client, monkeypatch, [('Watch progress.', 'wait',
+                                           {'mode': 'follow', 'after_turns': 2})])
+    assert monitor.review('Initialization').kind == 'wait'
+    assert not monitor.cqs.active and monitor.cqs.episode_start_turn is None
+    assert monitor.cqs.follow is None and monitor.cqs.completed_follow_cycles == 0
+    scripted(client, monkeypatch, [('', 'wait', {'mode': 'patrol', 'after_turns': 2})])
+    assert monitor.review('Later').kind == 'wait'
+    assert not [r for r in rows(ws) if r['event'] == 'ase_reconsideration_boundary']
+    assert 'Local Control Continuity' not in visible(sends[0])
+
+
+def test_local_intervention_ends_review_once_then_feedback_is_seen(tmp_path, monkeypatch):
+    monitor, client, ws = make_monitor(tmp_path)
+    ws.write_text('monitor/reference.md', 'Public route behavior matters.')
+    delivered = []
+    monitor.intervention_callback = lambda message: (delivered.append(message) or
+                                                     {'submission_id': 'one', 'delivery': 'queued'})
+    snapshots = []
+
+    def offline_once(tools):
+        snapshots.append(client.assembled_request_snapshot(tools))
+        if len(snapshots) == 1:
+            return ([{'type': 'tool_use', 'id': 'observe', 'name': 'file_read',
+                      'input': {'path': 'task/workspace/router.py'}}], {})
+        return ([{'type': 'text', 'text': 'Observed route conflict.'},
+                 {'type': 'tool_use', 'id': 'send', 'name': 'intervene',
+                  'input': {'message': 'Inspect route response.'}},
+                 {'type': 'tool_use', 'id': 'not-run', 'name': 'file_write',
+                  'input': {'path': 'monitor/unwanted.md', 'content': 'must not run'}}], {})
+
+    monkeypatch.setattr(client, '_request_once', offline_once)
+    action = monitor.review('Local wake')
+    assert action.kind == 'local_intervened' and len(snapshots) == 2
+    assert delivered == ['Inspect route response.']
+    assert not (ws.private_root / 'unwanted.md').exists()
+    assert any(r['event'] == 'control_result' and any(
+        'not_executed' in item['content'] for item in r['results']) for r in rows(ws))
+    (ws.evidence_root / 'public_events.jsonl').write_text(json.dumps({
+        'archive_sequence': 1, 'task_turn': 13, 'boundary': 'post_tool_pre_next_llm',
+        'text': 'Task inspected route response after input.', 'tool_calls': [], 'tool_results': []
+    }) + '\n', encoding='utf-8')
+    next_sends = scripted(client, monkeypatch, [('Await behavior.', 'wait',
+                                                {'mode': 'follow', 'after_turns': 2})])
+    assert monitor.review('Task feedback boundary').kind == 'wait'
+    assert 'Task inspected route response after input.' in visible(next_sends[0])
+    assert monitor.cqs.active and monitor.cqs.intervention_count == 1
+
+
+def test_episode_economy_reorientation_and_patrol(tmp_path, monkeypatch):
+    monitor, client, ws = make_monitor(tmp_path)
+    ws.write_text('monitor/reference.md', 'Public route behavior matters.')
+    used = [10]
+    monitor.task_budget_state = lambda: (used[0], 300)
+    monitor.intervention_callback = lambda message: {'submission_id': message, 'delivery': 'queued'}
+    scripted(client, monkeypatch, [('Initial concern.', 'intervene',
+                                    {'message': 'Check route response.'})])
+    assert monitor.review('Initial').kind == 'local_intervened'
+    assert monitor.cqs.episode_start_turn == 10 and monitor.cqs.intervention_count == 1
+    monkeypatch.setattr(monitor.analysis, 'start', lambda *args: {'status': 'success',
+                                                                 'exit_code': 0})
+    used[0] = 15
+    scripted(client, monkeypatch, [
+        ('', 'file_read', {'path': 'task/workspace/router.py'}),
+        ('', 'file_read', {'path': 'task/workspace/router.py'}),
+        ('', 'code_run', {'code': 'print(1)', 'type': 'python'}),
+        ('', 'code_run', {'code': 'print(1)', 'type': 'python'}),
+        ('Await edit.', 'wait', {'mode': 'follow', 'after_turns': 2}),
+    ])
+    assert monitor.review('Feedback 1').kind == 'wait'
+    assert (monitor.cqs.file_read_count, monitor.cqs.code_run_count,
+            monitor.cqs.duplicate_count) == (2, 2, 2)
+    assert monitor.cqs.observation_trace[-1]['status'] == 'success'
+    used[0] = 20
+    scripted(client, monkeypatch, [('Await result.', 'wait', {'mode': 'follow', 'after_turns': 2})])
+    assert monitor.review('Feedback 2').kind == 'wait'
+    assert monitor.cqs.completed_follow_cycles == 1
+    used[0] = 41
+    sends = scripted(client, monkeypatch, [('Revision.', 'intervene',
+                                           {'message': 'Recheck route response.'})])
+    assert monitor.review('Feedback 3').kind == 'local_intervened'
+    assert 'Control Reorientation' in visible(sends[0])
+    assert 'Control episode: age=31 task turns' in visible(sends[0])
+    assert monitor.cqs.episode_start_turn == 10
+    assert monitor.cqs.latest_intervention_turn == 41
+    assert monitor.cqs.intervention_count == 2
+    assert monitor.cqs.completed_follow_cycles == 2
+    events = rows(ws)
+    assert len([r for r in events if r['event'] == 'ase_control_reorientation_wake']) == 1
+    assert len([r for r in events if r['event'] == 'ase_episode_observation']) == 4
+    sends = scripted(client, monkeypatch, [
+        ('', 'wait', {'mode': 'patrol', 'after_turns': 2}),
+        ('', 'wait', {'mode': 'patrol', 'after_turns': 2}),
+    ])
+    assert monitor.review('Release').payload['mode'] == 'patrol'
+    assert 'Control Reorientation' in visible(sends[0])
+    assert not monitor.cqs.active and monitor.cqs.intervention_count == 0
+    assert monitor.cqs.completed_follow_cycles == 0
+    assert [r for r in rows(ws) if r['event'] == 'ase_control_episode_ended']
+
+
+def test_root_intervention_keeps_existing_root_action_and_episode_context(tmp_path, monkeypatch):
+    monitor, client, ws = make_monitor(tmp_path)
+    ws.write_text('monitor/reference.md', 'Public route behavior matters.')
+    monitor.intervention_callback = lambda message: {'submission_id': 'root-one', 'delivery': 'queued'}
+    scripted(client, monkeypatch, [('Local concern.', 'intervene',
+                                    {'message': 'Inspect response.'})])
+    assert monitor.review('Local').kind == 'local_intervened'
+    handoff = root(monitor)
+    sends = scripted(client, monkeypatch, [('Root concern.', 'intervene',
+                                           {'message': 'Check final behavior.'})])
+    action = monitor.review('Root', completion_pending=True, root_handoff=handoff)
+    assert action.kind == 'root_intervened'
+    assert 'Control episode:' in visible(sends[0])
+    assert 'Inspect response.' in visible(sends[0])
+    assert monitor.cqs.intervention_count == 2
+    assert monitor.cqs.anchor['message'] == 'Check final behavior.'

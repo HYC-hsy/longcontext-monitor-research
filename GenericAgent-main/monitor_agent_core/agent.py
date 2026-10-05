@@ -592,6 +592,8 @@ class MonitorAgent:
                 reference, reference_metadata = reference_surface(self.workspace)
                 self._audit_dialogue('ase_reference_surface_prepared', **reference_metadata)
                 parts.append(reference)
+                self.cqs.current_task_turn = (self.task_budget_state()[0]
+                                              if self.task_budget_state else None)
                 continuity = self.cqs.render()
                 if continuity:
                     parts.append(continuity)
@@ -1058,6 +1060,13 @@ class MonitorAgent:
                             False, MonitorAction('root_intervened', {
                                 'request_id': self.root_frame_handoff['request_id'],
                                 'generation': self.root_frame_handoff['generation']}))
+                    if self.ase_v0:
+                        return ToolOutcome(
+                            {'status': 'submitted', 'receipt': receipt,
+                             'note': 'This local review ended after the submitted control input. '
+                                     'Assess subsequent Task feedback at the next wake.'},
+                            False, MonitorAction('local_intervened', {
+                                'submission_id': receipt.get('submission_id') if isinstance(receipt, dict) else None}))
                     return ToolOutcome({"status": "submitted", "receipt": receipt,
                                         "note": "Submission is not proof of delivery or uptake. Continue observing; wait when appropriate.",
                                         **self._remember_advice(message, arguments)})
@@ -1215,7 +1224,11 @@ class MonitorAgent:
         if self.dcm is not None:
             self.dcm.begin_review(self.review_id)
         if self.cqs is not None:
-            self.cqs.begin_review(self.review_id)
+            if self.ase_v0:
+                used, _ = self.task_budget_state() if self.task_budget_state else (None, None)
+                self.cqs.begin_review(self.review_id, task_turn=used)
+            else:
+                self.cqs.begin_review(self.review_id)
         if self.situation is not None:
             self.situation.begin_review(self.review_id)
         if root_handoff is not None:
@@ -1248,6 +1261,12 @@ class MonitorAgent:
                         "Read subsequent public behavior to assess uptake. End with wait when ready to be silent, "
                         "or allow_complete only for a still-pending, justified root completion. "
                         "After an intervention that completion proposal is no longer pending.")
+                if self.ase_v0:
+                    mode = ("Use the ordinary tools to observe and control the public task. A submitted local "
+                            "intervention ends this review so the Task can respond; the next wake provides "
+                            "new public feedback to assess. Use wait to finish without intervention, or "
+                            "allow_complete only for a current justified root handoff. Delivery feedback "
+                            "remains available at monitor/delivery_feedback.jsonl.")
             active_system = (self.base_system_prompt + "\n\n" + ROOT_SYSTEM_PROMPT
                              if self.frame_kind == 'root' and not (self.verification_loop_v0 or self.ase_v0)
                              else self.system_prompt)
@@ -1265,6 +1284,14 @@ class MonitorAgent:
                 self._audit_dialogue('root_frame_input', mode=self.root_scope_v1,
                                      handoff=self.root_frame_handoff, content=wake_context)
             tools = verification_tools() if self.verification_loop_v0 and not self.ase_v0 else MONITOR_TOOLS
+            if self.ase_v0:
+                tools = json.loads(json.dumps(MONITOR_TOOLS))
+                next(tool['function'] for tool in tools if tool['function']['name'] == 'code_run')[
+                    'description'] += (
+                        ' Labels or conclusions you write with echo/print in a shell or Python script are '
+                        'self-authored text, not independent Task observations. External evidence comes '
+                        'from inspected task artifacts, actual program behavior, and tool status/output '
+                        'derived from those operations.')
             if self.independent_check is not None:
                 tools = [*tools, INDEPENDENT_CHECK_TOOL]
             if self.experimental_control is not None:
