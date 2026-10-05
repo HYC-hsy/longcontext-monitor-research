@@ -11,6 +11,7 @@ import threading
 import time
 import uuid
 import warnings
+from collections import Counter
 from dataclasses import asdict
 
 from .actions import MonitorAction, ToolOutcome
@@ -43,6 +44,8 @@ from .eis_v0 import GUIDANCE as EIS_GUIDANCE, executable_interpretation_surface
 from .cfs_v0 import SituationState
 from .dcm_v0 import DecisionMeasurementBoundary
 from .cqs_v0 import ControlQuestionState
+from .ase_v0 import (SYSTEM_PROMPT as ASE_SYSTEM_PROMPT, LocalContinuity,
+                     ReconsiderationBoundary, reference_surface)
 
 
 def _tool(name, description, properties, required):
@@ -408,6 +411,25 @@ class MonitorAgent:
                             or getattr(client, 'config', {}).get('monitor_release_support_horizon', False)):
             raise ValueError('CQS-v0 requires CFS, DCM, manual continuous verification, EIS/RSH off')
         self.cqs = ControlQuestionState(self._audit_dialogue) if self.cqs_v0 else None
+        self.ase_v0 = getattr(client, 'config', {}).get('monitor_adaptive_supervisory_environment', False)
+        if type(self.ase_v0) is not bool:
+            raise ValueError('monitor_adaptive_supervisory_environment must be a boolean')
+        if self.ase_v0:
+            if (not self.dcec_enabled or not self.path_control_v0 or not self.cfs_v0
+                    or not self.dcm_v0 or not self.verification_loop_v0
+                    or self.verification_runtime_managed or self.cqs_v0 or self.eis_v0
+                    or self.root_scope_v1 != 'off'
+                    or getattr(client, 'config', {}).get('monitor_release_support_horizon', False)):
+                raise ValueError('ASE-v0 requires DCEC/PATH/CFS/DCM, manual continuous verification, '
+                                 'and CQS/EIS/RSH/old root scope off')
+            self.system_prompt = ASE_SYSTEM_PROMPT
+            self.base_system_prompt = ASE_SYSTEM_PROMPT
+            self.cqs = LocalContinuity(self._audit_dialogue)
+            self.dcm = ReconsiderationBoundary(
+                self._audit_dialogue, lambda: self._ase_last_visible_context)
+        self._ase_pending_context = None
+        self._ase_last_visible_context = None
+        self._ase_tool_counts = Counter()
         self._dialogue_line = None
         if self.situation is not None:
             self.client.active_context_appended = self._cfs_context_appended
@@ -489,9 +511,10 @@ class MonitorAgent:
                 raise ValueError('monitor_dcec cannot be stacked with historical candidates: ' + ', '.join(enabled))
             if self.path_control_v0 and (research_view != "off" or research_intent != "off"):
                 raise ValueError("monitor_path_control_v0 requires experimental view and intent off")
-            self.system_prompt += "\n\n" + (
-                PATH_CONTROL_SYSTEM_PROMPT if self.path_control_v0 else DCEC_SYSTEM_PROMPT)
-        if self.verification_loop_v0:
+            if not self.ase_v0:
+                self.system_prompt += "\n\n" + (
+                    PATH_CONTROL_SYSTEM_PROMPT if self.path_control_v0 else DCEC_SYSTEM_PROMPT)
+        if self.verification_loop_v0 and not self.ase_v0:
             self.system_prompt += "\n\n" + VERIFICATION_GUIDANCE
         if self.eis_v0:
             self.system_prompt += "\n\n" + EIS_GUIDANCE
@@ -538,7 +561,7 @@ class MonitorAgent:
             self._audit_dialogue('root_working_view', **metadata)
             return text
         parts = []
-        if self.verification_loop_v0:
+        if self.verification_loop_v0 and not self.ase_v0:
             parts.append('Verification mode: runtime-managed selected checks and follow-up.'
                          if self.verification_runtime_managed else
                          'Verification mode: manual single code_run execution; organize follow-up yourself; '
@@ -553,7 +576,14 @@ class MonitorAgent:
             if text:
                 parts.append(text)
         if self.dcec_enabled:
-            if self.cqs is not None:
+            if self.ase_v0:
+                reference, reference_metadata = reference_surface(self.workspace)
+                self._audit_dialogue('ase_reference_surface_prepared', **reference_metadata)
+                parts.append(reference)
+                continuity = self.cqs.render()
+                if continuity:
+                    parts.append(continuity)
+            elif self.cqs is not None:
                 parts.append(self.cqs.render())
             else:
                 if self.path_control_v0 and self.frame_kind != 'root':
@@ -578,6 +608,23 @@ class MonitorAgent:
                     remaining_seconds=deadline - time.monotonic() if deadline is not None else None)
                 self._audit_dialogue('supervisory_situation_surface', content=surface, **metadata)
                 parts.append(surface)
+                if self.ase_v0:
+                    self._ase_pending_context = {
+                        'reference_source_sha256': reference_metadata['source_sha256'],
+                        'reference_surface_sha256': hashlib.sha256(reference.encode('utf-8')).hexdigest(),
+                        'reference_source_characters': reference_metadata['source_characters'],
+                        'reference_visible_characters': reference_metadata['visible_characters'],
+                        'reference_rendered_characters': reference_metadata['rendered_characters'],
+                        'reference_rendered_utf8_bytes': reference_metadata['rendered_utf8_bytes'],
+                        'reference_truncated': reference_metadata['truncated'],
+                        'continuity_sha256': (hashlib.sha256(continuity.encode('utf-8')).hexdigest()
+                                              if continuity else None),
+                        'continuity_rendered_characters': len(continuity) if continuity else 0,
+                        'cfs_surface_sha256': hashlib.sha256(surface.encode('utf-8')).hexdigest(),
+                        'cfs_rendered_characters': len(surface),
+                        'composition_order': ['reference', 'continuity', 'cfs'] if continuity else
+                                             ['reference', 'cfs'],
+                    }
             if self.eis_v0:
                 surface, surface_metadata = executable_interpretation_surface(self.workspace)
                 self._audit_dialogue('executable_interpretation_surface', content=surface, **surface_metadata)
@@ -594,7 +641,13 @@ class MonitorAgent:
             text = self.decision_context.attention()
             self._audit_dialogue('decision_attention', content=text)
             parts.append(text)
-        return '\n\n'.join(parts) or None
+        rendered = '\n\n'.join(parts) or None
+        if self.ase_v0 and self._ase_pending_context is not None:
+            self._ase_pending_context['active_context_sha256'] = hashlib.sha256(
+                rendered.encode('utf-8')).hexdigest()
+            self._ase_pending_context['active_context_characters'] = len(rendered)
+            self._ase_pending_context['active_context_utf8_bytes'] = len(rendered.encode('utf-8'))
+        return rendered
 
     def _cfs_context_appended(self):
         shown = self.situation.context_appended()
@@ -602,8 +655,16 @@ class MonitorAgent:
             self._audit_dialogue('supervisory_situation_injected',
                                  shown_through_cursor=shown['cursor'],
                                  manifest_locator=shown['manifest_locator'], content=shown['text'])
-        if self.cqs is not None:
-            self.cqs.surface_visible()
+        continuity = self.cqs.surface_visible() if self.cqs is not None else None
+        if self.ase_v0 and self._ase_pending_context is not None:
+            facts = dict(self._ase_pending_context)
+            facts['request_id'] = getattr(self.client, '_progress_request_id', None)
+            facts['frame'] = self.frame_kind
+            facts['cfs_manifest_locator'] = shown.get('manifest_locator') if shown else None
+            facts['continuity_injected'] = continuity is not None
+            self._ase_last_visible_context = facts
+            self._audit_dialogue('ase_context_injected', **facts)
+            self._ase_pending_context = None
 
     def _atomic_private_text(self, relative_path, text):
         path = self.workspace.private_root / relative_path
@@ -639,6 +700,30 @@ class MonitorAgent:
             else:
                 self._dialogue_line += 1
             self.cqs.observe(record, self._dialogue_line)
+        if self.ase_v0 and event == 'tool_call':
+            try:
+                args = json.loads(payload.get('arguments') or '{}')
+            except (TypeError, ValueError):
+                args = {}
+            name = payload.get('name')
+            if name == 'code_run' and isinstance(args.get('code'), str):
+                identity = ('code_run', args['code'])
+            elif name == 'file_read':
+                identity = ('file_read', json.dumps({
+                    'path': args.get('path'), 'start': args.get('start', 1),
+                    'count': args.get('count', 200), 'tail': args.get('tail', False),
+                    'offset': args.get('offset', 0), 'max_chars': args.get('max_chars', 20000),
+                }, sort_keys=True))
+            else:
+                identity = None
+            if identity is not None:
+                self._ase_tool_counts[identity] += 1
+                if self._ase_tool_counts[identity] > 1:
+                    self._audit_dialogue('ase_exact_duplicate_observation_call',
+                                         tool_name=name, identity_sha256=hashlib.sha256(
+                                             identity[1].encode('utf-8')).hexdigest(),
+                                         count=self._ase_tool_counts[identity],
+                                         dialogue_line=self._dialogue_line)
 
     def _prepare_continuation(self):
         """Same model, existing history, no tool actions during pre-compaction handoff."""
@@ -657,6 +742,10 @@ class MonitorAgent:
             prompt += ("\n\nPreserve the current handoff question, observed public grounds and limits, "
                        "and the next useful root decision. Do not turn prior local conclusions into "
                        "a whole-task verdict.")
+        elif self.ase_v0:
+            prompt += ('\n\nKeep this continuation in monitor/working.md as local reasoning only. '
+                       'monitor/reference.md is a separate, revisable task reference; do not rewrite '
+                       'or replace it during this maintenance request.')
         elif self.dcec_enabled:
             prompt += "\n\nDCEC continuation contract:\n" + (
                 PATH_CONTROL_CONTINUATION_PROMPT if self.path_control_v0 else DCEC_CONTINUATION_PROMPT)
@@ -824,12 +913,19 @@ class MonitorAgent:
                 if self.dcec_enabled and arguments["path"].replace('\\', '/').strip('/') == 'monitor/working.md':
                     self._progress('dcec_state_mutation', operation='file_write',
                                    mode=arguments.get('mode', 'replace'), **data)
+                if self.ase_v0 and arguments['path'].replace('\\', '/').strip('/') == 'monitor/reference.md':
+                    self._audit_dialogue('ase_reference_mutated', operation='file_write',
+                                         mode=arguments.get('mode', 'replace'),
+                                         action_locator=(self.cqs.last_call or {}).get('locator'), **data)
             elif name == "file_patch":
                 data = self.workspace.patch_text(
                     arguments["path"], arguments["old_text"], arguments["new_text"]
                 )
                 if self.dcec_enabled and arguments["path"].replace('\\', '/').strip('/') == 'monitor/working.md':
                     self._progress('dcec_state_mutation', operation='file_patch', **data)
+                if self.ase_v0 and arguments['path'].replace('\\', '/').strip('/') == 'monitor/reference.md':
+                    self._audit_dialogue('ase_reference_mutated', operation='file_patch',
+                                         action_locator=(self.cqs.last_call or {}).get('locator'), **data)
             elif name == "code_run":
                 session_id = arguments.get('session_id')
                 if session_id:
@@ -911,7 +1007,11 @@ class MonitorAgent:
                     if self.dcm is not None:
                         self.dcm.abandon('intervened')
                     if self.cqs is not None:
-                        self.cqs.submitted_intervention(message)
+                        if self.ase_v0:
+                            used, _ = self.task_budget_state() if self.task_budget_state else (None, None)
+                            self.cqs.submitted_intervention(message, task_turn=used)
+                        else:
+                            self.cqs.submitted_intervention(message)
                     if self.verification is not None:
                         self.verification.on_intervention(message)
                     if self._seen_completion:
@@ -974,6 +1074,10 @@ class MonitorAgent:
                     and str(arguments.get('path', '')).replace('\\', '/').strip('/') == 'monitor/working.md'):
                 self._progress('dcec_state_mutation_failed', operation=name,
                                error_type=type(exc).__name__)
+            if (self.ase_v0 and name in {'file_write', 'file_patch'}
+                    and str(arguments.get('path', '')).replace('\\', '/').strip('/') == 'monitor/reference.md'):
+                self._audit_dialogue('ase_reference_mutation_failed', operation=name,
+                                     error_type=type(exc).__name__)
             data = {"status": "error", "error": str(exc)}
         return ToolOutcome(data)
 
@@ -1193,7 +1297,11 @@ class MonitorAgent:
                                     else None),
             )
             if self.cqs is not None:
-                self.cqs.completed_wait(action)
+                if self.ase_v0:
+                    used, _ = self.task_budget_state() if self.task_budget_state else (None, None)
+                    self.cqs.completed_wait(action, task_turn=used)
+                else:
+                    self.cqs.completed_wait(action)
             return action
         finally:
             if self.dcm is not None:
