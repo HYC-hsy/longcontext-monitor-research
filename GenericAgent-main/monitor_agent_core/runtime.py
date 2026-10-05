@@ -17,6 +17,11 @@ from typing import Any, Mapping
 from .eis_v0 import append_index as append_eis_index
 
 
+ASE_CONTROL_ACTIONS = frozenset({
+    'wait', 'allow_complete', 'intervene', 'local_intervened', 'root_intervened',
+})
+
+
 @dataclass(frozen=True)
 class CompletionOutcome:
     allow: bool
@@ -360,7 +365,7 @@ def _worker(config, commands, outputs):
         if config["model_config"].get("monitor_live_intervention", True):
             monitor.intervention_callback = send_now
             # Only actual review-ending actions define compaction boundaries.
-            client.CONTROL_ACTIONS = ({"wait", "allow_complete", "local_intervened"}
+            client.CONTROL_ACTIONS = (ASE_CONTROL_ACTIONS
                                       if monitor.ase_v0 else {"wait", "allow_complete"})
         try:
             transition_view = None

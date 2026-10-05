@@ -414,6 +414,11 @@ class MonitorAgent:
         self.ase_v0 = getattr(client, 'config', {}).get('monitor_adaptive_supervisory_environment', False)
         if type(self.ase_v0) is not bool:
             raise ValueError('monitor_adaptive_supervisory_environment must be a boolean')
+        self.ase_meta_regulation = getattr(client, 'config', {}).get('monitor_ase_meta_regulation', False)
+        if type(self.ase_meta_regulation) is not bool:
+            raise ValueError('monitor_ase_meta_regulation must be a boolean')
+        if self.ase_meta_regulation and not self.ase_v0:
+            raise ValueError('monitor_ase_meta_regulation requires ASE')
         if self.ase_v0:
             if (self.dcec_enabled or self.path_control_v0 or self.cfs_v0
                     or self.dcm_v0 or self.verification_loop_v0 or self.cqs_v0 or self.eis_v0
@@ -426,7 +431,7 @@ class MonitorAgent:
             self.system_prompt = ASE_SYSTEM_PROMPT
             self.base_system_prompt = ASE_SYSTEM_PROMPT
             self.situation = SituationState(workspace)
-            self.cqs = LocalContinuity(self._audit_dialogue)
+            self.cqs = LocalContinuity(self._audit_dialogue, meta_regulation=self.ase_meta_regulation)
             self.dcm = ReconsiderationBoundary(
                 self._audit_dialogue, lambda: self._ase_last_visible_context)
         self._ase_initialization_complete = False

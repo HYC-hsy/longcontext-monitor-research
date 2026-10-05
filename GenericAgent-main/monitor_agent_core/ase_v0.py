@@ -16,12 +16,13 @@ CONTINUITY_LIMIT = 1400
 ANCHOR_LIMIT = 260
 FOLLOW_LIMIT = 160
 RATIONALE_LIMIT = 180
+META_FOLLOW_CYCLE_THRESHOLD = 2  # Experimental display threshold, not a task judgment.
 
 SYSTEM_PROMPT = """You are the persistent Supervisor for the full public task. The public task is authoritative. At initialization, read task/original_task.txt and inspect the pristine task/workspace/ with the ordinary tools, investigate as needed, then write a short natural-language monitor/reference.md: required behavior and constraints that may change later control, important integration consequences, distinctions that could give false positive evidence, and observations that may distinguish consequential states. This is your revisable interpretation, not verified truth. Do not use reference.md as a progress or completion ledger: do not put Target X complete, 5/7 done, current repair status, or local resolution there. Revise it with the existing private file tools when your understanding changes; no headings, form, or per-review rewrite are required.
 
 Task tests, build results, and Agent claims are evidence only for what they actually show. Use current public feedback to decide whether to observe, send a useful correction for a material discrepancy, follow its recovery, or let work proceed. If an observation cannot distinguish states that would change control, you may change the measurement. After intervening, inspect the Task's actual understanding, action, and result; revise your advice when feedback undermines it. Release local supervision when its grounds are adequate without investigating every unknown. At completion, judge the whole public mission, not merely recent repairs. Use the seven ordinary tools directly; no fixed reasoning fields or output sections are required.
 
-When intervening, identify a concrete conflict between the public contract and observed behavior and the consequence or observation worth rechecking. The Task Agent owns implementation; avoid designing its internals unless the public task constrains that choice. New feedback can overturn your own advice.
+Use intervention when public evidence supports a useful correction or re-anchoring. Prefer communicating the task conflict or relevant evidence over prescribing internal implementation. The Task Agent owns implementation choices unless the public task constrains them. New feedback may invalidate your own advice.
 
 monitor/working.md remains private scratch and continuation state, not the automatically supplied task reference. Reference, prior local control, and recent public events are navigational inputs, never substitutes for original evidence. Task evidence is read-only under task/; private files are writable under monitor/. code_run starts in monitor/ and is not a filesystem sandbox."""
 
@@ -93,8 +94,9 @@ def reference_surface(workspace, limit=REFERENCE_LIMIT):
 class LocalContinuity:
     """One local episode: last submitted intervention plus latest follow expectation."""
 
-    def __init__(self, audit):
+    def __init__(self, audit, *, meta_regulation=False):
         self.audit = audit
+        self.meta_regulation = meta_regulation
         self.anchor = None
         self.follow = None
         self.review_id = None
@@ -125,11 +127,23 @@ class LocalContinuity:
             self.audit('ase_follow_feedback_cycle_completed',
                        completed_follow_cycles=self.completed_follow_cycles,
                        task_turn=task_turn)
-            if self.completed_follow_cycles >= 2:
-                self.audit('ase_control_reorientation_wake',
-                           first=not self.reorientation_announced,
+        if self.active:
+            age = (task_turn - self.episode_start_turn
+                   if isinstance(task_turn, int) and isinstance(self.episode_start_turn, int) else None)
+            self.audit('ase_control_episode_observed', task_turn=task_turn,
+                       episode_start_task_turn=self.episode_start_turn,
+                       latest_intervention_turn=self.latest_intervention_turn,
+                       episode_task_turn_age=age, intervention_count=self.intervention_count,
+                       completed_follow_cycles=self.completed_follow_cycles,
+                       file_read_count=self.file_read_count, code_run_count=self.code_run_count,
+                       exact_duplicate_count=self.duplicate_count,
+                       recent_observation_trace=self.observation_trace[-4:])
+            if self.completed_follow_cycles >= META_FOLLOW_CYCLE_THRESHOLD:
+                self.audit('ase_meta_regulation_eligible', task_turn=task_turn,
                            completed_follow_cycles=self.completed_follow_cycles,
-                           task_turn=task_turn)
+                           threshold=META_FOLLOW_CYCLE_THRESHOLD,
+                           exposure_enabled=self.meta_regulation,
+                           first=not self.reorientation_announced)
                 self.reorientation_announced = True
         self.last_output = None
         self.last_call = None
@@ -284,24 +298,21 @@ class LocalContinuity:
             elif self.follow['rationale'] and self.anchor is None:
                 lines.append('Follow context: ' + self.follow['rationale'])
             lines.append('Follow source: ' + str(self.follow['action_locator'] or 'unavailable'))
-        age = None
-        if isinstance(self.episode_start_turn, int) and isinstance(self.current_task_turn, int):
-            age = max(0, self.current_task_turn - self.episode_start_turn)
-        lines.append(f'Control episode: age={age if age is not None else "unknown"} task turns; '
-                     f'interventions={self.intervention_count}; completed follow cycles={self.completed_follow_cycles}; '
-                     f'observations={self.code_run_count} code runs / {self.file_read_count} file reads; '
-                     f'exact duplicates={self.duplicate_count}.')
-        if self.completed_follow_cycles >= 2:
-            self.audit('ase_control_reorientation_surface',
-                       completed_follow_cycles=self.completed_follow_cycles,
-                       episode_start_task_turn=self.episode_start_turn,
-                       current_task_turn=self.current_task_turn)
-            lines.append('Control Reorientation: this local control has crossed multiple Task feedback cycles. '
-                         'Reconsider whether the current observation still changes your control decision. '
-                         'You may change measurement or your premise, continue intervention, or return to broader patrol; '
-                         'neither continuation nor release is required.')
+        if self.meta_regulation:
+            age = None
+            if isinstance(self.episode_start_turn, int) and isinstance(self.current_task_turn, int):
+                age = max(0, self.current_task_turn - self.episode_start_turn)
+            lines.append(f'Control episode: age={age if age is not None else "unknown"} task turns; '
+                         f'interventions={self.intervention_count}; completed follow cycles={self.completed_follow_cycles}; '
+                         f'observations={self.code_run_count} code runs / {self.file_read_count} file reads; '
+                         f'exact duplicates={self.duplicate_count}.')
+            if self.completed_follow_cycles >= META_FOLLOW_CYCLE_THRESHOLD:
+                lines.append('Control Reorientation: this local control has crossed multiple Task feedback cycles. '
+                             'Reconsider whether the current observation still changes your control decision. '
+                             'You may change measurement or your premise, continue intervention, or return to broader patrol; '
+                             'neither continuation nor release is required.')
         lines.append('Current public feedback may confirm, revise, or invalidate this local concern.')
-        trace = self.observation_trace[-4:]
+        trace = self.observation_trace[-4:] if self.meta_regulation else []
         content = '\n'.join(lines + (['Recent Supervisor observations (mechanical): ' +
                                       json.dumps(trace, ensure_ascii=False, separators=(',', ':'))]
                                      if trace else []))
@@ -314,7 +325,10 @@ class LocalContinuity:
             raise ValueError('ASE continuity surface exceeded its bound')
         self.pending_surface = {'content': content, 'sha256': digest(content),
                                 'anchor_locator': self.anchor.get('action_locator') if self.anchor else None,
-                                'follow_locator': self.follow.get('action_locator') if self.follow else None}
+                                'follow_locator': self.follow.get('action_locator') if self.follow else None,
+                                'meta_regulation': self.meta_regulation,
+                                'meta_eligible': self.completed_follow_cycles >= META_FOLLOW_CYCLE_THRESHOLD,
+                                'meta_trace_count': len(trace)}
         return content
 
     def surface_visible(self):
@@ -322,6 +336,13 @@ class LocalContinuity:
         if shown is not None:
             self.audit('ase_continuity_surface_injected', **shown,
                        rendered_characters=len(shown['content']))
+            if shown['meta_regulation']:
+                self.audit('ase_meta_regulation_surface_injected',
+                           rendered_characters=len(shown['content']),
+                           surface_sha256=shown['sha256'],
+                           eligible=shown['meta_eligible'],
+                           trace_count=shown['meta_trace_count'],
+                           source_locator=shown['anchor_locator'])
         return shown
 
 

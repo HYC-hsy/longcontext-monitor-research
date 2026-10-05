@@ -9,10 +9,11 @@ from monitor_agent_core.agent import MONITOR_TOOLS, MonitorAgent
 from monitor_agent_core.ase_v0 import REFERENCE_LIMIT, reference_surface
 from monitor_agent_core.provider import MonitorProviderClient
 from monitor_agent_core.root_scope_v1 import ROOT_SYSTEM_PROMPT
+from monitor_agent_core.runtime import ASE_CONTROL_ACTIONS
 from monitor_agent_core.workspace import MonitorWorkspace
 
 
-def make_monitor(tmp_path, *, ase=True, cqs=False):
+def make_monitor(tmp_path, *, ase=True, cqs=False, meta=None):
     evidence = tmp_path / 'evidence'
     evidence.mkdir(parents=True)
     (evidence / 'original_task.txt').write_text('Maintain the public route.', encoding='utf-8')
@@ -24,6 +25,8 @@ def make_monitor(tmp_path, *, ase=True, cqs=False):
     workspace.write_text('monitor/working.md', 'LOCAL_WORKING_SENTINEL')
     config = {'apikey': 'offline', 'apibase': 'https://offline.invalid', 'model': 'offline',
               'max_retries': 0, 'monitor_adaptive_supervisory_environment': ase}
+    if meta is not None:
+        config['monitor_ase_meta_regulation'] = meta
     if not ase:
         config.update({'monitor_dcec': True, 'monitor_path_control_v0': True,
                        'monitor_verification_loop_v0': True,
@@ -391,7 +394,7 @@ def test_local_intervention_ends_review_once_then_feedback_is_seen(tmp_path, mon
 
 
 def test_episode_economy_reorientation_and_patrol(tmp_path, monkeypatch):
-    monitor, client, ws = make_monitor(tmp_path)
+    monitor, client, ws = make_monitor(tmp_path, meta=True)
     ws.write_text('monitor/reference.md', 'Public route behavior matters.')
     used = [10]
     monitor.task_budget_state = lambda: (used[0], 300)
@@ -424,12 +427,15 @@ def test_episode_economy_reorientation_and_patrol(tmp_path, monkeypatch):
     assert monitor.review('Feedback 3').kind == 'local_intervened'
     assert 'Control Reorientation' in visible(sends[0])
     assert 'Control episode: age=31 task turns' in visible(sends[0])
+    assert 'Recent Supervisor observations (mechanical):' in visible(sends[0])
     assert monitor.cqs.episode_start_turn == 10
     assert monitor.cqs.latest_intervention_turn == 41
     assert monitor.cqs.intervention_count == 2
     assert monitor.cqs.completed_follow_cycles == 2
     events = rows(ws)
-    assert len([r for r in events if r['event'] == 'ase_control_reorientation_wake']) == 1
+    assert len([r for r in events if r['event'] == 'ase_meta_regulation_eligible']) == 1
+    assert [r for r in events if r['event'] == 'ase_meta_regulation_surface_injected'
+            and r['eligible'] and r['trace_count'] > 0]
     assert len([r for r in events if r['event'] == 'ase_episode_observation']) == 4
     sends = scripted(client, monkeypatch, [
         ('', 'wait', {'mode': 'patrol', 'after_turns': 2}),
@@ -454,7 +460,72 @@ def test_root_intervention_keeps_existing_root_action_and_episode_context(tmp_pa
                                            {'message': 'Check final behavior.'})])
     action = monitor.review('Root', completion_pending=True, root_handoff=handoff)
     assert action.kind == 'root_intervened'
-    assert 'Control episode:' in visible(sends[0])
+    assert 'Local Control Continuity' in visible(sends[0])
+    assert 'Control episode:' not in visible(sends[0])
     assert 'Inspect response.' in visible(sends[0])
     assert monitor.cqs.intervention_count == 2
     assert monitor.cqs.anchor['message'] == 'Check final behavior.'
+
+
+def test_default_core_keeps_episode_telemetry_out_of_model_context(tmp_path, monkeypatch):
+    monitor, client, ws = make_monitor(tmp_path)
+    assert 'monitor_ase_meta_regulation' not in client.config
+    assert monitor.ase_meta_regulation is False
+    ws.write_text('monitor/reference.md', 'Public route behavior matters.')
+    monitor.intervention_callback = lambda message: {'submission_id': message, 'delivery': 'queued'}
+    used = [10]
+    monitor.task_budget_state = lambda: (used[0], 300)
+    scripted(client, monkeypatch, [('Concern.', 'intervene', {'message': 'Check response.'})])
+    assert monitor.review('Initial').kind == 'local_intervened'
+    used[0] = 15
+    scripted(client, monkeypatch, [('', 'file_read', {'path': 'task/workspace/router.py'}),
+                                   ('Await edit.', 'wait', {'mode': 'follow', 'after_turns': 2})])
+    assert monitor.review('Feedback 1').kind == 'wait'
+    used[0] = 20
+    scripted(client, monkeypatch, [('Await result.', 'wait', {'mode': 'follow', 'after_turns': 2})])
+    assert monitor.review('Feedback 2').kind == 'wait'
+    used[0] = 30
+    sends = scripted(client, monkeypatch, [('Continue.', 'wait',
+                                            {'mode': 'follow', 'after_turns': 2})])
+    assert monitor.review('Feedback 3').kind == 'wait'
+    shown = visible(sends[0])
+    assert 'Check response.' in shown and 'Await result.' in shown
+    assert not any(marker in shown for marker in (
+        'Control episode:', 'Recent Supervisor observations', 'Control Reorientation'))
+    assert monitor.cqs.completed_follow_cycles == 2
+    assert monitor.cqs.file_read_count == 1
+    events = rows(ws)
+    assert [r for r in events if r['event'] == 'ase_meta_regulation_eligible'
+            and r['exposure_enabled'] is False]
+    assert not [r for r in events if r['event'] == 'ase_meta_regulation_surface_injected']
+    assert [r for r in events if r['event'] == 'ase_control_episode_observed'
+            and r['file_read_count'] == 1]
+
+
+def test_ase_intervention_history_boundaries_are_complete(tmp_path, monkeypatch):
+    monitor, client, ws = make_monitor(tmp_path)
+    ws.write_text('monitor/reference.md', 'Public route behavior matters.')
+    # Runtime installs these names only for ASE live-intervention reviews.
+    client.CONTROL_ACTIONS = ASE_CONTROL_ACTIONS
+    submitted = []
+    monitor.intervention_callback = lambda message: (submitted.append(message) or
+                                                     {'submission_id': message, 'delivery': 'queued'})
+    scripted(client, monkeypatch, [('Local concern.', 'intervene',
+                                    {'message': 'Inspect response.'})])
+    assert monitor.review('Local').kind == 'local_intervened'
+    assert client._review_boundaries()[-1] == len(client.history)
+    local_count = len(client._review_boundaries())
+    handoff = root(monitor)
+    scripted(client, monkeypatch, [('Root concern.', 'intervene',
+                                    {'message': 'Inspect final response.'})])
+    assert monitor.review('Root', completion_pending=True, root_handoff=handoff).kind == 'root_intervened'
+    assert len(client._review_boundaries()) == local_count + 1
+    assert client._review_boundaries()[-1] == len(client.history)
+    assert submitted == ['Inspect response.', 'Inspect final response.']
+
+
+def test_meta_requires_ase_and_boolean_config(tmp_path):
+    with pytest.raises(ValueError, match='requires ASE'):
+        make_monitor(tmp_path / 'legacy', ase=False, meta=True)
+    with pytest.raises(ValueError, match='must be a boolean'):
+        make_monitor(tmp_path / 'wrong', meta='true')
