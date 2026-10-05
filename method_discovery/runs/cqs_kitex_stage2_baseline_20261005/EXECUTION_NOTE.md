@@ -1,0 +1,7 @@
+# CQS-v0 Kitex diagnostic baseline — single fresh trial
+
+Authorized by the main research thread for one Kitex `CFS+DCM` trial with CQS off. The source is the frozen CQS-v0 candidate `cab01032c82d817b1b9ba28e18ef2504bd4a87a7`; `monitor_control_question_state` is the only changed private Monitor profile value relative to Stage-1 Kitex `f74b27efdeff45cc96bf9b70dac8e97a`. The code/tree identity, Task input, image, model routes, budget, runner, and bridge are inherited from that Stage-1 slot. This record does not allocate any other Stage-2 trial or a rerun.
+
+The CQS-off branch in `MonitorAgent._active_working_context` calls the pre-existing bounded `dcec_working_context` for `monitor/working.md` (4000 characters). The CQS-on branch instead renders `ControlQuestionState`. The existing `test_cqs_v0.py::test_off_on_contract_working_view_and_turn_zero` confirms the off/on system and seven tools are equal and that the off request contains the working-note sentinel while the on request does not. This is a wiring check, not a model result. The trial archive will record actual `dcec_working_view` events and provider input.
+
+Only the independent authorization and frozen one-slot runner manifest permit execution. Hidden native evaluation remains terminal-only through the unchanged bridge. Normal scientific outcomes do not authorize rerun; identity, isolation, or critical capture/binding failure stops the work with raw evidence preserved.
