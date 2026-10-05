@@ -1,0 +1,23 @@
+=== TARGET 3 DEFAULT PROTOCOL INVESTIGATION ===
+
+Spec requirement: Default transport protocol should be Framed (not PurePayload)
+
+1. Checking rpcinfo default initialization:
+func newRPCConfig() interface{} {
+	c := &rpcConfig{}
+	c.initialize()
+	return c
+}
+
+--
+func NewRPCConfig() RPCConfig {
+	r := rpcConfigPool.Get().(*rpcConfig)
+	return r
+}
+
+2. Checking if transport protocol has a default value:
+
+3. Checking client default options:
+186:	if o.Configs.TransportProtocol()&transport.GRPC == transport.GRPC {
+
+4. Check if any file sets Framed as default:

@@ -1,0 +1,19 @@
+=== CRITICAL: OPTION_STREAM.GO CURRENT STATE ===
+
+Lines 50-55 (WithStreamMiddleware):
+		di.Push("WithStreamMiddleware(...)")
+		streamOpt := func(opts *client.Options) {
+			opts.StreamX.StreamMWs = append(opts.StreamX.StreamMWs, mw)
+		}
+		o.StreamOptions = append(o.StreamOptions, streamOpt)
+	}}
+
+The error says: 'cannot use mw (type cep.StreamMiddleware) as streamx.StreamMiddleware'
+This means it's trying to append to a streamx field, not a cep field
+
+Checking what field it's appending to:
+			opts.StreamX.StreamMWs = append(opts.StreamX.StreamMWs, mw)
+		}
+		o.StreamOptions = append(o.StreamOptions, streamOpt)
+	}}
+}

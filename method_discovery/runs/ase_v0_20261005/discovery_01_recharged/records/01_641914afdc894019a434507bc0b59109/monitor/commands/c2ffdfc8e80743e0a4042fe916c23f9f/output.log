@@ -1,0 +1,30 @@
+=== Verifying unmarshalThriftData function ===
+
+// unmarshalThriftData only decodes the data (after methodName, msgType and seqId)
+// method is only used for generic calls
+func (c thriftCodec) unmarshalThriftData(trans bufiox.Reader, data interface{}, dataLen int) error {
+	dataLenOK := c.IsDataLenDeterministic(dataLen)
+	typecodec := getTypeCodec(data)
+	if dataLenOK && c.IsSet(FrugalRead) && typecodec.Frugal {
+		return frugalUnmarshal(trans, data, dataLen)
+	}
+	if dataLenOK && c.IsSet(FastRead) && typecodec.FastCodec {
+		return fastUnmarshal(trans, data, dataLen)
+	}
+	if typecodec.Apache {
+		return apacheUnmarshal(trans, data)
+	}
+	if dataLenOK {
+		// Basic codec now falls back to FastCodec/Frugal if available
+		// try fallback to frugal or fastcodec
+		// case: typecodec.Frugal=false but typecodec.FastCodec=true
+		if typecodec.FastCodec {
+			return fastUnmarshal(trans, data, dataLen)
+		}
+		// case: typecodec.FastCodec=false but typecodec.Frugal=true
+		if typecodec.Frugal {
+			return frugalUnmarshal(trans, data, dataLen)
+		}
+	}
+	return errDecodeMismatchMsgType
+}

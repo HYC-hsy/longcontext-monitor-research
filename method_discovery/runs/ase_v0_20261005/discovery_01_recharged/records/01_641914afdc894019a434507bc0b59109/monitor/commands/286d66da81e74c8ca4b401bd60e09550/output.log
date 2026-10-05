@@ -1,0 +1,25 @@
+=== DETAILED MISSING COMPONENTS CHECK ===
+
+Target 5 (Client Options) - CRITICAL GAPS:
+  Required files per spec:
+    1. option_unary.go: WithUnaryOptions, WithUnaryRPCTimeout, WithUnaryMiddleware, WithUnaryMiddlewareBuilder
+    2. option_ttstream.go: WithTTHeaderStreamingOptions, WithTTHeaderStreamingTransportOptions
+    3. option.go: Type aliases (UnaryOption, StreamOption, TTHeaderStreamingOption, etc.)
+    4. callopt/streamcall: WithRecvTimeout
+
+  Status:
+ls: cannot access '/app/client/option_unary.go': No such file or directory
+ls: cannot access '/app/client/option_ttstream.go': No such file or directory
+
+  Type aliases in option.go:
+
+  WithRecvTimeout in callopt/streamcall:
+    ✗ WithRecvTimeout NOT FOUND
+
+Target 6 (gRPC Diagnostics) - FRAME READER:
+  Required: Replace readFrameHeader(r) with fr.readAndCheckFrameHeader()
+  Current state:
+373:func readFrameHeader(r netpoll.Reader) (http2.FrameHeader, error) {
+
+  Required error format with hex dump:
+    ✗ Enhanced error format NOT FOUND

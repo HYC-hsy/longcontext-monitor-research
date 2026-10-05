@@ -1,0 +1,29 @@
+=== CRITICAL: Target 4 Issue ===
+thrift_data.go line 66 still has: if c.CodecType != Basic
+This prevents Basic codec from using fallback!
+
+Current code (lines 55-78):
+func (c thriftCodec) marshalThriftData(ctx context.Context, data interface{}) ([]byte, error) {
+	typecodec := getTypeCodec(data)
+	if c.IsSet(FrugalWrite) && typecodec.Frugal {
+		return frugalMarshalData(data)
+	}
+	if c.IsSet(FastWrite) && typecodec.FastCodec {
+		return fastMarshalData(data)
+	}
+	if typecodec.Apache {
+		return apacheMarshalData(data)
+	}
+	if c.CodecType != Basic {
+		// try fallback to frugal or fastcodec
+		// case: typecodec.Frugal=false but typecodec.FastCodec=true
+		if typecodec.FastCodec {
+			return fastMarshalData(data)
+		}
+		// case: typecodec.FastCodec=false but typecodec.Frugal=true
+		if typecodec.Frugal {
+			return frugalMarshalData(data)
+		}
+	}
+	return nil, errEncodeMismatchMsgType
+}

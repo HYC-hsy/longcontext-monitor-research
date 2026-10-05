@@ -1,0 +1,30 @@
+
+# Detailed verification of missing components
+echo "=== DETAILED MISSING COMPONENTS CHECK ==="
+echo ""
+
+echo "Target 5 (Client Options) - CRITICAL GAPS:"
+echo "  Required files per spec:"
+echo "    1. option_unary.go: WithUnaryOptions, WithUnaryRPCTimeout, WithUnaryMiddleware, WithUnaryMiddlewareBuilder"
+echo "    2. option_ttstream.go: WithTTHeaderStreamingOptions, WithTTHeaderStreamingTransportOptions"
+echo "    3. option.go: Type aliases (UnaryOption, StreamOption, TTHeaderStreamingOption, etc.)"
+echo "    4. callopt/streamcall: WithRecvTimeout"
+echo ""
+echo "  Status:"
+ls -la /app/client/option_unary.go 2>&1 | grep -E "cannot access|option_unary"
+ls -la /app/client/option_ttstream.go 2>&1 | grep -E "cannot access|option_ttstream"
+echo ""
+echo "  Type aliases in option.go:"
+grep -E "^type (UnaryOption|StreamOption|TTHeaderStreamingOption)" /app/client/option.go | head -5 || echo "    ✗ Type aliases NOT FOUND"
+echo ""
+echo "  WithRecvTimeout in callopt/streamcall:"
+grep -r "WithRecvTimeout" /app/client/callopt/streamcall/ 2>/dev/null || echo "    ✗ WithRecvTimeout NOT FOUND"
+
+echo ""
+echo "Target 6 (gRPC Diagnostics) - FRAME READER:"
+echo "  Required: Replace readFrameHeader(r) with fr.readAndCheckFrameHeader()"
+echo "  Current state:"
+grep -n "func.*readFrameHeader\|func.*readAndCheckFrameHeader" /app/pkg/remote/trans/nphttp2/grpc/grpcframe/frame_reader.go | head -3
+echo ""
+echo "  Required error format with hex dump:"
+grep "invalid frame.*first4Bytes" /app/pkg/remote/trans/nphttp2/grpc/grpcframe/frame_reader.go || echo "    ✗ Enhanced error format NOT FOUND"

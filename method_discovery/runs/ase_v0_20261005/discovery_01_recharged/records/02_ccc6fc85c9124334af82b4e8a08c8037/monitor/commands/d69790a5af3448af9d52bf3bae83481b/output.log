@@ -1,0 +1,40 @@
+	b.val = v
+	b.old = *v
+	return b
+}
+
+type boundString struct {
+	base
+
+	val *string
+}
+
+func (b *boundString) Get() (string, error) {
+	b.lock.RLock()
+	defer b.lock.RUnlock()
+
+	if b.val == nil {
+		return "", nil
+	}
+	return *b.val, nil
+}
+
+--
+
+	b.trigger()
+	return nil
+}
+
+type boundExternalString struct {
+	boundString
+
+	old string
+}
+
+func (b *boundExternalString) Set(val string) error {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+	if b.old == val {
+		return nil
+	}
+	*b.val = val

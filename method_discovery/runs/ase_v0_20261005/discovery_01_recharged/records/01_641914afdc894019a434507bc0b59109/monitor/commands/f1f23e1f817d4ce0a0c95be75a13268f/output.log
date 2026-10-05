@@ -1,0 +1,28 @@
+=== TARGET 5 REQUIREMENT 7: Retry Migration Status ===
+
+The spec says:
+  'The existing WithFailureRetry and WithBackupRequest options must store
+   retry policies in o.UnaryOptions.RetryMethodPolicies (not the old o.RetryMethodPolicies)'
+
+Checking current implementation:
+
+1. WithFailureRetry:
+			if opts.RetryMethodPolicies == nil {
+				opts.RetryMethodPolicies = make(map[string]retry.Policy)
+			if opts.RetryMethodPolicies[retry.Wildcard].MixedPolicy != nil ||
+
+2. WithBackupRequest:
+			if opts.RetryMethodPolicies == nil {
+				opts.RetryMethodPolicies = make(map[string]retry.Policy)
+			if opts.RetryMethodPolicies[retry.Wildcard].MixedPolicy != nil ||
+
+3. WithRetryContainer:
+
+4. WithFallback:
+func WithFallback(fb *fallback.Policy) Option {
+			panic(fmt.Errorf("WithFallback: invalid '%+v'", fb))
+		di.Push(fmt.Sprintf("WithFallback(%+v)", fb))
+
+5. WithSpecifiedResultRetry:
+			opts.RetryWithResult = rr
+		o.UnaryOptions = append(o.UnaryOptions, unaryOpt)

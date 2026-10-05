@@ -1,0 +1,19 @@
+=== CRITICAL: Target 5 Status ===
+Missing files:
+  - client/option_unary.go (REQUIRED per spec)
+  - client/option_ttstream.go (REQUIRED per spec)
+
+Missing type aliases in client/option.go:
+  - UnaryOption = client.UnaryOption
+  - StreamOption = client.StreamOption
+  - TTHeaderStreamingOption = client.TTHeaderStreamingOption
+  - Plus their Options container types
+
+Current client/option.go has:
+2
+type definitions (need to check if the new aliases are there)
+
+=== Target 6 frame_reader.go Status ===
+Required: Replace readFrameHeader with Framer.readAndCheckFrameHeader() method
+Current state:
+373:func readFrameHeader(r netpoll.Reader) (http2.FrameHeader, error) {

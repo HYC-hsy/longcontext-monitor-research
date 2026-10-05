@@ -1,0 +1,48 @@
+=== TARGET 3 DEFAULT PROTOCOL CLARIFICATION ===
+
+Spec states: 'Default transport protocol for new RPC configurations should be
+             transport.Framed instead of transport.PurePayload (0)'
+
+This means: When creating a new client/server WITHOUT specifying a protocol,
+            it should default to Framed, not PurePayload
+
+Looking for where this default is set in initialization code:
+
+1. rpcconfig.initialize() method:
+func (r *rpcConfig) initialize() {
+	r.readOnlyMask = 0
+	r.rpcTimeout = defaultRPCTimeout
+	r.connectTimeout = defaultConnectTimeout
+	r.readWriteTimeout = defaultReadWriteTimeout
+	r.ioBufferSize = defaultBufferSize
+	r.transportProtocol = 0
+	r.interactionMode = defaultInteractionMode
+}
+
+// Recycle reuses the rpcConfig.
+--
+	r.initialize()
+	rpcConfigPool.Put(r)
+}
+
+2. Checking if TransportProtocol field has a default value:
+	readOnlyMask      int
+	rpcTimeout        time.Duration
+	connectTimeout    time.Duration
+	readWriteTimeout  time.Duration
+	ioBufferSize      int
+	transportProtocol transport.Protocol
+	interactionMode   InteractionMode
+	payloadCodec      serviceinfo.PayloadCodec
+
+	// stream config
+	streamRecvTimeout time.Duration
+--
+func (r *rpcConfig) IOBufferSize() int {
+	return r.ioBufferSize
+}
+
+// TransportProtocol implements RPCConfig interface. It is only useful for client.
+func (r *rpcConfig) TransportProtocol() transport.Protocol {
+	return r.transportProtocol
+}

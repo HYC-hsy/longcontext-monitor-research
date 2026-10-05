@@ -1,0 +1,18 @@
+=== TARGET 6 FRAME_READER DETAILED CHECK ===
+
+Required per spec:
+  1. Replace standalone readFrameHeader(r) with Framer method readAndCheckFrameHeader()
+  2. Enhanced error with hex dump format
+
+Current implementation:
+
+1. Method signature check:
+func (fr *Framer) readAndCheckFrameHeader() (http2.FrameHeader, error) {
+	buf, err := fr.reader.Next(frameHeaderLen)
+	if err != nil {
+
+2. Enhanced error format check (looking for hex dump):
+			fmt.Sprintf("invalid frame (first4Bytes=%#x, second4Bytes=%#x): frame too large (%d > %d)",
+
+3. Check if standalone readFrameHeader still exists:
+  Standalone function removed/converted

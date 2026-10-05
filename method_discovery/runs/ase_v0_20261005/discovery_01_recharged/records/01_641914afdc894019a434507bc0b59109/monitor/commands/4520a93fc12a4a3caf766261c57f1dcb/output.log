@@ -1,0 +1,22 @@
+=== FINAL RETRY MIGRATION VERIFICATION ===
+
+Checking if retry functions append to o.UnaryOptions (required by spec):
+
+1. WithFailureRetry - checking for 'o.UnaryOptions = append':
+		o.UnaryOptions = append(o.UnaryOptions, unaryOpt)
+
+2. WithBackupRequest - checking for 'o.UnaryOptions = append':
+		o.UnaryOptions = append(o.UnaryOptions, unaryOpt)
+
+3. WithFallback - checking for 'o.UnaryOptions = append':
+		o.UnaryOptions = append(o.UnaryOptions, unaryOpt)
+
+4. WithSpecifiedResultRetry - checking for 'o.UnaryOptions = append':
+		o.UnaryOptions = append(o.UnaryOptions, unaryOpt)
+
+SUMMARY:
+The spec requirement states retry functions must store in o.UnaryOptions.RetryMethodPolicies
+This means: unaryOpt func sets opts.RetryMethodPolicies, then o.UnaryOptions = append(o.UnaryOptions, unaryOpt)
+
+Current implementation: WithFailureRetry creates unaryOpt func but doesn't append to o.UnaryOptions
+Status: Requirement 7 - INCOMPLETE (migration pattern not followed)

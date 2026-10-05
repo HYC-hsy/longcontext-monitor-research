@@ -1,0 +1,22 @@
+=== BUILD ERROR DETAILS ===
+
+1. TailOption redeclaration:
+   Line 65:
+type TailOption = client.TailOption
+
+// UnaryOptions is a slice of UnaryOption functions.
+   Line 88:
+func TailOption(opt Option) client.TailOption {
+	return func(o *client.Options) {
+		opt.F(o, &o.DebugInfo)
+
+2. StreamXOpts undefined - checking if it exists in internal/client:
+128:	StreamOptions            []StreamOption
+235:// StreamOptions are applied only to streaming RPC calls.
+
+3. streamx package check:
+total 132
+drwxrwxr-x 3 root root  4096 Apr 12 15:21 .
+drwxrwxr-x 1 root root  4096 Apr 12 15:49 ..
+-rw-rw-r-- 1 root root   798 Apr 12 15:21 client_options.go
+-rw-rw-r-- 1 root root  1545 Apr 12 15:21 client_provider.go

@@ -1,0 +1,18 @@
+=== BUILD ERROR CHECK ===
+
+Turn 151 showed: client/option_stream.go:70:29: too many errors
+
+Checking line 70 of option_stream.go:
+		streamOpt := func(opts *client.Options) {
+			// Store as StreamMiddleware wrapper that applies the builder
+			mw := func(next streamx.StreamHandler) streamx.StreamHandler {
+				return func(ctx streamx.StreamContext) error {
+					dynamicMW := mwb(ctx)
+					return dynamicMW(next)(ctx)
+				}
+			}
+			opts.StreamXOpts.StreamMWs = append(opts.StreamXOpts.StreamMWs, mw)
+		}
+		o.StreamOptions = append(o.StreamOptions, streamOpt)
+
+This appears to be a compilation error in option_stream.go

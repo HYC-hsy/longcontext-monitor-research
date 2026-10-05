@@ -1,0 +1,19 @@
+=== Understanding the Duplicate Issue ===
+Original files (existed before our work):
+  - pkg/endpoint/recv_endpoint.go: Has RecvEndpoint using streaming.Stream
+  - pkg/endpoint/send_endpoint.go: Has SendEndpoint using streaming.Stream
+
+Spec requirement for Target 2:
+  - Create deprecated.go with RecvEndpoint, SendEndpoint, RecvMiddleware, etc.
+
+INTERPRETATION:
+  The spec says 'Deprecated types (pkg/endpoint)' in deprecated.go
+  BUT the original codebase ALREADY has recv_endpoint.go and send_endpoint.go
+  These files should likely be MOVED to deprecated.go, not duplicated
+
+However, the spec says 'Create deprecated type ALIASES in a deprecated.go file'
+So maybe these should be TYPE ALIASES, not new declarations?
+
+Checking if original files should remain:
+-rw-rw-r-- 1 root root 1320 Apr 12 15:21 /app/pkg/endpoint/recv_endpoint.go
+-rw-rw-r-- 1 root root 1320 Apr 12 15:21 /app/pkg/endpoint/send_endpoint.go

@@ -1,0 +1,18 @@
+=== sep.StreamEndpoint signature ===
+type StreamEndpoint func(ctx context.Context, st streaming.ServerStream) error
+
+
+=== DummyDummyMiddleware in cep ===
+// DummyDummyMiddleware is a special no-op middleware for testing (note: double "Dummy" is intentional).
+func DummyDummyMiddleware(next Endpoint) Endpoint {
+
+=== StreamRecvEndpoint.EqualsTo in cep ===
+func (e StreamRecvEndpoint) EqualsTo(e2 StreamRecvEndpoint) bool {
+	return reflect.ValueOf(e).Pointer() == reflect.ValueOf(e2).Pointer()
+}
+
+=== Deprecated RecvEndpoint/SendEndpoint ===
+type RecvEndpoint func(stream streaming.Stream, message interface{}) (err error)
+
+--
+type SendEndpoint func(stream streaming.Stream, message interface{}) (err error)

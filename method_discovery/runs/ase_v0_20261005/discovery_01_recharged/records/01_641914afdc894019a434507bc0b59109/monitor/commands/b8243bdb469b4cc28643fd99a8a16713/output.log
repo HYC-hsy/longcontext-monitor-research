@@ -1,0 +1,51 @@
+=== FINAL COMPREHENSIVE TARGET VERIFICATION (Turn 131) ===
+
+✓ TARGET 1: Streaming Types - VERIFIED COMPLETE
+  - stream_types.go exists with all generic types
+  - Args/Result extended with ClientStream/ServerStream fields
+
+✓ TARGET 2: Endpoint Architecture - VERIFIED COMPLETE
+  - cep/sep packages exist
+  - StreamRecvEndpoint/StreamSendEndpoint with EqualsTo methods present
+  - DummyDummyMiddleware in cep exists
+  - deprecated.go complete with all middleware/builder/chain types
+
+? TARGET 3: Transport Protocol - NEEDS DEFAULT PROTOCOL VERIFICATION
+  ✓ TTHeaderStreaming(64), GRPCStreaming(128) as dedicated flags
+  ✓ String() handles composites with pipe-separated names
+  ? Default protocol change PurePayload→Framed
+
+  Checking default protocol in pkg/remote/codec/default_codec.go:
+	if tp&transport.Framed == transport.Framed {
+		if framedLenField, err = out.Malloc(Size32); err != nil {
+			return err
+--
+	if tp&transport.Framed == transport.Framed {
+		if framedLenField == nil {
+			return perrors.NewProtocolErrorWithMsg("no buffer allocated for the framed length field")
+--
+		// if protocol is PurePayload, should set payload length after decoded
+		message.SetPayloadLen(in.ReadLen() - hasRead)
+
+✓ TARGET 4: Thrift Codec Fallback - VERIFIED COMPLETE
+  - Basic codec exclusion removed from marshalThriftData
+  - Basic codec exclusion removed from unmarshalThriftData
+
+✓ TARGET 5: Client Options - VERIFIED COMPLETE
+  All 7 requirements complete:
+  ✓ Type aliases (6/6)
+  ✓ option_unary.go (4 functions)
+  ✓ option_stream.go (9 functions including WithTailOption)
+  ✓ option_ttstream.go (2 functions)
+  ✓ TailOption function in option.go
+  ✓ WithRecvTimeout in callopt/streamcall
+  ✓ Retry/fallback migration to UnaryOptions (all 4 functions)
+
+✓ TARGET 6: gRPC Diagnostics - VERIFIED COMPLETE
+  ✓ conn_pool.Dump() method implemented with panic safety
+  ✓ frame_reader.readAndCheckFrameHeader() method exists
+  ✓ Enhanced error format with hex dump verified
+
+SUMMARY:
+  Complete: 5/6 targets (1, 2, 4, 5, 6)
+  Pending verification: Target 3 default protocol change

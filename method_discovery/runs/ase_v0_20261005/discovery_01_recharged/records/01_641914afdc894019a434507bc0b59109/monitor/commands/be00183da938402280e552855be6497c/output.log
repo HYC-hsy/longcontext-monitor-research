@@ -1,0 +1,14 @@
+=== TailOption Function Check ===
+TailOption function NOT FOUND in option.go
+
+=== Retry Migration Check ===
+Checking WithFailureRetry implementation:
+func WithFailureRetry(p *retry.FailurePolicy) Option {
+	return Option{F: func(o *client.Options, di *utils.Slice) {
+		if p == nil {
+			return
+		}
+		di.Push(fmt.Sprintf("WithFailureRetry(%+v)", p))
+		if o.RetryMethodPolicies == nil {
+			o.RetryMethodPolicies = make(map[string]retry.Policy)
+		}

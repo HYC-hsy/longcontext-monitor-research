@@ -1,0 +1,26 @@
+=== RETRY MIGRATION VERIFICATION ===
+
+Pattern to look for: unaryOpt func that sets opts.RetryMethodPolicies or opts.Fallback
+                    then appends to o.UnaryOptions
+
+1. WithFailureRetry structure:
+func WithFailureRetry(p *retry.FailurePolicy) Option {
+	return Option{F: func(o *client.Options, di *utils.Slice) {
+		if p == nil {
+			return
+		}
+		di.Push(fmt.Sprintf("WithFailureRetry(%+v)", p))
+		unaryOpt := func(opts *client.Options) {
+			if opts.RetryMethodPolicies == nil {
+				opts.RetryMethodPolicies = make(map[string]retry.Policy)
+			}
+			if opts.RetryMethodPolicies[retry.Wildcard].MixedPolicy != nil ||
+				opts.RetryMethodPolicies[retry.Wildcard].BackupPolicy != nil {
+				panic("MixedPolicy or BackupPolicy has been setup, cannot support Failure Retry at same time")
+			}
+			opts.RetryMethodPolicies[retry.Wildcard] = retry.BuildFailurePolicy(p)
+		}
+
+2. WithSpecifiedResultRetry (already migrated per synopsis):
+		unaryOpt := func(opts *client.Options) {
+			opts.RetryWithResult = rr

@@ -1,0 +1,32 @@
+=== TARGET 3 DEFAULT PROTOCOL VERIFICATION ===
+
+Spec requirement: 'The default transport protocol for new RPC configurations
+                   should be transport.Framed instead of transport.PurePayload (0)'
+
+Checking where default protocol is set:
+
+1. Client default protocol:
+
+2. Codec default protocol selection:
+249:		// if protocol is PurePayload, should set payload length after decoded
+407:			transProto = transport.TTHeader
+409:			transProto = transport.PurePayload
+414:			transProto = transport.TTHeaderFramed
+416:			transProto = transport.Framed
+426:			transProto = transport.TTHeaderFramed
+428:			transProto = transport.Framed
+
+3. RPC config initialization:
+/app/pkg/rpcinfo/convert_test.go:130:	test.Assert(t, mc.SetTransportProtocol(transport.HTTP) == nil)
+/app/pkg/rpcinfo/mutable.go:48:	SetTransportProtocol(tp transport.Protocol) error
+/app/pkg/rpcinfo/rpcconfig.go:170:// SetTransportProtocol implements MutableRPCConfig interface.
+/app/pkg/rpcinfo/rpcconfig.go:171:func (r *rpcConfig) SetTransportProtocol(tp transport.Protocol) error {
+/app/pkg/rpcinfo/rpcconfig.go:173:	// since in previous implementation, r.transport |= transport.PurePayload would not take effect
+/app/pkg/rpcinfo/rpcconfig.go:174:	if tp == transport.PurePayload {
+/app/pkg/rpcinfo/rpcconfig_test.go:34:	test.Assert(t, c.TransportProtocol() == transport.PurePayload)
+/app/pkg/rpcinfo/rpcconfig_test.go:37:func TestSetTransportProtocol(t *testing.T) {
+/app/pkg/rpcinfo/rpcconfig_test.go:40:		_ = rpcinfo.AsMutableRPCConfig(c).SetTransportProtocol(transport.TTHeader)
+/app/pkg/rpcinfo/rpcconfig_test.go:45:		_ = rpcinfo.AsMutableRPCConfig(c).SetTransportProtocol(transport.Framed)
+
+Note: The spec requires the DEFAULT to be Framed, not PurePayload
+      This means new clients/servers should use Framed unless explicitly configured otherwise

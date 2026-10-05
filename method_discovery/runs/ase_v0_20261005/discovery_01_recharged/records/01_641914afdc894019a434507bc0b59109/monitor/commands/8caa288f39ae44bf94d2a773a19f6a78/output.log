@@ -1,0 +1,18 @@
+=== SPEC VERIFICATION ===
+
+The spec for Target 5 (Client Options) says:
+  'WithStreamMiddlewareBuilder(mwb cep.StreamMiddlewareBuilder) StreamOption'
+
+This means the functions should use cep package types, not streamx types!
+
+Checking if cep package has the required types:
+// StreamMiddleware is a chainable wrapper around a StreamEndpoint.
+type StreamMiddleware func(StreamEndpoint) StreamEndpoint
+// StreamRecvMiddleware is a chainable wrapper around a StreamRecvEndpoint.
+type StreamRecvMiddleware func(StreamRecvEndpoint) StreamRecvEndpoint
+// StreamSendMiddleware is a chainable wrapper around a StreamSendEndpoint.
+type StreamSendMiddleware func(StreamSendEndpoint) StreamSendEndpoint
+// StreamMiddlewareBuilder builds a stream middleware with information from a context.
+type StreamMiddlewareBuilder func(ctx context.Context) StreamMiddleware
+// StreamRecvMiddlewareBuilder builds a stream recv middleware with information from a context.
+type StreamRecvMiddlewareBuilder func(ctx context.Context) StreamRecvMiddleware
