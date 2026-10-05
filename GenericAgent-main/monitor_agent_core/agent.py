@@ -42,6 +42,7 @@ from .verification_loop_v0 import GUIDANCE as VERIFICATION_GUIDANCE, SelectedVer
 from .eis_v0 import GUIDANCE as EIS_GUIDANCE, executable_interpretation_surface
 from .cfs_v0 import SituationState
 from .dcm_v0 import DecisionMeasurementBoundary
+from .cqs_v0 import ControlQuestionState
 
 
 def _tool(name, description, properties, required):
@@ -398,6 +399,16 @@ class MonitorAgent:
                             or self.verification_runtime_managed or self.eis_v0):
             raise ValueError('DCM-v0 requires CFS, manual continuous verification and EIS off')
         self.dcm = DecisionMeasurementBoundary(self._audit_dialogue) if self.dcm_v0 else None
+        self.cqs_v0 = getattr(client, 'config', {}).get('monitor_control_question_state', False)
+        if type(self.cqs_v0) is not bool:
+            raise ValueError('monitor_control_question_state must be a boolean')
+        if self.cqs_v0 and (not self.dcm_v0 or not self.cfs_v0 or not self.verification_loop_v0
+                            or self.verification_runtime_managed or self.eis_v0
+                            or self.root_scope_v1 != 'off'
+                            or getattr(client, 'config', {}).get('monitor_release_support_horizon', False)):
+            raise ValueError('CQS-v0 requires CFS, DCM, manual continuous verification, EIS/RSH off')
+        self.cqs = ControlQuestionState(self._audit_dialogue) if self.cqs_v0 else None
+        self._dialogue_line = None
         if self.situation is not None:
             self.client.active_context_appended = self._cfs_context_appended
         self.root_routed = self.root_scope_v1 != 'off' or self.verification_loop_v0
@@ -542,14 +553,17 @@ class MonitorAgent:
             if text:
                 parts.append(text)
         if self.dcec_enabled:
-            if self.path_control_v0 and self.frame_kind != 'root':
-                text, metadata = dcec_working_context(
-                    self.workspace, self.dcec_working_chars, PATH_CONTROL_WORKING_GUIDANCE)
+            if self.cqs is not None:
+                parts.append(self.cqs.render())
             else:
-                text, metadata = dcec_working_context(self.workspace, self.dcec_working_chars)
-            self._audit_dialogue('dcec_working_view', **metadata)
-            self._progress('dcec_working_view', **metadata)
-            parts.append(text)
+                if self.path_control_v0 and self.frame_kind != 'root':
+                    text, metadata = dcec_working_context(
+                        self.workspace, self.dcec_working_chars, PATH_CONTROL_WORKING_GUIDANCE)
+                else:
+                    text, metadata = dcec_working_context(self.workspace, self.dcec_working_chars)
+                self._audit_dialogue('dcec_working_view', **metadata)
+                self._progress('dcec_working_view', **metadata)
+                parts.append(text)
             if self.path_control_v0 and not self.cfs_v0:
                 window, window_metadata = recent_public_events(
                     self.workspace, getattr(self.client, 'observed_root_handoff', None))
@@ -588,6 +602,8 @@ class MonitorAgent:
             self._audit_dialogue('supervisory_situation_injected',
                                  shown_through_cursor=shown['cursor'],
                                  manifest_locator=shown['manifest_locator'], content=shown['text'])
+        if self.cqs is not None:
+            self.cqs.surface_visible()
 
     def _atomic_private_text(self, relative_path, text):
         path = self.workspace.private_root / relative_path
@@ -616,6 +632,13 @@ class MonitorAgent:
         with path.open('a', encoding='utf-8') as stream:
             stream.write(json.dumps(record, ensure_ascii=False, default=str) + '\n')
             stream.flush()
+        if self.cqs is not None:
+            if self._dialogue_line is None:
+                with path.open('rb') as stream:
+                    self._dialogue_line = sum(1 for _ in stream)
+            else:
+                self._dialogue_line += 1
+            self.cqs.observe(record, self._dialogue_line)
 
     def _prepare_continuation(self):
         """Same model, existing history, no tool actions during pre-compaction handoff."""
@@ -887,6 +910,8 @@ class MonitorAgent:
                     self._sent_messages.add(message)
                     if self.dcm is not None:
                         self.dcm.abandon('intervened')
+                    if self.cqs is not None:
+                        self.cqs.submitted_intervention(message)
                     if self.verification is not None:
                         self.verification.on_intervention(message)
                     if self._seen_completion:
@@ -1051,6 +1076,8 @@ class MonitorAgent:
         self.client.review_id = self.review_id
         if self.dcm is not None:
             self.dcm.begin_review(self.review_id)
+        if self.cqs is not None:
+            self.cqs.begin_review(self.review_id)
         if self.situation is not None:
             self.situation.begin_review(self.review_id)
         if root_handoff is not None:
@@ -1165,6 +1192,8 @@ class MonitorAgent:
                                     if self.root_routed and self.frame_kind == 'local'
                                     else None),
             )
+            if self.cqs is not None:
+                self.cqs.completed_wait(action)
             return action
         finally:
             if self.dcm is not None:
