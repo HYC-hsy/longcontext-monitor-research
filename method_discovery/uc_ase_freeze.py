@@ -29,6 +29,8 @@ ORDER = (
     ('ktx-0.13.0-roadmap', 'fd962a22d2bc4af195d90e9de9ee34cd'),
     ('fyn-2.2.0-roadmap', '05b98c58e31a43a597d142fee3e26392'),
 )
+COMMON_OVERRIDES = {}
+REPLACEMENT_PROVENANCE = None
 
 
 def write_once(path, value):
@@ -64,6 +66,7 @@ def main():
     if common['GA_MAX_TURNS'] != '180':
         raise RuntimeError('Inherited Task turn ceiling changed')
     common['GA_MAX_TURNS'] = '300'
+    common.update(COMMON_OVERRIDES)
 
     source = PRIVATE / 'launch_ASE' / 'GenericAgent-main'
     shutil.copytree(SOURCE_BASE, source)
@@ -147,6 +150,8 @@ def main():
             'run_order': [row[1] for row in ORDER], 'slots': slots,
             'source_overlay_paths': changed,
             'stop_rule': 'stop after any confirmed infrastructure-invalid slot; no rerun or replacement'}
+    if REPLACEMENT_PROVENANCE is not None:
+        plan['replacement_provenance'] = REPLACEMENT_PROVENANCE
     write_once(PLAN, plan)
     write_once(MANIFEST, {'secrets_included': False, 'runs': runs})
     for slot in slots:

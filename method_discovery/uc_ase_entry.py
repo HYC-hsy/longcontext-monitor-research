@@ -12,6 +12,9 @@ from method_discovery import uc_r5_execution_entry as inherited
 from method_discovery.uc_r5_execution_bridge import file_sha, save_json
 from method_discovery.uc_ase_freeze import REPO, ROOT, PLAN, MANIFEST
 
+HARBOR_CLI = REPO / 'method_discovery/uc_ase_harbor_cli.py'
+COMMON_OVERRIDES = {}
+
 
 def load_authorized_slot(run_id, authorization_path):
     plan = json.loads(PLAN.read_text(encoding='utf-8'))
@@ -62,6 +65,7 @@ def launch(run_id, authorization_path):
     common = json.loads((REPO / 'method_discovery/runs/uc_r5_cmp_readiness_20261003/ENVIRONMENT_DRAFT.json'
                          ).read_text(encoding='utf-8'))['common']
     common['GA_MAX_TURNS'] = '300'
+    common.update(COMMON_OVERRIDES)
     for name, value in common.items():
         if os.environ.get(name) != value:
             raise RuntimeError(f'Effective common runtime configuration mismatch: {name}')
@@ -86,7 +90,7 @@ def launch(run_id, authorization_path):
         if len(command) < 3 or command[0] != harbor_exe or command[1:3] != ['jobs', 'start']:
             return original_run(command, *args, **kwargs)
         harbor_python = str(Path(harbor_exe).with_name('python.exe'))
-        guarded = [harbor_python, str(REPO / 'method_discovery/uc_ase_harbor_cli.py'), *command[1:]]
+        guarded = [harbor_python, str(HARBOR_CLI), *command[1:]]
         return original_run(guarded, *args, **kwargs)
 
     m4.run = run_with_hooks

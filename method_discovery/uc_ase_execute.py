@@ -12,6 +12,8 @@ from method_discovery.uc_ase_entry import load_authorized_slot
 from method_discovery.uc_ase_freeze import PLAN, MANIFEST, ROOT, REPO, ORDER
 from method_discovery.uc_r5_execution_bridge import file_sha
 
+ENTRY_MODULE = 'method_discovery.uc_ase_entry'
+
 
 def main():
     plan = json.loads(PLAN.read_text(encoding='utf-8'))
@@ -45,7 +47,7 @@ def main():
         print(f"START {run_id} {item['started_at']}", flush=True)
         with log_path.open('wb') as log:
             completed = subprocess.run(
-                [sys.executable, '-m', 'method_discovery.uc_ase_entry',
+                [sys.executable, '-m', ENTRY_MODULE,
                  '--run-id', run_id, '--authorization',
                  str((ROOT / f'AUTH_{run_id}.json').resolve())],
                 cwd=REPO, stdout=log, stderr=subprocess.STDOUT)
