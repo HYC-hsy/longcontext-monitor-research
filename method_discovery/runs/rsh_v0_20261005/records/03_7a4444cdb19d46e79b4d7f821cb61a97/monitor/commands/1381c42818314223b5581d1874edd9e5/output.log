@@ -1,0 +1,16 @@
+
+✓ Bitwise AND check present - will detect all set flags
+✓ Pipe separator logic present
+✓ PurePayload zero case handled
+✓ Unknown fallback present
+
+=== Verification ===
+The String() method implementation appears correct:
+1. Iterates flags in ascending bit order (2, 4, 8, 16, 32, 64, 128)
+2. Uses bitwise AND to check each flag
+3. Collects matching flags and joins with '|'
+4. Handles PurePayload=0 specially
+
+This should correctly produce:
+- TTHeaderFramed.String() → 'TTHeader|Framed'
+- (GRPC | Framed).String() → 'Framed|GRPC'

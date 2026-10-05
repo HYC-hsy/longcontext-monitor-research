@@ -1,0 +1,36 @@
+=== Target 4 Verification: Basic Codec Fallback ===
+
+1. Checking Marshal function in thrift.go:
+
+2. Checking unmarshalThriftData in thrift_data.go:
+65-	}
+66-	if c.CodecType != Basic {
+67:		// try fallback to frugal or fastcodec
+68-		// case: typecodec.Frugal=false but typecodec.FastCodec=true
+69-		if typecodec.FastCodec {
+70-			return fastMarshalData(data)
+71-		}
+72-		// case: typecodec.FastCodec=false but typecodec.Frugal=true
+73-		if typecodec.Frugal {
+74-			return frugalMarshalData(data)
+75-		}
+--
+120-	}
+121-	if dataLenOK {
+122:		// try fallback to frugal or fastcodec
+123-		// case: typecodec.Frugal=false but typecodec.FastCodec=true
+124-		if typecodec.FastCodec {
+125-			return fastUnmarshal(trans, data, dataLen)
+126-		}
+127-		// case: typecodec.FastCodec=false but typecodec.Frugal=true
+128-		if typecodec.Frugal {
+129-			return frugalUnmarshal(trans, data, dataLen)
+130-		}
+
+✗ ISSUE: Basic codec is still blocked from fallback in unmarshalThriftData
+
+=== Target 3 Verification: Default Protocol Change ===
+
+3. Checking for default protocol initialization (PurePayload=0 to Framed):
+✗ ISSUE: No default protocol change to Framed found in option files
+   Task requires: 'change the default transport protocol from buffered (PurePayload) to Framed'

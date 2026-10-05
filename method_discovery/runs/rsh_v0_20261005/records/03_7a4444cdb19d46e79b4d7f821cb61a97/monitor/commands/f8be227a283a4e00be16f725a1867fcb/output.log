@@ -1,0 +1,40 @@
+=== Verifying Target 5 Current State ===
+
+1. Checking what exists in client/option.go:
+Found option functions:
+568:func WithUnaryRPCTimeout(d time.Duration) UnaryOption {
+573:func WithUnaryMiddleware(mw endpoint.UnaryMiddleware) UnaryOption {
+578:func WithUnaryMiddlewareBuilder(mwb cep.UnaryMiddlewareBuilder) UnaryOption {
+583:func WithUnaryRetryPolicy(p retry.Policy) UnaryOption {
+588:func WithUnaryCircuitBreaker(cb *circuitbreak.CBSuite) UnaryOption {
+593:func WithUnaryFallback(fb *fallback.Policy) UnaryOption {
+600:func WithStreamRecvTimeout(d time.Duration) StreamOption {
+605:func WithStreamMiddleware(mw cep.StreamMiddleware) StreamOption {
+610:func WithStreamMiddlewareBuilder(mwb cep.StreamMiddlewareBuilder) StreamOption {
+615:func WithStreamRecvMiddleware(mw cep.StreamRecvMiddleware) StreamOption {
+620:func WithStreamRecvMiddlewareBuilder(mwb cep.StreamRecvMiddlewareBuilder) StreamOption {
+625:func WithStreamSendMiddleware(mw cep.StreamSendMiddleware) StreamOption {
+630:func WithStreamSendMiddlewareBuilder(mwb cep.StreamSendMiddlewareBuilder) StreamOption {
+637:func WithTTHeaderStreamingProtocol() TTHeaderStreamingOption {
+642:func WithTTHeaderStreamingTransportOptions(opts ...interface{}) TTHeaderStreamingOption {
+
+
+2. Checking WithRecvTimeout in callopt/streamcall:
+✓ WithRecvTimeout found:
+/app/client/callopt/streamcall/call_options.go:51:func WithRecvTimeout(d time.Duration) Option {
+
+
+3. Checking retry migration in client/option.go:
+Found retry functions at:
+340:// WithFailureRetry sets the failure retry policy for client, it will take effect for all methods.
+341:func WithFailureRetry(p *retry.FailurePolicy) Option {
+346:		di.Push(fmt.Sprintf("WithFailureRetry(%+v)", p))
+
+
+? Retry migration status unclear
+
+4. Current option file structure:
+-rw-rw-r-- 1 root root 24286 Oct  5 00:48 /app/client/option.go
+-rw-rw-r-- 1 root root  7362 Apr 12 15:21 /app/client/option_advanced.go
+-rw-rw-r-- 1 root root 27408 Apr 12 15:21 /app/client/option_test.go
+

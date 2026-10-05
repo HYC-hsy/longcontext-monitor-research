@@ -1,0 +1,46 @@
+=== Target 5: Toolbar Enhancements ===
+1. ToolbarAction.SetIcon() method:
+33:func (t *ToolbarAction) SetIcon(icon fyne.Resource) {
+
+2. Constructor return types (CRITICAL - must be concrete types):
+   NewToolbarAction:
+38:func NewToolbarAction(icon fyne.Resource, onActivated func()) *ToolbarAction {
+
+   NewToolbarSpacer:
+54:func NewToolbarSpacer() *ToolbarSpacer {
+
+   NewToolbarSeparator:
+69:func NewToolbarSeparator() *ToolbarSeparator {
+
+=== Target 6: Widget and Container Improvements ===
+1. Container.RemoveAll():
+171:func (c *Container) RemoveAll() {
+
+2. Container.Add() nil-safe check:
+func (c *Container) Add(add CanvasObject) {
+	if add == nil {
+		return
+	}
+--
+
+3. Hyperlink.OnTapped field:
+30:	OnTapped func() `json:"-"`
+
+4. Entry.SetMinRowsVisible():
+467:func (e *Entry) SetMinRowsVisible(count int) {
+
+5. validation.NewAllStrings():
+ls: cannot access '/app/data/validation/all.go': No such file or directory
+grep: /app/data/validation/all.go: No such file or directory
+
+=== Target 7: Desktop App Interface ===
+1. driver/desktop/app.go exists:
+-rw-r--r-- 1 root root 398 Oct  4 23:57 /app/driver/desktop/app.go
+
+2. desktop.App interface:
+type App interface {
+	fyne.App
+
+	// SetSystemTrayMenu sets the system tray menu for desktop platforms.
+	// The menu will appear when the user interacts with the app's system tray icon.
+	// Pass nil to remove the system tray menu.

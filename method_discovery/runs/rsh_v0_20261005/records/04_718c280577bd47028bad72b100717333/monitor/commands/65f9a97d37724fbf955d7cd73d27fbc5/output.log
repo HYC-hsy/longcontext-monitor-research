@@ -1,0 +1,128 @@
+=== TARGET 1: Streaming Types and Generic Interfaces ===
+1. Check Header/Trailer types:
+type Header map[string]string
+type Trailer map[string]string
+
+2. Check ClientStream interface methods:
+	// SendMsg sends a message to the peer
+	SendMsg(ctx context.Context, m any) error
+	// RecvMsg receives a message from the peer
+	RecvMsg(ctx context.Context, m any) error
+	// Header returns header metadata from the server
+	Header() (Header, error)
+	// Trailer returns trailer metadata from the server
+	Trailer() (Trailer, error)
+	// CloseSend closes the send direction
+	CloseSend(ctx context.Context) error
+
+3. Check ServerStream interface methods:
+	// SendMsg sends a message to the peer
+	SendMsg(ctx context.Context, m any) error
+	// RecvMsg receives a message from the peer
+	RecvMsg(ctx context.Context, m any) error
+	// SetHeader sets header metadata (may be called multiple times; merged)
+	SetHeader(hd Header) error
+	// SendHeader sends header metadata (fails if called after first response)
+	SendHeader(hd Header) error
+
+4. Check generic wrapper factories exist:
+/app/pkg/streaming/generic_client.go:func NewServerStreamingClient[Res any](st ClientStream) ServerStreamingClient[Res] {
+/app/pkg/streaming/generic_client.go:func NewClientStreamingClient[Req any, Res any](st ClientStream) ClientStreamingClient[Req, Res] {
+/app/pkg/streaming/generic_client.go:func NewBidiStreamingClient[Req any, Res any](st ClientStream) BidiStreamingClient[Req, Res] {
+/app/pkg/streaming/generic_server.go:func NewServerStreamingServer[Res any](st ServerStream) ServerStreamingServer[Res] {
+/app/pkg/streaming/generic_server.go:func NewClientStreamingServer[Req any, Res any](st ServerStream) ClientStreamingServer[Req, Res] {
+/app/pkg/streaming/generic_server.go:func NewBidiStreamingServer[Req any, Res any](st ServerStream) BidiStreamingServer[Req, Res] {
+
+5. Check Args/Result extensions:
+type Args struct {
+	Stream       Stream
+	ServerStream ServerStream
+	ClientStream ClientStream
+type Result struct {
+	Stream       Stream
+	ServerStream ServerStream
+	ClientStream ClientStream
+
+=== TARGET 2: Endpoint Architecture ===
+6. Check cep.StreamEndpoint signature (returns ClientStream):
+type StreamEndpoint func(ctx context.Context) (st streaming.ClientStream, err error)
+
+7. Check sep.StreamEndpoint signature (takes ServerStream param):
+type StreamEndpoint func(ctx context.Context, st streaming.ServerStream) (err error)
+
+8. Check cep EqualsTo methods:
+func (e StreamRecvEndpoint) EqualsTo(e2 StreamRecvEndpoint) bool {
+	if e == nil && e2 == nil {
+func (e StreamSendEndpoint) EqualsTo(e2 StreamSendEndpoint) bool {
+	if e == nil && e2 == nil {
+
+9. Check DummyDummyMiddleware:
+func DummyDummyMiddleware(next StreamEndpoint) StreamEndpoint {
+
+=== TARGET 3: Transport Protocol ===
+10. Check protocol constant values:
+	PurePayload Protocol = 0
+	TTHeader Protocol = 1 << iota // = 2
+	Framed                        // = 4
+	HTTP                          // = 8
+	GRPC                          // = 16
+	HESSIAN2                      // = 32
+	TTHeaderStreaming             // = 64 (dedicated, not composite)
+	GRPCStreaming                 // = 128 (new dedicated gRPC streaming protocol)
+	TTHeaderFramed = TTHeader | Framed
+	if tp&TTHeader != 0 {
+		parts = append(parts, "TTHeader")
+	if tp&Framed != 0 {
+		parts = append(parts, "Framed")
+	if tp&HTTP != 0 {
+		parts = append(parts, "HTTP")
+	if tp&GRPC != 0 {
+		parts = append(parts, "GRPC")
+	if tp&HESSIAN2 != 0 {
+	if tp&TTHeaderStreaming != 0 {
+		parts = append(parts, "TTHeaderStreaming")
+	if tp&GRPCStreaming != 0 {
+		parts = append(parts, "GRPCStreaming")
+
+11. Check String() handles composites with Hessian2:
+	if tp&HESSIAN2 != 0 {
+		parts = append(parts, "Hessian2")
+	}
+
+=== TARGET 5: Client Option Category System ===
+12. Check option type aliases in client/option.go:
+type UnaryOption = client.UnaryOption
+type UnaryOptions = client.UnaryOptions
+type StreamOption = client.StreamOption
+type StreamOptions = client.StreamOptions
+type TTHeaderStreamingOption = client.TTHeaderStreamingOption
+type TTHeaderStreamingOptions = client.TTHeaderStreamingOptions
+
+13. Check option files exist:
+/app/client/option_stream.go
+/app/client/option_ttstream.go
+/app/client/option_unary.go
+
+14. Check streamcall package:
+/app/client/callopt/streamcall/call_options.go
+/app/client/callopt/streamcall/definition.go
+/app/client/callopt/streamcall/grpc_options.go
+
+=== TARGET 6: gRPC Diagnostics ===
+15. Check connPool.Dump() method:
+
+16. Check readAndCheckFrameHeader with maxReadSize and hex dump:
+	}
+	if fh.Length > fr.maxReadSize {
+		return nil, http2.ErrFrameTooLarge
+	}
+	// payload := fr.getReadBuf(fh.Length)
+--
+	// Check if frame size exceeds max read size
+	if fh.Length > fr.maxReadSize {
+		return http2.FrameHeader{}, fmt.Errorf("%s or invalid frame (first4Bytes=%#x, second4Bytes=%#x)", 
+			http2.ErrFrameTooLarge, buf[:4], buf[4:8])
+	}
+
+=== BUILD STATUS ===
+17. Verify build success:

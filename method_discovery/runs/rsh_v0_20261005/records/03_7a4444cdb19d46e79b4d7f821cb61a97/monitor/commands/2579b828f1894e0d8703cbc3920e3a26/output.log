@@ -1,0 +1,31 @@
+=== Verifying Target 3: Default Protocol Change ===
+
+✓ Found Framed in rpcconfig.go:
+225:	r.transportProtocol = transport.Framed
+
+
+=== Verifying Target 4: unmarshalThriftData Fix ===
+
+Fallback sections in thrift_data.go:
+67:		// try fallback to frugal or fastcodec
+68-		// case: typecodec.Frugal=false but typecodec.FastCodec=true
+69-		if typecodec.FastCodec {
+70-			return fastMarshalData(data)
+71-		}
+72-		// case: typecodec.FastCodec=false but typecodec.Frugal=true
+73-		if typecodec.Frugal {
+74-			return frugalMarshalData(data)
+75-		}
+--
+122:		// try fallback to frugal or fastcodec
+123-		// case: typecodec.Frugal=false but typecodec.FastCodec=true
+124-		if typecodec.FastCodec {
+125-			return fastUnmarshal(trans, data, dataLen)
+126-		}
+127-		// case: typecodec.FastCodec=false but typecodec.Frugal=true
+128-		if typecodec.Frugal {
+129-			return frugalUnmarshal(trans, data, dataLen)
+130-		}
+
+
+✓ Basic codec block removed from unmarshalThriftData

@@ -1,0 +1,81 @@
+=== VERIFYING CRITICAL REQUIREMENTS ===
+
+1. RETRY MIGRATION (Target 5 req 7)
+--------------------------------------------------
+WithFailureRetry implementation:
+func WithFailureRetry(p *retry.FailurePolicy) Option {
+	return Option{F: func(o *client.Options, di *utils.Slice) {
+		if p == nil {
+			return
+		}
+		di.Push(fmt.Sprintf("WithFailureRetry(%+v)", p))
+		if o.RetryMethodPolicies == nil {
+			o.RetryMethodPolicies = make(map[string]retry.Policy)
+		}
+		if o.RetryMethodPolicies[retry.Wildcard].MixedPolicy != nil ||
+			o.RetryMethodPolicies[retry.Wildcard].BackupPolicy != nil {
+			panic("MixedPolicy or BackupPolicy has been setup, cannot support Failure R
+
+2. OPTIONS STRUCT FIELDS
+--------------------------------------------------
+UnaryOptions/Middleware fields in Options struct:
+93:	StreamMiddlewares   []cep.StreamMiddleware
+156:	F func(o *UnaryOptions, di *utils.Slice)
+249:	StreamMWs     []streamx.StreamMiddleware
+254:// UnaryOptions is an alias for Options, used for unary RPC configuration.
+255:type UnaryOptions = Options
+266:		F: func(o *UnaryOptions, di *utils.Slice) {
+276:		F: func(o *UnaryOptions, di *utils.Slice) {
+290:		F: func(o *UnaryOptions, di *utils.Slice) {
+300:		F: func(o *UnaryOptions, di *utils.Slice) {
+313:		F: func(o *UnaryOptions, di *utils.Slice) {
+323:		F: func(o *UnaryOptions, di *utils.Slice) {
+343:// WithStreamMiddleware adds stream middleware.
+344:func WithStreamMiddleware(mw cep.StreamMiddleware) StreamOption {
+347:			o.StreamMiddlewares = append(o.StreamMiddlewares, mw)
+348:			di.Push(fmt.Sprintf("WithStreamMiddleware(%+v)", mw))
+353:// WithStreamMiddlewareBuilder adds a stream middleware builder.
+354:func WithStreamMiddlewareBuilder(mwb cep.StreamMiddlewareBuilder) StreamOption {
+357:			o.StreamMiddlewares = append(o.StreamMiddlewares, mwb(context.Background()))
+358:			di.Push(fmt.Sprintf("WithStreamMiddlewareBuilder(%+v)", mwb))
+
+
+3. DUMP() PANIC-SAFE (Target 6 req 1)
+--------------------------------------------------
+Dump() implementation (first 35 lines):
+func (p *connPool) Dump() map[string]interface{} {
+	result := make(map[string]interface{})
+	result["pool_size"] = p.size
+	result["remote_service"] = p.remoteService
+	
+	connections := make(map[string]interface{})
+	p.conns.Range(func(addr, trans interface{}) bool {
+		address := addr.(string)
+		t := trans.(*transports)
+		
+		connInfo := make(map[string]interface{})
+		connInfo["size"] = t.size
+		connInfo["current_index"] = atomic.LoadUint32(&t.index)
+		
+		// Count active connections
+		activeCount := 0
+		for i := 0; i < int(t.size); i++ {
+			if t.cliTransports[i] != nil {
+				activeCount++
+			}
+		}
+		connInfo["active_count"] = activeCount
+		
+		connections[address] = connInfo
+		return true
+	})
+	result["connections"] = connections
+	
+	return result
+}
+
+
+
+4. BUILD STATUS
+--------------------------------------------------
+✓ BUILD SUCCESSFUL

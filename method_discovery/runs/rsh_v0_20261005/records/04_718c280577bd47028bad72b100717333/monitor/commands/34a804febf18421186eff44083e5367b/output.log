@@ -1,0 +1,8 @@
+// WithStreamRecvTimeout specifies the receive timeout for streaming calls.
+// This sets the maximum duration to wait for receiving a message from the server.
+func WithStreamRecvTimeout(d time.Duration) StreamOption {
+	return StreamOption{F: func(o *client.StreamOptions, di *utils.Slice) {
+		di.Push(fmt.Sprintf("WithStreamRecvTimeout(%s)", d))
+		o.RecvTimeout = d
+	}}
+}

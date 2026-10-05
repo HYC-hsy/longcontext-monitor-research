@@ -1,0 +1,1 @@
+cd /app && go build ./test 2>&1 | head -20

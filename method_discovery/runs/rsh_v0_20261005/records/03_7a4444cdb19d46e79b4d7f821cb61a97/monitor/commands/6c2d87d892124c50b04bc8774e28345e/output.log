@@ -1,0 +1,38 @@
+=== DETAILED TARGET 6 FRAME_READER VERIFICATION ===
+
+readAndCheckFrameHeader implementation:
+func (fr *Framer) readAndCheckFrameHeader() (http2.FrameHeader, error) {
+	buf, err := fr.reader.Next(frameHeaderLen)
+	if err != nil {
+		return http2.FrameHeader{}, err
+	}
+	
+	fh := http2.FrameHeader{
+		Length:   uint32(buf[0])<<16 | uint32(buf[1])<<8 | uint32(buf[2]),
+		Type:     http2.FrameType(buf[3]),
+		Flags:    http2.Flags(buf[4]),
+		StreamID: binary.BigEndian.Uint32(buf[5:]) & (1<<31 - 1),
+	}
+	
+	if fh.Length > fr.maxReadSize {
+		// Include hex dump of first 8 bytes for diagnostics
+		first4Bytes := binary.BigEndian.Uint32(buf[:4])
+
+
+======================================================================
+SEARCHING FOR HEX FORMATTING:
+142:// returned error is ErrFrameTooLarge. Other errors may be of type
+188:// checkFrameOrder reports an error if f is an invalid frame to return
+387:		first4Bytes := binary.BigEndian.Uint32(buf[:4])
+388:		second4Bytes := binary.BigEndian.Uint32(buf[4:8])
+389:		return http2.FrameHeader{}, fmt.Errorf("%s or invalid frame (first4Bytes=%#x, second4Bytes=%#x)", 
+390:			http2.ErrFrameTooLarge, first4Bytes, second4Bytes)
+
+
+======================================================================
+ORIGINAL TASK REQUIREMENT (Target 6.2):
+When frame size exceeds maxReadSize, return error containing:
+- http2.ErrFrameTooLarge text
+- "invalid frame" text
+- Hex-formatted first and second 4 bytes:
+  fmt.Errorf("%s or invalid frame (first4Bytes=%#x, second4Bytes=%#x)", ..., buf[:4], buf[4:8])

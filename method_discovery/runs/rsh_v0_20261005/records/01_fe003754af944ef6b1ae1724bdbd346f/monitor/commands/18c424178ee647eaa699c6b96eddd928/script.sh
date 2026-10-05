@@ -1,0 +1,1 @@
+cd /app/test && go build -o /dev/null . 2>&1 | grep -i metadata

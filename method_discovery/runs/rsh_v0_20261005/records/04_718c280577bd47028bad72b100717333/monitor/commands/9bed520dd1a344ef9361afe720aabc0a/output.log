@@ -1,0 +1,28 @@
+type ClientStream interface {
+	// SendMsg sends a message to the peer
+	SendMsg(ctx context.Context, m any) error
+type ServerStream interface {
+	// SendMsg sends a message to the peer
+	SendMsg(ctx context.Context, m any) error
+type StreamEndpoint func(ctx context.Context) (st streaming.ClientStream, err error)
+type StreamEndpoint func(ctx context.Context, st streaming.ServerStream) (err error)
+	TTHeaderStreaming             // = 64 (dedicated, not composite)
+	GRPCStreaming                 // = 128 (new dedicated gRPC streaming protocol)
+	case TTHeaderStreaming:
+func (fr *Framer) readAndCheckFrameHeader() (http2.FrameHeader, error) {
+	buf, err := fr.reader.Next(frameHeaderLen)
+	if err != nil {
+		return http2.FrameHeader{}, err
+	}
+	
+		return nil, err
+	}
+	if fh.Length > fr.maxReadSize {
+		return nil, http2.ErrFrameTooLarge
+	}
+--
+	
+	// Check if frame size exceeds max read size
+	if fh.Length > fr.maxReadSize {
+		return http2.FrameHeader{}, fmt.Errorf("%s or invalid frame (first4Bytes=%#x, second4Bytes=%#x)", 
+			http2.ErrFrameTooLarge, buf[:4], buf[4:8])

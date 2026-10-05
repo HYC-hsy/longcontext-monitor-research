@@ -1,0 +1,1 @@
+grep -n "type Bytes" /app/data/binding/binditems.go

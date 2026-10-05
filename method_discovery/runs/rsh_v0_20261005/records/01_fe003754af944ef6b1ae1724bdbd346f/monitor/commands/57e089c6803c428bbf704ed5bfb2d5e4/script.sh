@@ -1,0 +1,1 @@
+ls -la /app/widget/ | grep -E "toolbar|hyperlink|entry"
