@@ -1,0 +1,19 @@
+=== Target 4 Requirement Analysis ===
+
+Stated problem: 'fails when CodecType is Basic and message type does not support Apache codec'
+Translation: typecodec.Apache=False AND c.CodecType=Basic AND (typecodec.FastCodec=True OR typecodec.Frugal=True)
+
+Current code flow in marshalThriftData:
+1. Check FrugalWrite flag - skip if not set
+2. Check FastWrite flag - skip if not set
+3. if typecodec.Apache { ... } - SKIPPED (Apache=False)
+4. if c.CodecType != Basic { fallback to FastCodec/Frugal } - SKIPPED (CodecType IS Basic)
+5. return errEncodeMismatchMsgType - ERROR!
+
+Agent's fix: Added error fallback INSIDE the Apache block
+Problem: The Apache block is SKIPPED entirely when typecodec.Apache=False
+Conclusion: Agent's fix does NOT address the stated requirement
+
+Correct fix should be:
+Change line 'if c.CodecType != Basic {' to just remove the condition
+This allows Basic codec to also use FastCodec/Frugal fallback when Apache isn't supported

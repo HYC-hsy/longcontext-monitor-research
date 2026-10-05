@@ -20,8 +20,8 @@ def main():
         raise RuntimeError('Actual host prefix does not match the frozen order')
     if any(row['status'] == 'running' for row in host):
         raise RuntimeError('Cannot archive a running slot')
-    if RECORDS.exists():
-        raise RuntimeError('Archive records already exist; no overwrite')
+    if (ROOT / 'DISCOVERY_MECHANICAL_SUMMARY.json').exists():
+        raise RuntimeError('Archive already complete; no overwrite')
     raw.PLAN = PLAN
     raw.PLAN_ROOT = ROOT
     raw.CAMPAIGN = CAMPAIGN
@@ -29,8 +29,13 @@ def main():
     summaries = []
     for host_row in host:
         slot = next(row for row in plan['slots'] if row['run_id'] == host_row['run_id'])
-        summary = raw.record_one(slot)
         destination = RECORDS / f"{slot['position']:02d}_{slot['run_id']}"
+        if destination.exists():
+            if not (destination / 'RAW_FILE_MANIFEST.json').is_file():
+                raise RuntimeError('Incomplete base archive lacks its raw manifest')
+            summary = json.loads((destination / 'MECHANICAL_SUMMARY.json').read_text(encoding='utf-8'))
+        else:
+            summary = raw.record_one(slot)
         trial = Path(summary['trial_dir'])
         extra = []
 
@@ -48,6 +53,8 @@ def main():
             copy(trial / name, 'trial/' + name)
         for name in ('completion_incomplete.json',):
             copy(trial / 'agent/monitor' / name, 'monitor/' + name)
+        for name in ('reference.md',):
+            copy(trial / 'agent/monitor/monitor_private' / name, 'monitor/private/' + name)
         for name in ('agent_process_return_code.txt', 'isolated_transport.log'):
             copy(trial / 'agent' / name, 'agent/' + name)
         for name in ('result.json', 'job.log', 'launcher_stdout.log', 'launcher_stderr.log'):
@@ -55,10 +62,11 @@ def main():
         copy(CAMPAIGN / 'host_execution' / f"{slot['run_id']}.entry.log", 'host/entry.log')
         for name in ('report.json',):
             copy(trial / 'agent/failure_workspace' / name, 'agent/failure_workspace/' + name)
-        for source in sorted((trial / 'agent/monitor/monitor_private/audit').rglob('*')):
-            if source.is_file() and source.suffix != '.tar':
-                copy(source, 'monitor/audit/' + str(source.relative_to(
-                    trial / 'agent/monitor/monitor_private/audit')).replace('\\', '/'))
+        audit = trial / 'agent/monitor/monitor_private/audit'
+        for subdir in ('cfs_deltas', 'continuation_responses', 'history_transforms'):
+            for source in sorted((audit / subdir).glob('*.json*')):
+                if source.is_file():
+                    copy(source, 'monitor/audit/' + subdir + '/' + source.name)
         local_only = []
         for source in (trial / 'agent/failure_workspace/workspace.tar',):
             if source.is_file():
@@ -68,12 +76,20 @@ def main():
         manifest['copied'].extend(extra)
         manifest['local_only_large_artifacts'].extend(local_only)
         raw.write(destination / 'RAW_FILE_MANIFEST.json', manifest)
+        dialogue = raw.rows(trial / 'agent/monitor/monitor_private/audit/dialogue.jsonl')
+        event_counts = {name: sum(row.get('event') == name for row in dialogue) for name in (
+            'ase_reference_initialization_pending', 'ase_reference_initialization_ready',
+            'ase_reference_mutated', 'ase_context_injected', 'ase_continuity_updated',
+            'ase_continuity_cleared', 'ase_continuity_surface_injected',
+            'ase_reconsideration_boundary', 'supervisory_situation_surface')}
+        receipts = raw.rows(trial / 'agent/monitor/runtime_receipts.jsonl')
+        provider_403_count = sum('HTTP 403' in str(row.get('error', '')) for row in receipts)
         summary.update(host_status=host_row['status'], entry_exit_code=host_row['entry_exit_code'],
                        stop_reason='infrastructure_review' if host_row['status'] not in
                        {'completed', 'completed_budget'} else None,
                        ase_reference_present=(trial / 'agent/monitor/monitor_private/reference.md').is_file(),
-                       ase_initialization_pending_count=0,
-                       ase_initialization_ready_count=0)
+                       ase_event_counts=event_counts,
+                       provider_403_receipt_count=provider_403_count)
         raw.write(destination / 'MECHANICAL_SUMMARY.json', summary)
         summaries.append(summary)
     copy_host = RECORDS / 'host_execution'
