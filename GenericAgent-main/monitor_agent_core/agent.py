@@ -415,25 +415,29 @@ class MonitorAgent:
         if type(self.ase_v0) is not bool:
             raise ValueError('monitor_adaptive_supervisory_environment must be a boolean')
         if self.ase_v0:
-            if (not self.dcec_enabled or not self.path_control_v0 or not self.cfs_v0
-                    or not self.dcm_v0 or not self.verification_loop_v0
-                    or self.verification_runtime_managed or self.cqs_v0 or self.eis_v0
+            if (self.dcec_enabled or self.path_control_v0 or self.cfs_v0
+                    or self.dcm_v0 or self.verification_loop_v0 or self.cqs_v0 or self.eis_v0
                     or self.root_scope_v1 != 'off'
+                    or self.semantic_continuity is not True
+                    or getattr(client, 'config', {}).get('monitor_research_view', 'off') != 'off'
+                    or getattr(client, 'config', {}).get('monitor_research_intent', 'off') != 'off'
                     or getattr(client, 'config', {}).get('monitor_release_support_horizon', False)):
-                raise ValueError('ASE-v0 requires DCEC/PATH/CFS/DCM, manual continuous verification, '
-                                 'and CQS/EIS/RSH/old root scope off')
+                raise ValueError('ASE-v0 is exclusive with historical candidate and research switches')
             self.system_prompt = ASE_SYSTEM_PROMPT
             self.base_system_prompt = ASE_SYSTEM_PROMPT
+            self.situation = SituationState(workspace)
             self.cqs = LocalContinuity(self._audit_dialogue)
             self.dcm = ReconsiderationBoundary(
                 self._audit_dialogue, lambda: self._ase_last_visible_context)
+        self._ase_initialization_complete = False
+        self._ase_reference_ready_reported = False
         self._ase_pending_context = None
         self._ase_last_visible_context = None
         self._ase_tool_counts = Counter()
         self._dialogue_line = None
         if self.situation is not None:
             self.client.active_context_appended = self._cfs_context_appended
-        self.root_routed = self.root_scope_v1 != 'off' or self.verification_loop_v0
+        self.root_routed = self.root_scope_v1 != 'off' or self.verification_loop_v0 or self.ase_v0
         self.verification = (SelectedVerification(
             workspace, self.analysis, self._progress,
             getattr(client, 'verification_due_turn', None),
@@ -487,6 +491,14 @@ class MonitorAgent:
             raise ValueError('monitor_task_model must be a boolean')
         if task_model:
             raise ValueError('monitor_task_model is retired for fused execution; use the PMA bank and original task')
+        if self.ase_v0 and (tool_feedback or self.grounded_context or active_context or live_awareness
+                            or decision_context or pma_memory or self.root_decision_contract
+                            or self.root_simple_check or independent_check is not None
+                            or getattr(client, 'config', {}).get('monitor_handoff_validation', False)
+                            or getattr(client, 'config', {}).get('monitor_advice_revision', False)
+                            or getattr(client, 'config', {}).get('monitor_feedback_focus', False)
+                            or getattr(client, 'config', {}).get('monitor_inquiry', False)):
+            raise ValueError('ASE-v0 cannot be stacked with historical supervisory candidates')
         if self.dcec_enabled:
             if not self.semantic_continuity:
                 raise ValueError("monitor_dcec requires the ordinary semantic continuation path")
@@ -532,7 +544,7 @@ class MonitorAgent:
             if self.decision_context is not None:
                 self.decision_context.bank_owned = True
         self.active_context_enabled = active_context
-        if live_awareness or active_context or decision_context or pma_memory or self.dcec_enabled:
+        if live_awareness or active_context or decision_context or pma_memory or self.dcec_enabled or self.ase_v0:
             self.client.prepare_active_context = self._active_working_context
         if active_context and not decision_context and not pma_memory:
             self.system_prompt += (
@@ -555,7 +567,7 @@ class MonitorAgent:
             self.client.archive_continuation_history = self._archive_continuation_history
 
     def _active_working_context(self):
-        if self.frame_kind == 'root' and not self.verification_loop_v0:
+        if self.frame_kind == 'root' and not (self.verification_loop_v0 or self.ase_v0):
             text, metadata = dcec_working_context(
                 self.workspace, self.dcec_working_chars, ROOT_NOTE_GUIDANCE)
             self._audit_dialogue('root_working_view', **metadata)
@@ -575,7 +587,7 @@ class MonitorAgent:
             self._audit_dialogue('active_working_context', content=text)
             if text:
                 parts.append(text)
-        if self.dcec_enabled:
+        if self.dcec_enabled or self.ase_v0:
             if self.ase_v0:
                 reference, reference_metadata = reference_surface(self.workspace)
                 self._audit_dialogue('ase_reference_surface_prepared', **reference_metadata)
@@ -738,7 +750,7 @@ class MonitorAgent:
             "Keep details that change future decisions, not a chronology. No fixed schema; return only the note. "
             "Do not issue task interventions in this maintenance response. Existing private working note:\n" + previous
         )
-        if self.frame_kind == 'root' and not self.verification_loop_v0:
+        if self.frame_kind == 'root' and not (self.verification_loop_v0 or self.ase_v0):
             prompt += ("\n\nPreserve the current handoff question, observed public grounds and limits, "
                        "and the next useful root decision. Do not turn prior local conclusions into "
                        "a whole-task verdict.")
@@ -759,7 +771,7 @@ class MonitorAgent:
         self.client.continuation_transaction_id = transaction
         self.client.request_purpose = 'continuation'
         active_system = (self.base_system_prompt + "\n\n" + ROOT_SYSTEM_PROMPT
-                         if self.frame_kind == 'root' else self.system_prompt)
+                         if self.frame_kind == 'root' and not self.ase_v0 else self.system_prompt)
         self.client.system = active_system + "\n\n" + CONTINUATION_MODE_PROMPT
         self.client.history.append({"role": "user", "content": [{"type": "text", "text": prompt}]})
         stage = 'request'
@@ -878,6 +890,20 @@ class MonitorAgent:
             self._progress("advice_storage_failed", error_type=type(exc).__name__)
             return {"private_advice_error": str(exc), "note": "Input was submitted; private storage failed."}
 
+    def _ase_reference_ready(self):
+        _, metadata = reference_surface(self.workspace)
+        ready = metadata['status'] == 'present'
+        if ready:
+            if not self._ase_reference_ready_reported:
+                self._audit_dialogue('ase_reference_initialization_ready',
+                                     source_sha256=metadata['source_sha256'],
+                                     source_characters=metadata['source_characters'])
+                self._ase_reference_ready_reported = True
+        else:
+            self._audit_dialogue('ase_reference_initialization_pending',
+                                 status=metadata['status'])
+        return ready
+
     def _dispatch(self, name: str, arguments: dict) -> ToolOutcome:
         try:
             if name == 'work_context' and self.experimental_control is not None:
@@ -971,15 +997,23 @@ class MonitorAgent:
                 if mode not in ('follow', 'patrol'):
                     raise ValueError('wait mode must be follow or patrol')
                 after_turns = max(1, int(arguments["after_turns"]))
+                if self.ase_v0 and not self._ase_initialization_complete and not self._ase_reference_ready():
+                    return ToolOutcome({
+                        'status': 'reference_initialization_pending',
+                        'message': 'The supervisory reference is absent or empty. Initialization cannot '
+                                   'enter a long wait yet. You may continue investigating and create your '
+                                   'own monitor/reference.md with the ordinary private file tools.'})
                 if self.dcm is not None:
-                    if mode == 'patrol':
+                    if mode == 'patrol' and (not self.ase_v0 or self.cqs.active):
                         boundary = self.dcm.release('patrol', 'local', arguments)
                         if boundary is not None:
                             return ToolOutcome(boundary)
-                    else:
+                    elif mode == 'follow':
                         self.dcm.abandon('changed_to_follow')
                 if self.verification is not None and mode == 'patrol' and self.verification.follow_pending:
                     self.verification.dispose(arguments.get('result'), arguments.get('reason'))
+                if self.ase_v0:
+                    self._ase_initialization_complete = True
                 return ToolOutcome(None, False, MonitorAction(
                     "wait", {"after_turns": after_turns, 'mode': mode}
                 ))
@@ -1045,7 +1079,7 @@ class MonitorAgent:
                             or current["generation"] == self._intervened_generation):
                         raise ValueError("The observed handoff is no longer current. Inspect the runtime update before deciding.")
                     if self.dcm is not None:
-                        if arguments['result'] == 'resolve':
+                        if self.ase_v0 or arguments['result'] == 'resolve':
                             boundary = self.dcm.release('allow_complete', 'root', arguments)
                             if boundary is not None:
                                 return ToolOutcome(boundary)
@@ -1133,8 +1167,8 @@ class MonitorAgent:
         self._local_history_at_root = self.client.export_history()
         self.root_frame_handoff = dict(handoff)
         self.frame_kind = 'root'
-        if self.verification_loop_v0:
-            self._progress('root_frame_entered', mode='verification_loop_v0',
+        if self.verification_loop_v0 or self.ase_v0:
+            self._progress('root_frame_entered', mode='ase_v0' if self.ase_v0 else 'verification_loop_v0',
                            generation=handoff['generation'], request_id=handoff['request_id'],
                            inherited_history_items=len(self.client.history))
             return
@@ -1154,7 +1188,7 @@ class MonitorAgent:
         if self.frame_kind != 'root':
             return
         handoff = self.root_frame_handoff
-        if self.verification_loop_v0:
+        if self.verification_loop_v0 or self.ase_v0:
             self.frame_kind = 'local'
             self.root_frame_handoff = None
             self._local_history_at_root = None
@@ -1215,7 +1249,7 @@ class MonitorAgent:
                         "or allow_complete only for a still-pending, justified root completion. "
                         "After an intervention that completion proposal is no longer pending.")
             active_system = (self.base_system_prompt + "\n\n" + ROOT_SYSTEM_PROMPT
-                             if self.frame_kind == 'root' and not self.verification_loop_v0
+                             if self.frame_kind == 'root' and not (self.verification_loop_v0 or self.ase_v0)
                              else self.system_prompt)
             system = active_system + "\n\n" + mode
             if self.frame_kind == 'root':
@@ -1225,12 +1259,12 @@ class MonitorAgent:
                     self.workspace, self.root_frame_handoff,
                     remaining_seconds=(remaining - time.monotonic()) if remaining is not None else None,
                     task_turns_used=used, task_max_turns=limit,
-                    single_session=self.verification_loop_v0)
+                    single_session=self.verification_loop_v0 or self.ase_v0)
                 if root_transition_view:
                     wake_context += "\n\n" + root_transition_view
                 self._audit_dialogue('root_frame_input', mode=self.root_scope_v1,
                                      handoff=self.root_frame_handoff, content=wake_context)
-            tools = verification_tools() if self.verification_loop_v0 else MONITOR_TOOLS
+            tools = verification_tools() if self.verification_loop_v0 and not self.ase_v0 else MONITOR_TOOLS
             if self.independent_check is not None:
                 tools = [*tools, INDEPENDENT_CHECK_TOOL]
             if self.experimental_control is not None:

@@ -108,6 +108,10 @@ class LocalContinuity:
         self.last_call = None
         self.pending_surface = None
 
+    @property
+    def active(self):
+        return self.anchor is not None or self.follow is not None
+
     def observe(self, record, line):
         if record.get('review_id') != self.review_id:
             return
@@ -150,7 +154,7 @@ class LocalContinuity:
         elif mode == 'follow':
             if self.episode_start_turn is None:
                 self.episode_start_turn = task_turn
-            reason = call.get('args', {}).get('reason') if call.get('name') == 'wait' else None
+            reason = rationale.get('text')
             self.follow = {'reason': excerpt(reason, FOLLOW_LIMIT),
                            'reason_sha256': digest(reason),
                            'rationale': excerpt(rationale.get('text'), RATIONALE_LIMIT),
@@ -213,7 +217,7 @@ class ReconsiderationBoundary(DecisionMeasurementBoundary):
             result = {'status': 'release_not_executed',
                       'challenge_id': self.challenge['challenge_id'],
                       'proposed_action': 'wait(mode=patrol)' if kind == 'patrol'
-                                         else 'allow_complete(result=resolve)',
+                                         else 'allow_complete()',
                       'proposed_reason': arguments.get('reason'), 'message': RELEASE_GUIDANCE}
             self.audit('ase_reconsideration_boundary', challenge_id=self.challenge['challenge_id'],
                        release_kind=kind, frame=frame, proposed_args=dict(arguments),

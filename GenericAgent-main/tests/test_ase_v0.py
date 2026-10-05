@@ -5,9 +5,10 @@ import json
 
 import pytest
 
-from monitor_agent_core.agent import MonitorAgent
+from monitor_agent_core.agent import MONITOR_TOOLS, MonitorAgent
 from monitor_agent_core.ase_v0 import REFERENCE_LIMIT, reference_surface
 from monitor_agent_core.provider import MonitorProviderClient
+from monitor_agent_core.root_scope_v1 import ROOT_SYSTEM_PROMPT
 from monitor_agent_core.workspace import MonitorWorkspace
 
 
@@ -22,12 +23,16 @@ def make_monitor(tmp_path, *, ase=True, cqs=False):
     workspace = MonitorWorkspace(evidence, tmp_path / 'private', task_mounts={'workspace': task})
     workspace.write_text('monitor/working.md', 'LOCAL_WORKING_SENTINEL')
     config = {'apikey': 'offline', 'apibase': 'https://offline.invalid', 'model': 'offline',
-              'max_retries': 0, 'monitor_dcec': True, 'monitor_path_control_v0': True,
-              'monitor_verification_loop_v0': True, 'monitor_verification_runtime_managed': False,
-              'monitor_coarse_to_fine_surface': True,
-              'monitor_decision_conditioned_measurement': True,
-              'monitor_control_question_state': cqs,
-              'monitor_adaptive_supervisory_environment': ase}
+              'max_retries': 0, 'monitor_adaptive_supervisory_environment': ase}
+    if not ase:
+        config.update({'monitor_dcec': True, 'monitor_path_control_v0': True,
+                       'monitor_verification_loop_v0': True,
+                       'monitor_verification_runtime_managed': False,
+                       'monitor_coarse_to_fine_surface': True,
+                       'monitor_decision_conditioned_measurement': True,
+                       'monitor_control_question_state': cqs})
+    elif cqs:
+        config['monitor_control_question_state'] = True
     client = MonitorProviderClient('anthropic', config)
     monitor = MonitorAgent(client, workspace)
     monitor.task_budget_state = lambda: (12, 300)
@@ -96,12 +101,15 @@ def test_turn_zero_and_provider_ready_composition_no_working_ledger(tmp_path, mo
         ('', 'file_read', {'path': 'task/workspace/router.py'}),
         ('', 'file_write', {'path': 'monitor/reference.md',
                             'content': 'REFERENCE_SENTINEL: route behavior matters.'}),
-        ('', 'wait', {'mode': 'follow', 'after_turns': 2, 'reason': 'Watch route use'}),
+        ('Watch route use.', 'wait', {'mode': 'follow', 'after_turns': 2}),
     ])
     assert monitor.review('Initialization').kind == 'wait'
     assert len(sends) == 4
     assert [tool['function']['name'] for tool in sends[0]['tools']] == [
         'file_read', 'file_write', 'file_patch', 'code_run', 'wait', 'intervene', 'allow_complete']
+    assert sends[0]['tools'] == MONITOR_TOOLS
+    assert 'verification' not in json.dumps(sends[0]['tools'])
+    assert 'result' not in sends[0]['tools'][-1]['function']['parameters']['properties']
     assert 'monitor/reference.md' in sends[0]['system']
     assert 'task/original_task.txt' in sends[0]['system']
     assert 'Reference absent' in visible(sends[0])
@@ -117,12 +125,75 @@ def test_turn_zero_and_provider_ready_composition_no_working_ledger(tmp_path, mo
     assert monitor.dispatch('file_read', {'path': 'monitor/working.md'}).data['content'] == 'LOCAL_WORKING_SENTINEL'
 
 
-def test_intervention_anchor_survives_follows_then_patrol_clears(tmp_path, monkeypatch):
+def test_initialization_requires_model_authored_reference_before_wait(tmp_path, monkeypatch):
+    monitor, client, ws = make_monitor(tmp_path)
+    sends = scripted(client, monkeypatch, [
+        ('', 'wait', {'after_turns': 3, 'mode': 'patrol'}),
+        ('', 'file_write', {'path': 'monitor/reference.md', 'content': '   '}),
+        ('', 'wait', {'after_turns': 3, 'mode': 'follow'}),
+        ('', 'file_write', {'path': 'monitor/reference.md',
+                            'content': 'Public route response matters.'}),
+        ('', 'wait', {'after_turns': 3, 'mode': 'patrol'}),
+    ])
+    action = monitor.review('Initialization')
+    assert action.kind == 'wait' and action.payload['mode'] == 'patrol'
+    assert len(sends) == 5
+    feedback = [r['data'] for r in rows(ws) if r['event'] == 'tool_result'
+                and isinstance(r.get('data'), dict)
+                and r['data'].get('status') == 'reference_initialization_pending']
+    assert len(feedback) == 2
+    assert all('route' not in str(item).lower() for item in feedback)
+    assert [r['event'] for r in rows(ws) if r['event'].startswith('ase_reference_initialization_')] == [
+        'ase_reference_initialization_pending', 'ase_reference_initialization_pending',
+        'ase_reference_initialization_ready']
+    assert ws.resolve_read('monitor/reference.md').read_text(encoding='utf-8') == 'Public route response matters.'
+    assert not [r for r in rows(ws) if r['event'] == 'ase_reconsideration_boundary']
+
+
+def test_inactive_patrol_is_one_turn_but_active_patrol_reconsiders(tmp_path, monkeypatch):
+    monitor, client, ws = make_monitor(tmp_path)
+    ws.write_text('monitor/reference.md', 'Public route response matters.')
+    sends = scripted(client, monkeypatch, [('', 'wait', {'after_turns': 1, 'mode': 'patrol'})])
+    assert monitor.review('Initial').payload['mode'] == 'patrol'
+    assert len(sends) == 1
+    assert not [r for r in rows(ws) if r['event'] == 'ase_reconsideration_boundary']
+    monitor.intervention_callback = lambda message: {'delivery': 'queued'}
+    scripted(client, monkeypatch, [
+        ('Route discrepancy.', 'intervene', {'message': 'Check route response.'}),
+        ('Await update.', 'wait', {'after_turns': 1, 'mode': 'follow'}),
+    ])
+    assert monitor.review('Later').payload['mode'] == 'follow'
+    sends = scripted(client, monkeypatch, [
+        ('', 'wait', {'after_turns': 1, 'mode': 'patrol'}),
+        ('', 'wait', {'after_turns': 1, 'mode': 'patrol'}),
+    ])
+    assert monitor.review('Release').payload['mode'] == 'patrol'
+    assert len(sends) == 2
+    assert len([r for r in rows(ws) if r['event'] == 'ase_reconsideration_boundary']) == 1
+
+
+def test_intervention_before_reference_does_not_waive_initialization(tmp_path, monkeypatch):
     monitor, client, ws = make_monitor(tmp_path)
     monitor.intervention_callback = lambda message: {'delivery': 'queued'}
     sends = scripted(client, monkeypatch, [
+        ('Observed route discrepancy.', 'intervene', {'message': 'Inspect route behavior.'}),
+        ('', 'wait', {'after_turns': 1, 'mode': 'follow'}),
+        ('', 'file_write', {'path': 'monitor/reference.md', 'content': 'Public route behavior matters.'}),
+        ('', 'wait', {'after_turns': 1, 'mode': 'follow'}),
+    ])
+    assert monitor.review('Initialization').payload['mode'] == 'follow'
+    assert len(sends) == 4
+    assert monitor.cqs.anchor['message'] == 'Inspect route behavior.'
+    assert len([r for r in rows(ws) if r['event'] == 'ase_reference_initialization_pending']) == 1
+
+
+def test_intervention_anchor_survives_follows_then_patrol_clears(tmp_path, monkeypatch):
+    monitor, client, ws = make_monitor(tmp_path)
+    ws.write_text('monitor/reference.md', 'Route response is the public requirement.')
+    monitor.intervention_callback = lambda message: {'delivery': 'queued'}
+    sends = scripted(client, monkeypatch, [
         ('Route may be wrong.', 'intervene', {'message': 'Check actual route response.'}),
-        ('', 'wait', {'mode': 'follow', 'after_turns': 2, 'reason': 'Await first edit'}),
+        ('Await first edit.', 'wait', {'mode': 'follow', 'after_turns': 2}),
     ])
     assert monitor.review('Wake').kind == 'wait'
     assert 'Check actual route response.' in visible(sends[1])
@@ -131,7 +202,7 @@ def test_intervention_anchor_survives_follows_then_patrol_clears(tmp_path, monke
     assert monitor.cqs.anchor['message'] == 'Check actual route response.'
     for reason in ('Await test', 'Await result'):
         sends = scripted(client, monkeypatch, [
-            ('', 'wait', {'mode': 'follow', 'after_turns': 2, 'reason': reason}),
+            (reason, 'wait', {'mode': 'follow', 'after_turns': 2}),
         ])
         assert monitor.review('Next feedback').kind == 'wait'
         assert 'Check actual route response.' in visible(sends[0])
@@ -157,12 +228,16 @@ def test_release_boundary_root_and_changed_control(tmp_path, monkeypatch):
     monitor, client, ws = make_monitor(tmp_path)
     handoff = root(monitor)
     sends = scripted(client, monkeypatch, [
-        ('', 'allow_complete', {'result': 'resolve', 'reason': 'Ready'}),
+        ('', 'allow_complete', {}),
         ('', 'file_read', {'path': 'task/workspace/router.py'}),
-        ('', 'allow_complete', {'result': 'resolve', 'reason': 'Still ready'}),
+        ('', 'allow_complete', {}),
     ])
     action = monitor.review('Root', completion_pending=True, root_handoff=handoff)
     assert action.kind == 'allow_complete' and len(sends) == 3
+    assert ROOT_SYSTEM_PROMPT not in sends[0]['system']
+    assert 'monitor/root_working/' not in visible(sends[0])
+    assert 'monitor/audit/root_frames/' not in visible(sends[0])
+    assert monitor.root_routed and not monitor.verification_loop_v0
     events = rows(ws)
     assert len([r for r in events if r['event'] == 'ase_reconsideration_boundary']) == 1
     assert len([r for r in events if r['event'] == 'ase_release_confirmed']) == 1
@@ -178,15 +253,21 @@ def test_release_boundary_root_and_changed_control(tmp_path, monkeypatch):
 
 def test_boundary_can_change_to_follow_or_intervene(tmp_path, monkeypatch):
     monitor, client, ws = make_monitor(tmp_path)
+    ws.write_text('monitor/reference.md', 'Route response is the public requirement.')
+    monitor.intervention_callback = lambda message: {'delivery': 'queued'}
+    scripted(client, monkeypatch, [
+        ('Route concern.', 'intervene', {'message': 'Check route behavior.'}),
+        ('Await feedback.', 'wait', {'mode': 'follow', 'after_turns': 1}),
+    ])
+    assert monitor.review('Initial').kind == 'wait'
     sends = scripted(client, monkeypatch, [
         ('', 'wait', {'mode': 'patrol', 'after_turns': 1}),
-        ('', 'wait', {'mode': 'follow', 'after_turns': 1, 'reason': 'Need response'}),
+        ('Need response.', 'wait', {'mode': 'follow', 'after_turns': 1}),
     ])
     assert monitor.review('Wake').payload['mode'] == 'follow'
     assert len(sends) == 2
     assert any(r['event'] == 'ase_release_abandoned' and r['disposition'] == 'changed_to_follow'
                for r in rows(ws))
-    monitor.intervention_callback = lambda message: {'delivery': 'queued'}
     scripted(client, monkeypatch, [
         ('', 'wait', {'mode': 'patrol', 'after_turns': 1}),
         ('Now correct it.', 'intervene', {'message': 'Fix route handling.'}),
@@ -219,6 +300,7 @@ def test_continuation_only_rewrites_working_and_legacy_paths_unchanged(tmp_path,
 
 def test_exact_duplicate_telemetry_is_mechanical_and_not_a_control_trigger(tmp_path, monkeypatch):
     monitor, client, ws = make_monitor(tmp_path)
+    ws.write_text('monitor/reference.md', 'Route response is the public requirement.')
     sends = scripted(client, monkeypatch, [
         ('', 'file_read', {'path': 'task/workspace/router.py'}),
         ('', 'file_read', {'path': 'task/workspace/router.py', 'start': 1, 'count': 200}),
