@@ -1,0 +1,259 @@
+# High-Performance Serialization Library Development Roadmap
+
+## Overview
+
+This library is a header-only C++ framework for high-performance serialization and deserialization across multiple formats (JSON, a custom binary format called BEVE, TOML, CBOR, MsgPack, CSV). It is designed for zero-overhead compile-time reflection with a focus on maximum throughput and minimal binary size.
+
+---
+
+## Goals
+
+Our primary goal for this release is to introduce **lazy parsing** capabilities for both JSON and the BEVE binary format. Rather than eagerly deserializing an entire document into typed C++ structures, lazy parsers allow on-demand field access with zero upfront processing cost. This is the strategic centerpiece of the release: the JSON lazy parser establishes the API pattern, and the BEVE lazy parser mirrors it for binary data. Both parsers share the same design philosophy—O(1) construction, on-demand parsing, and optional indexed views for random access.
+
+In parallel, we plan to land several independent improvements to the BEVE binary format: a size precomputation API (for efficient pre-allocation in shared memory IPC) and a header inspection API (for examining buffer structure without full deserialization). We also plan to add comprehensive URL encoding/decoding utilities for the networking layer, bring TOML serialization to full 1.0 specification compliance with array-of-tables support, and improve variant type deduction by automatically inferring JSON types from custom read/write functions.
+
+The following capabilities are planned for this release:
+
+- **Target 1: Lazy JSON Parser** — On-demand JSON parsing that defers byte processing until individual fields are accessed
+- **Target 2: Lazy BEVE Parser** — The same lazy parsing paradigm applied to the BEVE binary format
+- **Target 3: BEVE Size Precomputation** — Calculate exact serialization byte count without performing actual serialization
+- **Target 4: BEVE Header Inspection** — Inspect BEVE buffer headers to extract type and count information without full deserialization
+- **Target 5: URL Encoding and Query Parameter Support** — Comprehensive URL encoding/decoding and query string parsing utilities
+- **Target 6: TOML Array of Tables** — Full TOML 1.0 specification compliance for array-of-tables (`[[table]]`) syntax
+- **Target 7: Variant Custom Type Inference** — Automatic JSON type deduction for custom types in `std::variant`
+
+---
+
+## Target 1: Lazy JSON Parser
+
+JSON documents in real-world applications are often large, but consumers typically need only a few fields. Eagerly parsing the entire document wastes CPU cycles on data that will never be read. We plan to introduce `glz::lazy_json`, a lazy JSON parser that performs **zero upfront processing**—creating a `lazy_json` object is O(1), storing only a pointer to the buffer. Parsing happens on demand when specific fields are accessed.
+
+A typical usage: given a JSON string `{"user":{"name":"Alice","age":30},"metadata":{...}}`, one can construct a `lazy_json`, navigate to `["user"]["name"]`, and extract just that field. The rest of the document is never parsed. For repeated random-access patterns, an indexed view can be built once in O(n) time, after which any element is retrievable in O(1).
+
+### Requirements
+
+1. **`glz::lazy_json` factory function**: Calling `glz::lazy_json(buffer)` on a `std::string` (or string-like buffer) returns an `expected`-like result. If parsing succeeds, `result.has_value()` is true and `*result` yields a lazy document. The function is templated on `glz::opts` to support compile-time options (e.g., `glz::lazy_json<opts>(buffer)` with `opts.minified = true`).
+
+2. **Lazy document interface** (`lazy_document`):
+   - `is_object()` / `is_array()` — type predicates on the root value
+   - `root()` — returns a lazy view of the root value
+   - `operator[](std::string_view key)` — for objects, navigates to a named field and returns a lazy view; returns an error view if the key is missing
+   - `operator[](size_t index)` — for arrays, navigates by position
+
+3. **Lazy view interface** (`lazy_json_view`):
+   - **Type predicates**: `is_object()`, `is_array()`, `is_string()`, `is_number()`, `is_boolean()`, `is_null()`
+   - **Value extraction**: `get<T>()` returns `std::optional<T>` for supported types (`std::string`, `std::string_view`, `int64_t`, `double`, `bool`). Only the requested bytes are parsed.
+   - **Navigation**: `operator[](key)` for objects, `operator[](index)` for arrays — returns a new lazy view for the nested value
+   - **Error checking**: `has_error()` returns true if the view was created from a failed navigation (e.g., missing key)
+   - **Size**: `size()` returns element count for objects/arrays
+   - **Iterator support**: range-based for loop compatibility. For objects, iteration yields successive `lazy_json_view` values (each pointing to the field's value), and each such view additionally exposes a `key()` method (returning `std::string_view`) to retrieve the associated key. Standard view methods like `get<T>()` work directly on these iterated views. For arrays, iteration yields successive lazy views.
+   - **Indexed view**: `.index()` builds an O(n) index and returns an `indexed_lazy_view` supporting O(1) `operator[](size_t)` random access and `.size()`.
+   - **Raw JSON**: `.raw_json()` returns the raw JSON substring (`std::string_view`) for the current value, including delimiters (e.g., `"Alice"` with quotes for strings, `[1,2,3]` for arrays).
+   - **Direct deserialization**: `.read_into(T& value)` deserializes the lazy view directly into any glaze-deserializable C++ type `T` (including primitive types such as `int`, `double`, `std::string`, `bool`, containers like `std::vector<int>`, and structs) in a single pass, returning an error code. This avoids the two-pass overhead of `.raw_json()` followed by `glz::read_json()`.
+   - **`glz::read_json` overload**: A new overload `glz::read_json(value, lazy_view)` accepts a `lazy_json_view` directly, enabling idiomatic single-pass deserialization from lazy navigation results.
+
+4. **Write support**: `glz::write_json()` can accept a `lazy_json_view`'s `.root()` result and serialize it back to a JSON string. When the input buffer is already compact (no extraneous whitespace), the output is byte-identical to the original input.
+
+---
+
+## Target 2: Lazy BEVE Parser
+
+The BEVE binary format benefits from the same lazy parsing paradigm. We plan to introduce `glz::lazy_beve`, which mirrors the lazy JSON API but operates on BEVE-encoded byte buffers (`std::vector<std::byte>` or similar).
+
+A typical usage: serialize a struct to BEVE, then lazily navigate to specific fields without deserializing the entire message. This is useful for routing, filtering, or partial inspection of binary messages in IPC scenarios.
+
+### Requirements
+
+1. **`glz::lazy_beve` factory function**: Calling `glz::lazy_beve(buffer)` on a byte buffer returns an `expected`-like result. If parsing succeeds, `*result` yields a lazy BEVE document.
+
+2. **Lazy BEVE document and view interface**: Mirrors the lazy JSON interface:
+   - `is_object()`, `is_array()`, `is_string()`, `is_number()`, `is_boolean()`, `is_null()` type predicates
+   - `root()` returns a lazy view; `operator[](key)` for objects, `operator[](index)` for arrays
+   - `get<T>()` extracts values (`std::string`, `int64_t`, `double`, `bool`, etc.)
+   - `has_error()` for error checking, `size()` for element count
+   - Iterator support: range-based for loops over objects (with `key()`) and arrays
+   - `.index()` for O(1) random access via indexed views
+   - `.read_into(T& value)` for single-pass deserialization into typed structs
+   - `.raw_beve()` returns the raw BEVE byte range for the current value, which can be passed to `glz::read_beve()` for deserialization into typed objects
+
+3. **Round-trip fidelity**: Serializing a struct to BEVE, creating a lazy view, navigating to a field, extracting the value, and comparing to the original struct field must produce identical results.
+
+---
+
+## Target 3: BEVE Size Precomputation
+
+For shared memory IPC and pre-allocation scenarios, it is useful to know the exact number of bytes a value will occupy when serialized to BEVE—without actually performing the serialization. We plan to introduce a size calculation API.
+
+A typical usage: `size_t n = glz::beve_size(my_struct); buffer.reserve(n);` — then serialize into the pre-allocated buffer.
+
+### Requirements
+
+1. **`glz::beve_size(const T& value)`**: Returns `size_t` — the exact number of bytes that `glz::write_beve(value)` would produce. Must match actual serialization size for all supported types. Defined in `glaze/beve/size.hpp` (included via `glaze/beve.hpp`).
+
+2. **`glz::compressed_int_size(uint64_t i)`**: Returns the number of bytes needed to encode `i` as a BEVE compressed integer. The encoding uses variable-length format:
+   - Values < 64: 1 byte
+   - Values < 16384: 2 bytes
+   - Values < 1073741824: 4 bytes
+   - Otherwise: 8 bytes
+
+3. **Supported types**: `beve_size` must work for:
+   - Primitives: `bool`, all integer types (`int8_t` through `uint64_t`), `float`, `double`
+   - Strings: `std::string`, `std::string_view`
+   - Containers: `std::vector<T>`, `std::array<T,N>`, `std::map<K,V>`, `std::unordered_map<K,V>`
+   - Composite: structs with `glz::meta` or reflectable structs, `std::optional<T>`, `std::variant<Ts...>`, `std::tuple<Ts...>`, `std::pair<A,B>`
+   - Smart pointers: `std::shared_ptr<T>`, `std::unique_ptr<T>`
+   - Special: `std::complex<T>`, enum types
+   - Nested containers: vector-of-vectors, map-of-vectors, etc.
+
+---
+
+## Target 4: BEVE Header Inspection
+
+Before committing to full deserialization of a BEVE buffer, it is useful to inspect just the header to learn the data type, element count, and header size. This enables pre-allocation, structure validation, and type-based routing without parsing the payload.
+
+A typical usage: peek at a buffer to learn it contains an array of 1000 elements, pre-allocate the output vector, then deserialize.
+
+### Requirements
+
+1. **`glz::beve_header` struct** (defined in `glaze/beve/peek_header.hpp`):
+   - `uint8_t tag` — the raw tag byte
+   - `uint8_t type` — base type code: null(0), number(1), string(2), object(3), typed_array(4), generic_array(5), extensions(6). Boolean values share `type = 0` with null (both have lower 3 bits of tag byte = 0).
+   - `uint8_t ext_type` — for extensions: subtype identifier
+   - `size_t count` — element/member count for containers, string length for strings, variant index for variants. For scalar types (null, boolean, number) that have no length prefix, `count` is set to 1.
+   - `size_t header_size` — total bytes consumed by tag + count encoding
+
+2. **Extension subtypes** (in `glz::extension` namespace):
+   - `delimiter = 0`, `variant = 1`, `complex = 3`
+   - `complex_number = 0` (single complex: count = 2), `complex_array = 1` (array of complex: count = element count)
+
+3. **`glz::beve_peek_header(const Buffer& buffer)`**: Returns `expected<beve_header, error_ctx>`. On success, the header fields are populated. On failure (empty buffer, truncated data), returns an error context. Also has a raw pointer overload: `beve_peek_header(const void* data, size_t size)`.
+
+4. **`glz::beve_peek_header_at(const Buffer& buffer, size_t offset)`**: Same as above but starts reading at the given byte offset. Useful for concatenated BEVE streams or embedded binary structures. Also has a raw pointer overload with offset.
+
+5. **Header size reflects compressed integer encoding**: Strings, objects, typed arrays, and generic arrays use compressed integer encoding for their count. The `header_size` field accounts for the variable-length encoding:
+   - 1-byte header (count < 64): header_size = 2 (tag + 1-byte int)
+   - 2-byte header (count 64–16383): header_size = 3 (tag + 2-byte int)
+   - 4-byte header (count ≥ 16384): header_size = 5 (tag + 4-byte int)
+
+---
+
+## Target 5: URL Encoding and Query Parameter Support
+
+The networking layer currently lacks URL handling utilities. We plan to add a comprehensive set of URL encoding/decoding and query string parsing functions in a new header `glaze/net/url.hpp`.
+
+A typical usage: receive an HTTP request with target `/api/users?name=John%20Doe&age=30`, split the path from the query string, then parse the query parameters into a map.
+
+### Requirements
+
+1. **`glz::url_decode(std::string_view input)`**: Returns decoded `std::string`. Handles `%XX` hex escapes (e.g., `%20` → space, `%2F` → `/`) and `+` as space (per application/x-www-form-urlencoded). Invalid sequences (incomplete `%`, non-hex characters) are passed through unchanged. Also has a buffer overload: `url_decode(input, std::string& output)`.
+
+2. **`glz::url_encode(std::string_view input)`**: Returns encoded `std::string`. Unreserved characters (`A-Z`, `a-z`, `0-9`, `-`, `.`, `_`, `~`) pass through unchanged. Space is encoded as `+`. All other characters are percent-encoded as `%XX` with uppercase hex digits. Also has a buffer overload: `url_encode(input, std::string& output)`.
+
+3. **`glz::parse_urlencoded(std::string_view query)`**: Parses a URL query string (`key=value&key2=value2`) into `std::unordered_map<std::string, std::string>`. Keys and values are URL-decoded. Empty keys are skipped. Keys without `=` get empty string values. Duplicate keys: last value wins. Also has buffer overloads: a 2-argument form `parse_urlencoded(query, output_map)` that writes results into the provided map, and a 4-argument form `parse_urlencoded(query, output_map, key_buf, val_buf)` that also reuses key/value string buffers to reduce allocations.
+
+4. **`glz::split_target(std::string_view target)`**: Splits an HTTP request target into path and query string components. Returns a struct with `path` and `query_string` fields (both `std::string_view`). The `?` separator is consumed—neither path nor query_string contains it. Works at compile time (`constexpr`). Examples: `/api/users?limit=10` → path=`/api/users`, query_string=`limit=10`; `/api/users` → path=`/api/users`, query_string=empty.
+
+5. **Roundtrip correctness**: `url_decode(url_encode(original))` must equal `original` for all inputs.
+
+---
+
+## Target 6: TOML Array of Tables
+
+The TOML serializer currently lacks support for the array-of-tables syntax (`[[table_name]]`), which is part of the TOML 1.0 specification. We plan to add full read and write support for this syntax, enabling vectors of structs to be serialized in the standard TOML array-of-tables format rather than inline.
+
+A typical usage: a `std::vector<Product>` serialized as multiple `[[products]]` sections, each containing the fields of one product entry.
+
+### Requirements
+
+1. **Writing array-of-tables**: When `glz::write_toml()` encounters a vector of objects (e.g., `std::vector<Product>` where `Product` has `glz::meta` or is reflectable), it serializes using `[[member_name]]` syntax:
+   ```toml
+   [[products]]
+   name = "Hammer"
+   sku = 738594937
+
+   [[products]]
+   name = "Nail"
+   sku = 284758393
+   ```
+   Empty vectors are written as inline empty arrays: `member_name = []`.
+
+2. **Reading array-of-tables**: `glz::read_toml()` parses `[[member_name]]` sections and populates the corresponding `std::vector`. Multiple `[[member_name]]` headers append successive elements.
+
+3. **Nested array-of-tables**: Nested vectors use dot-separated paths in headers. For example, if a `Fruit` struct contains `std::vector<FruitVariety> varieties`, writing `std::vector<Fruit>` produces:
+   ```toml
+   [[fruits]]
+   name = "apple"
+
+   [[fruits.varieties]]
+   name = "red delicious"
+
+   [[fruits.varieties]]
+   name = "granny smith"
+
+   [[fruits]]
+   name = "banana"
+
+   [[fruits.varieties]]
+   name = "plantain"
+   ```
+
+4. **Scalar-before-table ordering**: When a struct contains both scalar fields and table/array-of-table fields, scalars are written first. For example, a struct with `double value` and `nested inner` produces:
+   ```toml
+   value = 5.5
+   [inner]
+   x = 10
+   y = "test"
+   ```
+
+5. **Reflectable structs**: Array-of-tables works with both `glz::meta`-annotated structs and plain reflectable structs (automatic reflection).
+
+6. **Roundtrip**: Write → Read roundtrip preserves data fidelity for all supported struct types.
+
+7. **Error handling**: Malformed headers like `[[products]` (missing closing bracket) or `[products]` when `[[products]]` is expected produce parse errors.
+
+---
+
+## Target 7: Variant Custom Type Inference
+
+Currently, `std::variant` deserialization from JSON requires explicit type discrimination (tagged variants or manual type specification). For types with `glz::custom` read/write functions, the JSON type can be automatically inferred from the read function's input parameter. We plan to add this automatic inference so that custom types participate in variant type deduction without additional configuration.
+
+A typical usage: `std::variant<std::string, Amount>` where `Amount` has a custom read that takes `double` — parsing `42.5` automatically selects `Amount`, while parsing `"hello"` selects `std::string`.
+
+### Requirements
+
+1. **Type inference concepts** (defined in `glaze/core/custom_meta.hpp`, included via `glaze/core/common.hpp`):
+   - `glz::custom_num_t<T>` — true if `T` has `glz::custom` with a read function whose second parameter is a numeric type
+   - `glz::custom_str_t<T>` — true if the read function's second parameter is a string type
+   - `glz::custom_bool_t<T>` — true if the read function's second parameter is a bool type
+   These concepts inspect the second parameter of the custom read lambda to determine JSON type affinity.
+
+2. **Custom type definition pattern**: A custom type defines `glz::meta<T>` with `read_fn` and `write_fn` lambdas wrapped in `glz::custom<read_fn, write_fn>`:
+   ```cpp
+   struct Amount { double value{}; };
+   template<> struct glz::meta<Amount> {
+      static constexpr auto read_fn = [](Amount& a, const double& input) { a.value = input; };
+      static constexpr auto write_fn = [](const Amount& a) -> const double& { return a.value; };
+      static constexpr auto value = glz::custom<read_fn, write_fn>;
+   };
+   ```
+   The second parameter of `read_fn` (`const double&`) determines the JSON type affinity.
+
+3. **Variant deserialization**: When reading JSON into a `std::variant` containing custom types:
+   - If the JSON value is a number and one alternative satisfies `custom_num_t`, that alternative is chosen
+   - If the JSON value is a string and one alternative satisfies `custom_str_t`, that alternative is chosen
+   - If the JSON value is a bool and one alternative satisfies `custom_bool_t`, that alternative is chosen
+
+4. **Variant serialization**: Writing a variant containing a custom type uses the custom `write_fn`, producing the appropriate JSON type (number, string, or bool).
+
+5. **Roundtrip**: Write → Read roundtrip preserves the variant alternative and value for custom types.
+
+---
+
+## Completion Criteria
+
+- All new headers (`glaze/json/lazy.hpp`, `glaze/beve/lazy.hpp`, `glaze/beve/size.hpp`, `glaze/beve/peek_header.hpp`, `glaze/net/url.hpp`, `glaze/core/custom_meta.hpp`) are includable
+- `glaze/json.hpp` includes `glaze/json/lazy.hpp`; `glaze/beve.hpp` includes `glaze/beve/lazy.hpp` and `glaze/beve/size.hpp`
+- Existing JSON/BEVE/TOML read/write APIs remain backward compatible
+- All lazy parser operations are non-throwing (error codes / expected types)
+- URL encoding/decoding passes roundtrip for all valid inputs
+- TOML array-of-tables syntax conforms to TOML 1.0 specification

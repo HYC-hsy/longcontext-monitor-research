@@ -1,0 +1,389 @@
+**Turn 109 ...**
+
+<summary>✅ Bug #1 fixed (priority_tasks manual pop). Now tackling Bug #2: submit() broken template at line 847. The issue is complex - need to properly deduce return type without priority arg. Reading full submit() implementation to understand the logic.</summary>
+
+🛠️ Tool: `file_read`  📥 args:
+````text
+{
+  "count": 80,
+  "path": "/app/include/BS_thread_pool.hpp",
+  "start": 840
+}
+````
+`````
+
+[Action] Reading file: /app/include/BS_thread_pool.hpp
+`````
+
+
+**Turn 110 ...**
+
+<summary>Found the problem! Line 848 tries `std::tuple_element_t<0, std::tuple<A...>>>...` which expands ALL args. Should deduce return type from F and args WITHOUT the last priority arg. Need extract_args_without_last helper. Checking if it exists.</summary>
+
+🛠️ Tool: `code_run`  📥 args:
+````text
+{
+  "script": "cd /app/include && grep -n \"extract_args_without_last\" BS_thread_pool.hpp | head -10",
+  "type": "bash"
+}
+````
+`````
+[Action] Running bash in app: cd /app/include && grep -n "extract_args_without_last" BS_th...
+[Status] ✅ Exit Code: 0
+[Stdout]
+814:            auto task_wrapper = [task = std::forward<F>(task), args_without_priority = extract_args_without_last(std::forward<A>(args)...)]() mutable {
+856:            auto task_wrapper = [task = std::forward<F>(task), task_promise, args_without_priority = extract_args_without_last(std::forward<A>(args)...)]() mutable {
+1106:    static auto extract_args_without_last(A&&... args)
+1108:        return extract_args_without_last_impl(std::index_sequence_for<A...>{}, std::forward<A>(args)...);
+1112:    static auto extract_args_without_last_impl(std::index_sequence<Is...>, A&&... args)
+
+`````
+
+
+**Turn 111 ...**
+
+<summary>Good! extract_args_without_last helper exists (line 1106). The problem at line 848 is the return type deduction incorrectly expands all A... args. Need to deduce from F and args-minus-last. Reading helper implementation to understand correct usage.</summary>
+
+🛠️ Tool: `file_read`  📥 args:
+````text
+{
+  "count": 15,
+  "path": "/app/include/BS_thread_pool.hpp",
+  "start": 1105
+}
+````
+`````
+
+[Action] Reading file: /app/include/BS_thread_pool.hpp
+`````
+
+
+**Turn 112 ...**
+
+<summary>MASTER correction accepted. Previous audit was WRONG - checked symbol existence, not behavior correctness. Invalidated: Target 3 (get_index returns concurrency_t not optional_index, get_pool raw pointer not optional_pool, get_thread_ids returns indices not std::thread::id), Target 6 (loops lack num_blocks, behave like sequences). Reopening all targets. Creating focused behavioral tests first.</summary>
+
+🛠️ Tool: `update_working_checkpoint`  📥 args:
+````text
+{
+  "key_info": "BS::thread_pool v4.0.0 - MASTER CORRECTION #3: Behavior vs Symbol Audit
+
+INVALIDATED COMPLETION CLAIMS:
+❌ Target 3 (Thread init/info) - WRONG SIGNATURES:
+  - get_index() returns concurrency_t/0, should return optional_index/std::nullopt
+  - get_pool() returns raw pointer, should return optional_pool
+  - get_thread_ids() returns numeric indices, should return std::thread::id values
+
+❌ Target 6 (Loops) - WRONG BEHAVIOR:
+  - submit_loop/detach_loop LACK num_blocks parameter
+  - Currently one-task-per-index (same as sequence), should block-split internally
+  - No validation of reversed ranges (can underflow unsigned)
+
+❌ Target 7 (Wait) - WRONG SCOPE:
+  - wait_deadlock is namespace-level, should be thread_pool::wait_deadlock nested
+  - Target is \"optional wait deadlock detection\", not generic wait enhancements
+
+REOPENED STATUS:
+⚠️ Target 1: multi_future - needs behavioral tests
+⚠️ Target 2: utilities - needs behavioral tests
+⚠️ Target 3: Thread info - BROKEN signatures
+⚠️ Target 4: Priority - broken + needs FIFO tie test
+⚠️ Target 5: Sequences - needs behavioral tests
+⚠️ Target 6: Loops - MISSING num_blocks, wrong behavior
+⚠️ Target 7: Wait deadlock - wrong exception nesting
+
+Strategy: Write focused tests for EXACT requirements, let failures guide fixes.",
+  "related_sop": "None"
+}
+````
+`````
+[Info] Updated key_info and related_sop.
+`````
+
+
+**Turn 113 ...**
+
+<summary>Creating focused behavioral test for Target 3 first (most concrete failures): 1) get_index() should return optional_index/nullopt for non-pool threads 2) get_pool() should return optional_pool 3) get_thread_ids() should return actual std::thread::id not indices. This test will expose exact signature mismatches.</summary>
+
+🛠️ Tool: `file_write`  📥 args:
+````text
+{
+  "path": "/app/test_target3_thread_info.cpp",
+  "content": "/**
+ * Target 3: Thread Initialization and Information - Behavioral Test
+ * Tests EXACT signatures and semantics from v4.0.0 specification
+ */
+
+#define BS_THREAD_POOL_ENABLE_PRIORITY
+#define BS_THREAD_POOL_ENABLE_WAIT_DEADLOCK_CHECK
+
+#include \"include/BS_thread_pool.hpp\"
+#include <iostream>
+#include <thread>
+#include <cassert>
+
+using namespace BS;
+
+void test_get_index_signature()
+{
+    std::cout << \"\
+=== Test: get_index() returns optional_index ===\" << std::endl;
+    
+    // Test 1: Non-pool thread should return std::nullopt
+    auto result_main = this_thread::get_index();
+    
+    // Check type: should be std::optional<concurrency_t> (optional_index)
+    static_assert(std::is_same_v<decltype(result_main), optional_index>, 
+                  \"get_index() must return optional_index type\");
+    
+    if (!result_main.has_value()) {
+        std::cout << \"✅ Main thread returns nullopt (correct)\" << std::endl;
+    } else {
+        std::cout << \"❌ FAIL: Main thread returned value \" << result_main.value() 
+                  << \", expected nullopt\" << std::endl;
+        std::exit(1);
+    }
+    
+    // Test 2: Pool thread should return valid index
+    thread_pool pool(2);
+    std::atomic<bool> tested{false};
+    
+    pool.detach_task([&tested]() {
+        auto idx = this_thread::get_index();
+        if (idx.has_value()) {
+            std::cout << \"✅ Worker thread has index: \" << idx.value() << std::endl;
+        } else {
+            std::cout << \"❌ FAIL: Worker thread returned nullopt\" << std::endl;
+            std::exit(1);
+        }
+        tested = true;
+    });
+    
+    pool.wait_for_tasks();
+    assert(tested);
+    std::cout << \"✅ get_index() signature test PASSED\" << std::endl;
+}
+
+void test_get_pool_signature()
+{
+    std::cout << \"\
+=== Test: get_pool() returns optional_pool ===\" << std::endl;
+    
+    // Test 1: Non-pool thread should return std::nullopt
+    auto result_main = this_thread::get_pool();
+    
+    // Check type: should be std::optional<thread_pool*> (optional_pool)
+    static_assert(std::is_same_v<decltype(result_main), optional_pool>,
+                  \"get_pool() must return optional_pool type\");
+    
+    if (!result_main.has_value()) {
+        std::cout << \"✅ Main thread returns nullopt (correct)\" << std::endl;
+    } else {
+        std::cout << \"❌ FAIL: Main thread returned pointer, expected nullopt\" << std::endl;
+        std::exit(1);
+    }
+    
+    // Test 2: Pool thread should return valid pointer
+    thread_pool pool(2);
+    std::atomic<bool> tested{false};
+    
+    pool.detach_task([&pool, &tested]() {
+        auto pool_ptr = this_thread::get_pool();
+        if (pool_ptr.has_value() && pool_ptr.value() == &pool) {
+            std::cout << \"✅ Worker thread has correct pool pointer\" << std::endl;
+        } else {
+            std::cout << \"❌ FAIL: Worker thread returned wrong pool pointer\" << std::endl;
+            std::exit(1);
+        }
+        tested = true;
+    });
+    
+    pool.wait_for_tasks();
+    assert(tested);
+    std::cout << \"✅ get_pool() signature test PASSED\" << std::endl;
+}
+
+void test_get_thread_ids_returns_actual_ids()
+{
+    std::cout << \"\
+=== Test: get_thread_ids() returns std::thread::id values ===\" << std::endl;
+    
+    thread_pool pool(4);
+    
+    // Get thread IDs
+    auto ids = pool.get_thread_ids();
+    
+    // Check return type: should be vector<std::thread::id>
+    static_assert(std::is_same_v<decltype(ids), std::vector<std::thread::id>>,
+                  \"get_thread_ids() must return std::vector<std::thread::id>\");
+    
+    if (ids.size() != 4) {
+        std::cout << \"❌ FAIL: Expected 4 thread IDs, got \" << ids.size() << std::endl;
+        std::exit(1);
+    }
+    
+    // Verify these are actual thread::id values (not just numeric indices)
+    // Thread IDs should be unique and non-default
+    std::thread::id default_id;
+    for (size_t i = 0; i < ids.size(); ++i) {
+        if (ids[i] == default_id) {
+            std::cout << \"❌ FAIL: Thread ID \" << i << \" is default-constructed\" << std::endl;
+            std::exit(1);
+        }
+        
+        // Check uniqueness
+        for (size_t j = i + 1; j < ids.size(); ++j) {
+            if (ids[i] == ids[j]) {
+                std::cout << \"❌ FAIL: Thread IDs \" << i << \" and \" << j << \" are identical\" << std::endl;
+                std::exit(1);
+            }
+        }
+    }
+    
+    std::cout << \"✅ All \" << ids.size() << \" thread IDs are valid and unique\" << std::endl;
+    
+    // Verify we can match a thread::id from inside the pool
+    std::atomic<bool> found{false};
+    pool.detach_task([&ids, &found]() {
+        auto my_id = std::this_thread::get_id();
+        for (const auto& id : ids) {
+            if (id == my_id) {
+                found = true;
+                std::cout << \"✅ Worker thread found its own ID in pool list\" << std::endl;
+                break;
+            }
+        }
+    });
+    
+    pool.wait_for_tasks();
+    if (!found) {
+        std::cout << \"❌ FAIL: Worker thread ID not found in pool's thread_ids list\" << std::endl;
+        std::exit(1);
+    }
+    
+    std::cout << \"✅ get_thread_ids() test PASSED\" << std::endl;
+}
+
+void test_init_task_execution()
+{
+    std::cout << \"\
+=== Test: Constructor and reset() with init_task ===\" << std::endl;
+    
+    std::atomic<int> init_count{0};
+    
+    // Test 1: Constructor with init_task
+    {
+        thread_pool pool(3, [&init_count]() {
+            init_count++;
+        });
+        
+        // Wait a bit for initialization
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        
+        if (init_count == 3) {
+            std::cout << \"✅ Constructor init_task executed on all 3 threads\" << std::endl;
+        } else {
+            std::cout << \"❌ FAIL: Constructor init_task executed \" << init_count 
+                      << \" times, expected 3\" << std::endl;
+            std::exit(1);
+        }
+    }
+    
+    // Test 2: reset() with init_task
+    init_count = 0;
+    thread_pool pool(2);
+    
+    pool.reset(4, [&init_count]() {
+        init_count++;
+    });
+    
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    
+    if (init_count == 4) {
+        std::cout << \"✅ reset() init_task executed on all 4 threads\" << std::endl;
+    } else {
+        std::cout << \"❌ FAIL: reset() init_task executed \" << init_count 
+                  << \" times, expected 4\" << std::endl;
+        std::exit(1);
+    }
+    
+    std::cout << \"✅ init_task execution test PASSED\" << std::endl;
+}
+
+int main()
+{
+    std::cout << \"BS::thread_pool v4.0.0 - Target 3 Behavioral Test\" << std::endl;
+    std::cout << \"Testing EXACT signatures and semantics\" << std::endl;
+    
+    try {
+        test_get_index_signature();
+        test_get_pool_signature();
+        test_get_thread_ids_returns_actual_ids();
+        test_init_task_execution();
+        
+        std::cout << \"\
+✅✅✅ ALL TARGET 3 TESTS PASSED ✅✅✅\" << std::endl;
+        return 0;
+        
+    } catch (const std::exception& e) {
+        std::cerr << \"\
+❌ FATAL ERROR: \" << e.what() << std::endl;
+        return 1;
+    }
+}
+"
+}
+````
+`````
+[Action] Overwriting file: test_target3_thread_info.cpp
+[Status] ✅ Overwrite 成功 (7044 bytes)
+`````
+
+
+**Turn 114 ...**
+
+<summary>Created Target 3 behavioral test with static_asserts for exact types (optional_index, optional_pool, vector<thread::id>). Compiling to expose signature mismatches, then will fix implementation to match specification.</summary>
+
+🛠️ Tool: `code_run`  📥 args:
+````text
+{
+  "script": "cd /app && g++ -std=c++17 -pthread -Wall -Wextra -o test_target3 test_target3_thread_info.cpp 2>&1 | head -50",
+  "timeout": 30,
+  "type": "bash"
+}
+````
+`````
+[Action] Running bash in app: cd /app && g++ -std=c++17 -pthread -Wall -Wextra -o test_tar...
+[Status] ✅ Exit Code: 0
+[Stdout]
+In file included from test_target3_thread_info.cpp:9:
+include/BS_thread_pool.hpp: In member function ‘auto BS::thread_pool::submit(F&&, A&& ...)’:
+include/BS_thread_pool.hpp:848:116: error: expansion pattern ‘std::decay_t<typename std::tuple_element<0, std::tuple<_UTypes ...> >::type>’ contains no p
+
+[omitted long output]
+
+fo.cpp:63:57: error: ‘optional_pool’ was not declared in this scope
+   63 |     static_assert(std::is_same_v<decltype(result_main), optional_pool>,
+      |                                                         ^~~~~~~~~~~~~
+test_target3_thread_info.cpp:63:24: error: template argument 2 is invalid
+
+`````
+
+
+**Turn 115 ...**
+
+<summary>Perfect! Test compilation confirms ALL Target 3 issues: ❌ optional_index/optional_pool types don't exist ❌ get_index/get_pool return primitives not optionals ❌ detach_task doesn't exist ❌ submit() template broken. Now reading current get_index/get_pool implementations to fix signatures first.</summary>
+
+🛠️ Tool: `file_read`  📥 args:
+````text
+{
+  "count": 30,
+  "path": "/app/include/BS_thread_pool.hpp",
+  "start": 335
+}
+````
+`````
+
+[Action] Reading file: /app/include/BS_thread_pool.hpp
+`````
+
+

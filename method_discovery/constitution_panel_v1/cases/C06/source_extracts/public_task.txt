@@ -1,0 +1,166 @@
+# NLP Pipeline Framework Enhancement Roadmap
+
+## Overview
+
+This library is an industrial-strength natural language processing framework that provides production-ready pipelines for tokenization, part-of-speech tagging, dependency parsing, named entity recognition, and more. Its pattern matching system, entity linking pipeline, and multilingual tokenizer infrastructure are key extensibility points that serve a wide range of downstream applications.
+
+---
+
+## Goals
+
+Our primary goal in this release is to expand the expressiveness and robustness of two core subsystems: the token pattern matcher and the entity linking pipeline. The matcher currently supports basic quantifiers (`+`, `*`, `?`, `!`) but lacks the ability to specify exact or bounded repetition counts — a gap that limits pattern precision for many real-world use cases. Meanwhile, the entity linker has no mechanism to discard low-confidence predictions, forcing downstream consumers to handle noisy links. Both enhancements are self-contained and can be implemented independently.
+
+In parallel, we plan to address several correctness and robustness issues. The `Doc.has_vector` property currently checks only whether the vocabulary contains *any* vectors, rather than whether the specific document's tokens have vectors — this inconsistency with `Token.has_vector` and `Span.has_vector` should be resolved, along with refining when similarity warnings are emitted. The dependency parser's projectivization methods silently produce incorrect results when the input dependency tree contains cycles; we plan to add explicit cycle detection that raises a clear error. Finally, two language-level tokenization improvements are ready to land: support for combining diacritics in Cyrillic-script languages (Russian, Ukrainian, Bulgarian) where stress marks currently break tokenization at punctuation boundaries, and refined English tokenizer exceptions to correctly handle contractions involving demonstrative pronouns (this/that/these/those).
+
+The following capabilities are planned for this release:
+
+- **Target 1: Matcher Min/Max Quantifier Operator** — Enable bounded repetition counts (`{n}`, `{n,m}`, `{n,}`, `{,m}`) in token matcher patterns
+- **Target 2: Entity Linker Confidence Threshold** — Allow the entity linker to discard predictions below a configurable confidence score
+- **Target 3: Vector and Similarity Behavior Refinement** — Make `Doc.has_vector` consistent with token/span semantics and refine similarity warnings
+- **Target 4: Cycle Detection in Dependency Parsing** — Detect and report cycles in dependency graphs during projectivization
+- **Target 5: Cyrillic Combining Diacritics Tokenization** — Fix tokenization for Cyrillic words with combining diacritical marks at punctuation boundaries
+- **Target 6: English Tokenizer Contraction Improvements** — Correctly handle contractions for this/that/these/those demonstrative pronouns
+
+---
+
+## Target 1: Matcher Min/Max Quantifier Operator
+
+The token `Matcher` currently supports four quantifier operators for pattern tokens: `!` (exactly 0), `?` (0 or 1), `+` (1 or more), and `*` (0 or more). However, there is no way to specify an exact count or a bounded range of repetitions. Users who need patterns like "exactly 3 adjectives" or "between 2 and 5 tokens" must work around this limitation with verbose repeated pattern entries. We plan to add min/max quantifier operators using a curly-brace syntax familiar from regular expressions.
+
+After implementation, a user should be able to write patterns like `[{"ORTH": "foo", "OP": "{3}"}]` to match exactly 3 consecutive occurrences of "foo", or `[{"ORTH": "foo", "OP": "{2,5}"}]` to match between 2 and 5 occurrences.
+
+### Requirements
+
+1. **New quantifier syntax**: The `OP` field in a `Matcher` pattern token accepts four new forms, in addition to the existing `!`, `?`, `+`, `*`:
+   - `"{n}"` — match exactly _n_ times
+   - `"{n,m}"` — match at least _n_ but not more than _m_ times
+   - `"{n,}"` — match at least _n_ times (no upper bound)
+   - `"{,m}"` — match at most _m_ times (starting from 0)
+
+   Where _n_ and _m_ are non-negative integers and when both are present, _n_ must be less than or equal to _m_.
+
+2. **Semantics**: These operators produce matches consistent with the following behavior:
+   - `{n}` matches exactly _n_ consecutive occurrences of the pattern token
+   - `{n,m}` matches at least _n_ but no more than _m_ consecutive occurrences
+   - `{n,}` matches at least _n_ consecutive occurrences (no upper bound)
+   - `{,m}` matches zero to _m_ consecutive occurrences
+   - These operators work correctly with both greedy (`"LONGEST"`) and non-greedy matching, and produce correct alignment arrays
+   - In non-greedy (default) mode, when a quantifier produces multiple matches of different lengths at overlapping positions, shorter matches are returned before longer ones
+
+3. **Validation**: Invalid quantifier specifications raise appropriate errors:
+   - An `OP` value like `"{,}"`, `"{a,3}"`, `"{a}"`, `"{,a}"`, `"{1,2,3}"`, `"{1, 3}"` (space), `"{-2}"`, or `"{,4}4"` should be rejected
+   - When _n_ > _m_ (e.g., `"{5,3}"`), a `ValueError` with error code E011 should be raised
+   - Valid patterns like `{"TEXT": "ha", "OP": "{3}"}` should pass validation without errors
+
+4. **Pattern schema update**: The token pattern operator schema (used for pattern validation) must be extended to accept the new `{n}`, `{n,m}`, `{n,}`, `{,m}` forms in addition to the existing simple operators. Invalid forms (e.g., `{,}`, `{a,3}`, `{a}`, `{,a}`, `{1,2,3}`, `{1, 3}`, `{-2}`, `{,4}4`) must be rejected.
+
+---
+
+## Target 2: Entity Linker Confidence Threshold
+
+The `EntityLinker` pipeline component currently returns a prediction for every entity mention, regardless of how confident the model is. In many production scenarios, it is preferable to discard low-confidence links and return a "NIL" indicator instead. We plan to add an optional confidence threshold parameter that filters predictions below a specified score.
+
+After implementation, a user should be able to configure the entity linker with `config={"threshold": 0.99}`, and any entity whose best candidate's combined score falls below this threshold will be assigned the `EntityLinker.NIL` identifier instead of a potentially incorrect link.
+
+### Requirements
+
+1. **New `threshold` parameter**: The `EntityLinker` component (registered as `"entity_linker"`) and its factory function `make_entity_linker` accept a new optional parameter `threshold` (type: `Optional[float]`, default: `None`).
+   - When `threshold` is `None`, behavior is unchanged from previous versions — all predictions are kept
+   - When `threshold` is set to a float value, predictions with a confidence score below the threshold are discarded and replaced with `EntityLinker.NIL`
+   - The `threshold` value must be in the range `[0, 1]` (inclusive) or `None`. Values outside this range raise a `ValueError` with error code E1043
+
+2. **Prediction filtering logic**: When `threshold` is set, any entity prediction whose confidence score falls below the threshold must be replaced with `EntityLinker.NIL`. When `threshold` is `None`, all predictions are kept regardless of confidence score (existing behavior). The threshold check applies uniformly to all predictions, regardless of the number of candidates.
+
+3. **Stored attribute**: The `threshold` value is stored as `self.threshold` on the `EntityLinker` instance, accessible after initialization.
+
+4. **Error message E1043**: A new error message should be defined: `"Expected None or a value in range [{range_start}, {range_end}] for entity linker threshold, but got {value}."` with format keys `range_start`, `range_end`, and `value`.
+
+---
+
+## Target 3: Vector and Similarity Behavior Refinement
+
+The `Doc.has_vector` property currently returns `True` whenever the vocabulary contains any vectors at all, regardless of whether the specific tokens in the document actually have vectors. This is inconsistent with `Token.has_vector` and `Span.has_vector`, which check whether the individual token or span tokens have vector representations. Additionally, when computing similarity between objects where one has a zero vector norm, the library currently always emits a warning — even when both objects genuinely have vectors that happen to sum to zero.
+
+After this change, `Doc.has_vector` will return `True` only if at least one token in the document has a vector, matching the token/span semantics. And similarity computations will only emit the zero-norm warning when a participant truly has no vector representation (i.e., `has_vector` is `False`), not when it merely has a zero-magnitude vector.
+
+### Requirements
+
+1. **`Doc.has_vector` behavior change**: `Doc.has_vector` must return `True` only if at least one token in the document has a vector, consistent with the semantics of `Token.has_vector` and `Span.has_vector`. Previously, it returned `True` whenever the vocabulary contained any vectors, even if none of the document's tokens had vectors. Other existing behaviors (user hooks, tensor fallback) remain unchanged.
+
+2. **Similarity warning refinement for `Doc.similarity`, `Span.similarity`, and `Token.similarity`**: When computing similarity and `self.vector_norm == 0` or `other.vector_norm == 0`, only emit the W008 warning if the object with zero norm also has `has_vector == False`. If both objects genuinely have vectors (but one happens to sum to zero), no warning is emitted — the method still returns `0.0` in this case.
+
+3. **No-vector similarity behavior**: When neither document has vectors (e.g., fresh `Vocab()` with no loaded vectors), calling `doc1.similarity(doc2)` should emit a `UserWarning`. This applies to all pairwise combinations: Doc-Doc, Doc-Token, Doc-Span, Token-Doc, Span-Doc.
+
+---
+
+## Target 4: Cycle Detection in Dependency Parsing
+
+The projectivization methods in the dependency parser — specifically `is_nonproj_arc`, `is_nonproj_tree`, and `projectivize` — currently do not detect cycles in the input dependency graph. When a cyclic dependency tree is passed (e.g., token A depends on token B, which depends on token C, which depends back on A), the internal ancestor-tracing loop can run indefinitely or produce silently wrong results. We plan to add cycle detection that raises a clear `ValueError` when a cycle is encountered.
+
+After this change, calling `is_nonproj_arc(6, [1, 2, 2, 4, 5, 3, 2])` (where the tree has a cycle) will raise a `ValueError` with a message that includes the dependency graph.
+
+### Requirements
+
+1. **Cycle detection**: The functions `is_nonproj_arc`, `is_nonproj_tree`, and `projectivize` must detect cycles in the dependency graph. If a cycle is present, the function must not loop indefinitely but instead raise an error immediately.
+
+2. **Error reporting**: When a cycle is detected, raise a `ValueError` with a message matching the format `"Found cycle in dependency graph: [<heads>]"`, where `<heads>` is the comma-separated list of head indices in the dependency tree. For example, for input heads `[1, 2, 2, 4, 5, 3, 2]`, the error message should be `"Found cycle in dependency graph: [1, 2, 2, 4, 5, 3, 2]"`.
+
+3. **Affected functions**: The cycle detection must be triggered by:
+   - `is_nonproj_arc(token_id, heads)` — when the arc check traverses a cycle
+   - `is_nonproj_tree(heads)` — when any arc check encounters a cycle
+   - `projectivize(heads, labels)` — when projectivization encounters a cycle
+
+4. **Non-cyclic behavior unchanged**: Trees without cycles (including projective, non-projective, partial, and multi-rooted trees) continue to work exactly as before.
+
+---
+
+## Target 5: Cyrillic Combining Diacritics Tokenization
+
+Languages written with the Cyrillic alphabet (Russian, Ukrainian, Bulgarian) commonly use combining diacritical marks (Unicode range U+0300–U+036F) to indicate stressed syllables. The current tokenizer rules do not account for these combining characters at word boundaries, causing incorrect tokenization when a stressed word is followed by punctuation — for example, "жару́." (word with stress mark + period) may fail to split the period into a separate token.
+
+After this change, text like `"рекоменду́я подда́ть жару́. Самого́ Баргамота"` should tokenize correctly, with the period separated from the preceding stressed word.
+
+### Requirements
+
+1. **New character class constant**: Define a `COMBINING_DIACRITICS` constant in `spacy/lang/char_classes.py` representing the Unicode combining diacritical marks range `\u0300-\u036f`.
+
+2. **New tokenizer rule lists**: In `spacy/lang/punctuation.py`, create two new lists:
+   - `COMBINING_DIACRITICS_TOKENIZER_SUFFIXES`: extends the standard `TOKENIZER_SUFFIXES` with additional rules to correctly tokenize suffix punctuation (e.g., periods, commas) that follows alphabetic characters with combining diacritical marks
+   - `COMBINING_DIACRITICS_TOKENIZER_INFIXES`: extends the standard `TOKENIZER_INFIXES` with additional rules to correctly split at infix punctuation (e.g., periods before uppercase/quote, commas, hyphens, and special characters like `:<>=/`) when preceded by characters with combining diacritical marks
+
+3. **Language integration**: The Russian (`spacy/lang/ru`), Ukrainian (`spacy/lang/uk`), and Bulgarian (`spacy/lang/bg`) language classes must override their default `suffixes` and `infixes` with the new diacritics-aware lists (`COMBINING_DIACRITICS_TOKENIZER_SUFFIXES` and `COMBINING_DIACRITICS_TOKENIZER_INFIXES`), imported from `spacy.lang.punctuation`.
+
+4. **Expected tokenization behavior**:
+   - Russian: `"рекоменду́я подда́ть жару́. Самого́ Баргамота"` — the third token should be `"жару́"` and the fourth token should be a punctuation mark (period, comma, colon, or hyphen depending on the input variant)
+   - Ukrainian: `"Хлібі́в не було́. Хлібі́в не було́."` — the third token should be `"було́"` and the fourth token should be `"."`
+
+---
+
+## Target 6: English Tokenizer Contraction Improvements
+
+The English tokenizer exceptions currently generate contraction entries for demonstrative pronouns `this`, `that`, `these`, and `those` that are incorrect for certain forms. Specifically, the current code generates entries for forms like `"theses"` (which should be the plural of "thesis", not a contraction of "these" + "s") and `"thisre"` (which is not a valid English word). These spurious entries cause incorrect tokenization.
+
+After this fix, words like `"theses"` and `"thisre"` should be tokenized as single tokens rather than being split into contraction parts.
+
+### Requirements
+
+1. **Contraction generation logic**: The English tokenizer exception generation for demonstrative pronouns (`that`, `this`, `these`, `those`) must account for grammatical number and person to avoid generating invalid contractions:
+   - Singular third-person pronouns (`that`, `this`) should **not** generate `'s` possessive/contraction entries that conflict with their natural forms (i.e., keep `that's`, `this's`)
+   - Plural third-person pronouns (`these`, `those`) should **not** generate `'s` or bare `s` entries (since `"theses"` is an existing word and `"thoses"` is not a valid contraction)
+   - Plural forms should **not** generate `'re` / `re` contraction entries (since `"these're"` is not standard)
+   - Singular third-person forms should **not** generate `'re` / `re` entries (since `"that're"` is non-standard for third person singular)
+   - All other contraction forms (`'ll`, `'ve`, `'d`, `'ll've`, `'d've` and their no-apostrophe variants) must remain intact for all four demonstrative pronouns
+
+2. **Expected tokenization**: The words `"theses"` and `"thisre"` should each tokenize as a single token (1 token), not be split into multiple tokens.
+
+---
+
+## Completion Criteria
+
+- All new quantifier operators for the Matcher work correctly with greedy and non-greedy matching
+- EntityLinker threshold filtering is configurable and correctly filters low-confidence predictions
+- `Doc.has_vector` is consistent with `Token.has_vector` and `Span.has_vector`
+- Cyclic dependency graphs raise clear `ValueError` messages
+- Cyrillic text with combining diacritics tokenizes correctly at punctuation boundaries for Russian, Ukrainian, and Bulgarian
+- English contractions for this/that/these/those are correctly generated
+- Existing APIs remain unchanged (backward compatibility) for all non-modified behavior

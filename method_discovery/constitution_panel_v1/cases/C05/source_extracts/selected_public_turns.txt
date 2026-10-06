@@ -1,0 +1,388 @@
+**Turn 91 ...**
+
+<summary>Building concrete evidence audit. Starting systematic review: Target 1 (multi_future enhancements) - reading class definition lines 82-196 to identify what methods exist vs what's needed for v4.0.0.</summary>
+
+🛠️ Tool: `file_read`  📥 args:
+````text
+{
+  "count": 115,
+  "path": "/app/include/BS_thread_pool.hpp",
+  "start": 82
+}
+````
+`````
+
+[Action] Reading file: /app/include/BS_thread_pool.hpp
+`````
+
+
+**Turn 92 ...**
+
+<summary>Auditing multi_future: Has get(), ready_count(), valid(), wait(), wait_for(), wait_until(). Continuing to read rest of multi_future and checking BS_thread_pool_utils.hpp for Target 2 (utility separation + signaller).</summary>
+
+🛠️ Tool: `file_read`  📥 args:
+````text
+{
+  "count": 20,
+  "path": "/app/include/BS_thread_pool.hpp",
+  "start": 196
+}
+````
+`````
+
+[Action] Reading file: /app/include/BS_thread_pool.hpp
+`````
+
+
+**Turn 93 ...**
+
+<summary>multi_future complete: 6 methods (get/ready_count/valid/wait/wait_for/wait_until). Now checking Target 2: reading BS_thread_pool_utils.hpp to verify utility separation and look for signaller class.</summary>
+
+🛠️ Tool: `file_read`  📥 args:
+````text
+{
+  "path": "/app/include/BS_thread_pool_utils.hpp",
+  "count": 100
+}
+````
+`````
+
+[Action] Reading file: /app/include/BS_thread_pool_utils.hpp
+`````
+
+
+**Turn 94 ...**
+
+<summary>Excellent! Target 2 COMPLETE: BS_thread_pool_utils.hpp exists with signaller class (lines 27-91), synced_stream, timer. Utility separation done. Now auditing Target 3: checking this_thread namespace for get_index/get_pool public APIs and get_thread_ids method.</summary>
+
+🛠️ Tool: `file_read`  📥 args:
+````text
+{
+  "count": 50,
+  "path": "/app/include/BS_thread_pool.hpp",
+  "start": 325
+}
+````
+`````
+
+[Action] Reading file: /app/include/BS_thread_pool.hpp
+`````
+
+
+**Turn 95 ...**
+
+<summary>Target 3 progress: ✅ get_index()/get_pool() exist (lines 345-357), ✅ wait_deadlock detection exists (lines 363-372). Now checking for get_thread_ids() method in thread_pool class and constructor/reset init overloads.</summary>
+
+🛠️ Tool: `code_run`  📥 args:
+````text
+{
+  "script": "cd /app/include && grep -n \"get_thread_ids\\|thread_pool(\" BS_thread_pool.hpp | head -20",
+  "type": "bash"
+}
+````
+`````
+[Action] Running bash in app: cd /app/include && grep -n "get_thread_ids\|thread_pool(" BS...
+[Status] ✅ Exit Code: 0
+[Stdout]
+394:    thread_pool(const concurrency_t thread_count_ = 0, F&& init_task_ = nullptr)
+408:    ~thread_pool()
+474:    [[nodiscard]] std::vector<concurrency_t> get_thread_ids() const
+
+`````
+
+
+**Turn 96 ...**
+
+<summary>Target 3 almost complete: ✅ get_thread_ids() at line 474, ✅ constructor with init_task at 394. Checking reset() method for init overload, then auditing Targets 4-7 (priority/sequence/loop/wait APIs).</summary>
+
+🛠️ Tool: `code_run`  📥 args:
+````text
+{
+  "script": "cd /app/include && grep -n \"void reset\\|detach_sequence\\|detach_loop\\|submit_sequence\\|detach_task\\|submit_task\" BS_thread_pool.hpp | head -30",
+  "type": "bash"
+}
+````
+`````
+[Action] Running bash in app: cd /app/include && grep -n "void reset\|detach_sequence\|det...
+[Status] ✅ Exit Code: 0
+[Stdout]
+15: * - Index-based loop parallelization (detach_loop/submit_loop)
+16: * - Sequence task submission (detach_sequence/submit_sequence)
+648:    void detach_loop(const T1 first_index, const T2 index_after_last, F&& loop, const priority_t priority = pr::normal)
+662:    void detach_loop(const T index_aft
+
+[omitted long output]
+
+&& task)
+762:        detach_loop(first_index, index_after_last, std::forward<F>(task));
+766:    void detach_sequence(const T count, F&& task)
+768:        detach_loop(static_cast<T>(0), count, std::forward<F>(task));
+993:    void reset(const concurrency_t thread_count_ = 0, F&& init_task_ = nullptr)
+
+`````
+
+
+**Turn 97 ...**
+
+<summary>Excellent discoveries! ✅ Target 3: reset with init_task (line 993). ✅ Target 4: Priority versions exist. ✅ Target 5: detach_sequence/submit_sequence exist (lines 671-700, 748-768). ✅ Target 6: detach_loop methods exist. Now checking wait enhancements and compiling test to verify all signatures work.</summary>
+
+🛠️ Tool: `code_run`  📥 args:
+````text
+{
+  "script": "cd /app/include && grep -n \"wait_for_tasks\\|purge_tasks\" BS_thread_pool.hpp | head -20",
+  "type": "bash"
+}
+````
+`````
+[Action] Running bash in app: cd /app/include && grep -n "wait_for_tasks\|purge_tasks" BS_...
+[Status] ✅ Exit Code: 0
+[Stdout]
+365: * @brief Exception thrown when a deadlock is detected during wait_for_tasks().
+370:    wait_deadlock() : std::runtime_error("Deadlock detected: wait_for_tasks() called from a worker thread") {}
+410:        wait_for_tasks();
+999:        wait_for_tasks();
+1021:    void wait_for_tasks()
+1048:    bool wait_for_tasks_duration(const std::chrono::duration<R, P>& duration)
+1076:    bool wait_for_tasks_until(const std::chrono::time_point<C, D>& timeout_time)
+1255:     * @brief A condition variable used to notify wait_for_tasks() that all tasks are done.
+1280:     * @brief A flag indicating whether wait_for_tasks() is active.
+
+`````
+
+
+**Turn 98 ...**
+
+<summary>✅ Target 7: wait_for_tasks_duration/until exist (lines 1048, 1076). ALL 7 TARGETS appear implemented! Now writing comprehensive audit report with evidence, then will compile comprehensive test to verify everything actually works (not just exists in code).</summary>
+
+🛠️ Tool: `file_write`  📥 args:
+````text
+{
+  "content": "# BS::thread_pool v4.0.0 - Complete Evidence-Based Audit
+
+## Audit Date: 2026-08-21 Turn 97
+
+## Executive Summary
+All 7 targets appear to be IMPLEMENTED in the codebase. Evidence cited below.
+
+---
+
+## Target 1: Enhanced multi_future
+**Status**: ✅ COMPLETE
+
+**Evidence** (`BS_thread_pool.hpp` lines 102-214):
+- Line 119: `get()` - Retrieve results from all futures
+- Line 141: `ready_count()` - Count ready futures
+- Line 157: `valid()` - Check if all futures valid
+- Line 170: `wait()` - Wait for all futures
+- Line 185: `wait_for(duration)` - Wait with timeout
+- Line 205: `wait_until(time_point)` - Wait until deadline
+
+**Conclusion**: multi_future class has all 6 expected methods.
+
+---
+
+## Target 2: Utility Class Separation + Signaller
+**Status**: ✅ COMPLETE
+
+**Evidence** (`BS_thread_pool_utils.hpp`):
+- Line 10: File comment confirms \"signaller, synced_stream, and timer\"
+- Lines 27-91: **signaller** class with:
+  - Line 58: `ready()` method
+  - Line 70: `wait()` method
+  - Proper move semantics, deleted copy
+- Lines 100+: synced_stream class
+- timer class (need to verify)
+
+**Conclusion**: Utilities properly separated into dedicated header with signaller implementation.
+
+---
+
+## Target 3: Thread Initialization & Information
+**Status**: ✅ COMPLETE
+
+**Evidence** (`BS_thread_pool.hpp`):
+
+### 3a. Constructor with init_task
+- Line 394: `thread_pool(const concurrency_t thread_count_ = 0, F&& init_task_ = nullptr)`
+
+### 3b. reset() with init_task  
+- Line 993: `void reset(const concurrency_t thread_count_ = 0, F&& init_task_ = nullptr)`
+
+### 3c. this_thread queries
+- Line 345: `concurrency_t get_index()` - Returns thread index
+- Line 354: `thread_pool* get_pool()` - Returns pool pointer
+- Lines 337-338: Internal thread_local storage
+
+### 3d. get_thread_ids()
+- Line 474: `std::vector<concurrency_t> get_thread_ids() const`
+
+**Conclusion**: All thread initialization and query APIs present.
+
+---
+
+## Target 4: Priority Queue System
+**Status**: ✅ COMPLETE (with priority_task struct added in Turn 84)
+
+**Evidence** (`BS_thread_pool.hpp`):
+
+### 4a. Conditional compilation
+- Line 62: `#ifdef BS_THREAD_POOL_ENABLE_PRIORITY`
+
+### 4b. Priority types
+- Line 66: `using priority_t = int;`
+- Lines 71-79: `namespace pr` with highest/high/normal/low/lowest constants
+
+### 4c. priority_task struct
+- Lines 83-96: **priority_task** struct (ADDED Turn 84)
+  - Line 85: `priority_t priority` field
+  - Line 86: `std::function<void()> task` field
+  - Lines 92-95: `operator<` for priority_queue ordering
+
+### 4d. Priority queue member
+- Line 1223 (from earlier scan): `std::priority_queue<priority_task> priority_tasks`
+
+### 4e. Priority APIs (examples found)
+- Line 648: `void detach_loop(..., const priority_t priority = pr::normal)`
+- Line 671: `auto submit_sequence(..., const priority_t priority = pr::normal)`
+- Line 689: `void detach_sequence(..., const priority_t priority = pr::normal)`
+
+**Conclusion**: Complete priority system with struct, conditional compilation, and priority parameters.
+
+---
+
+## Target 5: Sequence Submission
+**Status**: ✅ COMPLETE
+
+**Evidence** (`BS_thread_pool.hpp`):
+
+### With priority support:
+- Line 671: `submit_sequence(T1 first_index, T2 index_after_last, F&& task, priority_t priority)`
+- Line 680: `submit_sequence(T count, F&& task, priority_t priority)` 
+- Line 689: `detach_sequence(T1 first_index, T2 index_after_last, F&& task, priority_t priority)`
+- Line 698: `detach_sequence(T count, F&& task, priority_t priority)`
+
+### Without priority (non-conditional):
+- Line 748: `submit_sequence(T1 first_index, T2 index_after_last, F&& task)`
+- Line 754: `submit_sequence(T count, F&& task)`
+- Line 760: `detach_sequence(T1 first_index, T2 index_after_last, F&& task)`
+- Line 766: `detach_sequence(T count, F&& task)`
+
+**Conclusion**: Complete sequence submission APIs with both priority and non-priority overloads.
+
+---
+
+## Target 6: Loop Enhancements
+**Status**: ✅ COMPLETE
+
+**Evidence** (`BS_thread_pool.hpp`):
+
+### With priority support:
+- Line 648: `detach_loop(T1 first_index, T2 index_after_last, F&& loop, priority_t priority)`
+- Line 662: `detach_loop(T index_after_last, F&& loop, priority_t priority)`
+
+### Without priority:
+- Line 731: `detach_loop(T1 first_index, T2 index_after_last, F&& loop)`
+- Line 742: `detach_loop(T index_after_last, F&& loop)`
+
+### Implementation note:
+- Line 691: detach_sequence internally calls detach_loop (code reuse)
+
+**Conclusion**: Loop APIs present with proper overloads.
+
+---
+
+## Target 7: Wait Enhancements
+**Status**: ✅ COMPLETE
+
+**Evidence** (`BS_thread_pool.hpp`):
+
+### 7a. wait_for_tasks() with deadlock detection
+- Line 1021: `void wait_for_tasks()`
+- Lines 363-372: `wait_deadlock` exception class
+- Line 1024 (from earlier scan): Checks `if (this_thread::internal::pool_ptr == this)` for deadlock
+
+### 7b. wait_for_tasks_duration()
+- Line 1048: `bool wait_for_tasks_duration(const std::chrono::duration<R, P>& duration)`
+
+### 7c. wait_for_tasks_until()
+- Line 1076: `bool wait_for_tasks_until(const std::chrono::time_point<C, D>& timeout_time)`
+
+**Conclusion**: All wait variants implemented including deadlock detection.
+
+---
+
+## Overall Status: ✅ ALL 7 TARGETS IMPLEMENTED
+
+### Summary Table
+| # | Target | Status | Key Evidence |
+|---|--------|--------|--------------|
+| 1 | Enhanced multi_future | ✅ COMPLETE | 6 methods (lines 102-214) |
+| 2 | Utility separation + signaller | ✅ COMPLETE | BS_thread_pool_utils.hpp exists |
+| 3 | Thread init/info | ✅ COMPLETE | Constructor, reset, this_thread, get_thread_ids |
+| 4 | Priority queues | ✅ COMPLETE | priority_task struct (Turn 84), conditional compile |
+| 5 | Sequence submission | ✅ COMPLETE | 4 overloads each for detach/submit |
+| 6 | Loop enhancements | ✅ COMPLETE | detach_loop overloads |
+| 7 | Wait enhancements | ✅ COMPLETE | wait_for_tasks + duration/until + deadlock |
+
+---
+
+## Next Step: VERIFICATION
+
+The audit shows all features appear to exist in code. However:
+
+1. **Compilation test needed**: Does the code compile with BS_THREAD_POOL_ENABLE_PRIORITY defined?
+2. **Functionality test needed**: Do all APIs work as expected?
+3. **Edge case verification**: Proper error handling, deadlock detection, priority ordering
+
+**Action**: Create comprehensive test program and compile to verify implementation completeness.
+
+---
+
+**Audit completed**: Turn 97
+**Files audited**: 
+- `/app/include/BS_thread_pool.hpp` (1299 lines)
+- `/app/include/BS_thread_pool_utils.hpp` (222 lines)
+",
+  "path": "/app/COMPLETE_AUDIT.md"
+}
+````
+`````
+[Action] Overwriting file: COMPLETE_AUDIT.md
+[Status] ✅ Overwrite 成功 (6442 bytes)
+`````
+
+
+**Turn 99 ...**
+
+<summary>All 7 targets audited as COMPLETE! Created COMPLETE_AUDIT.md with evidence. Now creating comprehensive test to verify all features compile and function correctly with BS_THREAD_POOL_ENABLE_PRIORITY flag.</summary>
+
+🛠️ Tool: `update_working_checkpoint`  📥 args:
+````text
+{
+  "key_info": "BS::thread_pool v4.0.0 - Audit Complete, Verification Phase
+
+CORRECTED 7 Target Status (Evidence-Based):
+✅ 1. Enhanced multi_future: 6 methods (get/ready_count/valid/wait/wait_for/wait_until)
+✅ 2. Utility separation + signaller: BS_thread_pool_utils.hpp with signaller/synced_stream/timer
+✅ 3. Thread init/info: constructor/reset with init_task, this_thread::get_index/get_pool, get_thread_ids()
+✅ 4. Priority queues: priority_task struct (Turn 84), pr:: constants, conditional compile, priority_tasks queue
+✅ 5. Sequence submission: detach_sequence/submit_sequence with priority & non-priority overloads
+✅ 6. Loop enhancements: detach_loop with priority & non-priority overloads
+✅ 7. Wait enhancements: wait_for_tasks + wait_for_tasks_duration/until + deadlock detection
+
+Evidence: /app/COMPLETE_AUDIT.md (lines cited for each feature)
+
+Current Phase: VERIFICATION
+- Need to compile test with BS_THREAD_POOL_ENABLE_PRIORITY
+- Test all 7 target APIs to confirm they work (not just exist)
+- Verify edge cases: deadlock detection, priority ordering, init_task execution
+
+Files: /app/include/BS_thread_pool.hpp (1299 lines), BS_thread_pool_utils.hpp (222 lines)",
+  "related_sop": "None"
+}
+````
+`````
+[Info] Updated key_info and related_sop.
+`````
+
+
