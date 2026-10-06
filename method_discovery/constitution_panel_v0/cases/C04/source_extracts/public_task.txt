@@ -1,0 +1,167 @@
+# High-Performance Web Framework Enhancement Roadmap
+
+## Overview
+
+This library is a Go web framework designed for building fast HTTP servers, built on top of a high-performance HTTP engine. Its middleware-driven architecture allows composable request processing pipelines, and its context API provides convenient helpers for parsing request data and constructing responses.
+
+---
+
+## Goals
+
+Our primary goal for this release is to expand the framework's request handling capabilities and server configuration flexibility. We plan to introduce new query parameter parsers that complement the existing integer parser, enabling handlers to extract boolean and floating-point values directly from URL query strings. In parallel, we are extending the proxy middleware with deadline-aware and redirect-following request functions, giving developers finer control over proxied HTTP calls.
+
+On the server side, we plan to add TLS listener methods that accept pre-loaded certificate objects rather than file paths, enabling programmatic certificate management and integration with certificate stores. Several middleware improvements are also planned: a session cookie control option for browser-session-only cookies, request ID middleware enhancements for type-safe context keys and smarter header preservation, a CORS wildcard behavior correction, and a MIME type resolution fallback to the standard library for broader extension coverage.
+
+The following capabilities are planned for this release:
+
+- **Target 1: Query Parameter Parsers** — Add boolean and floating-point query string parsers to the request context
+- **Target 2: Proxy Middleware Extensions** — Add redirect-following, timeout-aware, and deadline-aware proxy request functions
+- **Target 3: TLS Certificate Listeners** — Add listener methods that accept pre-loaded TLS certificates
+- **Target 4: CORS Wildcard Origin Handling** — Fix wildcard origin to return literal `*` in response headers
+- **Target 5: Request ID Middleware Improvements** — Support type-safe context keys and preserve existing request IDs
+- **Target 6: Session Cookie Control** — Add a configuration option for browser-session-only cookies
+- **Target 7: MIME Type Resolution Fallback** — Fall back to standard library MIME detection for unknown extensions
+
+---
+
+## Target 1: Query Parameter Parsers
+
+The framework currently provides `QueryInt` for parsing integer query parameters. However, handlers frequently need to parse boolean flags (e.g., `?verbose=true`) and floating-point values (e.g., `?amount=32.23`) from URLs. Currently, developers must manually call `strconv.ParseBool` or `strconv.ParseFloat` on raw string values, which is repetitive and error-prone. We plan to add `QueryBool` and `QueryFloat` methods to the request context, following the same pattern as `QueryInt`.
+
+For example, given `GET /?want_pizza=false&amount=32.23`, a handler could call `c.QueryBool("want_pizza")` to get `false` and `c.QueryFloat("amount")` to get `32.23`, without any manual parsing.
+
+### Requirements
+
+1. **`QueryBool(key string, defaultValue ...bool) bool`** — a method on the request context (`Ctx`) that parses the query parameter identified by `key` as a boolean value.
+   - Uses Go's `strconv.ParseBool` semantics for determining true/false ("1", "t", "TRUE", "true" → true; "0", "f", "FALSE", "false" → false).
+   - When the key is missing, empty, or has a value that `strconv.ParseBool` cannot parse (e.g., a plain string like `"alex"`), the method returns the first `defaultValue` if provided, otherwise returns `true`.
+   - When the key exists with a valid boolean string, the parsed value is returned regardless of any default.
+
+2. **`QueryFloat(key string, defaultValue ...float64) float64`** — a method on the request context (`Ctx`) that parses the query parameter identified by `key` as a 64-bit floating-point value.
+   - Uses Go's `strconv.ParseFloat` with 64-bit precision.
+   - When the key is missing, empty, or has a non-numeric value, the method returns the first `defaultValue` if provided, otherwise returns `0`.
+   - When the key exists with a valid numeric string, the parsed value is returned regardless of any default.
+
+---
+
+## Target 2: Proxy Middleware Extensions
+
+The proxy middleware currently exposes a `Do` function that forwards an HTTP request to a target address using a `fasthttp.Client`. However, it lacks support for following redirects, enforcing timeouts, and setting deadlines — capabilities that the underlying HTTP client already provides. Developers who need these features must bypass the proxy middleware and interact with the HTTP client directly, losing the middleware's URL restoration and header management logic.
+
+We plan to add three new functions — `DoRedirects`, `DoTimeout`, and `DoDeadline` — that wrap the corresponding HTTP client methods while preserving all existing proxy behavior (URL rewriting, connection header management, original URL restoration).
+
+For example, `DoRedirects(c, "http://target.com", 3)` follows up to 3 redirects, `DoTimeout(c, addr, 5*time.Second)` fails if the response doesn't arrive within 5 seconds, and `DoDeadline(c, addr, time.Now().Add(10*time.Second))` fails if the response doesn't arrive by the given absolute time.
+
+### Requirements
+
+All three functions are defined in the proxy middleware package and share the same pattern as the existing `Do` function.
+
+1. **`DoRedirects(c *fiber.Ctx, addr string, maxRedirectsCount int, clients ...*fasthttp.Client) error`** — performs the HTTP request and follows up to `maxRedirectsCount` redirects. When the redirect count is exceeded, the underlying client's "too many redirects" error is returned (which results in a 500 Internal Server Error response with the message `"too many redirects detected when doing the request"`).
+
+2. **`DoDeadline(c *fiber.Ctx, addr string, deadline time.Time, clients ...*fasthttp.Client) error`** — performs the request and waits for a response until the given absolute `deadline`. If the deadline passes before a response is received, a timeout error is returned.
+
+3. **`DoTimeout(c *fiber.Ctx, addr string, timeout time.Duration, clients ...*fasthttp.Client) error`** — performs the request and waits for a response for the given `timeout` duration. If the timeout elapses before a response is received, a timeout error is returned.
+
+4. All three functions must preserve the same behaviors as the existing `Do` function:
+   - Accept an optional custom `*fasthttp.Client`; use the global proxy client if none is provided.
+   - Restore the original request URL after proxying (so `c.OriginalURL()` returns the original path, not the proxied address).
+   - Remove the `Connection` header from both request and response.
+   - Correctly set the request URI scheme based on the provided address.
+
+---
+
+## Target 3: TLS Certificate Listeners
+
+The framework's existing `ListenTLS` and `ListenMutualTLS` methods accept file paths for TLS certificates and load them from disk. This works for simple deployments but prevents programmatic certificate management — for example, loading certificates from a vault, generating self-signed certs in memory, or rotating certificates without touching the filesystem.
+
+We plan to add `ListenTLSWithCertificate` and `ListenMutualTLSWithCertificate` methods that accept pre-loaded `tls.Certificate` objects (and for mutual TLS, a `*x509.CertPool` for client CA verification).
+
+For example, a developer could load a certificate with `tls.LoadX509KeyPair(certFile, keyFile)` and then call `app.ListenTLSWithCertificate(":443", cert)` without the framework needing to know about file paths.
+
+### Requirements
+
+1. **`ListenTLSWithCertificate(addr string, cert tls.Certificate) error`** — a method on the `App` that serves HTTPS requests using the provided `tls.Certificate`.
+   - Configures TLS with minimum version TLS 1.2.
+   - Supports prefork mode (multiple processes sharing the same listener).
+   - Returns an error for invalid addresses (e.g., invalid port numbers).
+
+2. **`ListenMutualTLSWithCertificate(addr string, cert tls.Certificate, clientCertPool *x509.CertPool) error`** — a method on the `App` that serves HTTPS requests with mutual TLS authentication.
+   - Accepts a `*x509.CertPool` containing trusted client CA certificates.
+   - Requires client certificates (`tls.RequireAndVerifyClientCert`).
+   - Returns an error for invalid addresses.
+
+3. The existing `ListenTLS` and `ListenMutualTLS` methods must remain fully functional and backward-compatible after the new methods are added. Both file-based and certificate-based listeners should produce identical TLS behavior.
+
+---
+
+## Target 4: CORS Wildcard Origin Handling
+
+The CORS middleware currently has incorrect behavior when `AllowOrigins` is set to `"*"` (wildcard). Instead of returning the literal `*` in the `Access-Control-Allow-Origin` response header, it echoes back the requesting origin. This violates the CORS specification — when a server intends to allow all origins, it should respond with `*`, not mirror each individual origin.
+
+For example, when a request arrives from `Origin: http://localhost` and the CORS config has `AllowOrigins: "*"`, the response should contain `Access-Control-Allow-Origin: *`, not `Access-Control-Allow-Origin: http://localhost`.
+
+### Requirements
+
+1. When `AllowOrigins` contains `"*"`, the `Access-Control-Allow-Origin` response header must be set to the literal string `"*"`, regardless of the requesting origin.
+
+2. When `AllowOrigins` contains specific origins (not `"*"`), the middleware should match against the requesting origin and echo it back if it matches. Non-matching origins should not receive an `Access-Control-Allow-Origin` header.
+
+3. The wildcard `"*"` match should take priority: once a `"*"` entry is found in the allowed origins list, the response is `"*"` and no further origin matching is performed.
+
+---
+
+## Target 5: Request ID Middleware Improvements
+
+The request ID middleware currently has two limitations. First, its `ContextKey` configuration field is typed as `string`, which prevents using Go's idiomatic pattern of unexported custom types as context keys to avoid collisions across packages. Second, the middleware always calls the `Generator` function and uses `c.Get(header, generatedValue)` to get the request ID — this means the generator runs even when the incoming request already carries a request ID header, wasting resources (e.g., UUID generation).
+
+We plan to change `ContextKey` to `interface{}` and adjust the request ID retrieval logic to only call `Generator` when no existing header value is found.
+
+### Requirements
+
+1. **`Config.ContextKey`** — change the type from `string` to `interface{}`. This allows callers to use custom types (e.g., an unexported `type contextKey int` with `const requestContextKey contextKey = iota`) as context keys, following Go best practices for `context.Value` keys.
+
+2. **Generator invocation** — the middleware should first check if the incoming request already has a value for the configured header (e.g., `X-Request-ID`). If the header is present and non-empty, use that value as the request ID without calling `Generator`. Only call `Generator` when the header is absent or empty.
+
+3. The middleware continues to set the request ID in both the response header and the context locals (via `c.Locals(cfg.ContextKey, rid)`).
+
+---
+
+## Target 6: Session Cookie Control
+
+The session middleware currently always sets `Max-Age` and `Expires` attributes on session cookies based on the configured expiration duration. However, some applications need browser-session cookies that are automatically deleted when the user closes the browser. According to the HTTP specification, cookies without `Expires` or `Max-Age` attributes are session cookies that last only for the browser session.
+
+We plan to add a `CookieSessionOnly` configuration option that, when enabled, omits the `Max-Age` and `Expires` attributes from the session cookie.
+
+### Requirements
+
+1. **`Config.CookieSessionOnly bool`** — a new field in the session middleware's `Config` struct.
+   - Default value: `false` (existing behavior preserved).
+   - When set to `true`, the session cookie must not include `Max-Age` or `Expires` attributes, making it a browser-session cookie that is deleted when the browser closes.
+   - When `false`, the cookie includes `Max-Age` and `Expires` based on the configured expiration, as before.
+
+2. The `CookieSessionOnly` setting takes precedence over the `Expiration` config: even if `Expiration` is set to a non-zero duration, `CookieSessionOnly: true` causes the cookie to omit time-based attributes.
+
+---
+
+## Target 7: MIME Type Resolution Fallback
+
+The framework's `GetMIME` utility function resolves file extensions to MIME types using a built-in static map. Extensions not present in this map return `application/octet-stream` as a fallback, even when the Go standard library's `mime` package knows the correct MIME type. This means extensions like `.mjs` (JavaScript modules), `.wasm`, or other less common but well-known types get a generic binary content type.
+
+We plan to add a fallback to Go's `mime.TypeByExtension` when the built-in map does not contain a match, only returning `application/octet-stream` as a last resort.
+
+### Requirements
+
+1. **`GetMIME(extension string) string`** (in the utils package) — update the resolution order:
+   - First, look up the extension in the existing built-in map (behavior unchanged for known extensions).
+   - If not found in the built-in map, call `mime.TypeByExtension` from Go's standard `mime` package.
+   - If the standard library also returns empty, return `MIMEOctetStream` (`"application/octet-stream"`).
+   - The function must handle extensions both with and without a leading dot (e.g., both `"mjs"` and `".mjs"` should work).
+
+---
+
+## Completion Criteria
+
+- All new methods (`QueryBool`, `QueryFloat`, `DoRedirects`, `DoTimeout`, `DoDeadline`, `ListenTLSWithCertificate`, `ListenMutualTLSWithCertificate`) are callable from their documented packages
+- New configuration fields (`CookieSessionOnly`, `ContextKey` as `interface{}`) are usable in middleware setup
+- CORS wildcard and MIME fallback behaviors produce correct results
+- Existing APIs remain backward compatible

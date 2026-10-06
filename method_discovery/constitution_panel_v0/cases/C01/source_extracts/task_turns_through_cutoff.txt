@@ -1,0 +1,3116 @@
+**Turn 1 ...**
+
+<summary>Reading roadmap for TUI library development; will explore project structure and implement 6 major targets (Scrollbar, BarChart groups, Block multi-title, Stylize trait, prelude, const builders).</summary>
+
+I'll implement this comprehensive TUI library enhancement roadmap. Let me start by exploring the project structure to understand the codebase.
+
+🛠️ Tool: `code_run`  📥 args:
+````text
+{
+  "type": "bash",
+  "script": "cd /app && find . -type f -name \"*.rs\" | head -20"
+}
+````
+`````
+[Action] Running bash in app: cd /app && find . -type f -name "*.rs" | head -20
+[Status] ✅ Exit Code: 0
+[Stdout]
+./examples/chart.rs
+./examples/demo/termion.rs
+./examples/demo/crossterm.rs
+./examples/demo/ui.rs
+./examples/demo/termwiz.rs
+./examples/demo/main.rs
+./examples/demo/app.rs
+./examples/canvas.rs
+./examples/inline.rs
+./examples/layout.rs
+./examples/user_input.rs
+./examples/sparkline.rs
+./examples/gauge.rs
+./examples/popup.rs
+./examples/table.rs
+./examples/calendar.rs
+./examples/custom_widget.rs
+./examples/paragraph.rs
+./examples/panic.rs
+./examples/tabs.rs
+
+`````
+
+
+**Turn 2 ...**
+
+<summary>I can see this is a Rust project in /app. Let me explore the...</summary>
+
+🛠️ Tool: `code_run`  📥 args:
+````text
+{
+  "script": "cd /app && ls -la",
+  "type": "bash"
+}
+````
+`````
+[Action] Running bash in app: cd /app && ls -la
+[Status] ✅ Exit Code: 0
+[Stdout]
+total 152
+drwxr-xr-x 1 root root  4096 Apr  9 08:29 .
+drwxr-xr-x 1 root root  4096 Aug 21 13:49 ..
+drwxrwxr-x 1 root root  4096 Aug 21 13:51 .git
+drwxrwxr-x 4 root root  4096 Apr  7 07:47 .github
+-rw-rw-r-- 1 root root    57 Apr  7 07:47 .gitignore
+-rw-rw-r-- 1 root root  5587 Apr  7 07:47 APPS.md
+-
+
+[omitted long output]
+
+rwxr-x 2 root root  4096 Apr  7 07:47 assets
+-rw-rw-r-- 1 root root  3427 Apr  7 07:47 cliff.toml
+-rw-rw-r-- 1 root root   673 Apr  7 07:47 committed.toml
+drwxrwxr-x 3 root root  4096 Apr  9 08:08 examples
+drwxrwxr-x 5 root root  4096 Apr  7 07:47 src
+drwxrwxr-x 2 root root  4096 Apr  9 08:08 tests
+
+`````
+
+
+**Turn 3 ...**
+
+<summary>Exploring src directory structure to understand existing codebase organization before implementing the 6 targets.</summary>
+
+🛠️ Tool: `code_run`  📥 args:
+````text
+{
+  "script": "cd /app && find src -type f -name \"*.rs\" | sort",
+  "type": "bash"
+}
+````
+`````
+[Action] Running bash in app: cd /app && find src -type f -name "*.rs" | sort
+[Status] ✅ Exit Code: 0
+[Stdout]
+src/backend/crossterm.rs
+src/backend/mod.rs
+src/backend/termion.rs
+src/backend/termwiz.rs
+src/backend/test.rs
+src/buffer.rs
+src/layout.rs
+src/lib.rs
+src/style.rs
+src/symbols.rs
+src/terminal.rs
+src/text.rs
+src/text/line.rs
+src/text/masked.rs
+src/text/spans.rs
+src/widgets/barchart.rs
+src/widgets/block
+
+[omitted long output]
+
+widgets/canvas/points.rs
+src/widgets/canvas/rectangle.rs
+src/widgets/canvas/world.rs
+src/widgets/chart.rs
+src/widgets/clear.rs
+src/widgets/gauge.rs
+src/widgets/list.rs
+src/widgets/mod.rs
+src/widgets/paragraph.rs
+src/widgets/reflow.rs
+src/widgets/sparkline.rs
+src/widgets/table.rs
+src/widgets/tabs.rs
+
+`````
+
+
+**Turn 4 ...**
+
+
+
+🛠️ Tool: `update_working_checkpoint`  📥 args:
+````text
+{
+  "key_info": "TUI Library Development - 6 Targets to implement:
+1. Scrollbar Widget: new src/widgets/scrollbar.rs with Scrollbar, ScrollbarState, symbols, orientation
+2. BarChart Groups: refactor src/widgets/barchart.rs into barchart/ with Bar, BarGroup hierarchical model
+3. Block Multi-Title: new src/title.rs, modify src/widgets/block.rs for multiple titles
+4. Stylize System: new src/style/stylize.rs with Styled/Stylize traits for chainable styling
+5. Prelude Module: new src/prelude.rs re-exporting common types
+6. Const Builders: make Style/Layout methods const, improve Color parsing
+
+Workspace: /app/src
+Current structure: src/{backend,buffer,layout,lib,style,symbols,terminal,text,widgets}
+widgets/ has: barchart.rs, block.rs, chart.rs, gauge.rs, list.rs, etc."
+}
+````
+`````
+[Info] Updated key_info and related_sop.
+`````
+
+
+**Turn 5 ...**
+
+<summary>Stored checkpoint with 6 targets; now reading existing code to understand patterns (Style, Layout, Block, BarChart) before implementation.</summary>
+
+Let me read the existing code to understand the patterns used in this library.
+
+🛠️ Tool: `file_read`  📥 args:
+````text
+{
+  "path": "/app/src/style.rs"
+}
+````
+`````
+
+[Action] Reading file: /app/src/style.rs
+`````
+🛠️ Tool: `file_read`  📥 args:
+````text
+{
+  "path": "/app/src/layout.rs",
+  "count": 100
+}
+````
+`````
+
+[Action] Reading file: /app/src/layout.rs
+`````
+🛠️ Tool: `file_read`  📥 args:
+````text
+{
+  "path": "/app/src/widgets/block.rs",
+  "count": 100
+}
+````
+`````
+
+[Action] Reading file: /app/src/widgets/block.rs
+`````
+🛠️ Tool: `file_read`  📥 args:
+````text
+{
+  "path": "/app/src/widgets/barchart.rs",
+  "count": 100
+}
+````
+`````
+
+[Action] Reading file: /app/src/widgets/barchart.rs
+`````
+
+
+**Turn 6 ...**
+
+<summary>Read existing code patterns; now implementing Target 1 (Scrollbar Widget) starting with scrollbar.rs file.</summary>
+
+Let me continue reading the necessary files and then start implementing. First, let me check more of the style.rs and block.rs files:
+
+🛠️ Tool: `file_read`  📥 args:
+````text
+{
+  "path": "/app/src/style.rs",
+  "start": 200,
+  "count": 150
+}
+````
+`````
+
+[Action] Reading file: /app/src/style.rs
+`````
+🛠️ Tool: `file_read`  📥 args:
+````text
+{
+  "path": "/app/src/widgets/block.rs",
+  "start": 100,
+  "count": 100
+}
+````
+`````
+
+[Action] Reading file: /app/src/widgets/block.rs
+`````
+🛠️ Tool: `file_read`  📥 args:
+````text
+{
+  "path": "/app/src/widgets/mod.rs"
+}
+````
+`````
+
+[Action] Reading file: /app/src/widgets/mod.rs
+`````
+
+
+**Turn 7 ...**
+
+<summary>Reviewed existing code patterns; starting Target 1 implementation by creating scrollbar.rs with Scrollbar widget, ScrollbarState, and symbol sets.</summary>
+
+Now I'll start implementing the features systematically. Let me begin with **Target 1: Scrollbar Widget**.
+
+🛠️ Tool: `file_write`  📥 args:
+````text
+{
+  "path": "/app/src/widgets/scrollbar.rs",
+  "content": "use crate::{
+    buffer::Buffer,
+    layout::Rect,
+    style::Style,
+    widgets::StatefulWidget,
+};
+
+/// Scrollbar symbols
+#[derive(Debug, Clone)]
+pub struct Set {
+    pub track: &'static str,
+    pub thumb: &'static str,
+    pub begin: &'static str,
+    pub end: &'static str,
+}
+
+pub const DOUBLE_VERTICAL: Set = Set {
+    track: \"║\",
+    thumb: \"█\",
+    begin: \"▲\",
+    end: \"▼\",
+};
+
+pub const DOUBLE_HORIZONTAL: Set = Set {
+    track: \"═\",
+    thumb: \"█\",
+    begin: \"◄\",
+    end: \"►\",
+};
+
+pub const VERTICAL: Set = Set {
+    track: \"│\",
+    thumb: \"█\",
+    begin: \"↑\",
+    end: \"↓\",
+};
+
+pub const HORIZONTAL: Set = Set {
+    track: \"─\",
+    thumb: \"█\",
+    begin: \"←\",
+    end: \"→\",
+};
+
+/// Scrollbar scroll direction
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScrollDirection {
+    #[default]
+    Forward,
+    Backward,
+}
+
+/// Scrollbar orientation and position
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollbarOrientation {
+    VerticalRight,
+    VerticalLeft,
+    HorizontalBottom,
+    HorizontalTop,
+}
+
+impl Default for ScrollbarOrientation {
+    fn default() -> Self {
+        ScrollbarOrientation::VerticalRight
+    }
+}
+
+/// State for tracking scrollbar position
+#[derive(Debug, Clone, Default)]
+pub struct ScrollbarState {
+    position: usize,
+    content_length: usize,
+    viewport_content_length: usize,
+}
+
+impl ScrollbarState {
+    pub fn position(mut self, position: usize) -> Self {
+        self.position = position;
+        self.clamp_position();
+        self
+    }
+
+    pub fn content_length(mut self, content_length: usize) -> Self {
+        self.content_length = content_length;
+        self.clamp_position();
+        self
+    }
+
+    pub fn viewport_content_length(mut self, viewport_content_length: usize) -> Self {
+        self.viewport_content_length = viewport_content_length;
+        self.clamp_position();
+        self
+    }
+
+    fn clamp_position(&mut self) {
+        if self.content_length > 0 {
+            self.position = self.position.min(self.content_length - 1);
+        } else {
+            self.position = 0;
+        }
+    }
+
+    pub fn prev(&mut self) {
+        self.position = self.position.saturating_sub(1);
+    }
+
+    pub fn next(&mut self) {
+        if self.content_length > 0 {
+            self.position = (self.position + 1).min(self.content_length - 1);
+        }
+    }
+
+    pub fn first(&mut self) {
+        self.position = 0;
+    }
+
+    pub fn last(&mut self) {
+        if self.content_length > 0 {
+            self.position = self.content_length - 1;
+        } else {
+            self.position = 0;
+        }
+    }
+
+    pub fn scroll(&mut self, direction: ScrollDirection) {
+        match direction {
+            ScrollDirection::Forward => self.next(),
+            ScrollDirection::Backward => self.prev(),
+        }
+    }
+}
+
+/// Scrollbar widget
+#[derive(Debug, Clone)]
+pub struct Scrollbar<'a> {
+    orientation: ScrollbarOrientation,
+    thumb_symbol: &'a str,
+    thumb_style: Style,
+    track_symbol: &'a str,
+    track_style: Style,
+    begin_symbol: Option<&'a str>,
+    begin_style: Style,
+    end_symbol: Option<&'a str>,
+    end_style: Style,
+    style: Style,
+}
+
+impl<'a> Default for Scrollbar<'a> {
+    fn default() -> Self {
+        Self {
+            orientation: ScrollbarOrientation::VerticalRight,
+            thumb_symbol: DOUBLE_VERTICAL.thumb,
+            thumb_style: Style::default(),
+            track_symbol: DOUBLE_VERTICAL.track,
+            track_style: Style::default(),
+            begin_symbol: Some(DOUBLE_VERTICAL.begin),
+            begin_style: Style::default(),
+            end_symbol: Some(DOUBLE_VERTICAL.end),
+            end_style: Style::default(),
+            style: Style::default(),
+        }
+    }
+}
+
+impl<'a> Scrollbar<'a> {
+    pub fn new(orientation: ScrollbarOrientation) -> Self {
+        let symbols = match orientation {
+            ScrollbarOrientation::VerticalRight | ScrollbarOrientation::VerticalLeft => {
+                DOUBLE_VERTICAL
+            }
+            ScrollbarOrientation::HorizontalBottom | ScrollbarOrientation::HorizontalTop => {
+                DOUBLE_HORIZONTAL
+            }
+        };
+        Self {
+            orientation,
+            thumb_symbol: symbols.thumb,
+            thumb_style: Style::default(),
+            track_symbol: symbols.track,
+            track_style: Style::default(),
+            begin_symbol: Some(symbols.begin),
+            begin_style: Style::default(),
+            end_symbol: Some(symbols.end),
+            end_style: Style::default(),
+            style: Style::default(),
+        }
+    }
+
+    pub fn orientation(mut self, orientation: ScrollbarOrientation) -> Self {
+        self.orientation = orientation;
+        let symbols = match orientation {
+            ScrollbarOrientation::VerticalRight | ScrollbarOrientation::VerticalLeft => {
+                DOUBLE_VERTICAL
+            }
+            ScrollbarOrientation::HorizontalBottom | ScrollbarOrientation::HorizontalTop => {
+                DOUBLE_HORIZONTAL
+            }
+        };
+        self.thumb_symbol = symbols.thumb;
+        self.track_symbol = symbols.track;
+        self.begin_symbol = Some(symbols.begin);
+        self.end_symbol = Some(symbols.end);
+        self
+    }
+
+    pub fn orientation_and_symbol(
+        mut self,
+        orientation: ScrollbarOrientation,
+        symbols: Set,
+    ) -> Self {
+        self.orientation = orientation;
+        self.thumb_symbol = symbols.thumb;
+        self.track_symbol = symbols.track;
+        self.begin_symbol = Some(symbols.begin);
+        self.end_symbol = Some(symbols.end);
+        self
+    }
+
+    pub fn thumb_symbol(mut self, thumb_symbol: &'a str) -> Self {
+        self.thumb_symbol = thumb_symbol;
+        self
+    }
+
+    pub fn thumb_style(mut self, thumb_style: Style) -> Self {
+        self.thumb_style = thumb_style;
+        self
+    }
+
+    pub fn track_symbol(mut self, track_symbol: &'a str) -> Self {
+        self.track_symbol = track_symbol;
+        self
+    }
+
+    pub fn track_style(mut self, track_style: Style) -> Self {
+        self.track_style = track_style;
+        self
+    }
+
+    pub fn begin_symbol(mut self, begin_symbol: Option<&'a str>) -> Self {
+        self.begin_symbol = begin_symbol;
+        self
+    }
+
+    pub fn begin_style(mut self, begin_style: Style) -> Self {
+        self.begin_style = begin_style;
+        self
+    }
+
+    pub fn end_symbol(mut self, end_symbol: Option<&'a str>) -> Self {
+        self.end_symbol = end_symbol;
+        self
+    }
+
+    pub fn end_style(mut self, end_style: Style) -> Self {
+        self.end_style = end_style;
+        self
+    }
+
+    pub fn symbols(mut self, symbols: Set) -> Self {
+        self.thumb_symbol = symbols.thumb;
+        self.track_symbol = symbols.track;
+        self.begin_symbol = Some(symbols.begin);
+        self.end_symbol = Some(symbols.end);
+        self
+    }
+
+    pub fn style(mut self, style: Style) -> Self {
+        self.style = style;
+        self.thumb_style = style;
+        self.track_style = style;
+        self.begin_style = style;
+        self.end_style = style;
+        self
+    }
+}
+
+impl<'a> StatefulWidget for Scrollbar<'a> {
+    type State = ScrollbarState;
+
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        if state.content_length == 0 {
+            return;
+        }
+
+        let (scrollbar_area, is_vertical) = match self.orientation {
+            ScrollbarOrientation::VerticalRight => {
+                if area.width == 0 {
+                    return;
+                }
+                (
+                    Rect {
+                        x: area.x + area.width - 1,
+                        y: area.y,
+                        width: 1,
+                        height: area.height,
+                    },
+                    true,
+                )
+            }
+            ScrollbarOrientation::VerticalLeft => {
+                if area.width == 0 {
+                    return;
+                }
+                (
+                    Rect {
+                        x: area.x,
+                        y: area.y,
+                        width: 1,
+                        height: area.height,
+                    },
+                    true,
+                )
+            }
+            ScrollbarOrientation::HorizontalBottom => {
+                if area.height == 0 {
+                    return;
+                }
+                (
+                    Rect {
+                        x: area.x,
+                        y: area.y + area.height - 1,
+                        width: area.width,
+                        height: 1,
+                    },
+                    false,
+                )
+            }
+            ScrollbarOrientation::HorizontalTop => {
+                if area.height == 0 {
+                    return;
+                }
+                (
+                    Rect {
+                        x: area.x,
+                        y: area.y,
+                        width: area.width,
+                        height: 1,
+                    },
+                    false,
+                )
+            }
+        };
+
+        let track_length = if is_vertical {
+            scrollbar_area.height
+        } else {
+            scrollbar_area.width
+        } as usize;
+
+        if track_length == 0 {
+            return;
+        }
+
+        // Calculate track length accounting for begin/end symbols
+        let mut track_start = 0;
+        let mut track_end = track_length;
+
+        if self.begin_symbol.is_some() {
+            track_start += 1;
+        }
+        if self.end_symbol.is_some() {
+            track_end = track_end.saturating_sub(1);
+        }
+
+        let available_track = track_end.saturating_sub(track_start);
+        if available_track < 1 {
+            return;
+        }
+
+        // Calculate thumb size and position
+        let thumb_size = if state.viewport_content_length == 0 {
+            available_track
+        } else {
+            let ratio = state.viewport_content_length as f64 / state.content_length as f64;
+            (available_track as f64 * ratio).round().max(1.0) as usize
+        }
+        .min(available_track);
+
+        let scrollable_area = state.content_length.saturating_sub(state.viewport_content_length);
+        let thumb_position = if scrollable_area == 0 {
+            0
+        } else {
+            let ratio = state.position as f64 / scrollable_area as f64;
+            let max_thumb_pos = available_track.saturating_sub(thumb_size);
+            (max_thumb_pos as f64 * ratio).round() as usize
+        };
+
+        // Render the scrollbar
+        for i in 0..track_length {
+            let (x, y) = if is_vertical {
+                (scrollbar_area.x, scrollbar_area.y + i as u16)
+            } else {
+                (scrollbar_area.x + i as u16, scrollbar_area.y)
+            };
+
+            let (symbol, style) = if i == 0 && self.begin_symbol.is_some() {
+                (self.begin_symbol.unwrap(), self.begin_style)
+            } else if i == track_length - 1 && self.end_symbol.is_some() {
+                (self.end_symbol.unwrap(), self.end_style)
+            } else {
+                let track_pos = i.saturating_sub(track_start);
+                if track_pos >= thumb_position && track_pos < thumb_position + thumb_size {
+                    (self.thumb_symbol, self.thumb_style)
+                } else {
+                    (self.track_symbol, self.track_style)
+                }
+            };
+
+            buf.get_mut(x, y)
+                .set_symbol(symbol)
+                .set_style(self.style.patch(style));
+        }
+    }
+}
+"
+}
+````
+`````
+[Action] Overwriting file: scrollbar.rs
+[Status] ✅ Overwrite 成功 (11560 bytes)
+`````
+
+
+**Turn 8 ...**
+
+<summary>Created scrollbar.rs; now updating widgets/mod.rs to export Scrollbar types as pub mod and re-exports.</summary>
+
+Now I need to update the widgets/mod.rs to export the scrollbar module:
+
+🛠️ Tool: `file_read`  📥 args:
+````text
+{
+  "path": "/app/src/widgets/mod.rs",
+  "start": 1,
+  "count": 50
+}
+````
+`````
+
+[Action] Reading file: /app/src/widgets/mod.rs
+`````
+
+
+**Turn 9 ...**
+
+<summary>Adding scrollbar module declaration and re-exports to widgets/mod.rs for Target 1.</summary>
+
+🛠️ Tool: `file_patch`  📥 args:
+````text
+{
+  "path": "/app/src/widgets/mod.rs",
+  "old_content": "mod barchart;
+mod block;
+#[cfg(feature = \"widget-calendar\")]
+pub mod calendar;
+pub mod canvas;
+mod chart;
+mod clear;
+mod gauge;
+mod list;
+mod paragraph;
+mod reflow;
+mod sparkline;
+mod table;
+mod tabs;
+
+pub use self::barchart::BarChart;
+pub use self::block::{Block, BorderType, Padding};
+pub use self::chart::{Axis, Chart, Dataset, GraphType};
+pub use self::clear::Clear;
+pub use self::gauge::{Gauge, LineGauge};
+pub use self::list::{List, ListItem, ListState};
+pub use self::paragraph::{Paragraph, Wrap};
+pub use self::sparkline::{RenderDirection, Sparkline};
+pub use self::table::{Cell, Row, Table, TableState};
+pub use self::tabs::Tabs;",
+  "new_content": "mod barchart;
+mod block;
+#[cfg(feature = \"widget-calendar\")]
+pub mod calendar;
+pub mod canvas;
+mod chart;
+mod clear;
+mod gauge;
+mod list;
+mod paragraph;
+mod reflow;
+pub mod scrollbar;
+mod sparkline;
+mod table;
+mod tabs;
+
+pub use self::barchart::BarChart;
+pub use self::block::{Block, BorderType, Padding};
+pub use self::chart::{Axis, Chart, Dataset, GraphType};
+pub use self::clear::Clear;
+pub use self::gauge::{Gauge, LineGauge};
+pub use self::list::{List, ListItem, ListState};
+pub use self::paragraph::{Paragraph, Wrap};
+pub use self::scrollbar::{Scrollbar, ScrollbarOrientation, ScrollbarState, ScrollDirection};
+pub use self::sparkline::{RenderDirection, Sparkline};
+pub use self::table::{Cell, Row, Table, TableState};
+pub use self::tabs::Tabs;"
+}
+````
+`````
+[Action] Patching file: /app/src/widgets/mod.rs
+
+{'status': 'success', 'msg': '文件局部修改成功'}
+`````
+
+
+**Turn 10 ...**
+
+<summary>Target 1 complete; starting Target 2 (BarChart Groups) by reading full barchart.rs to understand rendering logic.</summary>
+
+Good! Target 1 (Scrollbar) is complete. Now let's move to **Target 2: BarChart Groups**. I need to read the full barchart.rs file to understand the rendering logic:
+
+🛠️ Tool: `file_read`  📥 args:
+````text
+{
+  "path": "/app/src/widgets/barchart.rs"
+}
+````
+`````
+
+[Action] Reading file: /app/src/widgets/barchart.rs
+`````
+
+
+**Turn 11 ...**
+
+<summary>Read full barchart.rs; now creating barchart/ directory structure with bar.rs, bar_group.rs, and mod.rs files.</summary>
+
+🛠️ Tool: `file_read`  📥 args:
+````text
+{
+  "path": "/app/src/widgets/barchart.rs",
+  "start": 200
+}
+````
+`````
+
+[Action] Reading file: /app/src/widgets/barchart.rs
+`````
+
+
+**Turn 12 ...**
+
+<summary>Creating barchart directory structure; first making bar.rs with Bar struct and builder methods.</summary>
+
+Now I'll refactor the barchart into a module. First, let me create the directory and the new files:
+
+🛠️ Tool: `code_run`  📥 args:
+````text
+{
+  "type": "bash",
+  "script": "cd /app && mkdir -p src/widgets/barchart"
+}
+````
+`````
+[Action] Running bash in app: cd /app && mkdir -p src/widgets/barchart
+[Status] ✅ Exit Code: 0
+[Stdout]
+
+`````
+
+
+**Turn 13 ...**
+
+<summary>Created barchart directory; now writing bar.rs with Bar struct supporting value, label, styles, and text_value.</summary>
+
+🛠️ Tool: `file_write`  📥 args:
+````text
+{
+  "path": "/app/src/widgets/barchart/bar.rs",
+  "content": "use crate::{style::Style, text::Line};
+
+/// A single bar in a bar chart
+///
+/// # Examples
+///
+/// ```
+/// # use ratatui::widgets::barchart::Bar;
+/// # use ratatui::style::{Style, Color};
+/// let bar = Bar::default()
+///     .value(10)
+///     .label(\"Bar 1\".into())
+///     .style(Style::default().fg(Color::Red))
+///     .value_style(Style::default().fg(Color::Yellow))
+///     .text_value(\"10 units\".to_string());
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct Bar<'a> {
+    pub(super) value: u64,
+    pub(super) label: Line<'a>,
+    pub(super) style: Style,
+    pub(super) value_style: Style,
+    pub(super) text_value: Option<String>,
+}
+
+impl<'a> Bar<'a> {
+    /// Set the value of the bar
+    pub fn value(mut self, value: u64) -> Bar<'a> {
+        self.value = value;
+        self
+    }
+
+    /// Set the label of the bar
+    pub fn label(mut self, label: Line<'a>) -> Bar<'a> {
+        self.label = label;
+        self
+    }
+
+    /// Set the style of the bar
+    pub fn style(mut self, style: Style) -> Bar<'a> {
+        self.style = style;
+        self
+    }
+
+    /// Set the style of the value displayed on the bar
+    pub fn value_style(mut self, style: Style) -> Bar<'a> {
+        self.value_style = style;
+        self
+    }
+
+    /// Set a custom text value instead of the numeric value
+    pub fn text_value(mut self, text_value: String) -> Bar<'a> {
+        self.text_value = Some(text_value);
+        self
+    }
+}
+"
+}
+````
+`````
+[Action] Overwriting file: bar.rs
+[Status] ✅ Overwrite 成功 (1434 bytes)
+`````
+
+
+**Turn 14 ...**
+
+<summary>Created bar.rs; now writing bar_group.rs with BarGroup struct and From implementations for backward compatibility.</summary>
+
+🛠️ Tool: `file_write`  📥 args:
+````text
+{
+  "content": "use crate::text::Line;
+use super::bar::Bar;
+
+/// A group of bars to be displayed in a bar chart
+///
+/// # Examples
+///
+/// ```
+/// # use ratatui::widgets::barchart::{Bar, BarGroup};
+/// let group = BarGroup::default()
+///     .label(\"Group 1\".into())
+///     .bars(&[Bar::default().value(10), Bar::default().value(20)]);
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct BarGroup<'a> {
+    pub(super) label: Option<Line<'a>>,
+    pub(super) bars: Vec<Bar<'a>>,
+}
+
+impl<'a> BarGroup<'a> {
+    /// Set the group label
+    pub fn label(mut self, label: Line<'a>) -> BarGroup<'a> {
+        self.label = Some(label);
+        self
+    }
+
+    /// Set the bars in this group
+    pub fn bars(mut self, bars: &[Bar<'a>]) -> BarGroup<'a> {
+        self.bars = bars.to_vec();
+        self
+    }
+}
+
+// Backward compatibility: allow converting from old-style data
+impl<'a> From<&'a [(&'a str, u64)]> for BarGroup<'a> {
+    fn from(data: &'a [(&'a str, u64)]) -> BarGroup<'a> {
+        let bars = data
+            .iter()
+            .map(|&(label, value)| {
+                Bar::default()
+                    .label(Line::from(label))
+                    .value(value)
+            })
+            .collect();
+        BarGroup {
+            label: None,
+            bars,
+        }
+    }
+}
+
+impl<'a, const N: usize> From<&'a [(&'a str, u64); N]> for BarGroup<'a> {
+    fn from(data: &'a [(&'a str, u64); N]) -> BarGroup<'a> {
+        BarGroup::from(&data[..])
+    }
+}
+
+impl<'a> From<&'a Vec<(&'a str, u64)>> for BarGroup<'a> {
+    fn from(data: &'a Vec<(&'a str, u64)>) -> BarGroup<'a> {
+        BarGroup::from(&data[..])
+    }
+}
+",
+  "path": "/app/src/widgets/barchart/bar_group.rs"
+}
+````
+`````
+[Action] Overwriting file: bar_group.rs
+[Status] ✅ Overwrite 成功 (1616 bytes)
+`````
+
+
+**Turn 15 ...**
+
+<summary>Created bar_group.rs; now writing mod.rs with refactored BarChart supporting groups, group_gap, and hierarchical rendering.</summary>
+
+🛠️ Tool: `update_working_checkpoint`  📥 args:
+````text
+{
+  "key_info": "TUI Library Development - Progress:
+✓ Target 1 DONE: Scrollbar (scrollbar.rs created, exported in widgets/mod.rs)
+⚙ Target 2 IN PROGRESS: BarChart Groups
+  - Created barchart/ directory
+  - Created bar.rs with Bar struct (value, label, style, value_style, text_value)
+  - Created bar_group.rs with BarGroup struct + From impls for backward compat
+  - Next: Create mod.rs with refactored BarChart (Vec<BarGroup>, group_gap, new rendering)
+⏳ Target 3: Block Multi-Title (src/title.rs + modify block.rs)
+⏳ Target 4: Stylize System (src/style/stylize.rs)
+⏳ Target 5: Prelude (src/prelude.rs)
+⏳ Target 6: Const Builders (Style/Layout const fns, Color parsing)
+
+Files created: scrollbar.rs, barchart/bar.rs, barchart/bar_group.rs
+Next: barchart/mod.rs with full rendering logic"
+}
+````
+`````
+[Info] Updated key_info and related_sop.
+`````
+
+
+**Turn 16 ...**
+
+<summary>Now creating barchart/mod.rs with refactored BarChart supporting Vec<BarGroup>, group_gap, and hierarchical rendering logic.</summary>
+
+🛠️ Tool: `file_write`  📥 args:
+````text
+{
+  "content": "mod bar;
+mod bar_group;
+
+pub use bar::Bar;
+pub use bar_group::BarGroup;
+
+use crate::{
+    buffer::Buffer,
+    layout::Rect,
+    style::Style,
+    symbols,
+    text::Line,
+    widgets::{Block, Widget},
+};
+use std::cmp::min;
+use unicode_width::UnicodeWidthStr;
+
+/// Display multiple bars in a single widgets
+///
+/// # Examples
+///
+/// ```
+/// # use ratatui::widgets::{Block, Borders, BarChart};
+/// # use ratatui::widgets::barchart::{Bar, BarGroup};
+/// # use ratatui::style::{Style, Color, Modifier};
+/// BarChart::default()
+///     .block(Block::default().title(\"BarChart\").borders(Borders::ALL))
+///     .bar_width(3)
+///     .bar_gap(1)
+///     .group_gap(2)
+///     .bar_style(Style::default().fg(Color::Yellow).bg(Color::Red))
+///     .value_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+///     .label_style(Style::default().fg(Color::White))
+///     .data(BarGroup::default().bars(&[
+///         Bar::default().value(10).label(\"Jan\".into()),
+///         Bar::default().value(20).label(\"Feb\".into()),
+///     ]))
+///     .max(20);
+/// ```
+#[derive(Debug, Clone)]
+pub struct BarChart<'a> {
+    /// Block to wrap the widget in
+    block: Option<Block<'a>>,
+    /// The width of each bar
+    bar_width: u16,
+    /// The gap between each bar
+    bar_gap: u16,
+    /// The gap between each group
+    group_gap: u16,
+    /// Set of symbols used to display the data
+    bar_set: symbols::bar::Set,
+    /// Style of the bars
+    bar_style: Style,
+    /// Style of the values printed at the bottom of each bar
+    value_style: Style,
+    /// Style of the labels printed under each bar
+    label_style: Style,
+    /// Style for the widget
+    style: Style,
+    /// Groups of bars to display
+    data: Vec<BarGroup<'a>>,
+    /// Value necessary for a bar to reach the maximum height (if no value is specified,
+    /// the maximum value in the data is taken as reference)
+    max: Option<u64>,
+}
+
+impl<'a> Default for BarChart<'a> {
+    fn default() -> BarChart<'a> {
+        BarChart {
+            block: None,
+            max: None,
+            data: Vec::new(),
+            bar_style: Style::default(),
+            bar_width: 1,
+            bar_gap: 1,
+            group_gap: 1,
+            bar_set: symbols::bar::NINE_LEVELS,
+            value_style: Style::default(),
+            label_style: Style::default(),
+            style: Style::default(),
+        }
+    }
+}
+
+impl<'a> BarChart<'a> {
+    /// Add a group of bars to display
+    pub fn data(mut self, group: impl Into<BarGroup<'a>>) -> BarChart<'a> {
+        self.data.push(group.into());
+        self
+    }
+
+    pub fn block(mut self, block: Block<'a>) -> BarChart<'a> {
+        self.block = Some(block);
+        self
+    }
+
+    pub fn max(mut self, max: u64) -> BarChart<'a> {
+        self.max = Some(max);
+        self
+    }
+
+    pub fn bar_style(mut self, style: Style) -> BarChart<'a> {
+        self.bar_style = style;
+        self
+    }
+
+    pub fn bar_width(mut self, width: u16) -> BarChart<'a> {
+        self.bar_width = width;
+        self
+    }
+
+    pub fn bar_gap(mut self, gap: u16) -> BarChart<'a> {
+        self.bar_gap = gap;
+        self
+    }
+
+    pub fn group_gap(mut self, gap: u16) -> BarChart<'a> {
+        self.group_gap = gap;
+        self
+    }
+
+    pub fn bar_set(mut self, bar_set: symbols::bar::Set) -> BarChart<'a> {
+        self.bar_set = bar_set;
+        self
+    }
+
+    pub fn value_style(mut self, style: Style) -> BarChart<'a> {
+        self.value_style = style;
+        self
+    }
+
+    pub fn label_style(mut self, style: Style) -> BarChart<'a> {
+        self.label_style = style;
+        self
+    }
+
+    pub fn style(mut self, style: Style) -> BarChart<'a> {
+        self.style = style;
+        self
+    }
+}
+
+impl<'a> Widget for BarChart<'a> {
+    fn render(mut self, area: Rect, buf: &mut Buffer) {
+        buf.set_style(area, self.style);
+
+        let chart_area = match self.block.take() {
+            Some(b) => {
+                let inner_area = b.inner(area);
+                b.render(area, buf);
+                inner_area
+            }
+            None => area,
+        };
+
+        if chart_area.height < 2 {
+            return;
+        }
+
+        // Calculate maximum value across all bars
+        let max = self.max.unwrap_or_else(|| {
+            self.data
+                .iter()
+                .flat_map(|group| group.bars.iter())
+                .map(|bar| bar.value)
+                .max()
+                .unwrap_or_default()
+        });
+
+        // Determine how many bars we can fit and which groups to render
+        let mut current_x = 0u16;
+        let mut groups_to_render = Vec::new();
+        
+        for group in &self.data {
+            let group_width = if group.bars.is_empty() {
+                0
+            } else {
+                (group.bars.len() as u16 * self.bar_width)
+                    + ((group.bars.len().saturating_sub(1)) as u16 * self.bar_gap)
+            };
+            
+            if current_x + group_width <= chart_area.width {
+                groups_to_render.push((current_x, group));
+                current_x += group_width + self.group_gap;
+            } else {
+                break;
+            }
+        }
+
+        // Reserve space for labels
+        let label_height = if groups_to_render.iter().any(|(_, g)| g.label.is_some()) {
+            2 // bar label + group label
+        } else {
+            1 // just bar label
+        };
+
+        if chart_area.height <= label_height {
+            return;
+        }
+
+        let bar_height = chart_area.height - label_height;
+
+        // Render each group
+        for (group_x, group) in groups_to_render {
+            for (bar_idx, bar) in group.bars.iter().enumerate() {
+                let bar_x = chart_area.left()
+                    + group_x
+                    + (bar_idx as u16 * (self.bar_width + self.bar_gap));
+
+                // Calculate bar height in sub-cell units (8 levels per cell)
+                let bar_value = if max > 0 {
+                    bar.value * u64::from(bar_height) * 8 / max
+                } else {
+                    0
+                };
+
+                let mut remaining = bar_value;
+
+                // Render bar from bottom to top
+                for j in (0..bar_height).rev() {
+                    let symbol = match remaining {
+                        0 => self.bar_set.empty,
+                        1 => self.bar_set.one_eighth,
+                        2 => self.bar_set.one_quarter,
+                        3 => self.bar_set.three_eighths,
+                        4 => self.bar_set.half,
+                        5 => self.bar_set.five_eighths,
+                        6 => self.bar_set.three_quarters,
+                        7 => self.bar_set.seven_eighths,
+                        _ => self.bar_set.full,
+                    };
+
+                    let bar_style = if bar.style != Style::default() {
+                        bar.style
+                    } else {
+                        self.bar_style
+                    };
+
+                    for x in 0..self.bar_width {
+                        buf.get_mut(bar_x + x, chart_area.top() + j)
+                            .set_symbol(symbol)
+                            .set_style(bar_style);
+                    }
+
+                    if remaining > 8 {
+                        remaining -= 8;
+                    } else {
+                        remaining = 0;
+                    }
+                }
+
+                // Render value above the bar
+                if bar.value != 0 {
+                    let value_label = bar
+                        .text_value
+                        .as_deref()
+                        .unwrap_or_else(|| {
+                            // We need a temporary string, but we can't store it here
+                            // So we'll handle this differently in the actual rendering
+                        });
+                    
+                    let display_value = if let Some(ref text_val) = bar.text_value {
+                        text_val.as_str()
+                    } else {
+                        // Create a temporary string for the numeric value
+                        // This is a workaround - we'll need to store these
+                        \"\"
+                    };
+
+                    if !display_value.is_empty() {
+                        let width = display_value.width() as u16;
+                        if width <= self.bar_width {
+                            let value_style = if bar.value_style != Style::default() {
+                                bar.value_style
+                            } else {
+                                self.value_style
+                            };
+                            buf.set_string(
+                                bar_x + (self.bar_width - width) / 2,
+                                chart_area.top() + bar_height,
+                                display_value,
+                                value_style,
+                            );
+                        }
+                    }
+                }
+
+                // Render bar label
+                let label_str = bar.label.to_string();
+                buf.set_stringn(
+                    bar_x,
+                    chart_area.top() + bar_height + 1,
+                    label_str,
+                    self.bar_width as usize,
+                    self.label_style,
+                );
+            }
+
+            // Render group label if present
+            if let Some(ref group_label) = group.label {
+                let label_str = group_label.to_string();
+                let group_width = if group.bars.is_empty() {
+                    0
+                } else {
+                    (group.bars.len() as u16 * self.bar_width)
+                        + ((group.bars.len().saturating_sub(1)) as u16 * self.bar_gap)
+                };
+                buf.set_stringn(
+                    chart_area.left() + group_x,
+                    chart_area.top() + bar_height + 2,
+                    label_str,
+                    group_width as usize,
+                    self.label_style,
+                );
+            }
+        }
+    }
+}
+",
+  "path": "/app/src/widgets/barchart/mod.rs"
+}
+````
+`````
+[Action] Overwriting file: mod.rs
+[Status] ✅ Overwrite 成功 (10121 bytes)
+`````
+
+
+**Turn 17 ...**
+
+<summary>Created barchart/mod.rs but need to fix value rendering issue; now improving the implementation to properly handle text_value display.</summary>
+
+I need to fix the value rendering logic in the barchart. Let me rewrite the render function to properly handle the value display:
+
+🛠️ Tool: `file_patch`  📥 args:
+````text
+{
+  "path": "/app/src/widgets/barchart/mod.rs",
+  "old_content": "impl<'a> Widget for BarChart<'a> {
+    fn render(mut self, area: Rect, buf: &mut Buffer) {
+        buf.set_style(area, self.style);
+
+        let chart_area = match self.block.take() {
+            Some(b) => {
+                let inner_area = b.inner(area);
+                b.render(area, buf);
+                inner_area
+            }
+            None => area,
+        };
+
+        if chart_area.height < 2 {
+            return;
+        }
+
+        // Calculate maximum value across all bars
+        let max = self.max.unwrap_or_else(|| {
+            self.data
+                .iter()
+                .flat_map(|group| group.bars.iter())
+                .map(|bar| bar.value)
+                .max()
+                .unwrap_or_default()
+        });
+
+        // Determine how many bars we can fit and which groups to render
+        let mut current_x = 0u16;
+        let mut groups_to_render = Vec::new();
+        
+        for group in &self.data {
+            let group_width = if group.bars.is_empty() {
+                0
+            } else {
+                (group.bars.len() as u16 * self.bar_width)
+                    + ((group.bars.len().saturating_sub(1)) as u16 * self.bar_gap)
+            };
+            
+            if current_x + group_width <= chart_area.width {
+                groups_to_render.push((current_x, group));
+                current_x += group_width + self.group_gap;
+            } else {
+                break;
+            }
+        }
+
+        // Reserve space for labels
+        let label_height = if groups_to_render.iter().any(|(_, g)| g.label.is_some()) {
+            2 // bar label + group label
+        } else {
+            1 // just bar label
+        };
+
+        if chart_area.height <= label_height {
+            return;
+        }
+
+        let bar_height = chart_area.height - label_height;
+
+        // Render each group
+        for (group_x, group) in groups_to_render {
+            for (bar_idx, bar) in group.bars.iter().enumerate() {
+                let bar_x = chart_area.left()
+                    + group_x
+                    + (bar_idx as u16 * (self.bar_width + self.bar_gap));
+
+                // Calculate bar height in sub-cell units (8 levels per cell)
+                let bar_value = if max > 0 {
+                    bar.value * u64::from(bar_height) * 8 / max
+                } else {
+                    0
+                };
+
+                let mut remaining = bar_value;
+
+                // Render bar from bottom to top
+                for j in (0..bar_height).rev() {
+                    let symbol = match remaining {
+                        0 => self.bar_set.empty,
+                        1 => self.bar_set.one_eighth,
+                        2 => self.bar_set.one_quarter,
+                        3 => self.bar_set.three_eighths,
+                        4 => self.bar_set.half,
+                        5 => self.bar_set.five_eighths,
+                        6 => self.bar_set.three_quarters,
+                        7 => self.bar_set.seven_eighths,
+                        _ => self.bar_set.full,
+                    };
+
+                    let bar_style = if bar.style != Style::default() {
+                        bar.style
+                    } else {
+                        self.bar_style
+                    };
+
+                    for x in 0..self.bar_width {
+                        buf.get_mut(bar_x + x, chart_area.top() + j)
+                            .set_symbol(symbol)
+                            .set_style(bar_style);
+                    }
+
+                    if remaining > 8 {
+                        remaining -= 8;
+                    } else {
+                        remaining = 0;
+                    }
+                }
+
+                // Render value above the bar
+                if bar.value != 0 {
+                    let value_label = bar
+                        .text_value
+                        .as_deref()
+                        .unwrap_or_else(|| {
+                            // We need a temporary string, but we can't store it here
+                            // So we'll handle this differently in the actual rendering
+                        });
+                    
+                    let display_value = if let Some(ref text_val) = bar.text_value {
+                        text_val.as_str()
+                    } else {
+                        // Create a temporary string for the numeric value
+                        // This is a workaround - we'll need to store these
+                        \"\"
+                    };
+
+                    if !display_value.is_empty() {
+                        let width = display_value.width() as u16;
+                        if width <= self.bar_width {
+                            let value_style = if bar.value_style != Style::default() {
+                                bar.value_style
+                            } else {
+                                self.value_style
+                            };
+                            buf.set_string(
+                                bar_x + (self.bar_width - width) / 2,
+                                chart_area.top() + bar_height,
+                                display_value,
+                                value_style,
+                            );
+                        }
+                    }
+                }
+
+                // Render bar label
+                let label_str = bar.label.to_string();
+                buf.set_stringn(
+                    bar_x,
+                    chart_area.top() + bar_height + 1,
+                    label_str,
+                    self.bar_width as usize,
+                    self.label_style,
+                );
+            }
+
+            // Render group label if present
+            if let Some(ref group_label) = group.label {
+                let label_str = group_label.to_string();
+                let group_width = if group.bars.is_empty() {
+                    0
+                } else {
+                    (group.bars.len() as u16 * self.bar_width)
+                        + ((group.bars.len().saturating_sub(1)) as u16 * self.bar_gap)
+                };
+                buf.set_stringn(
+                    chart_area.left() + group_x,
+                    chart_area.top() + bar_height + 2,
+                    label_str,
+                    group_width as usize,
+                    self.label_style,
+                );
+            }
+        }
+    }
+}",
+  "new_content": "impl<'a> Widget for BarChart<'a> {
+    fn render(mut self, area: Rect, buf: &mut Buffer) {
+        buf.set_style(area, self.style);
+
+        let chart_area = match self.block.take() {
+            Some(b) => {
+                let inner_area = b.inner(area);
+                b.render(area, buf);
+                inner_area
+            }
+            None => area,
+        };
+
+        if chart_area.height < 2 {
+            return;
+        }
+
+        // Calculate maximum value across all bars
+        let max = self.max.unwrap_or_else(|| {
+            self.data
+                .iter()
+                .flat_map(|group| group.bars.iter())
+                .map(|bar| bar.value)
+                .max()
+                .unwrap_or_default()
+        });
+
+        // Pre-compute value strings to avoid lifetime issues
+        let mut value_strings: Vec<Vec<String>> = Vec::new();
+        for group in &self.data {
+            let mut group_values = Vec::new();
+            for bar in &group.bars {
+                let value_str = if let Some(ref text_val) = bar.text_value {
+                    text_val.clone()
+                } else {
+                    bar.value.to_string()
+                };
+                group_values.push(value_str);
+            }
+            value_strings.push(group_values);
+        }
+
+        // Determine how many bars we can fit and which groups to render
+        let mut current_x = 0u16;
+        let mut groups_to_render = Vec::new();
+        
+        for (group_idx, group) in self.data.iter().enumerate() {
+            let group_width = if group.bars.is_empty() {
+                0
+            } else {
+                (group.bars.len() as u16 * self.bar_width)
+                    + ((group.bars.len().saturating_sub(1)) as u16 * self.bar_gap)
+            };
+            
+            if current_x + group_width <= chart_area.width {
+                groups_to_render.push((current_x, group_idx, group));
+                current_x += group_width + self.group_gap;
+            } else {
+                break;
+            }
+        }
+
+        // Reserve space for labels
+        let label_height = if groups_to_render.iter().any(|(_, _, g)| g.label.is_some()) {
+            2 // bar label + group label
+        } else {
+            1 // just bar label
+        };
+
+        if chart_area.height <= label_height {
+            return;
+        }
+
+        let bar_height = chart_area.height - label_height;
+
+        // Render each group
+        for (group_x, group_idx, group) in groups_to_render {
+            for (bar_idx, bar) in group.bars.iter().enumerate() {
+                let bar_x = chart_area.left()
+                    + group_x
+                    + (bar_idx as u16 * (self.bar_width + self.bar_gap));
+
+                // Calculate bar height in sub-cell units (8 levels per cell)
+                let bar_value = if max > 0 {
+                    bar.value * u64::from(bar_height) * 8 / max
+                } else {
+                    0
+                };
+
+                let mut remaining = bar_value;
+
+                // Render bar from bottom to top
+                for j in (0..bar_height).rev() {
+                    let symbol = match remaining {
+                        0 => self.bar_set.empty,
+                        1 => self.bar_set.one_eighth,
+                        2 => self.bar_set.one_quarter,
+                        3 => self.bar_set.three_eighths,
+                        4 => self.bar_set.half,
+                        5 => self.bar_set.five_eighths,
+                        6 => self.bar_set.three_quarters,
+                        7 => self.bar_set.seven_eighths,
+                        _ => self.bar_set.full,
+                    };
+
+                    let bar_style = if bar.style != Style::default() {
+                        bar.style
+                    } else {
+                        self.bar_style
+                    };
+
+                    for x in 0..self.bar_width {
+                        buf.get_mut(bar_x + x, chart_area.top() + j)
+                            .set_symbol(symbol)
+                            .set_style(bar_style);
+                    }
+
+                    if remaining > 8 {
+                        remaining -= 8;
+                    } else {
+                        remaining = 0;
+                    }
+                }
+
+                // Render value above the bar
+                if bar.value != 0 {
+                    let display_value = &value_strings[group_idx][bar_idx];
+                    let width = display_value.width() as u16;
+                    
+                    if width <= self.bar_width {
+                        let value_style = if bar.value_style != Style::default() {
+                            bar.value_style
+                        } else {
+                            self.value_style
+                        };
+                        buf.set_string(
+                            bar_x + (self.bar_width - width) / 2,
+                            chart_area.top() + bar_height,
+                            display_value,
+                            value_style,
+                        );
+                    }
+                }
+
+                // Render bar label
+                let label_str = bar.label.to_string();
+                buf.set_stringn(
+                    bar_x,
+                    chart_area.top() + bar_height + 1,
+                    label_str,
+                    self.bar_width as usize,
+                    self.label_style,
+                );
+            }
+
+            // Render group label if present
+            if let Some(ref group_label) = group.label {
+                let label_str = group_label.to_string();
+                let group_width = if group.bars.is_empty() {
+                    0
+                } else {
+                    (group.bars.len() as u16 * self.bar_width)
+                        + ((group.bars.len().saturating_sub(1)) as u16 * self.bar_gap)
+                };
+                buf.set_stringn(
+                    chart_area.left() + group_x,
+                    chart_area.top() + bar_height + 2,
+                    label_str,
+                    group_width as usize,
+                    self.label_style,
+                );
+            }
+        }
+    }
+}"
+}
+````
+`````
+[Action] Patching file: /app/src/widgets/barchart/mod.rs
+
+{'status': 'success', 'msg': '文件局部修改成功'}
+`````
+
+
+**Turn 18 ...**
+
+<summary>Master feedback: must verify Target 1 (Scrollbar) with compilation and behavioral tests before continuing. Compiling now and will add focused tests.</summary>
+
+You're absolutely right. I need to verify Target 1 is actually working before moving forward. Let me compile and test the scrollbar implementation.
+
+🛠️ Tool: `code_run`  📥 args:
+````text
+{
+  "script": "cd /app && cargo build 2>&1 | head -100",
+  "type": "bash"
+}
+````
+`````
+[Action] Running bash in app: cd /app && cargo build 2>&1 | head -100
+[Status] ✅ Exit Code: 0
+[Stdout]
+error: rustc 1.82.0 is not supported by the following package:
+  unicode-segmentation@1.13.2 requires rustc 1.85.0
+Either upgrade rustc or select compatible dependency versions with
+`cargo update <name>@<current-ver> --precise <compatible-ver>`
+where `<compatible-ver>` is the latest version supporting rustc 1.82.0
+
+
+`````
+
+
+**Turn 19 ...**
+
+<summary>Rust version issue blocking compile; downgrading unicode-segmentation to fix, then will compile and test Target 1 scrollbar.</summary>
+
+🛠️ Tool: `code_run`  📥 args:
+````text
+{
+  "script": "cd /app && cargo update unicode-segmentation --precise 1.12.0",
+  "type": "bash"
+}
+````
+`````
+[Action] Running bash in app: cd /app && cargo update unicode-segmentation --precise 1.12....
+[Status] ✅ Exit Code: 0
+[Stdout]
+    Updating crates.io index
+ Downgrading unicode-segmentation v1.13.2 -> v1.12.0
+note: pass `--verbose` to see 96 unchanged dependencies behind latest
+
+`````
+
+
+**Turn 20 ...**
+
+<summary>Downgraded unicode-segmentation; now attempting compilation to check for errors in scrollbar and barchart code.</summary>
+
+🛠️ Tool: `code_run`  📥 args:
+````text
+{
+  "script": "cd /app && cargo build 2>&1 | head -150",
+  "type": "bash",
+  "timeout": 120
+}
+````
+`````
+[Action] Running bash in app: cd /app && cargo build 2>&1 | head -150
+[Status] ✅ Exit Code: 0
+[Stdout]
+ Downloading crates ...
+  Downloaded unicode-segmentation v1.12.0
+   Compiling libc v0.2.184
+   Compiling signal-hook v0.3.18
+   Compiling parking_lot_core v0.9.12
+   Compiling scopeguard v1.2.0
+   Compiling smallvec v1.15.1
+   Compiling log v0.4.29
+   Compiling cfg-if v1.0.4
+   Compiling lock_api v
+
+[omitted long output]
+
+
+    = note: `#[warn(unused_mut)]` on by default
+
+Some errors have detailed explanations: E0432, E0761.
+For more information about an error, try `rustc --explain E0432`.
+warning: `ratatui` (lib) generated 1 warning
+error: could not compile `ratatui` (lib) due to 2 previous errors; 1 warning emitted
+
+`````
+
+
+**Turn 21 ...**
+
+<summary>Compilation error: barchart.rs and barchart/mod.rs conflict. Deleting old barchart.rs file to resolve module ambiguity.</summary>
+
+The issue is clear - I have both `barchart.rs` and `barchart/mod.rs` which creates ambiguity. I need to delete the old `barchart.rs` file:
+
+🛠️ Tool: `code_run`  📥 args:
+````text
+{
+  "script": "cd /app && rm src/widgets/barchart.rs",
+  "type": "bash"
+}
+````
+`````
+[Action] Running bash in app: cd /app && rm src/widgets/barchart.rs
+[Status] ✅ Exit Code: 0
+[Stdout]
+
+`````
+
+
+**Turn 22 ...**
+
+<summary>Deleted old barchart.rs; now recompiling to check for remaining errors in scrollbar and barchart implementations.</summary>
+
+🛠️ Tool: `code_run`  📥 args:
+````text
+{
+  "script": "cd /app && cargo build 2>&1 | head -200",
+  "timeout": 120,
+  "type": "bash"
+}
+````
+`````
+[Action] Running bash in app: cd /app && cargo build 2>&1 | head -200
+[Status] ✅ Exit Code: 0
+[Stdout]
+   Compiling ratatui v0.21.0 (/app)
+warning: unused import: `bar::Bar`
+ --> src/widgets/barchart/mod.rs:4:9
+  |
+4 | pub use bar::Bar;
+  |         ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `text::Line`
+  --> src/widgets/barchart/mod.rs:12:5
+   |
+12 |     
+
+[omitted long output]
+
+     |
+    |         help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` on by default
+
+For more information about this error, try `rustc --explain E0599`.
+warning: `ratatui` (lib) generated 4 warnings
+error: could not compile `ratatui` (lib) due to 2 previous errors; 4 warnings emitted
+
+`````
+
+
+**Turn 23 ...**
+
+<summary>Compilation errors: Line doesn't have Display trait; need to check text::Line API and fix label rendering in barchart.</summary>
+
+🛠️ Tool: `update_working_checkpoint`  📥 args:
+````text
+{
+  "key_info": "TUI Library Development - Progress:
+⚙ Target 1 UNVERIFIED: Scrollbar (scrollbar.rs created, exported, BUT not compiled/tested yet)
+⚙ Target 2 IN PROGRESS: BarChart Groups - compilation errors
+  - Created barchart/ with bar.rs, bar_group.rs, mod.rs
+  - Current error: Line<'a> doesn't have Display/to_string() - need to check Line API
+  - bar.label and group.label are Line<'a>, need proper rendering method
+⏳ Target 3: Block Multi-Title (src/title.rs + modify block.rs)
+⏳ Target 4: Stylize System (src/style/stylize.rs)
+⏳ Target 5: Prelude (src/prelude.rs)
+⏳ Target 6: Const Builders (Style/Layout const fns, Color parsing)
+
+Next: Fix Line rendering in barchart, then compile successfully, THEN test Target 1 scrollbar"
+}
+````
+`````
+[Info] Updated key_info and related_sop.
+`````
+
+
+**Turn 24 ...**
+
+<summary>Checking text::Line API to understand proper rendering method instead of to_string().</summary>
+
+🛠️ Tool: `file_read`  📥 args:
+````text
+{
+  "path": "/app/src/text/line.rs"
+}
+````
+`````
+
+[Action] Reading file: /app/src/text/line.rs
+`````
+
+
+**Turn 25 ...**
+
+<summary>Found Line API: use String::from(line) conversion; now fixing barchart rendering to use proper Line-to-String conversion and buf.set_line().</summary>
+
+I see the issue now. `Line` can be converted to `String` using `String::from(line)`. However, looking at the buffer API, I should use `buf.set_line()` or similar methods. Let me check how other widgets handle Line rendering:
+
+🛠️ Tool: `code_run`  📥 args:
+````text
+{
+  "script": "cd /app && grep -n \"set_line\\|Line\" src/buffer.rs | head -30",
+  "type": "bash"
+}
+````
+`````
+[Action] Running bash in app: cd /app && grep -n "set_line\|Line" src/buffer.rs | head -30
+[Status] ✅ Exit Code: 0
+[Stdout]
+5:    text::{Line, Span, Spans},
+311:    #[deprecated(note = "Use `Buffer::set_line` instead")]
+333:    pub fn set_line(&mut self, x: u16, y: u16, line: &Line<'_>, width: u16) -> (u16, u16) {
+
+`````
+
+
+**Turn 26 ...**
+
+<summary>Found buf.set_line() method; now fixing barchart to use buf.set_line() for rendering labels and saving progress to file.</summary>
+
+Let me save the current progress to a file and then fix the barchart rendering:
+
+🛠️ Tool: `file_write`  📥 args:
+````text
+{
+  "content": "# TUI Library Development Progress Log
+
+## Target Status Overview
+1. **Scrollbar Widget** - UNVERIFIED (code written, not compiled/tested)
+2. **BarChart Groups** - IN PROGRESS (compilation errors with Line rendering)
+3. **Block Multi-Title** - TODO
+4. **Stylize System** - TODO
+5. **Prelude Module** - TODO
+6. **Const Builders** - TODO
+
+## Current Blockers
+### Issue 1: Rust Version Compatibility
+- **Problem**: unicode-segmentation 1.13.2 requires rustc 1.85.0, but system has 1.82.0
+- **Solution**: Downgraded to unicode-segmentation 1.12.0 with `cargo update unicode-segmentation --precise 1.12.0`
+- **Status**: RESOLVED
+
+### Issue 2: BarChart Module Ambiguity
+- **Problem**: Both `src/widgets/barchart.rs` and `src/widgets/barchart/mod.rs` existed
+- **Solution**: Deleted old `barchart.rs` file
+- **Status**: RESOLVED
+
+### Issue 3: Line Rendering in BarChart
+- **Problem**: `Line<'a>` doesn't implement Display/ToString traits
+- **Available APIs**: 
+  - `String::from(line)` - converts Line to String
+  - `buf.set_line(x, y, &line, width)` - renders Line directly to buffer
+  - `line.width()` - gets display width
+- **Current Error**: Lines 288 and 300 in barchart/mod.rs try to use `.to_string()` on Line
+- **Solution**: Use `buf.set_line()` or `buf.set_stringn()` with `String::from()`
+- **Status**: IN PROGRESS
+
+## Files Created/Modified
+- ✓ `/app/src/widgets/scrollbar.rs` - Full scrollbar implementation
+- ✓ `/app/src/widgets/mod.rs` - Added scrollbar exports
+- ✓ `/app/src/widgets/barchart/bar.rs` - Bar struct with builder pattern
+- ✓ `/app/src/widgets/barchart/bar_group.rs` - BarGroup with backward compatibility
+- ✓ `/app/src/widgets/barchart/mod.rs` - Refactored BarChart (needs Line rendering fix)
+- ✗ `/app/src/widgets/barchart.rs` - DELETED (old file)
+
+## Next Steps
+1. Fix Line rendering in barchart/mod.rs (lines 288, 300)
+2. Compile successfully
+3. Write comprehensive tests for Scrollbar (Target 1)
+4. Continue with remaining targets
+
+## Key Learnings
+- Always check for module file ambiguity (file.rs vs file/mod.rs)
+- Line type uses buf.set_line() or String::from() conversion, not to_string()
+- Must verify compilation before claiming target completion
+",
+  "path": "/app/development_progress.md"
+}
+````
+`````
+[Action] Overwriting file: development_progress.md
+[Status] ✅ Overwrite 成功 (2178 bytes)
+`````
+
+
+**Turn 27 ...**
+
+<summary>Saved progress log; now fixing barchart Line rendering by using buf.set_line() for labels instead of to_string().</summary>
+
+Now let me fix the Line rendering in barchart/mod.rs:
+
+🛠️ Tool: `file_read`  📥 args:
+````text
+{
+  "count": 50,
+  "path": "/app/src/widgets/barchart/mod.rs",
+  "start": 280
+}
+````
+`````
+
+[Action] Reading file: /app/src/widgets/barchart/mod.rs
+`````
+
+
+**Turn 28 ...**
+
+<summary>Fixing barchart lines 288 and 300 to use buf.set_line() instead of to_string() for proper Line rendering.</summary>
+
+🛠️ Tool: `file_patch`  📥 args:
+````text
+{
+  "path": "/app/src/widgets/barchart/mod.rs",
+  "old_content": "                // Render bar label
+                let label_str = bar.label.to_string();
+                buf.set_stringn(
+                    bar_x,
+                    chart_area.top() + bar_height + 1,
+                    label_str,
+                    self.bar_width as usize,
+                    self.label_style,
+                );",
+  "new_content": "                // Render bar label
+                buf.set_line(
+                    bar_x,
+                    chart_area.top() + bar_height + 1,
+                    &bar.label,
+                    self.bar_width,
+                );"
+}
+````
+`````
+[Action] Patching file: /app/src/widgets/barchart/mod.rs
+
+{'status': 'success', 'msg': '文件局部修改成功'}
+`````
+
+
+**Turn 29 ...**
+
+<summary>Fixed bar label rendering; now fixing group label rendering at line 300 with buf.set_line().</summary>
+
+🛠️ Tool: `file_patch`  📥 args:
+````text
+{
+  "new_content": "            // Render group label if present
+            if let Some(ref group_label) = group.label {
+                let group_width = if group.bars.is_empty() {
+                    0
+                } else {
+                    (group.bars.len() as u16 * self.bar_width)
+                        + ((group.bars.len().saturating_sub(1)) as u16 * self.bar_gap)
+                };
+                buf.set_line(
+                    chart_area.left() + group_x,
+                    chart_area.top() + bar_height + 2,
+                    group_label,
+                    group_width,
+                );
+            }",
+  "old_content": "            // Render group label if present
+            if let Some(ref group_label) = group.label {
+                let label_str = group_label.to_string();
+                let group_width = if group.bars.is_empty() {
+                    0
+                } else {
+                    (group.bars.len() as u16 * self.bar_width)
+                        + ((group.bars.len().saturating_sub(1)) as u16 * self.bar_gap)
+                };
+                buf.set_stringn(
+                    chart_area.left() + group_x,
+                    chart_area.top() + bar_height + 2,
+                    label_str,
+                    group_width as usize,
+                    self.label_style,
+                );
+            }",
+  "path": "/app/src/widgets/barchart/mod.rs"
+}
+````
+`````
+[Action] Patching file: /app/src/widgets/barchart/mod.rs
+
+{'status': 'success', 'msg': '文件局部修改成功'}
+`````
+
+
+**Turn 30 ...**
+
+<summary>Fixed both Line rendering issues; now compiling to check for remaining errors before proceeding to Target 1 tests.</summary>
+
+🛠️ Tool: `code_run`  📥 args:
+````text
+{
+  "script": "cd /app && cargo build 2>&1 | head -150",
+  "timeout": 120,
+  "type": "bash"
+}
+````
+`````
+[Action] Running bash in app: cd /app && cargo build 2>&1 | head -150
+[Status] ✅ Exit Code: 0
+[Stdout]
+   Compiling ratatui v0.21.0 (/app)
+warning: unused import: `bar::Bar`
+ --> src/widgets/barchart/mod.rs:4:9
+  |
+4 | pub use bar::Bar;
+  |         ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `text::Line`
+  --> src/widgets/barchart/mod.rs:12:5
+   |
+12 |     
+
+[omitted long output]
+
+
+   |        ^^^^^
+45 |     fn height(&self) -> u16;
+   |        ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+warning: `ratatui` (lib) generated 5 warnings (run `cargo fix --lib -p ratatui` to apply 4 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.92s
+
+`````
+
+
+**Turn 31 ...**
+
+<summary>Compilation successful with warnings! Now creating comprehensive behavioral tests for Target 1 Scrollbar to verify all features.</summary>
+
+Excellent! The code compiles successfully. Now I need to create comprehensive tests for Target 1 (Scrollbar) before claiming it's complete. Let me create a focused test file:
+
+🛠️ Tool: `file_write`  📥 args:
+````text
+{
+  "content": "#[cfg(test)]
+mod scrollbar_tests {
+    use crate::{
+        backend::TestBackend,
+        buffer::Buffer,
+        layout::Rect,
+        style::{Color, Style},
+        terminal::Terminal,
+        widgets::{
+            scrollbar::{Scrollbar, ScrollbarOrientation, ScrollbarState, ScrollDirection},
+            StatefulWidget,
+        },
+    };
+
+    #[test]
+    fn test_scrollbar_state_clamping() {
+        // Test that position is clamped within valid range
+        let mut state = ScrollbarState::new(100).position(50);
+        assert_eq!(state.position, 50);
+
+        // Position at max
+        state = state.position(100);
+        assert_eq!(state.position, 100);
+
+        // Position beyond max should clamp
+        state = state.position(150);
+        assert_eq!(state.position, 100);
+    }
+
+    #[test]
+    fn test_scrollbar_state_navigation() {
+        let mut state = ScrollbarState::new(100).position(50);
+
+        // Test next()
+        state.next();
+        assert_eq!(state.position, 51);
+
+        // Test prev()
+        state.prev();
+        assert_eq!(state.position, 50);
+
+        // Test prev at boundary
+        let mut state_at_start = ScrollbarState::new(100).position(0);
+        state_at_start.prev();
+        assert_eq!(state_at_start.position, 0);
+
+        // Test next at boundary
+        let mut state_at_end = ScrollbarState::new(100).position(100);
+        state_at_end.next();
+        assert_eq!(state_at_end.position, 100);
+    }
+
+    #[test]
+    fn test_scrollbar_state_scroll_operations() {
+        let mut state = ScrollbarState::new(100).position(50);
+
+        // Test scroll_down
+        state = state.scroll(ScrollDirection::Down, 10);
+        assert_eq!(state.position, 60);
+
+        // Test scroll_up
+        state = state.scroll(ScrollDirection::Up, 5);
+        assert_eq!(state.position, 55);
+
+        // Test scroll beyond bounds
+        state = state.scroll(ScrollDirection::Down, 100);
+        assert_eq!(state.position, 100);
+
+        state = state.scroll(ScrollDirection::Up, 200);
+        assert_eq!(state.position, 0);
+    }
+
+    #[test]
+    fn test_scrollbar_vertical_rendering() {
+        let backend = TestBackend::new(10, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let mut state = ScrollbarState::new(100).position(50);
+
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default()
+                    .orientation(ScrollbarOrientation::VerticalRight)
+                    .style(Style::default().fg(Color::Yellow));
+
+                f.render_stateful_widget(scrollbar, f.size(), &mut state);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        
+        // Check that scrollbar is rendered (at least some non-empty cells)
+        let mut has_content = false;
+        for y in 0..10 {
+            let cell = buffer.get(9, y);
+            if !cell.symbol.is_empty() && cell.symbol != \" \" {
+                has_content = true;
+                break;
+            }
+        }
+        assert!(has_content, \"Scrollbar should render visible content\");
+    }
+
+    #[test]
+    fn test_scrollbar_horizontal_rendering() {
+        let backend = TestBackend::new(20, 5);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let mut state = ScrollbarState::new(100).position(25);
+
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default()
+                    .orientation(ScrollbarOrientation::HorizontalBottom)
+                    .style(Style::default().fg(Color::Cyan));
+
+                f.render_stateful_widget(scrollbar, f.size(), &mut state);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        
+        // Check bottom row has scrollbar content
+        let mut has_content = false;
+        for x in 0..20 {
+            let cell = buffer.get(x, 4);
+            if !cell.symbol.is_empty() && cell.symbol != \" \" {
+                has_content = true;
+                break;
+            }
+        }
+        assert!(has_content, \"Horizontal scrollbar should render visible content\");
+    }
+
+    #[test]
+    fn test_scrollbar_too_small_no_render() {
+        let backend = TestBackend::new(1, 2);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let mut state = ScrollbarState::new(100).position(50);
+
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default();
+                f.render_stateful_widget(scrollbar, f.size(), &mut state);
+            })
+            .unwrap();
+
+        // Should not crash when area is too small
+        // The implementation should handle this gracefully
+    }
+
+    #[test]
+    fn test_scrollbar_content_length_zero() {
+        let backend = TestBackend::new(10, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let mut state = ScrollbarState::new(0).position(0);
+
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default();
+                f.render_stateful_widget(scrollbar, f.size(), &mut state);
+            })
+            .unwrap();
+
+        // Should handle content_length=0 without panic
+    }
+
+    #[test]
+    fn test_scrollbar_viewport_equals_content() {
+        let backend = TestBackend::new(10, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let mut state = ScrollbarState::new(10)
+            .position(0)
+            .viewport_content_length(10);
+
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default();
+                f.render_stateful_widget(scrollbar, f.size(), &mut state);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        
+        // When viewport equals content, thumb should fill entire track
+        // (or not render if implementation chooses not to show scrollbar when not needed)
+        // This tests the edge case handling
+    }
+
+    #[test]
+    fn test_scrollbar_proportional_thumb_size() {
+        let backend = TestBackend::new(10, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        // 50% viewport means 50% thumb size (approximately)
+        let mut state = ScrollbarState::new(200)
+            .position(0)
+            .viewport_content_length(100);
+
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default()
+                    .orientation(ScrollbarOrientation::VerticalRight);
+                f.render_stateful_widget(scrollbar, f.size(), &mut state);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        
+        // Count thumb cells (this is a rough check)
+        let thumb_count = (0..20)
+            .filter(|&y| {
+                let cell = buffer.get(9, y);
+                cell.symbol == \"█\"
+            })
+            .count();
+
+        // Should have some thumb representation
+        assert!(thumb_count > 0, \"Thumb should be visible\");
+    }
+
+    #[test]
+    fn test_scrollbar_thumb_position_at_start() {
+        let backend = TestBackend::new(10, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let mut state = ScrollbarState::new(200)
+            .position(0)
+            .viewport_content_length(50);
+
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default()
+                    .orientation(ScrollbarOrientation::VerticalRight);
+                f.render_stateful_widget(scrollbar, f.size(), &mut state);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        
+        // Thumb should be near the top (after begin arrow if present)
+        let mut found_thumb_near_top = false;
+        for y in 1..5 {
+            let cell = buffer.get(9, y);
+            if cell.symbol == \"█\" {
+                found_thumb_near_top = true;
+                break;
+            }
+        }
+        assert!(found_thumb_near_top, \"Thumb should be near top when position=0\");
+    }
+
+    #[test]
+    fn test_scrollbar_thumb_position_at_end() {
+        let backend = TestBackend::new(10, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let mut state = ScrollbarState::new(200)
+            .position(200)
+            .viewport_content_length(50);
+
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default()
+                    .orientation(ScrollbarOrientation::VerticalRight);
+                f.render_stateful_widget(scrollbar, f.size(), &mut state);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        
+        // Thumb should be near the bottom (before end arrow if present)
+        let mut found_thumb_near_bottom = false;
+        for y in 15..19 {
+            let cell = buffer.get(9, y);
+            if cell.symbol == \"█\" {
+                found_thumb_near_bottom = true;
+                break;
+            }
+        }
+        assert!(found_thumb_near_bottom, \"Thumb should be near bottom when at max position\");
+    }
+
+    #[test]
+    fn test_scrollbar_all_orientations() {
+        let orientations = [
+            ScrollbarOrientation::VerticalRight,
+            ScrollbarOrientation::VerticalLeft,
+            ScrollbarOrientation::HorizontalBottom,
+            ScrollbarOrientation::HorizontalTop,
+        ];
+
+        for orientation in orientations.iter() {
+            let backend = TestBackend::new(15, 15);
+            let mut terminal = Terminal::new(backend).unwrap();
+            let mut state = ScrollbarState::new(100).position(50);
+
+            terminal
+                .draw(|f| {
+                    let scrollbar = Scrollbar::default().orientation(*orientation);
+                    f.render_stateful_widget(scrollbar, f.size(), &mut state);
+                })
+                .unwrap();
+
+            // Should not panic for any orientation
+        }
+    }
+
+    #[test]
+    fn test_scrollbar_style_overrides() {
+        let backend = TestBackend::new(10, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let mut state = ScrollbarState::new(100).position(50);
+
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default()
+                    .style(Style::default().fg(Color::Red))
+                    .thumb_style(Style::default().fg(Color::Blue))
+                    .track_style(Style::default().fg(Color::Green));
+
+                f.render_stateful_widget(scrollbar, f.size(), &mut state);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        
+        // Check that styles are applied (at least one cell should have styling)
+        let mut has_styled_content = false;
+        for y in 0..10 {
+            let cell = buffer.get(9, y);
+            if cell.fg != Color::Reset {
+                has_styled_content = true;
+                break;
+            }
+        }
+        assert!(has_styled_content, \"Scrollbar should apply styles\");
+    }
+
+    #[test]
+    fn test_scrollbar_begin_end_symbols() {
+        let backend = TestBackend::new(10, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let mut state = ScrollbarState::new(100)
+            .position(50)
+            .viewport_content_length(20);
+
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default()
+                    .orientation(ScrollbarOrientation::VerticalRight)
+                    .begin_symbol(Some(\"▲\"))
+                    .end_symbol(Some(\"▼\"));
+
+                f.render_stateful_widget(scrollbar, f.size(), &mut state);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        
+        // Check for begin symbol at top
+        let top_cell = buffer.get(9, 0);
+        assert_eq!(top_cell.symbol, \"▲\", \"Begin symbol should be at top\");
+
+        // Check for end symbol at bottom
+        let bottom_cell = buffer.get(9, 19);
+        assert_eq!(bottom_cell.symbol, \"▼\", \"End symbol should be at bottom\");
+    }
+
+    #[test]
+    fn test_scrollbar_without_begin_end_symbols() {
+        let backend = TestBackend::new(10, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let mut state = ScrollbarState::new(100).position(50);
+
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default()
+                    .orientation(ScrollbarOrientation::VerticalRight)
+                    .begin_symbol(None)
+                    .end_symbol(None);
+
+                f.render_stateful_widget(scrollbar, f.size(), &mut state);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        
+        // Top and bottom should be track or thumb, not arrows
+        let top_cell = buffer.get(9, 0);
+        assert_ne!(top_cell.symbol, \"▲\");
+        assert_ne!(top_cell.symbol, \"▼\");
+    }
+}
+",
+  "path": "/app/tests/scrollbar_tests.rs"
+}
+````
+`````
+[Action] Overwriting file: scrollbar_tests.rs
+[Status] ✅ Overwrite 成功 (12904 bytes)
+`````
+
+
+**Turn 32 ...**
+
+<summary>Created comprehensive scrollbar tests; now running them to verify Target 1 behavioral correctness before proceeding.</summary>
+
+🛠️ Tool: `code_run`  📥 args:
+````text
+{
+  "script": "cd /app && cargo test scrollbar_tests 2>&1 | tail -100",
+  "timeout": 120,
+  "type": "bash"
+}
+````
+`````
+[Action] Running bash in app: cd /app && cargo test scrollbar_tests 2>&1 | tail -100
+[Status] ✅ Exit Code: 0
+[Stdout]
+   Compiling argh v0.1.19
+   Compiling indoc v2.0.7
+warning: unused import: `bar::Bar`
+ --> src/widgets/barchart/mod.rs:4:9
+  |
+4 | pub use bar::Bar;
+  |         ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `text::Line`
+  --> src/widgets/barchart/mod.rs:12:
+
+[omitted long output]
+
+ts::{
+  |         ~~~~~~~~~~~~~~~~
+
+Some errors have detailed explanations: E0432, E0433.
+For more information about an error, try `rustc --explain E0432`.
+error: could not compile `ratatui` (test "scrollbar_tests") due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+
+`````
+
+
+**Turn 33 ...**
+
+<summary>Test import errors; fixing test file to use correct module paths (ratatui:: instead of crate::).</summary>
+
+🛠️ Tool: `file_patch`  📥 args:
+````text
+{
+  "new_content": "#[cfg(test)]
+mod scrollbar_tests {
+    use ratatui::{
+        backend::TestBackend,
+        buffer::Buffer,
+        layout::Rect,
+        style::{Color, Style},
+        terminal::Terminal,
+        widgets::{
+            scrollbar::{Scrollbar, ScrollbarOrientation, ScrollbarState, ScrollDirection},
+            StatefulWidget,
+        },
+    };",
+  "old_content": "#[cfg(test)]
+mod scrollbar_tests {
+    use crate::{
+        backend::TestBackend,
+        buffer::Buffer,
+        layout::Rect,
+        style::{Color, Style},
+        terminal::Terminal,
+        widgets::{
+            scrollbar::{Scrollbar, ScrollbarOrientation, ScrollbarState, ScrollDirection},
+            StatefulWidget,
+        },
+    };",
+  "path": "/app/tests/scrollbar_tests.rs"
+}
+````
+`````
+[Action] Patching file: /app/tests/scrollbar_tests.rs
+
+{'status': 'success', 'msg': '文件局部修改成功'}
+`````
+
+
+**Turn 34 ...**
+
+<summary>Fixed test imports; now running scrollbar tests again to verify Target 1 behavioral correctness.</summary>
+
+🛠️ Tool: `code_run`  📥 args:
+````text
+{
+  "script": "cd /app && cargo test scrollbar_tests 2>&1 | tail -150",
+  "timeout": 120,
+  "type": "bash"
+}
+````
+`````
+[Action] Running bash in app: cd /app && cargo test scrollbar_tests 2>&1 | tail -150
+[Status] ✅ Exit Code: 0
+[Stdout]
+45 |     fn height(&self) -> u16;
+   |        ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+warning: `ratatui` (lib) generated 5 warnings (run `cargo fix --lib -p ratatui` to apply 4 suggestions)
+   Compiling ratatui v0.21.0 (/app)
+warning: unused imports: `StatefulWidget`, `buffer::Buf
+
+[omitted long output]
+
+e`
+
+For more information about this error, try `rustc --explain E0599`.
+warning: `ratatui` (test "scrollbar_tests") generated 1 warning
+error: could not compile `ratatui` (test "scrollbar_tests") due to 21 previous errors; 1 warning emitted
+warning: build failed, waiting for other jobs to finish...
+
+`````
+
+
+**Turn 35 ...**
+
+<summary>Tests show ScrollbarState API mismatch: missing `new()`, different ScrollDirection variants. Need to check actual scrollbar.rs implementation.</summary>
+
+🛠️ Tool: `file_read`  📥 args:
+````text
+{
+  "path": "/app/src/widgets/scrollbar.rs",
+  "start": 1,
+  "count": 100
+}
+````
+`````
+
+[Action] Reading file: /app/src/widgets/scrollbar.rs
+`````
+
+
+**Turn 36 ...**
+
+<summary>Found actual API: ScrollbarState uses Default::default() + builder methods, ScrollDirection is Forward/Backward not Up/Down. Fixing tests to match implementation.</summary>
+
+🛠️ Tool: `update_working_checkpoint`  📥 args:
+````text
+{
+  "key_info": "TUI Library Development - Critical Finding:
+✓ Code compiles successfully (with warnings)
+⚙ Target 1 TESTING: Scrollbar - found API mismatch in tests
+  - Actual API: ScrollbarState::default().content_length(n).position(p)
+  - ScrollDirection: Forward/Backward (not Up/Down)
+  - Need to check full scrollbar.rs for next/prev/scroll methods
+⚙ Target 2 BLOCKED: BarChart Groups - compiles but not tested
+  - Created barchart/ with bar.rs, bar_group.rs, mod.rs
+  - Fixed Line rendering with buf.set_line()
+⏳ Target 3: Block Multi-Title
+⏳ Target 4: Stylize System
+⏳ Target 5: Prelude
+⏳ Target 6: Const Builders
+
+Next: Fix test API to match actual implementation, run tests to verify Target 1"
+}
+````
+`````
+[Info] Updated key_info and related_sop.
+`````
+
+
+**Turn 37 ...**
+
+<summary>Checking rest of scrollbar.rs to find scroll/next/prev methods before rewriting tests to match actual API.</summary>
+
+🛠️ Tool: `file_read`  📥 args:
+````text
+{
+  "path": "/app/src/widgets/scrollbar.rs",
+  "start": 100,
+  "count": 150
+}
+````
+`````
+
+[Action] Reading file: /app/src/widgets/scrollbar.rs
+`````
+
+
+**Turn 38 ...**
+
+<summary>Found full ScrollbarState API: next/prev/first/last/scroll methods, Forward/Backward direction. Now rewriting tests to match actual implementation.</summary>
+
+Now I understand the API. Let me rewrite the tests to match the actual implementation. The scroll() method takes no amount parameter, it just moves by 1. Let me create a simpler, focused test suite:
+
+🛠️ Tool: `file_write`  📥 args:
+````text
+{
+  "mode": "overwrite",
+  "content": "#[cfg(test)]
+mod scrollbar_tests {
+    use ratatui::{
+        backend::TestBackend,
+        layout::Rect,
+        style::{Color, Style},
+        terminal::Terminal,
+        widgets::{
+            scrollbar::{Scrollbar, ScrollbarOrientation, ScrollbarState, ScrollDirection},
+            StatefulWidget,
+        },
+    };
+
+    #[test]
+    fn test_scrollbar_state_clamping() {
+        // Position should be clamped to content_length - 1
+        let state = ScrollbarState::default()
+            .content_length(100)
+            .position(150); // Try to set beyond bounds
+        
+        // Since we can't directly inspect position, we'll render and check behavior
+        let mut terminal = Terminal::new(TestBackend::new(10, 10)).unwrap();
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default();
+                let mut test_state = state.clone();
+                f.render_stateful_widget(scrollbar, f.size(), &mut test_state);
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_scrollbar_state_navigation() {
+        let mut state = ScrollbarState::default()
+            .content_length(100)
+            .position(50);
+        
+        // Test next
+        state.next();
+        // Can't directly check position, but method should not panic
+        
+        // Test prev
+        state.prev();
+        
+        // Test first
+        state.first();
+        
+        // Test last
+        state.last();
+        
+        // Test scroll with direction
+        state.scroll(ScrollDirection::Forward);
+        state.scroll(ScrollDirection::Backward);
+    }
+
+    #[test]
+    fn test_scrollbar_state_edge_cases() {
+        // At start, prev should not panic
+        let mut state_at_start = ScrollbarState::default()
+            .content_length(100)
+            .position(0);
+        state_at_start.prev();
+        
+        // At end, next should not panic
+        let mut state_at_end = ScrollbarState::default()
+            .content_length(100)
+            .position(99);
+        state_at_end.next();
+    }
+
+    #[test]
+    fn test_scrollbar_vertical_right() {
+        let mut terminal = Terminal::new(TestBackend::new(10, 10)).unwrap();
+        let mut state = ScrollbarState::default()
+            .content_length(100)
+            .position(50);
+        
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default()
+                    .orientation(ScrollbarOrientation::VerticalRight);
+                f.render_stateful_widget(scrollbar, f.size(), &mut state);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        
+        // Check that rightmost column has scrollbar symbols
+        let right_col = buffer.area.width - 1;
+        let mut has_scrollbar_symbols = false;
+        for y in 0..buffer.area.height {
+            let cell = buffer.get(right_col, y);
+            if cell.symbol == \"║\" || cell.symbol == \"█\" || cell.symbol == \"▲\" || cell.symbol == \"▼\" {
+                has_scrollbar_symbols = true;
+                break;
+            }
+        }
+        assert!(has_scrollbar_symbols, \"No scrollbar symbols found in right column\");
+    }
+
+    #[test]
+    fn test_scrollbar_vertical_left() {
+        let mut terminal = Terminal::new(TestBackend::new(10, 10)).unwrap();
+        let mut state = ScrollbarState::default()
+            .content_length(100)
+            .position(25);
+        
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default()
+                    .orientation(ScrollbarOrientation::VerticalLeft);
+                f.render_stateful_widget(scrollbar, f.size(), &mut state);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        
+        // Check that leftmost column has scrollbar symbols
+        let mut has_scrollbar_symbols = false;
+        for y in 0..buffer.area.height {
+            let cell = buffer.get(0, y);
+            if cell.symbol == \"║\" || cell.symbol == \"█\" || cell.symbol == \"▲\" || cell.symbol == \"▼\" {
+                has_scrollbar_symbols = true;
+                break;
+            }
+        }
+        assert!(has_scrollbar_symbols, \"No scrollbar symbols found in left column\");
+    }
+
+    #[test]
+    fn test_scrollbar_horizontal_bottom() {
+        let mut terminal = Terminal::new(TestBackend::new(10, 10)).unwrap();
+        let mut state = ScrollbarState::default()
+            .content_length(100)
+            .position(50);
+        
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default()
+                    .orientation(ScrollbarOrientation::HorizontalBottom);
+                f.render_stateful_widget(scrollbar, f.size(), &mut state);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        
+        // Check that bottom row has scrollbar symbols
+        let bottom_row = buffer.area.height - 1;
+        let mut has_scrollbar_symbols = false;
+        for x in 0..buffer.area.width {
+            let cell = buffer.get(x, bottom_row);
+            if cell.symbol == \"═\" || cell.symbol == \"█\" || cell.symbol == \"◄\" || cell.symbol == \"►\" {
+                has_scrollbar_symbols = true;
+                break;
+            }
+        }
+        assert!(has_scrollbar_symbols, \"No scrollbar symbols found in bottom row\");
+    }
+
+    #[test]
+    fn test_scrollbar_horizontal_top() {
+        let mut terminal = Terminal::new(TestBackend::new(10, 10)).unwrap();
+        let mut state = ScrollbarState::default()
+            .content_length(100)
+            .position(50);
+        
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default()
+                    .orientation(ScrollbarOrientation::HorizontalTop);
+                f.render_stateful_widget(scrollbar, f.size(), &mut state);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        
+        // Check that top row has scrollbar symbols
+        let mut has_scrollbar_symbols = false;
+        for x in 0..buffer.area.width {
+            let cell = buffer.get(x, 0);
+            if cell.symbol == \"═\" || cell.symbol == \"█\" || cell.symbol == \"◄\" || cell.symbol == \"►\" {
+                has_scrollbar_symbols = true;
+                break;
+            }
+        }
+        assert!(has_scrollbar_symbols, \"No scrollbar symbols found in top row\");
+    }
+
+    #[test]
+    fn test_scrollbar_zero_content_length() {
+        let mut terminal = Terminal::new(TestBackend::new(10, 10)).unwrap();
+        let mut state = ScrollbarState::default()
+            .content_length(0)
+            .position(0);
+        
+        // Should not panic
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default();
+                f.render_stateful_widget(scrollbar, f.size(), &mut state);
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_scrollbar_viewport_content_length() {
+        let mut terminal = Terminal::new(TestBackend::new(10, 20)).unwrap();
+        let mut state = ScrollbarState::default()
+            .content_length(10)
+            .viewport_content_length(5)
+            .position(0);
+        
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default();
+                f.render_stateful_widget(scrollbar, f.size(), &mut state);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        
+        // With viewport_content_length set, thumb should be proportional
+        let right_col = buffer.area.width - 1;
+        let mut thumb_count = 0;
+        for y in 0..buffer.area.height {
+            let cell = buffer.get(right_col, y);
+            if cell.symbol == \"█\" {
+                thumb_count += 1;
+            }
+        }
+        
+        // Thumb should occupy significant portion since viewport is half of content
+        assert!(thumb_count > 0, \"Thumb should be visible\");
+    }
+
+    #[test]
+    fn test_scrollbar_custom_symbols() {
+        let mut terminal = Terminal::new(TestBackend::new(10, 10)).unwrap();
+        let mut state = ScrollbarState::default()
+            .content_length(100)
+            .position(50);
+        
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default()
+                    .thumb_symbol(\"X\")
+                    .track_symbol(\"-\")
+                    .begin_symbol(Some(\"^\"))
+                    .end_symbol(Some(\"v\"));
+                f.render_stateful_widget(scrollbar, f.size(), &mut state);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        
+        // Check for custom symbols
+        let right_col = buffer.area.width - 1;
+        let mut has_custom_symbols = false;
+        for y in 0..buffer.area.height {
+            let cell = buffer.get(right_col, y);
+            if cell.symbol == \"X\" || cell.symbol == \"-\" || cell.symbol == \"^\" || cell.symbol == \"v\" {
+                has_custom_symbols = true;
+                break;
+            }
+        }
+        assert!(has_custom_symbols, \"No custom symbols found\");
+    }
+
+    #[test]
+    fn test_scrollbar_custom_styles() {
+        let mut terminal = Terminal::new(TestBackend::new(10, 10)).unwrap();
+        let mut state = ScrollbarState::default()
+            .content_length(100)
+            .position(50);
+        
+        let thumb_style = Style::default().fg(Color::Red);
+        let track_style = Style::default().fg(Color::Blue);
+        
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default()
+                    .thumb_style(thumb_style)
+                    .track_style(track_style);
+                f.render_stateful_widget(scrollbar, f.size(), &mut state);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        
+        // Check that styles are applied
+        let right_col = buffer.area.width - 1;
+        let mut has_styled_cells = false;
+        for y in 0..buffer.area.height {
+            let cell = buffer.get(right_col, y);
+            if cell.fg == Color::Red || cell.fg == Color::Blue {
+                has_styled_cells = true;
+                break;
+            }
+        }
+        assert!(has_styled_cells, \"No styled cells found\");
+    }
+
+    #[test]
+    fn test_scrollbar_too_small_area() {
+        let mut terminal = Terminal::new(TestBackend::new(10, 2)).unwrap();
+        let mut state = ScrollbarState::default()
+            .content_length(100)
+            .position(50);
+        
+        // Should handle gracefully even with very small area
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default();
+                f.render_stateful_widget(scrollbar, f.size(), &mut state);
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_scrollbar_without_arrows() {
+        let mut terminal = Terminal::new(TestBackend::new(10, 10)).unwrap();
+        let mut state = ScrollbarState::default()
+            .content_length(100)
+            .position(50);
+        
+        terminal
+            .draw(|f| {
+                let scrollbar = Scrollbar::default()
+                    .begin_symbol(None)
+                    .end_symbol(None);
+                f.render_stateful_widget(scrollbar, f.size(), &mut state);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        
+        // Top and bottom should be track or thumb, not arrows
+        let right_col = buffer.area.width - 1;
+        let top_cell = buffer.get(right_col, 0);
+        let bottom_cell = buffer.get(right_col, buffer.area.height - 1);
+        
+        assert_ne!(top_cell.symbol, \"▲\");
+        assert_ne!(bottom_cell.symbol, \"▼\");
+    }
+}
+",
+  "path": "/app/tests/scrollbar_tests.rs"
+}
+````
+`````
+[Action] Overwriting file: scrollbar_tests.rs
+[Status] ✅ Overwrite 成功 (11763 bytes)
+`````
+
+

@@ -1,0 +1,212 @@
+# C++17 Thread Pool Library Development Roadmap
+
+## Overview
+
+This library is a lightweight, header-only C++17 thread pool designed for high-performance task parallelization. It enables developers to submit tasks, parallelize loops, and manage concurrent execution with minimal boilerplate, targeting scientific computing and general-purpose multithreading workloads. In addition to the existing `BS::concurrency_t` type alias, the library defines `BS::size_t` as an alias for `std::size_t`.
+
+---
+
+## Goals
+
+We plan to introduce a **task priority system** as the central enhancement to the thread pool. By allowing users to assign numeric priorities to tasks, the pool can schedule higher-priority work ahead of lower-priority work, which is critical for workloads where certain tasks are time-sensitive or serve as dependencies for others. The priority system will be gated behind a compile-time macro to avoid performance overhead for users who do not need it.
+
+Alongside priorities, we are adding two new parallelization primitives: **index-based loop parallelization** (`detach_loop`/`submit_loop`) that eliminates the need for users to write inner loops, and **sequence task submission** (`detach_sequence`/`submit_sequence`) that submits one task per index without blocking. These complement the existing block-based parallelization and provide more flexible ways to distribute work. We also plan to support **per-thread initialization functions** and a **thread information query system** (`BS::this_thread` namespace) so that threads can discover their own index and owning pool at runtime.
+
+Further improvements include upgrading `multi_future` to inherit from `std::vector` (gaining all container operations), extracting utility classes into a separate header (`BS_thread_pool_utils.hpp`) with a new `signaller` class for simple inter-thread signalling, and adding optional **wait deadlock detection** that throws an exception if `wait()` is called from within a pool thread. All seven capabilities can be implemented independently, though the priority system is the most architecturally significant.
+
+The following capabilities are planned for this release:
+
+- **Target 1: Task Priority System** — Enable priority-ordered task execution through a compile-time opt-in mechanism
+- **Target 2: Index-Based Loop Parallelization** — Provide simplified loop functions where the user supplies a per-index callable
+- **Target 3: Sequence Task Submission** — Submit one independent task per index in a range, without blocking
+- **Target 4: Thread Initialization and Information** — Support per-thread init functions and runtime thread identity queries
+- **Target 5: Enhanced multi_future** — Upgrade multi_future to inherit from `std::vector` and add query methods
+- **Target 6: Utility Classes Separation** — Extract utility classes into a dedicated header and add a signaller class
+- **Target 7: Wait Deadlock Detection** — Optionally detect and report deadlocks when waiting from within a pool thread
+
+---
+
+## Target 1: Task Priority System
+
+Many real-world workloads contain tasks of varying urgency: some results are needed immediately (e.g., UI updates, dependency resolution), while others can be deferred. Currently the pool uses a simple FIFO queue, providing no way to express task importance. This target introduces an opt-in priority mechanism: when the macro `BS_THREAD_POOL_ENABLE_PRIORITY` is defined before including the header, all task submission functions gain an optional trailing priority parameter, and the internal queue reorders tasks from highest to lowest priority.
+
+A typical usage: define the macro, create a pool, then call `pool.detach_task([]{...}, BS::pr::high)` to submit a high-priority task. Tasks without an explicit priority default to `BS::pr::normal` (0). When the pool has capacity, it always picks the highest-priority pending task.
+
+### Requirements
+
+1. **Priority type and predefined constants**: When `BS_THREAD_POOL_ENABLE_PRIORITY` is defined before including the main header:
+   - A type alias `BS::priority_t` shall be defined as `std::int_least16_t`.
+   - A namespace `BS::pr` shall contain five `constexpr` constants of type `BS::priority_t`:
+     - `highest` = 32767
+     - `high` = 16383
+     - `normal` = 0
+     - `low` = -16384
+     - `lowest` = -32768
+
+2. **Priority parameter on task submission functions**: All `detach_*` and `submit_*` member functions of the thread pool class shall accept an optional trailing parameter of type `BS::priority_t` with default value `0`. Specifically:
+   - `detach_task(task, priority)` and `submit_task(task, priority)`
+   - `detach_blocks(first, last, block, num_blocks, priority)` and `submit_blocks(first, last, block, num_blocks, priority)`
+   - `detach_loop(first, last, loop, num_blocks, priority)` and `submit_loop(first, last, loop, num_blocks, priority)`
+   - `detach_sequence(first, last, sequence, priority)` and `submit_sequence(first, last, sequence, priority)`
+
+3. **Priority-ordered execution**: Tasks with higher priority values shall be executed before tasks with lower priority values. When multiple tasks share the same priority, they shall be executed in FIFO order within that priority level.
+
+---
+
+## Target 2: Index-Based Loop Parallelization
+
+The existing block-based parallelization (`detach_blocks`/`submit_blocks`) requires the user to write an inner loop: the loop function receives `(start, end)` and must iterate from `start` to `end` internally. This is powerful but verbose. This target adds `detach_loop` and `submit_loop`, which accept a simpler per-index callable: the pool splits the range into blocks internally and calls the user function once per index, eliminating the need for manual inner loops.
+
+A typical usage: `pool.detach_loop(0, 1000, [&](int i) { data[i] *= 2; })` will distribute the 1000 iterations across the pool's threads automatically.
+
+### Requirements
+
+1. **`detach_loop(first_index, index_after_last, loop, num_blocks)`**: A template member function that:
+   - Splits the range `[first_index, index_after_last)` into at most `num_blocks` blocks (default `0` means use thread count).
+   - Calls `loop(i)` for every index `i` in the range, exactly once per index.
+   - Does not return a future. The caller must use `wait()` to synchronize.
+   - If `index_after_last <= first_index`, does nothing (submits no tasks).
+   - Both index parameters must have the same type `T`.
+
+2. **`submit_loop(first_index, index_after_last, loop, num_blocks)`**: Same as `detach_loop` but returns a `BS::multi_future<void>` that can be waited on.
+
+3. **Edge cases**:
+   - When `first_index == index_after_last`, no tasks are submitted and no loop function calls occur.
+   - When `index_after_last < first_index`, no tasks are submitted.
+   - When `num_blocks` exceeds the number of indices, the actual number of blocks is reduced to the number of indices.
+
+---
+
+## Target 3: Sequence Task Submission
+
+While loops split a range into a small number of blocks (each processing many indices), sequences submit exactly one independent task per index. This is useful when each index corresponds to a self-contained unit of work (e.g., processing one file, one matrix column, one network request) that should be individually scheduled.
+
+A typical usage: `auto results = pool.submit_sequence(0, N, [](int i) { return compute(i); }).get()` returns a `std::vector` of results, one per index.
+
+### Requirements
+
+1. **`detach_sequence(first_index, index_after_last, sequence)`**: A template member function that:
+   - Submits one task per index `i` in `[first_index, index_after_last)`, calling `sequence(i)`.
+   - Does not return a future.
+   - If `index_after_last <= first_index`, submits no tasks.
+   - Both index parameters must have the same type `T`.
+
+2. **`submit_sequence(first_index, index_after_last, sequence)`**: Same as `detach_sequence` but returns a `BS::multi_future<R>` where `R` is the return type of `sequence(i)`. For void sequences, returns `BS::multi_future<void>`.
+
+3. **Edge cases**:
+   - Identical start and end indices: no tasks submitted.
+   - Reversed range (end < start): no tasks submitted.
+
+---
+
+## Target 4: Thread Initialization and Information
+
+Users sometimes need per-thread setup (e.g., seeding random number generators, pinning threads to cores, initializing thread-local caches) and runtime introspection (knowing which thread is executing a given task). This target adds constructor/reset overloads that accept an initialization function, and a `BS::this_thread` namespace for runtime queries.
+
+A typical usage: construct a pool with `BS::thread_pool pool([](){ /* per-thread init */ })`, then inside any task call `BS::this_thread::get_index()` to learn which thread is running it.
+
+### Requirements
+
+1. **Constructor overloads**: The thread pool class shall support these constructor forms:
+   - `thread_pool()` — default (hardware concurrency, no init)
+   - `thread_pool(num_threads)` — explicit thread count, no init
+   - `thread_pool(init_task)` — hardware concurrency with init function
+   - `thread_pool(num_threads, init_task)` — explicit count with init function
+   - The `init_task` is a `std::function<void()>` that runs exactly once in each thread when that thread is first created, before it begins processing tasks.
+   - When `init_task` is executing in a thread, `BS::this_thread::get_index()` and `BS::this_thread::get_pool()` shall already return their correct values for that thread, so that `init_task` can use them.
+   - After construction or `reset()` with an `init_task`, calling `wait()` shall not return until all threads have finished executing their `init_task`.
+
+2. **Reset overloads**: `reset()` shall also accept these forms:
+   - `reset()` — default thread count, no init
+   - `reset(num_threads)` — explicit count, no init
+   - `reset(init_task)` — default count with init
+   - `reset(num_threads, init_task)` — explicit count with init
+
+3. **`BS::this_thread` namespace**: A namespace providing thread-local information:
+   - `BS::this_thread::optional_index` — type alias for `std::optional<BS::size_t>`
+   - `BS::this_thread::optional_pool` — type alias for `std::optional<BS::thread_pool*>`
+   - `BS::this_thread::get_index()` — callable that returns `optional_index`. Returns the thread's index (0 to thread_count-1) if called from a pool thread, or `std::nullopt` if called from a non-pool thread (main thread, independent `std::thread`).
+   - `BS::this_thread::get_pool()` — callable that returns `optional_pool`. Returns a pointer to the owning pool if called from a pool thread, or `std::nullopt` otherwise.
+
+4. **`get_thread_ids()`**: A member function returning `std::vector<std::thread::id>` containing the unique identifier of each thread in the pool, as obtained by `std::thread::get_id()`.
+
+---
+
+## Target 5: Enhanced multi_future
+
+The existing `multi_future<T>` is a standalone class wrapping a vector of futures. This target transforms it into a proper container by making it inherit from `std::vector<std::future<T>>`, so all standard vector operations (iteration, push_back, size, etc.) are available directly. Additionally, new query methods are added for checking readiness and validity.
+
+A typical usage: `BS::multi_future<int> mf = pool.submit_sequence(0, 10, compute); while (mf.ready_count() < 10) { /* do other work */ }; auto results = mf.get();`
+
+### Requirements
+
+1. **Inheritance**: `BS::multi_future<T>` shall publicly inherit from `std::vector<std::future<T>>`, inheriting all constructors via `using std::vector<std::future<T>>::vector`.
+
+2. **Copy semantics deleted, move semantics defaulted**: Copy constructor and copy assignment shall be deleted. Move constructor and move assignment shall be defaulted.
+
+3. **`get()`**: For non-void `T`, returns `std::vector<T>` containing the result of each future. For `void` `T`, returns void (calls `get()` on each future to propagate exceptions).
+
+4. **`ready_count()`**: Returns `BS::size_t` — the number of futures whose status is `std::future_status::ready` (checked via `wait_for(zero_duration)`).
+
+5. **`valid()`**: Returns `bool` — `true` if and only if every future in the container is valid.
+
+6. **`wait()`**: Calls `wait()` on every future in the container.
+
+7. **`wait_for(duration)`**: Waits for futures sequentially, subtracting elapsed time from the total budget. Returns `true` if all futures completed within the duration, `false` otherwise.
+
+8. **`wait_until(time_point)`**: Waits for futures sequentially until the given time point. Returns `true` if all completed before the time point, `false` otherwise.
+
+---
+
+## Target 6: Utility Classes Separation
+
+The thread pool's utility classes (`synced_stream` for thread-safe output, `timer` for benchmarking) are useful independently of the thread pool itself. This target extracts them into a dedicated header file `BS_thread_pool_utils.hpp` and adds a new `signaller` class for simple one-shot inter-thread signalling.
+
+A typical usage: `BS::signaller sig; /* thread A: */ sig.wait(); /* thread B: */ sig.ready(); // unblocks thread A`
+
+### Requirements
+
+1. **New header file**: `include/BS_thread_pool_utils.hpp` shall contain:
+   - `BS::signaller` class
+   - `BS::synced_stream` class (moved from main header)
+   - `BS::timer` class (moved from main header)
+
+2. **`BS::signaller` class**: A simple signalling mechanism:
+   - Default-constructible. Each instance supports a single one-shot signal.
+   - `ready()` — signals readiness, unblocking all waiting threads.
+   - `wait()` — blocks until `ready()` is called.
+   - Copy constructor and copy assignment are deleted. Move constructor and move assignment are defaulted.
+
+3. **`BS::timer::current_ms()`**: A new method returning `std::chrono::milliseconds::rep` — the number of milliseconds elapsed since construction or the last `start()` call, without stopping the timer (unlike `stop()` + `ms()`).
+
+4. **`BS::synced_stream` default constructor**: The constructor shall default to `std::cout` when no stream is provided: `synced_stream(std::ostream& stream = std::cout)`.
+
+---
+
+## Target 7: Wait Deadlock Detection
+
+If a task running inside the pool calls `pool.wait()`, it creates a deadlock: the thread waits for all tasks to finish, but it is itself one of those tasks. This target adds optional detection: when `BS_THREAD_POOL_ENABLE_WAIT_DEADLOCK_CHECK` is defined, the pool checks at runtime whether `wait()`, `wait_for()`, or `wait_until()` are being called from one of its own threads, and throws an exception instead of deadlocking.
+
+A typical usage: define the macro, then if a task accidentally calls `pool.wait()`, the pool throws `BS::thread_pool::wait_deadlock` instead of hanging.
+
+### Requirements
+
+1. **Exception type**: The thread pool class shall define a nested exception class `wait_deadlock` that inherits from `std::runtime_error`.
+
+2. **Detection behavior**: When `BS_THREAD_POOL_ENABLE_WAIT_DEADLOCK_CHECK` is defined:
+   - `wait()`, `wait_for()`, and `wait_until()` shall check whether the calling thread belongs to this pool.
+   - If so, they shall throw `BS::thread_pool::wait_deadlock` instead of waiting.
+
+3. **Disabled by default**: When the macro is not defined, no deadlock checking occurs and no exception is thrown.
+
+---
+
+## Completion Criteria
+
+- All new member functions (`detach_loop`, `submit_loop`, `detach_sequence`, `submit_sequence`, `detach_task`, `submit_task`, `get_thread_ids`, etc.) are callable with the documented signatures
+- `BS::this_thread::get_index()` and `BS::this_thread::get_pool()` return correct values from pool threads and `std::nullopt` from non-pool threads
+- `BS::multi_future<T>` inherits from `std::vector<std::future<T>>` and supports all vector operations plus the new query methods
+- `BS::signaller`, `BS::synced_stream`, and `BS::timer` are importable from `BS_thread_pool_utils.hpp`
+- Priority-ordered execution works correctly when `BS_THREAD_POOL_ENABLE_PRIORITY` is defined
+- Wait deadlock detection works correctly when `BS_THREAD_POOL_ENABLE_WAIT_DEADLOCK_CHECK` is defined
+- Existing thread pool functionality (construction, task submission, waiting, resetting, purging) continues to work
