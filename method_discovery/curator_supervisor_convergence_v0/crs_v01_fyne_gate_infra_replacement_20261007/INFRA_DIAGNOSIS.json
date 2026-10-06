@@ -1,0 +1,60 @@
+{
+  "schema": "crs-v01-fyne-infrastructure-diagnosis/1",
+  "run_id": "crs-v01-fyne-mechanism-gate-b-only-r1-infra-replacement",
+  "status": "infrastructure_invalid_after_provider_sends",
+  "scientific_result": null,
+  "observed_sequence": [
+    {
+      "local_time": "2026-10-07T02:50:22+08:00",
+      "source": "Windows System event Microsoft-Windows-Resource-Exhaustion-Detector/2004, EventRecordID 772219",
+      "fact": "Windows diagnosed low virtual memory; system commit charge 33959481344 of limit 34227404800 bytes (267923456 bytes headroom)."
+    },
+    {
+      "local_time": "2026-10-07T02:50:28+08:00",
+      "source": "Docker Desktop host backend log, UTC 2026-10-06T18:50:28",
+      "fact": "WSL vpnkit-bridge exited with 0xc00000fd; backend recorded multiplexer disconnect and linux/wsl engine shutdown request."
+    },
+    {
+      "local_time": "2026-10-07T02:50:48+08:00",
+      "source": "Harbor trial exception.txt and result.json",
+      "fact": "A Docker exec API request returned HTTP 500; the AGENT_END capture hook then raised AttributeError on a missing stdout, masking the prior Docker failure."
+    }
+  ],
+  "pagefile_state_at_audit": {
+    "automatic_managed_pagefile": false,
+    "Win32_PageFileUsage_count": 0,
+    "Win32_PageFileSetting_count": 0,
+    "current_commit_limit_bytes": 34227404800,
+    "current_physical_memory_bytes": 34227404800
+  },
+  "causal_assessment": "The memory-exhaustion event six seconds before the Docker/WSL disconnect is strong host-infrastructure evidence, but the OS/Docker logs do not prove which individual process caused the engine exit. The Harbor AttributeError is secondary cleanup failure, not the initiating error.",
+  "source_artifacts": [
+    {
+      "path": "C:\\Users\\hsy\\AppData\\Local\\Docker\\log\\host\\com.docker.backend.exe.log.20261007-025038.687",
+      "bytes": 1047732,
+      "sha256": "880b42aeef1c8c84f24953904f1d9b5aa0379939400d9d2eb8d6fe6774959cb7",
+      "local_only": true
+    },
+    {
+      "path": "C:\\Users\\hsy\\AppData\\Local\\Docker\\log\\vm\\init.log.20261007-024958.532",
+      "bytes": 1048530,
+      "sha256": "ac00880d7c3e6da88aba0d7db45d281c2aa7e129cf9e0c006d651e371407c3be",
+      "local_only": true
+    },
+    {
+      "path": "archive/r1_invalid/trial/exception.txt",
+      "bytes": 2064,
+      "sha256": "daaffcfb252ce41a4ac4c4611c775a1da30b2c7aa92ea9b8834634f365ddbca2",
+      "local_only": false
+    }
+  ],
+  "scientific_calls": {
+    "gateway_requests_task": 13,
+    "gateway_requests_monitor": 11,
+    "total_gateway_requests": 24
+  },
+  "native_evaluator_executions": 0,
+  "os_pagefile_configuration_modified": false,
+  "docker_or_wsl_restarted_by_auditor": false,
+  "additional_scientific_run_started": false
+}

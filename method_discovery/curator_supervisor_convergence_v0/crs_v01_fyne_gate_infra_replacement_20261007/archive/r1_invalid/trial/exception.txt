@@ -1,0 +1,35 @@
+Traceback (most recent call last):
+  File "E:\LongContext\bench_runtime\m4\harbor-src\src\harbor\trial\trial.py", line 450, in _run_agent_phase
+    await asyncio.wait_for(
+    ...<6 lines>...
+    )
+  File "D:\python\envs\ga_bench\Lib\asyncio\tasks.py", line 507, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "E:\LongContext\long_context_bench\adapters\harbor_ga_agent.py", line 526, in run
+    raise RuntimeError(f"GenericAgent did not complete one task turn: {detail}")
+RuntimeError: GenericAgent did not complete one task turn: request returned 500 Internal Server Error for API route and version http://%2F%2F.%2Fpipe%2FdockerDesktopLinuxEngine/v1.55/exec/d14e9c8d1159b143789394e05a9147f43e2ff1da6ccfa01fbf56bf315c5bb35e/json, check if the server supports the requested API version
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "E:\LongContext\bench_runtime\m4\harbor-src\src\harbor\trial\trial.py", line 354, in run
+    await self._run()
+  File "E:\LongContext\bench_runtime\m4\harbor-src\src\harbor\trial\single_step.py", line 114, in _run
+    await self._run_agent()
+  File "E:\LongContext\bench_runtime\m4\harbor-src\src\harbor\trial\single_step.py", line 244, in _run_agent
+    await self._run_agent_phase(
+    ...<4 lines>...
+    )
+  File "E:\LongContext\bench_runtime\m4\harbor-src\src\harbor\trial\trial.py", line 464, in _run_agent_phase
+    await self._emit(TrialEvent.AGENT_END)
+  File "E:\LongContext\bench_runtime\m4\harbor-src\src\harbor\trial\trial.py", line 344, in _emit
+    await hook(hook_event)
+  File "E:\longcontext-cqs-v0-20261005\method_discovery\uc_r5_execution_bridge.py", line 306, in agent_end
+    before = await self.container_id()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\longcontext-cqs-v0-20261005\method_discovery\uc_r5_execution_bridge.py", line 118, in container_id
+    container = result.stdout.strip()
+                ^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'strip'
