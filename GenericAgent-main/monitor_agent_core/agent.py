@@ -46,6 +46,7 @@ from .dcm_v0 import DecisionMeasurementBoundary
 from .cqs_v0 import ControlQuestionState
 from .ase_v0 import (SYSTEM_PROMPT as ASE_SYSTEM_PROMPT, ControlEcho,
                      ReconsiderationBoundary, reference_surface, ASE_REFERENCE_MAX_CHARS)
+from .crs_v0 import ContrastiveReleaseBoundary
 
 
 def _tool(name, description, properties, required):
@@ -98,6 +99,35 @@ MONITOR_TOOLS = [
     }, ["message"]),
     _tool("allow_complete", "Allow only the currently pending root completion.", {}, []),
 ]
+
+
+def crs_tools():
+    """ASE root contrast on the existing allow_complete name; other tools unchanged."""
+    tools = json.loads(json.dumps(MONITOR_TOOLS))
+    release = next(tool['function'] for tool in tools
+                   if tool['function']['name'] == 'allow_complete')
+    locator = {'type': 'string', 'minLength': 1, 'maxLength': 200}
+    release['description'] = (
+        'Propose or confirm release of the current whole-task root handoff. Supply one '
+        'grounded action-separating contrast. Cite existing task/authority/Task Book '
+        'grounding and actual public or Supervisor tool-result observations. The first '
+        'proposal never releases; only the same exact contrast after its next-request '
+        'exposure may release. This is not required for local control.')
+    release['parameters']['properties'] = {'contrast': {
+        'type': 'object', 'additionalProperties': False,
+        'properties': {
+            'alternative': {'type': 'string', 'minLength': 1, 'maxLength': 1200},
+            'grounding': {'type': 'string', 'minLength': 1, 'maxLength': 1200},
+            'ground_refs': {'type': 'array', 'items': locator, 'minItems': 1, 'maxItems': 4,
+                            'description': 'Use task/original_task.txt, monitor/reference.md, or an existing task/public_events.jsonl#cursor.'},
+            'discrimination': {'type': 'string', 'minLength': 1, 'maxLength': 1600},
+            'observation_refs': {'type': 'array', 'items': locator, 'minItems': 1, 'maxItems': 4,
+                                 'description': 'Use an actual task/public_events.jsonl#cursor tool result or monitor/audit/dialogue.jsonl#line file_read/code_run tool_result.'},
+        },
+        'required': ['alternative', 'grounding', 'ground_refs', 'discrimination', 'observation_refs'],
+    }}
+    release['parameters']['required'] = ['contrast']
+    return tools
 
 
 def verification_tools():
@@ -419,6 +449,10 @@ class MonitorAgent:
             raise ValueError('monitor_ase_meta_regulation must be a boolean')
         if self.ase_meta_regulation and not self.ase_v0:
             raise ValueError('monitor_ase_meta_regulation requires ASE')
+        self.crs_v0 = getattr(client, 'config', {}).get('monitor_contrastive_release_state', False)
+        if type(self.crs_v0) is not bool or (self.crs_v0 and not self.ase_v0):
+            raise ValueError('monitor_contrastive_release_state must be boolean and requires ASE')
+        self.crs = None
         self.control_echo = None
         if self.ase_v0:
             if getattr(client, 'config', {}).get('monitor_live_intervention', True) is not True:
@@ -437,8 +471,9 @@ class MonitorAgent:
             self.base_system_prompt = ASE_SYSTEM_PROMPT
             self.situation = SituationState(workspace, include_supervisory_control=False)
             self.control_echo = ControlEcho(self._audit_dialogue)
-            self.dcm = ReconsiderationBoundary(
+            self.dcm = (ContrastiveReleaseBoundary if self.crs_v0 else ReconsiderationBoundary)(
                 self._audit_dialogue, lambda: self._ase_last_visible_context)
+            self.crs = self.dcm if self.crs_v0 else None
         self._ase_initialization_complete = False
         self._ase_reference_ready_reported = False
         self._ase_pending_context = None
@@ -630,6 +665,10 @@ class MonitorAgent:
                     remaining_seconds=deadline - time.monotonic() if deadline is not None else None)
                 self._audit_dialogue('supervisory_situation_surface', content=surface, **metadata)
                 parts.append(surface)
+                crs_surface = (self.crs.render_root(self.root_frame_handoff)
+                               if self.crs is not None and self.frame_kind == 'root' else None)
+                if crs_surface:
+                    parts.append(crs_surface)
                 if self.ase_v0:
                     self._ase_pending_context = {
                         'task_book_source_sha256': reference_metadata['source_sha256'],
@@ -649,6 +688,10 @@ class MonitorAgent:
                         'composition_order': ['task_book', 'control_echo', 'situation'] if echo else
                                              ['task_book', 'situation'],
                     }
+                    if crs_surface:
+                        self._ase_pending_context['composition_order'].append('crs')
+                        self._ase_pending_context['crs_surface_sha256'] = hashlib.sha256(
+                            crs_surface.encode('utf-8')).hexdigest()
             if self.eis_v0:
                 surface, surface_metadata = executable_interpretation_surface(self.workspace)
                 self._audit_dialogue('executable_interpretation_surface', content=surface, **surface_metadata)
@@ -681,6 +724,8 @@ class MonitorAgent:
                                  manifest_locator=shown['manifest_locator'], content=shown['text'])
         continuity = self.cqs.surface_visible() if self.cqs is not None else None
         echo = self.control_echo.surface_visible() if self.control_echo is not None else None
+        if self.crs is not None and self.frame_kind == 'root' and self.crs.root_contrast is not None:
+            self.crs.surface_visible(getattr(self.client, '_progress_request_id', None))
         if self.ase_v0 and self._ase_pending_context is not None:
             facts = dict(self._ase_pending_context)
             facts['request_id'] = getattr(self.client, '_progress_request_id', None)
@@ -954,9 +999,10 @@ class MonitorAgent:
                     raise ValueError('work_intent is disabled')
                 return ToolOutcome(self.experimental_control.intent_tool(arguments))
             if name == 'allow_complete':
-                allowed = {'_noargs', 'result', 'reason'} if self.verification_loop_v0 else {'_noargs'}
+                allowed = ({'_noargs', 'contrast'} if self.crs is not None else
+                           {'_noargs', 'result', 'reason'} if self.verification_loop_v0 else {'_noargs'})
                 if set(arguments) - allowed:
-                    raise ValueError('allow_complete accepts no arguments')
+                    raise ValueError('allow_complete arguments do not match the active release condition')
                 arguments = {key: value for key, value in arguments.items() if key != '_noargs'}
             if name == "file_read":
                 data = self.workspace.read_text(
@@ -1132,7 +1178,12 @@ class MonitorAgent:
                     if reference_block is not None:
                         return reference_block
                     if self.dcm is not None:
-                        if self.ase_v0 or arguments['result'] == 'resolve':
+                        if self.crs is not None:
+                            boundary = self.crs.root_release(arguments.get('contrast'), current,
+                                                              self.workspace)
+                            if boundary is not None:
+                                return ToolOutcome(boundary)
+                        elif self.ase_v0 or arguments['result'] == 'resolve':
                             boundary = self.dcm.release('allow_complete', 'root', arguments)
                             if boundary is not None:
                                 return ToolOutcome(boundary)
@@ -1150,6 +1201,8 @@ class MonitorAgent:
                         if self.root_routed else
                         {"request_id": current["request_id"]}))
                 if not self.completion_pending: raise ValueError("No root completion is pending")
+                if self.crs is not None:
+                    raise ValueError('CRS requires a current, identifiable root handoff')
                 reference_block = self._ase_reference_control_guard('allow_complete')
                 if reference_block is not None:
                     return reference_block
@@ -1331,9 +1384,10 @@ class MonitorAgent:
                     wake_context += "\n\n" + root_transition_view
                 self._audit_dialogue('root_frame_input', mode=self.root_scope_v1,
                                      handoff=self.root_frame_handoff, content=wake_context)
-            tools = verification_tools() if self.verification_loop_v0 and not self.ase_v0 else MONITOR_TOOLS
+            tools = (crs_tools() if self.crs is not None else
+                     verification_tools() if self.verification_loop_v0 and not self.ase_v0 else MONITOR_TOOLS)
             if self.ase_v0:
-                tools = json.loads(json.dumps(MONITOR_TOOLS))
+                tools = json.loads(json.dumps(tools))
                 next(tool['function'] for tool in tools if tool['function']['name'] == 'code_run')[
                     'description'] += (
                         ' Labels or conclusions you write with echo/print in a shell or Python script are '
