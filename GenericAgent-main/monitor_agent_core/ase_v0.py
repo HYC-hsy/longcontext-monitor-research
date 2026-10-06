@@ -19,17 +19,25 @@ FOLLOW_LIMIT = 160
 RATIONALE_LIMIT = 180
 META_FOLLOW_CYCLE_THRESHOLD = 2  # Experimental display threshold, not a task judgment.
 
-SYSTEM_PROMPT = """You are the persistent Supervisor for the full public task. The public task is authoritative. At initialization, read task/original_task.txt and inspect the pristine task/workspace/ with the ordinary tools, investigate as needed, then write a short natural-language monitor/reference.md: required behavior and constraints that may change later control, important integration consequences, distinctions that could give false positive evidence, and observations that may distinguish consequential states. This is your revisable interpretation, not verified truth. Do not use reference.md as a progress or completion ledger: do not put Target X complete, 5/7 done, current repair status, or local resolution there. Revise it with the existing private file tools when your understanding changes; no headings, form, or per-review rewrite are required.
+SYSTEM_PROMPT = """You are the persistent Curator-Supervisor of a long-running Task Agent. The full public task at task/original_task.txt is the authority.
 
-Task tests, build results, and Agent claims are evidence only for what they actually show. Use current public feedback to decide whether to observe, send a useful correction for a material discrepancy, follow its recovery, or let work proceed. If an observation cannot distinguish states that would change control, you may change the measurement. After intervening, inspect the Task's actual understanding, action, and result; revise your advice when feedback undermines it. Release local supervision when its grounds are adequate without investigating every unknown. At completion, judge the whole public mission, not merely recent repairs. Use the seven ordinary tools directly; no fixed reasoning fields or output sections are required.
+At initialization, read the public task and inspect the initial workspace as needed, then create monitor/reference.md as your Task Book. Keep only durable task cognition that may matter again much later: important requirements and constraints, stable facts learned from public evidence, and distinctions whose loss could cause a consequential mistake to recur. Preserve enough context to remember what a learned entry actually supports and when it may need rechecking. The Task Book is your revisable interpretation, not verified truth or current-world proof. Revise or delete it when public evidence undermines it. Do not use it as a progress or completion ledger.
 
-Use intervention when public evidence supports a useful correction or re-anchoring. Prefer communicating the task conflict or relevant evidence over prescribing internal implementation. The Task Agent owns implementation choices unless the public task constrains them. New feedback may invalidate your own advice.
+On each review, first orient to the Task Agent's current consequential move. Ask whether some still-relevant durable cognition would change that move if it were properly considered. If so, reactivate the relevant context. If no existing Task Book entry resolves the issue but the move depends on an unresolved premise whose truth could change your control action, investigate that premise with the ordinary tools. When investigation produces a durable fact or distinction that may matter again, update the Task Book. Do not investigate merely because something is unknown.
 
-monitor/working.md remains private scratch and continuation state, not the automatically supplied task reference. Reference, prior local control, and recent public events are navigational inputs, never substitutes for original evidence. Task evidence is read-only under task/; private files are writable under monitor/. code_run starts in monitor/ and is not a filesystem sandbox."""
+Your default is silence. Intervene when restoring relevant task cognition has control value. Prefer exposing the forgotten requirement, contradicted premise, learned distinction, or evidential limitation over prescribing implementation. The Task Agent owns implementation, debugging, test construction, and experimentation.
+
+A Task Book entry, prior conclusion, passing observation, or previous reminder is evidence only for what it actually supports now. New feedback may show that the Task Agent is wrong, that your earlier reminder was wrong, or that a stored belief needs revision. Reconsider your own cognition accordingly.
+
+When a Control Echo is present, it identifies the most recent reminder that was actually delivered to the Task Agent and whose first genuine feedback is now being assessed. It is prior control context, not an open concern or task truth. Use the fresh feedback to decide again. Once the Agent has recovered the relevant understanding and is autonomously pursuing a sound direction, withdraw and let it work; the implementation need not be finished before local supervision ends.
+
+At whole-task completion, return to the complete authoritative mission rather than the most recent local repair. Consider whether any still-valid requirement, learned fact, distinction, or unresolved action-changing premise would change the release decision. Investigate only where resolving uncertainty could change control. Do not require omniscience, and do not treat the absence of a remembered defect as proof of completion.
+
+Use the seven ordinary tools directly. monitor/working.md remains private scratch and compaction-continuation compatibility, not a second Task Book. Provider History is conversational continuity, not authority. Task evidence is read-only under task/; private files are writable under monitor/. code_run starts in monitor/ and is not a filesystem sandbox."""
 
 RELEASE_GUIDANCE = (
     'This proposed release has not executed. Your current task reference, recent situation and prior '
-    'local control context remain available. Reconsider freely: use ordinary tools, change the control '
+    'conversational evidence remain available. Reconsider freely: use ordinary tools, change the control '
     'action, or repeat the same kind of release in a new model turn if it remains appropriate.'
 )
 
@@ -59,7 +67,8 @@ def reference_surface(workspace, limit=REFERENCE_LIMIT):
         source, content, status = b'', '', 'absent'
     except (OSError, ValueError) as exc:
         source, content, status = b'', '', 'unavailable:' + type(exc).__name__
-    header = ('Supervisor Reference — your own revisable interpretation, not verified truth or progress. '
+    header = ('Task Book — your own durable, revisable task cognition; not verified truth, progress, '
+              'or current-world proof. '
               'The full public task at task/original_task.txt remains authoritative.\n')
     footer = '\nSource: monitor/reference.md.'
     if status == 'present' and len(content) > limit:
@@ -340,6 +349,107 @@ class LocalContinuity:
                            source_locator=shown['anchor_locator'])
         return shown
 
+
+
+class ControlEcho:
+    """One delivery-confirmed reminder for one genuine-feedback rejudgment."""
+
+    MESSAGE_LIMIT = 2000
+
+    def __init__(self, audit):
+        self.audit = audit
+        self.pending_submission = None
+        self.active_echo = None
+        self.review_id = None
+        self.pending_surface = None
+        self.last_intervene_call_locator = None
+        self.visible_review_id = None
+
+    @property
+    def active(self):
+        return self.active_echo is not None
+
+    def begin_review(self, review_id):
+        self.review_id = review_id
+        self.pending_surface = None
+        self.last_intervene_call_locator = None
+        self.visible_review_id = None
+
+    def observe(self, record, line):
+        if (record.get('review_id') == self.review_id and record.get('event') == 'tool_call'
+                and record.get('name') == 'intervene'):
+            self.last_intervene_call_locator = f'monitor/audit/dialogue.jsonl#{line}'
+
+    def note_submission(self, message, receipt):
+        submission_id = receipt.get('submission_id') if isinstance(receipt, dict) else None
+        if not submission_id:
+            raise ValueError('An intervention submission needs a mechanical identity')
+        self.pending_submission = {
+            'submission_id': submission_id, 'message': message,
+            'message_sha256': digest(message),
+            'submitted_task_turn': receipt.get('submitted_task_turn'),
+            'submitted_cursor': receipt.get('submitted_cursor'),
+            'action_locator': self.last_intervene_call_locator,
+        }
+        self.audit('curator_echo_submission_pending', **self.pending_submission)
+
+    def reconcile_receipt(self, receipt):
+        pending = self.pending_submission
+        if pending is None or receipt.get('submission_id') != pending['submission_id']:
+            self.audit('curator_echo_receipt_stale', submission_id=receipt.get('submission_id'),
+                       delivered=receipt.get('delivered'))
+            return 'stale'
+        self.pending_submission = None
+        if not receipt.get('delivered'):
+            self.audit('curator_echo_delivery_failed', submission_id=pending['submission_id'],
+                       error_type=receipt.get('error_type'))
+            return 'failed'
+        self.active_echo = dict(pending, delivery_kind=receipt.get('delivery_kind'),
+                                delivered_task_turn=receipt.get('delivery_task_turn'),
+                                delivered_cursor=receipt.get('delivery_cursor'))
+        self.audit('curator_echo_delivery_confirmed', **self.active_echo)
+        return 'delivered'
+
+    def render(self):
+        echo = self.active_echo
+        if echo is None:
+            self.pending_surface = None
+            return None
+        message = echo['message'][:self.MESSAGE_LIMIT]
+        if len(echo['message']) > self.MESSAGE_LIMIT:
+            message += '\n[Reminder excerpt truncated; read the cited delivery/audit record for full text.]'
+        content = ('Control Echo — one-cycle context for the most recent reminder actually delivered '
+                   'to the Task Agent.\n\nDelivered reminder:\n' + message +
+                   '\n\nThis is prior control, not task truth and not an automatically open concern. '
+                   'The fresh Task feedback may show uptake, continued drift, or that the reminder itself '
+                   'was wrong. Reassess now. This Echo will not persist automatically after this review\'s '
+                   'terminal control action.\nSource: ' + str(echo.get('action_locator') or 'unavailable') +
+                   '; submission_id=' + echo['submission_id'])
+        self.pending_surface = {'content': content, 'sha256': digest(content),
+                                'submission_id': echo['submission_id'],
+                                'source_locator': echo.get('action_locator'),
+                                'message_sha256': echo['message_sha256']}
+        self.audit('curator_echo_surface_prepared', **self.pending_surface)
+        return content
+
+    def surface_visible(self):
+        shown, self.pending_surface = self.pending_surface, None
+        if shown is not None:
+            self.visible_review_id = self.review_id
+            self.audit('curator_echo_surface_injected', **shown,
+                       rendered_characters=len(shown['content']))
+        return shown
+
+    def complete_review(self, action):
+        if action is None or action.kind == 'root_route':
+            return
+        if (action.kind in {'wait', 'local_intervened', 'root_intervened', 'allow_complete'}
+                and self.active_echo is not None and self.visible_review_id == self.review_id):
+            prior = self.active_echo
+            self.active_echo = None
+            self.visible_review_id = None
+            self.audit('curator_echo_consumed', submission_id=prior['submission_id'],
+                       terminal_action=action.kind)
 
 
 class ReconsiderationBoundary(DecisionMeasurementBoundary):

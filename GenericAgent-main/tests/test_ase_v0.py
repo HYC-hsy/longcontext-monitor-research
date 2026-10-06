@@ -99,7 +99,7 @@ def test_reference_full_exposure_and_model_owned_revision(tmp_path):
                                     'old_text': 'START_', 'new_text': 'REVISED_'})
     revised, _ = reference_surface(ws)
     assert 'REVISED_' in revised
-    assert len([r for r in rows(ws) if r['event'] == 'ase_reference_mutated']) == 2
+    assert len([r for r in rows(ws) if r['event'] == 'curator_task_book_mutated']) == 2
 
 
 def test_reference_source_limit_atomic_write_patch_and_initialization(tmp_path):
@@ -174,6 +174,7 @@ def test_archived_model_feedback_not_same_turn_tool_delta(tmp_path):
                             model_feedback_turn=78, model_feedback_cursor=4)
 
 
+@pytest.mark.skip(reason='Replaced by delivery-acknowledged worker tests in test_curator_supervisor_v0.py')
 def test_ase_worker_blocks_queued_same_turn_wake_then_reviews_new_feedback(tmp_path, monkeypatch):
     import monitor_agent_core.agent as agent_module
     import monitor_agent_core.provider as provider_module
@@ -253,6 +254,7 @@ def test_ase_worker_blocks_queued_same_turn_wake_then_reviews_new_feedback(tmp_p
         worker.join(timeout=3)
 
 
+@pytest.mark.skip(reason='Replaced by delivery-acknowledged worker tests in test_curator_supervisor_v0.py')
 def test_delivery_failure_is_recorded_without_same_turn_recontrol_or_double_send(tmp_path, monkeypatch):
     import monitor_agent_core.agent as agent_module
     import monitor_agent_core.provider as provider_module
@@ -380,7 +382,7 @@ def test_turn_zero_and_provider_ready_composition_no_working_ledger(tmp_path, mo
     assert injections[-1]['reference_source_characters'] > 0
     assert injections[-1]['reference_visible_characters'] == len(reference)
     assert injections[-1]['reference_truncated'] is False
-    assert injections[-1]['composition_order'] == ['reference', 'cfs']
+    assert injections[-1]['composition_order'] == ['task_book', 'situation']
     assert monitor.dispatch('file_read', {'path': 'monitor/working.md'}).data['content'] == 'LOCAL_WORKING_SENTINEL'
 
 
@@ -409,6 +411,7 @@ def test_initialization_requires_model_authored_reference_before_wait(tmp_path, 
     assert not [r for r in rows(ws) if r['event'] == 'ase_reconsideration_boundary']
 
 
+@pytest.mark.skip(reason='Queued intervention no longer creates model-visible active control')
 def test_inactive_patrol_is_one_turn_but_active_patrol_reconsiders(tmp_path, monkeypatch):
     monitor, client, ws = make_monitor(tmp_path)
     ws.write_text('monitor/reference.md', 'Public route response matters.')
@@ -428,6 +431,7 @@ def test_inactive_patrol_is_one_turn_but_active_patrol_reconsiders(tmp_path, mon
     assert len([r for r in rows(ws) if r['event'] == 'ase_reconsideration_boundary']) == 1
 
 
+@pytest.mark.skip(reason='Old assertion assumes queued LocalContinuity anchor')
 def test_initial_intervention_requires_reference_but_can_follow_write_in_same_review(tmp_path, monkeypatch):
     monitor, client, ws = make_monitor(tmp_path)
     monitor.intervention_callback = lambda message: {'delivery': 'queued'}
@@ -468,7 +472,8 @@ def test_invalid_reference_blocks_all_task_control_without_state_changes(tmp_pat
     monitor.completion_pending = True
     result = monitor.dispatch('allow_complete', {})
     assert result.action is None and result.data['status'] == 'reference_invalid'
-    assert not submitted and not monitor.cqs.active and monitor.cqs.anchor is None
+    assert not submitted and not monitor.control_echo.active
+    assert monitor.control_echo.pending_submission is None
     assert not [r for r in rows(ws) if r['event'] == 'ase_reconsideration_boundary']
     assert len([r for r in rows(ws) if r['event'] == 'ase_reference_control_blocked']) == 3
 
@@ -493,14 +498,15 @@ def test_code_run_reference_mutation_is_rechecked_before_control(tmp_path):
     assert monitor.dispatch('intervene', {'message': 'Check route.'}).action is None
     change('Z' * (ASE_REFERENCE_MAX_CHARS + 1))
     assert monitor.dispatch('intervene', {'message': 'Check route.'}).action is None
-    assert not submitted and not monitor.cqs.active
+    assert not submitted and not monitor.control_echo.active
     change('A valid model-owned revision from ordinary code_run.')
     assert reference_surface(ws)[1]['status'] == 'present'
     assert monitor.dispatch('intervene', {'message': 'Check route.'}).action.kind == 'local_intervened'
     assert submitted == ['Check route.']
-    assert monitor.cqs.anchor['message'] == 'Check route.'
+    assert monitor.control_echo.pending_submission['message'] == 'Check route.'
 
 
+@pytest.mark.skip(reason='Persistent LocalContinuity episode retired; one-cycle Echo tested separately')
 def test_intervention_anchor_survives_follows_then_patrol_clears(tmp_path, monkeypatch):
     monitor, client, ws = make_monitor(tmp_path)
     ws.write_text('monitor/reference.md', 'Route response is the public requirement.')
@@ -569,6 +575,7 @@ def test_release_boundary_root_and_changed_control(tmp_path, monkeypatch):
     assert [r for r in events if r['event'] == 'ase_reconsideration_boundary'][0]['visible_context']['reference_surface_sha256']
 
 
+@pytest.mark.skip(reason='Queued LocalContinuity release is retired; Echo release tested separately')
 def test_boundary_can_change_to_follow_or_intervene(tmp_path, monkeypatch):
     monitor, client, ws = make_monitor(tmp_path)
     ws.write_text('monitor/reference.md', 'Route response is the public requirement.')
@@ -652,6 +659,7 @@ def test_failed_provider_request_does_not_claim_reference_exposure(tmp_path, mon
     assert len([r for r in rows(ws) if r['event'] == 'ase_context_injected']) == 1
 
 
+@pytest.mark.skip(reason='Persistent episode state retired; absence of Echo covered by candidate tests')
 def test_follow_without_intervention_does_not_create_episode(tmp_path, monkeypatch):
     monitor, client, ws = make_monitor(tmp_path)
     ws.write_text('monitor/reference.md', 'Public route behavior matters.')
@@ -666,6 +674,7 @@ def test_follow_without_intervention_does_not_create_episode(tmp_path, monkeypat
     assert 'Local Control Continuity' not in visible(sends[0])
 
 
+@pytest.mark.skip(reason='Old test equates queued submission with persistent LocalContinuity')
 def test_local_intervention_ends_review_once_then_feedback_is_seen(tmp_path, monkeypatch):
     monitor, client, ws = make_monitor(tmp_path)
     ws.write_text('monitor/reference.md', 'Public route behavior matters.')
@@ -703,6 +712,7 @@ def test_local_intervention_ends_review_once_then_feedback_is_seen(tmp_path, mon
     assert monitor.cqs.active and monitor.cqs.intervention_count == 1
 
 
+@pytest.mark.skip(reason='Experimental episode/meta-regulation intentionally absent in Curator-Supervisor')
 def test_episode_economy_reorientation_and_patrol(tmp_path, monkeypatch):
     monitor, client, ws = make_monitor(tmp_path, meta=True)
     ws.write_text('monitor/reference.md', 'Public route behavior matters.')
@@ -758,6 +768,7 @@ def test_episode_economy_reorientation_and_patrol(tmp_path, monkeypatch):
     assert [r for r in rows(ws) if r['event'] == 'ase_control_episode_ended']
 
 
+@pytest.mark.skip(reason='Persistent episode model-visible context intentionally replaced by Echo')
 def test_root_intervention_keeps_existing_root_action_and_episode_context(tmp_path, monkeypatch):
     monitor, client, ws = make_monitor(tmp_path)
     ws.write_text('monitor/reference.md', 'Public route behavior matters.')
@@ -777,6 +788,7 @@ def test_root_intervention_keeps_existing_root_action_and_episode_context(tmp_pa
     assert monitor.cqs.anchor['message'] == 'Check final behavior.'
 
 
+@pytest.mark.skip(reason='Episode telemetry intentionally removed from Curator-Supervisor')
 def test_default_core_keeps_episode_telemetry_out_of_model_context(tmp_path, monkeypatch):
     monitor, client, ws = make_monitor(tmp_path)
     assert 'monitor_ase_meta_regulation' not in client.config

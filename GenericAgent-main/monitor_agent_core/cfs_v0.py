@@ -93,7 +93,7 @@ def code_run_outcomes(events, known_events=None):
 def render_surface(*, baseline, from_cursor, to_cursor, events, changed, sample_complete,
                    sample_errors, current_event, root_handoff, control, used_turns,
                    max_turns, remaining_seconds, manifest_locator, visible_boundary="complete",
-                   known_events=None):
+                   known_events=None, include_supervisory_control=True):
     """Render a fixed-allocation excerpt; full mechanical facts stay in the manifest."""
     turns = [row.get("task_turn") for row in events if type(row.get("task_turn")) is int]
     turn_range = f"{min(turns)}..{max(turns)}" if turns else "none in interval"
@@ -148,10 +148,11 @@ def render_surface(*, baseline, from_cursor, to_cursor, events, changed, sample_
                          f"stderr={_clip(row['stderr'] or '', 140)}\n")
     if len(outcomes) > 3:
         parts.append(f"Command view truncated: showing 3/{len(outcomes)}; full list in manifest.\n")
-    if control:
-        parts.append(f"Previous supervisory control (mechanical): {_clip(control, 290)}\n")
-    else:
-        parts.append("Previous supervisory control: none recorded.\n")
+    if include_supervisory_control:
+        if control:
+            parts.append(f"Previous supervisory control (mechanical): {_clip(control, 290)}\n")
+        else:
+            parts.append("Previous supervisory control: none recorded.\n")
     text = "".join(parts)
     if len(text) > LIMIT:
         # Fixed priority preserves interval, budget, original/manifest locators,
@@ -165,8 +166,9 @@ def render_surface(*, baseline, from_cursor, to_cursor, events, changed, sample_
 
 
 class SituationState:
-    def __init__(self, workspace):
+    def __init__(self, workspace, *, include_supervisory_control=True):
         self.workspace = workspace
+        self.include_supervisory_control = include_supervisory_control
         self.committed_cursor = 0
         self.shown_cursor = 0
         self.shown_this_review = False
@@ -260,7 +262,8 @@ class SituationState:
             current_event=selected, root_handoff=handoff, control=control,
             used_turns=used_turns, max_turns=max_turns, remaining_seconds=remaining_seconds,
             manifest_locator=locator, visible_boundary=self.visible_boundary,
-            known_events=[self.events[key] for key in sorted(self.events) if key <= current])
+            known_events=[self.events[key] for key in sorted(self.events) if key <= current],
+            include_supervisory_control=self.include_supervisory_control)
         manifest = {"review_id": self.review_id, "sequence": self.sequence,
                     "committed_baseline_cursor": self.committed_cursor,
                     "from_cursor": self.shown_cursor, "shown_through_cursor": current,

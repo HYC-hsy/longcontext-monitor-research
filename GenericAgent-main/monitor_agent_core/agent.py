@@ -44,7 +44,7 @@ from .eis_v0 import GUIDANCE as EIS_GUIDANCE, executable_interpretation_surface
 from .cfs_v0 import SituationState
 from .dcm_v0 import DecisionMeasurementBoundary
 from .cqs_v0 import ControlQuestionState
-from .ase_v0 import (SYSTEM_PROMPT as ASE_SYSTEM_PROMPT, LocalContinuity,
+from .ase_v0 import (SYSTEM_PROMPT as ASE_SYSTEM_PROMPT, ControlEcho,
                      ReconsiderationBoundary, reference_surface, ASE_REFERENCE_MAX_CHARS)
 
 
@@ -419,7 +419,10 @@ class MonitorAgent:
             raise ValueError('monitor_ase_meta_regulation must be a boolean')
         if self.ase_meta_regulation and not self.ase_v0:
             raise ValueError('monitor_ase_meta_regulation requires ASE')
+        self.control_echo = None
         if self.ase_v0:
+            if self.ase_meta_regulation:
+                raise ValueError('monitor_ase_meta_regulation is not part of Curator-Supervisor')
             if (self.dcec_enabled or self.path_control_v0 or self.cfs_v0
                     or self.dcm_v0 or self.verification_loop_v0 or self.cqs_v0 or self.eis_v0
                     or self.root_scope_v1 != 'off'
@@ -430,8 +433,8 @@ class MonitorAgent:
                 raise ValueError('ASE-v0 is exclusive with historical candidate and research switches')
             self.system_prompt = ASE_SYSTEM_PROMPT
             self.base_system_prompt = ASE_SYSTEM_PROMPT
-            self.situation = SituationState(workspace)
-            self.cqs = LocalContinuity(self._audit_dialogue, meta_regulation=self.ase_meta_regulation)
+            self.situation = SituationState(workspace, include_supervisory_control=False)
+            self.control_echo = ControlEcho(self._audit_dialogue)
             self.dcm = ReconsiderationBoundary(
                 self._audit_dialogue, lambda: self._ase_last_visible_context)
         self._ase_initialization_complete = False
@@ -597,11 +600,9 @@ class MonitorAgent:
                 reference, reference_metadata = reference_surface(self.workspace)
                 self._audit_dialogue('ase_reference_surface_prepared', **reference_metadata)
                 parts.append(reference)
-                self.cqs.current_task_turn = (self.task_budget_state()[0]
-                                              if self.task_budget_state else None)
-                continuity = self.cqs.render()
-                if continuity:
-                    parts.append(continuity)
+                echo = self.control_echo.render()
+                if echo:
+                    parts.append(echo)
             elif self.cqs is not None:
                 parts.append(self.cqs.render())
             else:
@@ -629,6 +630,7 @@ class MonitorAgent:
                 parts.append(surface)
                 if self.ase_v0:
                     self._ase_pending_context = {
+                        'task_book_source_sha256': reference_metadata['source_sha256'],
                         'reference_source_sha256': reference_metadata['source_sha256'],
                         'reference_surface_sha256': hashlib.sha256(reference.encode('utf-8')).hexdigest(),
                         'reference_source_characters': reference_metadata['source_characters'],
@@ -636,13 +638,14 @@ class MonitorAgent:
                         'reference_rendered_characters': reference_metadata['rendered_characters'],
                         'reference_rendered_utf8_bytes': reference_metadata['rendered_utf8_bytes'],
                         'reference_truncated': reference_metadata['truncated'],
-                        'continuity_sha256': (hashlib.sha256(continuity.encode('utf-8')).hexdigest()
-                                              if continuity else None),
-                        'continuity_rendered_characters': len(continuity) if continuity else 0,
+                        'echo_sha256': (hashlib.sha256(echo.encode('utf-8')).hexdigest()
+                                        if echo else None),
+                        'echo_submission_id': (self.control_echo.active_echo['submission_id']
+                                               if echo else None),
                         'cfs_surface_sha256': hashlib.sha256(surface.encode('utf-8')).hexdigest(),
                         'cfs_rendered_characters': len(surface),
-                        'composition_order': ['reference', 'continuity', 'cfs'] if continuity else
-                                             ['reference', 'cfs'],
+                        'composition_order': ['task_book', 'control_echo', 'situation'] if echo else
+                                             ['task_book', 'situation'],
                     }
             if self.eis_v0:
                 surface, surface_metadata = executable_interpretation_surface(self.workspace)
@@ -675,12 +678,13 @@ class MonitorAgent:
                                  shown_through_cursor=shown['cursor'],
                                  manifest_locator=shown['manifest_locator'], content=shown['text'])
         continuity = self.cqs.surface_visible() if self.cqs is not None else None
+        echo = self.control_echo.surface_visible() if self.control_echo is not None else None
         if self.ase_v0 and self._ase_pending_context is not None:
             facts = dict(self._ase_pending_context)
             facts['request_id'] = getattr(self.client, '_progress_request_id', None)
             facts['frame'] = self.frame_kind
             facts['cfs_manifest_locator'] = shown.get('manifest_locator') if shown else None
-            facts['continuity_injected'] = continuity is not None
+            facts['echo_injected'] = echo is not None
             self._ase_last_visible_context = facts
             self._audit_dialogue('ase_context_injected', **facts)
             self._ase_pending_context = None
@@ -712,13 +716,16 @@ class MonitorAgent:
         with path.open('a', encoding='utf-8') as stream:
             stream.write(json.dumps(record, ensure_ascii=False, default=str) + '\n')
             stream.flush()
-        if self.cqs is not None:
+        if self.cqs is not None or self.control_echo is not None:
             if self._dialogue_line is None:
                 with path.open('rb') as stream:
                     self._dialogue_line = sum(1 for _ in stream)
             else:
                 self._dialogue_line += 1
-            self.cqs.observe(record, self._dialogue_line)
+            if self.cqs is not None:
+                self.cqs.observe(record, self._dialogue_line)
+            if self.control_echo is not None:
+                self.control_echo.observe(record, self._dialogue_line)
         if self.ase_v0 and event == 'tool_call':
             try:
                 args = json.loads(payload.get('arguments') or '{}')
@@ -973,9 +980,9 @@ class MonitorAgent:
                     self._progress('dcec_state_mutation', operation='file_write',
                                    mode=arguments.get('mode', 'replace'), **data)
                 if ase_reference:
-                    self._audit_dialogue('ase_reference_mutated', operation='file_write',
-                                         mode=arguments.get('mode', 'replace'),
-                                         action_locator=(self.cqs.last_call or {}).get('locator'), **data)
+                    self._audit_dialogue('curator_task_book_mutated', operation='file_write',
+                                          mode=arguments.get('mode', 'replace'),
+                                          action_locator=f'monitor/audit/dialogue.jsonl#{self._dialogue_line}', **data)
             elif name == "file_patch":
                 ase_reference = (self.ase_v0 and self.workspace._parts(arguments['path']) ==
                                  ('monitor', ('reference.md',)))
@@ -986,8 +993,8 @@ class MonitorAgent:
                 if self.dcec_enabled and arguments["path"].replace('\\', '/').strip('/') == 'monitor/working.md':
                     self._progress('dcec_state_mutation', operation='file_patch', **data)
                 if ase_reference:
-                    self._audit_dialogue('ase_reference_mutated', operation='file_patch',
-                                         action_locator=(self.cqs.last_call or {}).get('locator'), **data)
+                    self._audit_dialogue('curator_task_book_mutated', operation='file_patch',
+                                          action_locator=f'monitor/audit/dialogue.jsonl#{self._dialogue_line}', **data)
             elif name == "code_run":
                 session_id = arguments.get('session_id')
                 if session_id:
@@ -1037,7 +1044,7 @@ class MonitorAgent:
                 if reference_block is not None:
                     return reference_block
                 if self.dcm is not None:
-                    if mode == 'patrol' and (not self.ase_v0 or self.cqs.active):
+                    if mode == 'patrol' and (not self.ase_v0 or self.control_echo.active):
                         boundary = self.dcm.release('patrol', 'local', arguments)
                         if boundary is not None:
                             return ToolOutcome(boundary)
@@ -1076,12 +1083,10 @@ class MonitorAgent:
                     self._sent_messages.add(message)
                     if self.dcm is not None:
                         self.dcm.abandon('intervened')
-                    if self.cqs is not None:
-                        if self.ase_v0:
-                            used, _ = self.task_budget_state() if self.task_budget_state else (None, None)
-                            self.cqs.submitted_intervention(message, task_turn=used)
-                        else:
-                            self.cqs.submitted_intervention(message)
+                    if self.control_echo is not None:
+                        self.control_echo.note_submission(message, receipt)
+                    elif self.cqs is not None:
+                        self.cqs.submitted_intervention(message)
                     if self.verification is not None:
                         self.verification.on_intervention(message)
                     if self._seen_completion:
@@ -1268,6 +1273,8 @@ class MonitorAgent:
                 self.cqs.begin_review(self.review_id, task_turn=used)
             else:
                 self.cqs.begin_review(self.review_id)
+        if self.control_echo is not None:
+            self.control_echo.begin_review(self.review_id)
         if self.situation is not None:
             self.situation.begin_review(self.review_id)
         if root_handoff is not None:
@@ -1402,6 +1409,8 @@ class MonitorAgent:
                     self.cqs.completed_wait(action, task_turn=used)
                 else:
                     self.cqs.completed_wait(action)
+            if self.control_echo is not None:
+                self.control_echo.complete_review(action)
             return action
         finally:
             if self.dcm is not None:

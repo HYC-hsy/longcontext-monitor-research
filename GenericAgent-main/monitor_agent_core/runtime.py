@@ -190,6 +190,10 @@ def _coalesce_wake_command(commands, first, completion_is_active=None):
             if selected is not None:
                 commands.put(selected)
             return candidate
+        if kind == 'delivery_receipt':
+            if selected is not None:
+                commands.put(selected)
+            return candidate
         if kind == "completion":
             if completion_is_active is None or completion_is_active(candidate):
                 selected = candidate
@@ -350,9 +354,37 @@ def _worker(config, commands, outputs):
         public_cursor = config.get('latest_public_cursor')
         clock = config.get('latest_task_turn')
         return (max(task_turn, clock.value if clock is not None else task_turn),
-                max(cursor, public_cursor.value if public_cursor is not None else cursor))
+                 max(cursor, public_cursor.value if public_cursor is not None else cursor))
+
+    def sync_intervention_receipts(*, wait_for_receipt=False):
+        receipts = config.get('intervention_receipts')
+        echo_state = getattr(monitor, 'control_echo', None)
+        if receipts is None or echo_state is None:
+            return
+        while True:
+            try:
+                receipt = (receipts.get(timeout=.1) if wait_for_receipt else receipts.get_nowait())
+            except queue.Empty:
+                if wait_for_receipt and not config['stop_event'].is_set():
+                    continue
+                return
+            wait_for_receipt = False
+            outcome = echo_state.reconcile_receipt(receipt)
+            if outcome == 'delivered' and feedback_barrier is not None:
+                echo = echo_state.active_echo
+                feedback_barrier.start(task_turn=echo['delivered_task_turn'],
+                                       cursor=echo['delivered_cursor'],
+                                       action_locator=echo['action_locator'],
+                                       submission_id=echo['submission_id'])
 
     def feedback_permits():
+        sync_intervention_receipts()
+        echo_state = getattr(monitor, 'control_echo', None)
+        if echo_state is not None and echo_state.pending_submission is not None:
+            monitor._progress('curator_delivery_pending_wake_blocked',
+                              submission_id=echo_state.pending_submission['submission_id'],
+                              current_task_turn=task_turn, current_cursor=cursor)
+            return False
         if feedback_barrier is None or feedback_barrier.pending is None:
             return True
         identity = config.get('latest_model_feedback')
@@ -402,21 +434,21 @@ def _worker(config, commands, outputs):
         def send_now(message):
             nonlocal submitted, close_watch, next_wake_turn
             delivery_id = request_id if completion and not submitted else uuid.uuid4().hex
-            if feedback_barrier is not None:
-                submitted_turn, submitted_cursor = current_public_identity()
-                feedback_barrier.start(task_turn=submitted_turn, cursor=submitted_cursor,
-                                       action_locator=(monitor.cqs.last_call or {}).get('locator'),
-                                       submission_id=delivery_id)
+            submitted_turn, submitted_cursor = current_public_identity()
             if completion and not submitted:
                 outputs.put({"kind": "completion", "decision": "continue", "cursor": cursor,
-                             "request_id": request_id, "message": message})
+                             "request_id": request_id, "message": message,
+                             "control_submission": True, "submission_id": delivery_id})
             else:
                 outputs.put({"kind": "intervention", "cursor": cursor,
-                             "request_id": delivery_id, "message": message})
+                             "request_id": delivery_id, "message": message,
+                             "control_submission": True, "submission_id": delivery_id})
             submitted = True
             close_watch = True
             next_wake_turn = task_turn + 1
-            return {"submission_id": delivery_id, "delivery": "queued"}
+            return {"submission_id": delivery_id, "delivery": "queued",
+                    "submitted_task_turn": submitted_turn,
+                    "submitted_cursor": submitted_cursor}
 
         if config["model_config"].get("monitor_live_intervention", True):
             monitor.intervention_callback = send_now
@@ -507,9 +539,7 @@ def _worker(config, commands, outputs):
             next_wake_turn = task_turn + 1
             delivery_id = request_id if completion else uuid.uuid4().hex
             if feedback_barrier is not None:
-                submitted_turn, submitted_cursor = current_public_identity()
-                feedback_barrier.start(task_turn=submitted_turn, cursor=submitted_cursor,
-                                       submission_id=delivery_id)
+                raise RuntimeError('ASE intervention must use the delivery-acknowledged callback')
             if not completion:
                 outputs.put({
                     "kind": "intervention", "message": action.payload["message"],
@@ -582,6 +612,15 @@ def _worker(config, commands, outputs):
             continue
         kind = command.get("kind")
         if kind == "close": return
+        if kind == 'delivery_receipt':
+            sync_intervention_receipts(wait_for_receipt=True)
+            active = current_completion()
+            if active is not None:
+                kind = 'completion'
+                command = dict(command, request_id=active['request_id'],
+                               generation=active['generation'], cursor=active['cursor'])
+            else:
+                kind = 'boundary'
         if kind == 'verification_boundary':
             state = config.get('verification_boundary_state')
             generation = command['generation']
@@ -695,6 +734,9 @@ class MonitorRuntime:
         self._commands = self._context.Queue()
         self._outputs = self._context.Queue()
         self._completion_receipts = self._context.Queue()
+        self._intervention_receipts = (self._context.Queue()
+                                       if model_config.get('monitor_adaptive_supervisory_environment') is True
+                                       else None)
         self._wake_receipts = self._context.Queue() if correction_begin is not None else None
         self._pending = {}
         self._pending_lock = threading.Lock()
@@ -736,6 +778,7 @@ class MonitorRuntime:
             "independent_probe_total_requests": int(independent_probe_total_requests),
             "independent_probe_max_requests": int(independent_probe_max_requests),
             "completion_receipts": self._completion_receipts,
+            "intervention_receipts": self._intervention_receipts,
             "wake_receipts": self._wake_receipts,
         }, self._commands, self._outputs), daemon=True)
         try:
@@ -879,7 +922,9 @@ class MonitorRuntime:
             elif kind == "intervention":
                 try:
                     receipt = self._interrupt_callback(value["message"])
-                    value = dict(value, delivery="handed_to_task_interrupt_interface", receipt=str(receipt))
+                    value = dict(value, delivery="handed_to_task_interrupt_interface", receipt=str(receipt),
+                                 delivery_task_turn=self._latest_task_turn.value,
+                                 delivery_cursor=self._latest_public_cursor.value)
                     # The correction has one owner: the Task Agent's interrupt mailbox.
                     # Wake any completion wait, but do not inject the message a second time.
                     with self._pending_lock:
@@ -892,7 +937,8 @@ class MonitorRuntime:
                             self._active_completion.value = 0
                         value = dict(value, resumed_completion_requests=resumed)
                 except Exception as exc:
-                    value = dict(value, delivery="failed", error=repr(exc))
+                    value = dict(value, delivery="failed", error=repr(exc),
+                                 error_type=type(exc).__name__)
                 finally:
                     self._finish_correction()
             elif kind == "completion" or (kind == "failure" and value.get("completion") is True):
@@ -900,6 +946,9 @@ class MonitorRuntime:
                 with self._pending_lock:
                     pending = self._pending.pop(value.get("request_id"), None)
                     if pending is not None:
+                        if value.get('control_submission'):
+                            value = dict(value, delivery_task_turn=self._latest_task_turn.value,
+                                         delivery_cursor=self._latest_public_cursor.value)
                         self._active_completion.value = 0
                         pending.put(value)
                         value = dict(value, delivery="handed_to_completion_boundary")
@@ -922,6 +971,20 @@ class MonitorRuntime:
             self._append_receipt(value)
             if kind in {"intervention", "completion"}:
                 _append(self.private_root / "delivery_feedback.jsonl", value)
+            if self._intervention_receipts is not None and value.get('control_submission'):
+                delivered = value.get('delivery') in {
+                    'handed_to_task_interrupt_interface', 'handed_to_completion_boundary'}
+                receipt = {'submission_id': value['submission_id'], 'delivered': delivered,
+                           'delivery_kind': value.get('delivery'),
+                           'error_type': value.get('error_type'),
+                           'delivery_task_turn': value.get('delivery_task_turn', self._latest_task_turn.value),
+                           'delivery_cursor': value.get('delivery_cursor', self._latest_public_cursor.value)}
+                self._intervention_receipts.put(receipt)
+                # A boundary may have arrived while delivery was unresolved.
+                # Recheck it after the receipt without creating a new model stage.
+                self._commands.put({'kind': 'delivery_receipt',
+                                    'task_turn': self._latest_task_turn.value,
+                                    'cursor': self._latest_public_cursor.value})
 
     def request_completion(self, public_event=None) -> CompletionOutcome:
         if not self._process.is_alive():
