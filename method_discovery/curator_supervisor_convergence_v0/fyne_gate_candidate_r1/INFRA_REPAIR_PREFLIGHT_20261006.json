@@ -1,0 +1,40 @@
+{
+  "schema": "curator-fyne-identity-preflight-repair/1",
+  "prior_invalid_attempt_archive_commit": "37eb63f3f3b2c575daf24bf288e8bbfa5bf72e70",
+  "prior_invalid_attempt_status": "INVALID_INFRA_FAILURE",
+  "failure": "Docker read-only model-identity probe attempted to create /opt/genericagent/temp and failed with Errno 30 before any provider request.",
+  "repair_scope": "private deployment filesystem only",
+  "repair": "Created an empty E:\\curator_fyne_gate_candidate_r1_private_20261006\\GenericAgent-main\\temp directory. No production file, runner file, profile byte, or existing raw archive was changed.",
+  "why_it_addresses_the_failure": "The probe bind-mounts GA_HOST_ROOT read-only. GenericAgent.__init__ calls os.makedirs(script_dir/temp, exist_ok=True); this succeeds when the directory already exists without requiring a write to the read-only mount.",
+  "private_temp_entry_count_after_probe": 0,
+  "candidate_source_sha256_after": "d194876e7844b6ed369ea34ba1bbf15a6fdd0fd908d1177ced8c94005b2d4409",
+  "candidate_source_sha_matches_freeze": true,
+  "frozen_bundle_source_sha256_after": "08daa1b1799bb603d141302c9e2995ce681d44a1a9c5e74de1fcba468493100f",
+  "frozen_bundle_sha_matches_freeze": true,
+  "zero_model_docker_identity_probe": {
+    "result": "pass",
+    "requested_llm_no": 0,
+    "effective_llm_no": 0,
+    "available_models": 1,
+    "backend_type": "NativeClaudeSession",
+    "backend_name": "claude-opus-4-8",
+    "model": "claude-opus-4-8",
+    "task_config_sha256": "ed09a811b654b83097bee77942704eae2539d67291bf55aa34476692081ff02e"
+  },
+  "full_runner_preflight": {
+    "result": "preflight() completed and wrote its identity JSON",
+    "local_private_output_sha256": "5ab7a6c248d36bd96b89e0a9b0e633f09805b3d37bcabc4996cf25f185467f0e",
+    "configured_model": "claude-opus-4-8",
+    "source_sha256": "d194876e7844b6ed369ea34ba1bbf15a6fdd0fd908d1177ced8c94005b2d4409",
+    "image_id": "sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1",
+    "note": "The diagnostic print expression then raised KeyError('id') because the preflight image field is image_id; the completed preflight itself did not fail. The private identity JSON is not committed because it can contain provider host information."
+  },
+  "production_changed": false,
+  "execution_harness_changed": false,
+  "supervisor_profile_changed": false,
+  "model_provider_calls": 0,
+  "task_agent_calls": 0,
+  "new_fyne_trial_started": false,
+  "native_verifier_executions": 0,
+  "scientific_rerun_authorized_by_this_record": false
+}
