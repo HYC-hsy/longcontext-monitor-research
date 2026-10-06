@@ -18,6 +18,10 @@ MANIFEST = json.loads((PANEL / 'manifest.json').read_text(encoding='utf-8'))
 GOLD = json.loads((PANEL / 'sealed' / 'gold.json').read_text(encoding='utf-8'))
 VAULT = json.loads(git_bytes(REPO, VAULT_COMMIT,
     'method_discovery/constitution_panel_v0/manifest.json'))
+CONSTITUTION_SHA = 'e666f351233607db4f7c1b6bb716d99f45573381778cee3fd8aee6705e309e21'
+CURRENT_SHA = '7dc87726489093c55f164b8ed45c5e92f75856b2f4a6cac1dcea52e7707b7632'
+SHELL_SHA = '61934d0b327cf5f47e6df50788e2736be956217ca402defc149c7af2e4472e13'
+AUDITED_FIXTURE_COMMIT = 'a5a71d66c446661405eed21d2e1246b2cd4914ad'
 
 
 def case_files(case_id):
@@ -125,9 +129,11 @@ def test_common_shell_body_tools_exactly_equal_across_conditions():
     assert control_tools('local')[0]['function']['parameters']['properties'] == {}
     for row in MANIFEST['cases']:
         packet, shell, core = load_inputs(row['case_id'], 'current')
+        other_packet, other_shell, other_core = load_inputs(row['case_id'], 'constitution')
+        assert packet == other_packet and shell == other_shell
         assert shell.encode('utf-8') == shell_raw
         first = assemble(packet, shell, core)
-        second = assemble(packet, shell, 'FIXTURE_ONLY_ALTERNATIVE_COGNITIVE_CORE')
+        second = assemble(other_packet, other_shell, other_core)
         assert first['messages'] == second['messages']
         assert first['tools'] == second['tools']
         assert first['system'].split('\n\n', 1)[0] == second['system'].split('\n\n', 1)[0]
@@ -177,12 +183,21 @@ def test_six_unchanged_packets_and_c07_packet_match_frozen_v1():
             REPO, 'd2dcb37380cd2fd301554a77b0dcd54db85aa19a', path)
 
 
-def test_runner_rejects_pending_constitution_and_has_no_network_path(tmp_path, monkeypatch):
+def test_prompt_freeze_does_not_change_any_audited_packet_or_common_shell():
+    for row in MANIFEST['cases']:
+        path = f"method_discovery/constitution_panel_v1/cases/{row['case_id']}/packet.json"
+        assert (PANEL / 'cases' / row['case_id'] / 'packet.json').read_bytes() == git_bytes(
+            REPO, AUDITED_FIXTURE_COMMIT, path)
+    for relative in ('prompts/panel_shell.txt', 'prompts/current_cognitive_core.txt'):
+        path = f'method_discovery/constitution_panel_v1/{relative}'
+        assert (PANEL / relative).read_bytes() == git_bytes(REPO, AUDITED_FIXTURE_COMMIT, path)
+
+
+def test_offline_preview_has_no_network_path(tmp_path, monkeypatch):
     import socket
     monkeypatch.setattr(socket, 'socket', lambda *_args, **_kwargs: (_ for _ in ()).throw(
         AssertionError('network path invoked')))
-    with pytest.raises(ValueError, match='Missing frozen cognitive core'):
-        load_inputs('C01', 'constitution')
+    assert load_inputs('C01', 'constitution')[2].startswith('You are the persistent Supervisor')
     output = tmp_path / 'preview.json'
     checksum = preview('C07', 'current', output)
     assert hashlib.sha256(output.read_bytes()).hexdigest() == checksum
@@ -198,40 +213,64 @@ def test_cognitive_core_identity_fail_closed(tmp_path):
     manifest_path = panel / 'manifest.json'
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
     core_path = panel / 'prompts' / 'constitution_cognitive_core.txt'
-    # The shipped pending state is refused, regardless of any other source.
-    with pytest.raises(ValueError, match='Missing frozen cognitive core'):
-        load_inputs('C01', 'constitution', panel)
+    original_core = core_path.read_bytes()
+    assert load_inputs('C01', 'constitution', panel)[2].encode('utf-8') == original_core
+    # A pending placeholder remains invalid even if a matching mock hash is supplied.
+    core_path.write_bytes(b'PENDING_MAIN_THREAD_REVIEW\n')
     manifest['frozen_cognitive_core_sha256']['constitution'] = digest(core_path.read_bytes())
     manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
     with pytest.raises(ValueError, match='not been frozen'):
         load_inputs('C01', 'constitution', panel)
-    # A future text without a frozen hash, or with mismatched bytes, is refused.
-    core_path.write_bytes(b'MOCK_FUTURE_CORE_FOR_IDENTITY_TEST\n')
+    core_path.write_bytes(original_core)
     manifest['frozen_cognitive_core_sha256']['constitution'] = None
     manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
     with pytest.raises(ValueError, match='Missing frozen cognitive core'):
         load_inputs('C01', 'constitution', panel)
-    manifest['frozen_cognitive_core_sha256']['constitution'] = '0' * 64
+    manifest['frozen_cognitive_core_sha256']['constitution'] = CONSTITUTION_SHA
     manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
+    mutation = bytearray(original_core)
+    mutation[0] ^= 1
+    core_path.write_bytes(mutation)
     with pytest.raises(ValueError, match='differ from frozen identity'):
         load_inputs('C01', 'constitution', panel)
-    # Only exact mock bytes with an explicit frozen identity pass this gate.
-    manifest['frozen_cognitive_core_sha256']['constitution'] = digest(core_path.read_bytes())
-    manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
-    assert load_inputs('C01', 'constitution', panel)[2] == 'MOCK_FUTURE_CORE_FOR_IDENTITY_TEST\n'
+    core_path.write_bytes(original_core)
+    assert load_inputs('C01', 'constitution', panel)[2].encode('utf-8') == original_core
+    shell_path = panel / 'prompts' / 'panel_shell.txt'
+    shell_path.write_bytes(shell_path.read_bytes() + b'X')
+    with pytest.raises(ValueError, match='shell bytes differ'):
+        load_inputs('C01', 'constitution', panel)
+    shell_path.write_bytes((PANEL / 'prompts' / 'panel_shell.txt').read_bytes())
+    packet_path = panel / 'cases' / 'C01' / 'packet.json'
+    packet_path.write_bytes(packet_path.read_bytes() + b'X')
+    with pytest.raises(ValueError, match='Packet bytes differ'):
+        load_inputs('C01', 'constitution', panel)
+    packet_path.write_bytes((PANEL / 'cases' / 'C01' / 'packet.json').read_bytes())
     current_path = panel / 'prompts' / 'current_cognitive_core.txt'
     current_path.write_bytes(current_path.read_bytes() + b'MUTATION')
     with pytest.raises(ValueError, match='differ from frozen identity'):
         load_inputs('C01', 'current', panel)
 
 
+def test_shipped_constitution_exact_byte_identity():
+    raw = (PANEL / 'prompts' / 'constitution_cognitive_core.txt').read_bytes()
+    assert len(raw) == 2878
+    assert digest(raw) == CONSTITUTION_SHA
+    assert not raw.startswith(b'\xef\xbb\xbf')
+    assert b'\r' not in raw
+    assert raw.endswith(b'\n') and not raw.endswith(b'\n\n')
+    assert MANIFEST['frozen_cognitive_core_sha256']['constitution'] == CONSTITUTION_SHA
+    assert MANIFEST['source_hashes']['prompts/constitution_cognitive_core.txt'] == CONSTITUTION_SHA
+
+
 def test_manifest_lists_every_source_hash():
     assert MANIFEST['source_archive_commit'] == SOURCE_COMMIT
     assert MANIFEST['v0_source_vault_commit'] == VAULT_COMMIT
     assert MANIFEST['execution_authorized'] is False
-    assert MANIFEST['frozen_cognitive_core_sha256']['constitution'] is None
+    assert MANIFEST['frozen_cognitive_core_sha256']['constitution'] == CONSTITUTION_SHA
     assert MANIFEST['frozen_cognitive_core_sha256']['current'] == digest(
         (PANEL / 'prompts' / 'current_cognitive_core.txt').read_bytes())
+    assert MANIFEST['frozen_cognitive_core_sha256']['current'] == CURRENT_SHA
+    assert digest((PANEL / 'prompts' / 'panel_shell.txt').read_bytes()) == SHELL_SHA
     assert MANIFEST['scientific_identity'] == 'retrospectively curated offline discrimination diagnostic panel'
     for key, value in MANIFEST['source_hashes'].items():
         if key.startswith('research_collaboration_private/'):

@@ -5,8 +5,9 @@ not a reproduction of the production Supervisor or a blind/random sample of
 tasks. It tests judgment on frozen public evidence, not evidence
 acquisition, long-horizon memory, Reference formation, Situation retrieval, wake
 scheduling, Control Echo, or closed-loop task performance. Scientific execution
-is not authorized. The Constitution cognitive core is still
-`PENDING_MAIN_THREAD_REVIEW`; the runner refuses it.
+is not authorized. The Constitution cognitive core is now byte-frozen at
+SHA-256 `e666f351233607db4f7c1b6bb716d99f45573381778cee3fd8aee6705e309e21`
+(2878 bytes); freezing it does not authorize a model comparison.
 Future nine-case results may support prompt screening, failure-mode diagnosis,
 and a decision to try closed-loop experiments. They cannot estimate general
 task accuracy, unbiased benchmark performance, or closed-loop effectiveness.
@@ -58,22 +59,22 @@ control tools are identical across conditions. The current core consists of
 unchanged cognitive/control sentences from lines 24 and 26 of frozen
 `GenericAgent-main/monitor_agent_core/ase_v0.py` at
 `928af84d3d3ee85382d16b43c0f390fa0650e566`; the final production
-seven-tools sentence on line 24 is omitted. The Constitution core is not yet
-written. The manifest has no frozen Constitution SHA, so the runner refuses it
-even if the placeholder file were edited. Every cognitive core must match an
+seven-tools sentence on line 24 is omitted. The Constitution core is the
+main-thread-supplied exact text. Every cognitive core must match an
 explicit frozen manifest SHA before request assembly. `wait`,
 `intervene(message)`, and root-only `allow_complete` are
 panel action classes, **not** the production tool schema. This stage permits
 no inspection tools. `sealed/gold.json` is never loaded by the runner.
 
-Build and test locally without a model:
+Run identity tests or a local preview without a model:
 
 ```powershell
-D:\python\python.exe method_discovery\constitution_panel_v1\build_panel.py --repo E:\longcontext-cqs-v0-20261005 --task-assets E:\LongContext\long_context_bench --destination E:\longcontext-cqs-v0-20261005\method_discovery\constitution_panel_v1
 D:\python\python.exe -m pytest method_discovery\constitution_panel_v1\test_panel.py -q
 D:\python\python.exe method_discovery\constitution_panel_v1\preview_runner.py --prompt current --case C09 --output method_discovery\constitution_panel_v1\previews\C09_current.json
 ```
 
 The preview command only writes local request bytes and their SHA-256. It has
 no provider transport. Before any future prompt comparison, the main thread
-must audit the exact task sources, window contents, and sealed separation.
+must audit the freeze commit. Do not rerun the earlier fixture builder against
+this frozen directory: that pre-freeze generator writes the historical
+placeholder and would invalidate the exact Constitution identity.
