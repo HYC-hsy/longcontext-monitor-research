@@ -2,11 +2,13 @@
 
 import json
 import shutil
+import subprocess
 from collections import Counter
 
 import pytest
 
 from stage1_blind_export import export, load_secret_map
+from stage1_freeze_blind_map import balanced_pairs, freeze
 from stage1_plan import (CASES, CONDITIONS, EXPECTED_MODEL, FIXTURE_COMMIT, PANEL,
                          PROFILE, REPLICATES, canonical, frozen_fixture_manifest,
                          generate_plan, sha)
@@ -235,6 +237,51 @@ def test_secret_map_mutation_refused_and_public_order_not_mapping(tmp_path):
     assert '"A"' not in public and '"B"' not in public
     assert 'blind_map_commitment_sha256' in public
     assert 'first condition is Response A' not in public
+
+
+def test_balanced_freeze_uses_secret_shuffle_and_never_redraws(tmp_path):
+    class ReverseShuffle:
+        def shuffle(self, labels):
+            labels.reverse()
+
+    class RotateShuffle:
+        def shuffle(self, labels):
+            labels[:] = labels[1:] + labels[:1]
+
+    reversed_pairs = balanced_pairs(ReverseShuffle())
+    rotated_pairs = balanced_pairs(RotateShuffle())
+    expected_keys = {(case, rep) for case in CASES for rep in REPLICATES}
+    for pairs in (reversed_pairs, rotated_pairs):
+        assert len(pairs) == len(expected_keys) == 27
+        assert {(p['case_id'], p['replicate']) for p in pairs} == expected_keys
+        assert Counter(p['A'] for p in pairs) == {'current': 13, 'constitution': 14}
+    assert [p['A'] for p in reversed_pairs] != [p['A'] for p in rotated_pairs]
+    assert 'secrets.SystemRandom()).shuffle(labels)' in (
+        PANEL / 'stage1_freeze_blind_map.py').read_text(encoding='utf-8')
+    target = tmp_path / 'private_map.json'
+    assert freeze(target) == sha(target.read_bytes())
+    assert Counter(p['A'] for p in json.loads(target.read_bytes())['pairs']) == {
+        'current': 13, 'constitution': 14}
+    with pytest.raises(ValueError, match='already exists'):
+        freeze(target)
+
+
+def test_old_commitment_refused_and_scientific_trials_unchanged(tmp_path):
+    path, _ = synthetic_secret_map(tmp_path)
+    old = '77ca8fcb9e64fc5fe5637859ce39e0cc4f9a0de1e84d174bc813acf125d5f851'
+    with pytest.raises(ValueError, match='commitment'):
+        load_secret_map(path, old)
+    plan = validate_plan()
+    assert plan['blind_map_commitment_sha256'] != old
+    original = json.loads(subprocess.check_output([
+        'git', '-C', str(REPO), 'show',
+        'e476fef6c0ed6a940286562775bd88c55caec7ec:'
+        'method_discovery/constitution_panel_v1/stage1/PLAN.json']))
+    assert plan['trials'] == original['trials']
+    assert [row['trial_id'] for row in plan['trials']] == [
+        row['trial_id'] for row in original['trials']]
+    assert [row['request_sha256'] for row in plan['trials']] == [
+        row['request_sha256'] for row in original['trials']]
 
 
 def test_provider_source_and_effective_semantics_gates(tmp_path):

@@ -68,7 +68,12 @@ headers or credentials. Missing provider metadata remains null/unknown.
 ## Review and interpretation
 
 Before any scientific response, a separate private sealed map assigns A/B for
-all 27 case-replicate pairs using OS randomness. It is frozen once, outside Git;
+all 27 case-replicate pairs. Thirteen A labels are `current` and fourteen are
+`constitution`; a cryptographically secure system shuffle assigns those labels
+to pairs without inspecting case content, gold, prior assignments, or responses.
+The first pre-execution map was superseded and preserved outside Git because
+its 15/12 aggregate did not meet this balance rule. The replacement is frozen
+once, outside Git;
 the public plan records only its SHA-256 commitment. The map does not change
 trial order, IDs, requests, or condition allocation. It cannot be redrawn
 after responses. `stage1_blind_export.py` requires the private map and verifies
