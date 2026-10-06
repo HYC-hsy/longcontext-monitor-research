@@ -2,14 +2,19 @@
 
 import hashlib
 import json
+import multiprocessing as mp
+import queue
+import threading
+import time
+from types import SimpleNamespace
 
 import pytest
 
 from monitor_agent_core.agent import MONITOR_TOOLS, MonitorAgent
-from monitor_agent_core.ase_v0 import REFERENCE_LIMIT, reference_surface
+from monitor_agent_core.ase_v0 import ASE_REFERENCE_MAX_CHARS, reference_surface
 from monitor_agent_core.provider import MonitorProviderClient
 from monitor_agent_core.root_scope_v1 import ROOT_SYSTEM_PROMPT
-from monitor_agent_core.runtime import ASE_CONTROL_ACTIONS
+from monitor_agent_core.runtime import ASE_CONTROL_ACTIONS, ASEFeedbackBarrier, MonitorRuntime
 from monitor_agent_core.workspace import MonitorWorkspace
 
 
@@ -76,19 +81,19 @@ def root(monitor):
     return handoff
 
 
-def test_reference_absent_head_tail_and_model_owned_revision(tmp_path):
+def test_reference_full_exposure_and_model_owned_revision(tmp_path):
     monitor, _, ws = make_monitor(tmp_path)
     absent, meta = reference_surface(ws)
     assert meta['status'] == 'absent' and meta['source_characters'] == 0
     assert 'no task interpretation was generated' in absent
-    source = 'START_' + 'm' * 8000 + '_END'
+    source = 'START_' + 'm' * 2750 + 'MIDDLE_MISSION_SENTINEL' + 'm' * 2750 + '_END'
     written = monitor.dispatch('file_write', {'path': 'monitor/reference.md', 'content': source})
     assert written.data['sha256'] == hashlib.sha256(source.encode()).hexdigest()
     surface, meta = reference_surface(ws)
-    assert len(surface) <= REFERENCE_LIMIT and meta['truncated']
-    assert 'START_' in surface and '_END' in surface and 'Middle omitted' in surface
+    assert source in surface and 'MIDDLE_MISSION_SENTINEL' in surface
+    assert not meta['truncated']
     assert meta['source_characters'] == len(source)
-    assert meta['visible_characters'] < len(source)
+    assert meta['visible_characters'] == len(source)
     assert meta['source_sha256'] == hashlib.sha256(source.encode()).hexdigest()
     monitor.dispatch('file_patch', {'path': 'monitor/reference.md',
                                     'old_text': 'START_', 'new_text': 'REVISED_'})
@@ -97,13 +102,165 @@ def test_reference_absent_head_tail_and_model_owned_revision(tmp_path):
     assert len([r for r in rows(ws) if r['event'] == 'ase_reference_mutated']) == 2
 
 
+def test_reference_source_limit_atomic_write_patch_and_initialization(tmp_path):
+    monitor, _, ws = make_monitor(tmp_path)
+    maximum = ASE_REFERENCE_MAX_CHARS
+    before = 'A' * (maximum - 2) + 'Q'
+    assert monitor.dispatch('file_write', {'path': 'monitor/reference.md', 'content': before}).data['characters'] == maximum - 1
+    assert monitor.dispatch('file_patch', {'path': 'monitor/reference.md',
+                                          'old_text': 'Q', 'new_text': 'BBB'}).data['status'] == 'error'
+    assert monitor.dispatch('file_write', {'path': 'monitor//reference.md',
+                                          'content': 'X' * (maximum + 1)}).data['status'] == 'error'
+    assert ws.resolve_read('monitor/reference.md').read_bytes() == before.encode()
+    assert reference_surface(ws)[1]['truncated'] is False
+    assert monitor.dispatch('file_write', {'path': 'monitor/reference.md',
+                                          'content': 'Z' * maximum}).data['characters'] == maximum
+    assert monitor._ase_reference_ready()
+    ws.write_text('monitor/reference.md', 'Z' * (maximum + 1))  # Simulate pre-existing external state.
+    surface, metadata = reference_surface(ws)
+    assert metadata['status'] == 'oversized' and 'Reference oversized' in surface
+    assert not monitor._ase_reference_ready()
+    assert [r for r in rows(ws) if r['event'] == 'ase_reference_mutation_failed']
+
+
+def test_ase_feedback_barrier_requires_new_model_event_and_cursor():
+    audit = []
+    barrier = ASEFeedbackBarrier(lambda event, **fields: audit.append((event, fields)))
+    barrier.start(task_turn=76, cursor=101, action_locator='dialogue#9', submission_id='sent-1')
+    assert not barrier.permits(task_turn=76, cursor=102,
+                               model_feedback_turn=76, model_feedback_cursor=102)
+    assert not barrier.permits(task_turn=77, cursor=103,
+                               model_feedback_turn=76, model_feedback_cursor=102)
+    assert not barrier.permits(task_turn=77, cursor=101,
+                               model_feedback_turn=77, model_feedback_cursor=103)
+    assert barrier.permits(task_turn=77, cursor=103,
+                            model_feedback_turn=77, model_feedback_cursor=103)
+    assert barrier.permits(task_turn=77, cursor=103,
+                            model_feedback_turn=77, model_feedback_cursor=103)
+    assert [event for event, _ in audit] == [
+        'ase_feedback_barrier_started', 'ase_feedback_barrier_blocked_wake',
+        'ase_feedback_barrier_blocked_wake', 'ase_feedback_barrier_blocked_wake',
+        'ase_feedback_barrier_satisfied']
+
+
+def test_archived_model_feedback_not_same_turn_tool_delta(tmp_path):
+    runtime = MonitorRuntime.__new__(MonitorRuntime)
+    runtime._archive_lock = threading.Lock()
+    runtime._sequence = 0
+    runtime._eis_enabled = False
+    runtime.events_path = tmp_path / 'public_events.jsonl'
+    runtime.synopsis_path = tmp_path / 'synopsis.jsonl'
+    runtime._latest_public_cursor = mp.Value('q', 0)
+    runtime._latest_model_feedback = mp.Array('q', [0, 0])
+    runtime._latest_task_turn = mp.Value('q', 0)
+    barrier = ASEFeedbackBarrier(lambda *_args, **_fields: None)
+    assert runtime._archive({'boundary': 'post_model_pre_tool', 'task_turn': 76}) == 1
+    barrier.start(task_turn=76, cursor=1, submission_id='sent-1')
+    assert runtime._archive({'boundary': 'post_tool_pre_next_llm', 'task_turn': 76}) == 2
+    assert list(runtime._latest_model_feedback[:]) == [76, 1]
+    assert not barrier.permits(task_turn=76, cursor=2,
+                               model_feedback_turn=76, model_feedback_cursor=1)
+    assert runtime._archive({'boundary': 'post_model_pre_tool', 'task_turn': 77}) == 3
+    # The queued old boundary cannot use an event newer than its own cursor.
+    assert not barrier.permits(task_turn=76, cursor=2,
+                               model_feedback_turn=77, model_feedback_cursor=3)
+    assert barrier.permits(task_turn=77, cursor=3,
+                            model_feedback_turn=77, model_feedback_cursor=3)
+    assert runtime._archive({'boundary': 'task_control_handoff', 'task_turn': 78}) == 4
+    barrier.start(task_turn=77, cursor=3, submission_id='root-sent')
+    assert not barrier.permits(task_turn=77, cursor=4,
+                               model_feedback_turn=77, model_feedback_cursor=4)
+    assert barrier.permits(task_turn=78, cursor=4,
+                            model_feedback_turn=78, model_feedback_cursor=4)
+
+
+def test_ase_worker_blocks_queued_same_turn_wake_then_reviews_new_feedback(tmp_path, monkeypatch):
+    import monitor_agent_core.agent as agent_module
+    import monitor_agent_core.provider as provider_module
+    from monitor_agent_core.runtime import _worker
+
+    reviewed, audited = [], []
+
+    class FakeClient:
+        def __init__(self, *_args):
+            self.captured_root_handoffs = set()
+
+    class FakeMonitor:
+        ase_v0 = True
+        dcec_enabled = False
+        root_routed = False
+        verification = None
+        max_review_turns = 20
+
+        def __init__(self, *_args, **_kwargs):
+            self.cqs = SimpleNamespace(last_call={'locator': 'dialogue#intervene'})
+
+        def _progress(self, event, **fields):
+            audited.append((event, fields))
+
+        def review(self, context, **_kwargs):
+            reviewed.append(context)
+            if len(reviewed) == 2:
+                self.intervention_callback('Correct the public route.')
+                return SimpleNamespace(kind='local_intervened', payload={})
+            return SimpleNamespace(kind='wait', payload={'after_turns': 1, 'mode': 'patrol'})
+
+    monkeypatch.setattr(provider_module, 'MonitorProviderClient', FakeClient)
+    monkeypatch.setattr(agent_module, 'MonitorAgent', FakeMonitor)
+    evidence, task = tmp_path / 'evidence', tmp_path / 'task'
+    evidence.mkdir()
+    task.mkdir()
+    commands, outputs = queue.Queue(), queue.Queue()
+    config = {'config_name': 'offline', 'model_config': {}, 'task_id': 'fixture',
+              'evidence_root': str(evidence), 'private_root': str(tmp_path / 'private'),
+              'task_workspace': str(task), 'max_review_turns': 20,
+              'stop_event': threading.Event(), 'active_completion': mp.Value('q', 0),
+              'completion_cursor': mp.Value('q', 0), 'latest_task_turn': mp.Value('q', 0),
+              'latest_public_cursor': mp.Value('q', 0),
+              'latest_model_feedback': mp.Array('q', [0, 0])}
+    worker = threading.Thread(target=_worker, args=(config, commands, outputs), daemon=True)
+    worker.start()
+    try:
+        assert outputs.get(timeout=3)['kind'] == 'ready'
+        config['latest_task_turn'].value = 76
+        config['latest_public_cursor'].value = 1
+        with config['latest_model_feedback'].get_lock():
+            config['latest_model_feedback'][0] = 76
+            config['latest_model_feedback'][1] = 1
+        commands.put({'kind': 'boundary', 'cursor': 1, 'task_turn': 76})
+        assert outputs.get(timeout=3)['kind'] == 'intervention'
+        commands.put({'kind': 'boundary', 'cursor': 2, 'task_turn': 76})
+        # An old queued same-turn wake is discarded by the turn schedule.
+        time.sleep(.05)
+        assert len(reviewed) == 2
+        # A later boundary with no newer model response is rejected by the barrier.
+        commands.put({'kind': 'boundary', 'cursor': 2, 'task_turn': 77})
+        deadline = time.monotonic() + 3
+        while not any(event == 'ase_feedback_barrier_blocked_wake' for event, _ in audited):
+            assert time.monotonic() < deadline
+            time.sleep(.01)
+        assert len(reviewed) == 2
+        with config['latest_model_feedback'].get_lock():
+            config['latest_model_feedback'][0] = 77
+            config['latest_model_feedback'][1] = 3
+        commands.put({'kind': 'boundary', 'cursor': 3, 'task_turn': 77})
+        assert outputs.get(timeout=3)['kind'] == 'review_silent'
+        assert len(reviewed) == 3
+        assert sum(event == 'ase_feedback_barrier_satisfied' for event, _ in audited) == 1
+        assert sum(event == 'ase_feedback_barrier_started' for event, _ in audited) == 1
+    finally:
+        commands.put({'kind': 'close'})
+        worker.join(timeout=3)
+
+
 def test_turn_zero_and_provider_ready_composition_no_working_ledger(tmp_path, monkeypatch):
     monitor, client, ws = make_monitor(tmp_path)
+    reference = 'REFERENCE_SENTINEL:' + 'a' * 2750 + 'MIDDLE_MISSION_SENTINEL' + 'b' * 2750
     sends = scripted(client, monkeypatch, [
         ('', 'file_read', {'path': 'task/original_task.txt'}),
         ('', 'file_read', {'path': 'task/workspace/router.py'}),
         ('', 'file_write', {'path': 'monitor/reference.md',
-                            'content': 'REFERENCE_SENTINEL: route behavior matters.'}),
+                            'content': reference}),
         ('Watch route use.', 'wait', {'mode': 'follow', 'after_turns': 2}),
     ])
     assert monitor.review('Initialization').kind == 'wait'
@@ -120,12 +277,15 @@ def test_turn_zero_and_provider_ready_composition_no_working_ledger(tmp_path, mo
     assert 'Reference absent' in visible(sends[0])
     assert 'LOCAL_WORKING_SENTINEL' not in visible(sends[0])
     assert 'REFERENCE_SENTINEL' in visible(sends[3])
+    assert reference in visible(sends[3])
     assert 'Supervisory Situation' in visible(sends[0])
     assert 'Situation unchanged through cursor 0' in visible(sends[3])
     assert visible(sends[3]).index('REFERENCE_SENTINEL') < visible(sends[3]).index('Situation unchanged')
     injections = [r for r in rows(ws) if r['event'] == 'ase_context_injected']
     assert len(injections) == 4
     assert injections[-1]['reference_source_characters'] > 0
+    assert injections[-1]['reference_visible_characters'] == len(reference)
+    assert injections[-1]['reference_truncated'] is False
     assert injections[-1]['composition_order'] == ['reference', 'cfs']
     assert monitor.dispatch('file_read', {'path': 'monitor/working.md'}).data['content'] == 'LOCAL_WORKING_SENTINEL'
 

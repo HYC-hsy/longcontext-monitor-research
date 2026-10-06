@@ -45,7 +45,7 @@ from .cfs_v0 import SituationState
 from .dcm_v0 import DecisionMeasurementBoundary
 from .cqs_v0 import ControlQuestionState
 from .ase_v0 import (SYSTEM_PROMPT as ASE_SYSTEM_PROMPT, LocalContinuity,
-                     ReconsiderationBoundary, reference_surface)
+                     ReconsiderationBoundary, reference_surface, ASE_REFERENCE_MAX_CHARS)
 
 
 def _tool(name, description, properties, required):
@@ -912,6 +912,7 @@ class MonitorAgent:
         return ready
 
     def _dispatch(self, name: str, arguments: dict) -> ToolOutcome:
+        ase_reference = False
         try:
             if name == 'work_context' and self.experimental_control is not None:
                 if self.experimental_control.view == 'off':
@@ -940,23 +941,29 @@ class MonitorAgent:
             elif name == 'inquiry' and self.inquiry is not None:
                 data = self.inquiry.call(**arguments)
             elif name == "file_write":
+                ase_reference = (self.ase_v0 and self.workspace._parts(arguments['path']) ==
+                                 ('monitor', ('reference.md',)))
                 data = self.workspace.write_text(
-                    arguments["path"], arguments["content"], arguments.get("mode", "replace")
+                    arguments["path"], arguments["content"], arguments.get("mode", "replace"),
+                    max_chars=ASE_REFERENCE_MAX_CHARS if ase_reference else None,
                 )
                 if self.dcec_enabled and arguments["path"].replace('\\', '/').strip('/') == 'monitor/working.md':
                     self._progress('dcec_state_mutation', operation='file_write',
                                    mode=arguments.get('mode', 'replace'), **data)
-                if self.ase_v0 and arguments['path'].replace('\\', '/').strip('/') == 'monitor/reference.md':
+                if ase_reference:
                     self._audit_dialogue('ase_reference_mutated', operation='file_write',
                                          mode=arguments.get('mode', 'replace'),
                                          action_locator=(self.cqs.last_call or {}).get('locator'), **data)
             elif name == "file_patch":
+                ase_reference = (self.ase_v0 and self.workspace._parts(arguments['path']) ==
+                                 ('monitor', ('reference.md',)))
                 data = self.workspace.patch_text(
-                    arguments["path"], arguments["old_text"], arguments["new_text"]
+                    arguments["path"], arguments["old_text"], arguments["new_text"],
+                    max_chars=ASE_REFERENCE_MAX_CHARS if ase_reference else None,
                 )
                 if self.dcec_enabled and arguments["path"].replace('\\', '/').strip('/') == 'monitor/working.md':
                     self._progress('dcec_state_mutation', operation='file_patch', **data)
-                if self.ase_v0 and arguments['path'].replace('\\', '/').strip('/') == 'monitor/reference.md':
+                if ase_reference:
                     self._audit_dialogue('ase_reference_mutated', operation='file_patch',
                                          action_locator=(self.cqs.last_call or {}).get('locator'), **data)
             elif name == "code_run":
@@ -1122,8 +1129,7 @@ class MonitorAgent:
                     and str(arguments.get('path', '')).replace('\\', '/').strip('/') == 'monitor/working.md'):
                 self._progress('dcec_state_mutation_failed', operation=name,
                                error_type=type(exc).__name__)
-            if (self.ase_v0 and name in {'file_write', 'file_patch'}
-                    and str(arguments.get('path', '')).replace('\\', '/').strip('/') == 'monitor/reference.md'):
+            if self.ase_v0 and name in {'file_write', 'file_patch'} and ase_reference:
                 self._audit_dialogue('ase_reference_mutation_failed', operation=name,
                                      error_type=type(exc).__name__)
             data = {"status": "error", "error": str(exc)}

@@ -128,17 +128,20 @@ class MonitorWorkspace:
                     "reread the affected range. Other ranges remain accessible.",
         }
 
-    def write_text(self, virtual_path: str, content: str, mode="replace") -> dict:
+    def write_text(self, virtual_path: str, content: str, mode="replace", *, max_chars=None) -> dict:
         if mode not in {"replace", "append", "prepend"}:
             raise ValueError("mode must be replace, append, or prepend")
         path = self.resolve_private(virtual_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         old = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
         updated = content if mode == "replace" else old + content if mode == "append" else content + old
+        if max_chars is not None and len(updated) > max_chars:
+            raise ValueError(f"Private reference exceeds {max_chars} source characters; "
+                             "compress it yourself so every accepted character remains automatically visible")
         self._atomic_write(path, updated)
         return self._receipt(virtual_path, path, len(updated))
 
-    def patch_text(self, virtual_path: str, old_text: str, new_text: str) -> dict:
+    def patch_text(self, virtual_path: str, old_text: str, new_text: str, *, max_chars=None) -> dict:
         if not old_text:
             raise ValueError("old_text must not be empty")
         path = self.resolve_private(virtual_path)
@@ -147,6 +150,9 @@ class MonitorWorkspace:
         if matches != 1:
             raise ValueError(f"old_text must match exactly once; found {matches}")
         updated = content.replace(old_text, new_text, 1)
+        if max_chars is not None and len(updated) > max_chars:
+            raise ValueError(f"Private reference exceeds {max_chars} source characters; "
+                             "compress it yourself so every accepted character remains automatically visible")
         self._atomic_write(path, updated)
         return self._receipt(virtual_path, path, len(updated))
 

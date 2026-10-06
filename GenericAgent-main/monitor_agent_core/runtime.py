@@ -20,6 +20,39 @@ from .eis_v0 import append_index as append_eis_index
 ASE_CONTROL_ACTIONS = frozenset({
     'wait', 'allow_complete', 'intervene', 'local_intervened', 'root_intervened',
 })
+TASK_MODEL_FEEDBACK_BOUNDARIES = frozenset({'post_model_pre_tool', 'task_control_handoff'})
+
+
+class ASEFeedbackBarrier:
+    """An intervention cannot be followed by control before a newer Task model event."""
+
+    def __init__(self, audit):
+        self.audit = audit
+        self.pending = None
+
+    def start(self, *, task_turn, cursor, action_locator=None, submission_id=None):
+        self.pending = {'submitted_task_turn': int(task_turn), 'submitted_cursor': int(cursor),
+                        'intervention_locator': action_locator, 'submission_id': submission_id}
+        self.audit('ase_feedback_barrier_started', **self.pending,
+                   current_task_turn=int(task_turn), current_cursor=int(cursor))
+
+    def permits(self, *, task_turn, cursor, model_feedback_turn, model_feedback_cursor):
+        if self.pending is None:
+            return True
+        current = dict(current_task_turn=int(task_turn), current_cursor=int(cursor))
+        if (int(model_feedback_turn) > self.pending['submitted_task_turn']
+                and int(model_feedback_cursor) > self.pending['submitted_cursor']
+                and int(task_turn) > self.pending['submitted_task_turn']
+                and int(cursor) >= int(model_feedback_cursor)):
+            self.audit('ase_feedback_barrier_satisfied', **self.pending, **current,
+                       model_feedback_turn=int(model_feedback_turn),
+                       model_feedback_cursor=int(model_feedback_cursor))
+            self.pending = None
+            return True
+        self.audit('ase_feedback_barrier_blocked_wake', **self.pending, **current,
+                   model_feedback_turn=int(model_feedback_turn),
+                   model_feedback_cursor=int(model_feedback_cursor))
+        return False
 
 
 @dataclass(frozen=True)
@@ -310,6 +343,25 @@ def _worker(config, commands, outputs):
     cursor = 0
     task_turn = 0
     receipt_offset = 0
+    feedback_barrier = (ASEFeedbackBarrier(lambda event, **fields: monitor._progress(event, **fields))
+                        if getattr(monitor, 'ase_v0', False) else None)
+
+    def current_public_identity():
+        public_cursor = config.get('latest_public_cursor')
+        clock = config.get('latest_task_turn')
+        return (max(task_turn, clock.value if clock is not None else task_turn),
+                max(cursor, public_cursor.value if public_cursor is not None else cursor))
+
+    def feedback_permits():
+        if feedback_barrier is None or feedback_barrier.pending is None:
+            return True
+        identity = config.get('latest_model_feedback')
+        with identity.get_lock():
+            model_turn, model_cursor = int(identity[0]), int(identity[1])
+        return feedback_barrier.permits(
+            task_turn=task_turn, cursor=cursor,
+            model_feedback_turn=model_turn if model_cursor <= cursor else 0,
+            model_feedback_cursor=model_cursor if model_cursor <= cursor else 0)
 
     def completion_is_active(command):
         active = config.get("active_completion")
@@ -349,9 +401,13 @@ def _worker(config, commands, outputs):
 
         def send_now(message):
             nonlocal submitted, close_watch, next_wake_turn
-            delivery_id = uuid.uuid4().hex
+            delivery_id = request_id if completion and not submitted else uuid.uuid4().hex
+            if feedback_barrier is not None:
+                submitted_turn, submitted_cursor = current_public_identity()
+                feedback_barrier.start(task_turn=submitted_turn, cursor=submitted_cursor,
+                                       action_locator=(monitor.cqs.last_call or {}).get('locator'),
+                                       submission_id=delivery_id)
             if completion and not submitted:
-                delivery_id = request_id
                 outputs.put({"kind": "completion", "decision": "continue", "cursor": cursor,
                              "request_id": request_id, "message": message})
             else:
@@ -450,9 +506,14 @@ def _worker(config, commands, outputs):
             close_watch = True
             next_wake_turn = task_turn + 1
             if not completion:
+                delivery_id = uuid.uuid4().hex
+                if feedback_barrier is not None:
+                    submitted_turn, submitted_cursor = current_public_identity()
+                    feedback_barrier.start(task_turn=submitted_turn, cursor=submitted_cursor,
+                                           submission_id=delivery_id)
                 outputs.put({
                     "kind": "intervention", "message": action.payload["message"],
-                    "cursor": cursor, "request_id": uuid.uuid4().hex,
+                    "cursor": cursor, "request_id": delivery_id,
                 })
         elif action.kind == 'root_intervened':
             close_watch = True
@@ -545,12 +606,19 @@ def _worker(config, commands, outputs):
         cursor = int(command.get("cursor") or cursor)
         task_turn = int(command.get("task_turn") or task_turn)
         if kind == "boundary" and task_turn >= next_wake_turn:
+            if not feedback_permits():
+                continue
             if not review(
                 f"Public task cursor advanced through {cursor}. Continue from your existing history, inspect "
                 "new synopsis rows, and retrieve original evidence wherever it can change your decision."
             ):
                 return
         elif kind == "completion" and completion_is_active(command):
+            if not feedback_permits():
+                outputs.put({'kind': 'completion', 'decision': 'continue', 'cursor': cursor,
+                             'request_id': command['request_id'],
+                             'message': 'Continue with the pending monitor correction.'})
+                continue
             if not review(
                 f"The host requested a root handoff review at cursor {cursor}. Read the Task Agent's actual "
                 "message in the public evidence: it may claim completion, ask for clarification, or report "
@@ -634,6 +702,8 @@ class MonitorRuntime:
         self._active_completion = self._context.Value('q', 0)
         self._completion_cursor = self._context.Value('q', 0)
         self._latest_task_turn = self._context.Value('q', 0)
+        self._latest_public_cursor = self._context.Value('q', self._sequence)
+        self._latest_model_feedback = self._context.Array('q', [0, 0])
         self._task_budget_turns_used = self._context.Value('q', 0)
         self._task_max_turns = task_max_turns
         managed_check = (model_config.get('monitor_verification_loop_v0') is True and
@@ -654,6 +724,8 @@ class MonitorRuntime:
             "root_checkpoint_required": root_checkpoint_required,
             "run_id": run_id,
             "latest_task_turn": self._latest_task_turn,
+            "latest_public_cursor": self._latest_public_cursor,
+            "latest_model_feedback": self._latest_model_feedback,
             "task_budget_turns_used": self._task_budget_turns_used,
             "task_max_turns": self._task_max_turns,
             "verification_due_turn": self._verification_due_turn,
@@ -684,6 +756,12 @@ class MonitorRuntime:
             sequence = self._sequence
             raw = dict(packet, archive_sequence=sequence, archived_at=time.time())
             _append(self.events_path, raw)
+            with self._latest_public_cursor.get_lock():
+                self._latest_public_cursor.value = sequence
+            if raw.get('boundary') in TASK_MODEL_FEEDBACK_BOUNDARIES:
+                with self._latest_model_feedback.get_lock():
+                    self._latest_model_feedback[0] = int(raw.get('task_turn') or 0)
+                    self._latest_model_feedback[1] = sequence
             if self._eis_enabled:
                 try:
                     append_eis_index(self.evidence_root, raw)
