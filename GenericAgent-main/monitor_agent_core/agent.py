@@ -1384,7 +1384,7 @@ class MonitorAgent:
                     wake_context += "\n\n" + root_transition_view
                 self._audit_dialogue('root_frame_input', mode=self.root_scope_v1,
                                      handoff=self.root_frame_handoff, content=wake_context)
-            tools = (crs_tools() if self.crs is not None else
+            tools = (crs_tools() if self.crs is not None and self.frame_kind == 'root' else
                      verification_tools() if self.verification_loop_v0 and not self.ase_v0 else MONITOR_TOOLS)
             if self.ase_v0:
                 tools = json.loads(json.dumps(tools))

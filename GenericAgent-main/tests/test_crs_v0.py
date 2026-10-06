@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 
 from monitor_agent_core.agent import MONITOR_TOOLS, MonitorAgent, crs_tools
-from monitor_agent_core.crs_v0 import validate_contrast
+from monitor_agent_core.crs_v0 import (CRS_PUBLIC_RESULT_EXCERPT_CHARS,
+                                        CRS_SURFACE_MAX_CHARS, validate_contrast)
 from monitor_agent_core.provider import MonitorProviderClient
 from monitor_agent_core.workspace import MonitorWorkspace
 
@@ -66,6 +67,11 @@ def expose(monitor, client):
     return text
 
 
+def visible(snapshot):
+    return '\n'.join(block['text'] for message in snapshot['messages']
+                     for block in message['content'] if block.get('type') == 'text')
+
+
 def test_schema_tools_and_first_boundary(tmp_path):
     monitor, client, workspace, _ = fixture(tmp_path)
     assert [x['function']['name'] for x in crs_tools()] == [x['function']['name'] for x in MONITOR_TOOLS]
@@ -78,6 +84,11 @@ def test_schema_tools_and_first_boundary(tmp_path):
     assert monitor.crs.root_contrast['surfaced'] is False
     shown = expose(monitor, client)
     assert 'Contrastive Release State' in shown and monitor.crs.root_contrast['canonical'] in shown
+    assert 'mechanical provenance only; no adequacy/support/verdict is supplied by runtime' in shown
+    assert 'tool_results_json_excerpt' in shown and 'tool_result_sha256' in shown
+    assert 'task_turn' in shown and 'archive_sequence' in shown
+    assert 'state_digest=' + monitor.crs.root_contrast['state_digest'] in shown
+    assert len(monitor.crs.render_root(monitor.root_frame_handoff)) <= CRS_SURFACE_MAX_CHARS
     assert monitor.crs.root_contrast['surfaced'] is True
     assert [r['event'] for r in events(workspace)].count('crs_surface_injected') == 1
 
@@ -116,10 +127,6 @@ def test_provider_ready_second_request_and_same_response_double_call(tmp_path, m
     monkeypatch.setattr(client, '_request_once', offline_response)
     action = monitor.review('Root', completion_pending=True, root_handoff=handoff)
     assert action.kind == 'allow_complete' and len(snapshots) == 2
-    def visible(snapshot):
-        return '\n'.join(block['text'] for message in snapshot['messages']
-                         for block in message['content'] if block.get('type') == 'text')
-
     first = visible(snapshots[0])
     second = visible(snapshots[1])
     assert 'Contrastive Release State' not in first
@@ -129,6 +136,152 @@ def test_provider_ready_second_request_and_same_response_double_call(tmp_path, m
     assert len([r for r in events(workspace) if r['event'] == 'crs_release_attempted']) == 3
     assert len([r for r in events(workspace) if r['event'] == 'crs_confirmed']) == 1
     assert monitor.crs.root_contrast is None
+
+
+def test_local_provider_schema_is_baseline_ase_and_only_root_allow_changes(tmp_path, monkeypatch):
+    monitor, client, workspace, handoff = fixture(tmp_path)
+    monitor.frame_kind = 'local'
+    monitor.root_frame_handoff = None
+    monitor.completion_state = lambda: None
+    local = []
+
+    def local_response(tools):
+        local.append(client.assembled_request_snapshot(tools))
+        return ([{'type': 'tool_use', 'id': 'local-wait', 'name': 'wait',
+                  'input': {'after_turns': 1, 'mode': 'follow'}}], {})
+
+    monkeypatch.setattr(client, '_request_once', local_response)
+    assert monitor.review('Local').kind == 'wait'
+    baseline_config = dict(client.config)
+    baseline_config['monitor_contrastive_release_state'] = False
+    baseline_client = MonitorProviderClient('anthropic', baseline_config)
+    baseline = MonitorAgent(baseline_client, workspace)
+    baseline.task_budget_state = lambda: (8, 300)
+    baseline_local = []
+
+    def baseline_response(tools):
+        baseline_local.append(baseline_client.assembled_request_snapshot(tools))
+        return ([{'type': 'tool_use', 'id': 'baseline-wait', 'name': 'wait',
+                  'input': {'after_turns': 1, 'mode': 'follow'}}], {})
+
+    monkeypatch.setattr(baseline_client, '_request_once', baseline_response)
+    assert baseline.review('Local').kind == 'wait'
+    assert local[0]['tools'] == baseline_local[0]['tools']
+    assert local[0]['tools'][-1]['function']['parameters'] == MONITOR_TOOLS[-1]['function']['parameters']
+
+    monitor.completion_state = lambda: handoff
+    monitor._seen_completion = handoff
+    root = []
+
+    def root_response(tools):
+        root.append(client.assembled_request_snapshot(tools))
+        return ([{'type': 'tool_use', 'id': 'root-allow', 'name': 'allow_complete',
+                  'input': {'contrast': contrast()}}], {})
+
+    monkeypatch.setattr(client, '_request_once', root_response)
+    # One model turn is enough to capture the root provider schema; exhaustion cannot release.
+    with pytest.raises(Exception, match='exceeded'):
+        monitor.review('Root', completion_pending=True, root_handoff=handoff,
+                       max_turns_override=1)
+    assert len(root) == 1
+    assert [x['function']['name'] for x in root[0]['tools']] == [x['function']['name'] for x in MONITOR_TOOLS]
+    assert root[0]['tools'][:-1] == local[0]['tools'][:-1]
+    assert root[0]['tools'][-1]['function']['parameters']['required'] == ['contrast']
+    assert 'contrast' not in local[0]['tools'][-1]['function']['parameters']['properties']
+
+
+def test_identical_text_with_changed_task_book_sha_requires_new_surface(tmp_path):
+    monitor, client, workspace, _ = fixture(tmp_path)
+    value = contrast(ground_refs=['monitor/reference.md'])
+    monitor.dcm.model_turn = 1
+    first = monitor.dispatch('allow_complete', {'contrast': value})
+    assert first.action is None
+    first_state = first.data['state_digest']
+    first_contrast = first.data['contrast_sha256']
+    first_visible = expose(monitor, client)
+    old_sha = monitor.crs.root_contrast['provenance']['ground_refs'][0]['source_sha256']
+    assert old_sha in first_visible
+    workspace.write_text('monitor/reference.md', 'Revised durable public-route requirement.')
+    monitor.dcm.model_turn = 2
+    revised = monitor.dispatch('allow_complete', {'contrast': value})
+    assert revised.action is None and revised.data['status'] == 'release_not_executed'
+    assert revised.data['contrast_sha256'] == first_contrast
+    assert revised.data['state_digest'] != first_state
+    assert monitor.crs.root_contrast['surfaced'] is False
+    new_sha = monitor.crs.root_contrast['provenance']['ground_refs'][0]['source_sha256']
+    assert new_sha != old_sha
+    second_visible = expose(monitor, client)
+    assert new_sha in second_visible and revised.data['state_digest'] in second_visible
+    monitor.dcm.model_turn = 3
+    assert monitor.dispatch('allow_complete', {'contrast': value}).action.kind == 'allow_complete'
+    revisions = [r for r in events(workspace) if r['event'] == 'crs_revised']
+    assert revisions[-1]['same_contrast'] is True
+
+
+def test_historical_file_read_receipt_identity_ignores_later_workspace_change(tmp_path):
+    monitor, client, workspace, _ = fixture(tmp_path)
+    monitor._audit_dialogue('tool_call', turn=1, tool_id='read-historical', name='file_read',
+                            arguments=json.dumps({'path': 'task/workspace/route.py'}))
+    receipt = monitor.dispatch('file_read', {'path': 'task/workspace/route.py'}).data
+    monitor._audit_dialogue('tool_result', turn=1, tool_id='read-historical', data=receipt, action=None)
+    locator = f'monitor/audit/dialogue.jsonl#{len(events(workspace))}'
+    value = contrast(observation_refs=[locator])
+    monitor.dcm.model_turn = 1
+    first = monitor.dispatch('allow_complete', {'contrast': value})
+    assert first.action is None
+    expose(monitor, client)
+    (workspace.task_mounts['workspace'] / 'route.py').write_text('ROUTE = False\n', encoding='utf-8')
+    monitor.dcm.model_turn = 2
+    confirmed = monitor.dispatch('allow_complete', {'contrast': value})
+    assert confirmed.action.kind == 'allow_complete'
+    assert receipt['sha256'] != hashlib.sha256(b'ROUTE = False\n').hexdigest()
+
+
+def test_cancelled_code_run_is_visible_despite_model_success_claim(tmp_path, monkeypatch):
+    monitor, client, workspace, handoff = fixture(tmp_path)
+    path = workspace.private_root / 'audit/dialogue.jsonl'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(''.join(json.dumps(row) + '\n' for row in [
+        {'event': 'tool_call', 'tool_id': 'c1', 'review_id': 'prior', 'name': 'code_run',
+         'arguments': json.dumps({'code': 'print(1)'})},
+        {'event': 'tool_result', 'tool_id': 'c1', 'review_id': 'prior',
+         'data': {'status': 'cancelled', 'session_id': 's1', 'cancelled': True,
+                  'exit_code': None}},
+    ]), encoding='utf-8')
+    value = contrast(discrimination='This observation was successful.',
+                     observation_refs=['monitor/audit/dialogue.jsonl#2'])
+    snapshots = []
+
+    def offline_response(tools):
+        snapshots.append(client.assembled_request_snapshot(tools))
+        return ([{'type': 'tool_use', 'id': f'allow-{len(snapshots)}',
+                  'name': 'allow_complete', 'input': {'contrast': value}}], {})
+
+    monkeypatch.setattr(client, '_request_once', offline_response)
+    assert monitor.review('Root', completion_pending=True, root_handoff=handoff).kind == 'allow_complete'
+    assert len(snapshots) == 2
+    second = visible(snapshots[1])
+    assert 'This observation was successful.' in second
+    assert '"status":"cancelled"' in second and '"cancelled":true' in second
+    assert '"session_id":"s1"' in second and 'receipt_sha256' in second
+    assert 'mechanical provenance only; no adequacy/support/verdict is supplied by runtime' in second
+    assert [r for r in events(workspace) if r['event'] == 'crs_confirmed']
+
+
+def test_public_tool_result_excerpt_is_raw_bounded_and_visible(tmp_path):
+    monitor, client, workspace, _ = fixture(tmp_path)
+    event = json.loads((workspace.evidence_root / 'public_events.jsonl').read_text(encoding='utf-8'))
+    event['tool_results'][0]['content'] = 'RAW_RESULT_' + 'x' * 2000
+    (workspace.evidence_root / 'public_events.jsonl').write_text(json.dumps(event) + '\n', encoding='utf-8')
+    monitor.dcm.model_turn = 1
+    assert monitor.dispatch('allow_complete', {'contrast': contrast()}).action is None
+    proof = monitor.crs.root_contrast['provenance']['observation_refs'][0]
+    assert proof['tool_results_excerpt_truncated'] is True
+    assert len(proof['tool_results_json_excerpt']) == CRS_PUBLIC_RESULT_EXCERPT_CHARS
+    shown = expose(monitor, client)
+    assert 'RAW_RESULT_' in shown and 'tool_results_json_characters' in shown
+    assert proof['tool_result_sha256'] in shown
+    assert len(monitor.crs.render_root(monitor.root_frame_handoff)) <= CRS_SURFACE_MAX_CHARS
 
 
 def test_existing_and_new_observation_revision_without_required_new_measurement(tmp_path):
@@ -144,7 +297,8 @@ def test_existing_and_new_observation_revision_without_required_new_measurement(
     monitor.dispatch('allow_complete', {'contrast': contrast()})
     expose(monitor, client)
     monitor._audit_dialogue('tool_call', turn=2, tool_id='read-1', name='file_read',
-                            arguments=json.dumps({'path': 'task/workspace/route.py'}))
+                            arguments=json.dumps({'path': 'task/workspace/route.py',
+                                                  'start': 1, 'count': 1}))
     receipt = monitor.dispatch('file_read', {'path': 'task/workspace/route.py'}).data
     monitor._audit_dialogue('tool_result', turn=2, tool_id='read-1', data=receipt, action=None)
     locator = f'monitor/audit/dialogue.jsonl#{len(events(workspace))}'
@@ -155,6 +309,11 @@ def test_existing_and_new_observation_revision_without_required_new_measurement(
     assert monitor.crs.root_contrast['provenance']['observation_refs'][0]['lifecycle']['start'] == receipt['start']
     assert monitor.crs.root_contrast['provenance']['observation_refs'][0]['lifecycle']['lines'] == receipt['lines']
     assert monitor.crs.root_contrast['provenance']['observation_refs'][0]['lifecycle']['sha256'] == receipt['sha256']
+    shown = expose(monitor, client)
+    assert '"requested_range"' in shown and '"count":1' in shown
+    assert '"path":"task/workspace/route.py"' in shown
+    assert receipt['sha256'] in shown and '"truncated":false' in shown
+    assert monitor.crs.root_contrast['provenance']['observation_refs'][0]['receipt_sha256'] in shown
 
 
 @pytest.mark.parametrize('lifecycle', [
