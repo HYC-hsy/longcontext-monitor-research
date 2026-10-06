@@ -18,7 +18,7 @@ from monitor_agent_core.runtime import ASE_CONTROL_ACTIONS, ASEFeedbackBarrier, 
 from monitor_agent_core.workspace import MonitorWorkspace
 
 
-def make_monitor(tmp_path, *, ase=True, cqs=False, meta=None):
+def make_monitor(tmp_path, *, ase=True, cqs=False, meta=None, live=None):
     evidence = tmp_path / 'evidence'
     evidence.mkdir(parents=True)
     (evidence / 'original_task.txt').write_text('Maintain the public route.', encoding='utf-8')
@@ -32,6 +32,8 @@ def make_monitor(tmp_path, *, ase=True, cqs=False, meta=None):
               'max_retries': 0, 'monitor_adaptive_supervisory_environment': ase}
     if meta is not None:
         config['monitor_ase_meta_regulation'] = meta
+    if live is not None:
+        config['monitor_live_intervention'] = live
     if not ase:
         config.update({'monitor_dcec': True, 'monitor_path_control_v0': True,
                        'monitor_verification_loop_v0': True,
@@ -431,10 +433,12 @@ def test_inactive_patrol_is_one_turn_but_active_patrol_reconsiders(tmp_path, mon
     assert len([r for r in rows(ws) if r['event'] == 'ase_reconsideration_boundary']) == 1
 
 
-@pytest.mark.skip(reason='Old assertion assumes queued LocalContinuity anchor')
 def test_initial_intervention_requires_reference_but_can_follow_write_in_same_review(tmp_path, monkeypatch):
     monitor, client, ws = make_monitor(tmp_path)
-    monitor.intervention_callback = lambda message: {'delivery': 'queued'}
+    submitted = []
+    monitor.intervention_callback = lambda message: (submitted.append(message) or {
+        'submission_id': 'initial-reminder', 'delivery': 'queued',
+        'submitted_task_turn': 12, 'submitted_cursor': 0})
     sends = scripted(client, monkeypatch, [
         ('Observed route discrepancy.', 'intervene', {'message': 'Inspect route behavior.'}),
         ('', 'file_write', {'path': 'monitor/reference.md', 'content': 'Public route behavior matters.'}),
@@ -442,11 +446,10 @@ def test_initial_intervention_requires_reference_but_can_follow_write_in_same_re
     ])
     assert monitor.review('Initialization').kind == 'local_intervened'
     assert len(sends) == 3
-    scripted(client, monkeypatch, [
-        ('', 'wait', {'after_turns': 1, 'mode': 'follow'}),
-    ])
-    assert monitor.review('After feedback').payload['mode'] == 'follow'
-    assert monitor.cqs.anchor['message'] == 'Inspect route behavior.'
+    assert submitted == ['Inspect route behavior.']
+    assert monitor.control_echo.pending_submission['submission_id'] == 'initial-reminder'
+    assert monitor.control_echo.active_echo is None
+    assert ws.resolve_read('monitor/reference.md').read_text(encoding='utf-8') == 'Public route behavior matters.'
     assert len([r for r in rows(ws) if r['event'] == 'ase_reference_initialization_pending']) == 1
 
 
@@ -575,15 +578,14 @@ def test_release_boundary_root_and_changed_control(tmp_path, monkeypatch):
     assert [r for r in events if r['event'] == 'ase_reconsideration_boundary'][0]['visible_context']['reference_surface_sha256']
 
 
-@pytest.mark.skip(reason='Queued LocalContinuity release is retired; Echo release tested separately')
-def test_boundary_can_change_to_follow_or_intervene(tmp_path, monkeypatch):
+def test_boundary_can_change_to_follow(tmp_path, monkeypatch):
     monitor, client, ws = make_monitor(tmp_path)
     ws.write_text('monitor/reference.md', 'Route response is the public requirement.')
-    monitor.intervention_callback = lambda message: {'delivery': 'queued'}
-    scripted(client, monkeypatch, [
-        ('Route concern.', 'intervene', {'message': 'Check route behavior.'}),
-    ])
-    assert monitor.review('Initial').kind == 'local_intervened'
+    monitor.control_echo.note_submission('Check route behavior.', {
+        'submission_id': 'old', 'submitted_task_turn': 12, 'submitted_cursor': 1})
+    assert monitor.control_echo.reconcile_receipt({
+        'submission_id': 'old', 'delivered': True,
+        'delivery_kind': 'handed_to_task_interrupt_interface'}) == 'delivered'
     sends = scripted(client, monkeypatch, [
         ('', 'wait', {'mode': 'patrol', 'after_turns': 1}),
         ('Need response.', 'wait', {'mode': 'follow', 'after_turns': 1}),
@@ -592,14 +594,32 @@ def test_boundary_can_change_to_follow_or_intervene(tmp_path, monkeypatch):
     assert len(sends) == 2
     assert any(r['event'] == 'ase_release_abandoned' and r['disposition'] == 'changed_to_follow'
                for r in rows(ws))
+    assert monitor.control_echo.active_echo is None
+    assert monitor.control_echo.pending_submission is None
+
+
+def test_boundary_can_change_to_intervene(tmp_path, monkeypatch):
+    monitor, client, ws = make_monitor(tmp_path)
+    ws.write_text('monitor/reference.md', 'Route response is the public requirement.')
+    monitor.control_echo.note_submission('Check route behavior.', {
+        'submission_id': 'old', 'submitted_task_turn': 12, 'submitted_cursor': 1})
+    assert monitor.control_echo.reconcile_receipt({
+        'submission_id': 'old', 'delivered': True,
+        'delivery_kind': 'handed_to_task_interrupt_interface'}) == 'delivered'
+    submitted = []
+    monitor.intervention_callback = lambda message: (submitted.append(message) or {
+        'submission_id': 'new', 'delivery': 'queued',
+        'submitted_task_turn': 12, 'submitted_cursor': 1})
     scripted(client, monkeypatch, [
         ('', 'wait', {'mode': 'patrol', 'after_turns': 1}),
         ('Now correct it.', 'intervene', {'message': 'Fix route handling.'}),
     ])
-    assert monitor.review('Next wake').kind == 'local_intervened'
+    assert monitor.review('Wake').kind == 'local_intervened'
     assert any(r['event'] == 'ase_release_abandoned' and r['disposition'] == 'intervened'
                for r in rows(ws))
-    assert monitor.cqs.anchor['message'] == 'Fix route handling.'
+    assert submitted == ['Fix route handling.']
+    assert monitor.control_echo.active_echo is None
+    assert monitor.control_echo.pending_submission['submission_id'] == 'new'
 
 
 def test_continuation_only_rewrites_working_and_legacy_paths_unchanged(tmp_path, monkeypatch):
@@ -674,7 +694,6 @@ def test_follow_without_intervention_does_not_create_episode(tmp_path, monkeypat
     assert 'Local Control Continuity' not in visible(sends[0])
 
 
-@pytest.mark.skip(reason='Old test equates queued submission with persistent LocalContinuity')
 def test_local_intervention_ends_review_once_then_feedback_is_seen(tmp_path, monkeypatch):
     monitor, client, ws = make_monitor(tmp_path)
     ws.write_text('monitor/reference.md', 'Public route behavior matters.')
@@ -701,15 +720,8 @@ def test_local_intervention_ends_review_once_then_feedback_is_seen(tmp_path, mon
     assert not (ws.private_root / 'unwanted.md').exists()
     assert any(r['event'] == 'control_result' and any(
         'not_executed' in item['content'] for item in r['results']) for r in rows(ws))
-    (ws.evidence_root / 'public_events.jsonl').write_text(json.dumps({
-        'archive_sequence': 1, 'task_turn': 13, 'boundary': 'post_tool_pre_next_llm',
-        'text': 'Task inspected route response after input.', 'tool_calls': [], 'tool_results': []
-    }) + '\n', encoding='utf-8')
-    next_sends = scripted(client, monkeypatch, [('Await behavior.', 'wait',
-                                                {'mode': 'follow', 'after_turns': 2})])
-    assert monitor.review('Task feedback boundary').kind == 'wait'
-    assert 'Task inspected route response after input.' in visible(next_sends[0])
-    assert monitor.cqs.active and monitor.cqs.intervention_count == 1
+    assert monitor.control_echo.pending_submission['submission_id'] == 'one'
+    assert monitor.control_echo.active_echo is None
 
 
 @pytest.mark.skip(reason='Experimental episode/meta-regulation intentionally absent in Curator-Supervisor')

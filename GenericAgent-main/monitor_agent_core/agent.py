@@ -421,6 +421,8 @@ class MonitorAgent:
             raise ValueError('monitor_ase_meta_regulation requires ASE')
         self.control_echo = None
         if self.ase_v0:
+            if getattr(client, 'config', {}).get('monitor_live_intervention', True) is not True:
+                raise ValueError('Curator-Supervisor requires monitor_live_intervention=true for delivery-acknowledged control.')
             if self.ase_meta_regulation:
                 raise ValueError('monitor_ase_meta_regulation is not part of Curator-Supervisor')
             if (self.dcec_enabled or self.path_control_v0 or self.cfs_v0

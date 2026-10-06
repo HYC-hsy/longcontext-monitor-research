@@ -2,10 +2,12 @@
 
 import hashlib
 import json
+import queue
 import threading
 import time
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -34,6 +36,23 @@ def fixture_monitor(tmp_path):
     monitor = MonitorAgent(client, workspace)
     monitor.task_budget_state = lambda: (8, 300)
     return monitor, client, workspace
+
+
+@pytest.mark.parametrize('live', [None, True])
+def test_curator_startup_accepts_default_or_explicit_live_intervention(tmp_path, live):
+    monitor, client, _ = fixture_monitor(tmp_path)
+    if live is not None:
+        client.config['monitor_live_intervention'] = live
+        monitor = MonitorAgent(client, monitor.workspace)
+    assert monitor.control_echo is not None
+
+
+def test_curator_startup_rejects_non_live_before_provider_request(tmp_path, monkeypatch):
+    monitor, client, workspace = fixture_monitor(tmp_path)
+    client.config['monitor_live_intervention'] = False
+    monkeypatch.setattr(client, '_request_once', lambda *_: pytest.fail('provider request must not begin'))
+    with pytest.raises(ValueError, match='requires monitor_live_intervention=true'):
+        MonitorAgent(client, workspace)
 
 
 def audit_rows(workspace):
@@ -504,3 +523,50 @@ def test_root_handoff_correction_receipt_activates_echo_only_when_matched(tmp_pa
         assert [name for name, _ in audit].count('curator_echo_consumed') == 1
     finally:
         runtime.close()
+
+
+def test_late_unmatched_root_correction_receipt_does_not_activate_echo_or_barrier(tmp_path):
+    """Exercise the parent's actual output pump with a superseded completion identity."""
+    private = tmp_path / 'private'
+    private.mkdir()
+    received = []
+    runtime = MonitorRuntime.__new__(MonitorRuntime)
+    runtime._closed = threading.Event()
+    runtime._correction_identity = None
+    runtime._correction_deadline = 0
+    runtime._outputs = queue.Queue()
+    runtime._process = SimpleNamespace(is_alive=lambda: True)
+    runtime._finish_correction = lambda: None
+    runtime._pending_lock = threading.Lock()
+    runtime._pending = {}  # Matching root request was superseded before this correction arrived.
+    runtime._active_completion = SimpleNamespace(value=0)
+    runtime._completion_receipts = queue.Queue()
+    runtime._intervention_receipts = queue.Queue()
+    runtime._commands = queue.Queue()
+    runtime._latest_task_turn = SimpleNamespace(value=8)
+    runtime._latest_public_cursor = SimpleNamespace(value=10)
+    runtime.private_root = private
+    runtime._append_receipt = lambda value: received.append(value)
+    pump = threading.Thread(target=MonitorRuntime._pump_outputs, args=(runtime,), daemon=True)
+    pump.start()
+    try:
+        echo = ControlEcho(lambda *_args, **_fields: None)
+        echo.note_submission('Revisit the whole mission.', submission(
+            identity='late-root', message='Revisit the whole mission.'))
+        barrier = ASEFeedbackBarrier(lambda *_args, **_fields: None)
+        runtime._outputs.put({'kind': 'completion', 'decision': 'continue',
+                              'request_id': 'superseded-request', 'submission_id': 'late-root',
+                              'control_submission': True, 'message': 'Revisit the whole mission.'})
+        receipt = runtime._intervention_receipts.get(timeout=2)
+        assert received[0]['delivery'] == 'archived_late_or_unmatched'
+        assert receipt['submission_id'] == 'late-root'
+        assert receipt['delivered'] is False
+        assert receipt['delivery_kind'] == 'archived_late_or_unmatched'
+        assert echo.reconcile_receipt(receipt) == 'failed'
+        assert echo.active_echo is None
+        assert echo.pending_submission is None
+        assert barrier.pending is None
+    finally:
+        runtime._closed.set()
+        pump.join(timeout=2)
+        assert not pump.is_alive()
