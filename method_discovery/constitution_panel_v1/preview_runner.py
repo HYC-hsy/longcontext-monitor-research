@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 
 
@@ -61,10 +62,18 @@ def load_inputs(case_id, prompt_name, panel=PANEL):
     if hashlib.sha256(packet_path.read_bytes()).hexdigest() != entries[0]['packet_sha256']:
         raise ValueError('Packet bytes differ from manifest identity')
     hashes = manifest['source_hashes']
-    for path in (shell_path, core_path):
-        relative = path.relative_to(panel).as_posix()
-        if relative in hashes and hashlib.sha256(path.read_bytes()).hexdigest() != hashes[relative]:
-            raise ValueError('Frozen prompt bytes differ from manifest identity')
+    shell_hash = hashes.get('prompts/panel_shell.txt')
+    if not isinstance(shell_hash, str) or not re.fullmatch(r'[0-9a-f]{64}', shell_hash):
+        raise ValueError('Missing frozen common panel shell SHA-256')
+    if hashlib.sha256(shell_path.read_bytes()).hexdigest() != shell_hash:
+        raise ValueError('Common panel shell bytes differ from frozen identity')
+    frozen = manifest.get('frozen_cognitive_core_sha256', {}).get(prompt_name)
+    if not isinstance(frozen, str) or not re.fullmatch(r'[0-9a-f]{64}', frozen):
+        raise ValueError('Missing frozen cognitive core SHA-256')
+    if hashlib.sha256(core_path.read_bytes()).hexdigest() != frozen:
+        raise ValueError('Cognitive core bytes differ from frozen identity')
+    if prompt_name == 'current' and hashes.get('prompts/current_cognitive_core.txt') != frozen:
+        raise ValueError('Current cognitive core source and frozen identity differ')
     packet = json.loads(packet_path.read_text(encoding='utf-8'))
     if packet['case_id'] != case_id:
         raise ValueError('Packet identity differs from selection')
