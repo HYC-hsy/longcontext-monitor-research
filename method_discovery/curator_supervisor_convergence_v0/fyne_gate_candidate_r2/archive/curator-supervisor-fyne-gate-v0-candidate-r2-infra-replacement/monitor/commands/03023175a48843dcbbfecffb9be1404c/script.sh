@@ -1,0 +1,1 @@
+cd /app && grep -A 8 "func (a \*testApp) Metadata" test/testapp.go

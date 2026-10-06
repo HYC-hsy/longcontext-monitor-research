@@ -1,0 +1,1 @@
+cd /app && grep -B 5 "metadata fyne.AppMetadata" app/app.go | head -20

@@ -1,0 +1,1 @@
+cd /app && grep -r "type.*struct" --include="*.go" | grep -i "app" | grep "struct" | head -20

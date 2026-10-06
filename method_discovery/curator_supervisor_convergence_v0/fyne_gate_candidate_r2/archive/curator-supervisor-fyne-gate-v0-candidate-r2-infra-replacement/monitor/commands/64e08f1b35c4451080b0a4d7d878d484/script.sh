@@ -1,0 +1,1 @@
+cd /app && go test -v ./... 2>&1 | head -100

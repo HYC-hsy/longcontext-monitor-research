@@ -1,0 +1,1 @@
+cd /app && grep -A 10 "func (a \*fyneApp) Metadata" app/app.go

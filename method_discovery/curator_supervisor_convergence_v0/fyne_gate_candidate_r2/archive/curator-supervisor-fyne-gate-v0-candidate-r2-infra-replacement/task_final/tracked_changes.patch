@@ -1,0 +1,353 @@
+diff --git a/app.go b/app.go
+index e2edc6a7..3c6d69dc 100644
+--- a/app.go
++++ b/app.go
+@@ -5,6 +5,24 @@ import (
+ 	"sync"
+ )
+ 
++// AppMetadata captures an application's build-time metadata.
++// This includes the application's unique identifier, human-friendly name,
++// version information, and optional icon resource.
++//
++// Since: 2.2
++type AppMetadata struct {
++	// ID is the unique application identifier (e.g., "com.example.myapp")
++	ID string
++	// Name is the human-friendly application name (e.g., "My Application")
++	Name string
++	// Version is the application version string (e.g., "1.0.0")
++	Version string
++	// Build is the application build number
++	Build int
++	// Icon is the optional application icon resource
++	Icon Resource
++}
++
+ // An App is the definition of a graphical application.
+ // Apps can have multiple windows, by default they will exit when all windows
+ // have been closed. This can be modified using SetMaster() or SetCloseIntercept().
+@@ -60,6 +78,11 @@ type App interface {
+ 
+ 	// Lifecycle returns a type that allows apps to hook in to lifecycle events.
+ 	Lifecycle() Lifecycle
++
++	// Metadata returns the application metadata including name, version, and build information.
++	//
++	// Since: 2.2
++	Metadata() AppMetadata
+ }
+ 
+ var app App
+diff --git a/app/app.go b/app/app.go
+index d78cb47e..0c96a805 100644
+--- a/app/app.go
++++ b/app/app.go
+@@ -29,6 +29,7 @@ type fyneApp struct {
+ 	settings  *settings
+ 	storage   *store
+ 	prefs     fyne.Preferences
++	metadata  fyne.AppMetadata
+ 
+ 	running  bool
+ 	runMutex sync.Mutex
+@@ -105,6 +106,10 @@ func (a *fyneApp) Lifecycle() fyne.Lifecycle {
+ 	return a.lifecycle
+ }
+ 
++func (a *fyneApp) Metadata() fyne.AppMetadata {
++	return a.metadata
++}
++
+ // New returns a new application instance with the default driver and no unique ID
+ func New() fyne.App {
+ 	internal.LogHint("Applications should be created with a unique ID using app.NewWithID()")
+diff --git a/app_test.go b/app_test.go
+index 12aa9699..6ed371a8 100644
+--- a/app_test.go
++++ b/app_test.go
+@@ -57,6 +57,10 @@ func (dummyApp) Lifecycle() Lifecycle {
+ 	return nil
+ }
+ 
++func (dummyApp) Metadata() AppMetadata {
++	return AppMetadata{}
++}
++
+ func TestSetCurrentApp(t *testing.T) {
+ 	a := &dummyApp{}
+ 	SetCurrentApp(a)
+diff --git a/cmd/fyne/internal/mobile/binres/testdata/gen.sh b/cmd/fyne/internal/mobile/binres/testdata/gen.sh
+old mode 100755
+new mode 100644
+diff --git a/container.go b/container.go
+index 3d42a3b7..f8184841 100644
+--- a/container.go
++++ b/container.go
+@@ -50,9 +50,13 @@ func NewContainerWithLayout(layout Layout, objects ...CanvasObject) *Container {
+ }
+ 
+ // Add appends the specified object to the items this container manages.
++// If the passed object is nil, this method does nothing (nil-safe).
+ //
+ // Since: 1.4
+ func (c *Container) Add(add CanvasObject) {
++	if add == nil {
++		return
++	}
+ 	c.Objects = append(c.Objects, add)
+ 	c.layout()
+ }
+@@ -161,6 +165,14 @@ func (c *Container) Remove(rem CanvasObject) {
+ 	}
+ }
+ 
++// RemoveAll removes all objects from the container and triggers a layout refresh.
++//
++// Since: 2.2
++func (c *Container) RemoveAll() {
++	c.Objects = nil
++	c.layout()
++}
++
+ // Visible returns true if the container is currently visible, false otherwise.
+ func (c *Container) Visible() bool {
+ 	return !c.Hidden
+diff --git a/dialog/testdata/bin b/dialog/testdata/bin
+old mode 100755
+new mode 100644
+diff --git a/internal/async/chan_canvasobject.go b/internal/async/chan_canvasobject.go
+old mode 100755
+new mode 100644
+diff --git a/internal/async/chan_func.go b/internal/async/chan_func.go
+old mode 100755
+new mode 100644
+diff --git a/internal/async/chan_interface.go b/internal/async/chan_interface.go
+old mode 100755
+new mode 100644
+diff --git a/internal/async/chan_struct.go b/internal/async/chan_struct.go
+old mode 100755
+new mode 100644
+diff --git a/menu.go b/menu.go
+index 87db5350..edde8e67 100644
+--- a/menu.go
++++ b/menu.go
+@@ -7,6 +7,17 @@ type Menu struct {
+ 	Items []*MenuItem
+ }
+ 
++// Refresh causes this menu to update its display, useful if items have been added or properties changed.
++//
++// Since: 2.2
++func (m *Menu) Refresh() {
++	for _, item := range m.Items {
++		if item.ChildMenu != nil {
++			item.ChildMenu.Refresh()
++		}
++	}
++}
++
+ // NewMenu creates a new menu given the specified label (to show in a MainMenu) and list of items to display.
+ func NewMenu(label string, items ...*MenuItem) *Menu {
+ 	return &Menu{Label: label, Items: items}
+@@ -24,6 +35,10 @@ type MenuItem struct {
+ 	Disabled bool
+ 	// Since: 2.1
+ 	Checked bool
++	// Since: 2.2
++	Icon Resource
++	// Since: 2.2
++	Shortcut Shortcut
+ }
+ 
+ // NewMenuItem creates a new menu item from the passed label and action parameters.
+@@ -41,6 +56,15 @@ type MainMenu struct {
+ 	Items []*Menu
+ }
+ 
++// Refresh causes this main menu to update its display, useful if items have been added or properties changed.
++//
++// Since: 2.2
++func (m *MainMenu) Refresh() {
++	for _, menu := range m.Items {
++		menu.Refresh()
++	}
++}
++
+ // NewMainMenu creates a top level menu structure used by fyne.Window for displaying a menubar
+ // (or appropriate equivalent).
+ func NewMainMenu(items ...*Menu) *MainMenu {
+diff --git a/test/testapp.go b/test/testapp.go
+index f6754fce..919f8987 100644
+--- a/test/testapp.go
++++ b/test/testapp.go
+@@ -24,6 +24,7 @@ type testApp struct {
+ 	propertyLock sync.RWMutex
+ 	storage      fyne.Storage
+ 	lifecycle    fyne.Lifecycle
++	metadata     fyne.AppMetadata
+ 
+ 	// user action variables
+ 	appliedTheme     fyne.Theme
+@@ -86,6 +87,12 @@ func (a *testApp) Lifecycle() fyne.Lifecycle {
+ 	return a.lifecycle
+ }
+ 
++func (a *testApp) Metadata() fyne.AppMetadata {
++	a.propertyLock.RLock()
++	defer a.propertyLock.RUnlock()
++	return a.metadata
++}
++
+ func (a *testApp) lastAppliedTheme() fyne.Theme {
+ 	a.propertyLock.Lock()
+ 	defer a.propertyLock.Unlock()
+@@ -99,8 +106,17 @@ func NewApp() fyne.App {
+ 	settings := &testSettings{scale: 1.0, theme: Theme()}
+ 	prefs := internal.NewInMemoryPreferences()
+ 	store := &testStorage{}
+-	test := &testApp{settings: settings, prefs: prefs, storage: store, driver: NewDriver().(*testDriver),
+-		lifecycle: &app.Lifecycle{}}
++	test := &testApp{
++		settings: settings,
++		prefs:    prefs,
++		storage:  store,
++		driver:   NewDriver().(*testDriver),
++		lifecycle: &app.Lifecycle{},
++		metadata: fyne.AppMetadata{
++			ID:   "testApp",
++			Name: "Test App",
++		},
++	}
+ 	root, _ := store.docRootURI()
+ 	store.Docs = &internal.Docs{RootDocURI: root}
+ 	cache.ResetThemeCaches()
+diff --git a/widget/entry.go b/widget/entry.go
+index e5f151dc..8daa128c 100644
+--- a/widget/entry.go
++++ b/widget/entry.go
+@@ -88,6 +88,10 @@ type Entry struct {
+ 	ActionItem      fyne.CanvasObject `json:"-"`
+ 	binder          basicBinder
+ 	conversionError error
++
++	// minRows is the minimum number of rows to display for a multiline entry
++	// Since: 2.2
++	minRows int
+ }
+ 
+ // NewEntry creates a new single line entry widget.
+@@ -459,6 +463,18 @@ func (e *Entry) SetText(text string) {
+ 	e.updateCursorAndSelection()
+ }
+ 
++// SetMinRowsVisible forces a multi-line entry to show `count` number of rows without scrolling.
++// This is useful to ensure that multiline entries are sufficiently tall by default.
++// The default value for a new entry is 3.
++//
++// Since: 2.2
++func (e *Entry) SetMinRowsVisible(count int) {
++	e.propertyLock.Lock()
++	e.minRows = count
++	e.propertyLock.Unlock()
++	e.Refresh()
++}
++
+ // Tapped is called when this entry has been tapped. We update the cursor position in
+ // device-specific callbacks (MouseDown() and TouchDown()).
+ //
+@@ -1306,9 +1322,13 @@ func (r *entryRenderer) MinSize() fyne.Size {
+ 	minSize := charMin.Add(fyne.NewSize(theme.Padding()*2, theme.Padding()*2))
+ 
+ 	if r.entry.MultiLine {
+-		// ensure multiline height is at least charMinSize * multilineRows
+-		rowHeight := charMin.Height * multiLineRows
+-		minSize.Height = fyne.Max(minSize.Height, rowHeight+(multiLineRows-1)*theme.Padding())
++		// ensure multiline height is at least charMinSize * rows
++		rows := multiLineRows
++		if r.entry.minRows > 0 {
++			rows = r.entry.minRows
++		}
++		rowHeight := charMin.Height * float32(rows)
++		minSize.Height = fyne.Max(minSize.Height, rowHeight+float32(rows-1)*theme.Padding())
+ 	}
+ 
+ 	return minSize.Add(fyne.NewSize(theme.Padding()*4, theme.Padding()*2))
+diff --git a/widget/hyperlink.go b/widget/hyperlink.go
+index 6faf8510..288a22bd 100644
+--- a/widget/hyperlink.go
++++ b/widget/hyperlink.go
+@@ -23,6 +23,12 @@ type Hyperlink struct {
+ 	Wrapping  fyne.TextWrap  // The wrapping of the Text
+ 	TextStyle fyne.TextStyle // The style of the hyperlink text
+ 
++	// OnTapped is an optional callback that is called when the hyperlink is tapped.
++	// If set, this callback is executed before opening the URL in the browser.
++	//
++	// Since: 2.2
++	OnTapped func() `json:"-"`
++
+ 	focused, hovered bool
+ 	provider         *RichText
+ }
+@@ -167,6 +173,9 @@ func (hl *Hyperlink) TypedKey(ev *fyne.KeyEvent) {
+ }
+ 
+ func (hl *Hyperlink) openURL() {
++	if hl.OnTapped != nil {
++		hl.OnTapped()
++	}
+ 	if hl.URL != nil {
+ 		err := fyne.CurrentApp().OpenURL(hl.URL)
+ 		if err != nil {
+diff --git a/widget/testdata/bin b/widget/testdata/bin
+old mode 100755
+new mode 100644
+diff --git a/widget/testdata/diff-failed.sh b/widget/testdata/diff-failed.sh
+old mode 100755
+new mode 100644
+diff --git a/widget/toolbar.go b/widget/toolbar.go
+index 259164f5..f38cb725 100644
+--- a/widget/toolbar.go
++++ b/widget/toolbar.go
+@@ -19,6 +19,13 @@ type ToolbarAction struct {
+ 	OnActivated func() `json:"-"`
+ }
+ 
++// SetIcon updates the icon for this ToolbarAction
++//
++// Since: 2.2
++func (t *ToolbarAction) SetIcon(icon fyne.Resource) {
++	t.Icon = icon
++}
++
+ // ToolbarObject gets a button to render this ToolbarAction
+ func (t *ToolbarAction) ToolbarObject() fyne.CanvasObject {
+ 	button := NewButtonWithIcon("", t.Icon, t.OnActivated)
+@@ -28,7 +35,7 @@ func (t *ToolbarAction) ToolbarObject() fyne.CanvasObject {
+ }
+ 
+ // NewToolbarAction returns a new push button style ToolbarItem
+-func NewToolbarAction(icon fyne.Resource, onActivated func()) ToolbarItem {
++func NewToolbarAction(icon fyne.Resource, onActivated func()) *ToolbarAction {
+ 	return &ToolbarAction{icon, onActivated}
+ }
+ 
+@@ -44,7 +51,7 @@ func (t *ToolbarSpacer) ToolbarObject() fyne.CanvasObject {
+ }
+ 
+ // NewToolbarSpacer returns a new spacer item for a Toolbar to assist with ToolbarItem alignment
+-func NewToolbarSpacer() ToolbarItem {
++func NewToolbarSpacer() *ToolbarSpacer {
+ 	return &ToolbarSpacer{}
+ }
+ 
+@@ -59,7 +66,7 @@ func (t *ToolbarSeparator) ToolbarObject() fyne.CanvasObject {
+ }
+ 
+ // NewToolbarSeparator returns a new separator item for a Toolbar to assist with ToolbarItem grouping
+-func NewToolbarSeparator() ToolbarItem {
++func NewToolbarSeparator() *ToolbarSeparator {
+ 	return &ToolbarSeparator{}
+ }
+ 

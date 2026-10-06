@@ -1,0 +1,1 @@
+cd /app && grep -n "func SetMetadata" app/meta.go
