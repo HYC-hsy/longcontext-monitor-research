@@ -899,6 +899,7 @@ class MonitorAgent:
 
     def _ase_reference_ready(self):
         _, metadata = reference_surface(self.workspace)
+        self._ase_reference_metadata = metadata
         ready = metadata['status'] == 'present'
         if ready:
             if not self._ase_reference_ready_reported:
@@ -907,9 +908,30 @@ class MonitorAgent:
                                      source_characters=metadata['source_characters'])
                 self._ase_reference_ready_reported = True
         else:
-            self._audit_dialogue('ase_reference_initialization_pending',
-                                 status=metadata['status'])
+            self._ase_reference_ready_reported = False
+            if not self._ase_initialization_complete:
+                self._audit_dialogue('ase_reference_initialization_pending',
+                                     status=metadata['status'])
         return ready
+
+    def _ase_reference_control_guard(self, action):
+        if not self.ase_v0 or self._ase_reference_ready():
+            return None
+        metadata = self._ase_reference_metadata
+        self._audit_dialogue('ase_reference_control_blocked', action=action,
+                             status=metadata['status'],
+                             source_characters=metadata['source_characters'],
+                             source_sha256=metadata['source_sha256'])
+        return ToolOutcome({
+            'status': ('reference_initialization_pending'
+                       if not self._ase_initialization_complete and action == 'wait'
+                       else 'reference_invalid'),
+            'message': 'No Task control was executed. monitor/reference.md must exist, be non-empty, '
+                       f'and contain at most {ASE_REFERENCE_MAX_CHARS} source characters so its full '
+                       'contents can be automatically exposed. Continue investigating or repair it '
+                       'with ordinary private tools before retrying.',
+            'reference_status': metadata['status'],
+        })
 
     def _dispatch(self, name: str, arguments: dict) -> ToolOutcome:
         ase_reference = False
@@ -1011,12 +1033,9 @@ class MonitorAgent:
                 if mode not in ('follow', 'patrol'):
                     raise ValueError('wait mode must be follow or patrol')
                 after_turns = max(1, int(arguments["after_turns"]))
-                if self.ase_v0 and not self._ase_initialization_complete and not self._ase_reference_ready():
-                    return ToolOutcome({
-                        'status': 'reference_initialization_pending',
-                        'message': 'The supervisory reference is absent or empty. Initialization cannot '
-                                   'enter a long wait yet. You may continue investigating and create your '
-                                   'own monitor/reference.md with the ordinary private file tools.'})
+                reference_block = self._ase_reference_control_guard('wait')
+                if reference_block is not None:
+                    return reference_block
                 if self.dcm is not None:
                     if mode == 'patrol' and (not self.ase_v0 or self.cqs.active):
                         boundary = self.dcm.release('patrol', 'local', arguments)
@@ -1041,6 +1060,9 @@ class MonitorAgent:
                 if (self.root_routed and self.frame_kind != 'root'
                         and self.completion_state is not None and self.completion_state()):
                     raise ValueError('A current handoff requires the root decision frame before control.')
+                reference_block = self._ase_reference_control_guard('intervene')
+                if reference_block is not None:
+                    return reference_block
                 if self.intervention_callback is not None:
                     if message in self._sent_messages:
                         return ToolOutcome({"status": "already_submitted",
@@ -1099,6 +1121,9 @@ class MonitorAgent:
                     if (not self._seen_completion or current != self._seen_completion
                             or current["generation"] == self._intervened_generation):
                         raise ValueError("The observed handoff is no longer current. Inspect the runtime update before deciding.")
+                    reference_block = self._ase_reference_control_guard('allow_complete')
+                    if reference_block is not None:
+                        return reference_block
                     if self.dcm is not None:
                         if self.ase_v0 or arguments['result'] == 'resolve':
                             boundary = self.dcm.release('allow_complete', 'root', arguments)
@@ -1118,6 +1143,9 @@ class MonitorAgent:
                         if self.root_routed else
                         {"request_id": current["request_id"]}))
                 if not self.completion_pending: raise ValueError("No root completion is pending")
+                reference_block = self._ase_reference_control_guard('allow_complete')
+                if reference_block is not None:
+                    return reference_block
                 return ToolOutcome(None, False, MonitorAction("allow_complete", {}))
             else:
                 data = {"status": "error", "error": f"Unknown tool: {name}"}

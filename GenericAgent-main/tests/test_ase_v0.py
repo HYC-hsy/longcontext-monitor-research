@@ -253,6 +253,100 @@ def test_ase_worker_blocks_queued_same_turn_wake_then_reviews_new_feedback(tmp_p
         worker.join(timeout=3)
 
 
+def test_delivery_failure_is_recorded_without_same_turn_recontrol_or_double_send(tmp_path, monkeypatch):
+    import monitor_agent_core.agent as agent_module
+    import monitor_agent_core.provider as provider_module
+    from monitor_agent_core.runtime import _worker
+
+    reviewed, audited, delivery_attempts = [], [], []
+
+    class ThreadProcess:
+        def __init__(self, *, target, args, daemon):
+            self.thread = threading.Thread(target=target, args=args, daemon=daemon)
+
+        def start(self):
+            self.thread.start()
+
+        def is_alive(self):
+            return self.thread.is_alive()
+
+        def join(self, timeout=None):
+            self.thread.join(timeout)
+
+        def terminate(self):
+            raise AssertionError('The fixture worker must close normally')
+
+    class FakeClient:
+        def __init__(self, *_args):
+            self.captured_root_handoffs = set()
+
+    class FakeMonitor:
+        ase_v0 = True
+        dcec_enabled = False
+        root_routed = False
+        verification = None
+        max_review_turns = 20
+
+        def __init__(self, *_args, **_kwargs):
+            self.cqs = SimpleNamespace(last_call={'locator': 'dialogue#intervene'})
+
+        def _progress(self, event, **fields):
+            audited.append((event, fields))
+
+        def review(self, _context, **_kwargs):
+            reviewed.append(len(reviewed) + 1)
+            if len(reviewed) == 2:
+                self.intervention_callback('Inspect the public route.')
+                return SimpleNamespace(kind='local_intervened', payload={})
+            return SimpleNamespace(kind='wait', payload={'after_turns': 1, 'mode': 'patrol'})
+
+    monkeypatch.setattr(provider_module, 'MonitorProviderClient', FakeClient)
+    monkeypatch.setattr(agent_module, 'MonitorAgent', FakeMonitor)
+    task = tmp_path / 'task'
+    task.mkdir()
+
+    def failed_delivery(message):
+        delivery_attempts.append(message)
+        raise RuntimeError('fixture delivery failure')
+
+    runtime = MonitorRuntime(public_task='Public route.', task_workspace=task,
+                             artifact_dir=tmp_path / 'artifacts', config_name='offline',
+                             model_config={'monitor_adaptive_supervisory_environment': True},
+                             interrupt_callback=failed_delivery, task_id='fixture:ase',
+                             worker_target=_worker, process_factory=ThreadProcess)
+    try:
+        receipts = runtime.artifact_dir / 'runtime_receipts.jsonl'
+        deadline = time.monotonic() + 3
+        while not (receipts.exists() and '"kind": "ready"' in receipts.read_text(encoding='utf-8')):
+            assert time.monotonic() < deadline
+            time.sleep(.01)
+        runtime.archive_boundary({'boundary': 'post_model_pre_tool', 'task_turn': 76,
+                                  'text': 'Task model response.'})
+        deadline = time.monotonic() + 3
+        while True:
+            records = [json.loads(line) for line in receipts.read_text(encoding='utf-8').splitlines()] \
+                if receipts.exists() else []
+            if any(row.get('kind') == 'intervention' and row.get('delivery') == 'failed'
+                   for row in records):
+                break
+            assert time.monotonic() < deadline
+            time.sleep(.01)
+        runtime.archive_boundary({'boundary': 'post_tool_pre_next_llm', 'task_turn': 76,
+                                  'text': 'Same-turn tool return.'})
+        time.sleep(.05)
+        assert len(reviewed) == 2 and delivery_attempts == ['Inspect the public route.']
+        runtime.archive_boundary({'boundary': 'post_model_pre_tool', 'task_turn': 77,
+                                  'text': 'New Task model feedback.'})
+        deadline = time.monotonic() + 3
+        while len(reviewed) < 3:
+            assert time.monotonic() < deadline
+            time.sleep(.01)
+        assert len(reviewed) == 3 and len(delivery_attempts) == 1
+        assert [event for event, _ in audited].count('ase_feedback_barrier_satisfied') == 1
+    finally:
+        runtime.close()
+
+
 def test_turn_zero_and_provider_ready_composition_no_working_ledger(tmp_path, monkeypatch):
     monitor, client, ws = make_monitor(tmp_path)
     reference = 'REFERENCE_SENTINEL:' + 'a' * 2750 + 'MIDDLE_MISSION_SENTINEL' + 'b' * 2750
@@ -334,22 +428,77 @@ def test_inactive_patrol_is_one_turn_but_active_patrol_reconsiders(tmp_path, mon
     assert len([r for r in rows(ws) if r['event'] == 'ase_reconsideration_boundary']) == 1
 
 
-def test_intervention_before_reference_does_not_waive_initialization(tmp_path, monkeypatch):
+def test_initial_intervention_requires_reference_but_can_follow_write_in_same_review(tmp_path, monkeypatch):
     monitor, client, ws = make_monitor(tmp_path)
     monitor.intervention_callback = lambda message: {'delivery': 'queued'}
     sends = scripted(client, monkeypatch, [
         ('Observed route discrepancy.', 'intervene', {'message': 'Inspect route behavior.'}),
+        ('', 'file_write', {'path': 'monitor/reference.md', 'content': 'Public route behavior matters.'}),
+        ('Observed route discrepancy.', 'intervene', {'message': 'Inspect route behavior.'}),
     ])
     assert monitor.review('Initialization').kind == 'local_intervened'
-    assert len(sends) == 1
+    assert len(sends) == 3
     scripted(client, monkeypatch, [
-        ('', 'wait', {'after_turns': 1, 'mode': 'follow'}),
-        ('', 'file_write', {'path': 'monitor/reference.md', 'content': 'Public route behavior matters.'}),
         ('', 'wait', {'after_turns': 1, 'mode': 'follow'}),
     ])
     assert monitor.review('After feedback').payload['mode'] == 'follow'
     assert monitor.cqs.anchor['message'] == 'Inspect route behavior.'
     assert len([r for r in rows(ws) if r['event'] == 'ase_reference_initialization_pending']) == 1
+
+
+@pytest.mark.parametrize('reference', [None, '', 'X' * (ASE_REFERENCE_MAX_CHARS + 1), b'\xff'])
+def test_invalid_reference_blocks_all_task_control_without_state_changes(tmp_path, reference):
+    monitor, _, ws = make_monitor(tmp_path)
+    if isinstance(reference, bytes):
+        ws.resolve_private('monitor/reference.md').write_bytes(reference)
+    elif reference is not None:
+        ws.write_text('monitor/reference.md', reference)  # Bypass file tools as code_run can.
+    submitted = []
+    monitor.intervention_callback = lambda message: submitted.append(message)
+    for name, arguments in (
+        ('intervene', {'message': 'Inspect the route.'}),
+        ('wait', {'after_turns': 1, 'mode': 'patrol'}),
+    ):
+        result = monitor.dispatch(name, arguments)
+        assert result.action is None and result.data['status'].startswith('reference_')
+    handoff = root(monitor)
+    monitor.frame_kind = 'root'
+    monitor.root_frame_handoff = handoff
+    monitor._seen_completion = handoff
+    monitor.completion_pending = True
+    result = monitor.dispatch('allow_complete', {})
+    assert result.action is None and result.data['status'] == 'reference_invalid'
+    assert not submitted and not monitor.cqs.active and monitor.cqs.anchor is None
+    assert not [r for r in rows(ws) if r['event'] == 'ase_reconsideration_boundary']
+    assert len([r for r in rows(ws) if r['event'] == 'ase_reference_control_blocked']) == 3
+
+
+def test_code_run_reference_mutation_is_rechecked_before_control(tmp_path):
+    monitor, _, ws = make_monitor(tmp_path)
+    monitor.dispatch('file_write', {'path': 'monitor/reference.md',
+                                    'content': 'Initial full task reference.'})
+    monitor._ase_initialization_complete = True
+    submitted = []
+    monitor.intervention_callback = lambda message: (submitted.append(message) or
+                                                     {'submission_id': 'sent', 'delivery': 'queued'})
+
+    def change(value):
+        result = monitor.dispatch('code_run', {
+            'code': f'from pathlib import Path\nPath("reference.md").write_text({value!r}, encoding="utf-8")',
+            'type': 'python', 'wait_seconds': 5})
+        assert result.data['status'] == 'success'
+
+    change('')
+    assert monitor.dispatch('wait', {'mode': 'follow', 'after_turns': 1}).action is None
+    assert monitor.dispatch('intervene', {'message': 'Check route.'}).action is None
+    change('Z' * (ASE_REFERENCE_MAX_CHARS + 1))
+    assert monitor.dispatch('intervene', {'message': 'Check route.'}).action is None
+    assert not submitted and not monitor.cqs.active
+    change('A valid model-owned revision from ordinary code_run.')
+    assert reference_surface(ws)[1]['status'] == 'present'
+    assert monitor.dispatch('intervene', {'message': 'Check route.'}).action.kind == 'local_intervened'
+    assert submitted == ['Check route.']
+    assert monitor.cqs.anchor['message'] == 'Check route.'
 
 
 def test_intervention_anchor_survives_follows_then_patrol_clears(tmp_path, monkeypatch):
@@ -394,6 +543,7 @@ def test_intervention_anchor_survives_follows_then_patrol_clears(tmp_path, monke
 
 def test_release_boundary_root_and_changed_control(tmp_path, monkeypatch):
     monitor, client, ws = make_monitor(tmp_path)
+    ws.write_text('monitor/reference.md', 'Public route behavior matters.')
     handoff = root(monitor)
     sends = scripted(client, monkeypatch, [
         ('', 'allow_complete', {}),

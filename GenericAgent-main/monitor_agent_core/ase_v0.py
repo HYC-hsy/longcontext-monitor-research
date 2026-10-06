@@ -49,8 +49,12 @@ def reference_surface(workspace, limit=REFERENCE_LIMIT):
         raise ValueError('ASE reference source limit must be a positive integer')
     try:
         source = workspace.resolve_read('monitor/reference.md').read_bytes()
-        content = source.decode('utf-8', errors='replace')
-        status = 'present' if content.strip() else 'empty'
+        try:
+            content = source.decode('utf-8')
+        except UnicodeDecodeError:
+            content, status = '', 'invalid_utf8'
+        else:
+            status = 'present' if content.strip() else 'empty'
     except FileNotFoundError:
         source, content, status = b'', '', 'absent'
     except (OSError, ValueError) as exc:
