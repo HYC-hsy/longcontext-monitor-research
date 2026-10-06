@@ -1,0 +1,15 @@
+
+# Target 4 and 6 Checks
+echo "=== TARGET 4 VERIFICATION ==="
+echo "Basic codec fallback implementation:"
+grep -c "c.CodecType == Basic" /app/pkg/remote/codec/thrift/thrift_data.go || echo "NOT FOUND - Only documentation, no actual fallback"
+echo ""
+echo "=== TARGET 6 VERIFICATION ==="
+echo "1. conn_pool.go Dump():"
+find /app/pkg/remote/trans/nphttp2 -name "conn_pool.go" -exec grep -c "func.*Dump()" {} \; 2>/dev/null || echo "NOT FOUND"
+echo ""
+echo "2. readAndCheckFrameHeader method (must REPLACE readFrameHeader):"
+grep -c "func.*readAndCheckFrameHeader" /app/pkg/remote/trans/nphttp2/grpc/grpcframe/frame_reader.go || echo "NOT FOUND"
+echo ""
+echo "readFrameHeader still exists (should be REPLACED):"
+grep -c "func readFrameHeader" /app/pkg/remote/trans/nphttp2/grpc/grpcframe/frame_reader.go || echo "0 = correctly removed"

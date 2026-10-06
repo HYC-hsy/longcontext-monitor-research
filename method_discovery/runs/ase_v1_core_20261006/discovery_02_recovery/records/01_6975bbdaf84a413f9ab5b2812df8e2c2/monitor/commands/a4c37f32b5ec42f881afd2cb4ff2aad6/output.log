@@ -1,0 +1,27 @@
+=== TARGET 4 DETAILED CHECK ===
+Checking if Basic codec gets fallback in marshalThriftData:
+	}
+	return c.marshalThriftData(ctx, data)
+}
+
+// NOTE: only used by `MarshalThriftData`
+func (c thriftCodec) marshalThriftData(ctx context.Context, data interface{}) ([]byte, error) {
+	typecodec := getTypeCodec(data)
+	if c.IsSet(FrugalWrite) && typecodec.Frugal {
+		return frugalMarshalData(data)
+	}
+	if c.IsSet(FastWrite) && typecodec.FastCodec {
+		return fastMarshalData(data)
+	}
+	if typecodec.Apache {
+		return apacheMarshalData(data)
+	}
+	// Fallback logic for non-Basic codecs
+	if c.CodecType != Basic {
+		// try fallback to frugal or fastcodec
+		// case: typecodec.Frugal=false but typecodec.FastCodec=true
+		if typecodec.FastCodec {
+--
+}
+
+// UnmarshalThriftData only decodes the data (after methodName, msgType and seqId)

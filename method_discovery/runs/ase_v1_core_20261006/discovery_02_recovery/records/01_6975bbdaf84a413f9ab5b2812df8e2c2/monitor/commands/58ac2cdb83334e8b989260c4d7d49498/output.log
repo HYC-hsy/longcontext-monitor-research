@@ -1,0 +1,7 @@
+type ClientStreamEndpoint func(ctx context.Context, stream streaming.ClientStream) error
+type ClientStreamMiddleware func(next ClientStreamEndpoint) ClientStreamEndpoint
+type ClientStreamMiddlewareBuilder func(ctx context.Context) ClientStreamMiddleware
+type TypedClientStreamEndpoint[Req, Resp any] func(ctx context.Context, stream streaming.ClientStreamWrapper[Req, Resp]) error
+func ClientStreamChain(mws ...ClientStreamMiddleware) ClientStreamMiddleware {
+func DummyClientStreamMiddleware(next ClientStreamEndpoint) ClientStreamEndpoint {
+func DummyClientStreamEndpoint(ctx context.Context, stream streaming.ClientStream) error {

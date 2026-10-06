@@ -1,0 +1,17 @@
+=== CLIENT STREAM ERROR CONTEXT ===
+// Header returns the header metadata sent by the server if any.
+// If a non-nil error is returned, stream.DoFinish() will be called to record the EndOfStream
+func (s *stream) Header() (md metadata.MD, err error) {
+	if md, err = s.stream.Header(); err != nil {
+		s.DoFinish(err)
+	}
+	return
+}
+
+func (s *stream) Trailer() metadata.MD {
+	return s.stream.Trailer()
+}
+
+func (s *stream) Context() context.Context {
+	return s.stream.Context()
+}

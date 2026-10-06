@@ -1,0 +1,21 @@
+// Args endpoint request
+type Args struct {
+	Stream Stream
+}
+
+// Result endpoint response
+type Result struct {
+	Stream Stream
+}
+
+// ClientStreamWrapper wraps a typed client stream
+type ClientStreamWrapper[Req, Resp any] interface {
+	Send(ctx context.Context, req *Req) error
+	Recv(ctx context.Context) (*Resp, error)
+	CloseAndRecv(ctx context.Context) (*Resp, error)
+	Header() (Header, error)
+	Trailer() (Trailer, error)
+	Context() context.Context
+}
+
+// ServerStreamWrapper wraps a typed server stream

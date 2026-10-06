@@ -1,0 +1,183 @@
+diff --git a/pkg/streaming/streaming.go b/pkg/streaming/streaming.go
+index 8e72b76..de4a9b3 100644
+--- a/pkg/streaming/streaming.go
++++ b/pkg/streaming/streaming.go
+@@ -22,8 +22,45 @@ import (
+ 	"io"
+ 
+ 	"github.com/cloudwego/kitex/pkg/remote/trans/nphttp2/metadata"
++	"github.com/cloudwego/kitex/pkg/stats"
+ )
+ 
++// Header represents RPC metadata in header
++type Header map[string]string
++
++// Trailer represents RPC metadata in trailer
++type Trailer map[string]string
++
++// ClientStream represents a client-side streaming interface
++type ClientStream interface {
++	// SendMsg sends a message to the peer
++	SendMsg(ctx context.Context, m any) error
++	// RecvMsg receives a message from the peer
++	RecvMsg(ctx context.Context, m any) error
++	// Header returns header metadata from the server
++	Header() (Header, error)
++	// Trailer returns trailer metadata from the server
++	Trailer() (Trailer, error)
++	// CloseSend closes the send direction
++	CloseSend(ctx context.Context) error
++	// Context returns the stream's context
++	Context() context.Context
++}
++
++// ServerStream represents a server-side streaming interface
++type ServerStream interface {
++	// SendMsg sends a message to the peer
++	SendMsg(ctx context.Context, m any) error
++	// RecvMsg receives a message from the peer
++	RecvMsg(ctx context.Context, m any) error
++	// SetHeader sets header metadata (may be called multiple times; merged)
++	SetHeader(hd Header) error
++	// SendHeader sends header metadata (fails if called after first response)
++	SendHeader(hd Header) error
++	// SetTrailer sets trailer metadata (merged when called multiple times)
++	SetTrailer(hd Trailer) error
++}
++
+ // Stream both client and server stream
+ type Stream interface {
+ 	// SetHeader sets the header metadata. It may be called multiple times.
+@@ -75,3 +112,132 @@ type Args struct {
+ type Result struct {
+ 	Stream Stream
+ }
++
++// ClientStreamWrapper wraps a typed client stream
++type ClientStreamWrapper[Req, Resp any] interface {
++	Send(ctx context.Context, req *Req) error
++	Recv(ctx context.Context) (*Resp, error)
++	CloseAndRecv(ctx context.Context) (*Resp, error)
++	Header() (Header, error)
++	Trailer() (Trailer, error)
++	Context() context.Context
++}
++
++// ServerStreamWrapper wraps a typed server stream
++type ServerStreamWrapper[Req, Resp any] interface {
++	Send(ctx context.Context, resp *Resp) error
++	SendAndClose(ctx context.Context, resp *Resp) error
++	Recv(ctx context.Context) (*Req, error)
++	SetHeader(hd Header) error
++	SendHeader(hd Header) error
++	SetTrailer(hd Trailer) error
++	Context() context.Context
++}
++
++// NewClientStreamWrapper creates a typed wrapper around ClientStream
++func NewClientStreamWrapper[Req, Resp any](stream ClientStream) ClientStreamWrapper[Req, Resp] {
++	return &clientStreamWrapper[Req, Resp]{stream: stream}
++}
++
++type clientStreamWrapper[Req, Resp any] struct {
++	stream ClientStream
++}
++
++func (w *clientStreamWrapper[Req, Resp]) Send(ctx context.Context, req *Req) error {
++	return w.stream.SendMsg(ctx, req)
++}
++
++func (w *clientStreamWrapper[Req, Resp]) Recv(ctx context.Context) (*Resp, error) {
++	var resp Resp
++	err := w.stream.RecvMsg(ctx, &resp)
++	if err != nil {
++		return nil, err
++	}
++	return &resp, nil
++}
++
++func (w *clientStreamWrapper[Req, Resp]) CloseAndRecv(ctx context.Context) (*Resp, error) {
++	if err := w.stream.CloseSend(ctx); err != nil {
++		return nil, err
++	}
++	return w.Recv(ctx)
++}
++
++func (w *clientStreamWrapper[Req, Resp]) Header() (Header, error) {
++	return w.stream.Header()
++}
++
++func (w *clientStreamWrapper[Req, Resp]) Trailer() (Trailer, error) {
++	return w.stream.Trailer()
++}
++
++func (w *clientStreamWrapper[Req, Resp]) Context() context.Context {
++	return w.stream.Context()
++}
++
++// NewServerStreamWrapper creates a typed wrapper around ServerStream
++func NewServerStreamWrapper[Req, Resp any](stream ServerStream) ServerStreamWrapper[Req, Resp] {
++	return &serverStreamWrapper[Req, Resp]{stream: stream}
++}
++
++type serverStreamWrapper[Req, Resp any] struct {
++	stream ServerStream
++}
++
++func (w *serverStreamWrapper[Req, Resp]) Send(ctx context.Context, resp *Resp) error {
++	return w.stream.SendMsg(ctx, resp)
++}
++
++func (w *serverStreamWrapper[Req, Resp]) SendAndClose(ctx context.Context, resp *Resp) error {
++	return w.stream.SendMsg(ctx, resp)
++}
++
++func (w *serverStreamWrapper[Req, Resp]) Recv(ctx context.Context) (*Req, error) {
++	var req Req
++	err := w.stream.RecvMsg(ctx, &req)
++	if err != nil {
++		return nil, err
++	}
++	return &req, nil
++}
++
++func (w *serverStreamWrapper[Req, Resp]) SetHeader(hd Header) error {
++	return w.stream.SetHeader(hd)
++}
++
++func (w *serverStreamWrapper[Req, Resp]) SendHeader(hd Header) error {
++	return w.stream.SendHeader(hd)
++}
++
++func (w *serverStreamWrapper[Req, Resp]) SetTrailer(hd Trailer) error {
++	return w.stream.SetTrailer(hd)
++}
++
++func (w *serverStreamWrapper[Req, Resp]) Context() context.Context {
++	return w.stream.Context()
++}
++
++// CloseCallbackRegister allows registering callbacks for stream close events
++type CloseCallbackRegister interface {
++	OnClose(callback func())
++}
++
++// GRPCStreamGetter provides access to the underlying gRPC stream
++type GRPCStreamGetter interface {
++	GetGRPCStream() interface{}
++}
++
++// EventHandler defines a hook for streaming-related events
++type EventHandler interface {
++	OnEvent(ctx context.Context, event stats.Event) error
++}
++
++// ArgsWithClientStream contains a typed client stream
++type ArgsWithClientStream[Req, Resp any] struct {
++	Stream ClientStreamWrapper[Req, Resp]
++}
++
++// ResultWithServerStream contains a typed server stream
++type ResultWithServerStream[Req, Resp any] struct {
++	Stream ServerStreamWrapper[Req, Resp]
++}

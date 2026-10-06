@@ -1,0 +1,23 @@
+=== TARGET 4 FINAL CHECK ===
+0
+Count above (should be 0 if fixed)
+
+Checking the actual fallback logic:
+	if dataLenOK && c.IsSet(FastRead) && typecodec.FastCodec {
+		return fastUnmarshal(trans, data, dataLen)
+	}
+	if typecodec.Apache {
+		return apacheUnmarshal(trans, data)
+	}
+	if dataLenOK {
+		// Fallback to FastCodec or Frugal if available
+		// This allows Basic codec to use FastCodec/Frugal when the type supports it
+		if typecodec.FastCodec {
+			return fastUnmarshal(trans, data, dataLen)
+		}
+		if typecodec.Frugal {
+			return frugalUnmarshal(trans, data, dataLen)
+		}
+	}
+	return errDecodeMismatchMsgType
+}

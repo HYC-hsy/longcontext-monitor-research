@@ -1,0 +1,26 @@
+=== TARGET 4 CRITICAL ISSUE ===
+The condition 'c.CodecType != Basic' at line 131 still EXCLUDES Basic from fallback
+This means Basic codec NEVER gets fallback to FastCodec/Frugal
+
+Spec requirement: Basic codec MUST succeed with FastCodec/Frugal when available
+Current: Only non-Basic codecs get fallback
+
+Context around line 131:
+		return fastUnmarshal(trans, data, dataLen)
+	}
+	if typecodec.Apache {
+		return apacheUnmarshal(trans, data)
+	}
+	if dataLenOK && c.CodecType != Basic {
+		// try fallback to frugal or fastcodec
+		// case: typecodec.Frugal=false but typecodec.FastCodec=true
+		if typecodec.FastCodec {
+			return fastUnmarshal(trans, data, dataLen)
+		}
+		// case: typecodec.FastCodec=false but typecodec.Frugal=true
+		if typecodec.Frugal {
+			return frugalUnmarshal(trans, data, dataLen)
+		}
+	}
+	return errDecodeMismatchMsgType
+}

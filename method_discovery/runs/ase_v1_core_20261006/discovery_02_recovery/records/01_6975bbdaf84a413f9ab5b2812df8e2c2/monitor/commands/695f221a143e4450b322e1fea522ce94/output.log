@@ -1,0 +1,16 @@
+=== TARGET 4 SPEC REQUIREMENT ===
+## Target 4: Thrift Codec Fallback Enhancement
+
+The thrift codec currently fails when `CodecType` is `Basic` and the message type does not support the Apache codec, even though alternative serialization codecs (FastCodec, Frugal) are available. This means services that only generate FastCodec or Frugal code cannot use the Basic codec at all.
+
+This target ensures that the thrift codec's alternative serialization fallback works consistently for all codec types, including Basic. After this change, calling `MarshalThriftData` or `UnmarshalThriftData` with a Basic codec on a message type that supports FastCodec or Frugal will succeed instead of returning an error.
+
+### Requirements
+
+1. **Marshal fallback** in `pkg/remote/codec/thrift`: `MarshalThriftData` must succeed when called with a `Basic` codec on message types that support alternative serialization (FastCodec or Frugal). The fallback behavior should be consistent regardless of the codec type — if a message cannot be serialized with the primary codec, alternative codecs must be attempted.
+
+2. **Unmarshal fallback** in `pkg/remote/codec/thrift`: `UnmarshalThriftData` must similarly succeed with a `Basic` codec when alternative serialization is available. The same consistency requirement applies — codec type should not prevent fallback to available alternatives.
+
+---
+
+## Target 5: Client Option Category System

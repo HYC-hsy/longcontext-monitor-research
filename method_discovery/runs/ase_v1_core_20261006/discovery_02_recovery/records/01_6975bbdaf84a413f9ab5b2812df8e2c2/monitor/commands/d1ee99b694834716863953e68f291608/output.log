@@ -1,0 +1,17 @@
+=== CRITICAL TARGET 4 ISSUE ===
+Current fallback code excludes Basic codec:
+	if c.CodecType != Basic {
+		// try fallback to frugal or fastcodec
+		// case: typecodec.Frugal=false but typecodec.FastCodec=true
+		if typecodec.FastCodec {
+			return fastMarshalData(data)
+		}
+		// case: typecodec.FastCodec=false but typecodec.Frugal=true
+		if typecodec.Frugal {
+			return frugalMarshalData(data)
+		}
+	}
+
+SPEC REQUIRES: Basic codec MUST succeed with FastCodec/Frugal when available
+CURRENT: Fallback only applies when c.CodecType != Basic (i.e., EXCLUDES Basic!)
+This is backwards - Basic codec never gets fallback!

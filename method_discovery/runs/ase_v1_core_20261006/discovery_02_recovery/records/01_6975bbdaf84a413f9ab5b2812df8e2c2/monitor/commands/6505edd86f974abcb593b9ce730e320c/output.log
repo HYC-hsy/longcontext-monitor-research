@@ -1,0 +1,20 @@
+=== TARGET 4 VERIFICATION ===
+The '!= Basic' condition still exists, which means Basic codec is EXCLUDED from fallback:
+		return fastUnmarshal(trans, data, dataLen)
+	}
+	if typecodec.Apache {
+		return apacheUnmarshal(trans, data)
+	}
+	if dataLenOK && c.CodecType != Basic {
+		// try fallback to frugal or fastcodec
+		// case: typecodec.Frugal=false but typecodec.FastCodec=true
+		if typecodec.FastCodec {
+			return fastUnmarshal(trans, data, dataLen)
+		}
+		// case: typecodec.FastCodec=false but typecodec.Frugal=true
+		if typecodec.Frugal {
+			return frugalUnmarshal(trans, data, dataLen)
+		}
+	}
+	return errDecodeMismatchMsgType
+}

@@ -1,0 +1,9 @@
+type ClientStreamWrapper[Req, Resp any] interface {
+	Send(ctx context.Context, req *Req) error
+	Recv(ctx context.Context) (*Resp, error)
+	CloseSend(ctx context.Context) error
+--
+type ServerStreamWrapper[Req, Resp any] interface {
+	Recv(ctx context.Context) (*Req, error)
+	Send(ctx context.Context, resp *Resp) error
+	SetHeader(hd Header) error

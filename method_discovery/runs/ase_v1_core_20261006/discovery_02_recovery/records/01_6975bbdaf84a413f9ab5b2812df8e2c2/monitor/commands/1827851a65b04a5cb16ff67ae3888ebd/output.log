@@ -1,0 +1,17 @@
+=== TARGET 4 STATUS CHECK ===
+Basic codec fallback implementation:
+		return apacheMarshalData(data)
+	}
+	if c.CodecType != Basic {
+		// try fallback to frugal or fastcodec
+		// case: typecodec.Frugal=false but typecodec.FastCodec=true
+		if typecodec.FastCodec {
+			return fastMarshalData(data)
+		}
+		// case: typecodec.FastCodec=false but typecodec.Frugal=true
+		if typecodec.Frugal {
+			return frugalMarshalData(data)
+		}
+	}
+--
+		return apacheUnmarshal(trans, data)

@@ -1,0 +1,1 @@
+ls -la /app/app/meta.go 2>&1 || echo "File does not exist yet"

@@ -1,0 +1,13 @@
+=== VERIFICATION OF ALL 3 CRITICAL FIXES ===
+
+Issue 1: StreamRecvEndpoint signature (MUST have stream and message parameters):
+CEP:
+type StreamRecvEndpoint func(ctx context.Context, stream streaming.ClientStream, message interface{}) error
+SEP:
+type StreamRecvEndpoint func(ctx context.Context, stream streaming.ServerStream, message interface{}) error
+
+Issue 2: Basic codec fallback (MUST NOT exclude Basic with !=):
+131:	if dataLenOK && c.CodecType != Basic {
+
+Issue 3: conn_pool Dump return type (MUST be interface{} not string):
+func (p *connPool) Dump() string {

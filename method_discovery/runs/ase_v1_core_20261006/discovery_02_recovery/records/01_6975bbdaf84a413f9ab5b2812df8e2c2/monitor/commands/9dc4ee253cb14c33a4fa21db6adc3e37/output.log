@@ -1,0 +1,18 @@
+=== FINAL VERIFICATION OF ALL 3 FIXES ===
+
+Issue 1: StreamRecvEndpoint/StreamSendEndpoint signatures (FIXED at turn 80):
+CEP StreamRecvEndpoint:
+type StreamRecvEndpoint func(ctx context.Context, stream streaming.ClientStream, message interface{}) error
+CEP StreamSendEndpoint:
+type StreamSendEndpoint func(ctx context.Context, stream streaming.ClientStream, message interface{}) error
+
+SEP StreamRecvEndpoint:
+type StreamRecvEndpoint func(ctx context.Context, stream streaming.ServerStream, message interface{}) error
+SEP StreamSendEndpoint:
+type StreamSendEndpoint func(ctx context.Context, stream streaming.ServerStream, message interface{}) error
+
+Issue 2: Basic codec fallback (checking if != Basic condition removed):
+1
+
+Issue 3: conn_pool Dump() return type (should be interface{}):
+func (p *connPool) Dump() interface{} {

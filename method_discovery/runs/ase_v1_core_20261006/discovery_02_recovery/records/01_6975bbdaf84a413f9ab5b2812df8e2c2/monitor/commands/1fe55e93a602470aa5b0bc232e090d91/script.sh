@@ -1,0 +1,28 @@
+
+# List all critical missing requirements across targets
+cat << 'EOF'
+=== CRITICAL GAPS ===
+
+Target 2 (Endpoint) - SUBSTANTIALLY INCOMPLETE:
+1. CEP: StreamEndpoint should "func() (ClientStream, error)" not "func(ClientStream) error"
+2. CEP: Missing StreamRecvEndpoint with EqualsTo method
+3. CEP: Missing StreamSendEndpoint with EqualsTo method  
+4. CEP: Missing StreamRecvMiddleware, StreamSendMiddleware types
+5. CEP: Missing StreamRecvChain, StreamSendChain functions
+6. CEP: Missing DummyDummyMiddleware (double Dummy)
+7. SEP: Same missing Recv/Send endpoint types and chains
+8. pkg/endpoint: Missing UnaryChain function
+9. pkg/endpoint: Missing ToMiddleware/ToUnaryMiddleware conversion methods
+10. deprecated.go: Missing RecvEndpoint/SendEndpoint and their middleware types
+
+Target 4 (Thrift Codec) - NOT IMPLEMENTED:
+- Requirement: "Basic codec type must succeed when FastCodec/Frugal available"
+- Current: Only documentation added, no actual fallback for Basic codec
+
+Target 6 (gRPC Diagnostics) - NOT IMPLEMENTED:
+- Requirement 1: conn_pool.go Dump() method returning map[string]interface{}
+- Requirement 2: readFrameHeader function must be REPLACED by readAndCheckFrameHeader METHOD
+- Current: Neither requirement implemented
+
+Target 5 - Status unknown (agent working on it)
+EOF

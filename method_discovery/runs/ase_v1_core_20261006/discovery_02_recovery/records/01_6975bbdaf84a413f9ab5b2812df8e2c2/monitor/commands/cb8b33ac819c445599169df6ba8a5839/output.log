@@ -1,0 +1,22 @@
+=== TARGET 4 VERIFICATION ===
+Checking for '!= Basic' condition (should be 0 or properly used):
+131:	if dataLenOK && c.CodecType != Basic {
+
+Return code: 0
+
+If no output above, condition was removed (FIXED)
+If output exists, checking context:
+	if typecodec.Apache {
+		return apacheUnmarshal(trans, data)
+	}
+	if dataLenOK && c.CodecType != Basic {
+		// try fallback to frugal or fastcodec
+		// case: typecodec.Frugal=false but typecodec.FastCodec=true
+		if typecodec.FastCodec {
+			return fastUnmarshal(trans, data, dataLen)
+		}
+		// case: typecodec.FastCodec=false but typecodec.Frugal=true
+		if typecodec.Frugal {
+			return frugalUnmarshal(trans, data, dataLen)
+		}
+	}

@@ -1,0 +1,13 @@
+=== TARGET 4 - STILL WRONG ===
+Basic codec fallback condition at line 131:
+	if dataLenOK && c.CodecType != Basic {
+		// try fallback to frugal or fastcodec
+		// case: typecodec.Frugal=false but typecodec.FastCodec=true
+		if typecodec.FastCodec {
+			return fastUnmarshal(trans, data, dataLen)
+		}
+		// case: typecodec.FastCodec=false but typecodec.Frugal=true
+		if typecodec.Frugal {
+			return frugalUnmarshal(trans, data, dataLen)
+
+This condition EXCLUDES Basic from fallback - it's backwards!

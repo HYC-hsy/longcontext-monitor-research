@@ -1,0 +1,23 @@
+=== TARGET 6 VERIFICATION ===
+1. conn_pool.go Dump() method:
+func (p *connPool) Dump() string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("connPool{remoteService=%s, size=%d, connections=[", p.remoteService, p.size))
+	
+	first := true
+	p.conns.Range(func(key, value interface{}) bool {
+
+2. readAndCheckFrameHeader method:
+	fh, err := readAndCheckFrameHeader(fr.reader)
+	if err != nil {
+		return nil, err
+	}
+	if fh.Length > fr.maxReadSize {
+		return nil, http2.ErrFrameTooLarge
+--
+func readAndCheckFrameHeader(r netpoll.Reader) (http2.FrameHeader, error) {
+	buf, err := r.Next(frameHeaderLen)
+	if err != nil {
+
+3. Check if readFrameHeader was replaced:
+0

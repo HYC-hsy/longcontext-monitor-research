@@ -1,0 +1,11 @@
+1. **Client endpoint package (`pkg/endpoint/cep`)**: Create a new package with these types:
+   - `StreamEndpoint func(ctx context.Context) (st streaming.ClientStream, err error)` — represents one stream call that returns a client stream
+   - `StreamMiddleware func(next StreamEndpoint) StreamEndpoint`
+   - `StreamMiddlewareBuilder func(ctx context.Context) StreamMiddleware`
+   - `StreamRecvEndpoint func(ctx context.Context, stream streaming.ClientStream, message interface{}) (err error)` — represents one stream recv call. Must have an `EqualsTo(e2 StreamRecvEndpoint) bool` method that returns true if and only if both endpoints reference the same underlying function
+   - `StreamRecvMiddleware func(next StreamRecvEndpoint) StreamRecvEndpoint`
+   - `StreamRecvMiddlewareBuilder func(ctx context.Context) StreamRecvMiddleware`
+   - `StreamSendEndpoint func(ctx context.Context, stream streaming.ClientStream, message interface{}) (err error)` — must also have `EqualsTo` method
+   - `StreamSendMiddleware func(next StreamSendEndpoint) StreamSendEndpoint`
+   - `StreamSendMiddlewareBuilder func(ctx context.Context) StreamSendMiddleware`
+   - `StreamChain(mws ...StreamMiddleware) StreamMiddleware` — composes middlewares right-to-left

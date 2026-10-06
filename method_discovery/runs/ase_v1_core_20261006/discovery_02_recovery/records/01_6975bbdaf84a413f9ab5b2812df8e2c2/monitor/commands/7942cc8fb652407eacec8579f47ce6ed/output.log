@@ -1,0 +1,6 @@
+4. **ServerStreamingClient[Res]**: A generic interface embedding `ClientStream` with an additional `Recv(ctx context.Context) (*Res, error)` method. Factory function `NewServerStreamingClient[Res any](st ClientStream) ServerStreamingClient[Res]` creates an implementation where `Recv` allocates a new `Res` and calls `st.RecvMsg(ctx, m)`.
+
+5. **ServerStreamingServer[Res]**: A generic interface embedding `ServerStream` with an additional `Send(ctx context.Context, res *Res) error` method. Factory function `NewServerStreamingServer[Res any](st ServerStream) ServerStreamingServer[Res]` creates an implementation where `Send` calls `st.SendMsg(ctx, res)`.
+
+6. **ClientStreamingClient[Req, Res]**: A generic interface embedding `ClientStream` with:
+   - `Send(ctx context.Context, req *Req) error` — delegates to `SendMsg`

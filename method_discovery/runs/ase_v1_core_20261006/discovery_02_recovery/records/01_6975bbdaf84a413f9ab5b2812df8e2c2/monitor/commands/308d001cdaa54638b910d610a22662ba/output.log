@@ -1,0 +1,28 @@
+diff --git a/pkg/remote/codec/thrift/thrift_data.go b/pkg/remote/codec/thrift/thrift_data.go
+index 2c871fe..99a3af6 100644
+--- a/pkg/remote/codec/thrift/thrift_data.go
++++ b/pkg/remote/codec/thrift/thrift_data.go
+@@ -109,9 +109,22 @@ func UnmarshalThriftData(ctx context.Context, codec remote.PayloadCodec, method
+ func (c thriftCodec) unmarshalThriftData(trans bufiox.Reader, data interface{}, dataLen int) error {
+ 	dataLenOK := c.IsDataLenDeterministic(dataLen)
+ 	typecodec := getTypeCodec(data)
++	
++	// Try Frugal first if enabled and available
+ 	if dataLenOK && c.IsSet(FrugalRead) && typecodec.Frugal {
+-		return frugalUnmarshal(trans, data, dataLen)
++		err := frugalUnmarshal(trans, data, dataLen)
++		// Note: If Frugal read fails and FastCodec is also available, 
++		// we cannot retry with FastRead here because the buffer has been consumed.
++		// The fallback logic below (lines 121-131) handles the case where
++		// Frugal is disabled but FastCodec is available.
++		// 
++		// If you see Frugal decode errors frequently, consider:
++		// 1. Regenerating Thrift code with the latest Frugal version
++		// 2. Checking for schema mismatches between client and server
++		// 3. Disabling FrugalRead codec flag to use FastRead instead
++		return err
+ 	}
++	
+ 	if dataLenOK && c.IsSet(FastRead) && typecodec.FastCodec {
+ 		return fastUnmarshal(trans, data, dataLen)
+ 	}

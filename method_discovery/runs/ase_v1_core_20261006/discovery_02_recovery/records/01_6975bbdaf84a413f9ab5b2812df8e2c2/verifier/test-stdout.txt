@@ -1,0 +1,136 @@
+=== Phase 1: Streaming Types and Generic Interfaces ===
+# github.com/cloudwego/kitex/pkg/streaming_test [github.com/cloudwego/kitex/pkg/streaming.test]
+pkg/streaming/test_01_streaming_types_test.go:106:53: cannot use mock (variable of type *mockClientStream) as streaming.ClientStream value in argument to streaming.NewServerStreamingClient[struct{}]: *mockClientStream does not implement streaming.ClientStream (wrong type for method Header)
+		have Header() (streaming.Header, error)
+		want Header() (metadata.MD, error)
+pkg/streaming/test_01_streaming_types_test.go:137:53: cannot use mock (variable of type *mockServerStream) as streaming.ServerStream value in argument to streaming.NewServerStreamingServer[struct{}]: *mockServerStream does not implement streaming.ServerStream (missing method Context)
+pkg/streaming/test_01_streaming_types_test.go:152:65: cannot use mock (variable of type *mockClientStream) as streaming.ClientStream value in argument to streaming.NewClientStreamingClient[struct{}, struct{}]: *mockClientStream does not implement streaming.ClientStream (wrong type for method Header)
+		have Header() (streaming.Header, error)
+		want Header() (metadata.MD, error)
+pkg/streaming/test_01_streaming_types_test.go:165:65: cannot use mock (variable of type *mockClientStream) as streaming.ClientStream value in argument to streaming.NewClientStreamingClient[struct{}, struct{}]: *mockClientStream does not implement streaming.ClientStream (wrong type for method Header)
+		have Header() (streaming.Header, error)
+		want Header() (metadata.MD, error)
+pkg/streaming/test_01_streaming_types_test.go:182:65: cannot use mock (variable of type *mockClientStream) as streaming.ClientStream value in argument to streaming.NewClientStreamingClient[struct{}, struct{}]: *mockClientStream does not implement streaming.ClientStream (wrong type for method Header)
+		have Header() (streaming.Header, error)
+		want Header() (metadata.MD, error)
+pkg/streaming/test_01_streaming_types_test.go:196:64: cannot use mock (variable of type *mockServerStream) as streaming.ServerStream value in argument to streaming.NewClientStreamingServer[struct{}, struct{}]: *mockServerStream does not implement streaming.ServerStream (missing method Context)
+pkg/streaming/test_01_streaming_types_test.go:220:62: cannot use mock (variable of type *mockClientStream) as streaming.ClientStream value in argument to streaming.NewBidiStreamingClient[struct{}, struct{}]: *mockClientStream does not implement streaming.ClientStream (wrong type for method Header)
+		have Header() (streaming.Header, error)
+		want Header() (metadata.MD, error)
+pkg/streaming/test_01_streaming_types_test.go:243:62: cannot use mock (variable of type *mockServerStream) as streaming.ServerStream value in argument to streaming.NewBidiStreamingServer[struct{}, struct{}]: *mockServerStream does not implement streaming.ServerStream (missing method Context)
+pkg/streaming/test_01_streaming_types_test.go:270:17: cannot use mockSS (variable of type *mockServerStream) as streaming.ServerStream value in struct literal: *mockServerStream does not implement streaming.ServerStream (missing method Context)
+pkg/streaming/test_01_streaming_types_test.go:271:17: cannot use mockCS (variable of type *mockClientStream) as streaming.ClientStream value in struct literal: *mockClientStream does not implement streaming.ClientStream (wrong type for method Header)
+		have Header() (streaming.Header, error)
+		want Header() (metadata.MD, error)
+pkg/streaming/test_01_streaming_types_test.go:271:17: too many errors
+FAIL	github.com/cloudwego/kitex/pkg/streaming [build failed]
+FAIL
+FAILED
+
+=== Phase 2: Endpoint Architecture Reorganization ===
+# github.com/cloudwego/kitex/pkg/endpoint [github.com/cloudwego/kitex/pkg/endpoint.test]
+pkg/endpoint/test_02_unary_endpoint_test.go:59:12: umw.ToMiddleware undefined (type UnaryMiddleware has no field or method ToMiddleware)
+pkg/endpoint/test_02_unary_endpoint_test.go:78:12: mw.ToUnaryMiddleware undefined (type Middleware has no field or method ToUnaryMiddleware)
+FAIL	github.com/cloudwego/kitex/pkg/endpoint [build failed]
+# github.com/cloudwego/kitex/pkg/endpoint/sep_test [github.com/cloudwego/kitex/pkg/endpoint/sep.test]
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:18:11: undefined: sep.StreamEndpoint
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:19:11: undefined: sep.StreamMiddleware
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:35:23: undefined: sep.StreamEndpoint
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:43:23: undefined: sep.StreamEndpoint
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:52:15: undefined: sep.StreamChain
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:95:40: cannot use &mockSepServerStream{} (value of type *mockSepServerStream) as streaming.ServerStream value in argument to endpoint: *mockSepServerStream does not implement streaming.ServerStream (missing method Context)
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:130:40: cannot use &mockSepServerStream{} (value of type *mockSepServerStream) as streaming.ServerStream value in argument to endpoint: *mockSepServerStream does not implement streaming.ServerStream (missing method Context)
+# github.com/cloudwego/kitex/pkg/endpoint/cep_test [github.com/cloudwego/kitex/pkg/endpoint/cep.test]
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:18:11: undefined: cep.StreamEndpoint
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:19:11: undefined: cep.StreamMiddleware
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:38:23: undefined: cep.StreamEndpoint
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:46:23: undefined: cep.StreamEndpoint
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:55:15: undefined: cep.StreamChain
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:58:10: cannot use &mockCepClientStream{} (value of type *mockCepClientStream) as streaming.ClientStream value in return statement: *mockCepClientStream does not implement streaming.ClientStream (wrong type for method Header)
+		have Header() (streaming.Header, error)
+		want Header() (metadata.MD, error)
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:98:40: cannot use &mockCepClientStream{} (value of type *mockCepClientStream) as streaming.ClientStream value in argument to endpoint: *mockCepClientStream does not implement streaming.ClientStream (wrong type for method Header)
+		have Header() (streaming.Header, error)
+		want Header() (metadata.MD, error)
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:133:40: cannot use &mockCepClientStream{} (value of type *mockCepClientStream) as streaming.ClientStream value in argument to endpoint: *mockCepClientStream does not implement streaming.ClientStream (wrong type for method Header)
+		have Header() (streaming.Header, error)
+		want Header() (metadata.MD, error)
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:146:10: cannot use &mockCepClientStream{} (value of type *mockCepClientStream) as streaming.ClientStream value in return statement: *mockCepClientStream does not implement streaming.ClientStream (wrong type for method Header)
+		have Header() (streaming.Header, error)
+		want Header() (metadata.MD, error)
+FAIL	github.com/cloudwego/kitex/pkg/endpoint/cep [build failed]
+FAIL	github.com/cloudwego/kitex/pkg/endpoint/sep [build failed]
+FAIL
+FAILED
+
+=== Phase 3: Transport Protocol Reorganization ===
+=== RUN   TestTransportProtocolConstants
+--- PASS: TestTransportProtocolConstants (0.00s)
+=== RUN   TestTransportProtocolString
+    test_03_transport_test.go:76: Protocol(6).String() = "TTHeaderFramed", want "TTHeader|Framed"
+    test_03_transport_test.go:76: Protocol(20).String() = "Unknown", want "Framed|GRPC"
+--- FAIL: TestTransportProtocolString (0.00s)
+=== RUN   TestTransportProtocolStringBitwise
+    test_03_transport_test.go:87: TTHeaderFramed.String() should be "TTHeader|Framed" (bitwise), got "TTHeaderFramed"
+--- FAIL: TestTransportProtocolStringBitwise (0.00s)
+FAIL
+FAIL	github.com/cloudwego/kitex/transport	0.003s
+FAIL
+FAILED
+
+=== Phase 4: Thrift Codec Fallback Enhancement ===
+=== RUN   TestThriftCodecFallbackMarshalBasic
+--- PASS: TestThriftCodecFallbackMarshalBasic (0.00s)
+=== RUN   TestThriftCodecFallbackUnmarshalBasic
+--- PASS: TestThriftCodecFallbackUnmarshalBasic (0.00s)
+=== RUN   TestThriftCodecFallbackMarshalFrugalBasic
+--- PASS: TestThriftCodecFallbackMarshalFrugalBasic (0.00s)
+=== RUN   TestThriftCodecFallbackUnmarshalFrugalBasic
+--- PASS: TestThriftCodecFallbackUnmarshalFrugalBasic (0.00s)
+PASS
+ok  	github.com/cloudwego/kitex/pkg/remote/codec/thrift	0.020s
+PASSED
+
+=== Phase 5: Client Option Category System ===
+# github.com/cloudwego/kitex/client/callopt/streamcall [github.com/cloudwego/kitex/client/callopt/streamcall.test]
+client/callopt/streamcall/test_05_streamcall_test.go:22:2: undefined: WithRecvTimeout
+client/callopt/streamcall/test_05_streamcall_test.go:23:26: callOpts.StreamOptions undefined (type callopt.CallOptions has no field or method StreamOptions)
+client/callopt/streamcall/test_05_streamcall_test.go:38:3: undefined: WithRecvTimeout
+client/callopt/streamcall/test_05_streamcall_test.go:39:27: callOpts.StreamOptions undefined (type callopt.CallOptions has no field or method StreamOptions)
+# github.com/cloudwego/kitex/client [github.com/cloudwego/kitex/client.test]
+client/test_05_client_options_test.go:20:7: undefined: UnaryOption
+client/test_05_client_options_test.go:21:7: undefined: StreamOption
+client/test_05_client_options_test.go:22:7: undefined: TTHeaderStreamingOption
+client/test_05_client_options_test.go:26:8: undefined: UnaryOption
+client/test_05_client_options_test.go:26:31: undefined: UnaryOptions
+client/test_05_client_options_test.go:30:8: undefined: StreamOption
+client/test_05_client_options_test.go:30:32: undefined: StreamOptions
+client/test_05_client_options_test.go:34:10: undefined: TTHeaderStreamingOption
+client/test_05_client_options_test.go:34:45: undefined: TTHeaderStreamingOptions
+client/test_05_client_options_test.go:40:9: undefined: WithUnaryOptions
+client/test_05_client_options_test.go:40:9: too many errors
+FAIL	github.com/cloudwego/kitex/client [build failed]
+FAIL	github.com/cloudwego/kitex/client/callopt/streamcall [build failed]
+?   	github.com/cloudwego/kitex/client/streamclient	[no test files]
+?   	github.com/cloudwego/kitex/client/streamxclient	[no test files]
+?   	github.com/cloudwego/kitex/client/streamxclient/streamxcallopt	[no test files]
+testing: warning: no tests to run
+PASS
+ok  	github.com/cloudwego/kitex/client/callopt	0.017s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/cloudwego/kitex/client/genericclient	0.016s [no tests to run]
+FAIL
+FAILED
+
+=== Phase 6: gRPC Diagnostics Enhancement ===
+# github.com/cloudwego/kitex/pkg/remote/trans/nphttp2/grpc/grpcframe [github.com/cloudwego/kitex/pkg/remote/trans/nphttp2/grpc/grpcframe.test]
+pkg/remote/trans/nphttp2/grpc/grpcframe/test_06_grpc_diagnostics_test.go:60:17: fr.readAndCheckFrameHeader undefined (type *Framer has no field or method readAndCheckFrameHeader)
+pkg/remote/trans/nphttp2/grpc/grpcframe/test_06_grpc_diagnostics_test.go:72:17: fr.readAndCheckFrameHeader undefined (type *Framer has no field or method readAndCheckFrameHeader)
+pkg/remote/trans/nphttp2/grpc/grpcframe/test_06_grpc_diagnostics_test.go:86:15: fr.readAndCheckFrameHeader undefined (type *Framer has no field or method readAndCheckFrameHeader)
+FAIL	github.com/cloudwego/kitex/pkg/remote/trans/nphttp2/grpc/grpcframe [build failed]
+FAIL
+FAILED
+
+=== Summary ===
+Result: 1/6 phases | Reward: 0.1
