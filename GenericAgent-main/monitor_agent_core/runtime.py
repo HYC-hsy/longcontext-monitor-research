@@ -505,12 +505,12 @@ def _worker(config, commands, outputs):
         elif action.kind == "intervene":
             close_watch = True
             next_wake_turn = task_turn + 1
+            delivery_id = request_id if completion else uuid.uuid4().hex
+            if feedback_barrier is not None:
+                submitted_turn, submitted_cursor = current_public_identity()
+                feedback_barrier.start(task_turn=submitted_turn, cursor=submitted_cursor,
+                                       submission_id=delivery_id)
             if not completion:
-                delivery_id = uuid.uuid4().hex
-                if feedback_barrier is not None:
-                    submitted_turn, submitted_cursor = current_public_identity()
-                    feedback_barrier.start(task_turn=submitted_turn, cursor=submitted_cursor,
-                                           submission_id=delivery_id)
                 outputs.put({
                     "kind": "intervention", "message": action.payload["message"],
                     "cursor": cursor, "request_id": delivery_id,
