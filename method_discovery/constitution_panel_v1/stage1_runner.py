@@ -15,6 +15,7 @@ import sys
 import time
 import uuid
 from urllib.parse import urlsplit
+import subprocess
 
 from preview_runner import PANEL, assemble, load_inputs
 from stage1_plan import (EXPECTED_MODEL, FIXTURE_COMMIT, PROFILE, canonical,
@@ -23,6 +24,32 @@ from stage1_plan import (EXPECTED_MODEL, FIXTURE_COMMIT, PROFILE, canonical,
 
 REPO = PANEL.parents[1]
 PLAN = PANEL / 'stage1' / 'PLAN.json'
+PROVIDER_RELATIVE = 'GenericAgent-main/monitor_agent_core/provider.py'
+PROVIDER_BLOB = 'd27ef568a3e7b7d2a49563145a8f7b1a26830692'
+
+
+def verify_provider_source(repo=REPO, provider_path=None):
+    path = provider_path or repo / PROVIDER_RELATIVE
+    frozen = subprocess.check_output(['git', '-C', str(repo), 'show',
+                                      f'{FIXTURE_COMMIT}:{PROVIDER_RELATIVE}'])
+    blob = subprocess.check_output(['git', '-C', str(repo), 'rev-parse',
+                                    f'{FIXTURE_COMMIT}:{PROVIDER_RELATIVE}'], text=True).strip()
+    if blob != PROVIDER_BLOB or path.read_bytes() != frozen:
+        raise ValueError('Stage 1 provider source differs from frozen fixture commit')
+    return {'source_commit': FIXTURE_COMMIT, 'git_blob': blob, 'sha256': sha(frozen)}
+
+
+def verify_effective_profile(profile, client):
+    expected = {'model': EXPECTED_MODEL, 'provider': 'anthropic', 'api_mode': 'messages',
+                'temperature': 1, 'thinking_type': 'adaptive', 'max_tokens': 8192,
+                'max_retries': 8, 'transport_route': 'monitor'}
+    actual = {'model': client.model, 'provider': client.provider, 'api_mode': client.api_mode,
+              'temperature': client.temperature, 'thinking_type': client.thinking_type,
+              'max_tokens': client.max_tokens, 'max_retries': client.max_retries,
+              'transport_route': profile.get('transport_route')}
+    if actual != expected:
+        raise ValueError('Effective Stage 1 profile semantics differ from frozen preregistration')
+    return actual
 
 
 def write_json(path: Path, value):
@@ -104,6 +131,8 @@ def load_private_profile(config_path: Path):
         raise ValueError('Configured model differs from expected model identity')
     if not raw.get('apikey') or not raw.get('apibase'):
         raise ValueError('Private provider configuration is incomplete')
+    # Public semantic fields are checked on the effective provider client as
+    # well, so defaults and provider-side coercions cannot evade this gate.
     return raw, sha(raw_file)
 
 
@@ -126,6 +155,7 @@ def real_transport(request, profile, profile_file_sha, before_send=None):
     SSE line bytes are archived per attempt. The adapter asserts every retry
     constructs the same provider payload. It does not add recovery prompts.
     """
+    verify_provider_source()
     sys.path.insert(0, str(REPO / 'GenericAgent-main'))
     import requests
     from monitor_agent_core.provider import MonitorProviderClient, RetryableProviderError
@@ -164,8 +194,7 @@ def real_transport(request, profile, profile_file_sha, before_send=None):
                 yield line
 
     client = CaptureClient(PROFILE, dict(profile))
-    if client.model != EXPECTED_MODEL or client.provider != 'anthropic':
-        raise ValueError('Actual provider/model differs from frozen Stage 1 identity')
+    verify_effective_profile(profile, client)
     client.system = request['system']
     client.history = [{'role': 'user', 'content': [
         {'type': 'text', 'text': request['messages'][0]['content']}]}]
@@ -222,13 +251,20 @@ def real_transport(request, profile, profile_file_sha, before_send=None):
 def run_authorized(plan_path: Path, profile_config: Path, authorization: Path, output_root: Path):
     plan = validate_plan(plan_path=plan_path)
     auth = require_authorization(authorization, plan_path, profile_config)
+    provider_identity = verify_provider_source()
     profile, profile_file_sha = load_private_profile(profile_config)
+    # Fail before output creation or any network send, even for a changed
+    # private profile whose whole-file SHA was explicitly authorized.
+    sys.path.insert(0, str(REPO / 'GenericAgent-main'))
+    from monitor_agent_core.provider import MonitorProviderClient
+    verify_effective_profile(profile, MonitorProviderClient(PROFILE, dict(profile)))
     if output_root.exists():
         raise ValueError('Stage 1 output root must be unused; no automatic resume or rerun')
     output_root.mkdir(parents=True)
     write_json(output_root / 'run_identity.json', {'fixture_commit': FIXTURE_COMMIT,
         'plan_sha256': sha(plan_path.read_bytes()), 'authorization_identity': auth,
-        'profile_file_sha256': profile_file_sha})
+        'profile_file_sha256': profile_file_sha,
+        'provider_source_identity': provider_identity})
     for trial in plan['trials']:
         trial_dir = output_root / f"{trial['ordinal']:02d}_{trial['trial_id']}"
         trial_dir.mkdir()

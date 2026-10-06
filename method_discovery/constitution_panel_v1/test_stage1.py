@@ -6,12 +6,32 @@ from collections import Counter
 
 import pytest
 
-from stage1_blind_export import export
+from stage1_blind_export import export, load_secret_map
 from stage1_plan import (CASES, CONDITIONS, EXPECTED_MODEL, FIXTURE_COMMIT, PANEL,
                          PROFILE, REPLICATES, canonical, frozen_fixture_manifest,
                          generate_plan, sha)
 from stage1_runner import (PLAN, REPO, parse_action, real_transport, require_authorization,
-                           semantic_request, validate_plan)
+                           semantic_request, validate_plan, verify_provider_source,
+                           verify_effective_profile)
+
+
+def synthetic_secret_map(tmp_path):
+    path = tmp_path / 'synthetic_test_blind_map.json'
+    pairs = [{'case_id': case, 'replicate': rep,
+              'A': ('current' if (index + rep) % 3 == 0 else 'constitution')}
+             for index, case in enumerate(CASES) for rep in REPLICATES]
+    path.write_bytes(canonical({'schema_version': 'stage1-secret-blind-map/1',
+                                'pairs': pairs}) + b'\n')
+    return path, sha(path.read_bytes())
+
+
+def fake_profile(**changes):
+    value = {'apikey': 'FAKE_TEST_ONLY', 'apibase': 'http://127.0.0.1:9',
+             'model': EXPECTED_MODEL, 'provider': 'anthropic', 'api_mode': 'messages',
+             'temperature': 1, 'thinking_type': 'adaptive', 'max_tokens': 8192,
+             'max_retries': 8, 'transport_route': 'monitor'}
+    value.update(changes)
+    return value
 
 
 def test_exact_frozen_54_call_allocation_and_order():
@@ -123,9 +143,7 @@ def test_transport_retry_resends_exact_payload_with_local_fake_service(monkeypat
     monkeypatch.setattr(provider.requests, 'post', fake_post)
     import stage1_runner
     monkeypatch.setattr(stage1_runner.time, 'sleep', lambda *_: None)
-    profile = {'apikey': 'FAKE_TEST_ONLY', 'apibase': 'http://127.0.0.1:9',
-               'model': EXPECTED_MODEL, 'provider': 'anthropic',
-               'api_mode': 'messages', 'max_retries': 1, 'transport_route': 'monitor'}
+    profile = fake_profile()
     pre_send = []
     result = real_transport(request, profile, 'f' * 64,
                             lambda payload, effective: pre_send.append((payload, effective)))
@@ -165,9 +183,7 @@ def test_complete_zero_tool_response_is_invalid_not_retried(monkeypatch):
         return EmptyResponse()
 
     monkeypatch.setattr(provider.requests, 'post', fake_post)
-    profile = {'apikey': 'FAKE_TEST_ONLY', 'apibase': 'http://127.0.0.1:9',
-               'model': EXPECTED_MODEL, 'provider': 'anthropic',
-               'api_mode': 'messages', 'max_retries': 2}
+    profile = fake_profile()
     result = real_transport(request, profile, 'f' * 64)
     assert result['error'] is None and result['blocks'] == []
     assert len(calls) == 1 and len(result['request_attempts']) == 1
@@ -180,7 +196,8 @@ def test_blind_export_is_separate_and_contains_no_condition_identity(tmp_path):
         records.append({**row, 'status': 'response_recorded',
                         'selected_action': 'wait', 'intervention_message': None,
                         'raw_response_blocks': [{'type': 'text', 'text': 'synthetic output'}]})
-    blind_path, map_path = export(records, tmp_path)
+    secret_path, commitment = synthetic_secret_map(tmp_path)
+    blind_path, map_path = export(records, tmp_path, secret_path, commitment)
     blind = json.loads(blind_path.read_bytes())
     mapping = json.loads(map_path.read_bytes())
     assert len(blind['pairs']) == 27 and len(mapping['mapping']) == 54
@@ -192,6 +209,64 @@ def test_blind_export_is_separate_and_contains_no_condition_identity(tmp_path):
     assert 'constitution' in map_path.read_text(encoding='utf-8')
     assert blind_path.parent.name == 'blind'
     assert map_path.parent.name == 'sealed_condition_map'
+    assigned = load_secret_map(secret_path, commitment)
+    for pair in blind['pairs']:
+        case, rep = pair['case_id'], pair['replicate']
+        revealed = [item for item in mapping['mapping']
+                    if item['case_id'] == case and item['replicate'] == rep]
+        assert len(revealed) == 2
+        for item in revealed:
+            assert item['condition'] == assigned[(case, rep)][item['response_label']]
+            assert item['trial_id'] == next(row['trial_id'] for row in validate_plan()['trials']
+                                             if row['case_id'] == case and row['replicate'] == rep
+                                             and row['condition'] == item['condition'])
+
+
+def test_secret_map_mutation_refused_and_public_order_not_mapping(tmp_path):
+    plan = validate_plan()
+    secret_path, commitment = synthetic_secret_map(tmp_path)
+    raw = secret_path.read_bytes()
+    mutated = tmp_path / 'mutated.json'
+    mutated.write_bytes(raw[:-2] + bytes([raw[-2] ^ 1]) + raw[-1:])
+    with pytest.raises(ValueError, match='commitment'):
+        load_secret_map(mutated, commitment)
+    # The public plan exposes only a commitment; no A/B assignment or rule.
+    public = PLAN.read_text(encoding='utf-8')
+    assert '"A"' not in public and '"B"' not in public
+    assert 'blind_map_commitment_sha256' in public
+    assert 'first condition is Response A' not in public
+
+
+def test_provider_source_and_effective_semantics_gates(tmp_path):
+    identity = verify_provider_source()
+    assert identity['git_blob'] == 'd27ef568a3e7b7d2a49563145a8f7b1a26830692'
+    copy = tmp_path / 'provider.py'
+    copy.write_bytes((REPO / 'GenericAgent-main/monitor_agent_core/provider.py').read_bytes() + b'X')
+    with pytest.raises(ValueError, match='provider source'):
+        verify_provider_source(provider_path=copy)
+    import sys
+    sys.path.insert(0, str(REPO / 'GenericAgent-main'))
+    from monitor_agent_core.provider import MonitorProviderClient
+    assert verify_effective_profile(fake_profile(), MonitorProviderClient(PROFILE, fake_profile()))
+    changed = fake_profile(max_tokens=4096)
+    with pytest.raises(ValueError, match='profile semantics'):
+        verify_effective_profile(changed, MonitorProviderClient(PROFILE, changed))
+
+
+def test_mutated_provider_refused_by_execution_gate_before_transport(tmp_path, monkeypatch):
+    import stage1_runner
+    copy = tmp_path / 'provider.py'
+    copy.write_bytes((REPO / 'GenericAgent-main/monitor_agent_core/provider.py').read_bytes() + b'X')
+    monkeypatch.setattr(stage1_runner, 'require_authorization', lambda *_: {})
+    monkeypatch.setattr(stage1_runner, 'verify_provider_source',
+                        lambda: verify_provider_source(provider_path=copy))
+    monkeypatch.setattr(stage1_runner, 'real_transport',
+                        lambda *_args, **_kwargs: pytest.fail('network path reached'))
+    output = tmp_path / 'unused_output'
+    with pytest.raises(ValueError, match='provider source'):
+        stage1_runner.run_authorized(PLAN, tmp_path / 'fake_profile.json',
+                                     tmp_path / 'fake_auth.json', output)
+    assert not output.exists()
 
 
 def test_fixture_mutations_fail_before_provider_path(tmp_path):

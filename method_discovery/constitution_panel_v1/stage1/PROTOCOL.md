@@ -15,6 +15,13 @@ fresh independent conversations per condition: **54 logical decisions**.
 The configured Monitor profile is `claude_monitor_opus48`, expected model
 `claude-opus-4-8`. Both conditions use the same single private profile file,
 effective provider/model parameters, abstract tools, and packet.
+Before any send, the runner byte-compares the actual
+`GenericAgent-main/monitor_agent_core/provider.py` against fixture commit
+`570356c...` (Git blob `d27ef568a3e7b7d2a49563145a8f7b1a26830692`) and
+archives that source identity. It also rejects effective profile semantics
+unless provider=Anthropic, api_mode=Messages, temperature=1,
+thinking=adaptive, max_tokens=8192, max_retries=8, transport_route=monitor.
+The private profile whole-file SHA remains separately authorization-bound.
 If the provider explicitly identifies a different model, archive the response
 and halt; an absent observed-model field remains unknown rather than inferred.
 
@@ -60,11 +67,18 @@ headers or credentials. Missing provider metadata remains null/unknown.
 
 ## Review and interpretation
 
+Before any scientific response, a separate private sealed map assigns A/B for
+all 27 case-replicate pairs using OS randomness. It is frozen once, outside Git;
+the public plan records only its SHA-256 commitment. The map does not change
+trial order, IDs, requests, or condition allocation. It cannot be redrawn
+after responses. `stage1_blind_export.py` requires the private map and verifies
+its exact-byte commitment; public execution order is not an A/B rule.
+
 `stage1_blind_export.py` is post-run and does not read gold. It emits a
 condition-free paired review file with `Response A` / `Response B`, case,
 replicate, frame, selected action, intervention text, and model-visible
-natural-language output. A/B mapping is counterbalanced mechanically and
-written **separately** under `sealed_condition_map/`; do not disclose it to
+natural-language output. A/B mapping is written **separately** under
+`sealed_condition_map/`; do not disclose it to
 the main thread before blind review. The developer thread does not judge
 qualitative dimensions automatically.
 

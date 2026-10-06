@@ -21,6 +21,7 @@ FROZEN_PROMPTS = {
     'constitution': 'e666f351233607db4f7c1b6bb716d99f45573381778cee3fd8aee6705e309e21',
 }
 SHELL_SHA = '61934d0b327cf5f47e6df50788e2736be956217ca402defc149c7af2e4472e13'
+BLIND_MAP_COMMITMENT = '77ca8fcb9e64fc5fe5637859ce39e0cc4f9a0de1e84d174bc813acf125d5f851'
 
 
 def sha(raw: bytes) -> str:
@@ -105,6 +106,7 @@ def generate_plan(manifest):
         'execution_authorized': False,
         'fixture_commit': FIXTURE_COMMIT,
         'profile': PROFILE, 'expected_model': EXPECTED_MODEL,
+        'blind_map_commitment_sha256': BLIND_MAP_COMMITMENT,
         'order_rule': 'for C01..C09, replicate 1..3, first condition index '
                       '(case_index + replicate_index) % 2; second is opposite',
         'planned_logical_calls': len(entries), 'trials': entries,
