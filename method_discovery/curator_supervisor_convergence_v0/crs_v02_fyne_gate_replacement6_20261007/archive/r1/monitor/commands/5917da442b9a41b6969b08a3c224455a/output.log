@@ -1,0 +1,39 @@
+func parseHexColor(hex string) (color.Color, error) {
+	var r, g, b, a uint8 = 0, 0, 0, 255
+
+	if len(hex) == 0 || hex[0] != '#' {
+		hex = "#" + hex
+	}
+
+	switch len(hex) {
+	case 4: // #RGB -> #RRGGBB
+		if _, err := parseHex(hex[1:], &r, &g, &b); err != nil {
+			return nil, err
+		}
+		// Expand: R -> RR (e.g., 0xA -> 0xAA)
+		r = r<<4 | r
+		g = g<<4 | g
+		b = b<<4 | b
+	case 5: // #RGBA -> #RRGGBBAA
+		if _, err := parseHex(hex[1:], &r, &g, &b, &a); err != nil {
+			return nil, err
+		}
+		// Expand each component
+		r = r<<4 | r
+		g = g<<4 | g
+		b = b<<4 | b
+		a = a<<4 | a
+	case 7: // #RRGGBB
+		if _, err := parseHex(hex[1:], &r, &g, &b); err != nil {
+			return nil, err
+		}
+	case 9: // #RRGGBBAA
+		if _, err := parseHex(hex[1:], &r, &g, &b, &a); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, errors.New("invalid hex color format")
+	}
+
+	return color.RGBA{R: r, G: g, B: b, A: a}, nil
+}

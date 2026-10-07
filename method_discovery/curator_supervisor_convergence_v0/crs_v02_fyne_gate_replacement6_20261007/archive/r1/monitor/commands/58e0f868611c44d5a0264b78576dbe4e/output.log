@@ -1,0 +1,30 @@
+func (s *stringFormat) Set(value string) error {
+	// Attempt to parse the formatted string back to source values
+	if len(s.sources) == 0 {
+		return fmt.Errorf("no source bindings to set")
+	}
+	
+	// Create temporary variables for scanning
+	vars := make([]interface{}, 0, len(s.sources))
+	
+	for _, source := range s.sources {
+		if source == nil {
+			return fmt.Errorf("cannot set value with nil source binding")
+		}
+		
+		switch source.(type) {
+		case String:
+			var str string
+			vars = append(vars, &str)
+		case Bool:
+			var b bool
+			vars = append(vars, &b)
+		case Int:
+			var i int
+			vars = append(vars, &i)
+		case Float:
+			var f float64
+			vars = append(vars, &f)
+		case Untyped:
+			var v interface{}
+			vars = append(vars, &v)
