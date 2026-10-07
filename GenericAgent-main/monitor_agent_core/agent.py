@@ -446,6 +446,10 @@ class MonitorAgent:
             raise ValueError('monitor_ase_meta_regulation must be a boolean')
         if self.ase_meta_regulation and not self.ase_v0:
             raise ValueError('monitor_ase_meta_regulation requires ASE')
+        self.rhr_v0 = getattr(client, 'config', {}).get('monitor_receding_horizon_release', False)
+        if type(self.rhr_v0) is not bool or (self.rhr_v0 and not (
+                self.ase_v0 and getattr(client, 'config', {}).get('monitor_contrastive_release_state', False) is True)):
+            raise ValueError('monitor_receding_horizon_release must be boolean and requires ASE + CRS')
         self.crs_v0 = getattr(client, 'config', {}).get('monitor_contrastive_release_state', False)
         if type(self.crs_v0) is not bool or (self.crs_v0 and not self.ase_v0):
             raise ValueError('monitor_contrastive_release_state must be boolean and requires ASE')
@@ -468,8 +472,10 @@ class MonitorAgent:
             self.base_system_prompt = ASE_SYSTEM_PROMPT
             self.situation = SituationState(workspace, include_supervisory_control=False)
             self.control_echo = ControlEcho(self._audit_dialogue)
-            self.dcm = (ContrastiveReleaseBoundary if self.crs_v0 else ReconsiderationBoundary)(
-                self._audit_dialogue, lambda: self._ase_last_visible_context)
+            self.dcm = (ContrastiveReleaseBoundary(
+                self._audit_dialogue, lambda: self._ase_last_visible_context,
+                receding_horizon=self.rhr_v0) if self.crs_v0 else ReconsiderationBoundary(
+                    self._audit_dialogue, lambda: self._ase_last_visible_context))
             self.crs = self.dcm if self.crs_v0 else None
         self._ase_initialization_complete = False
         self._ase_reference_ready_reported = False
@@ -662,7 +668,7 @@ class MonitorAgent:
                     remaining_seconds=deadline - time.monotonic() if deadline is not None else None)
                 self._audit_dialogue('supervisory_situation_surface', content=surface, **metadata)
                 parts.append(surface)
-                crs_surface = (self.crs.render_root(self.root_frame_handoff)
+                crs_surface = (self.crs.render_root(self.root_frame_handoff, self.workspace)
                                if self.crs is not None and self.frame_kind == 'root' else None)
                 citable_surface = (self.crs.render_citable_observations(self.workspace, self.review_id)
                                    if self.crs is not None and self.frame_kind == 'root' else None)
@@ -694,7 +700,8 @@ class MonitorAgent:
                         self._ase_pending_context['crs_citable_surface_sha256'] = hashlib.sha256(
                             citable_surface.encode('utf-8')).hexdigest()
                     if crs_surface:
-                        self._ase_pending_context['composition_order'].append('crs')
+                        self._ase_pending_context['composition_order'].append(
+                            'root_horizon_reset' if self.crs.root_reorientation is not None else 'crs')
                         self._ase_pending_context['crs_surface_sha256'] = hashlib.sha256(
                             crs_surface.encode('utf-8')).hexdigest()
             if self.eis_v0:
@@ -729,7 +736,8 @@ class MonitorAgent:
                                  manifest_locator=shown['manifest_locator'], content=shown['text'])
         continuity = self.cqs.surface_visible() if self.cqs is not None else None
         echo = self.control_echo.surface_visible() if self.control_echo is not None else None
-        if self.crs is not None and self.frame_kind == 'root' and self.crs.root_contrast is not None:
+        if (self.crs is not None and self.frame_kind == 'root'
+                and (self.crs.root_contrast is not None or self.crs.root_reorientation is not None)):
             self.crs.surface_visible(getattr(self.client, '_progress_request_id', None))
         if self.ase_v0 and self._ase_pending_context is not None:
             facts = dict(self._ase_pending_context)

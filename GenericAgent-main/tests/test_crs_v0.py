@@ -15,7 +15,7 @@ from monitor_agent_core.provider import MonitorProviderClient
 from monitor_agent_core.workspace import MonitorWorkspace
 
 
-def fixture(tmp_path):
+def fixture(tmp_path, *, rhr=False):
     evidence = tmp_path / 'evidence'
     evidence.mkdir()
     (evidence / 'original_task.txt').write_text('The route must remain public.', encoding='utf-8')
@@ -30,7 +30,8 @@ def fixture(tmp_path):
     client = MonitorProviderClient('anthropic', {
         'apikey': 'offline', 'apibase': 'https://offline.invalid', 'model': 'offline',
         'max_retries': 0, 'monitor_adaptive_supervisory_environment': True,
-        'monitor_contrastive_release_state': True})
+        'monitor_contrastive_release_state': True,
+        'monitor_receding_horizon_release': rhr})
     monitor = MonitorAgent(client, workspace)
     workspace.write_text('monitor/reference.md', 'Durable public-route requirement.')
     handoff = {'request_id': 'completion-1', 'generation': 1, 'cursor': 1}

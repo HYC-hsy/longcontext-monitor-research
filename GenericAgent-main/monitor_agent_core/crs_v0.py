@@ -19,6 +19,7 @@ _MAX_TEXT = {"release_blocking_state": 1200, "grounding": 1200, "exclusion_reaso
 CRS_PUBLIC_RESULT_EXCERPT_CHARS = 640
 CRS_SURFACE_MAX_CHARS = 16000
 CRS_CITABLE_MAX_CHARS = 4000
+RHR_SURFACE_MAX_CHARS = 4000
 
 
 def _dialogue_receipts(workspace, review_id=None):
@@ -227,16 +228,88 @@ def _surface(active):
     return surface
 
 
+def _handoff_identity(handoff):
+    return {key: handoff.get(key) for key in ("request_id", "generation", "cursor")}
+
+
+def _task_book_sha256(workspace):
+    return hashlib.sha256(workspace.resolve_read("monitor/reference.md").read_bytes()).hexdigest()
+
+
+def _root_horizon_digest(handoff, task_book_sha256, focal_state_digest):
+    source = (_canonical(handoff) + "\n" + task_book_sha256 + "\n" + focal_state_digest)
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+
+def _rhr_surface(active):
+    surface = (
+        "Root Horizon Reset — control phase only; not task truth or runtime verification.\n"
+        "Whole-task release has not executed. The prior focal CRS is one release-blocking "
+        "cognition you selected; runtime has not judged it correct, sufficient, or resolved. "
+        "Repeating one focal CRS does not by itself support unrelated parts of the whole task. "
+        "The full public task, Task Book, and ordinary root context are available in this request. "
+        "Reconsider the whole mission: investigate, intervene, submit a different grounded "
+        "release-blocking state, or, if no other currently grounded action-changing state "
+        "is identifiable, resubmit the prior exact CRS in a later model response to release.\n"
+        f"root_horizon_digest={active['root_horizon_digest']} "
+        f"prior_focal_state_digest={active['prior_focal']['state_digest']} "
+        f"task_book_sha256={active['task_book_sha256']} "
+        f"handoff={_canonical(active['handoff'])}\n"
+        "Prior release_blocking_state excerpt: " +
+        json.loads(active['prior_focal']['canonical'])['release_blocking_state'][:1200]
+    )
+    if len(surface) > RHR_SURFACE_MAX_CHARS:
+        raise ValueError("Root Horizon Reset surface exceeds mechanical transport bound")
+    return surface
+
+
 class ContrastiveReleaseBoundary(ReconsiderationBoundary):
     """Extends ASE reconsideration only for root allow_complete."""
 
-    def __init__(self, audit, visible_context):
+    def __init__(self, audit, visible_context, *, receding_horizon=False):
         super().__init__(audit, visible_context)
+        self.receding_horizon = receding_horizon
         self.root_contrast = None
+        self.root_reorientation = None
 
     def begin_review(self, review_id):
         super().begin_review(review_id)
         self.root_contrast = None
+        self.root_reorientation = None
+
+    def _enter_root_reorientation(self, focal, workspace):
+        book_sha = _task_book_sha256(workspace)
+        active = {"prior_focal": focal, "handoff": focal["handoff"],
+                  "task_book_sha256": book_sha,
+                  "root_horizon_digest": _root_horizon_digest(
+                      focal["handoff"], book_sha, focal["state_digest"]),
+                  "entered_turn": self.model_turn, "surfaced": False,
+                  "surfaced_request_id": None}
+        _rhr_surface(active)
+        self.root_contrast = None
+        self.root_reorientation = active
+        self.audit("rhr_entered", prior_focal_state_digest=focal["state_digest"],
+                   handoff=focal["handoff"], task_book_sha256=book_sha,
+                   root_horizon_digest=active["root_horizon_digest"], model_turn=self.model_turn)
+        return active
+
+    def _refresh_root_reorientation(self, workspace):
+        active = self.root_reorientation
+        if active is None:
+            return None
+        book_sha = _task_book_sha256(workspace)
+        if book_sha != active["task_book_sha256"]:
+            old_digest = active["root_horizon_digest"]
+            active["task_book_sha256"] = book_sha
+            active["root_horizon_digest"] = _root_horizon_digest(
+                active["handoff"], book_sha, active["prior_focal"]["state_digest"])
+            active["entered_turn"] = self.model_turn
+            active["surfaced"] = False
+            active["surfaced_request_id"] = None
+            self.audit("rhr_reentered", old_root_horizon_digest=old_digest,
+                       new_root_horizon_digest=active["root_horizon_digest"],
+                       reason="task_book_changed", handoff=active["handoff"])
+        return active
 
     def render_citable_observations(self, workspace, review_id):
         receipts = _dialogue_receipts(workspace, review_id)[-5:]
@@ -268,7 +341,7 @@ class ContrastiveReleaseBoundary(ReconsiderationBoundary):
         provenance_text = _canonical(provenance)
         provenance_digest = hashlib.sha256(provenance_text.encode("utf-8")).hexdigest()
         state_digest = hashlib.sha256((canonical + "\n" + provenance_text).encode("utf-8")).hexdigest()
-        identity = {key: handoff.get(key) for key in ("request_id", "generation", "cursor")}
+        identity = _handoff_identity(handoff)
         prior = self.root_contrast
         proposed = {"canonical": canonical, "sha256": digest,
                     "provenance_sha256": provenance_digest, "state_digest": state_digest,
@@ -279,16 +352,48 @@ class ContrastiveReleaseBoundary(ReconsiderationBoundary):
         if prior is not None and prior["handoff"] != identity:
             self._clear_root("stale_handoff")
             prior = None
+        reset = self.root_reorientation
+        if reset is not None and reset["handoff"] != identity:
+            self._clear_root("stale_handoff")
+            reset = None
         self.audit("crs_release_attempted", contrast_sha256=digest,
                    provenance_sha256=provenance_digest, state_digest=state_digest, handoff=identity,
                    ground_refs=provenance["ground_refs"],
                    observation_refs=provenance["observation_refs"], model_turn=self.model_turn)
+        if reset is not None:
+            focal = reset["prior_focal"]
+            if focal["canonical"] != canonical or focal["state_digest"] != state_digest:
+                self.audit("rhr_new_focal_selected",
+                           prior_focal_state_digest=focal["state_digest"],
+                           new_focal_state_digest=state_digest, handoff=identity)
+                self._clear_root("new_focal_selected")
+                prior = None
+            else:
+                reset = self._refresh_root_reorientation(workspace)
+                if (reset["surfaced"] and self.model_turn is not None
+                        and self.model_turn > reset["entered_turn"]):
+                    self.audit("rhr_final_release_confirmed",
+                               root_horizon_digest=reset["root_horizon_digest"],
+                               prior_focal_state_digest=focal["state_digest"],
+                               final_focal_state_digest=state_digest,
+                               surfaced_request_id=reset["surfaced_request_id"],
+                               model_turn=self.model_turn, handoff=identity)
+                    self.root_reorientation = None
+                    return None
+                return {"status": "release_not_executed",
+                        "root_horizon_digest": reset["root_horizon_digest"],
+                        "message": "Whole-task release has not executed. Root Horizon Reset must appear in a later model request before final confirmation."}
         if (prior is not None and prior["canonical"] == canonical
                 and prior["state_digest"] == state_digest and prior["surfaced"]
                 and self.model_turn is not None and self.model_turn > prior["proposed_turn"]):
             self.audit("crs_confirmed", contrast_sha256=digest,
                        provenance_sha256=provenance_digest, state_digest=state_digest, handoff=identity,
                        surfaced_request_id=prior["surfaced_request_id"], model_turn=self.model_turn)
+            if self.receding_horizon:
+                reset = self._enter_root_reorientation(prior, workspace)
+                return {"status": "release_not_executed",
+                        "root_horizon_digest": reset["root_horizon_digest"],
+                        "message": "Focal CRS reaffirmed; whole-task release has not executed. Root Horizon Reset must appear in a later model request."}
             self.root_contrast = None
             return None
         if prior is not None and prior["state_digest"] != state_digest:
@@ -307,7 +412,20 @@ class ContrastiveReleaseBoundary(ReconsiderationBoundary):
                 "provenance_sha256": provenance_digest, "state_digest": state_digest,
                 "message": "Whole-task release has not executed. Your exact contrast must appear in a later model request before the same contrast can authorize release. You may investigate, intervene, or revise it."}
 
-    def render_root(self, handoff):
+    def render_root(self, handoff, workspace=None):
+        reset = self.root_reorientation
+        if reset is not None:
+            if not handoff or _handoff_identity(handoff) != reset["handoff"]:
+                self._clear_root("stale_handoff")
+                return None
+            if workspace is None:
+                raise ValueError("Root Horizon Reset requires the current Task Book identity")
+            self._refresh_root_reorientation(workspace)
+            surface = _rhr_surface(reset)
+            self.audit("rhr_surface_prepared", root_horizon_digest=reset["root_horizon_digest"],
+                       surface_sha256=hashlib.sha256(surface.encode("utf-8")).hexdigest(),
+                       handoff=reset["handoff"])
+            return surface
         active = self.root_contrast
         if active is None:
             return None
@@ -323,6 +441,13 @@ class ContrastiveReleaseBoundary(ReconsiderationBoundary):
         return surface
 
     def surface_visible(self, request_id):
+        reset = self.root_reorientation
+        if reset is not None:
+            reset["surfaced"] = True
+            reset["surfaced_request_id"] = request_id
+            self.audit("rhr_surface_injected", root_horizon_digest=reset["root_horizon_digest"],
+                       request_id=request_id, handoff=reset["handoff"])
+            return
         active = self.root_contrast
         if active is not None:
             active["surfaced"] = True
@@ -333,6 +458,11 @@ class ContrastiveReleaseBoundary(ReconsiderationBoundary):
                        handoff=active["handoff"], request_id=request_id)
 
     def _clear_root(self, reason):
+        reset = self.root_reorientation
+        if reset is not None:
+            self.audit("rhr_abandoned", root_horizon_digest=reset["root_horizon_digest"],
+                       reason=reason, handoff=reset["handoff"])
+            self.root_reorientation = None
         active = self.root_contrast
         if active is not None:
             self.audit("crs_abandoned", contrast_sha256=active["sha256"],
