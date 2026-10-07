@@ -1,0 +1,50 @@
+package theme
+
+import (
+	"encoding/json"
+	"fmt"
+	"image/color"
+	"io"
+	"strings"
+
+	"fyne.io/fyne/v2"
+)
+
+// jsonTheme represents a theme loaded from JSON with customizable colors, sizes, fonts, and icons.
+type jsonTheme struct {
+	colorsDark  map[fyne.ThemeColorName]color.Color
+	colorsLight map[fyne.ThemeColorName]color.Color
+	sizes       map[fyne.ThemeSizeName]float32
+	fonts       map[string]fyne.Resource
+	icons       map[fyne.ThemeIconName]fyne.Resource
+}
+
+// jsonThemeData represents the JSON structure for theme configuration.
+type jsonThemeData struct {
+	Colors      map[string]string            `json:"colors"`       // Generic colors (both variants)
+	ColorsDark  map[string]string            `json:"colors-dark"`  // Dark variant specific
+	ColorsLight map[string]string            `json:"colors-light"` // Light variant specific
+	Sizes       map[string]float32           `json:"sizes"`
+	Fonts       map[string]string            `json:"fonts"`
+	Icons       map[string]string            `json:"icons"`
+}
+
+// FromJSON creates a new Theme from JSON data provided as a string.
+// The JSON format supports defining colors (with variant-specific "colors-dark" and "colors-light" keys),
+// sizes, fonts, and icons. Hex colors can be specified with or without '#' prefix in 3, 4, 6, or 8 digit formats.
+// On parse error, returns the default theme and the error.
+//
+// Since: 2.2
+func FromJSON(data string) (fyne.Theme, error) {
+	theme, err := FromJSONReader(strings.NewReader(data))
+	if err != nil {
+		return DefaultTheme(), err
+	}
+	return theme, nil
+}
+
+// FromJSONReader reads JSON from an io.Reader and returns a Theme instance.
+// This is useful for loading themes from files or network streams.
+// On parse error, returns the default theme and the error.
+//
+// Since: 2.2

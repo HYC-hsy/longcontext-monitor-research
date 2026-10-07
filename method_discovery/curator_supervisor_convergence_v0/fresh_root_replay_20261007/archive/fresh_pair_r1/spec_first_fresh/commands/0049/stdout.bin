@@ -1,0 +1,51 @@
+func (hl *Hyperlink) SetURLFromString(str string) error {
+	u, err := url.Parse(str)
+	if err != nil {
+		return err
+	}
+	hl.URL = u
+	return nil
+}
+
+// Tapped is called when a pointer tapped event is captured and triggers any change handler
+func (hl *Hyperlink) Tapped(*fyne.PointEvent) {
+	hl.openURL()
+}
+
+// TypedRune is a hook called by the input handling logic on text input events if this object is focused.
+func (hl *Hyperlink) TypedRune(rune) {
+}
+
+// TypedKey is a hook called by the input handling logic on key events if this object is focused.
+func (hl *Hyperlink) TypedKey(ev *fyne.KeyEvent) {
+	if ev.Name == fyne.KeySpace {
+		hl.openURL()
+	}
+}
+
+func (hl *Hyperlink) openURL() {
+	if hl.URL != nil {
+		err := fyne.CurrentApp().OpenURL(hl.URL)
+		if err != nil {
+			fyne.LogError("Failed to open url", err)
+		}
+	}
+}
+
+func (hl *Hyperlink) syncSegments() {
+	hl.provider.Wrapping = hl.Wrapping
+	hl.provider.Segments = []RichTextSegment{&TextSegment{
+		Style: RichTextStyle{
+			Alignment: hl.Alignment,
+			ColorName: theme.ColorNamePrimary,
+			Inline:    true,
+			TextStyle: hl.TextStyle,
+		},
+		Text: hl.Text,
+	}}
+}
+
+var _ fyne.WidgetRenderer = (*hyperlinkRenderer)(nil)
+
+type hyperlinkRenderer struct {
+	hl    *Hyperlink

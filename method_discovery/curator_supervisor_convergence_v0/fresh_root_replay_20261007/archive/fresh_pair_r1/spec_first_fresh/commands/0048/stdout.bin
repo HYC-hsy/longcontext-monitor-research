@@ -1,0 +1,51 @@
+}
+
+// Refresh triggers a redraw of the hyperlink.
+//
+// Implements: fyne.Widget
+func (hl *Hyperlink) Refresh() {
+	if hl.provider == nil { // not created until visible
+		return
+	}
+	hl.syncSegments()
+
+	hl.provider.Refresh()
+	hl.BaseWidget.Refresh()
+}
+
+// MinSize returns the smallest size this widget can shrink to
+func (hl *Hyperlink) MinSize() fyne.Size {
+	if hl.provider == nil {
+		hl.CreateRenderer()
+	}
+
+	return hl.provider.MinSize()
+}
+
+// Resize sets a new size for the hyperlink.
+// Note this should not be used if the widget is being managed by a Layout within a Container.
+func (hl *Hyperlink) Resize(size fyne.Size) {
+	hl.BaseWidget.Resize(size)
+	if hl.provider == nil { // not created until visible
+		return
+	}
+	hl.provider.Resize(size)
+}
+
+// SetText sets the text of the hyperlink
+func (hl *Hyperlink) SetText(text string) {
+	hl.Text = text
+	if hl.provider == nil { // not created until visible
+		return
+	}
+	hl.syncSegments()
+	hl.provider.Refresh()
+}
+
+// SetURL sets the URL of the hyperlink, taking in a URL type
+func (hl *Hyperlink) SetURL(url *url.URL) {
+	hl.URL = url
+}
+
+// SetURLFromString sets the URL of the hyperlink, taking in a string type
+func (hl *Hyperlink) SetURLFromString(str string) error {

@@ -1,0 +1,36 @@
+// SetMinRowsVisible sets the minimum number of rows to display for multi-line entries.
+// This overrides the default minimum number of visible rows and affects the entry's MinSize.
+// A value of 0 or negative will use the default behavior.
+//
+// Since: 2.2
+func (e *Entry) SetMinRowsVisible(count int) {
+	e.minRowsVisible = count
+	e.Refresh()
+}
+
+// Tapped is called when this entry has been tapped. We update the cursor position in
+// device-specific callbacks (MouseDown() and TouchDown()).
+//
+// Implements: fyne.Tappable
+func (e *Entry) Tapped(ev *fyne.PointEvent) {
+	if fyne.CurrentDevice().IsMobile() && e.selecting {
+		e.selecting = false
+	}
+}
+
+// TappedSecondary is called when right or alternative tap is invoked.
+//
+// Opens the PopUpMenu with `Paste` item to paste text from the clipboard.
+//
+// Implements: fyne.SecondaryTappable
+func (e *Entry) TappedSecondary(pe *fyne.PointEvent) {
+	if e.Disabled() && e.Password {
+		return // no popup options for a disabled concealed field
+	}
+
+	e.requestFocus()
+	clipboard := fyne.CurrentApp().Driver().AllWindows()[0].Clipboard()
+	super := e.super()
+
+	cutItem := fyne.NewMenuItem("Cut", func() {
+		super.(fyne.Shortcutable).TypedShortcut(&fyne.ShortcutCut{Clipboard: clipboard})

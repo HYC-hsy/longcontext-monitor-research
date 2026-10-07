@@ -1,0 +1,31 @@
+// StringToStringWithFormat creates a new String binding that formats another String binding value
+// using the provided format string. The format string should contain exactly one %s placeholder.
+//
+// Example:
+//   name := binding.NewString()
+//   name.Set("Alice")
+//   greeting := binding.StringToStringWithFormat(name, "Hello, %s!")
+//   // greeting.Get() returns "Hello, Alice!"
+//
+// Since: 2.2
+func StringToStringWithFormat(str String, format string) String {
+	b := &stringToStringWithFormat{
+		format: format,
+		source: str,
+	}
+
+	// Listen to source changes
+	str.AddListener(b)
+
+	return b
+}
+
+// DataChanged is called when the source string changes.
+func (b *stringToStringWithFormat) DataChanged() {
+	b.trigger()
+}
+
+// Get returns the formatted string value.
+func (b *stringToStringWithFormat) Get() (string, error) {
+	b.lock.RLock()
+	defer b.lock.RUnlock()

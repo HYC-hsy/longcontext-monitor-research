@@ -1,0 +1,21 @@
+//   name.Set("Alice")
+//   greeting := binding.StringToStringWithFormat(name, "Hello, %s!")
+//   // greeting.Get() returns "Hello, Alice!"
+//
+// Since: 2.2
+func StringToStringWithFormat(str String, format string) String {
+	b := &stringToStringWithFormat{
+		format: format,
+		source: str,
+	}
+
+	// Listen to source changes
+	str.AddListener(b)
+
+	return b
+}
+
+// DataChanged is called when the source string changes.
+func (b *stringToStringWithFormat) DataChanged() {
+	b.trigger()
+}

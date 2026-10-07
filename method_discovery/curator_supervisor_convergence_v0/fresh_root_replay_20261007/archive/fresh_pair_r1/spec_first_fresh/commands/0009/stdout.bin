@@ -1,0 +1,50 @@
+package binding
+
+import (
+	"fmt"
+	"sync"
+)
+
+// sprintfBinding is a String binding that formats multiple data items using a format string.
+type sprintfBinding struct {
+	base
+	format  string
+	sources []DataItem
+
+	lock sync.RWMutex
+}
+
+// NewSprintf creates a new String binding that formats its value using fmt.Sprintf.
+// The format string and data sources are provided, and the binding updates whenever
+// any source data changes.
+//
+// Example:
+//   name := binding.NewString()
+//   age := binding.NewInt()
+//   formatted := binding.NewSprintf("Name: %s, Age: %d", name, age)
+//
+// Since: 2.2
+func NewSprintf(format string, sources ...DataItem) String {
+	b := &sprintfBinding{
+		format:  format,
+		sources: sources,
+	}
+
+	// Listen to all source data items
+	for _, source := range sources {
+		source.AddListener(b)
+	}
+
+	return b
+}
+
+// DataChanged is called when any of the source data items change.
+// It triggers a refresh of the formatted string.
+func (b *sprintfBinding) DataChanged() {
+	b.trigger()
+}
+
+// Get returns the current formatted string value.
+func (b *sprintfBinding) Get() (string, error) {
+	b.lock.RLock()
+	defer b.lock.RUnlock()
