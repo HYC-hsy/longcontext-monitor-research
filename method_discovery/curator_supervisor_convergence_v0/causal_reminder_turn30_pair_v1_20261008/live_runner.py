@@ -1,17 +1,19 @@
 """Fail-closed future execution entry for the frozen causal pair.
 
-There is deliberately no authorization file or bound provider/evaluator adapter
-in this zero-model commit. --validate is offline; --live cannot send by default.
+There is deliberately no authorization file in this zero-model commit.
+--validate is offline; --live fails before adapter construction by default.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Callable, Optional
 
 from .execution_control import ArmResult, PairController
+from .container_launcher import ContainerPairRuntime, validate_frozen_execution_environment
 from .pair_harness import (AUTHORITY_COMMIT, EXPECTED, HERE, REQUEST_FIELDS,
                            _read_json, build_pair_requests, checkpoint_binding,
                            frozen_reminder, sha, sha_bytes)
@@ -25,6 +27,16 @@ from method_discovery.curator_supervisor_convergence_v0.causal_reminder_turn30_2
 
 DEFAULT_AUTHORIZATION = HERE / "AUTHORIZATION.json"  # deliberately absent
 TASK_SOURCE = Path(r"E:\LongContext\long_context_bench\.cache\m12_roadmap_tasks\fyn-2.2.0-roadmap")
+ADAPTER_SOURCE_FILES = ("live_runner.py", "container_launcher.py", "continuation_adapter.py",
+                        "arm_child.py", "native_evaluator_adapter.py", "execution_control.py")
+
+
+def adapter_source_sha256() -> str:
+    hasher = hashlib.sha256()
+    for name in ADAPTER_SOURCE_FILES:
+        hasher.update(name.encode("utf-8") + b"\0")
+        hasher.update((HERE / name).read_bytes())
+    return hasher.hexdigest()
 
 
 def validate_offline() -> dict:
@@ -78,12 +90,14 @@ def validate_offline() -> dict:
         raise RuntimeError("Arms share workspace")
     if control["model"] != "claude-opus-4-8" or treatment["model"] != control["model"]:
         raise RuntimeError("Task model mismatch")
+    environment = validate_frozen_execution_environment()
     return {"status": "CAUSAL_PAIR_ZERO_MODEL_READY",
             "checkpoint_authority_commit": AUTHORITY_COMMIT,
             "control_request_sha256": sha(control), "treatment_request_sha256": sha(treatment),
             "request_fields": list(REQUEST_FIELDS), "ignored_fields": [],
             "arm_order": ["control", "treatment"],
             "remaining_task_turns_per_arm": 270,
+            "future_task_execution_environment": environment,
             "provider_send_count": 0, "task_agent_accepted_response_count": 0,
             "supervisor_reviewer_pma_model_calls": 0, "native_evaluator_execution_count": 0}
 
@@ -99,6 +113,7 @@ def require_live_authorization(path: Path = DEFAULT_AUTHORIZATION) -> dict:
         "execution_plan_sha256": sha_bytes((HERE / "EXECUTION_PLAN.json").read_bytes()),
         "control_request_canonical_sha256": sha(_read_json(HERE / "CONTROL_REQUEST.json")),
         "treatment_request_canonical_sha256": sha(_read_json(HERE / "TREATMENT_REQUEST.json")),
+        "live_adapter_source_sha256": adapter_source_sha256(),
         "approved_order": ["control", "treatment"],
     }
     if auth != required:
@@ -108,14 +123,23 @@ def require_live_authorization(path: Path = DEFAULT_AUTHORIZATION) -> dict:
 
 def run_authorized_pair(*, authorization: Path,
                         execute_arm: Optional[Callable[[str], ArmResult]] = None,
-                        evaluate_workspace: Optional[Callable[[str], object]] = None) -> dict:
-    # Authorization, full zero-model identity, and both adapters are required
-    # before the first possible external action. No adapter ships by default.
+                        evaluate_workspace: Optional[Callable[[str], object]] = None,
+                        output_root: Optional[Path] = None) -> dict:
+    # Authorization and full zero-model identity precede every external action.
     require_live_authorization(authorization)
     validate_offline()
-    if execute_arm is None or evaluate_workspace is None:
-        raise RuntimeError("No audited live continuation/evaluator adapters bound; no send permitted")
-    return PairController().run(execute_arm, evaluate_workspace)
+    if execute_arm is None and evaluate_workspace is None:
+        if output_root is None:
+            raise RuntimeError("Fresh live output root required; no send permitted")
+        adapter = ContainerPairRuntime(output_root)
+        execute_arm, evaluate_workspace = adapter.execute_arm, adapter.evaluate_workspace
+    elif execute_arm is None or evaluate_workspace is None:
+        raise RuntimeError("Incomplete live adapter binding; no send permitted")
+    result = PairController().run(execute_arm, evaluate_workspace)
+    if output_root is not None:
+        (output_root / "pair_result.json").write_text(
+            json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return result
 
 
 def main() -> None:
@@ -123,14 +147,15 @@ def main() -> None:
     parser.add_argument("--validate", action="store_true")
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--authorization", type=Path, default=DEFAULT_AUTHORIZATION)
+    parser.add_argument("--output-root", type=Path)
     args = parser.parse_args()
     if args.validate == args.live:
         parser.error("choose exactly one of --validate or --live")
     if args.validate:
         print(json.dumps(validate_offline(), ensure_ascii=False))
     else:
-        # CLI does not bind an execution adapter in this zero-model freeze.
-        print(json.dumps(run_authorized_pair(authorization=args.authorization), ensure_ascii=False))
+        print(json.dumps(run_authorized_pair(authorization=args.authorization,
+                                             output_root=args.output_root), ensure_ascii=False))
 
 
 if __name__ == "__main__":

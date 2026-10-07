@@ -37,9 +37,33 @@ failure, never selectively retries, and provides the evaluator only a
 label-neutral temporary `/app` copy after both arms have legally terminated.
 Its passive capture appends raw records without changing a provider payload.
 
-`live_runner.py --validate` performs the zero-network gate. Its default
-`AUTHORIZATION.json` is absent; `--live` has no bound Agent/provider/evaluator
-adapter in this zero-model freeze and cannot send. A later audited adapter,
-independent authorization, and live launch decision are required. No hidden
-evaluator material, prior research diagnosis, or Task/Supervisor trajectory
-after the checkpoint is placed in the model-visible requests.
+The final zero-model adapter layer is in `continuation_adapter.py`,
+`arm_child.py`, `container_launcher.py`, and `native_evaluator_adapter.py`.
+Each future authorized arm runs in a separate pinned task-image container and
+Python process, with its own writable `/app`, production-source copy, raw log
+root, and gateway volume. The child verifies the checkpoint, restores the
+deployed `ga.GenericAgentHandler`, `NativeToolClient`, provider history and
+compression counter, and enters the deployed `agent_loop.agent_runner_loop`
+with `turn_offset=30` and at most 270 additional turns. Its first `chat`
+substitutes the historical tool result plus the frozen next prompt; subsequent
+calls pass directly to production `NativeToolClient.chat`. At the production
+transport entry, the first actual payload must equal that arm's frozen request
+before the same payload object is sent. Raw pre-send inputs, responses, tool
+calls/results and production research telemetry are captured outside `/app`.
+
+`LIVE_ADAPTER_CERTIFICATION.json` records two independent task-image dry-runs
+using the deployed request builder with a deliberate pre-network cut. They
+confirm the Control and Treatment canonical hashes and zero network/model
+calls. `live_runner.py --validate` remains offline. `AUTHORIZATION.json` is
+absent, and `AUTHORIZATION_TEMPLATE.json` has `execution_authorized=false`;
+`--live` fails before constructing either arm until a separate authorization
+is supplied. No Control, Treatment, or evaluator has run.
+
+On a separately authorized live invocation, the parent uses the existing
+single-use `PairController`: Control child exits completely before Treatment
+child starts; both must terminate legally before the native adapter receives
+label-neutral workspace copies. The task containers have no network, no
+online `/tests`, no mounted other-arm workspace, and no Supervisor/PMA/reviewer.
+The evaluator sees only `/app`, `/tests`, and its neutral output location.
+No hidden evaluator material, prior research diagnosis, or Task/Supervisor
+trajectory after the checkpoint is placed in model-visible requests.
