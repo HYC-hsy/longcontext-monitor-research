@@ -30,6 +30,7 @@ CLEAN_SOURCE_GIT = Path(r"E:\fyne_turn30_source_20261007")
 IMAGE_APP = Path(r"E:\fyne_turn30_image_app_20261007")
 TASK_IMAGE = "sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1"
 IMAGE_APP_TREE_SHA256 = "a78fd1e12055de14567a74114ecef238f3b9bfdec267b7f69c19607f60b38bdf"
+ORIGINAL_TASK_SIDECAR = ".monitor_original_task_acae0ed0dd4346a5a1515a7586ffceed.txt"
 EXPECTED = {
     PUBLIC_EVENTS: "f2a007c9afa3ed8d097e249d6b96d55717066d61217c1229f823764bb6ad9441",
     RESEARCH_EVENTS: "da03831f6382ea7a02ebe5b71e9c3907bad71d60c01926ed95e784415be60082",
@@ -169,10 +170,22 @@ def materialize(destination: Path) -> dict:
         raise RuntimeError("Checkpoint destination exists; refusing overwrite")
     events = jsonl(PUBLIC_EVENTS)
     _check_shell_calls(events)
-    shutil.copytree(IMAGE_APP, destination, ignore=shutil.ignore_patterns(".git"))
-    base_tree, base_files = source_tree(destination)
+    # The historical /app was Git-backed. Preserve that exact clean-image
+    # repository before replaying public mutations; .git is not model-hidden.
+    shutil.copytree(IMAGE_APP, destination)
+    base_tree, base_files = source_tree(destination, exclude_git=True)
     if len(base_files) != 2468 or base_tree != IMAGE_APP_TREE_SHA256:
         raise RuntimeError("Clean image workspace identity mismatch")
+    # Turn-2 public ls proves this task-text sidecar predated the checkpoint.
+    # Source bytes are cross-checked against the retained pre-evaluator tar,
+    # not taken from the later implementation state.
+    with tarfile.open(SOURCE_TAR, "r") as capture:
+        stream = capture.extractfile("./" + ORIGINAL_TASK_SIDECAR)
+        if stream is None or stream.read() != TASK.read_bytes():
+            raise RuntimeError("Historical original-task sidecar identity mismatch")
+    if (IMAGE_APP / ORIGINAL_TASK_SIDECAR).exists():
+        raise RuntimeError("Sidecar unexpectedly present in clean image")
+    (destination / ORIGINAL_TASK_SIDECAR).write_bytes(TASK.read_bytes())
     mutations = []
     for event in events:
         if event["task_turn"] > 30 or event["boundary"] != "post_tool_pre_next_llm":
@@ -204,7 +217,7 @@ def materialize(destination: Path) -> dict:
             mutations.append({"task_turn": event["task_turn"], "archive_sequence": event["archive_sequence"],
                               "tool": call["name"], "tool_call_id": call["id"],
                               "path": target.relative_to(destination).as_posix(), "sha256_after": sha_file(target)})
-    tree, files = source_tree(destination)
+    tree, files = source_tree(destination, exclude_git=True)
     return {"source_commit": SOURCE_COMMIT, "clean_git_head": CLEAN_GIT_HEAD,
             "task_image": TASK_IMAGE, "clean_image_tree_sha256": base_tree,
             "workspace_tree_sha256": tree, "workspace_file_count": len(files),

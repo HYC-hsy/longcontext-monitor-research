@@ -9,16 +9,18 @@ from pathlib import Path
 import subprocess
 
 from .materialize import (ARCHIVE, CLEAN_GIT_HEAD, CLEAN_TAR, EXPECTED, HERE, IMAGE_APP,
-                          IMAGE_APP_TREE_SHA256, PUBLIC_EVENTS, REPO, RESEARCH_EVENTS,
+                          IMAGE_APP_TREE_SHA256, ORIGINAL_TASK_SIDECAR, PUBLIC_EVENTS, REPO, RESEARCH_EVENTS,
                           RUNTIME_RECEIPTS, SOURCE_COMMIT, SOURCE_TAR, TASK, TASK_IMAGE,
                           jsonl, sha_bytes, sha_file, source_tree, verify_sources)
+from .git_state import certify_git_state
+from .runtime_checkpoint import DEPLOYED_SOURCE, certify as certify_runtime
 from .reconstruct_next_request import (NEXT_ID, NEXT_SHA256, PREVIOUS_ID,
                                        PREVIOUS_SHA256, bound_first_send,
                                        canonical, comparison, request_path, sha)
 
 
-MATERIALIZED = Path(r"E:\fyne_turn30_materialized_20261007_v3")
-EXPECTED_WORKSPACE_TREE = "88c60e02e0e278e6fa11ee80f41cec8587d2d8dea75b2a0c6b78c2b6e3d3cadd"
+MATERIALIZED = Path(r"E:\fyne_turn30_materialized_20261007_v4")
+EXPECTED_WORKSPACE_TREE = "994ed5f372f0ee6fecda6a600dc970ce4c5fbbb1a8c09acfa9ab3748ce323c60"
 DEPLOYED_TASK_AGENT_SOURCE = Path(r"E:\LongContext\long_context_bench\output\crs_rhr_rer_fyne_mechanism_gate\isolated_bundles\crs-rhr-rer-v0-fyne-bji-high-budget-r1\source\ga.py")
 DEPLOYED_TASK_AGENT_SOURCE_SHA256 = "189c2272545b08dc61fd26a645df0ae0d0dbc07f0f62c8b713bb4f9a34bcb05a"
 
@@ -84,7 +86,8 @@ def timeline() -> list[dict]:
 def source_manifest() -> dict:
     inputs = []
     for path in (PUBLIC_EVENTS, RESEARCH_EVENTS, RUNTIME_RECEIPTS, TASK, SOURCE_TAR, CLEAN_TAR,
-                 DEPLOYED_TASK_AGENT_SOURCE,
+                 DEPLOYED_TASK_AGENT_SOURCE, DEPLOYED_SOURCE / "llmcore.py",
+                 DEPLOYED_SOURCE / "agent_loop.py", DEPLOYED_SOURCE / "mykey.json",
                  request_path(PREVIOUS_ID), request_path(NEXT_ID)):
         inputs.append({"path": _relative(path), "bytes": path.stat().st_size,
                        "sha256": sha_file(path), "role": ("local_hash_bound_request_body"
@@ -140,11 +143,13 @@ def freeze() -> dict:
     original, reconstructed, working, request_comparison = comparison()
     if not request_comparison["model_visible_equal"]:
         raise RuntimeError("Model-visible next-request reconstruction mismatch")
-    workspace_tree, files = source_tree(MATERIALIZED)
-    if workspace_tree != EXPECTED_WORKSPACE_TREE or len(files) != 2471:
+    workspace_tree, files = source_tree(MATERIALIZED, exclude_git=True)
+    if workspace_tree != EXPECTED_WORKSPACE_TREE or len(files) != 2472:
         raise RuntimeError("Materialized turn-30 workspace identity mismatch")
-    if any(path.startswith(("monitor/", "verifier/", "solution/", ".git/"))
-           or path.startswith(".monitor_original_task_")
+    if sha_file(MATERIALIZED / ORIGINAL_TASK_SIDECAR) != EXPECTED[TASK]:
+        raise RuntimeError("Historical original-task sidecar differs")
+    if any(path.startswith(("monitor/", "verifier/", "solution/"))
+           or (path.startswith(".monitor_original_task_") and path != ORIGINAL_TASK_SIDECAR)
            for path in (row["path"] for row in files)):
         raise RuntimeError("Private/future root entered checkpoint workspace")
     if any(row["path"] in ("IMPLEMENTATION_COMPLETE.md", "IMPLEMENTATION_SUMMARY.md") for row in files):
@@ -157,19 +162,35 @@ def freeze() -> dict:
         raise RuntimeError("Turn-30 action-selection control boundary changed")
     if intervened_between:
         raise RuntimeError("Supervisor intervention delivered at the checkpoint boundary")
+    git_state = certify_git_state(MATERIALIZED)
+    runtime_state, runtime_request, runtime_comparison = certify_runtime()
+    if (not runtime_comparison["model_visible_equal"]
+            or runtime_comparison["ignored_transport_fields"]
+            or runtime_comparison["original_raw_bytes_sha256"] != NEXT_SHA256
+            or runtime_request != reconstructed):
+        raise RuntimeError("Production runtime dry-run next request differs")
+    if sha(runtime_request["messages"]) != "95737650e2f053901b01db20f9db9729e911cba395895d94713926cf2353556b":
+        raise RuntimeError("Accepted provider-history request identity changed")
+    working_state = {"key_info": working["call"]["args"]["key_info"], "passed_sessions": 0}
+    if sha(working_state) != "bb0590c60c8033c9ba1e11e701cceae0e4429adcccd73d5ee7bbe912fd6c7d64":
+        raise RuntimeError("Accepted working-state identity changed")
 
     write_json("SOURCE_MANIFEST.json", source_manifest())
     write_json("TURN30_BOUNDARY_TIMELINE.json", timeline())
     write_json("CHECKPOINT_WORKSPACE_MANIFEST.json", {"workspace_tree_sha256": workspace_tree,
-                                                        "file_count": len(files), "files": files})
+                                                        "file_count": len(files),
+                                                        "git_directory_certified_separately": True,
+                                                        "files": files})
+    write_json("GIT_STATE_CERTIFICATION.json", git_state)
+    write_json("RUNTIME_CHECKPOINT_STATE.json", runtime_state)
+    write_json("RUNTIME_NEXT_REQUEST_COMPARISON.json", runtime_comparison)
     (HERE / "PREVIOUS_REQUEST.json").write_bytes(request_path(PREVIOUS_ID).read_bytes())
     (HERE / "ORIGINAL_NEXT_REQUEST.json").write_bytes(request_path(NEXT_ID).read_bytes())
-    write_json("RECONSTRUCTED_NEXT_REQUEST.json", reconstructed)
+    write_json("RECONSTRUCTED_NEXT_REQUEST.json", runtime_request)
     write_json("NEXT_REQUEST_COMPARISON.json", request_comparison)
     history = provider_history_manifest(reconstructed["messages"])
     write_json("TASK_AGENT_PROVIDER_HISTORY_MANIFEST.json", history)
     key_info = working["call"]["args"]["key_info"]
-    working_state = {"key_info": key_info, "passed_sessions": 0}
     write_json("WORKING_CHECKPOINT.json", {
         "tool_call_id": working["call"]["id"], "exact_arguments": working["call"]["args"],
         "exact_result": working["result"], "backing_state": "Task Agent in-memory self.working",
@@ -181,6 +202,8 @@ def freeze() -> dict:
     })
     leakage = {
         "included_model_visible_sources": ["clean task image /app public workspace at Git HEAD",
+                                           "historical original-task sidecar from exact task bytes, public ls turn 2",
+                                           "clean historical .git state (certified separately from workspace content SHA)",
                                            "successful public file writes/patches through turn 30",
                                            "exact Task turn-30 provider request history",
                                            "public Task turn-30 assistant tool call, result, next prompt",
@@ -196,6 +219,9 @@ def freeze() -> dict:
         "future_information_excluded": True,
         "supervisor_intervention_between_tool_result_and_next_request": False,
         "prior_supervisor_interventions_in_history_are_not_removed": True,
+        "historical_original_task_sidecar_allowed": ORIGINAL_TASK_SIDECAR,
+        "historical_original_task_sidecar_sha256": EXPECTED[TASK],
+        "git_directory_is_private_or_forbidden": False,
     }
     write_json("LEAKAGE_AUDIT.json", leakage)
     identity = {
@@ -203,6 +229,11 @@ def freeze() -> dict:
         "task_id": "fyn-2.2.0-roadmap",
         "boundary": "post task-turn-30 tool result / pre next task-agent provider request",
         "workspace_tree_sha256": workspace_tree,
+        "workspace_file_count": len(files),
+        "git_state_certified": git_state["git_backed_workspace"],
+        "runtime_state_certified": runtime_comparison["model_visible_equal"],
+        "runtime_backend_history_sha256": runtime_state["backend_history_sha256"],
+        "runtime_handler_history_info_sha256": runtime_state["history_info_sha256"],
         "task_agent_provider_history_sha256": history["history_sha256"],
         "working_state_sha256": sha(working_state),
         "original_next_request_model_visible_sha256": request_comparison["original_model_visible_sha256"],
