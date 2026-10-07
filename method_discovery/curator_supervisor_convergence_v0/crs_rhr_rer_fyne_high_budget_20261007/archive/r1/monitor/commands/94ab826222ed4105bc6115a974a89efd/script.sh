@@ -1,0 +1,1 @@
+cd /app && grep -r "type.*struct.*{" app/app.go test/testapp.go | grep -A5 "App"

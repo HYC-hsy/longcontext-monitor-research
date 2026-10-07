@@ -1,0 +1,1 @@
+cd /app && grep -A5 "type mobileApp" internal/driver/mobile/canvas_test.go

@@ -1,0 +1,1 @@
+cd /app && grep -r "^func.*\*.*Metadata.*AppMetadata" --include="*.go" .

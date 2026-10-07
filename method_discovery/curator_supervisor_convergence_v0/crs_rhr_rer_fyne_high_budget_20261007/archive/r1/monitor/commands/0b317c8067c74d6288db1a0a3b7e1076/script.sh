@@ -1,0 +1,1 @@
+cd /app && grep -rn "^type.*App.*struct" --include="*.go" app/ internal/ driver/ test/ 2>/dev/null | grep -v "AppMetadata"

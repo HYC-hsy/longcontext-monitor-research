@@ -1,0 +1,1 @@
+cd /app && find . -name "*.go" -type f -exec grep -l "^type.*struct.*{" {} \; | xargs grep -l "fyne\.App" | head -20

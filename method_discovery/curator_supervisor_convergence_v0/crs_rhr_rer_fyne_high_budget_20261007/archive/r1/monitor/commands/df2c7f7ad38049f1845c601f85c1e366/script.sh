@@ -1,0 +1,1 @@
+cd /app && read session_id <<< "d0dced2117234e70b502152827bf9e5b" && cat monitor/audit/commands/d0dced2117234e70b502152827bf9e5b/output.log

@@ -1,0 +1,1 @@
+cd /app && find . -name "app.go" -o -name "meta.go" -o -name "menu.go" -o -name "container.go" | grep -v vendor | grep -v internal

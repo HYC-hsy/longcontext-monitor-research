@@ -1,0 +1,1 @@
+cd /app && go build -v ./... 2>&1 | tail -5
