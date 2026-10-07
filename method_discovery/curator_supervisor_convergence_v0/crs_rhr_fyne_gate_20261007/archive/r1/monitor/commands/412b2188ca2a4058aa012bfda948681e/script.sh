@@ -1,0 +1,1 @@
+ls -la /app/app/ /app/driver/desktop/ /app/data/binding/ /app/data/validation/ /app/theme/ /app/widget/ 2>&1 | head -60

@@ -1,0 +1,320 @@
+diff --git a/app.go b/app.go
+index e2edc6a7..e777c206 100644
+--- a/app.go
++++ b/app.go
+@@ -5,6 +5,22 @@ import (
+ 	"sync"
+ )
+ 
++// AppMetadata captures build-time application metadata including identity and version information.
++//
++// Since: 2.2
++type AppMetadata struct {
++	// ID is the unique application identifier (e.g., "com.example.myapp")
++	ID string
++	// Name is the human-friendly application name (e.g., "My App")
++	Name string
++	// Version is the semantic version string (e.g., "1.0.0")
++	Version string
++	// Build is the build number
++	Build int
++	// Icon is an optional icon resource bundled at build time
++	Icon Resource
++}
++
+ // An App is the definition of a graphical application.
+ // Apps can have multiple windows, by default they will exit when all windows
+ // have been closed. This can be modified using SetMaster() or SetCloseIntercept().
+@@ -60,6 +76,11 @@ type App interface {
+ 
+ 	// Lifecycle returns a type that allows apps to hook in to lifecycle events.
+ 	Lifecycle() Lifecycle
++
++	// Metadata returns the application's build metadata including ID, name, version and build number.
++	//
++	// Since: 2.2
++	Metadata() AppMetadata
+ }
+ 
+ var app App
+diff --git a/app/app.go b/app/app.go
+index d78cb47e..feba41ec 100644
+--- a/app/app.go
++++ b/app/app.go
+@@ -105,6 +105,10 @@ func (a *fyneApp) Lifecycle() fyne.Lifecycle {
+ 	return a.lifecycle
+ }
+ 
++func (a *fyneApp) Metadata() fyne.AppMetadata {
++	return GetMetadata()
++}
++
+ // New returns a new application instance with the default driver and no unique ID
+ func New() fyne.App {
+ 	internal.LogHint("Applications should be created with a unique ID using app.NewWithID()")
+diff --git a/cmd/fyne/internal/mobile/binres/testdata/gen.sh b/cmd/fyne/internal/mobile/binres/testdata/gen.sh
+old mode 100755
+new mode 100644
+diff --git a/container.go b/container.go
+index 3d42a3b7..6d466f78 100644
+--- a/container.go
++++ b/container.go
+@@ -53,6 +53,9 @@ func NewContainerWithLayout(layout Layout, objects ...CanvasObject) *Container {
+ //
+ // Since: 1.4
+ func (c *Container) Add(add CanvasObject) {
++	if add == nil {
++		return
++	}
+ 	c.Objects = append(c.Objects, add)
+ 	c.layout()
+ }
+@@ -161,6 +164,15 @@ func (c *Container) Remove(rem CanvasObject) {
+ 	}
+ }
+ 
++// RemoveAll clears the container, removing all child objects.
++// This is more efficient than calling Remove() repeatedly.
++//
++// Since: 2.2
++func (c *Container) RemoveAll() {
++	c.Objects = nil
++	c.layout()
++}
++
+ // Visible returns true if the container is currently visible, false otherwise.
+ func (c *Container) Visible() bool {
+ 	return !c.Hidden
+diff --git a/dialog/testdata/bin b/dialog/testdata/bin
+old mode 100755
+new mode 100644
+diff --git a/internal/async/chan_canvasobject.go b/internal/async/chan_canvasobject.go
+old mode 100755
+new mode 100644
+diff --git a/internal/async/chan_func.go b/internal/async/chan_func.go
+old mode 100755
+new mode 100644
+diff --git a/internal/async/chan_interface.go b/internal/async/chan_interface.go
+old mode 100755
+new mode 100644
+diff --git a/internal/async/chan_struct.go b/internal/async/chan_struct.go
+old mode 100755
+new mode 100644
+diff --git a/menu.go b/menu.go
+index 87db5350..70814a9e 100644
+--- a/menu.go
++++ b/menu.go
+@@ -5,6 +5,8 @@ package fyne
+ type Menu struct {
+ 	Label string
+ 	Items []*MenuItem
++
++	refresh func() // callback to trigger menu UI update
+ }
+ 
+ // NewMenu creates a new menu given the specified label (to show in a MainMenu) and list of items to display.
+@@ -12,6 +14,16 @@ func NewMenu(label string, items ...*MenuItem) *Menu {
+ 	return &Menu{Label: label, Items: items}
+ }
+ 
++// Refresh triggers a visual update of the menu if it is currently displayed.
++// This is useful when menu items have changed dynamically.
++//
++// Since: 2.2
++func (m *Menu) Refresh() {
++	if m.refresh != nil {
++		m.refresh()
++	}
++}
++
+ // MenuItem is a single item within any menu, it contains a display Label and Action function that is called when tapped.
+ type MenuItem struct {
+ 	ChildMenu *Menu
+@@ -24,6 +36,16 @@ type MenuItem struct {
+ 	Disabled bool
+ 	// Since: 2.1
+ 	Checked bool
++	// Icon is the icon to display next to the menu item.
++	//
++	// Since: 2.2
++	Icon Resource
++	// Shortcut is the keyboard shortcut for this menu item.
++	//
++	// Since: 2.2
++	Shortcut Shortcut
++
++	refresh func() // callback to trigger menu item UI update
+ }
+ 
+ // NewMenuItem creates a new menu item from the passed label and action parameters.
+@@ -31,6 +53,16 @@ func NewMenuItem(label string, action func()) *MenuItem {
+ 	return &MenuItem{Label: label, Action: action}
+ }
+ 
++// Refresh triggers a visual update of this menu item if it is currently displayed.
++// This is useful when item properties (like Checked, Disabled, Icon) have changed.
++//
++// Since: 2.2
++func (m *MenuItem) Refresh() {
++	if m.refresh != nil {
++		m.refresh()
++	}
++}
++
+ // NewMenuItemSeparator creates a menu item that is to be used as a separator.
+ func NewMenuItemSeparator() *MenuItem {
+ 	return &MenuItem{IsSeparator: true, Action: func() {}}
+@@ -39,10 +71,22 @@ func NewMenuItemSeparator() *MenuItem {
+ // MainMenu defines the data required to show a menu bar (desktop) or other appropriate top level menu.
+ type MainMenu struct {
+ 	Items []*Menu
++
++	refresh func() // callback to trigger main menu UI update
+ }
+ 
+ // NewMainMenu creates a top level menu structure used by fyne.Window for displaying a menubar
+ // (or appropriate equivalent).
+ func NewMainMenu(items ...*Menu) *MainMenu {
+-	return &MainMenu{items}
++	return &MainMenu{Items: items}
++}
++
++// Refresh triggers a visual update of the main menu if it is currently displayed.
++// This is useful when the menu structure has changed dynamically.
++//
++// Since: 2.2
++func (m *MainMenu) Refresh() {
++	if m.refresh != nil {
++		m.refresh()
++	}
+ }
+diff --git a/test/testapp.go b/test/testapp.go
+index f6754fce..48549c24 100644
+--- a/test/testapp.go
++++ b/test/testapp.go
+@@ -86,6 +86,15 @@ func (a *testApp) Lifecycle() fyne.Lifecycle {
+ 	return a.lifecycle
+ }
+ 
++func (a *testApp) Metadata() fyne.AppMetadata {
++	return fyne.AppMetadata{
++		ID:      "com.example.test",
++		Name:    "Test App",
++		Version: "1.0.0",
++		Build:   1,
++	}
++}
++
+ func (a *testApp) lastAppliedTheme() fyne.Theme {
+ 	a.propertyLock.Lock()
+ 	defer a.propertyLock.Unlock()
+diff --git a/widget/entry.go b/widget/entry.go
+index e5f151dc..49a45580 100644
+--- a/widget/entry.go
++++ b/widget/entry.go
+@@ -88,6 +88,12 @@ type Entry struct {
+ 	ActionItem      fyne.CanvasObject `json:"-"`
+ 	binder          basicBinder
+ 	conversionError error
++
++	// MinRowsVisible sets a minimum height for multiline entries.
++	// This is useful to ensure the entry is tall enough to display content without excessive scrolling.
++	//
++	// Since: 2.2
++	MinRowsVisible int
+ }
+ 
+ // NewEntry creates a new single line entry widget.
+@@ -459,6 +465,18 @@ func (e *Entry) SetText(text string) {
+ 	e.updateCursorAndSelection()
+ }
+ 
++// SetMinRowsVisible sets the minimum number of rows that should be visible in a multiline entry.
++// This helps ensure the entry displays enough content without excessive scrolling.
++//
++// Since: 2.2
++func (e *Entry) SetMinRowsVisible(rows int) {
++	if e.MinRowsVisible == rows {
++		return
++	}
++	e.MinRowsVisible = rows
++	e.Refresh()
++}
++
+ // Tapped is called when this entry has been tapped. We update the cursor position in
+ // device-specific callbacks (MouseDown() and TouchDown()).
+ //
+diff --git a/widget/hyperlink.go b/widget/hyperlink.go
+index 6faf8510..736710e5 100644
+--- a/widget/hyperlink.go
++++ b/widget/hyperlink.go
+@@ -22,6 +22,10 @@ type Hyperlink struct {
+ 	Alignment fyne.TextAlign // The alignment of the Text
+ 	Wrapping  fyne.TextWrap  // The wrapping of the Text
+ 	TextStyle fyne.TextStyle // The style of the hyperlink text
++	// OnTapped is called when the hyperlink is tapped. If nil, the URL is opened.
++	//
++	// Since: 2.2
++	OnTapped func()
+ 
+ 	focused, hovered bool
+ 	provider         *RichText
+@@ -167,6 +171,10 @@ func (hl *Hyperlink) TypedKey(ev *fyne.KeyEvent) {
+ }
+ 
+ func (hl *Hyperlink) openURL() {
++	if hl.OnTapped != nil {
++		hl.OnTapped()
++		return
++	}
+ 	if hl.URL != nil {
+ 		err := fyne.CurrentApp().OpenURL(hl.URL)
+ 		if err != nil {
+diff --git a/widget/testdata/bin b/widget/testdata/bin
+old mode 100755
+new mode 100644
+diff --git a/widget/testdata/diff-failed.sh b/widget/testdata/diff-failed.sh
+old mode 100755
+new mode 100644
+diff --git a/widget/toolbar.go b/widget/toolbar.go
+index 259164f5..4ca4e908 100644
+--- a/widget/toolbar.go
++++ b/widget/toolbar.go
+@@ -27,8 +27,18 @@ func (t *ToolbarAction) ToolbarObject() fyne.CanvasObject {
+ 	return button
+ }
+ 
++// SetIcon updates the icon for this ToolbarAction and refreshes the display.
++//
++// Since: 2.2
++func (t *ToolbarAction) SetIcon(icon fyne.Resource) {
++	if t.Icon == icon {
++		return
++	}
++	t.Icon = icon
++}
++
+ // NewToolbarAction returns a new push button style ToolbarItem
+-func NewToolbarAction(icon fyne.Resource, onActivated func()) ToolbarItem {
++func NewToolbarAction(icon fyne.Resource, onActivated func()) *ToolbarAction {
+ 	return &ToolbarAction{icon, onActivated}
+ }
+ 
+@@ -44,7 +54,7 @@ func (t *ToolbarSpacer) ToolbarObject() fyne.CanvasObject {
+ }
+ 
+ // NewToolbarSpacer returns a new spacer item for a Toolbar to assist with ToolbarItem alignment
+-func NewToolbarSpacer() ToolbarItem {
++func NewToolbarSpacer() *ToolbarSpacer {
+ 	return &ToolbarSpacer{}
+ }
+ 
+@@ -59,7 +69,7 @@ func (t *ToolbarSeparator) ToolbarObject() fyne.CanvasObject {
+ }
+ 
+ // NewToolbarSeparator returns a new separator item for a Toolbar to assist with ToolbarItem grouping
+-func NewToolbarSeparator() ToolbarItem {
++func NewToolbarSeparator() *ToolbarSeparator {
+ 	return &ToolbarSeparator{}
+ }
+ 
