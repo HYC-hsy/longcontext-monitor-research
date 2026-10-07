@@ -46,10 +46,10 @@ def fixture(tmp_path):
 
 
 def contrast(**changes):
-    value = {'alternative': 'The public route is absent.',
+    value = {'release_blocking_state': 'The public route is absent.',
              'grounding': 'The public task requires the route.',
              'ground_refs': ['task/original_task.txt'],
-             'discrimination': 'The observed route result would differ if it were absent.',
+             'exclusion_reason': 'The observed route result would differ if it were absent.',
              'observation_refs': ['task/public_events.jsonl#1']}
     value.update(changes)
     return value
@@ -75,11 +75,16 @@ def visible(snapshot):
 def test_schema_tools_and_first_boundary(tmp_path):
     monitor, client, workspace, _ = fixture(tmp_path)
     assert [x['function']['name'] for x in crs_tools()] == [x['function']['name'] for x in MONITOR_TOOLS]
-    assert crs_tools()[-1]['function']['parameters']['required'] == ['contrast']
+    assert set(crs_tools()[-1]['function']['parameters']['required']) == set(contrast())
+    properties = crs_tools()[-1]['function']['parameters']['properties']
+    assert 'contrast' not in properties
+    assert 'contract-violating WORLD STATE' in properties['release_blocking_state']['description']
+    assert 'not an alternative control action' in properties['release_blocking_state']['description']
+    assert 'do not call allow_complete' in crs_tools()[-1]['function']['description']
     assert monitor.dispatch('allow_complete', {}).action is None
-    assert monitor.dispatch('allow_complete', {'contrast': contrast(ground_refs=[])}).action is None
+    assert monitor.dispatch('allow_complete', contrast(ground_refs=[])).action is None
     monitor.dcm.model_turn = 1
-    first = monitor.dispatch('allow_complete', {'contrast': contrast()})
+    first = monitor.dispatch('allow_complete', contrast())
     assert first.action is None and first.data['status'] == 'release_not_executed'
     assert monitor.crs.root_contrast['surfaced'] is False
     shown = expose(monitor, client)
@@ -96,18 +101,18 @@ def test_schema_tools_and_first_boundary(tmp_path):
 def test_second_turn_exact_or_revised_contrast(tmp_path):
     monitor, client, workspace, _ = fixture(tmp_path)
     monitor.dcm.model_turn = 1
-    assert monitor.dispatch('allow_complete', {'contrast': contrast()}).action is None
+    assert monitor.dispatch('allow_complete', contrast()).action is None
     # Two calls in the same provider response cannot use a pending surface.
-    assert monitor.dispatch('allow_complete', {'contrast': contrast()}).action is None
+    assert monitor.dispatch('allow_complete', contrast()).action is None
     expose(monitor, client)
     monitor.dcm.model_turn = 2
-    changed = contrast(alternative='A different public route is absent.')
-    assert monitor.dispatch('allow_complete', {'contrast': changed}).action is None
+    changed = contrast(release_blocking_state='A different public route is absent.')
+    assert monitor.dispatch('allow_complete', changed).action is None
     assert monitor.crs.root_contrast['surfaced'] is False
-    assert monitor.dispatch('allow_complete', {'contrast': changed}).action is None
+    assert monitor.dispatch('allow_complete', changed).action is None
     expose(monitor, client)
     monitor.dcm.model_turn = 3
-    assert monitor.dispatch('allow_complete', {'contrast': changed}).action.kind == 'allow_complete'
+    assert monitor.dispatch('allow_complete', changed).action.kind == 'allow_complete'
     assert monitor.crs.root_contrast is None
     names = [r['event'] for r in events(workspace)]
     assert names.count('crs_proposed') == 2 and 'crs_revised' in names and 'crs_confirmed' in names
@@ -121,7 +126,7 @@ def test_provider_ready_second_request_and_same_response_double_call(tmp_path, m
         snapshots.append(client.assembled_request_snapshot(tools))
         calls = 2 if len(snapshots) == 1 else 1
         return ([{'type': 'tool_use', 'id': f'c{len(snapshots)}-{n}',
-                  'name': 'allow_complete', 'input': {'contrast': contrast()}}
+                  'name': 'allow_complete', 'input': contrast()}
                  for n in range(calls)], {})
 
     monkeypatch.setattr(client, '_request_once', offline_response)
@@ -176,7 +181,7 @@ def test_local_provider_schema_is_baseline_ase_and_only_root_allow_changes(tmp_p
     def root_response(tools):
         root.append(client.assembled_request_snapshot(tools))
         return ([{'type': 'tool_use', 'id': 'root-allow', 'name': 'allow_complete',
-                  'input': {'contrast': contrast()}}], {})
+                  'input': contrast()}], {})
 
     monkeypatch.setattr(client, '_request_once', root_response)
     # One model turn is enough to capture the root provider schema; exhaustion cannot release.
@@ -186,7 +191,7 @@ def test_local_provider_schema_is_baseline_ase_and_only_root_allow_changes(tmp_p
     assert len(root) == 1
     assert [x['function']['name'] for x in root[0]['tools']] == [x['function']['name'] for x in MONITOR_TOOLS]
     assert root[0]['tools'][:-1] == local[0]['tools'][:-1]
-    assert root[0]['tools'][-1]['function']['parameters']['required'] == ['contrast']
+    assert set(root[0]['tools'][-1]['function']['parameters']['required']) == set(contrast())
     assert 'contrast' not in local[0]['tools'][-1]['function']['parameters']['properties']
 
 
@@ -194,7 +199,7 @@ def test_identical_text_with_changed_task_book_sha_requires_new_surface(tmp_path
     monitor, client, workspace, _ = fixture(tmp_path)
     value = contrast(ground_refs=['monitor/reference.md'])
     monitor.dcm.model_turn = 1
-    first = monitor.dispatch('allow_complete', {'contrast': value})
+    first = monitor.dispatch('allow_complete', value)
     assert first.action is None
     first_state = first.data['state_digest']
     first_contrast = first.data['contrast_sha256']
@@ -203,7 +208,7 @@ def test_identical_text_with_changed_task_book_sha_requires_new_surface(tmp_path
     assert old_sha in first_visible
     workspace.write_text('monitor/reference.md', 'Revised durable public-route requirement.')
     monitor.dcm.model_turn = 2
-    revised = monitor.dispatch('allow_complete', {'contrast': value})
+    revised = monitor.dispatch('allow_complete', value)
     assert revised.action is None and revised.data['status'] == 'release_not_executed'
     assert revised.data['contrast_sha256'] == first_contrast
     assert revised.data['state_digest'] != first_state
@@ -213,7 +218,7 @@ def test_identical_text_with_changed_task_book_sha_requires_new_surface(tmp_path
     second_visible = expose(monitor, client)
     assert new_sha in second_visible and revised.data['state_digest'] in second_visible
     monitor.dcm.model_turn = 3
-    assert monitor.dispatch('allow_complete', {'contrast': value}).action.kind == 'allow_complete'
+    assert monitor.dispatch('allow_complete', value).action.kind == 'allow_complete'
     revisions = [r for r in events(workspace) if r['event'] == 'crs_revised']
     assert revisions[-1]['same_contrast'] is True
 
@@ -227,12 +232,12 @@ def test_historical_file_read_receipt_identity_ignores_later_workspace_change(tm
     locator = f'monitor/audit/dialogue.jsonl#{len(events(workspace))}'
     value = contrast(observation_refs=[locator])
     monitor.dcm.model_turn = 1
-    first = monitor.dispatch('allow_complete', {'contrast': value})
+    first = monitor.dispatch('allow_complete', value)
     assert first.action is None
     expose(monitor, client)
     (workspace.task_mounts['workspace'] / 'route.py').write_text('ROUTE = False\n', encoding='utf-8')
     monitor.dcm.model_turn = 2
-    confirmed = monitor.dispatch('allow_complete', {'contrast': value})
+    confirmed = monitor.dispatch('allow_complete', value)
     assert confirmed.action.kind == 'allow_complete'
     assert receipt['sha256'] != hashlib.sha256(b'ROUTE = False\n').hexdigest()
 
@@ -248,14 +253,14 @@ def test_cancelled_code_run_is_visible_despite_model_success_claim(tmp_path, mon
          'data': {'status': 'cancelled', 'session_id': 's1', 'cancelled': True,
                   'exit_code': None}},
     ]), encoding='utf-8')
-    value = contrast(discrimination='This observation was successful.',
+    value = contrast(exclusion_reason='This observation was successful.',
                      observation_refs=['monitor/audit/dialogue.jsonl#2'])
     snapshots = []
 
     def offline_response(tools):
         snapshots.append(client.assembled_request_snapshot(tools))
         return ([{'type': 'tool_use', 'id': f'allow-{len(snapshots)}',
-                  'name': 'allow_complete', 'input': {'contrast': value}}], {})
+                  'name': 'allow_complete', 'input': value}], {})
 
     monkeypatch.setattr(client, '_request_once', offline_response)
     assert monitor.review('Root', completion_pending=True, root_handoff=handoff).kind == 'allow_complete'
@@ -274,7 +279,7 @@ def test_public_tool_result_excerpt_is_raw_bounded_and_visible(tmp_path):
     event['tool_results'][0]['content'] = 'RAW_RESULT_' + 'x' * 2000
     (workspace.evidence_root / 'public_events.jsonl').write_text(json.dumps(event) + '\n', encoding='utf-8')
     monitor.dcm.model_turn = 1
-    assert monitor.dispatch('allow_complete', {'contrast': contrast()}).action is None
+    assert monitor.dispatch('allow_complete', contrast()).action is None
     proof = monitor.crs.root_contrast['provenance']['observation_refs'][0]
     assert proof['tool_results_excerpt_truncated'] is True
     assert len(proof['tool_results_json_excerpt']) == CRS_PUBLIC_RESULT_EXCERPT_CHARS
@@ -287,14 +292,14 @@ def test_public_tool_result_excerpt_is_raw_bounded_and_visible(tmp_path):
 def test_existing_and_new_observation_revision_without_required_new_measurement(tmp_path):
     monitor, client, workspace, _ = fixture(tmp_path)
     monitor.dcm.model_turn = 1
-    monitor.dispatch('allow_complete', {'contrast': contrast()})
+    monitor.dispatch('allow_complete', contrast())
     expose(monitor, client)
     monitor.dcm.model_turn = 2
     # An old completed observation is sufficient; no post-boundary tool is required.
-    assert monitor.dispatch('allow_complete', {'contrast': contrast()}).action.kind == 'allow_complete'
+    assert monitor.dispatch('allow_complete', contrast()).action.kind == 'allow_complete'
     monitor.dcm.begin_review('r2')
     monitor.dcm.model_turn = 1
-    monitor.dispatch('allow_complete', {'contrast': contrast()})
+    monitor.dispatch('allow_complete', contrast())
     expose(monitor, client)
     monitor._audit_dialogue('tool_call', turn=2, tool_id='read-1', name='file_read',
                             arguments=json.dumps({'path': 'task/workspace/route.py',
@@ -304,7 +309,7 @@ def test_existing_and_new_observation_revision_without_required_new_measurement(
     locator = f'monitor/audit/dialogue.jsonl#{len(events(workspace))}'
     revised = contrast(observation_refs=[locator])
     monitor.dcm.model_turn = 2
-    assert monitor.dispatch('allow_complete', {'contrast': revised}).action is None
+    assert monitor.dispatch('allow_complete', revised).action is None
     assert monitor.crs.root_contrast['provenance']['observation_refs'][0]['lifecycle']['path'] == 'task/workspace/route.py'
     assert monitor.crs.root_contrast['provenance']['observation_refs'][0]['lifecycle']['start'] == receipt['start']
     assert monitor.crs.root_contrast['provenance']['observation_refs'][0]['lifecycle']['lines'] == receipt['lines']
@@ -357,25 +362,98 @@ def test_grounding_existence_only_and_public_result_requirement(tmp_path):
              'text': 'Claim only.', 'tool_calls': [], 'tool_results': []}
     with (workspace.evidence_root / 'public_events.jsonl').open('a', encoding='utf-8') as stream:
         stream.write(json.dumps(event) + '\n')
-    with pytest.raises(ValueError, match='actual tool result'):
+    with pytest.raises(ValueError, match='source exists but is not an observation result'):
         validate_contrast(contrast(observation_refs=['task/public_events.jsonl#2']), workspace)
+
+
+def test_original_task_line_range_and_actionable_invalid_ref(tmp_path):
+    monitor, _, workspace, _ = fixture(tmp_path)
+    (workspace.evidence_root / 'original_task.txt').write_text(
+        ''.join(f'Public line {n}\n' for n in range(1, 131)), encoding='utf-8')
+    ground = validate_contrast(contrast(ground_refs=['task/original_task.txt lines 121-127']),
+                               workspace)[2]['ground_refs'][0]
+    assert ground['locator'] == 'task/original_task.txt'
+    assert ground['submitted_ref'] == 'task/original_task.txt lines 121-127'
+    assert (ground['line_start'], ground['line_end']) == (121, 127)
+    monitor._audit_dialogue('tool_call', turn=1, tool_id='read-1', name='file_read',
+                            arguments=json.dumps({'path': 'task/workspace/route.py'}))
+    result = monitor.dispatch('file_read', {'path': 'task/workspace/route.py'}).data
+    monitor._audit_dialogue('tool_result', turn=1, tool_id='read-1', data=result, action=None)
+    with pytest.raises(ValueError) as exc:
+        validate_contrast(contrast(observation_refs=['not-an-observation']), workspace, 'r1')
+    error = str(exc.value)
+    assert "observation_refs[0]" in error and 'not-an-observation' in error
+    assert 'task/public_events.jsonl#cursor' in error and 'obs:read:' in error
+
+
+def test_scripted_root_code_receipt_handle_flat_proposal_and_confirmation(tmp_path, monkeypatch):
+    monitor, client, workspace, handoff = fixture(tmp_path)
+    (workspace.evidence_root / 'original_task.txt').write_text(
+        ''.join(f'Public line {n}\n' for n in range(1, 131)), encoding='utf-8')
+    output_path = 'monitor/audit/commands/session-1/output.log'
+    monkeypatch.setattr(monitor.analysis, 'start', lambda *args, **kwargs: {
+        'status': 'success', 'session_id': 'session-1', 'exit_code': 0,
+        'output_path': output_path})
+    snapshots = []
+    submitted = []
+
+    def offline_response(tools):
+        snapshots.append(client.assembled_request_snapshot(tools))
+        ordinal = len(snapshots)
+        if ordinal == 1:
+            return ([{'type': 'tool_use', 'id': 'code-1', 'name': 'code_run',
+                      'input': {'code': 'print(1)', 'type': 'python'}}], {})
+        if ordinal == 2:
+            shown = visible(snapshots[-1])
+            import re
+            handle = re.search(r'obs:code:[0-9a-f]{24}', shown).group()
+            submitted.append(contrast(ground_refs=['task/original_task.txt lines 121-127'],
+                                      observation_refs=[handle]))
+        return ([{'type': 'tool_use', 'id': f'allow-{ordinal}', 'name': 'allow_complete',
+                  'input': submitted[0]}], {})
+
+    monkeypatch.setattr(client, '_request_once', offline_response)
+    action = monitor.review('Root', completion_pending=True, root_handoff=handoff)
+    assert action.kind == 'allow_complete' and len(snapshots) == 3
+    assert 'CRS-citable observation receipts' in visible(snapshots[1])
+    assert output_path in visible(snapshots[1])
+    assert 'Contrastive Release State' in visible(snapshots[2])
+    proof = [e for e in events(workspace) if e['event'] == 'crs_proposed'][0]
+    assert proof['observation_refs'][0]['locator'].startswith('monitor/audit/dialogue.jsonl#')
+    assert proof['observation_refs'][0]['submitted_ref'] == submitted[0]['observation_refs'][0]
+    alias = validate_contrast(contrast(observation_refs=[output_path]), workspace)[2]
+    assert alias['observation_refs'][0]['locator'] == proof['observation_refs'][0]['locator']
+    assert len([e for e in events(workspace) if e['event'] == 'crs_confirmed']) == 1
+
+
+def test_scripted_root_intervention_requires_no_crs_and_arms_no_release(tmp_path, monkeypatch):
+    monitor, client, workspace, handoff = fixture(tmp_path)
+    monitor.intervention_callback = lambda message: {'submission_id': 'queued-root',
+                                                      'delivery': 'queued'}
+    monkeypatch.setattr(client, '_request_once', lambda tools: (
+        [{'type': 'tool_use', 'id': 'intervene-1', 'name': 'intervene',
+          'input': {'message': 'The public route is absent.'}}], {}))
+    action = monitor.review('Root', completion_pending=True, root_handoff=handoff)
+    assert action.kind == 'root_intervened'
+    assert monitor.crs.root_contrast is None
+    assert not [e for e in events(workspace) if e['event'] == 'crs_proposed']
 
 
 def test_intervention_stale_handoff_and_review_end_abandon(tmp_path):
     monitor, client, workspace, handoff = fixture(tmp_path)
     monitor.dcm.model_turn = 1
-    monitor.dispatch('allow_complete', {'contrast': contrast()})
+    monitor.dispatch('allow_complete', contrast())
     expose(monitor, client)
     monitor.intervention_callback = lambda _: {'submission_id': 'queued', 'delivery': 'queued'}
     assert monitor.dispatch('intervene', {'message': 'Recheck the public route.'}).action.kind == 'root_intervened'
     assert monitor.crs.root_contrast is None
     monitor.dcm.begin_review('r2')
     monitor.dcm.model_turn = 1
-    monitor.dispatch('allow_complete', {'contrast': contrast()})
+    monitor.dispatch('allow_complete', contrast())
     handoff['generation'] = 2
     handoff['request_id'] = 'completion-2'
     monitor.dcm.model_turn = 2
-    assert monitor.dispatch('allow_complete', {'contrast': contrast()}).action is None
+    assert monitor.dispatch('allow_complete', contrast()).action is None
     assert monitor.crs.root_contrast['handoff']['generation'] == 2
     monitor.dcm.end_review('review_exhausted')
     assert monitor.crs.root_contrast is None
@@ -385,22 +463,22 @@ def test_intervention_stale_handoff_and_review_end_abandon(tmp_path):
 def test_provider_failure_and_review_error_cannot_release(tmp_path):
     monitor, _, _, _ = fixture(tmp_path)
     monitor.dcm.model_turn = 1
-    monitor.dispatch('allow_complete', {'contrast': contrast()})
+    monitor.dispatch('allow_complete', contrast())
     monitor.dcm.end_review('error')
     assert monitor.crs.root_contrast is None
     monitor.dcm.begin_review('r2')
     monitor.dcm.model_turn = 2
-    assert monitor.dispatch('allow_complete', {'contrast': contrast()}).action is None
+    assert monitor.dispatch('allow_complete', contrast()).action is None
 
 
 def test_new_handoff_does_not_inherit_surfaced_contrast(tmp_path):
     monitor, client, _, handoff = fixture(tmp_path)
     monitor.dcm.model_turn = 1
-    monitor.dispatch('allow_complete', {'contrast': contrast()})
+    monitor.dispatch('allow_complete', contrast())
     expose(monitor, client)
     handoff.update(request_id='completion-2', generation=2)
     monitor.dcm.model_turn = 2
-    result = monitor.dispatch('allow_complete', {'contrast': contrast()})
+    result = monitor.dispatch('allow_complete', contrast())
     assert result.action is None and result.data['status'] == 'release_not_executed'
     assert monitor.crs.root_contrast['handoff']['request_id'] == 'completion-2'
     assert monitor.crs.root_contrast['surfaced'] is False

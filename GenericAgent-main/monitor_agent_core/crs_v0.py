@@ -11,10 +11,60 @@ from .ase_v0 import ReconsiderationBoundary
 
 _PUBLIC = re.compile(r"task/public_events\.jsonl#([1-9][0-9]*)\Z")
 _DIALOGUE = re.compile(r"monitor/audit/dialogue\.jsonl#([1-9][0-9]*)\Z")
-_FIELDS = {"alternative", "grounding", "ground_refs", "discrimination", "observation_refs"}
-_MAX_TEXT = {"alternative": 1200, "grounding": 1200, "discrimination": 1600}
+_ORIGINAL = re.compile(r"task/original_task\.txt(?: line ([1-9][0-9]*)| lines ([1-9][0-9]*)-([1-9][0-9]*))?\Z")
+_COMMAND_OUTPUT = re.compile(r"monitor/audit/commands/([^/]+)/output\.log\Z")
+_HANDLE = re.compile(r"obs:(?:read|code):[0-9a-f]{24}\Z")
+_FIELDS = {"release_blocking_state", "grounding", "ground_refs", "exclusion_reason", "observation_refs"}
+_MAX_TEXT = {"release_blocking_state": 1200, "grounding": 1200, "exclusion_reason": 1600}
 CRS_PUBLIC_RESULT_EXCERPT_CHARS = 640
 CRS_SURFACE_MAX_CHARS = 16000
+CRS_CITABLE_MAX_CHARS = 4000
+
+
+def _dialogue_receipts(workspace, review_id=None):
+    """Return only actual paired file_read/code_run tool-result receipts."""
+    path = workspace.private_root / "audit/dialogue.jsonl"
+    if not path.is_file():
+        return []
+    calls = {}
+    found = []
+    with path.open("r", encoding="utf-8") as stream:
+        for number, line in enumerate(stream, 1):
+            row = json.loads(line)
+            key = (row.get("review_id"), row.get("tool_id"))
+            if row.get("event") == "tool_call" and row.get("name") in {"file_read", "code_run"}:
+                calls[key] = row
+            elif row.get("event") == "tool_result" and key in calls and isinstance(row.get("data"), dict):
+                if review_id is not None and row.get("review_id") != review_id:
+                    continue
+                locator = f"monitor/audit/dialogue.jsonl#{number}"
+                kind = "read" if calls[key]["name"] == "file_read" else "code"
+                handle = f"obs:{kind}:{hashlib.sha256(locator.encode('utf-8')).hexdigest()[:24]}"
+                found.append((handle, locator, calls[key], row))
+    return found
+
+
+def _allowed_formats(workspace, review_id):
+    handles = [item[0] for item in _dialogue_receipts(workspace, review_id)[-5:]]
+    return ("ground_refs: task/original_task.txt [line N|lines N-M], monitor/reference.md, "
+            "task/public_events.jsonl#cursor. observation_refs: an exact CRS observation handle "
+            "shown in active context, a uniquely resolvable monitor/audit/commands/<session>/output.log, "
+            "or task/public_events.jsonl#cursor containing tool results. "
+            f"Current citable handles: {', '.join(handles) if handles else 'none'}")
+
+
+def _resolve_observation_alias(ref, workspace):
+    if _HANDLE.fullmatch(ref):
+        matches = [item for item in _dialogue_receipts(workspace) if item[0] == ref]
+    elif _COMMAND_OUTPUT.fullmatch(ref):
+        matches = [item for item in _dialogue_receipts(workspace)
+                   if item[2].get("name") == "code_run" and
+                   item[3]["data"].get("output_path") == ref]
+    else:
+        return None
+    if len(matches) != 1:
+        raise ValueError("observation identity does not resolve to exactly one actual tool receipt")
+    return matches[0][1]
 
 
 def _row(path, index):
@@ -30,9 +80,25 @@ def _row(path, index):
 def _reference(ref, workspace, observation):
     if not isinstance(ref, str) or len(ref) > 200:
         raise ValueError("Contrast locator must be a bounded string")
-    if not observation and ref in {"task/original_task.txt", "monitor/reference.md"}:
-        path = workspace.resolve_read(ref)
-        return {"locator": ref, "source_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+    original = _ORIGINAL.fullmatch(ref)
+    if not observation and (original or ref == "monitor/reference.md"):
+        locator = "task/original_task.txt" if original else ref
+        path = workspace.resolve_read(locator)
+        result = {"locator": locator, "submitted_ref": ref,
+                  "source_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+        if original and (original.group(1) or original.group(2)):
+            first = int(original.group(1) or original.group(2))
+            last = int(original.group(1) or original.group(3))
+            if last < first or last > len(path.read_text(encoding="utf-8").splitlines()):
+                raise ValueError("requested original-task line range does not exist")
+            result["line_start"], result["line_end"] = first, last
+        return result
+    if observation:
+        alias = _resolve_observation_alias(ref, workspace)
+        if alias is not None:
+            resolved = _reference(alias, workspace, True)
+            resolved["submitted_ref"] = ref
+            return resolved
     public = _PUBLIC.fullmatch(ref)
     if public:
         cursor = int(public.group(1))
@@ -42,7 +108,7 @@ def _reference(ref, workspace, observation):
         if observation:
             results = event.get("tool_results")
             if not isinstance(results, list) or not results:
-                raise ValueError("Public observation requires an actual tool result")
+                raise ValueError("source exists but is not an observation result (no tool results)")
             raw_results = json.dumps(results, ensure_ascii=False, separators=(",", ":"))
             return {"locator": ref, "source": "task_tool_result",
                     "task_turn": event.get("task_turn"),
@@ -102,19 +168,27 @@ def _reference(ref, workspace, observation):
     raise ValueError("Contrast locator is not an allowed source for this field")
 
 
-def validate_contrast(value, workspace):
+def validate_contrast(value, workspace, review_id=None):
     if not isinstance(value, dict) or set(value) != _FIELDS:
-        raise ValueError("contrast requires exactly alternative, grounding, ground_refs, discrimination, observation_refs")
+        raise ValueError("allow_complete requires exactly these flat fields: " + ", ".join(sorted(_FIELDS)))
     for field, maximum in _MAX_TEXT.items():
         text = value[field]
         if not isinstance(text, str) or not text.strip() or len(text) > maximum:
-            raise ValueError(f"contrast.{field} must be non-empty and at most {maximum} characters")
+            raise ValueError(f"{field} must be non-empty and at most {maximum} characters")
     provenance = {}
     for field, observation in (("ground_refs", False), ("observation_refs", True)):
         refs = value[field]
         if not isinstance(refs, list) or not 1 <= len(refs) <= 4 or len(set(map(str, refs))) != len(refs):
-            raise ValueError(f"contrast.{field} requires 1–4 distinct locators")
-        provenance[field] = [_reference(ref, workspace, observation) for ref in refs]
+            raise ValueError(f"{field} requires 1–4 distinct locators. " +
+                             _allowed_formats(workspace, review_id))
+        provenance[field] = []
+        for index, ref in enumerate(refs):
+            try:
+                provenance[field].append(_reference(ref, workspace, observation))
+            except (ValueError, FileNotFoundError, OSError, json.JSONDecodeError) as exc:
+                raise ValueError(f"{field}[{index}] submitted_ref={str(ref)[:200]!r} "
+                                 f"cannot be resolved: {exc}. " +
+                                 _allowed_formats(workspace, review_id)) from exc
     canonical = json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     return canonical, hashlib.sha256(canonical.encode("utf-8")).hexdigest(), provenance
 
@@ -144,7 +218,7 @@ def _surface(active):
         "mechanical provenance only; no adequacy/support/verdict is supplied by runtime.\n"
         f"contrast_sha256={active['sha256']} provenance_sha256={active['provenance_sha256']} "
         f"state_digest={active['state_digest']}\n"
-        "Model-authored contrast:\n" + active["canonical"] + "\n"
+        "Model-authored contrast (flat allow_complete arguments):\n" + active["canonical"] + "\n"
         "Resolved mechanical provenance for cited sources:\n" +
         _canonical(_display(active["provenance"]))
     )
@@ -164,8 +238,33 @@ class ContrastiveReleaseBoundary(ReconsiderationBoundary):
         super().begin_review(review_id)
         self.root_contrast = None
 
+    def render_citable_observations(self, workspace, review_id):
+        receipts = _dialogue_receipts(workspace, review_id)[-5:]
+        if not receipts:
+            return None
+        lines = ["CRS-citable observation receipts — mechanical provenance only; "
+                 "no adequacy/support/verdict is supplied by runtime. Copy an exact obs: handle "
+                 "as an observation_ref. Only returned observations from this root review appear here."]
+        for handle, locator, call, receipt in receipts:
+            data = receipt["data"]
+            identity = {key: data[key] for key in
+                        ("path", "start", "lines", "sha256", "truncated", "output_path",
+                         "session_id", "status", "exit_code", "cancelled", "running", "error_type")
+                        if key in data}
+            line = f"{handle} -> {locator}; tool={call['name']}; " + _canonical(_display(identity))
+            if len(line) > 680:
+                line = line[:680] + " [render truncated]"
+            lines.append(line)
+        surface = "\n".join(lines)
+        if len(surface) > CRS_CITABLE_MAX_CHARS:
+            raise ValueError("CRS citable receipt surface exceeds mechanical transport bound")
+        self.audit("crs_citable_observations_prepared", citable_review_id=review_id,
+                   handles=[item[0] for item in receipts],
+                   surface_sha256=hashlib.sha256(surface.encode("utf-8")).hexdigest())
+        return surface
+
     def root_release(self, contrast, handoff, workspace):
-        canonical, digest, provenance = validate_contrast(contrast, workspace)
+        canonical, digest, provenance = validate_contrast(contrast, workspace, self.review_id)
         provenance_text = _canonical(provenance)
         provenance_digest = hashlib.sha256(provenance_text.encode("utf-8")).hexdigest()
         state_digest = hashlib.sha256((canonical + "\n" + provenance_text).encode("utf-8")).hexdigest()
