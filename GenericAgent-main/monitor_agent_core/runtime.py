@@ -19,8 +19,18 @@ from .eis_v0 import append_index as append_eis_index
 
 ASE_CONTROL_ACTIONS = frozenset({
     'wait', 'allow_complete', 'intervene', 'local_intervened', 'root_intervened',
+    'root_reestimate',
 })
 TASK_MODEL_FEEDBACK_BOUNDARIES = frozenset({'post_model_pre_tool', 'task_control_handoff'})
+
+
+def _remaining_root_turns(remaining, action):
+    """Charge every internal subreview to the same root handoff ceiling."""
+    used = (action.payload['prior_model_turns'] if action.kind == 'root_route' else
+            action.payload['model_turns_used_in_this_subreview'])
+    if type(used) is not int or used < 0:
+        raise ValueError('Invalid root subreview model-turn count')
+    return remaining - used
 
 
 class ASEFeedbackBarrier:
@@ -483,34 +493,48 @@ def _worker(config, commands, outputs):
             action = monitor.review(
                 context, completion_pending=completion,
                 root_handoff=root, root_transition_view=transition_view)
-            if action.kind == 'root_route':
-                root = current_completion()
-                remaining_turns = monitor.max_review_turns - int(action.payload['prior_model_turns'])
-                if root is None:
+            remaining_turns = monitor.max_review_turns
+            while action.kind in {'root_route', 'root_reestimate'}:
+                prior = action.kind
+                remaining_turns = _remaining_root_turns(remaining_turns, action)
+                next_root = current_completion()
+                if next_root is None or (prior == 'root_reestimate' and next_root != root):
+                    if prior == 'root_reestimate':
+                        monitor.crs.abandon('stale_handoff')
+                        monitor.restore_rer_parent('stale_handoff')
                     outputs.put({'kind': 'root_route_superseded', 'reason': 'handoff_no_longer_pending'})
                     from .actions import MonitorAction
                     action = MonitorAction('wait', {'after_turns': 1, 'mode': 'follow'})
-                elif remaining_turns <= 0:
+                    break
+                root = next_root
+                if remaining_turns <= 0:
+                    if prior == 'root_reestimate':
+                        monitor.crs.abandon('root_turn_budget_exhausted')
+                        monitor.restore_rer_parent('root_turn_budget_exhausted')
                     outputs.put({'kind': 'failure', 'error': 'Root review turn budget exhausted',
                                  'completion': True, 'request_id': root['request_id']})
                     return False
-                else:
-                    completion, request_id = True, root['request_id']
-                    root_transition_view = None
-                    if workspace_sampler is not None:
-                        clock = config.get('latest_task_turn')
-                        sampled_turn = max(task_turn, clock.value) if clock is not None else task_turn
-                        root_transition_view, root_transition_audit = workspace_sampler.sample(
-                            workspace.task_mounts['workspace'], cursor=root['cursor'],
-                            task_turn=sampled_turn)
-                        _append(Path(config['private_root']) / 'audit' /
-                                'workspace_transitions.jsonl', root_transition_audit)
-                    action = monitor.review(
-                        context, completion_pending=True, root_handoff=root,
-                        max_turns_override=remaining_turns,
-                        root_transition_view=root_transition_view)
+                if prior == 'root_reestimate':
+                    monitor.enter_root_reestimate(root, action)
+                completion, request_id = True, root['request_id']
+                root_transition_view = None
+                if workspace_sampler is not None and prior == 'root_route':
+                    clock = config.get('latest_task_turn')
+                    sampled_turn = max(task_turn, clock.value) if clock is not None else task_turn
+                    root_transition_view, root_transition_audit = workspace_sampler.sample(
+                        workspace.task_mounts['workspace'], cursor=root['cursor'],
+                        task_turn=sampled_turn)
+                    _append(Path(config['private_root']) / 'audit' /
+                            'workspace_transitions.jsonl', root_transition_audit)
+                action = monitor.review(
+                    context, completion_pending=True, root_handoff=root,
+                    max_turns_override=remaining_turns,
+                    root_transition_view=root_transition_view)
             receipt_offset = next_receipt_offset
         except Exception as exc:
+            if getattr(monitor, 'rer_v0', False):
+                monitor.crs.abandon('runtime_error')
+                monitor.restore_rer_parent('runtime_error')
             from .provider import failure_chain
             outputs.put({"kind": "failure", "error": repr(exc), "completion": completion and not submitted,
                          "request_id": request_id, "cause_chain": failure_chain(exc),

@@ -453,6 +453,16 @@ class MonitorAgent:
         self.crs_v0 = getattr(client, 'config', {}).get('monitor_contrastive_release_state', False)
         if type(self.crs_v0) is not bool or (self.crs_v0 and not self.ase_v0):
             raise ValueError('monitor_contrastive_release_state must be boolean and requires ASE')
+        self.rer_v0 = getattr(client, 'config', {}).get('monitor_root_epistemic_reestimation', False)
+        if type(self.rer_v0) is not bool or (self.rer_v0 and not (
+                self.ase_v0 and self.crs_v0 and self.rhr_v0)):
+            raise ValueError('monitor_root_epistemic_reestimation must be boolean and requires ASE + CRS + RHR')
+        if self.rer_v0:
+            self.client.CONTROL_ACTIONS = set(self.client.CONTROL_ACTIONS) | {'root_reestimate'}
+        self._rer_parent_history = None
+        self._rer_parent_history_measure = None
+        self._rer_frame_sequence = 0
+        self._rer_handoff = None
         self.crs = None
         self.control_echo = None
         if self.ase_v0:
@@ -474,7 +484,8 @@ class MonitorAgent:
             self.control_echo = ControlEcho(self._audit_dialogue)
             self.dcm = (ContrastiveReleaseBoundary(
                 self._audit_dialogue, lambda: self._ase_last_visible_context,
-                receding_horizon=self.rhr_v0) if self.crs_v0 else ReconsiderationBoundary(
+                receding_horizon=self.rhr_v0,
+                epistemic_reestimation=self.rer_v0) if self.crs_v0 else ReconsiderationBoundary(
                     self._audit_dialogue, lambda: self._ase_last_visible_context))
             self.crs = self.dcm if self.crs_v0 else None
         self._ase_initialization_complete = False
@@ -674,6 +685,18 @@ class MonitorAgent:
                                    if self.crs is not None and self.frame_kind == 'root' else None)
                 if citable_surface:
                     parts.append(citable_surface)
+                if self.rer_v0 and self._rer_parent_history is not None and self.frame_kind == 'root':
+                    rer_surface = (
+                        'Root Epistemic Re-estimation Frame — mechanical context boundary; not task truth. '
+                        'This provider-history branch does not automatically inherit prior free-form Supervisor '
+                        'conversation. Prior conversation has not been declared false or invalid. Durable cognition '
+                        'remains available through the Task Book. Raw prior observations and history remain '
+                        'available at their existing audit/evidence paths. Form the current whole-task decision '
+                        'in this frame.\n'
+                        f'frame_sequence={self._rer_frame_sequence}')
+                    parts.append(rer_surface)
+                    self._audit_dialogue('rer_surface_prepared', frame_sequence=self._rer_frame_sequence,
+                                         surface_sha256=hashlib.sha256(rer_surface.encode('utf-8')).hexdigest())
                 if crs_surface:
                     parts.append(crs_surface)
                 if self.ase_v0:
@@ -699,6 +722,8 @@ class MonitorAgent:
                         self._ase_pending_context['composition_order'].append('crs_citable_observations')
                         self._ase_pending_context['crs_citable_surface_sha256'] = hashlib.sha256(
                             citable_surface.encode('utf-8')).hexdigest()
+                    if self.rer_v0 and self._rer_parent_history is not None and self.frame_kind == 'root':
+                        self._ase_pending_context['composition_order'].append('root_epistemic_reestimation')
                     if crs_surface:
                         self._ase_pending_context['composition_order'].append(
                             'root_horizon_reset' if self.crs.root_reorientation is not None else 'crs')
@@ -739,6 +764,9 @@ class MonitorAgent:
         if (self.crs is not None and self.frame_kind == 'root'
                 and (self.crs.root_contrast is not None or self.crs.root_reorientation is not None)):
             self.crs.surface_visible(getattr(self.client, '_progress_request_id', None))
+        if self.rer_v0 and self._rer_parent_history is not None and self.frame_kind == 'root':
+            self._audit_dialogue('rer_surface_injected', frame_sequence=self._rer_frame_sequence,
+                                 request_id=getattr(self.client, '_progress_request_id', None))
         if self.ase_v0 and self._ase_pending_context is not None:
             facts = dict(self._ase_pending_context)
             facts['request_id'] = getattr(self.client, '_progress_request_id', None)
@@ -1200,6 +1228,14 @@ class MonitorAgent:
                             boundary = self.crs.root_release(arguments, current,
                                                               self.workspace)
                             if boundary is not None:
+                                if boundary.get('root_reestimate_required'):
+                                    reset = self.crs.root_reorientation
+                                    return ToolOutcome(boundary, False, MonitorAction('root_reestimate', {
+                                        'request_id': current['request_id'],
+                                        'generation': current['generation'],
+                                        'root_horizon_digest': reset['root_horizon_digest'],
+                                        'model_turns_used_in_this_subreview': self.dcm.model_turn,
+                                    }))
                                 return ToolOutcome(boundary)
                         elif self.ase_v0 or arguments['result'] == 'resolve':
                             boundary = self.dcm.release('allow_complete', 'root', arguments)
@@ -1331,6 +1367,49 @@ class MonitorAgent:
         self._local_history_at_root = None
         self._progress('root_frame_left', generation=handoff['generation'],
                        request_id=handoff['request_id'])
+
+    def enter_root_reestimate(self, handoff, action):
+        """Start a new provider-history branch after the previous tool exchange closed."""
+        if not self.rer_v0 or action.kind != 'root_reestimate':
+            raise ValueError('Root re-estimation transition is not enabled')
+        if (self.completion_state is None or self.completion_state() != handoff or
+                action.payload['request_id'] != handoff['request_id'] or
+                action.payload['generation'] != handoff['generation'] or
+                (self._rer_handoff is not None and self._rer_handoff != handoff) or
+                self.crs.root_reorientation is None or
+                self.crs.root_reorientation['root_horizon_digest'] != action.payload['root_horizon_digest']):
+            raise ValueError('Root re-estimation requires the same fresh pending handoff and horizon')
+        branch_measure = self.client.history_measure()
+        if self._rer_parent_history is None:
+            self._rer_parent_history = self.client.export_history()
+            self._rer_parent_history_measure = branch_measure
+            event = 'rer_frame_entered'
+        else:
+            event = 'rer_frame_restarted'
+        self.client.restore_history([])
+        self._rer_frame_sequence += 1
+        self._rer_handoff = dict(handoff)
+        self._audit_dialogue(event, frame_sequence=self._rer_frame_sequence,
+                             root_horizon_digest=action.payload['root_horizon_digest'],
+                             handoff=handoff,
+                             parent_history_items=self._rer_parent_history_measure['items'],
+                             parent_history_characters=self._rer_parent_history_measure['characters'],
+                             parent_history_sha256=self._rer_parent_history_measure['sha256'],
+                             discarded_branch_history=branch_measure)
+
+    def restore_rer_parent(self, disposition):
+        if self._rer_parent_history is None:
+            return
+        branch_measure = self.client.history_measure()
+        self.client.restore_history(self._rer_parent_history)
+        self._audit_dialogue('rer_parent_history_restored', disposition=disposition,
+                             parent_history_sha256=self._rer_parent_history_measure['sha256'],
+                             discarded_branch_history_sha256=branch_measure['sha256'],
+                             handoff=self.root_frame_handoff or self._rer_handoff)
+        self._rer_parent_history = None
+        self._rer_parent_history_measure = None
+        self._rer_frame_sequence = 0
+        self._rer_handoff = None
 
     def review(self, wake_context: str, completion_pending=False, *,
                root_handoff=None, max_turns_override=None,
@@ -1491,7 +1570,9 @@ class MonitorAgent:
                 error = sys.exc_info()[1]
                 disposition = ('review_exhausted' if error is not None and
                                type(error).__name__ == 'MonitorLoopError' else
-                               'error' if error is not None else 'review_ended')
+                               'error' if error is not None else
+                               'root_reestimate' if action is not None and action.kind == 'root_reestimate'
+                               else 'review_ended')
                 self.dcm.end_review(disposition)
             if self.situation is not None:
                 self.situation.end_review(action)
@@ -1509,6 +1590,10 @@ class MonitorAgent:
                     "frame": self.frame_kind, "handoff": self.root_frame_handoff,
                 }, ensure_ascii=False) + "\n", mode="append",
             )
+            if self.rer_v0 and (sys.exc_info()[1] is not None or
+                                action is None or action.kind != 'root_reestimate'):
+                self.restore_rer_parent('error' if sys.exc_info()[1] is not None else
+                                        action.kind if action is not None else 'incomplete')
             self._leave_root_frame()
             self.workspace.write_text(
                 "monitor/audit/provider_history.json",
