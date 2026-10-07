@@ -1,0 +1,1 @@
+cd /app && grep -n "SetMinRowsVisible" task/workspace/widget/entry.go

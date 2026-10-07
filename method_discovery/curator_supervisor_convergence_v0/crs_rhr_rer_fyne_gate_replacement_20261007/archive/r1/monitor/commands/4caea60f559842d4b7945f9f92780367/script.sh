@@ -1,0 +1,1 @@
+cd /app && go list -f '{{.ImportPath}}' ./data/validation

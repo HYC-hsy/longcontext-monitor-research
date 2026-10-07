@@ -1,0 +1,1 @@
+cd /app && head -50 app.go | grep -A5 "type App interface"

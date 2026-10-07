@@ -1,0 +1,1 @@
+cd /app && find data/validation -type f -name "*.go" 2>&1

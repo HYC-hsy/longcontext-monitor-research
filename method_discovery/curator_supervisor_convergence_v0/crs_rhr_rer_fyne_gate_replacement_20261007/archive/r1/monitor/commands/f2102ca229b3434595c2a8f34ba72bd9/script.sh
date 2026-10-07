@@ -1,0 +1,1 @@
+cd task/workspace && grep -n "func (c \*Container) RemoveAll" container.go

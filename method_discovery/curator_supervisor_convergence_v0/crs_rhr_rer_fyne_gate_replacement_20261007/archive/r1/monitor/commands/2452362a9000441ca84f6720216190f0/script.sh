@@ -1,0 +1,1 @@
+cd task/workspace && grep -n "func (e \*Entry) SetMinRowsVisible" widget/entry.go

@@ -1,0 +1,1 @@
+cd /app && grep -rn "NewAllStrings" . 2>&1 | head -20

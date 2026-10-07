@@ -1,0 +1,1 @@
+cd /app && grep -r "NewAllStrings" data/validation/ 2>&1

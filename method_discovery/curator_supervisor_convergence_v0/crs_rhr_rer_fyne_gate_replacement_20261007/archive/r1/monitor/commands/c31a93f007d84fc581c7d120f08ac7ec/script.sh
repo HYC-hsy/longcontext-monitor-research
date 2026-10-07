@@ -1,0 +1,1 @@
+cd task/workspace && ls -la data/validation/ 2>&1
