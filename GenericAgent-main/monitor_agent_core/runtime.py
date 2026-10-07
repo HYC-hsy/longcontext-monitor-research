@@ -33,6 +33,16 @@ def _remaining_root_turns(remaining, action):
     return remaining - used
 
 
+def _root_turn_ceiling(config, ordinary_limit):
+    """Use the ordinary ceiling unless this run explicitly sets a root-only one."""
+    root_limit = config.get('root_max_review_turns')
+    if root_limit is None:
+        return ordinary_limit
+    if type(root_limit) is not int or root_limit < 1:
+        raise ValueError('root_max_review_turns must be a positive integer')
+    return root_limit
+
+
 class ASEFeedbackBarrier:
     """An intervention cannot be followed by control before a newer Task model event."""
 
@@ -342,6 +352,7 @@ def _worker(config, commands, outputs):
         monitor = MonitorAgent(client, workspace, config["max_review_turns"],
                                stop_event=config['stop_event'],
                                independent_check=(independent_check if probe_total > 0 else None))
+        root_turn_ceiling = _root_turn_ceiling(config, config['max_review_turns'])
         used_turns = config.get('task_budget_turns_used')
         max_turns = config.get('task_max_turns')
         monitor.task_budget_state = lambda: (
@@ -490,10 +501,15 @@ def _worker(config, commands, outputs):
             root = current_completion() if monitor.root_routed else None
             if root is not None:
                 completion, request_id = True, root['request_id']
-            action = monitor.review(
-                context, completion_pending=completion,
-                root_handoff=root, root_transition_view=transition_view)
-            remaining_turns = monitor.max_review_turns
+            initial_review_kwargs = {
+                'completion_pending': completion,
+                'root_handoff': root,
+                'root_transition_view': transition_view,
+            }
+            if root is not None and config.get('root_max_review_turns') is not None:
+                initial_review_kwargs['max_turns_override'] = root_turn_ceiling
+            action = monitor.review(context, **initial_review_kwargs)
+            remaining_turns = root_turn_ceiling
             while action.kind in {'root_route', 'root_reestimate'}:
                 prior = action.kind
                 remaining_turns = _remaining_root_turns(remaining_turns, action)
@@ -696,6 +712,7 @@ def _worker(config, commands, outputs):
 class MonitorRuntime:
     def __init__(self, *, public_task, task_workspace, artifact_dir, config_name,
                  model_config, interrupt_callback, max_review_turns=20,
+                 root_max_review_turns=None,
                  completion_timeout=300, process_factory=None, worker_target=None,
                  interrupt_pending=None, run_timeout_seconds=10000, run_deadline_epoch=None,
                  correction_begin=None, correction_end=None, task_original_path=None, task_id,
@@ -703,6 +720,7 @@ class MonitorRuntime:
                  root_checkpoint_required=False, run_id=None, task_max_turns=None):
         if model_config.get('monitor_hybrid_control', False):
             raise ValueError('Model-requested hybrid pause is retired')
+        _root_turn_ceiling({'root_max_review_turns': root_max_review_turns}, max_review_turns)
         self.artifact_dir = Path(artifact_dir).resolve()
         if type(root_checkpoint_required) is not bool:
             raise ValueError("root_checkpoint_required must be boolean")
@@ -784,6 +802,7 @@ class MonitorRuntime:
             "config_name": config_name, "model_config": dict(model_config), "task_id": task_id,
             "evidence_root": str(self.evidence_root), "private_root": str(self.private_root),
             "task_workspace": str(task_workspace), "max_review_turns": int(max_review_turns),
+            "root_max_review_turns": root_max_review_turns,
             "task_original_path": self.task_original_path,
             "active_completion": self._active_completion,
             "completion_cursor": self._completion_cursor,

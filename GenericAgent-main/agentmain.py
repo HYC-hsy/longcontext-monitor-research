@@ -391,6 +391,9 @@ class GenericAgent:
                     correction_begin=self.begin_monitor_correction,
                     correction_end=self.end_monitor_correction,
                     max_review_turns=int(os.environ.get('GA_MONITOR_MAX_REVIEW_TURNS', '20')),
+                    root_max_review_turns=(
+                        int(os.environ['GA_MONITOR_ROOT_MAX_REVIEW_TURNS'])
+                        if 'GA_MONITOR_ROOT_MAX_REVIEW_TURNS' in os.environ else None),
                     completion_timeout=float(os.environ.get('GA_MONITOR_COMPLETION_TIMEOUT_SECONDS', '300')),
                     task_max_turns=max_turns,
                 )
