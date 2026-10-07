@@ -99,10 +99,14 @@ def _crs_v02_source_gate(bundle):
     tests = ['tests/test_crs_v0.py::test_scripted_root_code_receipt_handle_flat_proposal_and_confirmation',
              'tests/test_crs_v0.py::test_original_task_line_range_and_actionable_invalid_ref',
              'tests/test_crs_v0.py::test_local_provider_schema_is_baseline_ase_and_only_root_allow_changes']
-    checked = subprocess.run([sys.executable, '-m', 'pytest', *tests, '-q'],
+    # Harbor's isolated orchestration Python does not include pytest. The
+    # same frozen zero-model smoke runs under the host test interpreter in
+    # both parent and Harbor pre-send gates.
+    checked = subprocess.run([r'D:\python\python.exe', '-m', 'pytest', *tests, '-q'],
                              cwd=REPO / 'GenericAgent-main', capture_output=True, text=True)
     if checked.returncode != 0:
-        raise RuntimeError('Scripted zero-model CRS preflight failed: ' + checked.stdout[-2000:])
+        raise RuntimeError('Scripted zero-model CRS preflight failed: ' +
+                           (checked.stdout + checked.stderr)[-2000:])
 
 
 inherited._crs_source_gate = _crs_v02_source_gate
