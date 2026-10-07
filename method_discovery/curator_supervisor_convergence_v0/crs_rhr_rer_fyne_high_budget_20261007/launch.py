@@ -39,8 +39,8 @@ def _git(*args):
 
 def source_gate(bundle):
     previous.source_gate(bundle)
-    if _git('rev-parse', 'HEAD') != CANDIDATE:
-        raise RuntimeError('Checked-out production commit mismatch')
+    if _git('rev-parse', 'HEAD:GenericAgent-main') != _git('rev-parse', f'{CANDIDATE}:GenericAgent-main'):
+        raise RuntimeError('Checked-out production tree differs from audited candidate')
     for relative in ('agentmain.py', 'monitor_agent_core/runtime.py'):
         source = PRIVATE / 'GenericAgent-main' / relative
         if _git('hash-object', str(source)) != _git('rev-parse', f'{CANDIDATE}:GenericAgent-main/{relative}'):
