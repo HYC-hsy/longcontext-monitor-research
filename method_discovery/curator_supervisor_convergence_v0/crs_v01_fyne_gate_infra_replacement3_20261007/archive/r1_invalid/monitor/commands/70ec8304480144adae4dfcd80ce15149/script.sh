@@ -1,0 +1,1 @@
+cd /app && grep -rn "const.*Variant" . --include="*.go" | grep -v vendor | head -20

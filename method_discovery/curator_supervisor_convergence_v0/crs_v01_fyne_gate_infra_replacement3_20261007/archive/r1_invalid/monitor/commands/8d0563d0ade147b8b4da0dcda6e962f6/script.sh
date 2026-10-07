@@ -1,0 +1,1 @@
+cd /app && grep -B2 -A5 "func (c \*Container) RemoveAll" container.go

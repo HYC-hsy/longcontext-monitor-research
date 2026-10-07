@@ -1,0 +1,1 @@
+cd /app && grep -rn "VariantDark\|VariantLight" theme/ --include="*.go" | head -10

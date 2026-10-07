@@ -1,0 +1,1 @@
+cd /app/widget && grep "^func NewToolbar" toolbar.go

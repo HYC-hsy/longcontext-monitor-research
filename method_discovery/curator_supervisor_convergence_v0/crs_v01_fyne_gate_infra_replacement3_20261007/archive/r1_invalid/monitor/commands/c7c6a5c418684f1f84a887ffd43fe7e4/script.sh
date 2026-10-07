@@ -1,0 +1,1 @@
+cd /app && go build ./... 2>&1 | grep -E "^#|error:" | head -15

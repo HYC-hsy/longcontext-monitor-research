@@ -1,0 +1,1 @@
+cd /app/widget && grep -A2 "func NewToolbarAction\|func NewToolbarSpacer\|func NewToolbarSeparator" toolbar.go

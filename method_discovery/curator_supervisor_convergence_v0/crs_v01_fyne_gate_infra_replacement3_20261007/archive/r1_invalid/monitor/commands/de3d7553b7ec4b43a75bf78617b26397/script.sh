@@ -1,0 +1,1 @@
+cd /app && grep -n "func.*RemoveAll\|func.*InsertAt" container.go

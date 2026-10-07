@@ -1,0 +1,1 @@
+cd /app && grep -n "VariantDark\|VariantLight" theme/theme.go

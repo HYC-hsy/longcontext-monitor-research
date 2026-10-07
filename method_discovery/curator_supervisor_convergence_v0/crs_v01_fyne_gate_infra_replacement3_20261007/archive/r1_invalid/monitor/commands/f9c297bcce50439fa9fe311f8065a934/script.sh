@@ -1,0 +1,1 @@
+cd /app && grep -n "return &ToolbarAction" widget/toolbar.go

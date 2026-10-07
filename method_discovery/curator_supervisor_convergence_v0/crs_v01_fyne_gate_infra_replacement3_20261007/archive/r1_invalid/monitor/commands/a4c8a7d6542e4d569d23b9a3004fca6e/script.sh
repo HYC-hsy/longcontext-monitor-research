@@ -1,0 +1,1 @@
+cd /app && grep -n "Variant" fyne.go theme.go 2>/dev/null | head -20
