@@ -1,0 +1,84 @@
+{
+  "services": {
+    "model-gateway": {
+      "image": "sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171",
+      "network_mode": "bridge",
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "read_only": true,
+      "environment": {
+        "SSL_CERT_FILE": "/opt/m4-runtime/ga-env/lib/python3.12/site-packages/certifi/cacert.pem"
+      },
+      "volumes": [
+        "E:/LongContext/bench_runtime/m2/linux:/opt/m4-runtime:ro",
+        "E:/LongContext/long_context_bench/output/crs_rhr_rer_fyne_mechanism_gate/isolated_bundles/crs-rhr-rer-v0-fyne-bji-high-budget-r1/gateway:/gateway:ro",
+        "model-channel:/run/model-channel"
+      ],
+      "entrypoint": [
+        "/opt/m4-runtime/python/cpython-3.12.12-linux-x86_64-gnu/bin/python3.12",
+        "/gateway/transport.py",
+        "gateway",
+        "--config",
+        "/gateway/config.json"
+      ],
+      "command": [],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "/opt/m4-runtime/python/cpython-3.12.12-linux-x86_64-gnu/bin/python3.12",
+          "-c",
+          "import socket; s=socket.socket(socket.AF_UNIX); s.connect('/run/model-channel/gateway.sock'); s.close()"
+        ],
+        "interval": "1s",
+        "timeout": "3s",
+        "retries": 30
+      }
+    },
+    "main": {
+      "image": "sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1",
+      "network_mode": "none",
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "working_dir": "/app",
+      "tmpfs": [
+        "/tests"
+      ],
+      "depends_on": {
+        "model-gateway": {
+          "condition": "service_healthy"
+        }
+      },
+      "volumes": [
+        "model-channel:/run/model-channel:ro",
+        "E:/fyne_turn30_causal_pair_v1_live_20261008_run1/control/workspace:/app",
+        "E:/fyne_turn30_causal_pair_v1_live_20261008_run1/control/production_source:/opt/genericagent",
+        "E:/LongContext/bench_runtime/m2/linux:/opt/m4-runtime:ro",
+        "E:/fyne_turn30_causal_pair_v1_live_20261008_run1/control/stage:/opt/causal-stage:ro",
+        "E:/fyne_turn30_causal_pair_v1_live_20261008_run1/control/raw:/logs/agent"
+      ],
+      "environment": {
+        "PYTHONPATH": "/opt/m4-runtime/ga-env/lib/python3.12/site-packages:/opt/genericagent:/opt/causal-stage",
+        "GA_LANG": "en",
+        "GA_PMA_ENABLED": "0",
+        "GA_MONITOR_ENABLED": "0"
+      },
+      "entrypoint": [
+        "/opt/m4-runtime/python/cpython-3.12.12-linux-x86_64-gnu/bin/python3.12",
+        "/opt/causal-stage/arm_child.py",
+        "--authorized-child"
+      ],
+      "command": []
+    }
+  },
+  "volumes": {
+    "model-channel": {}
+  }
+}
