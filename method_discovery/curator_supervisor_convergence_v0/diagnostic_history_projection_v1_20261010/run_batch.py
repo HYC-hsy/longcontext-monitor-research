@@ -25,6 +25,7 @@ PROFILE = v2.HOST_PROFILE
 CODE = {
     "projection.py": HERE / "projection.py",
     "run_batch.py": HERE / "run_batch.py",
+    "archive_batch.py": HERE / "archive_batch.py",
     "research/adapter.py": adapter.HERE / "adapter.py",
     "research/protocol.py": adapter.HERE / "protocol.py",
     "research/docker_tool.py": adapter.HERE / "docker_tool.py",
@@ -79,6 +80,7 @@ def build_freeze() -> dict:
         "request_file_sha256": {k: digest((REQUEST_DIR / f"{k}_REQUEST.json").read_bytes())
                                 for k in values},
         "projection_manifest_sha256": digest((REQUEST_DIR / "PROJECTION_MANIFEST.json").read_bytes()),
+        "evaluation_record_template_sha256": digest((HERE / "EVALUATION_RECORD_TEMPLATE.json").read_bytes()),
         "code_hashes": {name: digest(path.read_bytes()) for name, path in CODE.items()},
         "profile_file_sha256": digest(PROFILE.read_bytes()),
         "archived_profile_sha256": digest(freeze_inputs.PROFILE.read_bytes()),
