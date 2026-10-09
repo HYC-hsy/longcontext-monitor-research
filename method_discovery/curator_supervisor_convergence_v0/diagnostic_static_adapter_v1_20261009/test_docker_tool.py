@@ -16,6 +16,14 @@ from .docker_tool import DockerToolPort, IMAGE
                                     capture_output=True, text=True, check=False).stdout.strip() == "linux",
                      "Docker Linux daemon unavailable: isolation remains uncertified")
 class FrozenImageToolTests(unittest.TestCase):
+    @staticmethod
+    def completed(port, receipt):
+        for _ in range(12):
+            if receipt["status"] != "running":
+                return receipt
+            receipt = port.execute("code_run", {"session_id": receipt["session_id"], "wait_seconds": 1})
+        raise AssertionError("analysis session did not reach a terminal receipt")
+
     @classmethod
     def setUpClass(cls):
         image = subprocess.run(["docker", "image", "inspect", IMAGE, "--format", "{{.Id}}"],
@@ -43,7 +51,8 @@ class FrozenImageToolTests(unittest.TestCase):
         for name in ("C01_B", "C02_B"):
             port = DockerToolPort(self.root / name)
             before = sha((port.app / "menu.go").read_bytes())
-            receipt = port.execute("code_run", {"type": "python", "code": code, "timeout": 60})
+            receipt = self.completed(port, port.execute("code_run", {"type": "python", "code": code,
+                                                                     "timeout": 60, "wait_seconds": 5}))
             self.assertEqual(receipt["status"], "success")
             content = (port.private / receipt["output_path"].removeprefix("monitor/")).read_text(encoding="utf-8")
             self.assertTrue(all(json.loads(content).values()))
@@ -76,10 +85,23 @@ class FrozenImageToolTests(unittest.TestCase):
     def test_timeout_terminates_container(self):
         port = DockerToolPort(self.root / "C01_B")
         receipt = port.execute("code_run", {"type": "bash", "code": "sleep 30", "timeout": 1})
-        self.assertEqual(receipt["status"], "cancelled_timeout")
+        receipt = self.completed(port, receipt)
+        self.assertEqual(receipt["status"], "error")
+        self.assertEqual(receipt["reason"], "timeout")
         remaining = subprocess.run(["docker", "container", "inspect", receipt["session_id"]],
                                    capture_output=True, check=False)
         self.assertNotEqual(remaining.returncode, 0)
+
+    def test_per_attempt_home_tmp_cache_and_output_persist_without_cross_arm_sharing(self):
+        first, second = DockerToolPort(self.root / "C01_B"), DockerToolPort(self.root / "C01_F")
+        write = "import os, pathlib\nfor k in ('HOME','TMPDIR','GOCACHE'):\n p=pathlib.Path(os.environ[k]); p.mkdir(parents=True,exist_ok=True); (p/'STATIC_MARKER').write_text(k)\npathlib.Path('/output/STATIC_MARKER').write_text('output')"
+        self.assertEqual(self.completed(first, first.execute("code_run", {"type": "python", "code": write}))['status'], 'success')
+        read = "import os, pathlib\nprint([ (pathlib.Path(os.environ[k])/'STATIC_MARKER').read_text() for k in ('HOME','TMPDIR','GOCACHE') ] + [pathlib.Path('/output/STATIC_MARKER').read_text()])"
+        receipt = self.completed(first, first.execute("code_run", {"type": "python", "code": read}))
+        self.assertEqual(receipt['status'], 'success')
+        self.assertIn("['HOME', 'TMPDIR', 'GOCACHE', 'output']", receipt['stdout'])
+        self.assertFalse((second.private / '.static_runtime/home/STATIC_MARKER').exists())
+        self.assertFalse((second.private / '.static_runtime/tmp/STATIC_MARKER').exists())
 
     def test_fake_provider_cannot_send_and_code_run_tool_is_metered(self):
         port = DockerToolPort(self.root / "C01_B")
