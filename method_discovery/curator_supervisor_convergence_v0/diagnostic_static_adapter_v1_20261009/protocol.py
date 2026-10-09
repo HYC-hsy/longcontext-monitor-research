@@ -242,8 +242,8 @@ class StaticDispatch:
 
 
 def run_static(scene: str, arm: str, config: dict, fixture: Path, audit: Audit,
-               transport=None) -> dict:
-    frozen = request(scene, arm)
+               transport=None, frozen_request: dict | None = None) -> dict:
+    frozen = copy.deepcopy(frozen_request) if frozen_request is not None else request(scene, arm)
     client = StaticClient(config, frozen, audit, transport)
     port = DockerToolPort(fixture)
     dispatch = StaticDispatch(frozen, port, audit)
