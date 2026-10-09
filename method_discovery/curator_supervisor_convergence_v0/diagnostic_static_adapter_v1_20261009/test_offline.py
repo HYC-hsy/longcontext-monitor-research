@@ -86,6 +86,18 @@ class StaticOfflineTests(unittest.TestCase):
         self.assertEqual(len(self.manifests["C01"]["outputs"]["historical_completed_outputs"]), 11)
         self.assertEqual(len(self.manifests["C02"]["outputs"]["historical_completed_outputs"]), 18)
 
+    def test_archived_running_then_success_is_not_active(self):
+        session = "0301ebcd6e5e4d77beb90823a92121f6"
+        for scene in adapter.SCENES:
+            request = adapter.request(scene, "B")
+            statuses = []
+            for message in request["messages"]:
+                for block in message["content"]:
+                    if block.get("type") == "tool_result" and session in str(block.get("content", "")):
+                        statuses.append(json.loads(block["content"])["status"])
+            self.assertEqual(statuses, ["running", "success"])
+            self.assertIn(session, self.manifests[scene]["outputs"]["historical_completed_outputs"])
+
     def test_missing_historical_output_is_unavailable(self):
         receipt = {"event": "tool_result", "data": {"session_id": "historical", "stdout": "partial",
                    "status": "running", "next_read": {"session_id": "historical"}, "unread_bytes": 0}}
@@ -146,6 +158,12 @@ class StaticOfflineTests(unittest.TestCase):
         self.assertEqual(wait.attempt([], tool_wait_seconds=600), "undecided_budget")
         wall = adapter.FakeDiagnostic("C01")
         self.assertEqual(wall.attempt([], elapsed_seconds=1200), "undecided_budget")
+        retries = adapter.FakeDiagnostic("C01")
+        for _ in range(11):
+            self.assertIsNone(retries.failed_request_attempt("fake_transport_failure"))
+        self.assertEqual(retries.failed_request_attempt("fake_transport_failure"), "undecided_budget")
+        with self.assertRaises(RuntimeError):
+            retries.attempt([])
 
     def test_new_command_limit_and_live_provider_fail_closed(self):
         run = adapter.FakeDiagnostic("C01")
@@ -153,6 +171,15 @@ class StaticOfflineTests(unittest.TestCase):
         self.assertEqual(run.events[-1]["reason"], "static_command_timeout_cap")
         with self.assertRaises(RuntimeError):
             adapter.NoLiveProvider().send({"model": "claude-opus-4-8"})
+
+    def test_fake_provider_records_only_scripted_requests(self):
+        scripted = [[{"name": "wait", "arguments": {"after_turns": 1}}]]
+        provider = adapter.FakeProvider(scripted)
+        payload = adapter.request("C01", "B")
+        self.assertEqual(provider.send(payload), scripted[0])
+        self.assertEqual(provider.requests, [payload])
+        with self.assertRaises(StopIteration):
+            provider.send(payload)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import time
 
 from method_discovery.curator_supervisor_convergence_v0.causal_reminder_turn30_20261007 import materialize as checkpoint
 from method_discovery.curator_supervisor_convergence_v0.diagnostic_flex_preflight_v0_20261009 import check_workspace, freeze_inputs
@@ -187,7 +188,7 @@ def materialize(scene: str, destination: Path) -> dict:
                         (evidence, "public task/event prefix through cutoff"),
                         (private, "private Book/feedback/dialogue/output receipt proven by cutoff")):
         for path in sorted(root.rglob("*")):
-            if path.is_file() and ".git" not in path.relative_to(root).parts:
+            if path.is_file():
                 visible.append({"mount": root.name, "path": path.relative_to(root).as_posix(),
                                 "sha256": sha(path.read_bytes()), "bytes": path.stat().st_size,
                                 "cutoff_basis": basis})
@@ -199,6 +200,17 @@ def materialize(scene: str, destination: Path) -> dict:
 class NoLiveProvider:
     def send(self, *_args, **_kwargs):
         raise RuntimeError("Live provider prohibited: static diagnostic is not authorized or isolated")
+
+
+class FakeProvider:
+    """Scripted responses only; no transport, credential or retry side effect."""
+    def __init__(self, responses: list[list[dict]]):
+        self.responses = iter(copy.deepcopy(responses))
+        self.requests = []
+
+    def send(self, request_payload: dict) -> list[dict]:
+        self.requests.append(copy.deepcopy(request_payload))
+        return next(self.responses)
 
 
 def validate_args(tool: dict, arguments: dict) -> bool:
@@ -229,14 +241,24 @@ def validate_args(tool: dict, arguments: dict) -> bool:
 
 class FakeDiagnostic:
     """Deterministic controller. Real tool and provider ports are deliberately absent."""
-    def __init__(self, scene: str):
+    def __init__(self, scene: str, backend=None):
         self.tools = {tool["name"]: tool for tool in request(scene, "B")["tools"]}
+        self.backend = backend
         self.requests = 0
         self.tool_calls = 0
         self.terminal = None
         self.events = []
         self.wall_seconds = 0.0
         self.tool_wait_seconds = 0.0
+
+    def failed_request_attempt(self, reason: str) -> str | None:
+        if self.terminal is not None:
+            raise RuntimeError("No provider retry after terminal disposition")
+        self.requests += 1
+        self.events.append({"kind": "failed_provider_attempt", "reason": reason})
+        if self.requests >= LIMITS["provider_requests_including_retries"]:
+            self.terminal = "undecided_budget"
+        return self.terminal
 
     def attempt(self, calls: list[dict], *, elapsed_seconds=0.0, tool_wait_seconds=0.0) -> str | None:
         if self.terminal is not None:
@@ -275,5 +297,23 @@ class FakeDiagnostic:
                 for later in range(index + 1, len(calls)):
                     self.events.append({"kind": "not_executed_after_proposal", "index": later})
                 return self.terminal
-            self.events.append({"kind": "fake_tool_receipt", "index": index, "name": name})
+            if self.backend is None:
+                self.events.append({"kind": "fake_tool_receipt", "index": index, "name": name})
+            else:
+                started = time.monotonic()
+                try:
+                    receipt = self.backend.execute(name, args)
+                    self.events.append({"kind": "tool_receipt", "index": index, "name": name,
+                                        "receipt": receipt})
+                except (OSError, RuntimeError, ValueError, TypeError) as exc:
+                    self.events.append({"kind": "tool_error", "index": index, "name": name,
+                                        "reason": type(exc).__name__})
+                finally:
+                    used = time.monotonic() - started
+                    self.wall_seconds += used
+                    self.tool_wait_seconds += used if name == "code_run" else 0
+                if (self.wall_seconds >= LIMITS["wall_seconds"] or
+                        self.tool_wait_seconds >= LIMITS["cumulative_tool_wait_seconds"]):
+                    self.terminal = "undecided_budget"
+                    return self.terminal
         return None

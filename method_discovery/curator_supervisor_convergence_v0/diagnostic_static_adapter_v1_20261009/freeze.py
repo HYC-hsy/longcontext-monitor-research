@@ -41,7 +41,7 @@ def run() -> None:
         "accepted_wrong_judgment": "retain as method outcome, not infrastructure invalid",
         "budget_exhausted_without_control": "retain complete trace as undecided, never relabel wait",
         "no_model_visible_countdown": True,
-        "isolation_certified": False,
+        "isolation_certification": "See separate ISOLATION_CERTIFICATION.json; fixture generation alone does not certify isolation.",
         "live_provider_entry": "NoLiveProvider always raises"
     })
 
