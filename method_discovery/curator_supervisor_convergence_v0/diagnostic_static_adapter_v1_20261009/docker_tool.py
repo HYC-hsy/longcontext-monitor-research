@@ -19,6 +19,10 @@ from method_discovery.curator_supervisor_convergence_v0.diagnostic_flex_prefligh
 IMAGE = "sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1"
 
 
+class StaticIntegrityError(RuntimeError):
+    """The submitted command bytes differ from the script sent to Docker."""
+
+
 def _workspace_class():
     source = REPO / "GenericAgent-main/monitor_agent_core/workspace.py"
     spec = importlib.util.spec_from_file_location("static_diagnostic_workspace", source)
@@ -63,6 +67,10 @@ class DockerToolPort:
                 "--env", "HOME=/home/monitor", "--env", "TMPDIR=/tmp",
                 "--env", "GOCACHE=/cache/go", "--env", "GOMODCACHE=/cache/gomod",
                 "--entrypoint", interpreter, IMAGE, virtual_script]
+
+    @staticmethod
+    def _persist_script(path: Path, raw: bytes):
+        path.write_bytes(raw)
 
     def execute(self, name: str, args: dict) -> dict:
         if name == "file_read":
@@ -109,7 +117,16 @@ class DockerToolPort:
         directory = self.private / "audit" / "commands" / session
         directory.mkdir(parents=True)
         script = directory / ("script.py" if kind == "python" else "script.sh")
-        script.write_text(code, encoding="utf-8")
+        submitted = code.encode("utf-8")
+        self._persist_script(script, submitted)
+        actual = script.read_bytes()
+        identity = {"submitted_utf8_sha256": hashlib.sha256(submitted).hexdigest(),
+                    "script_sha256": hashlib.sha256(actual).hexdigest(),
+                    "byte_equal": actual == submitted, "submitted_bytes": len(submitted),
+                    "script_bytes": len(actual)}
+        save_json(directory / "script_identity.json", identity)
+        if not identity["byte_equal"]:
+            raise StaticIntegrityError("code_run script bytes changed before Docker execution")
         output = directory / "output.log"
         command = self._docker_args(session, script, kind)
         with output.open("wb") as stream:

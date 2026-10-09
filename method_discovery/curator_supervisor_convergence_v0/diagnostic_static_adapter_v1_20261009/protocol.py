@@ -11,7 +11,7 @@ import time
 import requests
 
 from .adapter import CONTROL, canonical, request, save_json, sha, validate_args
-from .docker_tool import DockerToolPort
+from .docker_tool import DockerToolPort, StaticIntegrityError
 from method_discovery.curator_supervisor_convergence_v0.diagnostic_flex_preflight_v0_20261009.freeze_inputs import REPO
 
 sys.path.insert(0, str(REPO / "GenericAgent-main"))
@@ -71,6 +71,8 @@ class StaticClient(MonitorProviderClient):
         self.request_count = 0
         self.outer_cycles = 0
         self.accepted_responses = 0
+        self.proposed_tool_calls = 0
+        self.dispatch = None
         self.expected_history = copy.deepcopy(frozen["messages"])
         self.seen_tool_ids = set()
         self.started = time.monotonic()
@@ -143,7 +145,10 @@ class StaticClient(MonitorProviderClient):
         if sum(block.get("name") in CONTROL for block in blocks
                if block.get("type") == "tool_use") > 1:
             raise StaticProtocolError("Conflicting control proposals in one response")
+        if self.dispatch is not None:
+            self.dispatch.stage_response(blocks)
         self.seen_tool_ids.update(ids)
+        self.proposed_tool_calls += len(ids)
         self.accepted_responses += 1
         self.audit.record("provider_response", index=index, blocks=blocks,
                           usage=usage, stop_reason=self.last_response_metadata.get("stop_reason"),
@@ -175,24 +180,57 @@ class StaticDispatch:
         self.schema = {item["name"]: item for item in frozen["tools"]}
         self.port, self.audit = port, audit
         self.calls, self.polls, self.wait_seconds = 0, 0, 0.0
+        self.suppress_ordinary = False
+        self.not_executed = 0
+        self.parameter_rejections = 0
+        self.control_proposals = 0
+        self.ordinary_port_calls = 0
+
+    def stage_response(self, blocks: list[dict]):
+        calls = [block for block in blocks if block.get("type") == "tool_use"]
+        valid_controls = [block for block in calls if block.get("name") in CONTROL and
+                          validate_args(self.schema[block["name"]], block.get("input"))]
+        self.suppress_ordinary = len(valid_controls) == 1
+        if self.suppress_ordinary:
+            skipped = [{"tool_id": block["id"], "name": block["name"]} for block in calls
+                       if block["name"] not in CONTROL]
+            self.not_executed += len(skipped)
+            self.audit.record("response_control_preflight", control_id=valid_controls[0]["id"],
+                              control_name=valid_controls[0]["name"],
+                              ordinary_not_executed=skipped,
+                              reason="cooccurring_valid_terminal_control")
+        else:
+            self.audit.record("response_control_preflight", control_id=None,
+                              ordinary_not_executed=[], reason="no_valid_terminal_control")
 
     def __call__(self, name: str, arguments: dict) -> ToolOutcome:
         self.calls += 1
+        if self.suppress_ordinary and name not in CONTROL:
+            result = {"status": "not_executed", "reason": "cooccurring_valid_terminal_control"}
+            self.audit.record("tool_not_executed", name=name, arguments=arguments, result=result)
+            return ToolOutcome(result)
         if name == "code_run" and isinstance(arguments, dict) and arguments.get("session_id"):
             self.polls += 1
         if name not in self.schema or not validate_args(self.schema[name], arguments):
+            self.parameter_rejections += 1
             result = {"status": "error", "reason": "invalid_tool_schema"}
             self.audit.record("tool_validation_error", name=name, arguments=arguments, result=result)
             return ToolOutcome(result)
         if name in CONTROL:
+            self.control_proposals += 1
             kind = {"wait": "wait_proposal", "intervene": "intervention_proposal",
                     "allow_complete": "release_proposal"}[name]
             self.audit.record("control_proposal", name=name, arguments=arguments, disposition=kind)
             return ToolOutcome({"status": "proposal_only", "executed": False},
                                action=MonitorAction(kind, {}))
         began = time.monotonic()
+        self.ordinary_port_calls += 1
         try:
             result = self.port.execute(name, arguments)
+        except StaticIntegrityError as exc:
+            self.audit.record("adapter_integrity_failure", name=name,
+                              error_type=type(exc).__name__)
+            raise
         except Exception as exc:
             result = {"status": "execution_unconfirmed", "error_type": type(exc).__name__}
         elapsed = time.monotonic() - began
@@ -209,6 +247,7 @@ def run_static(scene: str, arm: str, config: dict, fixture: Path, audit: Audit,
     client = StaticClient(config, frozen, audit, transport)
     port = DockerToolPort(fixture)
     dispatch = StaticDispatch(frozen, port, audit)
+    client.dispatch = dispatch
     tools = ordinary_tools(frozen)
     started = time.monotonic()
     try:
@@ -232,6 +271,11 @@ def run_static(scene: str, arm: str, config: dict, fixture: Path, audit: Audit,
               "provider_requests": client.request_count,
               "transport_retries": 0, "model_turns": client.outer_cycles,
               "accepted_responses": client.accepted_responses,
+              "proposed_tool_calls": client.proposed_tool_calls,
+              "ordinary_port_calls": dispatch.ordinary_port_calls,
+              "not_executed": dispatch.not_executed,
+              "control_proposals": dispatch.control_proposals,
+              "parameter_rejections": dispatch.parameter_rejections,
               "control_outcome": "no_terminal" if terminal == "valid_capped" else terminal,
               "tool_calls": dispatch.calls, "tool_polls": dispatch.polls,
               "tool_wait_seconds": dispatch.wait_seconds,

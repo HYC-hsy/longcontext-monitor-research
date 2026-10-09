@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 from .adapter import FakeDiagnostic, materialize, sha
-from .docker_tool import DockerToolPort, IMAGE
+from .docker_tool import DockerToolPort, IMAGE, StaticIntegrityError
 
 
 @unittest.skipUnless(subprocess.run(["docker", "info", "--format", "{{.OSType}}"],
@@ -102,6 +102,45 @@ class FrozenImageToolTests(unittest.TestCase):
         self.assertIn("['HOME', 'TMPDIR', 'GOCACHE', 'output']", receipt['stdout'])
         self.assertFalse((second.private / '.static_runtime/home/STATIC_MARKER').exists())
         self.assertFalse((second.private / '.static_runtime/tmp/STATIC_MARKER').exists())
+
+    def test_submitted_script_bytes_survive_windows_to_linux(self):
+        port = DockerToolPort(self.root / "C01_B")
+        cases = [
+            ("bash", "\n# leading blank and comment\nprintf '%s-%s\\n' alpha beta\nprintf '%s\\n' gamma\n", "alpha-beta\ngamma\n"),
+            ("bash", "printf '%s' single", "single"),
+            ("bash", "printf '%s' no-final-newline", "no-final-newline"),
+            ("python", "\n# Python lines\nprint('one')\nprint('two')\n", "one\ntwo\n"),
+        ]
+        for kind, code, expected in cases:
+            with self.subTest(kind=kind, expected=expected):
+                receipt = self.completed(port, port.execute("code_run", {"type": kind,
+                                           "code": code, "timeout": 30, "wait_seconds": 5}))
+                self.assertEqual(receipt["status"], "success")
+                directory = port.private / "audit/commands" / receipt["session_id"]
+                script = directory / ("script.sh" if kind == "bash" else "script.py")
+                self.assertEqual(script.read_bytes(), code.encode("utf-8"))
+                identity = json.loads((directory / "script_identity.json").read_text(encoding="utf-8"))
+                self.assertTrue(identity["byte_equal"])
+                self.assertEqual(identity["submitted_utf8_sha256"], identity["script_sha256"])
+                self.assertIn(expected, (directory / "output.log").read_text(encoding="utf-8"))
+        original_cr = "printf 'kept'\r\n"
+        cr_receipt = self.completed(port, port.execute("code_run", {"type": "bash",
+                                  "code": original_cr, "timeout": 30, "wait_seconds": 5}))
+        cr_script = port.private / "audit/commands" / cr_receipt["session_id"] / "script.sh"
+        self.assertEqual(cr_script.read_bytes(), original_cr.encode("utf-8"))
+        port.close()
+
+    def test_integrity_mismatch_blocks_before_docker_start(self):
+        fixture = self.root / "integrity"
+        materialize("C01", fixture)
+        port = DockerToolPort(fixture)
+        port._persist_script = lambda path, raw: path.write_bytes(raw + b"\r")
+        with self.assertRaises(StaticIntegrityError):
+            port.execute("code_run", {"type": "bash", "code": "printf ok"})
+        self.assertEqual(port.new_sessions, {})
+        identities = list((port.private / "audit/commands").glob("static-*/script_identity.json"))
+        self.assertEqual(len(identities), 1)
+        self.assertFalse(json.loads(identities[0].read_text(encoding="utf-8"))["byte_equal"])
 
     def test_fake_provider_cannot_send_and_code_run_tool_is_metered(self):
         port = DockerToolPort(self.root / "C01_B")

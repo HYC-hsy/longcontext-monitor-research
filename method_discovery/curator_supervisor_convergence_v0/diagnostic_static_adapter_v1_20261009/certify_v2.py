@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 import subprocess
@@ -11,7 +12,9 @@ from .adapter import HERE, materialize, save_json, sha
 from .docker_tool import DockerToolPort, IMAGE
 
 
-def run() -> dict:
+def run(output_name: str = "ISOLATION_CERTIFICATION_V2.json") -> dict:
+    if output_name not in {"ISOLATION_CERTIFICATION_V2.json", "ISOLATION_CERTIFICATION_V3.json"}:
+        raise ValueError("Certification output name is not allowed")
     image = subprocess.run(["docker", "image", "inspect", IMAGE, "--format", "{{.Id}}"],
                            text=True, capture_output=True, check=True).stdout.strip()
     server = subprocess.run(["docker", "info", "--format", "{{.ServerVersion}} {{.OSType}}"],
@@ -50,9 +53,12 @@ def run() -> dict:
               "probe_source_sha256": sha((HERE / "probe_isolation.py").read_bytes()),
               "mount_policy": "app/evidence read-only; per-attempt private writable; /tests masked; no network; read-only root; no host credentials passed",
               "model_provider_calls": 0, "task_calls": 0, "native_evaluator_calls": 0}
-    save_json(HERE / "ISOLATION_CERTIFICATION_V2.json", result)
+    save_json(HERE / output_name, result)
     return result
 
 
 if __name__ == "__main__":
-    print(json.dumps(run(), ensure_ascii=False, sort_keys=True))
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output-name", default="ISOLATION_CERTIFICATION_V2.json")
+    args = parser.parse_args()
+    print(json.dumps(run(args.output_name), ensure_ascii=False, sort_keys=True))

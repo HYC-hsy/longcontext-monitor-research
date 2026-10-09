@@ -14,7 +14,7 @@ import time
 from . import adapter
 from .docker_tool import IMAGE
 from .protocol import Audit, RUN_BUDGET, run_static
-from .freeze_run import HOST_PROFILE
+from .freeze_run import HOST_PROFILE, V1_COMMIT, code_hashes, v1_request_hashes
 from method_discovery.curator_supervisor_convergence_v0.diagnostic_flex_preflight_v0_20261009 import freeze_inputs
 
 
@@ -29,14 +29,21 @@ def digest(path: Path) -> str:
 
 
 def validate_freeze(freeze: dict) -> dict:
-    expected = {"source_commit", "stage1_commit", "profile_sha256", "archived_profile_sha256", "image",
+    expected = {"source_commit", "batch_revision", "v1_archive_commit", "stage1_commit",
+                "historical_stage1_limits_superseded", "code_hashes",
+                "profile_sha256", "archived_profile_sha256", "image",
                 "docker_tool_sha256", "probe_sha256", "requests", "order", "limits",
                 "provider_policy", "tool_policy", "visibility_manifests"}
     if set(freeze) != expected:
         raise RuntimeError("Incomplete or expanded frozen run identity")
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=freeze_inputs.REPO,
                           text=True, capture_output=True, check=True).stdout.strip()
-    if head != freeze["source_commit"] or freeze["stage1_commit"] != "d76d8a178e4268582f3d5b5a2c052c6cd85a18bf":
+    if (head != freeze["source_commit"] or
+            freeze["stage1_commit"] != "d76d8a178e4268582f3d5b5a2c052c6cd85a18bf" or
+            freeze["batch_revision"] != "v2_execution_fidelity_repair" or
+            freeze["v1_archive_commit"] != V1_COMMIT or
+            freeze["historical_stage1_limits_superseded"] is not True or
+            freeze["code_hashes"] != code_hashes()):
         raise RuntimeError("Code/phase identity mismatch")
     if (digest(HOST_PROFILE) != freeze["profile_sha256"] or freeze["profile_sha256"] != EXPECTED_PROFILE_SHA or
             digest(freeze_inputs.PROFILE) != freeze["archived_profile_sha256"] or
@@ -47,7 +54,7 @@ def validate_freeze(freeze: dict) -> dict:
         raise RuntimeError("Certified tool execution identity changed")
     if freeze["order"] != [list(row) for row in adapter.ORDER] or freeze["limits"] != RUN_BUDGET:
         raise RuntimeError("Order/budget identity changed")
-    certification = HERE / "ISOLATION_CERTIFICATION_V2.json"
+    certification = HERE / "ISOLATION_CERTIFICATION_V3.json"
     expected_tool = {"image": IMAGE, "network": "none", "app": "read_only",
                      "evidence": "read_only", "private": "per_attempt_writable",
                      "scratch": "per_attempt_persistent_home_tmp_build_cache_output",
@@ -56,6 +63,8 @@ def validate_freeze(freeze: dict) -> dict:
                      "certification_sha256": digest(certification) if certification.exists() else None}
     if not certification.exists() or freeze["tool_policy"] != expected_tool:
         raise RuntimeError("Amended Docker isolation identity changed")
+    if freeze["requests"] != v1_request_hashes():
+        raise RuntimeError("V1/V2 first-request equality changed")
     for scene in adapter.SCENES:
         if freeze["visibility_manifests"].get(scene) != digest(HERE / f"{scene}_VISIBILITY_MANIFEST.json"):
             raise RuntimeError("Cutoff visibility manifest changed")

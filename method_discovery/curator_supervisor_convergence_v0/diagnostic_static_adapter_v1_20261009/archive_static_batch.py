@@ -35,7 +35,7 @@ def selected_files(root: Path, slots: list[dict]) -> list[Path]:
     files += [adapter.HERE / name for name in ("C01_B_STATIC_REQUEST.json",
               "C01_F_STATIC_REQUEST.json", "C02_B_STATIC_REQUEST.json",
               "C02_F_STATIC_REQUEST.json", "REQUEST_COMPARISON.json",
-              "ISOLATION_CERTIFICATION_V2.json", "RUN_ORDER_AND_LIMITS.json")]
+              "ISOLATION_CERTIFICATION_V3.json", "RUN_ORDER_AND_LIMITS.json")]
     return sorted(set(files), key=lambda path: str(path).lower())
 
 
@@ -47,8 +47,10 @@ def event_index(path: Path) -> dict:
         kind = item.get("kind")
         counts[kind] = counts.get(kind, 0) + 1
         if kind in {"provider_pre_send", "provider_response", "tool_execution",
-                    "tool_validation_error", "control_proposal", "loop_model_output",
-                    "loop_tool_call", "loop_tool_result", "failed_terminal", "budget_terminal"}:
+                    "tool_validation_error", "tool_not_executed", "response_control_preflight",
+                    "adapter_integrity_failure", "control_proposal", "loop_model_output",
+                    "loop_tool_call", "loop_tool_result", "loop_control_result",
+                    "failed_terminal", "budget_terminal"}:
             locators.append({"line": line_no, "kind": kind,
                              "content_sha256": digest(line.encode("utf-8")),
                              "request_index": item.get("index"),
@@ -99,6 +101,11 @@ def build(root: Path, destination: Path, stage1_packet: Path) -> dict:
                                "provider_requests": slot["provider_requests"],
                                "model_turns": slot["model_turns"], "accepted_responses": slot["accepted_responses"],
                                "tool_calls": slot["tool_calls"], "tool_polls": slot["tool_polls"],
+                               "proposed_tool_calls": slot["proposed_tool_calls"],
+                               "ordinary_port_calls": slot["ordinary_port_calls"],
+                               "not_executed": slot["not_executed"],
+                               "parameter_rejections": slot["parameter_rejections"],
+                               "control_proposals": slot["control_proposals"],
                                "wall_seconds": slot["wall_seconds"], "usage": slot["usage"],
                                "events": event})
     destination.mkdir(parents=True)
@@ -112,6 +119,8 @@ def build(root: Path, destination: Path, stage1_packet: Path) -> dict:
     freeze = load(root / "FROZEN_RUN_IDENTITY.json")
     lines = ["STATIC DIAGNOSTIC BATCH — MECHANICAL AUDIT PACK", "",
              "No B/F scientific ranking or correctness verdict is assigned here.",
+             "Batch v1 remains immutable exploratory evidence affected by Windows LF-to-CRLF script writing.",
+             "This batch v2 is independently frozen and is not pooled with v1.",
              "Historical online recovery: BLOCKED; static snapshot diagnosis only.",
              "Task Agent calls: 0; native evaluator calls: 0; training: 0; production changes: 0.",
              "", "FROZEN RUN IDENTITY (non-secret):",
