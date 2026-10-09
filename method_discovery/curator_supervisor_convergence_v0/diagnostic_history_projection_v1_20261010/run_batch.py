@@ -9,6 +9,8 @@ import subprocess
 import sys
 import time
 
+import requests as http_requests
+
 from .projection import HERE, SOURCE, digest, project
 from method_discovery.curator_supervisor_convergence_v0.diagnostic_static_adapter_v1_20261009 import adapter
 from method_discovery.curator_supervisor_convergence_v0.diagnostic_static_adapter_v1_20261009 import live_batch as v2
@@ -51,6 +53,13 @@ def requests() -> dict[str, dict]:
     return results
 
 
+def direct_session() -> http_requests.Session:
+    """Use the configured HTTPS endpoint without inheriting Windows proxy settings."""
+    session = http_requests.Session()
+    session.trust_env = False
+    return session
+
+
 def build_freeze() -> dict:
     if not CERT.exists():
         raise RuntimeError("Certified isolation identity missing")
@@ -71,6 +80,8 @@ def build_freeze() -> dict:
         raise RuntimeError("Frozen model profile unavailable")
     if not host.get("apikey") or not host.get("apibase"):
         raise RuntimeError("Private inference transport unavailable")
+    if host.get("proxy") or host.get("verify", True) is not True:
+        raise RuntimeError("Direct transport requires no explicit proxy and certificate verification")
     return {
         "source_commit": head(), "research_revision": "C02_history_projection_H_R_v1",
         "v2_archive_commit": "adb12fb9fb2224619d1593d57baac8d0edebe227",
@@ -94,7 +105,9 @@ def build_freeze() -> dict:
                      "stream": True, "temperature_sent": False,
                      "connect_timeout_seconds": max(1, int(host.get("timeout", 10))),
                      "read_timeout_seconds": max(10, int(host.get("read_timeout", 300))),
-                     "ambiguous_transport_retries": 0},
+                     "ambiguous_transport_retries": 0,
+                     "proxy_policy": "direct_session_trust_env_false",
+                     "certificate_verification": True},
         "tool": {"image": IMAGE, "network": "none", "task_source": "read_only",
                  "private_and_scratch": "fresh_per_slot", "new_code_run_timeout_default": 60,
                  "new_code_run_timeout_max": 300, "poll_wait_max_seconds": 5},
@@ -130,7 +143,9 @@ def child(slot: Path, arm: str, freeze_path: Path) -> None:
     audit.record("fixture_identity", workspace_sha256=material["workspace_tree_sha256"],
                  visible_file_count=len(material["visible_files"]))
     request = requests()[arm]
-    result = run_static("C02", arm, profile, fixture, audit, frozen_request=request)
+    with direct_session() as session:
+        result = run_static("C02", arm, profile, fixture, audit,
+                            transport=session.post, frozen_request=request)
     print(json.dumps({"terminal": result["terminal"], "requests": result["provider_requests"]}), flush=True)
 
 

@@ -3,15 +3,39 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 from .projection import project
-from .run_batch import ORDER, requests
+from .run_batch import ORDER, child, direct_session, requests
 from method_discovery.curator_supervisor_convergence_v0.diagnostic_static_adapter_v1_20261009.adapter import materialize
 from method_discovery.curator_supervisor_convergence_v0.diagnostic_static_adapter_v1_20261009.protocol import Audit, StaticClient, StaticProtocolError, ordinary_tools, run_static
 from method_discovery.curator_supervisor_convergence_v0.diagnostic_static_adapter_v1_20261009.test_protocol import FakeTransport, config, sse_tool
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_direct_transport_ignores_system_proxy_without_disabling_tls_validation(self):
+        with direct_session() as session:
+            self.assertFalse(session.trust_env)
+            settings = session.merge_environment_settings(
+                "https://example.invalid", {}, None, None, None)
+            self.assertEqual(settings["proxies"], {})
+            self.assertTrue(settings["verify"])
+
+    def test_child_passes_direct_session_to_certified_loop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            freeze = root / "freeze.json"
+            freeze.write_text("{}", encoding="utf-8")
+            seen = []
+            def fake_run(_scene, _arm, _profile, _fixture, _audit, *, transport, frozen_request):
+                seen.append((transport.__self__.trust_env, frozen_request))
+                return {"terminal": "wait_proposal", "provider_requests": 1}
+            with mock.patch("method_discovery.curator_supervisor_convergence_v0.diagnostic_history_projection_v1_20261010.run_batch.validate_freeze", return_value={}), \
+                 mock.patch("method_discovery.curator_supervisor_convergence_v0.diagnostic_history_projection_v1_20261010.run_batch.adapter.materialize", return_value={"workspace_tree_sha256": "fixture", "visible_files": []}), \
+                 mock.patch("method_discovery.curator_supervisor_convergence_v0.diagnostic_history_projection_v1_20261010.run_batch.run_static", side_effect=fake_run):
+                child(root / "slot", "R", freeze)
+            self.assertEqual(seen, [(False, requests()["R"])])
+
     def test_two_frozen_requests_and_tail(self):
         h, r, _ = project()
         self.assertEqual(requests(), {"H": h, "R": r})
