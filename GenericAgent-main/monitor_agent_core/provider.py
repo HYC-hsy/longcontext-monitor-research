@@ -599,13 +599,16 @@ class MonitorProviderClient:
         if deadline is None:
             return self._request_batch(tools)
         stop = self.recovery_stop
-        for batch in range(2):
+        batches = getattr(self, 'recovery_batches', 2)
+        if batches not in (1, 2):
+            raise ValueError('Unsupported provider recovery batch count')
+        for batch in range(batches):
             if stop.is_set() or time.monotonic() >= deadline:
                 raise ProviderRecoveryExhausted('Monitor stopped or task budget exhausted')
             try:
                 return self._request_batch(tools)
             except RetryableProviderError as exc:
-                if batch == 1:
+                if batch == batches - 1:
                     raise ProviderRecoveryExhausted(str(exc)) from exc
                 delay = min(30.0, max(0.0, deadline - time.monotonic()))
                 self._progress('transport_recovery_wait', seconds=delay,

@@ -270,11 +270,14 @@ def _worker(config, commands, outputs):
         client = MonitorProviderClient(config["config_name"], config["model_config"])
         client.verification_due_turn = config.get('verification_due_turn')
         client.verification_accepted_generation = config.get('verification_accepted_generation')
-        if ('run_deadline_epoch' in config and
-                not config['model_config'].get('monitor_pilot_zero_ambiguous_retry')):
+        if 'run_deadline_epoch' in config:
             client.recovery_deadline = time.monotonic() + max(
                 0.0, config['run_deadline_epoch'] - time.time())
             client.recovery_stop = config['stop_event']
+        if config['model_config'].get('monitor_pilot_zero_ambiguous_retry'):
+            if getattr(client, 'recovery_deadline', None) is None:
+                raise ValueError('Pilot transport requires a host run deadline')
+            client.recovery_batches = 1
         workspace = MonitorWorkspace(
             config["evidence_root"], config["private_root"],
             task_mounts={"workspace": config["task_workspace"]},
