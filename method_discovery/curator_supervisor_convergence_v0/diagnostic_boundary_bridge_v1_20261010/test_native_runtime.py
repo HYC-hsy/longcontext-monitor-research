@@ -13,7 +13,7 @@ from .freeze_inputs import build_requests
 from .native_runtime import run_native_slot, _native_undecided
 from .payload_client import AnthropicEnvelope, BridgeIntegrityError
 from .ports import IsolatedAnalysis
-from monitor_agent_core.provider import HistoryCapacityError, ProviderRecoveryExhausted
+from monitor_agent_core.provider import HistoryCapacityError, ProviderRecoveryExhausted, ProviderError
 from monitor_agent_core.handoff_validation import ContinuationContractError
 import requests
 from method_discovery.curator_supervisor_convergence_v0.diagnostic_static_adapter_v1_20261009 import adapter
@@ -371,6 +371,53 @@ class NativeRuntimeTests(unittest.TestCase):
         self.assertFalse(_native_undecided(wrapped, state, state))
         state.failure_latch = None
         self.assertTrue(_native_undecided(HistoryCapacityError("capacity"), state, state))
+        wrapped.__cause__ = ProviderError("HTTP status 503")
+        self.assertFalse(_native_undecided(wrapped, state, state))
+
+    def test_nonobject_tool_input_is_model_parameter_error_not_transport(self):
+        requests_by_arm, _ = build_requests()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = self._fixture(root)
+            fake = FakeSession([[('file_read', ['not', 'an', 'object'])],
+                                [('intervene', {'message': 'Public task correction.'})]])
+            result = run_native_slot(fixture, requests_by_arm['H'], candidate_config(),
+                                     Audit(root / 'audit'), fake)
+            self.assertEqual(result['terminal'], 'static_root_intervention')
+            self.assertEqual(len(fake.payloads), 2)
+            self.assertIn('Invalid tool parameters', json.dumps(fake.payloads[1]))
+            events = (root / 'audit' / 'events.jsonl')
+            if events.exists():
+                self.assertIn('model_tool_parameter_nonobject', events.read_text())
+
+    def test_workspace_boundary_failure_precedes_next_send(self):
+        requests_by_arm, _ = build_requests()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = self._fixture(root)
+            fake = FakeSession([[('file_read', {'path': 'task/../host.txt'})],
+                                [('intervene', {'message': 'Must not be sent.'})]])
+            with self.assertRaisesRegex(BridgeIntegrityError, 'Workspace boundary'):
+                run_native_slot(fixture, requests_by_arm['H'], candidate_config(),
+                                Audit(root / 'audit'), fake)
+            self.assertEqual(len(fake.payloads), 1)
+
+    def test_incomplete_sse_is_integrity_failure_not_maintenance_undecided(self):
+        class Incomplete(FakeSession):
+            def post(self, url, *, json, **kwargs):
+                response = super().post(url, json=json, **kwargs)
+                response.lines.pop()  # Remove message_stop from an otherwise parseable stream.
+                return response
+
+        requests_by_arm, _ = build_requests()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = self._fixture(root)
+            fake = Incomplete(["partial note"])
+            with self.assertRaises(Exception):
+                run_native_slot(fixture, requests_by_arm['H'], candidate_config(),
+                                Audit(root / 'audit'), fake)
+            self.assertEqual(len(fake.payloads), 1)
 
     def test_bad_ordinary_arguments_are_tool_error_then_native_loop_continues(self):
         requests_by_arm, _ = build_requests()

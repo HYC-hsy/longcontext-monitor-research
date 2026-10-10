@@ -263,9 +263,11 @@ class BoundaryClient(MonitorProviderClient):
             while cursor is not None and len(chain) < 12:
                 chain.append(type(cursor).__name__)
                 cursor = cursor.__cause__ or cursor.__context__
-            if isinstance(exc, BridgeIntegrityError):
+            if isinstance(exc, BridgeIntegrityError) or (
+                    phase == "sse_read" and not envelope.finished):
                 self.failure_latch = "integrity"
-            elif isinstance(exc, (requests.RequestException, OSError)):
+            elif (isinstance(exc, (requests.RequestException, OSError)) or
+                  isinstance(exc, ProviderError) and not isinstance(exc, HistoryCapacityError)):
                 self.failure_latch = "transport_or_io"
             self.audit.record("provider_incomplete_or_failed", index=index,
                               error_type=type(exc).__name__,
@@ -277,11 +279,14 @@ class BoundaryClient(MonitorProviderClient):
             raise BridgeIntegrityError("Provider response not stream-complete")
         ids = [b.get("id") for b in blocks if b.get("type") == "tool_use"]
         if (any(not value or value in self.seen_ids for value in ids)
-                or len(ids) != len(set(ids))
-                or any(b.get("type") == "tool_use" and
-                       not isinstance(b.get("input"), dict) for b in blocks)):
+                or len(ids) != len(set(ids))):
             self.failure_latch = "integrity"
             raise BridgeIntegrityError("Malformed or duplicate tool-use envelope")
+        for block in blocks:
+            if block.get("type") == "tool_use" and not isinstance(block.get("input"), dict):
+                self.audit.record("model_tool_parameter_nonobject", index=index,
+                                  tool_use_id=block["id"], input_type=type(block["input"]).__name__)
+                block["input"] = {"_raw": block["input"]}
         self.seen_ids.update(ids)
         self.accepted_count += 1
         purpose = getattr(self, "request_purpose", "review")

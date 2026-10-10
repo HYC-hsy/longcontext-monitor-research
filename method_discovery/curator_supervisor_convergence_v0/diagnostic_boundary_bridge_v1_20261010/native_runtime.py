@@ -17,7 +17,8 @@ from .ports import IsolatedAnalysis, NoTaskControl
 from method_discovery.curator_supervisor_convergence_v0.diagnostic_static_adapter_v1_20261009.docker_tool import DockerToolPort
 from monitor_agent_core.agent import MonitorAgent
 from monitor_agent_core.loop import MonitorLoopError, run_review
-from monitor_agent_core.provider import HistoryCapacityError, ProviderRecoveryExhausted
+from monitor_agent_core.provider import HistoryCapacityError, ProviderRecoveryExhausted, ProviderError
+from monitor_agent_core.workspace import MonitorPathError
 from monitor_agent_core.handoff_validation import ContinuationContractError
 from monitor_agent_core.runtime import _remaining_root_turns
 from monitor_agent_core.actions import ToolOutcome
@@ -44,6 +45,9 @@ def _native_undecided(exc, client, analysis):
     while cursor is not None:
         if isinstance(cursor, (BridgeIntegrityError, requests.RequestException, OSError)):
             return False
+        if isinstance(cursor, ProviderError) and not isinstance(
+                cursor, ProviderRecoveryExhausted):
+            return False
         cursor = cursor.__cause__ or cursor.__context__
     chain = _failure_types(exc)
     return ("HistoryCapacityError" in chain or
@@ -64,6 +68,16 @@ class BoundaryMonitorAgent(MonitorAgent):
             if errors:
                 return ToolOutcome({"status": "error", "error": "Invalid tool parameters: " +
                                     errors[0].message[:500]})
+            if name in {"file_read", "file_write", "file_patch"}:
+                try:
+                    if name == "file_read":
+                        self.workspace.resolve_read(arguments["path"])
+                    else:
+                        self.workspace.resolve_private(arguments["path"])
+                except FileNotFoundError:
+                    pass  # Missing permitted evidence remains an ordinary result.
+                except MonitorPathError as exc:
+                    raise BridgeIntegrityError("Workspace boundary violation") from exc
         result = super().dispatch(name, arguments)
         failure = getattr(self.analysis, "integrity_error", None)
         if failure is not None:
