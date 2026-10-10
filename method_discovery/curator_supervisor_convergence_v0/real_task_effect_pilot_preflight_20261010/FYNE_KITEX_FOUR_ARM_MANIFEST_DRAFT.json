@@ -1,0 +1,64 @@
+{
+  "schema": "fyne-kitex-real-task-pilot-draft-v1",
+  "status": "offline_blocked_not_authorized",
+  "execution_authorized": false,
+  "purpose": "Development pilot of Task-only versus native ASE+CRS+RHR+RER+root_records_v1 supervision; not an isolation of R and not held-out validation",
+  "arms": [
+    {"order": 1, "task_id": "roadmapbench:fyn-2.2.0-roadmap", "condition": "T"},
+    {"order": 2, "task_id": "roadmapbench:fyn-2.2.0-roadmap", "condition": "S"},
+    {"order": 3, "task_id": "roadmapbench:ktx-0.13.0-roadmap", "condition": "S"},
+    {"order": 4, "task_id": "roadmapbench:ktx-0.13.0-roadmap", "condition": "T"}
+  ],
+  "task_assets": {
+    "roadmapbench:fyn-2.2.0-roadmap": {
+      "image_id": "sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1",
+      "repo_digests": ["znpt/roadmapbench-fyn-2.2.0-roadmap@sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1"],
+      "task_tree_sha256": "928e4d98926e9c6038f2538ec960be19fa1fb199bfc11f06e3fe01a7d50259d6",
+      "task_toml_sha256": "db81f4ee37e4f69e7ace0fa7b7cb6ab8b2cd3469463091b1bcf073da4237dd6d",
+      "agent_timeout_in_task_toml_seconds": 7200,
+      "verifier_timeout_in_task_toml_seconds": 1800
+    },
+    "roadmapbench:ktx-0.13.0-roadmap": {
+      "image_id": "sha256:7ffcd70e49d77031b8e67eaa99226dc8468fa046f33e615118e8922b89fff32e",
+      "repo_digests": ["znpt/roadmapbench-ktx-0.13.0-roadmap@sha256:7ffcd70e49d77031b8e67eaa99226dc8468fa046f33e615118e8922b89fff32e"],
+      "task_tree_sha256": "19986c7804fe51795c8923c478a63e9d3595a2394f10229aa1905b468af8e0ab",
+      "task_toml_sha256": "cd08b0c7d55b3059dba27c9970240e856aeb0a7ae301673675e3cc37d3f82a54",
+      "agent_timeout_in_task_toml_seconds": 7200,
+      "verifier_timeout_in_task_toml_seconds": 1800
+    }
+  },
+  "run_policy": {
+    "fresh_run_and_task_volume_per_arm": true,
+    "neutral_container_condition_id": "pilot-neutral",
+    "task_profile": "native_claude_cc_vibe_opus48",
+    "task_model": "claude-opus-4-8",
+    "task_turn_ceiling": 300,
+    "task_provider_retries": 4,
+    "task_provider_max_attempts_per_call": 5,
+    "supervisor_profile": "claude_monitor_opus48",
+    "supervisor_model": "claude-opus-4-8",
+    "ordinary_review_turn_ceiling": 20,
+    "root_handoff_cumulative_turn_ceiling": 300,
+    "supervisor_connect_timeout_seconds": 120,
+    "supervisor_read_timeout_seconds": 300,
+    "supervisor_extra_ambiguous_recovery_batches": 0,
+    "harbor_whole_trial_max_retries": 0,
+    "proposed_agent_phase_host_ceiling_seconds": 10000,
+    "agent_phase_hidden_tests_visible": false,
+    "native_evaluation_only_after_stop_and_frozen_product": true,
+    "online_native_evaluation_feedback": false
+  },
+  "failure_policy": {
+    "local_role_transport_failure": "preserve technical-undecided arm; no rerun or replacement; proceed only after verified cleanup and shared identity",
+    "shared_identity_or_isolation_failure": "preserve evidence and stop remaining arms",
+    "cleanup_unknown": "no evaluator and no next arm",
+    "poor_task_or_supervisor_decision": "retain as outcome, not infrastructure retry"
+  },
+  "result_viewing": "Freeze all preapproved arms or stop on a shared failure before comparing native results; no score-adaptive changes",
+  "known_limits": [
+    "Two exposed development tasks, not unseen holdout",
+    "Sequential arms are independent trajectories, not exact counterfactuals",
+    "Fixed order does not remove order effects",
+    "T/S comparison estimates bundled supervision, not root_records_v1 separately"
+  ]
+}

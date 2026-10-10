@@ -44,6 +44,9 @@ class PilotDockerToolPort(DockerToolPort):
         if not all(path.is_dir() for path in (self.private, self.cognition,
                                               self.scratch, self.evidence)):
             raise ValueError('Pilot analysis roots are missing')
+        if any(self.private == writable or self.private.is_relative_to(writable)
+               for writable in (self.cognition, self.scratch)):
+            raise ValueError('Trusted analysis root must be outside writable model roots')
         for name in ('home', 'tmp', 'build_cache', 'output'):
             (self.scratch / name).mkdir(parents=True, exist_ok=True)
         self._mount_identities = {str(path): self._safe_mount_identity(path)
@@ -132,16 +135,23 @@ class PilotDockerToolPort(DockerToolPort):
 
 
 class PilotHostBridge:
-    def __init__(self, *, root, run_id, port: PilotDockerToolPort):
+    def __init__(self, *, root, run_id, port: PilotDockerToolPort, adopt_existing=False):
         self.root = Path(root).resolve()
         self.run_id = str(run_id)
         self.port = port
         self.closed = False
         self._session_scratch_before = {}
-        self.root.mkdir(parents=True, exist_ok=False)
-        for name in ('requests', 'accepted', 'responses'):
-            (self.root / name).mkdir()
-        _atomic_json(self.root / 'identity.json', {'schema': SCHEMA, 'run_id': self.run_id})
+        if adopt_existing:
+            expected = {'schema': SCHEMA, 'run_id': self.run_id}
+            identity = json.loads((self.root / 'identity.json').read_text(encoding='utf-8'))
+            if identity != expected or any(not (self.root / name).is_dir()
+                                           for name in ('requests', 'accepted', 'responses')):
+                raise RuntimeError('Existing pilot spool identity mismatch')
+        else:
+            self.root.mkdir(parents=True, exist_ok=False)
+            for name in ('requests', 'accepted', 'responses'):
+                (self.root / name).mkdir()
+            _atomic_json(self.root / 'identity.json', {'schema': SCHEMA, 'run_id': self.run_id})
 
     def _handle(self, request):
         if request.get('schema') != SCHEMA or request.get('run_id') != self.run_id:

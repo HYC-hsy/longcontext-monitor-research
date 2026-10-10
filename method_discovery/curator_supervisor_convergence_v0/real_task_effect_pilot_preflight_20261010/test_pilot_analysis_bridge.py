@@ -12,6 +12,7 @@ import threading
 import time
 import unittest
 import uuid
+from unittest import mock
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / 'GenericAgent-main'))
@@ -36,6 +37,19 @@ def docker(*args):
 
 
 class PilotAnalysisBridgeFixture(unittest.TestCase):
+    def test_docker_unavailable_is_cleanup_unknown_not_success(self):
+        port = object.__new__(PilotDockerToolPort)
+        port.new_sessions = {'static-fixture': {'done': threading.Event()}}
+        port.new_sessions['static-fixture']['done'].set()
+        with mock.patch('method_discovery.curator_supervisor_convergence_v0.'
+                        'diagnostic_static_adapter_v1_20261009.docker_tool.DockerToolPort.close'), \
+             mock.patch('method_discovery.curator_supervisor_convergence_v0.'
+                        'real_task_effect_pilot_preflight_20261010.pilot_analysis_bridge.'
+                        'subprocess.run', return_value=subprocess.CompletedProcess(
+                            ['docker', 'inspect'], 1, '', 'Cannot connect to daemon')):
+            with self.assertRaisesRegex(RuntimeError, 'cleanup_unknown'):
+                port.close()
+
     def test_malformed_or_misowned_spool_receipt_is_integrity_failure(self):
         for payload in ([], {'run_id': 'wrong', 'request_id': 'wrong',
                              'status': 'ok', 'result': {}}):
