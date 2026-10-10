@@ -89,8 +89,8 @@ class PilotAnalysisBridgeFixture(unittest.TestCase):
                 monitor.review('queued wake')
             self.assertEqual(len(list((root / 'requests').glob('*.json'))), 1)
 
-    def _completed(self, client, code):
-        receipt = client.start(code, 'bash', timeout=120, wait_seconds=1)
+    def _completed(self, client, code, timeout=120):
+        receipt = client.start(code, 'bash', timeout=timeout, wait_seconds=1)
         chunks = [receipt.get('stdout', '')]
         for _ in range(150):
             if receipt['status'] != 'running':
@@ -176,6 +176,10 @@ class PilotAnalysisBridgeFixture(unittest.TestCase):
                     self.assertIn('ok', private_test['stdout'])
                     self.assertIn('tmp/probe/source.txt',
                                   private_test['private_scratch_diff']['added'])
+                    public_build = self._completed(client,
+                        'cd /app; go env GOMODCACHE; go test -run "^$" .', timeout=300)
+                    self.assertEqual(public_build['status'], 'success', public_build)
+                    self.assertIn('/go/pkg/mod', public_build['stdout'])
                     protected = self._completed(client,
                         'if mv /pilot_control /tmp/redirected 2>/dev/null; then exit 13; fi; '
                         'if printf forged >/pilot_control/audit/commands/forged 2>/dev/null; '
