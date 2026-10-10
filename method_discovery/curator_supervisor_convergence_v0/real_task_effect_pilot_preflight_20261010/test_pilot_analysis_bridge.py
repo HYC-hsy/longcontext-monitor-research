@@ -36,6 +36,36 @@ def docker(*args):
 
 
 class PilotAnalysisBridgeFixture(unittest.TestCase):
+    def test_malformed_or_misowned_spool_receipt_is_integrity_failure(self):
+        for payload in ([], {'run_id': 'wrong', 'request_id': 'wrong',
+                             'status': 'ok', 'result': {}}):
+            with self.subTest(payload=payload), tempfile.TemporaryDirectory(prefix='lc_spool_bad_') as name:
+                root = pathlib.Path(name) / 'bridge'
+                root.mkdir()
+                (root / 'requests').mkdir()
+                (root / 'responses').mkdir()
+                (root / 'identity.json').write_text(json.dumps({
+                    'schema': 'pilot-analysis-spool-v1', 'run_id': 'offline-run'}), encoding='utf-8')
+                client = SpoolAnalysisSessions(root, 'offline-run', threading.Event(),
+                                               response_timeout=1)
+
+                def respond():
+                    requests = root / 'requests'
+                    for _ in range(100):
+                        found = list(requests.glob('*.json'))
+                        if found:
+                            (root / 'responses' / found[0].name).write_text(
+                                json.dumps(payload), encoding='utf-8')
+                            return
+                        time.sleep(.01)
+
+                thread = threading.Thread(target=respond)
+                thread.start()
+                with self.assertRaises(AnalysisPortIntegrityError):
+                    client.start('echo harmless', 'bash')
+                thread.join(timeout=2)
+                self.assertFalse(thread.is_alive())
+
     def test_unanswered_accepted_request_never_falls_back_to_local_process(self):
         with tempfile.TemporaryDirectory(prefix='lc_pilot_spool_') as name:
             root = pathlib.Path(name) / 'bridge'
@@ -87,10 +117,14 @@ class PilotAnalysisBridgeFixture(unittest.TestCase):
                                   'printf task-v1 >/app/.pilot_probe.txt')
                     self.assertEqual(init.returncode, 0, init.stderr)
                     private, evidence = temp / 'monitor_private', temp / 'task_evidence'
+                    trusted, scratch = temp / 'trusted_control', temp / 'scratch'
                     private.mkdir()
                     evidence.mkdir()
+                    trusted.mkdir()
+                    scratch.mkdir()
                     port = PilotDockerToolPort(image=image, task_volume=volume,
-                                               private_root=private, evidence_root=evidence)
+                                               trusted_root=trusted, cognition_root=private,
+                                               scratch_root=scratch, evidence_root=evidence)
                     bridge = PilotHostBridge(root=temp / 'monitor_bridge',
                                              run_id='fixture-' + volume, port=port)
 
@@ -142,6 +176,16 @@ class PilotAnalysisBridgeFixture(unittest.TestCase):
                     self.assertIn('ok', private_test['stdout'])
                     self.assertIn('tmp/probe/source.txt',
                                   private_test['private_scratch_diff']['added'])
+                    protected = self._completed(client,
+                        'if mv /pilot_control /tmp/redirected 2>/dev/null; then exit 13; fi; '
+                        'if printf forged >/pilot_control/audit/commands/forged 2>/dev/null; '
+                        'then exit 14; fi; '
+                        'if printf forged >/logs/agent/monitor/monitor_private/reference.md '
+                        '2>/dev/null; then exit 15; fi; '
+                        'printf still-private >/tmp/protected-probe; '
+                        'test "$(cat /tmp/protected-probe)" = still-private')
+                    self.assertEqual(protected['status'], 'success', protected)
+                    port._check_mount_sources()
                     update = docker('run', '--rm', '--network', 'none', '--mount',
                                     f'type=volume,source={volume},destination=/app',
                                     '--entrypoint', 'sh', image, '-c',
@@ -156,7 +200,8 @@ class PilotAnalysisBridgeFixture(unittest.TestCase):
                     self.assertFalse(thread.is_alive())
                     self.assertFalse(error, error)
                     self.assertTrue(bridge.closed)
-                    self.assertTrue(list(private.glob('audit/commands/*/script_identity.json')))
+                    self.assertTrue(list(trusted.glob('audit/commands/*/script_identity.json')))
+                    self.assertTrue(list(private.glob('audit/commands/*/output.log')))
                 finally:
                     stop.set()
                     if thread is not None:

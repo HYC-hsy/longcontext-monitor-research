@@ -6,6 +6,7 @@ import json
 import hashlib
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import time
@@ -32,15 +33,23 @@ def _atomic_json(path: Path, value: dict) -> None:
 class PilotDockerToolPort(DockerToolPort):
     """Reuse the certified session/byte/receipt logic with fixed live mounts."""
 
-    def __init__(self, *, image, task_volume, private_root, evidence_root):
+    def __init__(self, *, image, task_volume, trusted_root, cognition_root,
+                 scratch_root, evidence_root):
         self.image = str(image)
         self.task_volume = str(task_volume)
-        self.private = Path(private_root).resolve(strict=True)
+        self.private = Path(trusted_root).resolve(strict=True)
+        self.cognition = Path(cognition_root).resolve(strict=True)
+        self.scratch = Path(scratch_root).resolve(strict=True)
         self.evidence = Path(evidence_root).resolve(strict=True)
-        if not self.private.is_dir() or not self.evidence.is_dir():
+        if not all(path.is_dir() for path in (self.private, self.cognition,
+                                              self.scratch, self.evidence)):
             raise ValueError('Pilot analysis roots are missing')
         for name in ('home', 'tmp', 'build_cache', 'output'):
-            (self.private / '.static_runtime' / name).mkdir(parents=True, exist_ok=True)
+            (self.scratch / name).mkdir(parents=True, exist_ok=True)
+        self._mount_identities = {str(path): self._safe_mount_identity(path)
+                                  for path in (self.private, self.cognition, self.scratch,
+                                               self.evidence, *(self.scratch / name for name in
+                                                                ('home', 'tmp', 'build_cache', 'output')))}
         self.new_sessions = {}
         self.historical = {}
         image_result = subprocess.run(['docker', 'image', 'inspect', self.image, '--format', '{{.Id}}'],
@@ -52,29 +61,74 @@ class PilotDockerToolPort(DockerToolPort):
                 volume_result.returncode != 0 or volume_result.stdout.strip() != self.task_volume):
             raise ValueError('Pinned pilot image or Task volume identity mismatch')
 
+    @staticmethod
+    def _safe_mount_identity(path):
+        if path.is_symlink() or getattr(os.path, 'isjunction', lambda _: False)(path):
+            raise RuntimeError('Pilot mount source is redirected')
+        resolved = path.resolve(strict=True)
+        if resolved != path or not path.is_dir():
+            raise RuntimeError('Pilot mount source identity changed')
+        stat = path.stat()
+        return (stat.st_dev, stat.st_ino)
+
+    def _check_mount_sources(self):
+        for text, identity in self._mount_identities.items():
+            if self._safe_mount_identity(Path(text)) != identity:
+                raise RuntimeError('Pilot mount source identity changed')
+
     def _docker_args(self, session: str, script: Path, kind: str) -> list[str]:
+        self._check_mount_sources()
         interpreter = {'python': '/usr/bin/python3', 'bash': '/bin/bash'}[kind]
-        virtual_script = '/logs/agent/monitor/monitor_private/' + script.relative_to(self.private).as_posix()
-        scratch = self.private / '.static_runtime'
+        virtual_script = '/pilot_control/' + script.relative_to(self.private).as_posix()
+        scratch = self.scratch
         return ['docker', 'run', '--rm', '--name', session, '--network', 'none',
                 '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
                 '--mount', f'type=volume,source={self.task_volume},destination=/app,readonly',
-                '--mount', f'type=bind,source={self.private},destination=/logs/agent/monitor/monitor_private',
+                '--mount', f'type=bind,source={self.private},destination=/pilot_control,readonly',
+                '--mount', f'type=bind,source={self.cognition},destination=/logs/agent/monitor/monitor_private,readonly',
                 '--mount', f'type=bind,source={self.evidence},destination=/logs/agent/monitor/task_evidence,readonly',
                 '--mount', f'type=bind,source={scratch / "home"},destination=/home/monitor',
                 '--mount', f'type=bind,source={scratch / "tmp"},destination=/tmp',
                 '--mount', f'type=bind,source={scratch / "build_cache"},destination=/cache',
                 '--mount', f'type=bind,source={scratch / "output"},destination=/output',
                 '--env', 'HOME=/home/monitor', '--env', 'TMPDIR=/tmp',
-                '--env', 'GOCACHE=/cache/go', '--env', 'GOMODCACHE=/cache/gomod',
+                '--env', 'GOCACHE=/cache/go', '--env', 'GOPROXY=off',
                 '--entrypoint', interpreter, self.image, virtual_script]
+
+    def mirror_output(self, session):
+        """Expose a read-only-in-diagnostic copy; trusted original stays private."""
+        source = self.private / 'audit' / 'commands' / session / 'output.log'
+        if not source.is_file() or source.is_symlink():
+            raise RuntimeError('Trusted analysis output unavailable')
+        destination = self.cognition / 'audit' / 'commands' / session / 'output.log'
+        if destination.exists() and destination.is_symlink():
+            raise RuntimeError('Analysis output mirror redirected')
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        staged = destination.with_name('output.pending')
+        if staged.exists():
+            raise RuntimeError('Analysis output mirror pending file exists')
+        shutil.copyfile(source, staged)
+        os.replace(staged, destination)
 
     def close(self):
         super().close()
         for session in self.new_sessions:
-            found = subprocess.run(['docker', 'inspect', session], capture_output=True, timeout=15)
+            try:
+                found = subprocess.run(['docker', 'inspect', session], text=True,
+                                       capture_output=True, timeout=15)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise RuntimeError('cleanup_unknown: Docker inspect unavailable') from exc
             if found.returncode == 0:
                 raise RuntimeError('Pilot analysis container deletion unconfirmed')
+            if 'no such object' not in found.stderr.lower():
+                raise RuntimeError('cleanup_unknown: Docker inspect did not certify absence')
+            try:
+                daemon = subprocess.run(['docker', 'info', '--format', '{{.ID}}'], text=True,
+                                        capture_output=True, timeout=15)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise RuntimeError('cleanup_unknown: Docker daemon unavailable') from exc
+            if daemon.returncode != 0 or not daemon.stdout.strip():
+                raise RuntimeError('cleanup_unknown: Docker daemon state unconfirmed')
 
 
 class PilotHostBridge:
@@ -101,6 +155,8 @@ class PilotHostBridge:
             result = self.port.execute('code_run', {
                 'code': request['code'], 'type': request['code_type'],
                 'timeout': request['timeout'], 'wait_seconds': request['wait_seconds']})
+            if result.get('session_id'):
+                self.port.mirror_output(result['session_id'])
             result['source_version'] = {'status': 'version_uncertain',
                                         'task_volume': self.port.task_volume}
             if result.get('session_id'):
@@ -113,6 +169,8 @@ class PilotHostBridge:
             result = self.port.execute('code_run', {
                 'session_id': request['session_id'], 'wait_seconds': request['wait_seconds'],
                 'cancel': request['cancel']})
+            if result.get('session_id'):
+                self.port.mirror_output(result['session_id'])
             result['source_version'] = {'status': 'version_uncertain',
                                         'task_volume': self.port.task_volume}
             before = self._session_scratch_before.get(request['session_id'])
@@ -126,7 +184,7 @@ class PilotHostBridge:
         raise ValueError('Unsupported analysis operation')
 
     def _scratch_files(self):
-        root = self.port.private / '.static_runtime'
+        root = self.port.scratch
         files = {}
         for name in ('tmp', 'output'):
             for path in (root / name).rglob('*'):

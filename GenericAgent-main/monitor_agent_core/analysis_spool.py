@@ -22,11 +22,14 @@ class SpoolAnalysisSessions:
         self.response_timeout = response_timeout
         if not self.run_id or not (self.root / 'identity.json').is_file():
             raise AnalysisPortIntegrityError('Pilot analysis port identity unavailable')
-        identity = json.loads((self.root / 'identity.json').read_text(encoding='utf-8'))
+        try:
+            identity = json.loads((self.root / 'identity.json').read_text(encoding='utf-8'))
+        except (OSError, ValueError, TypeError) as exc:
+            raise AnalysisPortIntegrityError('Pilot analysis identity unreadable') from exc
         if identity != {'run_id': self.run_id, 'schema': 'pilot-analysis-spool-v1'}:
             raise AnalysisPortIntegrityError('Pilot analysis port identity mismatch')
         for name in ('requests', 'responses'):
-            if not (self.root / name).is_dir():
+            if not (self.root / name).is_dir() or (self.root / name).is_symlink():
                 raise AnalysisPortIntegrityError('Pilot analysis port queue missing')
 
     def _exchange(self, operation, **fields):
@@ -36,31 +39,49 @@ class SpoolAnalysisSessions:
         request = {'schema': 'pilot-analysis-spool-v1', 'run_id': self.run_id,
                    'request_id': request_id, 'operation': operation, **fields}
         path = self.root / 'requests' / (request_id + '.json')
-        descriptor, temporary = tempfile.mkstemp(prefix='.pending-', dir=path.parent)
+        if path.parent.is_symlink() or not path.parent.is_dir():
+            raise AnalysisPortIntegrityError('Analysis request queue redirected')
+        temporary = None
         try:
+            descriptor, temporary = tempfile.mkstemp(prefix='.pending-', dir=path.parent)
             with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
                 json.dump(request, stream, ensure_ascii=False)
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(temporary, path)
+        except (OSError, ValueError, TypeError) as exc:
+            raise AnalysisPortIntegrityError('Analysis request could not be committed') from exc
         finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
+            if temporary is not None:
+                try:
+                    if os.path.exists(temporary):
+                        os.unlink(temporary)
+                except OSError as exc:
+                    raise AnalysisPortIntegrityError('Analysis request cleanup failed') from exc
         response = self.root / 'responses' / (request_id + '.json')
         deadline = time.monotonic() + self.response_timeout
         while not response.is_file():
+            if response.is_symlink() or response.parent.is_symlink():
+                raise AnalysisPortIntegrityError('Analysis response path redirected')
             if self.stop_event.is_set() or time.monotonic() >= deadline:
                 # The host may have accepted the request. Never replay it.
                 raise AnalysisPortIntegrityError('Analysis response unknown; request was not retried')
             time.sleep(.02)
+        if response.is_symlink() or response.parent.is_symlink():
+            raise AnalysisPortIntegrityError('Analysis response path redirected')
         try:
             receipt = json.loads(response.read_text(encoding='utf-8'))
         except (OSError, ValueError) as exc:
             raise AnalysisPortIntegrityError('Analysis receipt unreadable') from exc
+        if not isinstance(receipt, dict):
+            raise AnalysisPortIntegrityError('Analysis receipt is not an object')
         if (receipt.get('run_id'), receipt.get('request_id')) != (self.run_id, request_id):
             raise AnalysisPortIntegrityError('Analysis receipt identity mismatch')
         if receipt.get('status') != 'ok' or not isinstance(receipt.get('result'), dict):
             raise AnalysisPortIntegrityError('Analysis host did not return a complete result')
+        if (operation == 'read' and receipt['result'].get('session_id') not in
+                (None, fields['session_id'])):
+            raise AnalysisPortIntegrityError('Analysis session receipt identity mismatch')
         return receipt['result']
 
     def start(self, code, code_type='python', timeout=60, wait_seconds=1):
