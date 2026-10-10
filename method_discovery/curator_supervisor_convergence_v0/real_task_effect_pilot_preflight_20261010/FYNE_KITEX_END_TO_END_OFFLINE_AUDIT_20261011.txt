@@ -1,0 +1,271 @@
+FYNE / KITEX PILOT — END-TO-END OFFLINE WIRING AUDIT (2026-10-11)
+Status: prepared_not_executed. This is engineering certification, not a Task
+outcome or a Supervisor-effect result. Real external model/API requests: 0.
+Native evaluator calls: 0. Training/scoring-model calls: 0. Native Task and
+Monitor runtimes did execute against deterministic local fake responses.
+
+1. Scope and implementation identity
+------------------------------------
+Starting source: c6f9d9ad33ed2c48fb42ba68e6f0e9f9c45aeb4a on
+crs-v0-20261007 in E:/longcontext-cqs-v0-20261005. Ordered implementation
+commits: 6760538e, baf691c3, dbc21e50, 51abe62f, b1c524cb, 9e066c93,
+4f1e41fb. The final audit commit follows this document. No C02 archive,
+production prompt, Task Agent loop, native evaluator, or unrelated working-tree
+file was edited. Existing untracked __pycache__ directories remain untouched.
+
+Changed paths since the starting commit (exact diff is in Git):
+GenericAgent-main/monitor_agent_core/{analysis_spool.py,provider.py,runtime.py};
+GenericAgent-main/tests/test_pilot_transport_boundary.py;
+research-only FYNE_KITEX_FOUR_ARM_MANIFEST_DRAFT.json, pilot_analysis_bridge.py,
+pilot_entry.py, pilot_fake_gateway.py, pilot_harbor_cli.py,
+pilot_harbor_hooks.py, pilot_offline_harbor.py, test_pilot_analysis_bridge.py,
+test_pilot_entry.py in this directory. The production-adjacent changes are
+pilot-flagged stop/deadline and integrity handling. Default-off behavior was
+covered by the existing root-records and transport-boundary regression.
+
+The current draft manifest is unarmed: execution_authorized=false. The actual
+live entry is pilot_entry.py --live. It requires a separate AUTHORIZATION.json
+whose approved_arms exactly equal the draft arms, manifest_sha256 matches the
+draft bytes, and audited_code_commit equals the checked-out Git HEAD. No such
+authorization file exists. A missing authorization aborts before run staging
+or any provider send. No four-arm live experiment was launched.
+
+2. Frozen task and model assets
+-------------------------------
+Fyne task_id roadmapbench:fyn-2.2.0-roadmap; Docker image ID
+sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1;
+RepoDigest znpt/roadmapbench-fyn-2.2.0-roadmap@sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1;
+/app clean Git HEAD 7229e889d49c81a83b0b7e09400837f67f6ddad5;
+instruction SHA c0df6c1cdc6c2d61e7129bd515dcf1f5746e606b72fa9cdd13e101aa405c778c;
+task.toml SHA db81f4ee37e4f69e7ace0fa7b7cb6ab8b2cd3469463091b1bcf073da4237dd6d;
+native tests/test.sh SHA 77637bf7eb621697259e7fad7428ed4cc578b17aef171fc76f44cf5474b8bda2;
+native tests tree SHA 9da32be9bee4f850d6c31d8bbdf463919477bbdc473437c09d9227c0cace6752.
+Current task-cache ordinary-file tree SHA (path+NUL+bytes, excluding .git):
+36991e23b078c5b14b5ea96b8026592932048abfe5e3321c483f0430578cbe1a,
+1479 files. This is not the older differently coded task_tree_sha256.
+
+Kitex task_id roadmapbench:ktx-0.13.0-roadmap; Docker image ID
+sha256:7ffcd70e49d77031b8e67eaa99226dc8468fa046f33e615118e8922b89fff32e;
+RepoDigest znpt/roadmapbench-ktx-0.13.0-roadmap@sha256:7ffcd70e49d77031b8e67eaa99226dc8468fa046f33e615118e8922b89fff32e;
+/app clean Git HEAD 2a128be5c44b8de7af8d1e3988a2ac22da7c6578;
+instruction SHA a8a46e2db3c9892fc41dc6562c61b6928bbadaaa197b5b073edd93d86b2b3f74;
+task.toml SHA cd08b0c7d55b3059dba27c9970240e856aeb0a7ae301673675e3cc37d3f82a54;
+native tests/test.sh SHA f0a24e1ac883c65e04eec6a7ecc9e74ffb6214a7a0e1dcf7974eeb7bd3144324;
+native tests tree SHA 2c78b005db4c21e2b6e71117d553e3c1c00e43e978fa166533b864d00235ce1b.
+Current task-cache ordinary-file tree SHA be34b5600d7d034554a8a44eb8b2f260d6274f3f71e96c7f8faf78adc97f4804,
+811 files. Images were inspected locally; image ID and RepoDigests are distinct
+recorded Docker fields. Both tasks are previously exposed development tasks,
+not unseen holdouts.
+
+The public Harbor agent package contains the original instruction.md,
+task.toml, and environment only; tests is empty and solution absent during
+agent execution. Native evaluator assets are staged host-side only for the
+later verification phase, after source tree and test.sh hashes match the draft.
+Actual Harbor AGENT_START inspected /tests in the agent container and required
+it absent or empty. Fake verification showed the real Harbor verification hook
+fires only after AGENT_END; no native evaluator was used.
+
+Task and Supervisor models are claude-opus-4-8. Task profile is
+native_claude_cc_vibe_opus48; Supervisor profile claude_monitor_opus48.
+Private profile *file hashes only* are frozen in the draft manifest and checked
+before staging; no credential or endpoint body is archived. Task system/tools
+and public instruction bytes were identical across T/S first requests for
+each task. The only differing Task request field was metadata.user_id, carrying
+fresh process session/device identity. No temperature field was added to the
+actual Monitor requests. Actual Monitor first-request fields were max_tokens,
+messages, model, output_config, stream, system, thinking, tools.
+
+3. Pilot entry, bridge and control lifecycle
+--------------------------------------------
+pilot_entry.prepare_run verifies fresh run root, exact task image, RepoDigest,
+current source tree, profile-file hashes and arm membership. It stages a
+fresh public task package, exact source bundle, Task-RW named volume, and
+Harbor compose. T gets no Monitor route/worker/spool. S gets native
+ASE+CRS-v0.2+RHR-v0+RER-v0+root_records_v1 and the fixed spool port. Both use
+baseline_condition=original and condition_id=pilot-neutral. The true T/S
+mapping remains host-side. Harbor whole-trial --max-retries 0 is in the actual
+launcher argv, not merely the draft.
+
+The trusted spool service runs concurrently with Harbor and adopts the
+Monitor's own task_identity before opening its analysis port. Native Monitor
+code_run uses the spool; the model can submit only fixed run-owned script and
+session operations, never Docker flags, image, mount or host command. Host
+PilotDockerToolPort pins the task image and named Task volume. Diagnostic
+/app is RO; network=none; private HOME/TMP/cache/output and a scratch copy are
+writable. Accepted requests, receipts and original scripts live under a
+trusted host root outside model-writable scratch. Sources are rechecked for
+redirected paths before each mount. UTF-8 script bytes are checked before
+execution. Version-uncertain reads and private scratch diffs remain distinct
+from actual Task product changes. No diagnostic patch syncs to Task /app.
+
+At AGENT_START the hook checked the exact image, clean /app Git HEAD, RW Task
+volume, network=none, RO source/runtime, S spool mount rights, and empty or
+absent /tests. At AGENT_END it signalled the spool, waited for sidecar clean
+receipt, stopped and restarted the same main container, inspected for active
+Task/Monitor Python writers, and streamed the whole /app writable layer to
+pre_evaluation_app.tar with SHA-256. It records legal_agent_end only if native
+round_end_seen=true, wrapper_return_code=0 and archive_status=finished.
+Verification is rejected if any legal/clean/frozen/product or evaluator asset
+identity check fails. The fake verifier is a sentinel shell script, not a
+native task checker; its output was never returned to the fake Task/Monitor.
+The run-scoped cleanup only targets containers with this exact compose file.
+
+The native queue/ControlEcho was exercised: in Fyne S the fake Supervisor
+intervened and the correction appeared in subsequent actual Task provider
+requests 0005.json and 0006.json. Later the native root path executed
+code_run through the host port, produced an observation receipt, proposed
+flat CRS, entered RHR/RER, and completed through the native control path.
+The fake response contained a free text block before tool_use so root_records
+applied=true at completion-1 and completion-3. The actual Monitor request
+0004.json contained the @RECORD ledger; 0007-0010 also retained projected
+history. Source/projected/manifest/commit files are in native audit
+root_projections, and pre-send request capture is in provider_pre_send. This
+is an offline protocol trace, not evidence of task correctness.
+
+4. Actual offline fixture runs and retained raw locations
+-------------------------------------------------------
+Local raw roots, retained outside the repository (no secret profile content is
+copied into this TXT):
+E:/pilot_offline_fyne_t_1011d — Harbor exit 0, fake requests 1, frozen /app
+tar SHA 91df9fcef895b9076a2a341ebb0efc1f1fa30bf1f6f4df259114581b68c08308.
+E:/pilot_offline_fyne_sproj_1011a — Harbor exit 0, fake requests 11 (3 Task,
+8 Monitor), spool errors [], real host code_run receipt 1, legal agent end,
+fake Harbor verification release, frozen /app tar SHA
+8fd8288f654c74368f0d83606676927016925a9b7c4feecde328e298d5087965.
+E:/pilot_offline_kitex_t_1011a — Harbor exit 0, fake requests 1, frozen /app
+tar SHA a45ad3c24071149a3cf39746a87b6a3a3f665b59dab4f83da4fda7144f8c7e30.
+E:/pilot_offline_kitex_s_1011a — Harbor exit 0, fake requests 11, real host
+code_run receipt 1, frozen /app tar SHA
+2d4b416e66aaf4718277015583f2bd9dcec7c3104eb5a83e63af1b6d4fc0d7b.
+The final projection-enabled Fyne S run returned:
+  {"returncode":0,"timed_out":false,"offline_containers_removed":[],
+   "spool_errors":[],"fake_provider_requests":11,"frozen_product":true,
+   "harbor_verifier_released":true,"native_evaluator_calls":0}
+Its request 0004.json SHA is
+bcf433956854e3943a3b39b23b2cb2baeba2c585c957b2723316d24be1b21dec;
+projection committed.json SHA is
+d46507b99d629aff1cad4b097a80c3b88d91c8da2214937c81e15654c7771230;
+agent_end_frozen.json SHA is
+82ac0d897f9af2d0e63ce780b11f57fffc2bc85ca025825d290a242fd847dd21;
+verification_released.json SHA is
+a2d98239f5a0ef9cdb27de96a746830adecdbb33c0ee9d47ee42ccc5ef047.
+Each local archive retains pilot_command_public.json, Harbor stdout/stderr,
+fake provider request JSON and raw SSE, native Monitor dialogue/progress,
+analysis scripts/receipts, product tar, and freeze/release records. The local
+raw roots are offline fixture evidence, not four real experimental arms.
+
+The first Task request for each task was extracted from raw fake-gateway
+captures, not reconstructed from a template. Fyne T 0001 vs S 0003 and
+Kitex T 0001 vs S 0003: all top-level fields except metadata were structurally
+equal; only metadata.user_id differed. Canonical full body SHA values:
+Fyne T e4548c6397d934f73626c921c0b1739409e8205b5f0cea55dfb65ac85795c474;
+Fyne S 6d18e2fd3b8c8adf98bc86e77ab2db9f078a2376e509982ee0943cda6d2aab9f;
+Kitex T fb8a254c43b3ba3d11584b7b0c42667834d64d361679f36ff92378c65045e38f;
+Kitex S d2b16fb4241d4ae82dc0cda399b392d46ed91c300855edb3c8de7520ebea0d58.
+The differing full hashes are expected from fresh session/device metadata,
+not a license to normalize any system, tool, task or generation field.
+
+5. Offline test commands, stdout/stderr, exit status
+---------------------------------------------------
+All commands used PYTHONPATH with this worktree and GenericAgent-main; the
+pilot-entry test also set PILOT_TASK_SOURCE_ROOT, PILOT_GA_SOURCE,
+PILOT_RUNTIME_ROOT, PILOT_TASK_PROFILE_FILE, PILOT_MONITOR_PROFILE_FILE and
+PILOT_PYTHON_HOME to the exact local sources above. Values of the two private
+profile files were never printed or copied to the audit.
+
+python -m pytest -q --import-mode=importlib \
+  method_discovery/curator_supervisor_convergence_v0/
+  real_task_effect_pilot_preflight_20261010/test_pilot_entry.py
+exit 0; stdout "11 passed in 14.86s". Windows pytest atexit emitted a
+PermissionError for Temp/pytest-of-hsy/pytest-951 *after* exit 0; the test
+assertions and command status succeeded. It did not modify pilot sources.
+
+python -m pytest -q --import-mode=importlib \
+  GenericAgent-main/tests/test_pilot_transport_boundary.py \
+  GenericAgent-main/tests/test_root_records_v1.py
+exit 0; stdout "17 passed in 0.45s". The same Windows pytest atexit
+warning appeared after test completion. Two earlier path/import invocations
+failed before collection; the corrected command above is the accepted result.
+
+python -m pytest -q --import-mode=importlib \
+  method_discovery/curator_supervisor_convergence_v0/
+  real_task_effect_pilot_preflight_20261010/test_pilot_analysis_bridge.py \
+  method_discovery/curator_supervisor_convergence_v0/
+  real_task_effect_pilot_preflight_20261010/test_pilot_volume_identity.py \
+  method_discovery/curator_supervisor_convergence_v0/
+  real_task_effect_pilot_preflight_20261010/test_pilot_profile.py
+exit 0; stdout "6 passed in 80.73s"; stderr empty.
+
+Target Docker diagnostic port command for each image: go test -run "^$" .
+Both Fyne and Kitex completed successfully in the real isolated port with
+image-provided public dependencies; neither invoked native hidden evaluator.
+The test fixture also attempted writes to Task /app and trusted mount sources,
+which were rejected, and verified writable private scratch and cleanup.
+
+The full Harbor fixture command, including argv and nonsecret environment,
+is preserved in each archive/pilot_command_public.json. Its essential CLI
+contract is: m4 Harbor Python -m ...pilot_harbor_cli jobs start --path
+<fresh public_agent_task> --agent adapters.harbor_ga_agent:HarborGenericAgent
+--model claude-opus-4-8 --mounts <read-only runtime/source> --extra-docker-compose
+<fresh compose> --n-concurrent 1 --max-retries 0 --yes --delete
+--enable-verification (fake sentinel only in offline run) --ak
+max_turns=300 --ak baseline_condition=original --ak condition_id=pilot-neutral
+--ak monitor_enabled=<arm> --ak monitor_config=<S profile or empty>.
+Each fixture command returned Harbor 0; raw stdout/stderr and exact argv are
+retained in its archive. No command used the real model endpoint in the fake
+gateway fixtures; Docker network_mode was none.
+
+6. Frozen future-run plan and limits
+----------------------------------
+The unarmed draft manifest orders four *fresh* arms: Fyne T then S; Kitex S
+then T. This fixed order does not remove order effects. T is native Task only;
+S adds live ASE/CRS/RHR/RER and root_records_v1. It tests a bundled treatment,
+not R separately. Each arm gets a fresh Task volume, process, profile session,
+spool and output root. Task turn ceiling is 300. Proposed agent phase ceiling
+is 10000 seconds; both task.toml files have native agent 7200 seconds and
+verifier 1800 seconds, so the live Harbor command explicitly uses multiplier
+10000/7200. Task provider max_retries=4 means at most 5 attempts per native
+call; Supervisor uses independent connect/read timeouts 120/300 seconds and
+zero extra ambiguous recovery batches; Harbor whole-trial retries=0.
+Supervisor ordinary review ceiling=20, root handoff cumulative ceiling=300
+across native RER subreviews. No online evaluator feedback or benchmark score
+is available to either model. The native verifier identity is checked in
+verification_start only after legal agent termination and stopped/frozen
+product, and must not become Task/Supervisor evidence.
+
+The pilot manifest records failure policy: a role-local technical failure is
+preserved without rerun; proceed only if cleanup and shared identities are
+verified. Shared identity, isolation or cleanup-unknown stops later arms.
+No native score is consumed to alter the fixed order. The pilot entry is
+one-arm-at-a-time; future four-arm authorization must name this manifest,
+the audited code commit and fresh output roots. No AUTHORIZATION.json was
+created by this offline stage. No live arm is authorized by this report.
+The guarded future CLI is `python -m method_discovery.curator_supervisor_convergence_v0.
+real_task_effect_pilot_preflight_20261010.pilot_entry --live --authorization
+<new exact authorization JSON> --harbor-python <pinned m4 Harbor Python>
+--manifest <this frozen four-arm draft> --task-id <approved exact task_id>
+--condition <T or S> --run-id <fresh opaque ID> --run-root <fresh absent path>
+--source-root E:/LongContext/long_context_bench/.cache/m12_roadmap_tasks
+--ga-source E:/longcontext-cqs-v0-20261005/GenericAgent-main
+--runtime-root E:/LongContext/bench_runtime/m2/linux
+--task-profile-file <pinned private profile path>
+--monitor-profile-file <pinned private profile path>
+--python-home cpython-3.12.12-linux-x86_64-gnu`.
+
+7. Remaining limits and exact outcome
+------------------------------------
+All reported evidence is zero-external-model engineering evidence. The local
+fake responses do not test scientific diagnostic quality or native task
+correctness. The actual provider endpoint and actual native verifier have
+not been exercised in this stage, by instruction. The offline S projection
+trace proves applied=true and provider visibility, not that the model would
+use the ledger well. The four offline fixture runs were performed while
+research integration code was being finalized, so they are interface checks,
+not a single immutable experimental batch. Final changed paths were covered
+by targeted deterministic tests; an exact live code commit is required in a
+later authorization. Historical task_tree_sha256 fields and current cache
+tree hashes are deliberately separate. The full local raw directories are not
+claimed to be a whole-machine snapshot.
+
+Stage status: prepared_not_executed. Real Task Agent/Supervisor provider calls,
+native evaluator calls, training calls and scoring-model calls: all 0.
