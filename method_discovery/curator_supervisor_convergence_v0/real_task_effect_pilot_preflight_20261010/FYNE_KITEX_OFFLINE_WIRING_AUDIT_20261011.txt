@@ -1,0 +1,183 @@
+Fyne / Kitex real-task pilot: offline wiring audit (2026-10-11)
+Status: offline_blocked; no live authorization used.
+Source branch: crs-v0-20261007. Starting commit: a52c3286e0d0fa66911a9ab95a238bc9c09e0311.
+This file contains no provider credentials, private endpoint, hidden test content, or model response.
+
+Scope and code changes
+======================
+This stage added four ordered, small commits:
+  d829fedb  pilot: fail closed on root projection archive or commit error
+  a9ecdf30  pilot: route opt-in monitor analysis through fixed host spool
+  fe2abade  pilot: bind projection pre-send evidence and target volume identities
+  1eb19740  pilot: separate public agent task from verifier assets
+
+Production-default behavior is unchanged unless the pilot-only options are
+explicitly enabled. The opt-in changes touch monitor_agent_core/agent.py,
+root_records_v1.py, analysis_spool.py, runtime.py, provider.py,
+ga_monitor_adapter.py, and long_context_bench/adapters/harbor_ga_agent.py.
+Research-only modules are pilot_analysis_bridge.py, pilot_profile.py,
+pilot_task_package.py, with focused tests. No Task Agent prompt, evaluator,
+native task tests, ASE system prompt, CRS/RHR/RER policy, or frozen C02 archive
+was edited. Source diff from a52c3286: 15 files, 951 insertions, 28 deletions.
+
+Task identities and role separation
+===================================
+Candidate 1: roadmapbench:fyn-2.2.0-roadmap.
+  Source cache: E:/LongContext/long_context_bench/.cache/m12_roadmap_tasks/fyn-2.2.0-roadmap
+  Historical source revision: 59184e779909300a5a0150b06b945d39da81a099
+  Cached task tree SHA256: 928e4d98926e9c6038f2538ec960be19fa1fb199bfc11f06e3fe01a7d50259d6
+  Original instruction SHA256: c0df6c1cdc6c2d61e7129bd515dcf1f5746e606b72fa9cdd13e101aa405c778c
+  task.toml SHA256: db81f4ee37e4f69e7ace0fa7b7cb6ab8b2cd3469463091b1bcf073da4237dd6d
+  Dockerfile SHA256: d11b120d8cf2500f82e5fecddf4c2b428415d7bc392ddfc6c226704f9ba1728e
+  Native tests/test.sh SHA256: 77637bf7eb621697259e7fad7428ed4cc578b17aef171fc76f44cf5474b8bda2
+  Local image ID and RepoDigest: sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1
+  /app Git HEAD: 7229e889d49c81a83b0b7e09400837f67f6ddad5; clean.
+Candidate 2: roadmapbench:ktx-0.13.0-roadmap.
+  Source cache: E:/LongContext/long_context_bench/.cache/m12_roadmap_tasks/ktx-0.13.0-roadmap
+  Historical source revision: 59184e779909300a5a0150b06b945d39da81a099
+  Cached task tree SHA256: 19986c7804fe51795c8923c478a63e9d3595a2394f10229aa1905b468af8e0ab
+  Original instruction SHA256: a8a46e2db3c9892fc41dc6562c61b6928bbadaaa197b5b073edd93d86b2b3f74
+  task.toml SHA256: cd08b0c7d55b3059dba27c9970240e856aeb0a7ae301673675e3cc37d3f82a54
+  Dockerfile SHA256: b172ac769a29c25c8823f24d0daeb297f38d715c88f74a76b898509627d4d590
+  Native tests/test.sh SHA256: f0a24e1ac883c65e04eec6a7ecc9e74ffb6214a7a0e1dcf7974eeb7bd3144324
+  Local image ID and RepoDigest: sha256:7ffcd70e49d77031b8e67eaa99226dc8468fa046f33e615118e8922b89fff32e
+  /app Git HEAD: 2a128be5c44b8de7af8d1e3988a2ac22da7c6578; clean.
+Both are previously exposed development-pilot tasks, not held-out tasks.
+Both target images have /app and no baked-in /tests directory (zero-model
+Docker checks). Dockerfiles only COPY environment/repo to /app; source task
+packages retain hidden tests separately from online agent material.
+
+Read-only diagnostic connection actually tested
+===============================================
+MonitorAgent's real code_run dispatch can use SpoolAnalysisSessions in pilot
+mode. The task-side spool only accepts fixed start/read/close operations tied
+to one run_id; it cannot select host commands, image, mount or container args.
+The trusted host uses PilotDockerToolPort, reusing the prior certified
+DockerToolPort UTF-8 script/receipt/session implementation. It pins an exact
+image ID and named Task volume. The diagnostic container has /app mounted RO,
+network=none, read-only root, dropped capabilities, no-new-privileges, and
+independent writable private/home/tmp/cache/output; it has no Docker socket.
+The host journals acceptance before execution; a duplicate or uncertain
+request is not executed again. Cancellation and close check container removal.
+The ordinary AnalysisSessions Popen path remains only when pilot mode is off.
+When pilot mode is on, a spool integrity failure is latched and prevents
+subsequent Monitor actions rather than being returned as an ordinary tool
+failure. Any source update observed during a command is marked
+version_uncertain; a return-time tree hash is not asserted to cover the full
+execution interval. Private scratch diffs are attached to results.
+Tests used the real Fyne and Kitex images and Docker named volumes: a fake
+Task wrote v1 and v2 into /app, the real Monitor dispatch read each version,
+direct Supervisor write to /app failed, and a private Go test compiled and ran.
+Separate T/S image volumes were initialized from the same images and had equal
+full content/type/mode manifests: Fyne 2787 entries, SHA256
+01f87323980613d63c942253c719338f03d8ebc25f24abe0c9e9170b7426bb1d;
+Kitex 998 entries, SHA256
+87a8d5d416d4005976361e6d460f3fc4d208a4aa401d9a4fd86adb9424aec40f.
+These fixture volumes were removed and verified absent. This proves the tool
+port on target images, not the not-yet-wired Harbor pilot trial mount.
+
+Projection and provider evidence
+================================
+root_records_v1 remains default-off. Before History mutation, the pilot now
+uniquely archives full source History, actual projected History and manifest,
+reads all three back, rechecks current handoff and source History, and writes
+and reads back a commit record. A source locator/hash is present in the
+ledger. Archive/commit mismatch or failure latches ProjectionIntegrityError;
+stale handoff does not become a success. A pilot-only provider pre-send hook
+captures the actual assembled request before transport and checks that a
+pending projected ledger is visible. Capture failure blocks transport. The
+accepted request_usage clears pending visibility. A pilot-only runtime option
+disables the Monitor provider's extra ambiguous-recovery batch. Normal mode
+keeps the preexisting behavior.
+
+Task/evaluator isolation issue found
+===================================
+Harbor trial._agent_env_mounts unconditionally bind-mounts the task package's
+verifier_dir into the agent container even with verification disabled. Simply
+passing --disable-verification would expose tests. pilot_task_package.py now
+materializes a fresh agent-phase package with identical public instruction,
+task.toml and environment, but an empty tests mount and no solution. Harbor's
+real Task.is_valid_dir(..., disable_verification=True) and Task instruction
+equality passed for both target tasks. The original full package is retained
+only for a future post-agent evaluator phase. This materialization does not
+yet implement that separate evaluator execution or its barrier.
+
+Offline checks (actual commands/results)
+========================================
+1. From GenericAgent-main: python -m pytest -q
+   tests/test_root_records_v1.py tests/test_crs_v0.py tests/test_rhr_v0.py
+   tests/test_rer_v0.py tests/test_ase_v0.py
+   tests/test_curator_supervisor_v0.py tests/test_dcm_v0.py
+   Result: exit 1; 113 passed, 8 skipped, 2 failed. Both failures are legacy
+   frozen-provider identity assertions against 29bdcb/928af84; the pilot's
+   explicit provider pre-send callback intentionally changes provider.py.
+   All functional tests in this selection passed. These two assertions were
+   not altered or falsely counted as green.
+2. From repo root with PYTHONPATH=GenericAgent-main;repo:
+   python -m pytest -q --import-mode=importlib [pilot_profile,
+   pilot_analysis_bridge, pilot_volume_identity tests]
+   Result: exit 0; 4 passed in 42.64 s. Both real target images exercised.
+3. With PILOT_TASK_SOURCE_ROOT pointing at the audited read-only cache and
+   PILOT_HARBOR_PYTHON pointing at the installed Harbor environment:
+   python -m pytest -q [test_pilot_task_package.py]
+   Result: exit 0; 3 passed in 6.68 s. The Harbor subprocess uses PYTHONUTF8=1
+   because host Windows default GBK cannot decode the authoritative UTF-8
+   instruction files; that initial failure is retained as test evidence.
+4. python -m py_compile [changed modules]: exit 0.
+5. git diff --check / git diff --cached --check: exit 0 at commits.
+6. Direct zero-model Docker commands in both target images: /tests absent.
+No provider/Task Agent/Supervisor live model/native evaluator call was made.
+Windows pytest emitted an atexit warning about a preexisting temporary
+pytest directory; test processes nevertheless exited as recorded above.
+
+Proposed pilot (NOT AUTHORIZED TO EXECUTE)
+==========================================
+Fyne T then S; Kitex S then T. Each arm starts from a fresh original image
+and public task package, not C02 or a historical patch/session. T is Task
+only. S is the same Task plus native ASE/CRS/RHR/RER and default-off opt-in
+root_records_v1 with the restricted diagnostic port. Neither condition may
+see the other arm, evaluator material, gold patch or research archive.
+Task profile: native_claude_cc_vibe_opus48, claude-opus-4-8, at most 300
+Task turns, native max_retries=4 (at most five attempts); proposed agent-phase
+host ceiling 10000 s. Supervisor profile: claude_monitor_opus48,
+claude-opus-4-8, max_tokens 8192, adaptive/high, ordinary review 20 turns,
+root handoff cumulative 300; pilot profile resolves TLS verify=True,
+connect/read=120/300 s, max_retries=0, no extra ambiguous recovery batch.
+Harbor whole-trial retries must be 0. Exact runtime values require the missing
+Harbor live binding/readback gate below; no cost in dollars is asserted.
+Agent-only continuations must finish and all Monitor/bridge processes and
+in-flight provider requests must be stopped before a frozen product is sent
+to the independent native evaluator. Evaluation may not feed a later arm.
+An intervention ACK is not evidence that the Task model received the message;
+queue/consumption/request identity must be archived in the real pilot.
+
+Unresolved launch gates: offline_blocked
+========================================
+1. The complete research pilot entry does not yet connect Harbor's live Task
+   container to the exact named /app volume and host bridge lifecycle.
+   Existing generic run_proof starts a synchronous whole Harbor job and its
+   original identity gate rejects /app mounts. The research-only target-image
+   fixture proves the mount's permissions, but not the live Harbor
+   task/monitor start, sidecar shutdown, or mount identity. Do not bypass or
+   disable the global identity gate; an exact pilot-only mapping is needed.
+2. No real-adapter fake-provider test yet proves T/S first Task requests are
+   identical in system, original task, tools, generation params and visible
+   files, with neutral condition identity. Task-only bundle route checks exist
+   from the previous stage, but are not this full end-to-end assertion.
+3. No complete agent-only → all-sidecars-stopped → frozen product → separate
+   native evaluator path has been wired/tested. The verifier mount issue above
+   makes this a hard information-boundary gate, not an optional convenience.
+4. The pilot profile overrides, ASE/CRS/RHR/RER/root_records flags and 20/300
+   budget forwarding are not yet read back from a real constructed Harbor
+   container. Current source-side checks cannot certify runtime settings.
+5. Queue/ControlEcho delivery, stale/duplicate/end races, and the delayed
+   evaluation barrier have not yet been exercised through the full pilot
+   runner with fake provider and fake evaluator.
+6. Dynamic Task source changes are visible through the shared volume, but a
+   running analysis command's stable source version is not certified. Such a
+   command must remain version_uncertain and cannot be reported as a verified
+   version-specific observation.
+
+No Fyne/Kitex arm has been launched. The old mko/fal/glz six-arm draft is
+superseded, not silently remapped. Remaining gates need further offline work
+and a later explicit live run authorization.
