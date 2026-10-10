@@ -16,7 +16,7 @@ import shutil
 import subprocess
 
 from long_context_bench.scripts.isolated_run_bundle import build_bundle, digest_tree
-from .pilot_analysis_bridge import PilotDockerToolPort, PilotHostBridge
+from .pilot_analysis_bridge import SCHEMA
 from .pilot_profile import resolved_supervisor_profile, public_profile_identity
 from .pilot_task_package import materialize_public_agent_task
 
@@ -37,6 +37,23 @@ MONITOR_PROFILE = 'claude_monitor_opus48'
 
 def sha_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _ordinary_source_tree_sha256(root: Path) -> tuple[str, int]:
+    """Freeze current cache bytes, distinct from historical task-tree IDs."""
+    digest = hashlib.sha256()
+    count = 0
+    for path in sorted(root.rglob('*')):
+        relative = path.relative_to(root)
+        if '.git' in relative.parts:
+            continue
+        if path.is_symlink():
+            raise RuntimeError('Pilot task source contains a redirected path')
+        if path.is_file():
+            digest.update(relative.as_posix().encode('utf-8') + b'\0')
+            digest.update(path.read_bytes())
+            count += 1
+    return digest.hexdigest(), count
 
 
 def _image_identity(image: str) -> dict:
@@ -62,8 +79,7 @@ def _augment_compose(path: Path, *, volume: str, condition: str, root: Path) -> 
             (spool / 'requests', '/logs/agent/monitor_bridge/requests', False),
             (spool / 'responses', '/logs/agent/monitor_bridge/responses', True),
             (spool / 'identity.json', '/logs/agent/monitor_bridge/identity.json', True),
-            (root / 'monitor_private', '/logs/agent/monitor/monitor_private', False),
-            (root / 'task_evidence', '/logs/agent/monitor/task_evidence', False),
+            (root / 'monitor', '/logs/agent/monitor', False),
         ):
             main['volumes'].append({'type': 'bind', 'source': source.resolve().as_posix(),
                                     'target': target, 'read_only': readonly})
@@ -92,6 +108,9 @@ def prepare_run(*, manifest: Path, task_id: str, condition: str, run_id: str,
     if image_identity['repo_digests'] != frozen['task_assets'][task_id]['repo_digests']:
         raise ValueError('RepoDigest list changed since draft freeze')
     source = Path(source_root).resolve(strict=True) / short
+    source_tree, source_files = _ordinary_source_tree_sha256(source)
+    if source_tree != frozen['task_assets'][task_id]['current_cache_non_git_tree_sha256']:
+        raise RuntimeError('Pilot current task source tree differs from frozen draft')
     ga_source = Path(ga_source).resolve(strict=True)
     runtime_root = Path(runtime_root).resolve(strict=True)
     task_profile_file = Path(task_profile_file).resolve(strict=True)
@@ -99,8 +118,7 @@ def prepare_run(*, manifest: Path, task_id: str, condition: str, run_id: str,
     if run_root.exists():
         raise FileExistsError(run_root)
     run_root.mkdir(parents=True)
-    for name in ('control', 'archive', 'trusted', 'scratch', 'monitor_private',
-                 'task_evidence', 'jobs'):
+    for name in ('control', 'archive', 'trusted', 'scratch', 'monitor', 'jobs'):
         (run_root / name).mkdir()
     public_task = run_root / 'public_agent_task'
     package_identity = materialize_public_agent_task(source, public_task)
@@ -132,10 +150,15 @@ def prepare_run(*, manifest: Path, task_id: str, condition: str, run_id: str,
     if created.returncode or created.stdout.strip() != volume:
         raise RuntimeError('Pilot task volume creation failed')
     if condition == 'S':
-        port = PilotDockerToolPort(image=image, task_volume=volume,
-            trusted_root=run_root / 'trusted', cognition_root=run_root / 'monitor_private',
-            scratch_root=run_root / 'scratch', evidence_root=run_root / 'task_evidence')
-        PilotHostBridge(root=run_root / 'control' / 'spool', run_id=run_id, port=port)
+        # Mount the empty Monitor root.  The native runtime creates its own
+        # task_identity.json before private/evidence directories.  Precreating
+        # either child would look like unverified prior state and fail closed.
+        spool = run_root / 'control' / 'spool'
+        spool.mkdir()
+        for child in ('requests', 'accepted', 'responses'):
+            (spool / child).mkdir()
+        (spool / 'identity.json').write_text(
+            json.dumps({'schema': SCHEMA, 'run_id': run_id}), encoding='utf-8')
     _augment_compose(compose, volume=volume, condition=condition, root=run_root)
     spec = {'schema': 'pilot-harbor-run-v1', 'mode': 'unarmed',
             'execution_authorized': False, 'run_id': run_id, 'task_id': task_id,
@@ -147,6 +170,8 @@ def prepare_run(*, manifest: Path, task_id: str, condition: str, run_id: str,
     receipt = {'manifest_sha256': sha_file(manifest), 'task_id': task_id,
                'condition': condition, 'run_id': run_id, 'image': image_identity,
                'public_package': package_identity,
+               'current_cache_non_git_tree_sha256': source_tree,
+               'current_cache_non_git_file_count': source_files,
                'bundle_source_sha256': digest_tree(bundle_source),
                'compose_sha256': sha_file(compose),
                'profile_public': profile_identity,
@@ -172,6 +197,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--live', action='store_true')
     parser.add_argument('--authorization', type=Path)
+    parser.add_argument('--harbor-python', type=Path)
     parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--task-id', required=True)
     parser.add_argument('--condition', choices=['T', 'S'], required=True)
@@ -185,13 +211,24 @@ def main():
     parser.add_argument('--python-home', required=True)
     args = parser.parse_args()
     if args.live:
-        if args.authorization is None:
-            raise RuntimeError('Pilot live authorization is missing')
+        if args.authorization is None or args.harbor_python is None:
+            raise RuntimeError('Pilot live authorization or Harbor runtime is missing')
         require_live_authorization(args.manifest, args.authorization,
                                    {'task_id': args.task_id, 'condition': args.condition})
-        raise RuntimeError('Pilot execution remains blocked pending end-to-end certification')
+        from .pilot_offline_harbor import run_offline
+        result = run_offline(
+            manifest=args.manifest, task_id=args.task_id, condition=args.condition,
+            run_id=args.run_id, run_root=args.run_root, source_root=args.source_root,
+            ga_source=args.ga_source, runtime_root=args.runtime_root,
+            task_profile_file=args.task_profile_file,
+            monitor_profile_file=args.monitor_profile_file,
+            python_home=args.python_home, harbor_python=args.harbor_python,
+            timeout_seconds=10000, execution_mode='authorized_live',
+            authorization=args.authorization)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
     result = prepare_run(**{key: value for key, value in vars(args).items()
-                            if key not in {'live', 'authorization'}})
+                            if key not in {'live', 'authorization', 'harbor_python'}})
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

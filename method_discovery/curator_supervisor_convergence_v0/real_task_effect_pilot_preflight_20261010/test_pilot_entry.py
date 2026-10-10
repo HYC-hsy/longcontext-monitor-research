@@ -1,16 +1,22 @@
 """No-model staging checks for the exact four-arm pilot entry."""
 
+import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
 import subprocess
+from types import SimpleNamespace
 import uuid
 
 import pytest
 
 from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.pilot_entry import (
-    prepare_run, require_live_authorization,
+    _ordinary_source_tree_sha256, prepare_run, require_live_authorization,
 )
+from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.pilot_fake_gateway import _sse
+from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.pilot_offline_harbor import _stage_native_tests
+from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.pilot_harbor_hooks import PilotTrialHooks
 
 
 HERE = Path(__file__).resolve().parent
@@ -23,6 +29,80 @@ def test_unarmed_manifest_cannot_launch(tmp_path):
     with pytest.raises(RuntimeError, match='authorization'):
         require_live_authorization(MANIFEST, authorization, {
             'task_id': 'roadmapbench:fyn-2.2.0-roadmap', 'condition': 'T'})
+
+
+@pytest.mark.parametrize('task_id,short', [
+    ('roadmapbench:fyn-2.2.0-roadmap', 'fyn-2.2.0-roadmap'),
+    ('roadmapbench:ktx-0.13.0-roadmap', 'ktx-0.13.0-roadmap'),
+])
+def test_current_source_bytes_match_separate_draft_identity(task_id, short):
+    source = Path(os.environ['PILOT_TASK_SOURCE_ROOT']) / short
+    actual, count = _ordinary_source_tree_sha256(source)
+    expected = json.loads(MANIFEST.read_text())['task_assets'][task_id]
+    assert actual == expected['current_cache_non_git_tree_sha256']
+    assert count > 0
+    assert actual != expected['task_tree_sha256']  # historical identity uses another codec
+
+
+def test_evaluator_gate_rejects_nonterminal_or_unstopped_product(tmp_path):
+    control, archive, tests = (tmp_path / name for name in ('control', 'archive', 'tests'))
+    for path in (control, archive, tests):
+        path.mkdir()
+    script = tests / 'test.sh'
+    script.write_bytes(b'#!/bin/sh\nexit 0\n')
+    digest = hashlib.sha256(script.read_bytes()).hexdigest()
+    trial = SimpleNamespace(task=SimpleNamespace(paths=SimpleNamespace(tests_dir=tests)))
+    hook = PilotTrialHooks(trial, {
+        'run_id': 'offline-test', 'mode': 'offline_fake', 'fake_evaluator': True,
+        'fake_evaluator_sha256': digest,
+        'control_root': str(control), 'archive_root': str(archive),
+    })
+    hook.container_id = 'fixed-container'
+    hook.product_sha256 = 'fixed-product'
+    frozen = {'run_id': 'offline-test', 'container_id': hook.container_id,
+              'tar_sha256': hook.product_sha256, 'writers_stopped': True,
+              'sidecar_clean': True, 'legal_agent_end': False}
+    freeze_path = archive / 'agent_end_frozen.json'
+    freeze_path.write_text(json.dumps(frozen), encoding='utf-8')
+    with pytest.raises(RuntimeError, match='frozen, stopped'):
+        asyncio.run(hook.verification_start(None))
+    assert not (archive / 'verification_released.json').exists()
+    frozen['legal_agent_end'] = True
+    frozen['sidecar_clean'] = False
+    freeze_path.write_text(json.dumps(frozen), encoding='utf-8')
+    with pytest.raises(RuntimeError, match='frozen, stopped'):
+        asyncio.run(hook.verification_start(None))
+    assert not (archive / 'verification_released.json').exists()
+
+
+def test_fake_multiblock_sse_uses_native_monitor_parser():
+    from monitor_agent_core.provider import MonitorProviderClient
+    client = MonitorProviderClient.__new__(MonitorProviderClient)
+    payload = _sse(1, 'wait', '', {'after_turns': 1})
+    blocks, usage = client._parse_anthropic(payload.decode().splitlines())
+    assert [block['type'] for block in blocks] == ['text', 'tool_use']
+    assert blocks[1]['input'] == {'after_turns': 1}
+    assert client.last_response_metadata['stream_complete'] is True
+    assert usage['output_tokens'] == 1
+
+
+@pytest.mark.parametrize('task_id', [
+    'roadmapbench:fyn-2.2.0-roadmap',
+    'roadmapbench:ktx-0.13.0-roadmap',
+])
+def test_native_verifier_source_is_pinned_but_not_staged_for_agent(tmp_path, task_id):
+    tests = tmp_path / 'public_agent_task' / 'tests'
+    tests.mkdir(parents=True)
+    assert list(tests.iterdir()) == []
+    tree, script = _stage_native_tests(MANIFEST, task_id,
+        Path(os.environ['PILOT_TASK_SOURCE_ROOT']), tmp_path)
+    expected = json.loads(MANIFEST.read_text())['task_assets'][task_id]
+    assert tree == expected['native_tests_tree_sha256']
+    assert script == expected['native_test_sh_sha256']
+    assert (tests / 'test.sh').is_file()
+    with pytest.raises(RuntimeError, match='not empty'):
+        _stage_native_tests(MANIFEST, task_id,
+            Path(os.environ['PILOT_TASK_SOURCE_ROOT']), tmp_path)
 
 
 @pytest.mark.parametrize('task_id,condition', [
@@ -55,6 +135,10 @@ def test_staged_harbor_package_and_mount_contract_are_arm_specific(tmp_path, tas
         if condition == 'S':
             assert sorted(item['read_only'] for item in spool) == [False, True, True]
             assert receipt['profile_public']['monitor_history_projection'] == 'root_records_v1'
+            native_monitor = [item for item in mounts if isinstance(item, dict) and
+                              item.get('target') == '/logs/agent/monitor']
+            assert len(native_monitor) == 1 and native_monitor[0]['read_only'] is False
+            assert list((tmp_path / 'run/monitor').iterdir()) == []
         else:
             assert receipt['profile_public'] is None
         assert not list((tmp_path / 'run/public_agent_task/tests').iterdir())

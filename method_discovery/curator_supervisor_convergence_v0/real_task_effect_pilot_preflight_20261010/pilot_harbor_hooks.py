@@ -23,6 +23,17 @@ def _atomic(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, sort_keys=True), encoding='utf-8')
 
 
+def _tree_sha256(root: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob('*')):
+        if path.is_symlink():
+            raise RuntimeError('Pilot evaluator contains redirected source')
+        if path.is_file():
+            digest.update(path.relative_to(root).as_posix().encode() + b'\0')
+            digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
 class PilotTrialHooks:
     def __init__(self, trial, spec):
         self.trial = trial
@@ -61,8 +72,8 @@ class PilotTrialHooks:
                 app.get('Name') != self.spec['task_volume'] or not app.get('RW')):
             raise RuntimeError('Pilot Task image, network or RW volume identity mismatch')
         tests = mounts.get('/tests')
-        if tests is None or tests.get('Type') != 'bind':
-            raise RuntimeError('Pilot public-only verifier mount missing')
+        if tests is not None and tests.get('Type') != 'bind':
+            raise RuntimeError('Pilot verifier mount has unexpected type')
         for destination in ('/opt/genericagent-source', '/opt/m4-runtime'):
             if destination not in mounts or mounts[destination].get('RW'):
                 raise RuntimeError('Pilot source/runtime mount is absent or writable')
@@ -75,9 +86,10 @@ class PilotTrialHooks:
                     raise RuntimeError('Pilot spool mount identity mismatch')
         elif any(path.startswith('/logs/agent/monitor_bridge') for path in mounts):
             raise RuntimeError('Task-only arm unexpectedly mounted Monitor spool')
+        public_tests_check = ('test -z "$(find /tests -mindepth 1 -print -quit)" && '
+                              if tests is not None else 'test ! -e /tests && ')
         check = await self.trial.agent_environment.exec(
-            'test -z "$(find /tests -mindepth 1 -print -quit)" && '
-            'git -C /app rev-parse HEAD && '
+            public_tests_check + 'git -C /app rev-parse HEAD && '
             'git -C /app status --porcelain=v1 --untracked-files=all',
             timeout_sec=40, user='root')
         lines = check.stdout.strip().splitlines()
@@ -93,6 +105,11 @@ class PilotTrialHooks:
         })
 
     async def agent_end(self, _event):
+        agent_result = getattr(self.trial.result, 'agent_result', None)
+        metadata = getattr(agent_result, 'metadata', None) or {}
+        legal_agent_end = (metadata.get('round_end_seen') is True and
+                           metadata.get('wrapper_return_code') == 0 and
+                           metadata.get('archive_status') == 'finished')
         _atomic(self.control / 'agent_end_pending.json',
                 {'run_id': self.spec['run_id'], 'container_id': self.container_id})
         deadline = time.monotonic() + 120
@@ -129,16 +146,47 @@ class PilotTrialHooks:
         if capture.returncode:
             raise RuntimeError('Pilot frozen Task workspace capture failed: ' +
                                stderr.decode(errors='replace')[:200])
-        self.product_sha256 = hashlib.sha256(destination.read_bytes()).hexdigest()
+        digest = hashlib.sha256()
+        with destination.open('rb') as frozen:
+            for chunk in iter(lambda: frozen.read(1024 * 1024), b''):
+                digest.update(chunk)
+        self.product_sha256 = digest.hexdigest()
         _atomic(self.archive / 'agent_end_frozen.json', {
             'run_id': self.spec['run_id'], 'container_id': after,
             'sidecar_clean': True, 'writers_stopped': True,
             'tar_sha256': self.product_sha256, 'tar_bytes': destination.stat().st_size,
-            'evaluator_released': False,
+            'evaluator_released': False, 'legal_agent_end': legal_agent_end,
+            'agent_metadata_public': {key: metadata.get(key) for key in
+                ('round_end_seen', 'wrapper_return_code', 'archive_status')},
         })
 
     async def verification_start(self, _event):
-        raise RuntimeError('Pilot agent phase must not invoke online verification')
+        mode = self.spec.get('mode')
+        if mode == 'offline_fake' and self.spec.get('fake_evaluator'):
+            expected = self.spec['fake_evaluator_sha256']
+            expected_tree = None
+        elif mode == 'authorized_live' and self.spec.get('execution_authorized') is True:
+            expected = self.spec['native_test_sh_sha256']
+            expected_tree = self.spec['native_tests_tree_sha256']
+        else:
+            raise RuntimeError('Pilot evaluation is not authorized by this hook')
+        frozen = json.loads((self.archive / 'agent_end_frozen.json').read_text(encoding='utf-8'))
+        if (frozen.get('run_id') != self.spec['run_id'] or
+                frozen.get('container_id') != self.container_id or
+                frozen.get('tar_sha256') != self.product_sha256 or
+                not frozen.get('writers_stopped') or not frozen.get('sidecar_clean') or
+                not frozen.get('legal_agent_end')):
+            raise RuntimeError('Fake evaluator barrier has no frozen, stopped product')
+        script = self.trial.task.paths.tests_dir / 'test.sh'
+        if not script.is_file() or hashlib.sha256(script.read_bytes()).hexdigest() != expected:
+            raise RuntimeError('Pilot evaluator script identity mismatch')
+        if expected_tree is not None and _tree_sha256(script.parent) != expected_tree:
+            raise RuntimeError('Pilot native evaluator file tree changed')
+        _atomic(self.archive / 'verification_released.json', {
+            'run_id': self.spec['run_id'], 'container_id': self.container_id,
+            'frozen_product_sha256': self.product_sha256,
+            'test_sha256': expected, 'mode': mode, 'sidecar_clean': True,
+        })
 
 
 def install_trial_hooks():
@@ -151,8 +199,19 @@ def install_trial_hooks():
     spec = json.loads(Path(spec_path).read_text(encoding='utf-8'))
     if spec.get('mode') not in {'offline_fake', 'authorized_live'}:
         raise RuntimeError('Pilot Harbor execution mode is not certified')
-    if spec['mode'] == 'authorized_live' and spec.get('execution_authorized') is not True:
-        raise RuntimeError('Pilot live execution is not authorized')
+    if spec['mode'] == 'authorized_live':
+        authorization = Path(spec.get('authorization_path') or '')
+        if (spec.get('execution_authorized') is not True or
+                not authorization.is_file() or
+                hashlib.sha256(authorization.read_bytes()).hexdigest() !=
+                    spec.get('authorization_sha256')):
+            raise RuntimeError('Pilot live execution authorization is absent or changed')
+        granted = json.loads(authorization.read_text(encoding='utf-8'))
+        if (granted.get('execution_authorized') is not True or
+                granted.get('manifest_sha256') != spec.get('manifest_sha256') or
+                {'task_id': spec['task_id'], 'condition': spec['condition']} not in
+                    granted.get('approved_arms', [])):
+            raise RuntimeError('Pilot live arm is outside the exact authorization')
     original = Trial.create.__func__
 
     async def create(cls, config):
