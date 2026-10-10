@@ -6,7 +6,8 @@ provider, native evaluator, training, or scoring-model call was made. No pilot a
 Research worktree: E:\longcontext-cqs-v0-20261005; branch crs-v0-20261007;
 starting HEAD d3c9134af09f63dc7fd867dd5fc3340dbc72af61. Tracked tree was clean;
 unrelated untracked monitor_agent_core __pycache__ directories were left untouched.
-The complete authorized change is this report plus PILOT_PREPARATION_MANIFEST.json.
+The authorized change is this report, PILOT_PREPARATION_MANIFEST.json,
+METHOD_INPUTS_DRAFT.json, and a research-only fake-transport retry test.
 Production code diff: empty. No Task-only, read-only analysis, projection, or live
 delivery code was installed. This is a stop at the user-defined offline design gate,
 not a claim that those implementations passed.
@@ -63,10 +64,12 @@ These are method_dev/reserve candidates, not unseen tasks or a holdout set.
 T must run the same Task model/profile, original instruction, tools, task tree,
 generation fields, and normal completion path without creating a Monitor worker,
 route, state, or completion gate. A simple GA_MONITOR_ENABLED=0 does not establish
-this: external scripts/isolated_run_bundle.py unconditionally loads both task
-and monitor configs and emits two inference routes. SHA-256 of that script:
-a0d76100a59a5d79dd3c6712698666f528aa6e950a84b12a1265a55fd5c53c91.
-Its implementation and task cache live outside this research worktree. No
+this: this worktree's long_context_bench/scripts/isolated_run_bundle.py
+unconditionally loads both task and monitor configs and emits two inference
+routes. SHA-256 of that script:
+3137ae71fd62c963a6dea61ec7e5dedb456d0c8677f7c2a25234a5a35b3b4d8c.
+The runner source is local, while the specified task cache is in a separate
+worktree. No
 Task-only initial-request equality test was run; the entry is not yet built.
 The current Harbor adapter forwards a bounded GA_* allowlist but not
 GA_MONITOR_MAX_REVIEW_TURNS or GA_MONITOR_ROOT_MAX_REVIEW_TURNS. SHA-256:
@@ -204,3 +207,73 @@ necessary /app mount. The minimum next decision is whether to authorize the
 cross-tree bundle/Harbor and exact-mount/sidecar integration work, with a
 separate no-model certification before any six-arm launch. Nothing was silently
 substituted. Status remains offline_blocked, not prepared_not_executed.
+
+7. 2026-10-11 clarification: three retry layers (draft protocol, not a run)
+Task uses its native max_retries=4. llmcore._stream_with_retry loops
+range(sess.max_retries + 1), so the setting means up to five transport
+attempts for one logical Task provider call, not four total attempts.
+Preserve its actual per-attempt request/failure/recovery/final-state telemetry;
+the post-termination no-refill policy must not disable this existing recovery.
+Supervisor has a separate frozen transport policy and must not inherit Task's
+4 retries or gain an implicit resend. A network request with unknown server
+outcome stays unknown; absence of response headers is not proof of no server
+execution. Harbor whole-trial --max-retries is 0 in the local runner command;
+all other outer wrappers still require resolved-command inspection before a
+live freeze. Docker health polling is not a model retry. The proposed
+single-arm 'no resend/no refill' rule begins only after that role's native
+recovery policy has ended and the arm is technically terminated. It forbids
+starting a substitute arm or restarting the whole trial.
+Offline evidence: python -m pytest method_discovery/curator_supervisor_convergence_v0/
+real_task_effect_pilot_preflight_20261010/test_retry_layers_offline.py -q
+returned exit 0, stdout '3 passed in 0.04s', stderr empty. Fake transport
+confirmed 4 retries -> 5 attempts, 0 retries -> 1 attempt, and the local
+Harbor command's --max-retries 0. This does not certify the future resolved
+six-arm command or observe actual provider usage.
+
+8. 2026-10-11 clarification: private diagnostic copy and provenance
+Task's actual /app delivery workspace is the read-only target for S. A
+per-arm isolated private source copy may be writable for Supervisor builds,
+public tests and diagnostic experiments. It must carry source cursor/version
+and SHA, plus any Supervisor-added tests/patches and their diff. It must not
+merge, synchronize or write back to Task /app. A private patched build passing
+is evidence about that private candidate only, not about Task's present
+implementation or whole-task release. For a concurrent read that cannot be
+bound to a stable version, record version_uncertain; an end-of-command hash
+cannot certify what the command read throughout execution. The missing
+Task-RW/Supervisor-RO live port remains an offline blocker. This permission
+does not authorize a new generic backend or force Task to pause/test.
+
+9. 2026-10-11 clarification: method input identity
+Static source hashes and the on-demand memory/SOP inventory are in
+METHOD_INPUTS_DRAFT.json. Current local Task system asset sys_prompt_en.txt
+SHA-256: 30aed812af58b03fdf24462aaf227239c41f31c1631cd5bb150a74a62a7f0619.
+Task tools_schema.json SHA-256:
+c02d844ec87f05c7859f26b7d76f1606d70afb62dbb5472e3bd1228992779731.
+get_system_prompt() appends today's date plus get_global_memory(), whose
+auto-loaded files are global_mem_insight.txt and insight_fixed_structure_en.txt.
+global_mem.txt exists but is not read by that function; other SOP files are
+on-demand tool-readable material rather than automatically injected text.
+Current local ASE source SHA-256:
+bd9f1f321a6163dbe07a2140ecaf34ff6a360a334e0aa74f1b8bced74cad23a4;
+CRS source SHA-256:
+f6ebc5ae0fa2407582ad5f1c1e6eb88e78d581b217c3e8857d882e74c9e321e4.
+These are static source identities, not deployed request validation. No six-arm
+bundle exists yet. The separate local monitor profile lists model
+claude-opus-4-8, max_tokens 8192, temperature 1, max_retries 8,
+connect/read 30/300; it does not match the proposed Supervisor transport and
+must not be silently used. Task profile parameters are not certified from a
+non-secret deployed config. Before any live approval, compare T/S actual
+Task system/tools/model-visible files and params; read back S's native
+ASE/CRS/RHR/RER prompt, flags, root_records_v1 flag, root/local tool schemas,
+and every loaded memory/SOP hash from the generated bundle and pre-send
+requests. Any additional method delta must be reported, not hidden. The S
+input must not inherit C02's static diagnostic footer or NoTaskControl port,
+and must contain no historic answer or research audit text.
+
+The run2 fault-injection seams requested in the earlier instruction were NOT
+repaired or tested: wrapped maintenance HTTP/incomplete SSE, swallowed
+workspace-boundary exceptions, and complete non-object tool arguments. Their
+status remains unresolved because this phase stopped before live adapter
+implementation; no C02 run was performed. They remain targeted obligations
+if the foundational image, task-only route and read-only execution gates are
+subsequently authorized and resolved.

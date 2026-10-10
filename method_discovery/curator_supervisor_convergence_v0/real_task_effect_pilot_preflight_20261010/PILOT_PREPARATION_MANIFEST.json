@@ -29,6 +29,8 @@
     "source_task_toml_agent_timeout_seconds": 7200,
     "source_task_toml_verifier_timeout_seconds": 1800,
     "task_provider_retries": 4,
+    "task_provider_attempts_max_per_logical_call": 5,
+    "task_retry_count_semantics": "range(max_retries + 1) in deployed llmcore; preserve native recovery",
     "supervisor_model_profile": "claude_monitor_opus48",
     "supervisor_model": "claude-opus-4-8",
     "ordinary_review_turn_ceiling": 20,
@@ -36,6 +38,8 @@
     "supervisor_connect_timeout_seconds": 120,
     "supervisor_read_timeout_seconds": 300,
     "supervisor_ambiguous_retries": 0,
+    "harbor_whole_trial_retries": 0,
+    "outer_wrapper_restart_verified": false,
     "monitor_history_projection": "root_records_v1",
     "projection_default_enabled": false
   },
@@ -47,6 +51,23 @@
     "existing Bridge identity gate rejects an /app volume mount",
     "target-image Task-RW/diagnostic-RO initialization and evaluator isolation are not certified",
     "root_records_v1 live projection is not implemented or fixture-certified",
-    "resolved six-arm timeout and Harbor multiplier are not frozen"
+    "resolved six-arm timeout and Harbor multiplier are not frozen",
+    "deployed Task/Supervisor method inputs, memory/SOP mounts and tool schemas are not frozen"
   ]
+  ,
+  "private_diagnostic_copy_draft": {
+    "task_delivery_workspace_writable_by_supervisor": false,
+    "per_arm_scratch_source_copy_allowed": true,
+    "source_version_and_sha_receipt_required": true,
+    "private_patch_and_test_diff_required": true,
+    "sync_back_to_task_workspace_allowed": false,
+    "unstable_concurrent_read_label": "version_uncertain",
+    "certified_on_target_image": false
+  },
+  "retry_layers_draft": {
+    "task": "native 4 retries remain enabled; archive all actual attempts",
+    "supervisor": "separate frozen policy; no inherited Task retry count",
+    "whole_trial": "Harbor --max-retries 0; no automatic arm replacement",
+    "no_refill_boundary": "only after role-native recovery ends and arm technically terminates"
+  }
 }
