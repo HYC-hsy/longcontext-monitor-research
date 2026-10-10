@@ -189,6 +189,40 @@ class PilotTrialHooks:
         })
 
 
+def _check_authorized_live_spec(spec: dict) -> None:
+    from .pilot_entry import exact_run_binding, unique_authorized_arm
+
+    if spec['mode'] == 'authorized_live':
+        authorization = Path(spec.get('authorization_path') or '')
+        manifest = Path(spec.get('manifest_path') or '')
+        if (spec.get('execution_authorized') is not True or
+                not authorization.is_file() or
+                not manifest.is_file() or
+                hashlib.sha256(manifest.read_bytes()).hexdigest() !=
+                    spec.get('manifest_sha256') or
+                hashlib.sha256(authorization.read_bytes()).hexdigest() !=
+                    spec.get('authorization_sha256')):
+            raise RuntimeError('Pilot live execution authorization is absent or changed')
+        granted = json.loads(authorization.read_text(encoding='utf-8'))
+        frozen = json.loads(manifest.read_text(encoding='utf-8'))
+        checkout = Path(__file__).resolve().parents[3]
+        head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=checkout,
+                              capture_output=True, text=True, timeout=10)
+        if (granted.get('execution_authorized') is not True or
+                frozen.get('execution_authorized') is not False or
+                granted.get('manifest_sha256') != spec.get('manifest_sha256') or
+                head.returncode or
+                granted.get('audited_code_commit') != spec.get('audited_code_commit') or
+                granted.get('audited_code_commit') != head.stdout.strip() or
+                granted.get('approved_arms') != frozen.get('arms') or
+                not unique_authorized_arm(frozen.get('arms'), spec) or
+                not exact_run_binding(granted, frozen.get('arms', []), spec,
+                                      spec.get('run_id'),
+                                      Path(spec.get('control_root', '')).parent,
+                                      require_fresh=False)):
+            raise RuntimeError('Pilot live arm is outside the exact authorization')
+
+
 def install_trial_hooks():
     from harbor.trial.hooks import TrialEvent
     from harbor.trial.trial import Trial
@@ -199,19 +233,7 @@ def install_trial_hooks():
     spec = json.loads(Path(spec_path).read_text(encoding='utf-8'))
     if spec.get('mode') not in {'offline_fake', 'authorized_live'}:
         raise RuntimeError('Pilot Harbor execution mode is not certified')
-    if spec['mode'] == 'authorized_live':
-        authorization = Path(spec.get('authorization_path') or '')
-        if (spec.get('execution_authorized') is not True or
-                not authorization.is_file() or
-                hashlib.sha256(authorization.read_bytes()).hexdigest() !=
-                    spec.get('authorization_sha256')):
-            raise RuntimeError('Pilot live execution authorization is absent or changed')
-        granted = json.loads(authorization.read_text(encoding='utf-8'))
-        if (granted.get('execution_authorized') is not True or
-                granted.get('manifest_sha256') != spec.get('manifest_sha256') or
-                {'task_id': spec['task_id'], 'condition': spec['condition']} not in
-                    granted.get('approved_arms', [])):
-            raise RuntimeError('Pilot live arm is outside the exact authorization')
+    _check_authorized_live_spec(spec)
     original = Trial.create.__func__
 
     async def create(cls, config):

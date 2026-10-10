@@ -187,7 +187,45 @@ def prepare_run(*, manifest: Path, task_id: str, condition: str, run_id: str,
     return receipt
 
 
-def require_live_authorization(manifest: Path, authorization: Path, arm: dict) -> None:
+def unique_authorized_arm(arms: object, arm: dict) -> bool:
+    """Match CLI/Harbor identity without discarding frozen order metadata."""
+    if not isinstance(arms, list) or not isinstance(arm, dict):
+        return False
+    matches = [row for row in arms if isinstance(row, dict) and
+               row.get('task_id') == arm.get('task_id') and
+               row.get('condition') == arm.get('condition')]
+    return len(matches) == 1
+
+
+def exact_run_binding(granted: dict, arms: list, arm: dict, run_id: str,
+                      run_root: Path, *, require_fresh: bool) -> bool:
+    bindings = granted.get('run_bindings')
+    if not isinstance(bindings, list) or len(bindings) != len(arms):
+        return False
+    if any(not isinstance(row, dict) or
+           set(row) != {'order', 'task_id', 'condition', 'run_id', 'run_root'} or
+           any(row.get(key) != expected.get(key) for key in
+               ('order', 'task_id', 'condition')) or
+           not isinstance(row['run_id'], str) or
+           not isinstance(row['run_root'], str) or
+           not Path(row['run_root']).is_absolute()
+           for row, expected in zip(bindings, arms)):
+        return False
+    if (len({row['run_id'] for row in bindings}) != len(bindings) or
+            len({row['run_root'] for row in bindings}) != len(bindings)):
+        return False
+    current = [row for row in bindings if row['task_id'] == arm.get('task_id') and
+               row['condition'] == arm.get('condition')]
+    if len(current) != 1:
+        return False
+    target = Path(run_root).resolve()
+    return (current[0]['run_id'] == run_id and
+            Path(current[0]['run_root']).resolve() == target and
+            (not require_fresh or not target.exists()))
+
+
+def require_live_authorization(manifest: Path, authorization: Path, arm: dict,
+                               run_id: str, run_root: Path) -> None:
     frozen = json.loads(Path(manifest).read_text(encoding='utf-8'))
     granted = json.loads(Path(authorization).read_text(encoding='utf-8'))
     checkout = Path(__file__).resolve().parents[3]
@@ -198,7 +236,9 @@ def require_live_authorization(manifest: Path, authorization: Path, arm: dict) -
             granted.get('manifest_sha256') != sha_file(Path(manifest)) or
             head.returncode or granted.get('audited_code_commit') != head.stdout.strip() or
             granted.get('approved_arms') != frozen.get('arms') or
-            arm not in frozen['arms']):
+            not unique_authorized_arm(frozen.get('arms'), arm) or
+            not exact_run_binding(granted, frozen.get('arms', []), arm,
+                                  run_id, run_root, require_fresh=True)):
         raise RuntimeError('Pilot live authorization absent or mismatched')
 
 
@@ -223,7 +263,8 @@ def main():
         if args.authorization is None or args.harbor_python is None:
             raise RuntimeError('Pilot live authorization or Harbor runtime is missing')
         require_live_authorization(args.manifest, args.authorization,
-                                   {'task_id': args.task_id, 'condition': args.condition})
+                                   {'task_id': args.task_id, 'condition': args.condition},
+                                   args.run_id, args.run_root)
         from .pilot_offline_harbor import run_offline
         result = run_offline(
             manifest=args.manifest, task_id=args.task_id, condition=args.condition,

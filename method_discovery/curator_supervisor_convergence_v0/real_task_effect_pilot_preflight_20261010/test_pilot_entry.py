@@ -29,7 +29,8 @@ def test_unarmed_manifest_cannot_launch(tmp_path):
     authorization.write_text(json.dumps({'execution_authorized': False}), encoding='utf-8')
     with pytest.raises(RuntimeError, match='authorization'):
         require_live_authorization(MANIFEST, authorization, {
-            'task_id': 'roadmapbench:fyn-2.2.0-roadmap', 'condition': 'T'})
+            'task_id': 'roadmapbench:fyn-2.2.0-roadmap', 'condition': 'T'},
+            'not-authorized', tmp_path / 'absent')
 
 
 def test_authorization_must_pin_audited_code_commit(tmp_path):
@@ -41,7 +42,8 @@ def test_authorization_must_pin_audited_code_commit(tmp_path):
         'audited_code_commit': '0' * 40,
     }), encoding='utf-8')
     with pytest.raises(RuntimeError, match='authorization'):
-        require_live_authorization(MANIFEST, authorization, frozen['arms'][0])
+        require_live_authorization(MANIFEST, authorization, frozen['arms'][0],
+                                   'not-authorized', tmp_path / 'absent')
 
 
 def test_live_cli_rejects_missing_authorization_before_staging(tmp_path, monkeypatch):

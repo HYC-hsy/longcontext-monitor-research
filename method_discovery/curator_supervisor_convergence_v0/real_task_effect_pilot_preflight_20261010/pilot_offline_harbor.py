@@ -171,7 +171,7 @@ def run_offline(*, manifest: Path, task_id: str, condition: str, run_id: str,
         if authorization is None or verify_sentinel:
             raise RuntimeError('Live pilot requires exact authorization and cannot use fake evaluation')
         require_live_authorization(manifest, authorization,
-            {'task_id': task_id, 'condition': condition})
+            {'task_id': task_id, 'condition': condition}, run_id, run_root)
     prepared = prepare_run(manifest=manifest, task_id=task_id,
         condition=condition, run_id=run_id, run_root=run_root,
         source_root=source_root, ga_source=ga_source,
@@ -187,10 +187,13 @@ def run_offline(*, manifest: Path, task_id: str, condition: str, run_id: str,
     spec['mode'] = execution_mode
     if execution_mode == 'authorized_live':
         tests_tree, test_script = _stage_native_tests(manifest, task_id, source_root, run_root)
+        granted = json.loads(Path(authorization).read_text(encoding='utf-8'))
         spec.update(execution_authorized=True, native_tests_tree_sha256=tests_tree,
                     native_test_sh_sha256=test_script,
+                    manifest_path=str(Path(manifest).resolve(strict=True)),
                     authorization_path=str(Path(authorization).resolve(strict=True)),
                     authorization_sha256=hashlib.sha256(Path(authorization).read_bytes()).hexdigest(),
+                    audited_code_commit=granted['audited_code_commit'],
                     manifest_sha256=hashlib.sha256(Path(manifest).read_bytes()).hexdigest())
     elif verify_sentinel:
         fake_test = (run_root / 'public_agent_task' / 'tests' / 'test.sh')
