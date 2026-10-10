@@ -26,6 +26,8 @@ def test_clean_launch_refuses_legacy_public_network(monkeypatch):
 
 @pytest.mark.parametrize('flag', ['GA_MONITOR_ACTIVE_WORKING_CONTEXT', 'GA_MONITOR_LIVE_AWARENESS',
                                  'GA_MONITOR_DECISION_CONTEXT', 'GA_MONITOR_HYBRID_CONTROL',
+                                 'GA_MONITOR_MAX_REVIEW_TURNS',
+                                 'GA_MONITOR_ROOT_MAX_REVIEW_TURNS',
                                  'GA_MONITOR_PMA_MEMORY', 'GA_MONITOR_TASK_MODEL',
                                  'GA_MONITOR_INDEPENDENT_C',
                                  'GA_MONITOR_INDEPENDENT_C_TOTAL_REQUESTS',

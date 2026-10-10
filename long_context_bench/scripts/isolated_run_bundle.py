@@ -56,6 +56,8 @@ def build_bundle(root, source, runtime, python_home, task_config, monitor_config
                  collector_port, monitor_profile_path=None):
     """No Docker/API calls. Output includes a private gateway credential file."""
     root, source, runtime = Path(root), Path(source), Path(runtime)
+    if monitor_config is None and monitor_profile_path is not None:
+        raise ValueError('Task-only bundle cannot load a Monitor profile')
     root.mkdir(parents=True, exist_ok=False)
     copied = root / 'source'
     copied.mkdir()
@@ -88,7 +90,10 @@ def build_bundle(root, source, runtime, python_home, task_config, monitor_config
     independent = json.loads(Path(monitor_profile_path).read_text(encoding='utf-8')) if monitor_profile_path else None
     monitor_clients = {}
     ca_sources = {}
-    for role, name in [('task', task_config), ('monitor', monitor_config)]:
+    roles = [('task', task_config)]
+    if monitor_config is not None:
+        roles.append(('monitor', monitor_config))
+    for role, name in roles:
         cfg = dict(independent[name] if role == 'monitor' and independent is not None else configs[name])
         endpoint = urlsplit(cfg['apibase'])
         if endpoint.scheme != 'https' or not endpoint.hostname or endpoint.query or endpoint.fragment:

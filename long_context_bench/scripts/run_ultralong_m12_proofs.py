@@ -62,6 +62,7 @@ MANIFEST_CONTROLLED_ENV_KEYS = {
     "GA_MONITOR_TASK_MODEL",
     "GA_MONITOR_DCEC", "GA_MONITOR_DCEC_WORKING_CHARS",
     "GA_MONITOR_HYBRID_CONTROL",
+    "GA_MONITOR_MAX_REVIEW_TURNS", "GA_MONITOR_ROOT_MAX_REVIEW_TURNS",
     "BENCHMARK_CAMPAIGN_ROOT",
     "GA_BASELINE_CONDITION", "GA_EXPERIMENT_ID", "GA_CONDITION_ID",
     "GA_LLM_CONFIG_NAME", "GA_MAX_TURNS", "GA_PROVIDER_MAX_RETRIES",
@@ -714,7 +715,9 @@ def run_proof(
             WORK_ROOT / 'isolated_bundles' / run_id, m4.GA_ROOT, m4.GA_RUNTIME,
             identity['runtime']['python_home'], os.environ['GA_LLM_CONFIG_NAME'],
             os.environ['GA_PMA_CONFIG'] if os.environ.get('GA_PMA_ENABLED') == '1'
-            else os.environ['GA_MONITOR_CONFIG'], COLLECTOR_PORT,
+            else (os.environ['GA_MONITOR_CONFIG']
+                  if os.environ.get('GA_MONITOR_ENABLED') == '1' else None),
+            COLLECTOR_PORT,
             monitor_profile_path=(m4.GA_ROOT.parent / 'monitor_config' / 'models.local.json')
             if os.environ.get('GA_MONITOR_ENABLED') == '1' else None)
         identity['isolation'] = json.loads(

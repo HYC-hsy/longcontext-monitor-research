@@ -213,6 +213,26 @@ def test_bundle_has_no_source_checkout_or_credentials_in_task(tmp_path):
                        'python', 'task', 'monitor', 15340)
 
 
+def test_task_only_bundle_has_no_monitor_route_or_profile(tmp_path):
+    source = tmp_path / 'src'
+    source.mkdir()
+    (source / 'mykey.py').write_text(
+        "task={'model':'claude-test','apikey':'TASKSECRET','apibase':'https://example.invalid'}")
+    copied, compose = b.build_bundle(tmp_path / 'bundle', source, tmp_path / 'runtime',
+                                     'python', 'task', None, 15340)
+    assert list(json.loads((copied / 'mykey.json').read_text())) == ['task']
+    assert not (copied / 'monitor_agent_core/models.local.json').exists()
+    gateway = json.loads((compose.parent / 'gateway/config.json').read_text())
+    assert list(gateway['models']) == ['claude-test']
+    assert list(json.loads((compose.parent / 'isolation_identity.json').read_text())
+                ['model_names']) == ['claude-test']
+    assert 'TASKSECRET' not in (copied / 'mykey.json').read_text()
+    with pytest.raises(ValueError, match='Task-only bundle'):
+        b.build_bundle(tmp_path / 'invalid', source, tmp_path / 'runtime',
+                       'python', 'task', None, 15340,
+                       monitor_profile_path=tmp_path / 'not-allowed.json')
+
+
 def test_independent_monitor_bundle_same_model(tmp_path):
     source = tmp_path / 'src'
     (source / 'monitor_agent_core').mkdir(parents=True)
