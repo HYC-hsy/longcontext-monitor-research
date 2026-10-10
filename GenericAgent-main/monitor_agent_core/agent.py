@@ -17,6 +17,7 @@ from dataclasses import asdict
 from .actions import MonitorAction, ToolOutcome
 from .loop import run_review
 from .process_runner import AnalysisSessions
+from .analysis_spool import AnalysisPortIntegrityError
 from .workspace import MonitorWorkspace
 from .grounded_context import read_with_sources
 from .handoff_validation import validate_handoff, note_text, ContinuationContractError
@@ -469,6 +470,7 @@ class MonitorAgent:
             raise ValueError('root_records_v1 requires ASE + CRS + RHR + RER')
         self._projected_root_handoffs = set()
         self._projection_integrity_failure = None
+        self._analysis_integrity_failure = False
         if self.rer_v0:
             self.client.CONTROL_ACTIONS = set(self.client.CONTROL_ACTIONS) | {'root_reestimate'}
         self._rer_parent_history = None
@@ -975,13 +977,19 @@ class MonitorAgent:
     def dispatch(self, name: str, arguments: dict) -> ToolOutcome:
         if self._projection_integrity_failure is not None:
             raise ProjectionIntegrityError('Root projection integrity failed; no further control')
+        if self._analysis_integrity_failure:
+            raise AnalysisPortIntegrityError('Pilot analysis port integrity failed; no further control')
         tool_id = uuid.uuid4().hex
         started = time.monotonic()
         if self.dcm is not None:
             self.dcm.next_tool(name, arguments)
         self._progress('tool_started', tool_id=tool_id, name=name)
         try:
-            outcome = self._dispatch(name, arguments)
+            try:
+                outcome = self._dispatch(name, arguments)
+            except AnalysisPortIntegrityError:
+                self._analysis_integrity_failure = True
+                raise
             if self.experimental_control is not None and name not in {'work_context', 'work_intent'}:
                 try:
                     self.experimental_control.audit(
@@ -1277,6 +1285,8 @@ class MonitorAgent:
                 return ToolOutcome(None, False, MonitorAction("allow_complete", {}))
             else:
                 data = {"status": "error", "error": f"Unknown tool: {name}"}
+        except AnalysisPortIntegrityError:
+            raise
         except Exception as exc:
             if self.experimental_control is not None and name in {'work_context', 'work_intent'}:
                 self.experimental_control.audit('operation_failed', name=name,
@@ -1486,6 +1496,8 @@ class MonitorAgent:
                root_transition_view=None) -> MonitorAction:
         if self._projection_integrity_failure is not None:
             raise ProjectionIntegrityError('Root projection integrity failed; no further review')
+        if self._analysis_integrity_failure:
+            raise AnalysisPortIntegrityError('Pilot analysis port integrity failed; no further review')
         started = time.time()
         self.review_id = uuid.uuid4().hex
         self.client.review_id = self.review_id

@@ -76,10 +76,20 @@ class GenericAgentMonitorAdapter:
                 raise ValueError("GA_MONITOR_DCEC_WORKING_CHARS must be an integer") from exc
             runtime_options["model_config"] = dict(
                 runtime_options["model_config"], monitor_dcec_working_chars=dcec_chars)
-        original = Path(runtime_options['task_workspace']) / f'.monitor_original_task_{uuid.uuid4().hex}.txt'
-        with original.open('x', encoding='utf-8') as stream:
-            stream.write(runtime_options['public_task'])
-        runtime_options['task_original_path'] = str(original)
+        pilot = os.environ.get('GA_PILOT_ANALYSIS_PORT_DIR')
+        if pilot:
+            if (os.environ.get('GA_PILOT_MODE') != '1' or
+                    not os.environ.get('GA_BENCH_RUN_ID') or
+                    not Path(pilot).is_absolute()):
+                raise ValueError('Pilot analysis port requires explicit pilot/run identity')
+            runtime_options['analysis_port_root'] = pilot
+            original = None
+            runtime_options['task_original_path'] = None
+        else:
+            original = Path(runtime_options['task_workspace']) / f'.monitor_original_task_{uuid.uuid4().hex}.txt'
+            with original.open('x', encoding='utf-8') as stream:
+                stream.write(runtime_options['public_task'])
+            runtime_options['task_original_path'] = str(original)
         runtime_options.setdefault('task_id', os.environ.get('GA_BENCH_RUN_ID') or uuid.uuid4().hex)
         if os.environ.get('GA_MONITOR_INDEPENDENT_C', '0') not in {'0', '1'}:
             raise ValueError('GA_MONITOR_INDEPENDENT_C must be 0 or 1')
@@ -94,7 +104,8 @@ class GenericAgentMonitorAdapter:
         try:
             self.runtime = MonitorRuntime(**runtime_options)
         except Exception:
-            original.unlink(missing_ok=True)
+            if original is not None:
+                original.unlink(missing_ok=True)
             raise
 
     def archive_boundary(self, packet):

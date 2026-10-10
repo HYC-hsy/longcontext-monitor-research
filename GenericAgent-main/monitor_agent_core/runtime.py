@@ -234,6 +234,7 @@ def _verification_boundary_valid(state, generation):
 
 def _worker(config, commands, outputs):
     from .agent import MonitorAgent
+    from .analysis_spool import SpoolAnalysisSessions
     from .checkpoint import capture_live_root_checkpoint
     from .provider import MonitorProviderClient, ProviderRecoveryExhausted
     from .probe import IndependentVerifier, ProbeConfig
@@ -352,6 +353,10 @@ def _worker(config, commands, outputs):
         monitor = MonitorAgent(client, workspace, config["max_review_turns"],
                                stop_event=config['stop_event'],
                                independent_check=(independent_check if probe_total > 0 else None))
+        if config.get('analysis_port_root') is not None:
+            # No task-local process is ever started in this opt-in pilot mode.
+            monitor.analysis = SpoolAnalysisSessions(
+                config['analysis_port_root'], config['run_id'], config['stop_event'])
         root_turn_ceiling = _root_turn_ceiling(config, config['max_review_turns'])
         used_turns = config.get('task_budget_turns_used')
         max_turns = config.get('task_max_turns')
@@ -717,11 +722,14 @@ class MonitorRuntime:
                  interrupt_pending=None, run_timeout_seconds=10000, run_deadline_epoch=None,
                  correction_begin=None, correction_end=None, task_original_path=None, task_id,
                  independent_probe_total_requests=0, independent_probe_max_requests=3,
-                 root_checkpoint_required=False, run_id=None, task_max_turns=None):
+                 root_checkpoint_required=False, run_id=None, task_max_turns=None,
+                 analysis_port_root=None):
         if model_config.get('monitor_hybrid_control', False):
             raise ValueError('Model-requested hybrid pause is retired')
         _root_turn_ceiling({'root_max_review_turns': root_max_review_turns}, max_review_turns)
         self.artifact_dir = Path(artifact_dir).resolve()
+        if analysis_port_root is not None and (not run_id or not Path(analysis_port_root).is_absolute()):
+            raise ValueError('Pilot analysis port requires an absolute root and run identity')
         if type(root_checkpoint_required) is not bool:
             raise ValueError("root_checkpoint_required must be boolean")
         if not isinstance(task_id, str) or not task_id.strip():
@@ -746,7 +754,7 @@ class MonitorRuntime:
         self.evidence_root.mkdir(parents=True, exist_ok=True)
         self.private_root.mkdir(parents=True, exist_ok=True)
         (self.evidence_root / "original_task.txt").write_text(public_task, encoding="utf-8")
-        self.task_original_path = task_original_path
+        self.task_original_path = task_original_path or str(self.evidence_root / 'original_task.txt')
         self.synopsis_path = self.evidence_root / "synopsis.jsonl"
         self.events_path = self.evidence_root / "public_events.jsonl"
         self._eis_enabled = model_config.get("monitor_executable_interpretation_surface", False)
@@ -808,6 +816,7 @@ class MonitorRuntime:
             "completion_cursor": self._completion_cursor,
             "root_checkpoint_required": root_checkpoint_required,
             "run_id": run_id,
+            "analysis_port_root": str(analysis_port_root) if analysis_port_root is not None else None,
             "latest_task_turn": self._latest_task_turn,
             "latest_public_cursor": self._latest_public_cursor,
             "latest_model_feedback": self._latest_model_feedback,

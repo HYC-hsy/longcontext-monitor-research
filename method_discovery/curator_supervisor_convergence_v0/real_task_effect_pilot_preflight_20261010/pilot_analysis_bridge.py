@@ -1,0 +1,143 @@
+"""Pilot-only trusted-host port for one fixed Task volume and Monitor spool."""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+import time
+
+from method_discovery.curator_supervisor_convergence_v0.diagnostic_static_adapter_v1_20261009.docker_tool import DockerToolPort
+
+
+SCHEMA = 'pilot-analysis-spool-v1'
+
+
+def _atomic_json(path: Path, value: dict) -> None:
+    descriptor, temporary = tempfile.mkstemp(prefix='.pending-', dir=path.parent)
+    try:
+        with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
+            json.dump(value, stream, ensure_ascii=False, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+class PilotDockerToolPort(DockerToolPort):
+    """Reuse the certified session/byte/receipt logic with fixed live mounts."""
+
+    def __init__(self, *, image, task_volume, private_root, evidence_root):
+        self.image = str(image)
+        self.task_volume = str(task_volume)
+        self.private = Path(private_root).resolve(strict=True)
+        self.evidence = Path(evidence_root).resolve(strict=True)
+        if not self.private.is_dir() or not self.evidence.is_dir():
+            raise ValueError('Pilot analysis roots are missing')
+        for name in ('home', 'tmp', 'build_cache', 'output'):
+            (self.private / '.static_runtime' / name).mkdir(parents=True, exist_ok=True)
+        self.new_sessions = {}
+        self.historical = {}
+        image_result = subprocess.run(['docker', 'image', 'inspect', self.image, '--format', '{{.Id}}'],
+                                      text=True, capture_output=True, timeout=20)
+        volume_result = subprocess.run(['docker', 'volume', 'inspect', self.task_volume,
+                                        '--format', '{{.Name}}'],
+                                       text=True, capture_output=True, timeout=20)
+        if (image_result.returncode != 0 or image_result.stdout.strip() != self.image or
+                volume_result.returncode != 0 or volume_result.stdout.strip() != self.task_volume):
+            raise ValueError('Pinned pilot image or Task volume identity mismatch')
+
+    def _docker_args(self, session: str, script: Path, kind: str) -> list[str]:
+        interpreter = {'python': '/usr/bin/python3', 'bash': '/bin/bash'}[kind]
+        virtual_script = '/logs/agent/monitor/monitor_private/' + script.relative_to(self.private).as_posix()
+        scratch = self.private / '.static_runtime'
+        return ['docker', 'run', '--rm', '--name', session, '--network', 'none',
+                '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
+                '--mount', f'type=volume,source={self.task_volume},destination=/app,readonly',
+                '--mount', f'type=bind,source={self.private},destination=/logs/agent/monitor/monitor_private',
+                '--mount', f'type=bind,source={self.evidence},destination=/logs/agent/monitor/task_evidence,readonly',
+                '--mount', f'type=bind,source={scratch / "home"},destination=/home/monitor',
+                '--mount', f'type=bind,source={scratch / "tmp"},destination=/tmp',
+                '--mount', f'type=bind,source={scratch / "build_cache"},destination=/cache',
+                '--mount', f'type=bind,source={scratch / "output"},destination=/output',
+                '--env', 'HOME=/home/monitor', '--env', 'TMPDIR=/tmp',
+                '--env', 'GOCACHE=/cache/go', '--env', 'GOMODCACHE=/cache/gomod',
+                '--entrypoint', interpreter, self.image, virtual_script]
+
+    def close(self):
+        super().close()
+        for session in self.new_sessions:
+            found = subprocess.run(['docker', 'inspect', session], capture_output=True, timeout=15)
+            if found.returncode == 0:
+                raise RuntimeError('Pilot analysis container deletion unconfirmed')
+
+
+class PilotHostBridge:
+    def __init__(self, *, root, run_id, port: PilotDockerToolPort):
+        self.root = Path(root).resolve()
+        self.run_id = str(run_id)
+        self.port = port
+        self.closed = False
+        self.root.mkdir(parents=True, exist_ok=False)
+        for name in ('requests', 'accepted', 'responses'):
+            (self.root / name).mkdir()
+        _atomic_json(self.root / 'identity.json', {'schema': SCHEMA, 'run_id': self.run_id})
+
+    def _handle(self, request):
+        if request.get('schema') != SCHEMA or request.get('run_id') != self.run_id:
+            raise ValueError('Analysis request ownership mismatch')
+        op = request.get('operation')
+        common = {'schema', 'run_id', 'request_id', 'operation'}
+        if op == 'start':
+            if set(request) != common | {'code', 'code_type', 'timeout', 'wait_seconds'}:
+                raise ValueError('Analysis start fields mismatch')
+            return self.port.execute('code_run', {
+                'code': request['code'], 'type': request['code_type'],
+                'timeout': request['timeout'], 'wait_seconds': request['wait_seconds']})
+        if op == 'read':
+            if set(request) != common | {'session_id', 'wait_seconds', 'cancel'}:
+                raise ValueError('Analysis read fields mismatch')
+            return self.port.execute('code_run', {
+                'session_id': request['session_id'], 'wait_seconds': request['wait_seconds'],
+                'cancel': request['cancel']})
+        if op == 'close' and set(request) == common:
+            self.port.close()
+            self.closed = True
+            return {'status': 'closed'}
+        raise ValueError('Unsupported analysis operation')
+
+    def serve_once(self):
+        for request_path in sorted((self.root / 'requests').glob('*.json')):
+            request_id = request_path.stem
+            receipt_path = self.root / 'responses' / request_path.name
+            if receipt_path.exists():
+                continue
+            accepted = self.root / 'accepted' / request_path.name
+            if accepted.exists():
+                # The previous host may have executed. Never submit again.
+                _atomic_json(receipt_path, {'run_id': self.run_id, 'request_id': request_id,
+                                            'status': 'uncertain', 'result': None})
+                continue
+            request = json.loads(request_path.read_text(encoding='utf-8'))
+            if request.get('request_id') != request_id:
+                raise ValueError('Analysis request filename/ID mismatch')
+            _atomic_json(accepted, {'run_id': self.run_id, 'request_id': request_id,
+                                    'accepted_at_ns': time.time_ns()})
+            try:
+                result = self._handle(request)
+                receipt = {'run_id': self.run_id, 'request_id': request_id,
+                           'status': 'ok', 'result': result}
+            except (ValueError, KeyError) as exc:
+                # Invalid model arguments are a tool error, not a new process.
+                receipt = {'run_id': self.run_id, 'request_id': request_id,
+                           'status': 'ok', 'result': {'status': 'error', 'error': str(exc)}}
+            _atomic_json(receipt_path, receipt)
+
+    def close(self):
+        if not self.closed:
+            self.port.close()
+            self.closed = True
