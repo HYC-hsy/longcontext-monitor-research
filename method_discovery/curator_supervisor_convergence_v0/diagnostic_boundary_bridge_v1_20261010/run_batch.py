@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from importlib.metadata import version
 import json
 from pathlib import Path
 import subprocess
@@ -31,6 +32,7 @@ FILES = {
     "research/native_runtime.py": HERE / "native_runtime.py",
     "research/run_batch.py": HERE / "run_batch.py",
     "research/archive_batch.py": HERE / "archive_batch.py",
+    "research/test_native_runtime.py": HERE / "test_native_runtime.py",
     "research/BOOTSTRAP_STATE_TEMPLATE.json": HERE / "BOOTSTRAP_STATE_TEMPLATE.json",
     "research/EVALUATION_RECORD_TEMPLATE.json": HERE / "EVALUATION_RECORD_TEMPLATE.json",
     "research/docker_tool.py": adapter.HERE / "docker_tool.py",
@@ -84,8 +86,10 @@ def build_freeze():
         raise RuntimeError("Frozen private inference transport unavailable")
     if any(profile.get(key) != source.get(key) for key in
            ("model", "provider", "max_tokens", "thinking_type", "reasoning_effort",
-            "temperature", "transport_route", "timeout", "read_timeout")):
+            "temperature", "transport_route")):
         raise RuntimeError("Model/transport profile changed while enabling native control flags")
+    if profile.get("timeout") != 120 or profile.get("read_timeout") != 300:
+        raise RuntimeError("Research transport timeout identity drifted")
     if (profile["model"] != "claude-opus-4-8" or profile["max_tokens"] != 8192 or
             profile["thinking_type"] != "adaptive" or profile["reasoning_effort"] != "high" or
             profile.get("temperature", 1) != 1 or profile.get("proxy") or
@@ -93,7 +97,7 @@ def build_freeze():
         raise RuntimeError("Frozen model or direct verified transport mismatch")
     if not CERT.exists():
         raise RuntimeError("Certified static Docker isolation record missing")
-    return {"source_commit": head(), "revision": "C02_H_R_native_BJI_static_v1",
+    return {"source_commit": head(), "revision": "C02_H_R_native_BJI_static_run2",
             "source_request_identities": identities,
             "new_requests": {arm: digest(adapter.canonical(value))
                              for arm, value in requests_by_arm.items()},
@@ -101,6 +105,7 @@ def build_freeze():
                                           f"{arm}_FULL_REQUEST.json").read_bytes())
                                          for arm in requests_by_arm},
             "code_hashes": code_hashes(), "native_source_identity": native_source_identity(),
+            "schema_validator": {"package": "jsonschema", "version": version("jsonschema")},
             "private_profile_file_sha256": digest(HOST_PROFILE.read_bytes()),
             "isolation_certification_sha256": digest(CERT.read_bytes()),
             "C02_visibility_manifest_sha256": digest((adapter.HERE /

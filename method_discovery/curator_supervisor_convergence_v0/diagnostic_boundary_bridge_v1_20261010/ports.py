@@ -20,9 +20,21 @@ class IsolatedAnalysis:
             result = self.port.execute("code_run", arguments)
             self.audit.record("isolated_analysis_result", arguments=arguments, result=result)
             return result
-        except StaticIntegrityError as exc:
+        except (StaticIntegrityError, OSError, PermissionError) as exc:
             self.integrity_error = exc
-            self.audit.record("adapter_integrity_failure", error_type=type(exc).__name__)
+            try:
+                self.audit.record("adapter_integrity_failure", error_type=type(exc).__name__)
+            except OSError:
+                pass
+            raise
+        except RuntimeError as exc:
+            if "Historical receipt bytes changed" not in str(exc):
+                raise
+            self.integrity_error = exc
+            try:
+                self.audit.record("adapter_integrity_failure", error_type=type(exc).__name__)
+            except OSError:
+                pass
             raise
 
     def start(self, code, kind, timeout, wait_seconds):

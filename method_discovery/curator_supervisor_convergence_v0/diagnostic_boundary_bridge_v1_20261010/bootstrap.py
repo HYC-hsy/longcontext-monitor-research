@@ -26,6 +26,9 @@ DIALOGUE_CUTOFF = 418
 
 def candidate_config():
     data = json.loads(HOST_PROFILE.read_text(encoding="utf-8"))["claude_monitor_opus48"]
+    # Research transport protection only; the deployed/private profile is unchanged.
+    data["timeout"] = 120
+    data["read_timeout"] = 300
     data.update(monitor_adaptive_supervisory_environment=True,
                 monitor_contrastive_release_state=True,
                 monitor_receding_horizon_release=True,
