@@ -1,7 +1,7 @@
 """Research-only Fyne/Kitex pilot staging and fail-closed execution entry.
 
 ``prepare`` has no model or evaluator effects. ``live`` cannot proceed without
-an exact future authorization and a completed offline certification marker.
+an exact future authorization bound to the audited checkout.
 The historical C02 and six-arm authorizations are never accepted here.
 """
 
@@ -114,6 +114,11 @@ def prepare_run(*, manifest: Path, task_id: str, condition: str, run_id: str,
     ga_source = Path(ga_source).resolve(strict=True)
     runtime_root = Path(runtime_root).resolve(strict=True)
     task_profile_file = Path(task_profile_file).resolve(strict=True)
+    monitor_profile_file = Path(monitor_profile_file).resolve(strict=True)
+    private_hashes = frozen['private_profile_file_sha256_only']
+    if (sha_file(task_profile_file) != private_hashes['task'] or
+            sha_file(monitor_profile_file) != private_hashes['supervisor']):
+        raise RuntimeError('Pilot private profile identity differs from frozen draft')
     run_root = Path(run_root)
     if run_root.exists():
         raise FileExistsError(run_root)
@@ -185,9 +190,13 @@ def prepare_run(*, manifest: Path, task_id: str, condition: str, run_id: str,
 def require_live_authorization(manifest: Path, authorization: Path, arm: dict) -> None:
     frozen = json.loads(Path(manifest).read_text(encoding='utf-8'))
     granted = json.loads(Path(authorization).read_text(encoding='utf-8'))
+    checkout = Path(__file__).resolve().parents[3]
+    head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=checkout,
+                          capture_output=True, text=True, timeout=10)
     if (frozen.get('execution_authorized') is not False or
             granted.get('execution_authorized') is not True or
             granted.get('manifest_sha256') != sha_file(Path(manifest)) or
+            head.returncode or granted.get('audited_code_commit') != head.stdout.strip() or
             granted.get('approved_arms') != frozen.get('arms') or
             arm not in frozen['arms']):
         raise RuntimeError('Pilot live authorization absent or mismatched')

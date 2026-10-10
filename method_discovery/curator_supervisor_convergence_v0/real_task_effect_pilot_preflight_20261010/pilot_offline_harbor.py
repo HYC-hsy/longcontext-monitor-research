@@ -1,8 +1,8 @@
-"""One-arm, no-network Harbor fixture using the actual pilot entry and hooks.
+"""One-arm Harbor launcher using the actual pilot entry and hooks.
 
-This module is deliberately unable to use a live inference gateway.  It
-replaces the gateway container with a local deterministic Unix-socket server
-before Harbor starts and refuses an authorized-live specification.
+The default offline fixture replaces the inference gateway with a local
+deterministic Unix-socket server.  The live mode is separately authorized and
+is never used by the offline fixture tests.
 """
 
 from __future__ import annotations

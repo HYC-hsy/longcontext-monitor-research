@@ -6,13 +6,14 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 from types import SimpleNamespace
 import uuid
 
 import pytest
 
 from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.pilot_entry import (
-    _ordinary_source_tree_sha256, prepare_run, require_live_authorization,
+    _ordinary_source_tree_sha256, main, prepare_run, require_live_authorization, sha_file,
 )
 from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.pilot_fake_gateway import _sse
 from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.pilot_offline_harbor import _stage_native_tests
@@ -29,6 +30,33 @@ def test_unarmed_manifest_cannot_launch(tmp_path):
     with pytest.raises(RuntimeError, match='authorization'):
         require_live_authorization(MANIFEST, authorization, {
             'task_id': 'roadmapbench:fyn-2.2.0-roadmap', 'condition': 'T'})
+
+
+def test_authorization_must_pin_audited_code_commit(tmp_path):
+    frozen = json.loads(MANIFEST.read_text(encoding='utf-8'))
+    authorization = tmp_path / 'AUTHORIZATION.json'
+    authorization.write_text(json.dumps({
+        'execution_authorized': True, 'manifest_sha256': sha_file(MANIFEST),
+        'approved_arms': frozen['arms'],
+        'audited_code_commit': '0' * 40,
+    }), encoding='utf-8')
+    with pytest.raises(RuntimeError, match='authorization'):
+        require_live_authorization(MANIFEST, authorization, frozen['arms'][0])
+
+
+def test_live_cli_rejects_missing_authorization_before_staging(tmp_path, monkeypatch):
+    run_root = tmp_path / 'not-created'
+    monkeypatch.setattr(sys, 'argv', ['pilot_entry', '--live',
+        '--manifest', str(MANIFEST), '--task-id', 'roadmapbench:fyn-2.2.0-roadmap',
+        '--condition', 'T', '--run-id', 'offline-auth-gate',
+        '--run-root', str(run_root), '--source-root', str(tmp_path),
+        '--ga-source', str(tmp_path), '--runtime-root', str(tmp_path),
+        '--task-profile-file', str(tmp_path / 'absent'),
+        '--monitor-profile-file', str(tmp_path / 'absent'),
+        '--python-home', 'not-used'])
+    with pytest.raises(RuntimeError, match='authorization'):
+        main()
+    assert not run_root.exists()
 
 
 @pytest.mark.parametrize('task_id,short', [

@@ -1,8 +1,8 @@
 """Research-only Harbor identity and agent/evaluator boundary hooks.
 
 Installed by an explicit subprocess bootstrap, never by sitecustomize or the
-default Harbor CLI.  The pilot agent-phase invocation disables verification;
-native evaluation is a separate, later authorized operation.
+default Harbor CLI.  A verifier may run only after the stopped agent product
+has been frozen and its evaluator asset identity passes the trusted hook.
 """
 
 from __future__ import annotations
