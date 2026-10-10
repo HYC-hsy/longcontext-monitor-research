@@ -47,6 +47,8 @@ from .cqs_v0 import ControlQuestionState
 from .ase_v0 import (SYSTEM_PROMPT as ASE_SYSTEM_PROMPT, ControlEcho,
                      ReconsiderationBoundary, reference_surface, ASE_REFERENCE_MAX_CHARS)
 from .crs_v0 import ContrastiveReleaseBoundary
+from .root_records_v1 import canonical as root_records_canonical, digest as root_records_digest
+from .root_records_v1 import project as project_root_records
 
 
 def _tool(name, description, properties, required):
@@ -457,6 +459,11 @@ class MonitorAgent:
         if type(self.rer_v0) is not bool or (self.rer_v0 and not (
                 self.ase_v0 and self.crs_v0 and self.rhr_v0)):
             raise ValueError('monitor_root_epistemic_reestimation must be boolean and requires ASE + CRS + RHR')
+        self.history_projection = getattr(client, 'config', {}).get('monitor_history_projection', 'off')
+        if self.history_projection not in ('off', 'root_records_v1') or (
+                self.history_projection == 'root_records_v1' and not self.rer_v0):
+            raise ValueError('root_records_v1 requires ASE + CRS + RHR + RER')
+        self._projected_root_handoffs = set()
         if self.rer_v0:
             self.client.CONTROL_ACTIONS = set(self.client.CONTROL_ACTIONS) | {'root_reestimate'}
         self._rer_parent_history = None
@@ -1326,6 +1333,25 @@ class MonitorAgent:
     def _enter_root_frame(self, handoff):
         if not handoff or self.completion_state is None or self.completion_state() != handoff:
             raise ValueError('Root frame requires the current pending handoff')
+        if self.history_projection == 'root_records_v1':
+            identity = (handoff['request_id'], handoff['generation'])
+            if identity not in self._projected_root_handoffs:
+                original = self.client.export_history()
+                relative = 'audit/root_projections/' + root_records_digest(
+                    root_records_canonical(identity))[:24]
+                self._atomic_private_text(relative + '/source.json',
+                                          root_records_canonical(original).decode('utf-8'))
+                projected, manifest, _ = project_root_records(original)
+                self._atomic_private_text(relative + '/manifest.json',
+                                          root_records_canonical(manifest).decode('utf-8'))
+                if manifest['applied']:
+                    self.client.restore_history(projected)
+                self._projected_root_handoffs.add(identity)
+                self._progress('root_records_projection', request_id=identity[0],
+                               generation=identity[1], applied=manifest['applied'],
+                               source_sha256=manifest['source_sha256'],
+                               projected_sha256=manifest['projected_sha256'],
+                               removed_blocks=manifest['removed_blocks'])
         self._local_history_at_root = self.client.export_history()
         self.root_frame_handoff = dict(handoff)
         self.frame_kind = 'root'
