@@ -51,6 +51,10 @@ from .root_records_v1 import canonical as root_records_canonical, digest as root
 from .root_records_v1 import project as project_root_records
 
 
+class ProjectionIntegrityError(RuntimeError):
+    """Root history projection could not be durably prepared and committed."""
+
+
 def _tool(name, description, properties, required):
     return {"type": "function", "function": {
         "name": name, "description": description,
@@ -464,6 +468,7 @@ class MonitorAgent:
                 self.history_projection == 'root_records_v1' and not self.rer_v0):
             raise ValueError('root_records_v1 requires ASE + CRS + RHR + RER')
         self._projected_root_handoffs = set()
+        self._projection_integrity_failure = None
         if self.rer_v0:
             self.client.CONTROL_ACTIONS = set(self.client.CONTROL_ACTIONS) | {'root_reestimate'}
         self._rer_parent_history = None
@@ -968,6 +973,8 @@ class MonitorAgent:
                 self._progress_warning = True
 
     def dispatch(self, name: str, arguments: dict) -> ToolOutcome:
+        if self._projection_integrity_failure is not None:
+            raise ProjectionIntegrityError('Root projection integrity failed; no further control')
         tool_id = uuid.uuid4().hex
         started = time.monotonic()
         if self.dcm is not None:
@@ -1330,28 +1337,65 @@ class MonitorAgent:
                                + type(exc).__name__)
         return "\n\n".join(update for update in updates if update) or None
 
+    def _commit_root_projection(self, identity, handoff):
+        original = self.client.export_history()
+        source = root_records_canonical(original)
+        relative = 'audit/root_projections/' + uuid.uuid4().hex
+        directory = self.workspace.private_root / relative
+        try:
+            directory.mkdir(parents=True, exist_ok=False)
+            locator = 'monitor/' + relative + '/source.json'
+            projected, manifest, _ = project_root_records(original, source_locator=locator)
+            manifest.update(request_id=identity[0], generation=identity[1])
+            payloads = {
+                'source.json': source,
+                'projected_history.json': root_records_canonical(projected),
+                'manifest.json': root_records_canonical(manifest),
+            }
+            for name, raw in payloads.items():
+                self._atomic_private_text(relative + '/' + name, raw.decode('utf-8'))
+                if (directory / name).read_bytes() != raw:
+                    raise ProjectionIntegrityError('Root projection archive readback mismatch')
+            if (self.completion_state() != handoff or
+                    root_records_canonical(self.client.export_history()) != source):
+                raise ValueError('Root handoff or pre-projection history became stale')
+            if manifest['applied']:
+                self.client.restore_history(projected)
+            if root_records_canonical(self.client.export_history()) != payloads['projected_history.json']:
+                raise ProjectionIntegrityError('Root projection commit history mismatch')
+            commit = root_records_canonical({
+                'request_id': identity[0], 'generation': identity[1],
+                'source_sha256': manifest['source_sha256'],
+                'projected_sha256': manifest['projected_sha256'],
+                'applied': manifest['applied'], 'source_locator': locator,
+            })
+            self._atomic_private_text(relative + '/committed.json', commit.decode('utf-8'))
+            if (directory / 'committed.json').read_bytes() != commit:
+                raise ProjectionIntegrityError('Root projection commit receipt readback mismatch')
+            self._projected_root_handoffs.add(identity)
+            self._progress('root_records_projection', request_id=identity[0],
+                           generation=identity[1], applied=manifest['applied'],
+                           source_sha256=manifest['source_sha256'],
+                           projected_sha256=manifest['projected_sha256'],
+                           removed_blocks=manifest['removed_blocks'],
+                           commit_locator='monitor/' + relative + '/committed.json')
+        except ValueError:
+            # A genuine stale handoff is handled by the existing root freshness path.
+            if self.completion_state() != handoff:
+                raise
+            self._projection_integrity_failure = 'projection_validation'
+            raise ProjectionIntegrityError('Root projection validation failed') from None
+        except Exception as exc:
+            self._projection_integrity_failure = type(exc).__name__
+            raise ProjectionIntegrityError('Root projection archive or commit failed') from exc
+
     def _enter_root_frame(self, handoff):
         if not handoff or self.completion_state is None or self.completion_state() != handoff:
             raise ValueError('Root frame requires the current pending handoff')
         if self.history_projection == 'root_records_v1':
             identity = (handoff['request_id'], handoff['generation'])
             if identity not in self._projected_root_handoffs:
-                original = self.client.export_history()
-                relative = 'audit/root_projections/' + root_records_digest(
-                    root_records_canonical(identity))[:24]
-                self._atomic_private_text(relative + '/source.json',
-                                          root_records_canonical(original).decode('utf-8'))
-                projected, manifest, _ = project_root_records(original)
-                self._atomic_private_text(relative + '/manifest.json',
-                                          root_records_canonical(manifest).decode('utf-8'))
-                if manifest['applied']:
-                    self.client.restore_history(projected)
-                self._projected_root_handoffs.add(identity)
-                self._progress('root_records_projection', request_id=identity[0],
-                               generation=identity[1], applied=manifest['applied'],
-                               source_sha256=manifest['source_sha256'],
-                               projected_sha256=manifest['projected_sha256'],
-                               removed_blocks=manifest['removed_blocks'])
+                self._commit_root_projection(identity, handoff)
         self._local_history_at_root = self.client.export_history()
         self.root_frame_handoff = dict(handoff)
         self.frame_kind = 'root'
@@ -1440,6 +1484,8 @@ class MonitorAgent:
     def review(self, wake_context: str, completion_pending=False, *,
                root_handoff=None, max_turns_override=None,
                root_transition_view=None) -> MonitorAction:
+        if self._projection_integrity_failure is not None:
+            raise ProjectionIntegrityError('Root projection integrity failed; no further review')
         started = time.time()
         self.review_id = uuid.uuid4().hex
         self.client.review_id = self.review_id

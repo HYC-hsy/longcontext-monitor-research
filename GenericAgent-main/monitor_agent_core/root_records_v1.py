@@ -64,6 +64,17 @@ def parse_ledger(text):
     if not raw.startswith(PREFIX.encode('utf-8')):
         raise ValueError('Root record prefix mismatch')
     pos, rows = len(PREFIX.encode('utf-8')), []
+    if raw[pos:].startswith(b'@SOURCE '):
+        end = raw.find(b'\n', pos)
+        if end < 0:
+            raise ValueError('Unterminated root record source')
+        source = json.loads(raw[pos + len(b'@SOURCE '):end])
+        if (set(source) != {'locator', 'sha256'} or
+                not isinstance(source['locator'], str) or
+                not source['locator'].startswith('monitor/audit/root_projections/') or
+                not isinstance(source['sha256'], str) or len(source['sha256']) != 64):
+            raise ValueError('Root record source identity changed')
+        pos = end + 1
     while pos < len(raw):
         end = raw.find(b'\n', pos)
         if end < 0:
@@ -93,11 +104,18 @@ def parse_ledger(text):
     return rows
 
 
-def project(history):
+def project(history, *, source_locator=None):
     """Return projected history, mechanical manifest, and exact source bytes."""
     calls = _closed(history)
     source = canonical(history)
     rows, raw = [], bytearray(PREFIX.encode('utf-8'))
+    if source_locator is not None:
+        if (not isinstance(source_locator, str) or
+                not source_locator.startswith('monitor/audit/root_projections/') or
+                not source_locator.endswith('/source.json')):
+            raise ValueError('Invalid root record source locator')
+        raw.extend(b'@SOURCE ' + canonical({'locator': source_locator,
+                                            'sha256': digest(source)}) + b'\n')
     removed = 0
     for mi, message in enumerate(history):
         for bi, block in enumerate(message['content']):
@@ -118,7 +136,8 @@ def project(history):
                 row.update(start=len(raw), length=len(record), sha256=digest(record))
                 raw.extend(record)
             rows.append(row)
-    manifest = {'source_sha256': digest(source), 'source_items': len(history),
+    manifest = {'source_sha256': digest(source), 'source_locator': source_locator,
+                'source_items': len(history),
                 'tool_pairs': calls, 'removed_blocks': removed, 'rows': rows}
     if not removed:
         manifest.update(applied=False, projected_sha256=digest(source))

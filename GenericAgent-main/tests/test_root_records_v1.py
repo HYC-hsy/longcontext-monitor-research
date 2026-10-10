@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from monitor_agent_core.agent import MonitorAgent
+from monitor_agent_core.agent import MonitorAgent, ProjectionIntegrityError
 from monitor_agent_core.provider import MonitorProviderClient
 from monitor_agent_core.root_records_v1 import canonical, parse_ledger, project
 from test_crs_v0 import fixture
@@ -75,3 +75,59 @@ def test_projection_config_is_default_off_and_requires_bji(tmp_path):
     config['monitor_root_epistemic_reestimation'] = False
     with pytest.raises(ValueError, match='requires ASE'):
         MonitorAgent(MonitorProviderClient('anthropic', config), workspace)
+
+
+@pytest.mark.parametrize('failed_name', ['source.json', 'manifest.json', 'committed.json'])
+def test_archive_or_commit_failure_latches_and_prevents_reentry(tmp_path, monkeypatch, failed_name):
+    monitor, client, workspace, handoff = fixture(tmp_path, rhr=True, rer=True)
+    monitor.history_projection = 'root_records_v1'
+    client.restore_history(_history())
+    original_write = monitor._atomic_private_text
+
+    def failing_write(path, text):
+        if path.endswith('/' + failed_name):
+            raise OSError('synthetic archive failure')
+        return original_write(path, text)
+
+    monkeypatch.setattr(monitor, '_atomic_private_text', failing_write)
+    with pytest.raises(ProjectionIntegrityError):
+        monitor._enter_root_frame(handoff)
+    assert monitor._projection_integrity_failure is not None
+    assert not monitor._projected_root_handoffs
+    with pytest.raises(ProjectionIntegrityError):
+        monitor.review('queued wake', root_handoff=handoff)
+
+
+def test_stale_handoff_during_prepare_never_commits(tmp_path, monkeypatch):
+    monitor, client, workspace, handoff = fixture(tmp_path, rhr=True, rer=True)
+    monitor.history_projection = 'root_records_v1'
+    client.restore_history(_history())
+    replacement = {'request_id': 'new', 'generation': 2, 'cursor': 3}
+    original_write = monitor._atomic_private_text
+
+    def change_handoff(path, text):
+        result = original_write(path, text)
+        if path.endswith('/manifest.json'):
+            monitor.completion_state = lambda: replacement
+        return result
+
+    monkeypatch.setattr(monitor, '_atomic_private_text', change_handoff)
+    with pytest.raises(ValueError, match='stale'):
+        monitor._enter_root_frame(handoff)
+    assert client.export_history() == _history()
+    assert not list((workspace.private_root / 'audit/root_projections').rglob('committed.json'))
+
+
+def test_unicode_delimiters_ledger_and_commit_readback(tmp_path):
+    monitor, client, workspace, handoff = fixture(tmp_path, rhr=True, rer=True)
+    monitor.history_projection = 'root_records_v1'
+    history = _history()
+    history[0]['content'][0]['text'] = '菜单\n@RECORD 12 34\n↔'
+    client.restore_history(history)
+    monitor._enter_root_frame(handoff)
+    ledger = client.export_history()[0]['content'][0]['text']
+    assert 'source.json' in ledger and '菜单' in ledger
+    assert len(parse_ledger(ledger)) == 3
+    committed = list((workspace.private_root / 'audit/root_projections').rglob('committed.json'))
+    assert len(committed) == 1
+    assert json.loads(committed[0].read_text(encoding='utf-8'))['applied'] is True
