@@ -1,0 +1,197 @@
+REAL TASK EFFECT PILOT — COMPLETE DESENSITIZED OFFLINE IMPLEMENTATION AUDIT
+Status: offline_blocked; no six-arm launch authorization. This is an offline engineering result,
+not method-effect evidence. Previous C02 batches and their raw archives were not modified.
+
+1. Identity, scope and code changes
+Research worktree E:\longcontext-cqs-v0-20261005, branch crs-v0-20261007,
+starting pushed commit 62798156f38ddb8b6bf7f6b96da4ee0f225e2eb5.
+The only production-adjacent modifications are the specifically authorized default-off
+root hook, Task-only bundle path and review-budget forwarding. No model prompt, evaluator,
+Task Agent loop, CRS, RHR or RER semantics were changed. Unrelated untracked Python
+__pycache__ directories were retained.
+
+Ordered implementation commits:
+3d8a93d3 pilot: add task-only bundle and review budget forwarding
+12397974 pilot: add opt-in reversible root records projection
+1681f337 research: harden native bridge failure classification
+e42a9010 pilot: materialize frozen task assets by execution role
+This final audit and Docker probe are a subsequent research-only delivery commit.
+
+Exact changed implementation paths relative to the starting commit:
+long_context_bench/scripts/isolated_run_bundle.py;
+long_context_bench/scripts/run_ultralong_m12_proofs.py;
+long_context_bench/adapters/harbor_ga_agent.py;
+GenericAgent-main/monitor_agent_core/agent.py;
+GenericAgent-main/monitor_agent_core/root_records_v1.py;
+method_discovery/curator_supervisor_convergence_v0/diagnostic_boundary_bridge_v1_20261010/native_runtime.py;
+method_discovery/curator_supervisor_convergence_v0/diagnostic_boundary_bridge_v1_20261010/payload_client.py;
+research-only materialize_candidate_assets.py and tests. Full diff is retrievable from
+the ordered commits; no historical archive is overwritten.
+
+2. Three specified assets and role separation
+The source is the read-only E:\LongContext task cache at RoadmapBench revision
+59184e779909300a5a0150b06b945d39da81a099; its separate worktree HEAD at
+preflight was 9e22855e2294272541c31586031648e768d76964. The proposal registry
+SHA-256 is c40e7d683d445015259c7916cfb3fb559a68c30f8ca8e3c5e76f9c5859028c9f.
+Tasks are method_dev/reserve with prior m14-natural exposure, not unseen holdout tasks.
+No old outcome or solution file was copied into a model-facing role.
+
+The materializer verifies source instruction, task.toml, Dockerfile, evaluator test.sh,
+source file count and deterministic Python-sorted content tree SHA before copying.
+It rejects symlinks/existing destination and verifies the copy afterwards.
+Successful local role copy: E:\lc_pilot_assets_20261011\ASSET_MANIFEST.json.
+The task role contains instruction.md and task.toml; image_build contains Dockerfile
+and source repo; evaluator_only contains tests and must never be mounted online.
+The role copy is local preparation, not a recovered target execution image.
+
+Task                         files source-tree SHA-256
+mko-7.0.0-roadmap              2592 eb1f36f2da999b11e13c85a32152905d328cdf5125c22f8a6fd1b576f5df732f
+fal-2.0.0-roadmap               229 5604d903235b79c3acc7ce1e556f8376f918b4366b66c67e947896eb2c63aa38
+glz-7.0.0-roadmap               493 38ff16edf48aaff1f24ebdff6679707a8413fd58f2827c908bc7c53d43ef636b
+These tree hashes use the materializer's Python ordering and content formula;
+they do not replace the older report's differently computed file-manifest hashes.
+Source/copy per-file identity is in ASSET_MANIFEST.json. Its task.toml hashes are
+mko 2e99c8ef876d92e98ea56862d1a59ca60b6c7775d8b72eb63c625ab9c55650c9,
+fal f079ab63422a0293c4e0e77e84bfcbb6f7319742a46f2a6779fd1a1f142d4fdb,
+glz 7a92c045d2f6c4bb839ee5714705a981247c7e2cff33b439fa5a8f0e507328ca.
+An earlier attempt with a long in-repo destination reached Windows path length failure;
+its partial research-only path remains unmounted and unused. It was not treated as
+a valid copy and was not silently substituted for the successful short-path copy.
+
+The three registered image digests are mko 0c26698cdfd15a306ebc118e40feccf9e31f741c5d8a676ab53d63489a37777e,
+fal 92350c073bee31c5077d414995a5dcc530cef6ee4b7f625c58bf2c964ca7a598,
+glz e4e2947a37ed540aa407240ee08c4ebc62af9e17848fb9e87c4629af27ddcea9.
+`docker image inspect` on all three returned "No such image" (exit 1). A registered
+digest is not a proven pullable repository reference or local image ID. No target
+image pull, build, Task execution or evaluator execution was attempted. Dockerfile
+dependencies include external apt/npm/pip sources; rebuilding and recording a new
+identity remains a separate asset gate, not a claim of restoring historical digests.
+
+3. Real read-only mount fixture and remaining live-port gap
+The local allowed image debian:bookworm-slim was used only for a synthetic file.
+Command: python -m unittest method_discovery.curator_supervisor_convergence_v0.
+real_task_effect_pilot_preflight_20261010.test_ro_volume_fixture -v
+Exit 0: 1 test, OK, 7.351 seconds. The test creates a fresh named Docker volume,
+mounts /app RW to a Task-side container, writes task-v1, then mounts that same
+volume /app RO to a network-disabled, cap-dropped, no-new-privileges, read-only
+diagnostic container. It confirms /app write rejection, source read, private
+/scratch copy and mutation, source unchanged, no Docker socket, then exact-volume
+removal and inspect failure. This certifies this synthetic Docker mount behavior
+and confirmed fixture cleanup, not any of the three target images or Harbor pilot.
+
+Harbor's current source exposes ServiceVolumeConfig type volume/bind/image with
+read_only, and its Docker compose path maps the read_only setting. The older
+uc_r5_execution_bridge identity_gate still rejects any /app mount. It belongs
+to a different frozen candidate and was not globally weakened or repurposed.
+The existing DockerToolPort already supplies host-controlled no-network analysis
+with /app RO and private writable directories, but is hardcoded to the static
+C02/Fyne image and fixture. The deployed live MonitorAgent still constructs
+AnalysisSessions, which starts analysis in the writable Task container. No live
+host-to-Monitor code-run transport or exact pilot mount identity gate was wired.
+Thus the user-authorized Task-is-sole-implementer safety boundary is NOT certified
+for S. The minimal remaining design must route every executable Supervisor
+analysis entry through a host-owned restricted port, bind a verified live Task
+workspace version RO, keep private scratch separate, audit source/scratch diff,
+and fail closed on any native/host subprocess bypass. A scratch-patched test is
+diagnostic-only and cannot prove that the actual Task workspace was repaired.
+Concurrent source reads need a stable version receipt or version_uncertain label.
+No target image, Harbor /app initialization or sidecar lifecycle has passed that gate.
+
+4. Task-only and root projection implementation
+build_bundle(monitor_config=None) now creates only a Task inference route and
+rejects a Monitor profile path. The runner passes None for disabled Monitor.
+The adapter explicitly forwards GA_MONITOR_MAX_REVIEW_TURNS and
+GA_MONITOR_ROOT_MAX_REVIEW_TURNS, and runner reset semantics include both.
+This is not yet an executed T/S first-Task-request equality proof, full neutral
+condition identity, no-Monitor-worker container readback, or final evaluator gate.
+
+The root_records_v1 option defaults to off, requires ASE/CRS/RHR/RER, and
+operates at root entry on an already validated handoff. It archives source
+History before mutation, validates a closed exchange/known block schema,
+encodes retained historical user/tool_result and assistant tool_use blocks in
+length-prefixed @RECORD text, removes only older assistant free text/thinking,
+inverse-parses the rendered text and checks hashes, then atomically restores
+the projected History. No removable blocks means exact no-op. One request_id/
+generation pair is processed at most once in this fresh-process pilot. Later
+new handoffs may project again. It does not modify Task Agent History or create
+an extra model stage; RER naturally saves/restores the post-projection parent.
+It is a new root-entry migration, not the prior C02 mid-review projection.
+The hook is implemented, but actual target-run method inputs and full RER/Task
+handoff readback are not yet certified. No C02 run3 was started.
+
+Current relevant source SHA-256 values:
+agent.py 3d31c60e9bb2bd84de227e1d99f7ae6fff179f4130b9684b1b51bfafad48e372
+root_records_v1.py 0647b5ef236ba09371675365c039f7cd7844f0e3cc4d4b29bd281924368de504
+process_runner.py (unchanged) 81e5e85bbabb1cfb38658ab03ae457a14250ef9753b39f0eef2980936142e281
+isolated_run_bundle.py f0ffa262d5d29a79859f12abfba41e00c1b0ebae0354a5a7b9a7ea111a67e018
+run_ultralong_m12_proofs.py d0e05d47c6cc48462589de6032a987f9e95f8d94825db9e766a1571286d5d79e
+harbor_ga_agent.py 67c6c21f8cc620686b7a201ca149ef9020dcc4a325b7b7f6bfc6281a34b49e17
+materialize_candidate_assets.py dd5de5528fc9b2682c727acfdef1aef6735f48a6825ab55d793356c10093dae4
+
+5. Three previously untriggered native bridge seams
+Research-only native_runtime.py now treats ProviderError in wrapped capacity/
+maintenance cause chains as transport/integrity E rather than D, and prechecks
+native workspace file paths so a MonitorPathError cannot be swallowed by the
+production ordinary-tool exception handler. payload_client.py latches incomplete
+SSE as integrity failure and passes a fully received non-object tool input to
+the native parameter-error path instead of calling it malformed transport.
+No production provider, monitor control mechanism, prompt or tool schema changed.
+Targeted fake-transport tests confirmed three named cases and incomplete SSE;
+an initial test invocation using a wrong test method name failed to load, then
+the correct method was run successfully. No live provider was contacted.
+
+6. Actual offline checks, including non-passing diagnostics
+`python -m pytest tests/test_root_records_v1.py tests/test_crs_v0.py
+ tests/test_rhr_v0.py tests/test_rer_v0.py -q` (GenericAgent-main): exit 0,
+52 passed in 4.24s. Windows pytest atexit emitted a Temp pytest directory
+PermissionError after the success summary; no test failure was hidden.
+`python -m pytest long_context_bench/tests/test_isolated_transport.py
+ long_context_bench/tests/test_run_ultralong_m12_proofs.py -q`: exit 1,
+82 passed, 1 failed in 2.01s. The failed legacy test reads absent
+long_context_bench/tasks/ultralong_m12_lhtb_proposal.jsonl in this worktree.
+No legacy test/data was patched or fabricated. The earlier focused command
+`-k 'task_only_bundle or active_working_context_reaches_container_and_is_reset_between_conditions'`
+exited 0 with 18 passed, 65 deselected after the bundle check was corrected.
+Targeted native bridge unittest three methods: 3 passed; combined invocation
+had one wrong method name and exit 1 (3 passed, 1 loader error). Correct
+incomplete-SSE method alone: exit 0, 1 passed in 20.982s.
+`test_ro_volume_fixture`: exit 0, 1 passed. Docker fixture used no Task image.
+These are zero-model checks; result summaries are not scientific outcomes.
+
+7. Frozen proposed six arms, budgets and retry layers — not a launch
+Order mko T,S; fal S,T; glz T,S. Both Task profiles planned as
+native_claude_cc_vibe_opus48 / claude-opus-4-8. S Monitor planned as
+claude_monitor_opus48 / claude-opus-4-8 with ASE, CRS-v0.2, RHR-v0,
+RER-v0 and root_records_v1 only. Task ceiling 300 total turns; proposed
+agent phase 10000s while source task.toml says 7200s agent and 1800s verifier.
+Ordinary Supervisor reviews 20 turns; each root handoff cumulative 300 across
+RER. Task native max_retries=4 means up to 5 attempts per logical call in the
+deployed range(max_retries+1) loop. Supervisor has its separate frozen
+120s connect/300s read, TLS verification and zero ambiguous automatic resend.
+Harbor whole-trial retry intended 0; health polling is not model retry.
+After role-native recovery ends, a technical arm is not silently restarted.
+The full six-arm resolved profile, actual container budget readback, Harbor
+multiplier/outer deadline, outer wrapper no-restart proof and provider request
+parameters remain launch gates. The 10000s would include Supervisor blocking,
+so equal Task active time is not asserted. Price is unknown; no dollar estimate.
+
+T must have normal Task completion and no Monitor worker, route, control gate,
+extra self-check prompt or online native feedback. S uses the native live
+Task/Monitor queue, Echo and safety barrier; simulated static NoTaskControl
+is not imported. A proposal/ACK alone is not Task receipt: future evidence
+must include message-bearing successful Task request hashes and ensuing actions.
+Each evaluator can run only after its own Task, Monitor, sidecar and in-flight
+inference are stopped or isolated, on frozen artifacts, with no online return.
+Neither this evaluator barrier nor task/monitor sidecar quiescence is certified.
+No arm result may be viewed to change remaining planned arms. These method and
+failure rules are a draft, requiring separate precise launch approval.
+
+8. Start blockers and final classification
+The code work and synthetic mount fixture succeeded, but the three exact task
+images are unavailable; an exact Harbor/target-image Task-RW/diagnostic-RO
+mount, all executable Supervisor entry routing, Task/S first-input identity,
+full resolved profiles/memory/SOP, delivery and evaluator isolation remain
+uncertified. Therefore status is offline_blocked, not prepared_not_executed.
+No production Task run, provider request, Supervisor model, evaluator, training
+or scoring-model call occurred: all actual call counts = 0.
+This report is research/audit input, never a Task/Supervisor model-visible file.
