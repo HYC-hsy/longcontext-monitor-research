@@ -5,7 +5,9 @@ import json
 import pytest
 
 from monitor_agent_core.agent import MonitorAgent, ProjectionIntegrityError
+from monitor_agent_core.agent import MONITOR_TOOLS
 from monitor_agent_core.provider import MonitorProviderClient
+from monitor_agent_core.runtime import _capture_pilot_payload
 from monitor_agent_core.root_records_v1 import canonical, parse_ledger, project
 from test_crs_v0 import fixture
 
@@ -131,3 +133,51 @@ def test_unicode_delimiters_ledger_and_commit_readback(tmp_path):
     committed = list((workspace.private_root / 'audit/root_projections').rglob('committed.json'))
     assert len(committed) == 1
     assert json.loads(committed[0].read_text(encoding='utf-8'))['applied'] is True
+
+
+def test_actual_pre_send_payload_capture_and_missing_ledger_fail_closed(tmp_path):
+    monitor, client, workspace, handoff = fixture(tmp_path, rhr=True, rer=True)
+    monitor.history_projection = 'root_records_v1'
+    client.restore_history(_history())
+    monitor._enter_root_frame(handoff)
+    payload = {'model': 'offline', 'messages': client.export_history()}
+    _capture_pilot_payload(workspace.private_root, monitor, 'attempt-1', payload)
+    captured = json.loads((workspace.private_root / 'audit/provider_pre_send/attempt-1.json').read_text())
+    assert captured['payload'] == payload
+    assert captured['projection_commit'].endswith('/committed.json')
+    with pytest.raises(ProjectionIntegrityError, match='absent'):
+        _capture_pilot_payload(workspace.private_root, monitor, 'attempt-2',
+                               {'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': 'lost'}]}]})
+    assert monitor._projection_integrity_failure == 'ledger_absent_from_provider_payload'
+    assert not (workspace.private_root / 'audit/provider_pre_send/attempt-2.json').exists()
+
+
+def test_pre_send_archive_failure_prevents_provider_attempt(tmp_path):
+    monitor, client, workspace, handoff = fixture(tmp_path, rhr=True, rer=True)
+    monitor.history_projection = 'root_records_v1'
+    client.restore_history(_history())
+    monitor._enter_root_frame(handoff)
+    blocking = workspace.private_root / 'audit/provider_pre_send'
+    blocking.parent.mkdir(parents=True, exist_ok=True)
+    blocking.write_text('not a directory', encoding='utf-8')
+    with pytest.raises(ProjectionIntegrityError, match='archive'):
+        _capture_pilot_payload(workspace.private_root, monitor, 'attempt-1',
+                               {'messages': client.export_history()})
+    assert monitor._projection_integrity_failure == 'provider_pre_send_archive'
+
+
+def test_real_request_builder_aborts_before_transport_on_projection_mismatch(tmp_path, monkeypatch):
+    monitor, client, workspace, handoff = fixture(tmp_path, rhr=True, rer=True)
+    monitor.history_projection = 'root_records_v1'
+    client.restore_history(_history())
+    monitor._enter_root_frame(handoff)
+    client.restore_history([{'role': 'user', 'content': [{'type': 'text', 'text': 'lost ledger'}]}])
+    client.pre_send_capture = lambda request_id, payload: _capture_pilot_payload(
+        workspace.private_root, monitor, request_id, payload)
+    sent = []
+    monkeypatch.setattr('monitor_agent_core.provider.requests.post',
+                        lambda *args, **kwargs: sent.append(True))
+    client._progress_request_id = 'actual-pre-send'
+    with pytest.raises(ProjectionIntegrityError):
+        client._request_once(MONITOR_TOOLS)
+    assert sent == []

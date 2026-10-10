@@ -149,6 +149,7 @@ class MonitorProviderClient:
         # Optional read-only hook used by the runtime to capture one exact
         # root-handoff request before transport. It must not alter the request.
         self.request_assembly_callback = None
+        self.pre_send_capture = None
         self.review_id = None
         self.observed_root_handoff = None
         self.captured_root_handoffs = set()
@@ -684,6 +685,9 @@ class MonitorProviderClient:
             parser = self._parse_openai_responses if self.api_mode.startswith("response") else self._parse_openai_chat
         if self.config.get('transport_route'):
             headers['x-model-route'] = self.config['transport_route']
+        capture = getattr(self, 'pre_send_capture', None)
+        if capture is not None:
+            capture(self._progress_request_id, payload)
         with requests.post(
             url, headers=headers, json=payload, stream=True,
             timeout=(self.connect_timeout, self.read_timeout), proxies=self.proxies, verify=self.verify,

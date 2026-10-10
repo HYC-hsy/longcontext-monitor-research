@@ -470,6 +470,7 @@ class MonitorAgent:
             raise ValueError('root_records_v1 requires ASE + CRS + RHR + RER')
         self._projected_root_handoffs = set()
         self._projection_integrity_failure = None
+        self._projection_pending_request = None
         self._analysis_integrity_failure = False
         if self.rer_v0:
             self.client.CONTROL_ACTIONS = set(self.client.CONTROL_ACTIONS) | {'root_reestimate'}
@@ -962,6 +963,8 @@ class MonitorAgent:
             self.client.request_purpose = previous_purpose
 
     def _progress(self, event, **fields):
+        if event == 'request_usage' and self._projection_pending_request is not None:
+            self._projection_pending_request = None
         # Metadata only: never put credentials, prompts, code or reasoning here.
         path = self.workspace.private_root / 'audit' / 'progress.jsonl'
         try:
@@ -1383,6 +1386,12 @@ class MonitorAgent:
             if (directory / 'committed.json').read_bytes() != commit:
                 raise ProjectionIntegrityError('Root projection commit receipt readback mismatch')
             self._projected_root_handoffs.add(identity)
+            if manifest['applied']:
+                self._projection_pending_request = {
+                    'identity': identity, 'ledger_sha256': manifest['ledger_sha256'],
+                    'commit_locator': 'monitor/' + relative + '/committed.json',
+                    'ledger': projected[0]['content'][0]['text'],
+                }
             self._progress('root_records_projection', request_id=identity[0],
                            generation=identity[1], applied=manifest['applied'],
                            source_sha256=manifest['source_sha256'],

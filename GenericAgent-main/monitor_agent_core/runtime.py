@@ -232,6 +232,32 @@ def _verification_boundary_valid(state, generation):
         return int(state[0]) == generation and time.monotonic() < state[1]
 
 
+def _capture_pilot_payload(private_root, monitor, request_id, payload):
+    """Fail before transport if the committed projection is absent or audit fails."""
+    from .agent import ProjectionIntegrityError
+    pending = monitor._projection_pending_request
+    if pending is not None and not any(
+            block.get('type') == 'text' and block.get('text') == pending['ledger']
+            for message in payload.get('messages', [])
+            for block in message.get('content', []) if isinstance(block, dict)):
+        monitor._projection_integrity_failure = 'ledger_absent_from_provider_payload'
+        raise ProjectionIntegrityError('Committed root ledger absent from provider payload')
+    path = Path(private_root) / 'audit' / 'provider_pre_send' / (request_id + '.json')
+    receipt = {'request_id': request_id, 'payload': payload,
+               'projection_commit': pending['commit_locator'] if pending else None}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open('x', encoding='utf-8') as stream:
+            json.dump(receipt, stream, ensure_ascii=False, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if json.loads(path.read_text(encoding='utf-8')) != receipt:
+            raise OSError('Provider pre-send archive readback mismatch')
+    except (OSError, ValueError) as exc:
+        monitor._projection_integrity_failure = 'provider_pre_send_archive'
+        raise ProjectionIntegrityError('Provider pre-send archive failed') from exc
+
+
 def _worker(config, commands, outputs):
     from .agent import MonitorAgent
     from .analysis_spool import SpoolAnalysisSessions
@@ -244,7 +270,8 @@ def _worker(config, commands, outputs):
         client = MonitorProviderClient(config["config_name"], config["model_config"])
         client.verification_due_turn = config.get('verification_due_turn')
         client.verification_accepted_generation = config.get('verification_accepted_generation')
-        if 'run_deadline_epoch' in config:
+        if ('run_deadline_epoch' in config and
+                not config['model_config'].get('monitor_pilot_zero_ambiguous_retry')):
             client.recovery_deadline = time.monotonic() + max(
                 0.0, config['run_deadline_epoch'] - time.time())
             client.recovery_stop = config['stop_event']
@@ -357,6 +384,8 @@ def _worker(config, commands, outputs):
             # No task-local process is ever started in this opt-in pilot mode.
             monitor.analysis = SpoolAnalysisSessions(
                 config['analysis_port_root'], config['run_id'], config['stop_event'])
+            client.pre_send_capture = lambda request_id, payload: _capture_pilot_payload(
+                config['private_root'], monitor, request_id, payload)
         root_turn_ceiling = _root_turn_ceiling(config, config['max_review_turns'])
         used_turns = config.get('task_budget_turns_used')
         max_turns = config.get('task_max_turns')
@@ -728,6 +757,8 @@ class MonitorRuntime:
             raise ValueError('Model-requested hybrid pause is retired')
         _root_turn_ceiling({'root_max_review_turns': root_max_review_turns}, max_review_turns)
         self.artifact_dir = Path(artifact_dir).resolve()
+        if model_config.get('monitor_pilot_zero_ambiguous_retry') and analysis_port_root is None:
+            raise ValueError('Pilot transport policy requires the fixed analysis port')
         if analysis_port_root is not None and (not run_id or not Path(analysis_port_root).is_absolute()):
             raise ValueError('Pilot analysis port requires an absolute root and run identity')
         if type(root_checkpoint_required) is not bool:

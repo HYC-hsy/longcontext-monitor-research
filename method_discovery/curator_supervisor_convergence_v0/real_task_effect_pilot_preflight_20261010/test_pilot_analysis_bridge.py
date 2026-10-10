@@ -123,6 +123,7 @@ class PilotAnalysisBridgeFixture(unittest.TestCase):
                         chunks.append(read.get('stdout', ''))
                     read['stdout'] = ''.join(chunks)
                     self.assertEqual(read['status'], 'success', read)
+                    self.assertEqual(read['source_version']['status'], 'version_uncertain')
                     self.assertIn('task-v1', read['stdout'])
                     denied = self._completed(client,
                         'if printf bad >/app/.pilot_probe.txt 2>/dev/null; then exit 9; fi; '
@@ -139,6 +140,8 @@ class PilotAnalysisBridgeFixture(unittest.TestCase):
                         'GO111MODULE=off go test .')
                     self.assertEqual(private_test['status'], 'success', private_test)
                     self.assertIn('ok', private_test['stdout'])
+                    self.assertIn('tmp/probe/source.txt',
+                                  private_test['private_scratch_diff']['added'])
                     update = docker('run', '--rm', '--network', 'none', '--mount',
                                     f'type=volume,source={volume},destination=/app',
                                     '--entrypoint', 'sh', image, '-c',

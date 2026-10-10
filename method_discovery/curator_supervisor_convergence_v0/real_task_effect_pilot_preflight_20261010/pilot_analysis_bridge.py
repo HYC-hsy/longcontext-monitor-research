@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -82,6 +83,7 @@ class PilotHostBridge:
         self.run_id = str(run_id)
         self.port = port
         self.closed = False
+        self._session_scratch_before = {}
         self.root.mkdir(parents=True, exist_ok=False)
         for name in ('requests', 'accepted', 'responses'):
             (self.root / name).mkdir()
@@ -89,29 +91,60 @@ class PilotHostBridge:
 
     def _handle(self, request):
         if request.get('schema') != SCHEMA or request.get('run_id') != self.run_id:
-            raise ValueError('Analysis request ownership mismatch')
+            raise RuntimeError('Analysis request ownership mismatch')
         op = request.get('operation')
         common = {'schema', 'run_id', 'request_id', 'operation'}
         if op == 'start':
             if set(request) != common | {'code', 'code_type', 'timeout', 'wait_seconds'}:
                 raise ValueError('Analysis start fields mismatch')
-            return self.port.execute('code_run', {
+            before = self._scratch_files()
+            result = self.port.execute('code_run', {
                 'code': request['code'], 'type': request['code_type'],
                 'timeout': request['timeout'], 'wait_seconds': request['wait_seconds']})
+            result['source_version'] = {'status': 'version_uncertain',
+                                        'task_volume': self.port.task_volume}
+            if result.get('session_id'):
+                self._session_scratch_before[result['session_id']] = before
+            result['private_scratch_diff_at_return'] = self._scratch_diff(before, self._scratch_files())
+            return result
         if op == 'read':
             if set(request) != common | {'session_id', 'wait_seconds', 'cancel'}:
                 raise ValueError('Analysis read fields mismatch')
-            return self.port.execute('code_run', {
+            result = self.port.execute('code_run', {
                 'session_id': request['session_id'], 'wait_seconds': request['wait_seconds'],
                 'cancel': request['cancel']})
+            result['source_version'] = {'status': 'version_uncertain',
+                                        'task_volume': self.port.task_volume}
+            before = self._session_scratch_before.get(request['session_id'])
+            if before is not None and result.get('status') != 'running':
+                result['private_scratch_diff'] = self._scratch_diff(before, self._scratch_files())
+            return result
         if op == 'close' and set(request) == common:
             self.port.close()
             self.closed = True
             return {'status': 'closed'}
         raise ValueError('Unsupported analysis operation')
 
+    def _scratch_files(self):
+        root = self.port.private / '.static_runtime'
+        files = {}
+        for name in ('tmp', 'output'):
+            for path in (root / name).rglob('*'):
+                if path.is_file() and not path.is_symlink():
+                    files[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+        return files
+
+    @staticmethod
+    def _scratch_diff(before, after):
+        return {'added': sorted(after.keys() - before.keys()),
+                'changed': sorted(path for path in after.keys() & before.keys()
+                                  if after[path] != before[path]),
+                'removed': sorted(before.keys() - after.keys())}
+
     def serve_once(self):
         for request_path in sorted((self.root / 'requests').glob('*.json')):
+            if self.closed:
+                break
             request_id = request_path.stem
             receipt_path = self.root / 'responses' / request_path.name
             if receipt_path.exists():
