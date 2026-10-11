@@ -3,23 +3,17 @@
 from __future__ import annotations
 
 import json
-import hashlib
-import errno
 import os
 from pathlib import Path
 import shutil
-import stat
 import subprocess
 import tempfile
 import time
-import warnings
 
 from method_discovery.curator_supervisor_convergence_v0.diagnostic_static_adapter_v1_20261009.docker_tool import DockerToolPort
 
 
 SCHEMA = 'pilot-analysis-spool-v1'
-SCRATCH_SCAN_LIMITS = {'entries': 20000, 'file_bytes': 8 * 1024 * 1024,
-                       'total_bytes': 32 * 1024 * 1024, 'seconds': 5, 'chunk_bytes': 64 * 1024}
 
 
 def _atomic_json(path: Path, value: dict) -> None:
@@ -77,6 +71,10 @@ class PilotDockerToolPort(DockerToolPort):
         if resolved != path or not path.is_dir():
             raise RuntimeError('Pilot mount source identity changed')
         stat = path.stat()
+        # Listing only the source root tests actual read permission.  It does
+        # not traverse or hash model-writable scratch contents.
+        with os.scandir(path) as listing:
+            next(listing, None)
         return (stat.st_dev, stat.st_ino)
 
     def _check_mount_sources(self):
@@ -163,19 +161,24 @@ class PilotHostBridge:
         self.run_id = str(run_id)
         self.port = port
         self.closed = False
-        self.scratch_observation_errors = []
         if adopt_existing:
             expected = {'schema': SCHEMA, 'run_id': self.run_id}
             identity = json.loads((self.root / 'identity.json').read_text(encoding='utf-8'))
             if identity != expected or any(not (self.root / name).is_dir()
                                            for name in ('requests', 'accepted', 'responses')):
                 raise RuntimeError('Existing pilot spool identity mismatch')
-            (self.root / 'scratch_observations').mkdir(exist_ok=True)
         else:
             self.root.mkdir(parents=True, exist_ok=False)
-            for name in ('requests', 'accepted', 'responses', 'scratch_observations'):
+            for name in ('requests', 'accepted', 'responses'):
                 (self.root / name).mkdir()
             _atomic_json(self.root / 'identity.json', {'schema': SCHEMA, 'run_id': self.run_id})
+        policy = {'schema': SCHEMA, 'run_id': self.run_id, 'scratch_content_statistics': 'disabled'}
+        policy_path = self.root / 'scratch_statistics_policy.json'
+        if policy_path.exists():
+            if json.loads(policy_path.read_text(encoding='utf-8')) != policy:
+                raise RuntimeError('Pilot scratch statistics policy mismatch')
+        else:
+            _atomic_json(policy_path, policy)
 
     def _handle(self, request):
         if request.get('schema') != SCHEMA or request.get('run_id') != self.run_id:
@@ -185,22 +188,28 @@ class PilotHostBridge:
         if op == 'start':
             if set(request) != common | {'code', 'code_type', 'timeout', 'wait_seconds'}:
                 raise ValueError('Analysis start fields mismatch')
+            self.port._check_mount_sources()
             result = self.port.execute('code_run', {
                 'code': request['code'], 'type': request['code_type'],
                 'timeout': request['timeout'], 'wait_seconds': request['wait_seconds']})
+            self.port._check_mount_sources()
             if result.get('session_id'):
                 self.port.mirror_output(result['session_id'])
+            self.port._check_mount_sources()
             result['source_version'] = {'status': 'version_uncertain',
                                         'task_volume': self.port.task_volume}
             return result
         if op == 'read':
             if set(request) != common | {'session_id', 'wait_seconds', 'cancel'}:
                 raise ValueError('Analysis read fields mismatch')
+            self.port._check_mount_sources()
             result = self.port.execute('code_run', {
                 'session_id': request['session_id'], 'wait_seconds': request['wait_seconds'],
                 'cancel': request['cancel']})
+            self.port._check_mount_sources()
             if result.get('session_id'):
                 self.port.mirror_output(result['session_id'])
+            self.port._check_mount_sources()
             result['source_version'] = {'status': 'version_uncertain',
                                         'task_volume': self.port.task_volume}
             return result
@@ -209,97 +218,6 @@ class PilotHostBridge:
             self.closed = True
             return {'status': 'closed'}
         raise ValueError('Unsupported analysis operation')
-
-    def _scratch_snapshot(self):
-        # Source identity remains a hard gate; optional statistics do not own
-        # the execution receipt after a command has already run.
-        self.port._check_mount_sources()
-        try:
-            return self._scratch_files()
-        except OSError as exc:
-            return {'files': {}, 'skipped': [{'path': str(getattr(exc, 'filename', None)),
-                                              'reason': type(exc).__name__}],
-                    'snapshot_incomplete': True, 'limit_reached': False,
-                    'scanned_bytes': 0, 'entries': 0, 'limits': dict(SCRATCH_SCAN_LIMITS)}
-
-    def _scratch_files(self):
-        root = self.port.scratch
-        files, skipped = {}, []
-        started = time.monotonic()
-        limits = SCRATCH_SCAN_LIMITS
-        scanned_bytes = 0
-        entries = 0
-        limit_reached = False
-        pending = [root / 'output', root / 'tmp']
-        while pending and not limit_reached:
-            directory = pending.pop()
-            try:
-                if not directory.resolve(strict=True).is_relative_to(root):
-                    skipped.append({'path': directory.relative_to(root).as_posix(),
-                                    'reason': 'redirected_directory'})
-                    continue
-                with os.scandir(directory) as listing:
-                    for entry in listing:
-                        if time.monotonic() - started >= limits['seconds'] or entries >= limits['entries']:
-                            limit_reached = True
-                            break
-                        entries += 1
-                        path = Path(entry.path)
-                        relative = path.relative_to(root).as_posix()
-                        try:
-                            info = path.lstat()
-                            if stat.S_ISDIR(info.st_mode):
-                                pending.append(path)
-                                continue
-                            if not stat.S_ISREG(info.st_mode):
-                                skipped.append({'path': relative, 'reason': 'not_regular_file'})
-                                continue
-                            if not path.resolve(strict=True).is_relative_to(root):
-                                skipped.append({'path': relative, 'reason': 'redirected_file'})
-                                continue
-                            if (info.st_size > limits['file_bytes'] or
-                                    info.st_size > limits['total_bytes'] - scanned_bytes):
-                                skipped.append({'path': relative, 'reason': 'byte_limit'})
-                                limit_reached = True
-                                continue
-                            digest = hashlib.sha256()
-                            file_bytes = 0
-                            with path.open('rb') as stream:
-                                opened = os.fstat(stream.fileno())
-                                if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
-                                    skipped.append({'path': relative, 'reason': 'changed_before_read'})
-                                    continue
-                                while True:
-                                    if time.monotonic() - started >= limits['seconds']:
-                                        limit_reached = True
-                                        skipped.append({'path': relative, 'reason': 'time_limit'})
-                                        break
-                                    chunk = stream.read(min(limits['chunk_bytes'],
-                                        limits['file_bytes'] - file_bytes + 1,
-                                        limits['total_bytes'] - scanned_bytes + 1))
-                                    if not chunk:
-                                        files[relative] = digest.hexdigest()
-                                        break
-                                    file_bytes += len(chunk)
-                                    scanned_bytes += len(chunk)
-                                    if (file_bytes > limits['file_bytes'] or
-                                            scanned_bytes > limits['total_bytes']):
-                                        limit_reached = True
-                                        skipped.append({'path': relative, 'reason': 'byte_limit'})
-                                        break
-                                    digest.update(chunk)
-                        except OSError as exc:
-                            skipped.append({'path': relative, 'reason':
-                                            'disappeared' if exc.errno in (errno.ENOENT, errno.ENOTDIR)
-                                            else type(exc).__name__})
-            except OSError as exc:
-                skipped.append({'path': directory.relative_to(root).as_posix(),
-                                'reason': 'disappeared' if exc.errno in (errno.ENOENT, errno.ENOTDIR)
-                                else type(exc).__name__})
-        return {'files': files, 'skipped': skipped,
-                'snapshot_incomplete': bool(skipped) or limit_reached,
-                'limit_reached': limit_reached, 'scanned_bytes': scanned_bytes,
-                'entries': entries, 'limits': dict(limits)}
 
     def serve_once(self):
         for request_path in sorted((self.root / 'requests').glob('*.json')):
@@ -329,24 +247,6 @@ class PilotHostBridge:
                 receipt = {'run_id': self.run_id, 'request_id': request_id,
                            'status': 'ok', 'result': {'status': 'error', 'error': str(exc)}}
             _atomic_json(receipt_path, receipt)
-            if request.get('operation') in ('start', 'read'):
-                # Optional observation is deliberately after the durable main
-                # receipt.  It never changes that receipt or replays the command.
-                observation_path = self.root / 'scratch_observations' / request_path.name
-                try:
-                    snapshot = self._scratch_snapshot()
-                    observation = {'run_id': self.run_id, 'request_id': request_id,
-                                   'kind': 'post_receipt_snapshot', 'diff_unavailable': True,
-                                   'snapshot': snapshot}
-                    _atomic_json(observation_path, observation)
-                except OSError as exc:
-                    # Scratch statistics are auxiliary; accepted/result/receipt
-                    # identities and mount checks remain hard gates.
-                    self.scratch_observation_errors.append({
-                        'request_id': request_id, 'error_type': type(exc).__name__,
-                        'error': str(exc)})
-                    warnings.warn(f'Optional scratch observation unavailable for {request_id}: '
-                                  f'{type(exc).__name__}')
 
     def close(self):
         if not self.closed:
