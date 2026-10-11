@@ -1066,15 +1066,15 @@ index f7ab3883..176bbc2b 100644
 +++ b/GenericAgent-main/monitor_agent_core/provider.py
 @@ -35,6 +35,10 @@ class RetryableProviderError(ProviderError):
      """Explicit temporary remote failure, not a model/tool decision."""
- 
- 
+
+
 +class IncompleteStreamError(RetryableProviderError):
 +    """A response stream ended without the provider's completion marker."""
 +
 +
  class ProviderRecoveryExhausted(ProviderError):
      """Bounded transport recovery ended; do not start another review to retry."""
- 
+
 @@ -596,6 +600,10 @@ class MonitorProviderClient:
          # Runtime-owned recovery stays inside this request: no new wake, tool
          # replay, history append, or synthetic completion decision.
@@ -1089,7 +1089,7 @@ index f7ab3883..176bbc2b 100644
 @@ -616,18 +624,23 @@ class MonitorProviderClient:
                  if stop.wait(delay) or time.monotonic() >= deadline:
                      raise ProviderRecoveryExhausted('Monitor stopped or task budget exhausted') from exc
- 
+
 -    def _request_batch(self, tools):
 +    def _request_batch(self, tools, incomplete_stream_only=False):
          last_error = None
@@ -1154,7 +1154,7 @@ index f7ab3883..176bbc2b 100644
 +        if incomplete_stream_only:
 +            raise ProviderRecoveryExhausted('Incomplete stream recovery exhausted') from last_error
          raise RetryableProviderError(f"Provider request failed: {last_error}") from last_error
- 
+
      def _request_once(self, tools):
 @@ -689,6 +718,13 @@ class MonitorProviderClient:
          if self.config.get('transport_route'):
@@ -1179,13 +1179,13 @@ index f7ab3883..176bbc2b 100644
 +            raise IncompleteStreamError('Anthropic stream ended before a complete message_stop')
          metadata.update(stream_complete=True, response_block_types=[b['type'] for b in blocks])
          return blocks, usage
- 
+
 diff --git a/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_analysis_bridge.py b/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_analysis_bridge.py
 index 0b21b0a7..769ffb7b 100644
 --- a/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_analysis_bridge.py
 +++ b/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_analysis_bridge.py
 @@ -4,6 +4,7 @@ from __future__ import annotations
- 
+
  import json
  import hashlib
 +import errno
@@ -1194,7 +1194,7 @@ index 0b21b0a7..769ffb7b 100644
  import shutil
 @@ -114,8 +115,22 @@ class PilotDockerToolPort(DockerToolPort):
          os.replace(staged, destination)
- 
+
      def close(self):
 -        super().close()
 +        primary_error = None
@@ -1224,8 +1224,8 @@ index 0b21b0a7..769ffb7b 100644
 +                raise RuntimeError('cleanup_unknown: session watcher reported cleanup_error')
 +        if primary_error is not None:
 +            raise RuntimeError('cleanup_unknown: base session cleanup failed') from primary_error
- 
- 
+
+
  class PilotHostBridge:
 @@ -161,7 +180,7 @@ class PilotHostBridge:
          if op == 'start':
@@ -1257,7 +1257,7 @@ index 0b21b0a7..769ffb7b 100644
 @@ -193,21 +212,59 @@ class PilotHostBridge:
              return {'status': 'closed'}
          raise ValueError('Unsupported analysis operation')
- 
+
 +    def _scratch_snapshot(self):
 +        # Source identity remains a hard gate; optional statistics do not own
 +        # the execution receipt after a command has already run.
@@ -1305,7 +1305,7 @@ index 0b21b0a7..769ffb7b 100644
 +                        skipped.append({'path': relative, 'reason': 'disappeared'})
 +        return {'files': files, 'skipped': skipped,
 +                'snapshot_incomplete': bool(skipped), 'limit_reached': False}
- 
+
      @staticmethod
      def _scratch_diff(before, after):
 -        return {'added': sorted(after.keys() - before.keys()),
@@ -1320,6 +1320,6 @@ index 0b21b0a7..769ffb7b 100644
 +                'snapshot_incomplete': before['snapshot_incomplete'] or after['snapshot_incomplete'],
 +                'skipped_before': before['skipped'], 'skipped_after': after['skipped'],
 +                'limit_reached': before['limit_reached'] or after['limit_reached']}
- 
+
      def serve_once(self):
          for request_path in sorted((self.root / 'requests').glob('*.json')):
