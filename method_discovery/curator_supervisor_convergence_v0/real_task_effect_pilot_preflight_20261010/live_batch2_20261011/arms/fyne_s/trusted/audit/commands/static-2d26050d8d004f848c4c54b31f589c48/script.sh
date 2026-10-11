@@ -1,0 +1,1 @@
+cd /app && grep -n "func (e \*Entry) SetMinRowsVisible" widget/entry.go

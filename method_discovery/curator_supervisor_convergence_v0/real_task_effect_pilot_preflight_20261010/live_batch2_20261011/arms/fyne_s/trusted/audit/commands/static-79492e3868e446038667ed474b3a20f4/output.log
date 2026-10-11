@@ -1,0 +1,47 @@
+=== Searching for MinRowsVisible usage in Entry rendering/sizing ===
+50:	// MinRowsVisible is the minimum number of rows to show for a multi-line entry.
+54:	MinRowsVisible int
+467:// SetMinRowsVisible sets the minimum number of rows that should be visible in a multi-line entry.
+470:func (e *Entry) SetMinRowsVisible(rows int) {
+471:	e.MinRowsVisible = rows
+
+=== Entry renderer MinSize implementation ===
+type entryRenderer struct {
+	box, line *canvas.Rectangle
+	scroll    *widget.Scroll
+
+	objects []fyne.CanvasObject
+	entry   *Entry
+}
+
+func (r *entryRenderer) MinSize() fyne.Size {
+	if r.scroll.Direction == widget.ScrollNone {
+		return r.entry.content.MinSize().Add(fyne.NewSize(0, theme.InputBorderSize()*2))
+	}
+
+	charMin := r.entry.placeholderProvider().charMinSize(r.entry.Password, r.entry.TextStyle)
+	minSize := charMin.Add(fyne.NewSize(theme.Padding()*2, theme.Padding()*2))
+
+	if r.entry.MultiLine {
+		// ensure multiline height is at least charMinSize * multilineRows
+		rowHeight := charMin.Height * multiLineRows
+		minSize.Height = fyne.Max(minSize.Height, rowHeight+(multiLineRows-1)*theme.Padding())
+	}
+
+	return minSize.Add(fyne.NewSize(theme.Padding()*4, theme.Padding()*2))
+}
+
+func (r *entryRenderer) Objects() []fyne.CanvasObject {
+	r.entry.propertyLock.RLock()
+	defer r.entry.propertyLock.RUnlock()
+
+	return r.objects
+}
+
+func (r *entryRenderer) Refresh() {
+	r.entry.propertyLock.RLock()
+	content := r.entry.content
+	focusedAppearance := r.entry.focused && !r.entry.disabled
+	size := r.entry.size
+	wrapping := r.entry.Wrapping
+	r.entry.propertyLock.RUnlock()

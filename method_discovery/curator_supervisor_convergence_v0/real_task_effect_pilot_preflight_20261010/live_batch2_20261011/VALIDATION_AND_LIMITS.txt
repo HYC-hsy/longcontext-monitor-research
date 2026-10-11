@@ -1,0 +1,42 @@
+Fyne/Kitex live pilot batch 2 — code gate and archival limits
+
+Reviewed baseline: 2b3e2f85d8962cf3805460a202fcc6b57c932d06
+Earlier subtraction repair: f205f4b903600a1c8df7017d56039ddd6a5bcf87
+RUN_CODE_COMMIT: 8cfc4ef2aac99c2378d98a0489fc0cad45511573
+Remote ref: public/crs-v0-20261007; exact code commit fetched and confirmed before execution.
+Code gate diff: research pilot_profile.py adds incomplete_stream_recovery_v1=true to PILOT_OVERRIDES and public_profile_identity; two research tests add assertions. Generic provider defaults, Task code, method prompts, projection, RER, and task assets were not edited for the code gate.
+
+Targeted zero-model checks executed before live launch:
+1. python -m unittest -v method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.test_pilot_profile
+   Result: exit 0; 2 tests passed. Checked actual MonitorProviderClient constructed from resolved pilot profile, public identity, and generic default absent/off.
+2. python -m pytest -q GenericAgent-main/tests/test_monitor_incomplete_stream_recovery.py
+   Result: exit 0; 10 passed. Included three total attempts, same logical request, default off, one history/tool commit, and stop/deadline response discard.
+3. python -m pytest -q method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/test_pilot_entry.py -k staged_harbor_package_and_mount_contract_are_arm_specific
+   Result: exit 0; 2 passed, 9 deselected. S staged private resolved profile and public identity carried true; T staged no Monitor profile. pytest printed a Windows temp-directory PermissionError from atexit after the two tests completed; the runner exit code was 0. This incidental test cleanup warning was not suppressed or treated as an experiment observation.
+4. git diff --check: exit 0; no whitespace errors.
+
+Prelaunch gate:
+- HEAD and fetched public branch matched RUN_CODE_COMMIT.
+- Four exact authorization bindings passed require_live_authorization without provider calls.
+- All four run roots were absent. No duplicate pilot process existed.
+- Fyne/Kitex source-tree hashes, both private profile file hashes, image IDs and RepoDigests matched the frozen manifest.
+- The manifest remained execution_authorized=false; the separate one-time authorization carried true, its byte hash, code commit, full ordered arms, and exact run bindings.
+- No extra model canary or native evaluator probe ran.
+
+Post-run mechanical state:
+- Four arms started once and ended in the frozen T, S, S, T order.
+- No Task/Supervisor/Harbor batch process or matching Docker container was observed after termination.
+- Fyne T, Fyne S and Kitex T had legal_agent_end=true and native verifier release.
+- Kitex S had completion_incomplete reason=review_failed for completion-5, legal_agent_end=false, writers_stopped=true, sidecar_clean=true, and no native verifier release. It was not scored and was not rerun.
+- Runtime incomplete-stream recovery was enabled only in the S profile. The monitor request-attempt records in this batch show zero attempts numbered above 1; no observed S retry is claimed.
+- Scratch content scanning remained disabled during runtime. No post-run scratch-content completeness claim is made.
+
+Archive scope and limits:
+- RAW_FILE_MANIFEST.json binds all copied files by byte count and SHA-256. The complete Fyne S checkpoint tar.gz was split into contiguous 64-MiB Git-deliverable parts; ordered reassembly SHA-256 is checked and listed. The original compressed tar.gz remains in the local batch control directory.
+- Original run roots and uncompressed frozen workspace tar files remain local; remote copies are gzip-compressed without changing tar payload bytes. Full frozen workspaces permit recovery of changed source even where an explicit Git text/binary patch is not available.
+- FINAL_WORKSPACE_MANIFEST.json per arm records final tar member hashes and raw path/hash comparison with the cached public source repo. This comparison is not a semantic correctness judgment.
+- RAW_TRAJECTORIES.zip contains copied text/JSON trace files; its CRC and SHA-256 were checked. Larger frozen products/checkpoint parts are separate Git archive objects and named by the manifest.
+- Task research_events preserve request hashes, attempts, responses, actions, and usage; full raw Task provider wire bodies are not universally available in this runner. Do not infer such capture from hashes. Supervisor provider_pre_send snapshots and live checkpoints are archived.
+- The archive is a selected raw research evidence package, not a full machine or every build cache/temporary scratch file. Excluded local source checkpoint files are individually hashed in RAW_FILE_MANIFEST.json and represented losslessly by compressed checkpoint archives.
+- Private credentials and endpoint values were never copied from profile files into the research archive. Exact private markers were checked against frozen workspace tar members and text evidence. One initially flagged substring inside ordinary task prose was a scanner boundary false positive; no run data was edited. The scanner was narrowed to token word starts and all copied evidence was rescanned.
+- No semantic B/J/I or T/S effect judgment, causal score, or model-based scoring was performed by the archival scripts.

@@ -1,0 +1,56 @@
+=== Target 4: Menu.Refresh and MainMenu.Refresh methods ===
+func (m *Menu) Refresh() {
+	app := CurrentApp()
+	if app == nil {
+		return
+func (m *MainMenu) Refresh() {
+	app := CurrentApp()
+	if app == nil {
+		return
+
+=== Target 5: Toolbar concrete return types ===
+func NewToolbarAction(icon fyne.Resource, onActivated func()) *ToolbarAction {
+func NewToolbarSpacer() *ToolbarSpacer {
+func NewToolbarSeparator() *ToolbarSeparator {
+
+=== Target 5: ToolbarAction.SetIcon method ===
+func (t *ToolbarAction) SetIcon(icon fyne.Resource) {
+	t.Icon = icon
+	if t.toolbarObject != nil {
+		t.toolbarObject.SetIcon(icon)
+	}
+}
+
+=== Target 6: Container.RemoveAll ===
+func (c *Container) RemoveAll() {
+	c.Objects = nil
+	c.layout()
+}
+
+// Visible returns true if the container is currently visible, false otherwise.
+
+=== Target 6: Hyperlink.OnTapped field ===
+	OnTapped func()
+
+	focused, hovered bool
+	provider         *RichText
+
+=== Target 6: Entry.SetMinRowsVisible and MinRowsVisible field ===
+	MinRowsVisible int
+func (e *Entry) SetMinRowsVisible(rows int) {
+	e.MinRowsVisible = rows
+	e.Refresh()
+}
+
+// Tapped is called when this entry has been tapped. We update the cursor position in
+
+=== Target 6: validation.NewAllStrings ===
+func NewAllStrings(validators ...fyne.StringValidator) fyne.StringValidator {
+	return func(s string) error {
+		for _, validator := range validators {
+			if validator == nil {
+				continue
+			}
+			if err := validator(s); err != nil {
+				return err
+			}

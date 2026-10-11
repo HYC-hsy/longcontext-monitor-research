@@ -1,0 +1,21 @@
+=== Target 5: Checking if ALL retry functions use UnaryOptions ===
+Lines 369 and 391 were problematic before (WithMixedRetry and WithRetryMethodPolicies)
+
+Line 369 context (should be o.UnaryOptions.RetryMethodPolicies):
+			o.UnaryOptions.RetryMethodPolicies = make(map[string]retry.Policy)
+		}
+		// no need to check if BackupPolicy or FailurePolicy are been setup, just let mixed retry replace it
+		o.UnaryOptions.RetryMethodPolicies[retry.Wildcard] = retry.BuildMixedPolicy(p)
+	}}
+}
+
+
+Line 391 context (should be o.UnaryOptions.RetryMethodPolicies):
+		o.UnaryOptions.RetryMethodPolicies = mp
+		if wildcardCfg.Enable && !mp[retry.Wildcard].Enable {
+			// if there is enabled wildcard config before, keep it
+			o.UnaryOptions.RetryMethodPolicies[retry.Wildcard] = wildcardCfg
+		}
+	}}
+}
+

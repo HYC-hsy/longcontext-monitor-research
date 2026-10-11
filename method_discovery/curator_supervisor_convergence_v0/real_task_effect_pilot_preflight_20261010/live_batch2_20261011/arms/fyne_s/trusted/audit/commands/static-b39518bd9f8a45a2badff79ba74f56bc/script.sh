@@ -1,0 +1,2 @@
+
+cd /app && grep -n "RemoveAll" container.go

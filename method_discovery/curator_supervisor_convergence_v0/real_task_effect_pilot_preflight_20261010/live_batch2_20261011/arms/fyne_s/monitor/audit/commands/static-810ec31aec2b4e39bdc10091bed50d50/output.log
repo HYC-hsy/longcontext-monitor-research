@@ -1,0 +1,34 @@
+=== Target 7: desktop.App interface ===
+type App interface {
+	fyne.App
+	
+	// SetSystemTrayMenu sets the system tray menu for the application.
+	// This allows the application to add an icon and menu to the system tray.
+	// Pass nil to remove the system tray menu.
+
+=== Target 3: StringToStringWithFormat '%s' optimization ===
+//
+// Since: 2.2
+func StringToStringWithFormat(source String, format string) String {
+	if source == nil {
+		return NewString() // Return empty binding if source is nil
+	}
+	
+
+=== Target 3: Set() method signature and Sscanf usage ===
+func (s *sprintfString) Set(str string) error {
+	if len(s.sources) == 0 {
+		return nil
+	}
+	
+	// Create pointers to receive parsed values
+	values := make([]interface{}, len(s.sources))
+	
+	for i, src := range s.sources {
+		if src == nil {
+			continue
+		}
+		
+		switch src.(type) {
+		case String:
+			var val string

@@ -1,0 +1,39 @@
+=== Entry type definition ===
+type Entry struct {
+	DisableableWidget
+	shortcut fyne.ShortcutHandler
+	Text     string
+	// Since: 2.0
+	TextStyle   fyne.TextStyle
+	PlaceHolder string
+	OnChanged   func(string) `json:"-"`
+	// Since: 2.0
+	OnSubmitted func(string) `json:"-"`
+	Password    bool
+	MultiLine   bool
+	Wrapping    fyne.TextWrap
+	// MinRowsVisible is the minimum number of rows to show for a multi-line entry.
+	// This value is used to calculate the minimum height of the entry.
+	//
+	// Since: 2.2
+	MinRowsVisible int
+
+	// Set a validator that this entry will check against
+	// Since: 1.4
+	Validator           fyne.StringValidator `json:"-"`
+	validationStatus    *validationStatus
+	onValidationChanged func(error)
+	validationError     error
+
+	CursorRow, CursorColumn int
+	OnCursorChanged         func() `json:"-"`
+
+	cursorAnim *entryCursorAnimation
+
+
+=== Searching for MinRowsVisible usage in entry rendering ===
+50:	// MinRowsVisible is the minimum number of rows to show for a multi-line entry.
+54:	MinRowsVisible int
+467:// SetMinRowsVisible sets the minimum number of rows that should be visible in a multi-line entry.
+470:func (e *Entry) SetMinRowsVisible(rows int) {
+471:	e.MinRowsVisible = rows

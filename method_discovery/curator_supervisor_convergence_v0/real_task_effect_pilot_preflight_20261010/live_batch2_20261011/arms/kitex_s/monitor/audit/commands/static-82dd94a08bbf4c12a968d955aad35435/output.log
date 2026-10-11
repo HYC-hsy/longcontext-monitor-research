@@ -1,0 +1,22 @@
+=== Checking current state after intervention ===
+
+1. UnaryOptions struct (should have 3 new fields):
+type UnaryOptions struct {
+	UnaryMiddlewares        []endpoint.UnaryMiddleware
+	UnaryMiddlewareBuilders []endpoint.UnaryMiddlewareBuilder
+	RetryMethodPolicies     map[string]retry.Policy
+	RetryContainer          *retry.Container
+	Fallback                *fallback.Policy
+	RetryWithResult         *retry.ShouldResultRetry
+}
+
+2. WithFallback implementation:
+func WithFallback(fb *fallback.Policy) Option {
+	return Option{F: func(o *client.Options, di *utils.Slice) {
+		if !fallback.IsPolicyValid(fb) {
+			panic(fmt.Errorf("WithFallback: invalid '%+v'", fb))
+		}
+		di.Push(fmt.Sprintf("WithFallback(%+v)", fb))
+		o.Fallback = fb
+	}}
+}

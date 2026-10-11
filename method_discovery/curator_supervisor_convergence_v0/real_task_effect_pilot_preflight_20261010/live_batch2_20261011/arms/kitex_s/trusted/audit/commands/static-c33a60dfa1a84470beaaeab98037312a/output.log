@@ -1,0 +1,22 @@
+Pattern not found - may have been fixed
+---
+	if typecodec.Apache {
+		return apacheMarshalData(data)
+	}
+	// Always try fallback to frugal or fastcodec (including Basic codec)
+	// case: typecodec.Frugal=false but typecodec.FastCodec=true
+	if typecodec.FastCodec {
+		return fastMarshalData(data)
+	}
+	// case: typecodec.FastCodec=false but typecodec.Frugal=true
+	if typecodec.Frugal {
+		return frugalMarshalData(data)
+	}
+	return nil, errEncodeMismatchMsgType
+}
+
+func unmarshalThriftException(in bufiox.Reader) error {
+--
+	if typecodec.Apache {
+		return apacheUnmarshal(trans, data)
+	}

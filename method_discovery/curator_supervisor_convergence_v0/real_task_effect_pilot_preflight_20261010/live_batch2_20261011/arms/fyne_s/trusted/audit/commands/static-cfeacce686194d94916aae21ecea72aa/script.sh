@@ -1,0 +1,1 @@
+cd task/workspace && go build ./... 2>&1

@@ -1,0 +1,37 @@
+=== Behavioral Implementation Verification ===
+
+1. Container.RemoveAll implementation:
+func (c *Container) RemoveAll() {
+	c.Objects = nil
+	c.layout()
+}
+
+// Visible returns true if the container is currently visible, false otherwise.
+
+2. Hyperlink.Tapped() - checking OnTapped callback usage:
+
+// Tapped is called when a pointer tapped event is captured and triggers any change handler
+func (hl *Hyperlink) Tapped(*fyne.PointEvent) {
+	hl.openURL()
+}
+
+// TypedRune is a hook called by the input handling logic on text input events if this object is focused.
+func (hl *Hyperlink) TypedRune(rune) {
+}
+
+// TypedKey is a hook called by the input handling logic on key events if this object is focused.
+func (hl *Hyperlink) TypedKey(ev *fyne.KeyEvent) {
+	if ev.Name == fyne.KeySpace {
+
+3. Entry.SetMinRowsVisible and MinSize interaction:
+func (e *Entry) SetMinRowsVisible(rows int) {
+	e.MinRowsVisible = rows
+	e.Refresh()
+}
+
+// Tapped is called when this entry has been tapped. We update the cursor position in
+	// MinRowsVisible is the minimum number of rows to show for a multi-line entry.
+	MinRowsVisible int
+// SetMinRowsVisible sets the minimum number of rows that should be visible in a multi-line entry.
+func (e *Entry) SetMinRowsVisible(rows int) {
+	e.MinRowsVisible = rows

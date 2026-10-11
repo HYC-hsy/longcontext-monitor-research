@@ -1,0 +1,1 @@
+cd /app && grep -n "func NewSprintf" data/binding/sprintf.go

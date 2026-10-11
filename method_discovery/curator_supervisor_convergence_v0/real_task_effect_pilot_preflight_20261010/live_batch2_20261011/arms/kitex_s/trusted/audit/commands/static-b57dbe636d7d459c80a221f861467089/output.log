@@ -1,0 +1,15 @@
+=== VERIFICATION: Target 5 Req 7 - Retry/Fallback Field Migration ===
+
+1. WithRetryContainer (should use o.UnaryOptions.RetryContainer):
+func WithRetryContainer(rc *retry.Container) Option {
+		di.Push("WithRetryContainer()")
+		o.UnaryOptions.RetryContainer = rc
+
+2. WithFallback (should use o.UnaryOptions.Fallback):
+func WithFallback(fb *fallback.Policy) Option {
+			panic(fmt.Errorf("WithFallback: invalid '%+v'", fb))
+		di.Push(fmt.Sprintf("WithFallback(%+v)", fb))
+		o.UnaryOptions.Fallback = fb
+
+3. WithSpecifiedResultRetry (should use o.UnaryOptions.RetryWithResult):
+		o.UnaryOptions.RetryWithResult = rr

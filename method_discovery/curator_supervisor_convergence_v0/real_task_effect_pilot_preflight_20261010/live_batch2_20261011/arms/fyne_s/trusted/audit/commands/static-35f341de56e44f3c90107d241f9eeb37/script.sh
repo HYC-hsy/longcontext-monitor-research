@@ -1,0 +1,1 @@
+cd /app && grep -n "Shortcut" menu.go | head -5

@@ -1,0 +1,1 @@
+cd /app && grep -n "func.*Add\|func.*RemoveAll\|func.*Tapped" task/workspace/container.go task/workspace/widget/hyperlink.go | head -20

@@ -1,0 +1,95 @@
+=== Target 3: StringToStringWithFormat implementation ===
+func StringToStringWithFormat(source String, format string) String {
+	if source == nil {
+		return NewString() // Return empty binding if source is nil
+	}
+	
+	// Optimization: if format is "%s", return source directly
+	if format == "%s" {
+		return source
+	}
+	
+	return NewSprintf(format, source)
+}
+
+=== Target 3: Set() method implementation ===
+func (s *sprintfString) Set(str string) error {
+	if len(s.sources) == 0 {
+		return nil
+	}
+	
+	// Create pointers to receive parsed values
+	values := make([]interface{}, len(s.sources))
+	
+	for i, src := range s.sources {
+		if src == nil {
+			continue
+		}
+		
+		switch src.(type) {
+		case String:
+			var val string
+			values[i] = &val
+		case Int:
+			var val int
+			values[i] = &val
+		case Float:
+			var val float64
+			values[i] = &val
+		case Bool:
+			var val bool
+			values[i] = &val
+		case URI:
+			var val string
+			values[i] = &val
+		default:
+			return fmt.Errorf("unsupported binding type for parsing")
+		}
+	}
+	
+	// Parse the string using Sscanf
+	n, err := fmt.Sscanf(str, s.format, values...)
+	if err != nil && n == 0 {
+		return err
+	}
+	
+	// Set the parsed values back to source bindings
+	for i, src := range s.sources {
+		if src == nil || values[i] == nil {
+			continue
+		}
+		
+		switch src := src.(type) {
+		case String:
+			if strPtr, ok := values[i].(*string); ok {
+				if err := src.Set(*strPtr); err != nil {
+					return err
+				}
+			}
+		case Int:
+			if intPtr, ok := values[i].(*int); ok {
+				if err := src.Set(*intPtr); err != nil {
+					return err
+				}
+			}
+		case Float:
+			if floatPtr, ok := values[i].(*float64); ok {
+				if err := src.Set(*floatPtr); err != nil {
+					return err
+				}
+			}
+		case Bool:
+			if boolPtr, ok := values[i].(*bool); ok {
+				if err := src.Set(*boolPtr); err != nil {
+					return err
+				}
+			}
+		case URI:
+			if strPtr, ok := values[i].(*string); ok {
+				uri, err := storage.ParseURI(*strPtr)
+				if err != nil {
+					return err
+				}
+				if err := src.Set(uri); err != nil {
+					return err
+				}

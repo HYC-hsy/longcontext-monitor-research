@@ -1,0 +1,32 @@
+=== Target 6: Container.Add nil-safe check ===
+func (c *Container) Add(add CanvasObject) {
+	if add == nil {
+		return
+	}
+	c.Objects = append(c.Objects, add)
+	c.layout()
+}
+func (c *Container) AddObject(o CanvasObject) {
+	c.Add(o)
+}
+
+=== Target 3: NewSprintf DataChanged listener registration ===
+func NewSprintf(format string, sources ...DataItem) String {
+	ret := &sprintfString{
+		format:  format,
+		sources: sources,
+	}
+	
+	// Add listeners to all sources
+	for _, src := range sources {
+		if src != nil {
+			src.AddListener(ret)
+		}
+	}
+	
+	return ret
+}
+
+=== Target 6: Hyperlink.Tapped checking OnTapped callback ===
+
+=== Target 6: Entry.MinSize using MinRowsVisible ===

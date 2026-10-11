@@ -1,0 +1,11 @@
+=== Target 6: Checking if error format matches EXACT task requirement ===
+Task requires: fmt.Errorf("%s or invalid frame (first4Bytes=%#x, second4Bytes=%#x)", http2.ErrFrameTooLarge, buf[:4], buf[4:8])
+Condition: When frame size exceeds maxReadSize
+
+Checking ReadFrame method around fh.Length > fr.maxReadSize:
+	if fh.Length > fr.maxReadSize {
+		return nil, fmt.Errorf("%s or invalid frame (first4Bytes=%#x, second4Bytes=%#x)", http2.ErrFrameTooLarge, binary.BigEndian.Uint32(buf[:4]), binary.BigEndian.Uint32(buf[4:8]))
+	}
+	// payload := fr.getReadBuf(fh.Length)
+	var f http2.Frame
+	if fh.Type == http2.FrameData {

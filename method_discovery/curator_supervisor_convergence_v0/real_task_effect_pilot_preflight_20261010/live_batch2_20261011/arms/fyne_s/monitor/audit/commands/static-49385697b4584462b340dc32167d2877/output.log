@@ -1,0 +1,46 @@
+=== Hyperlink OnTapped Implementation Analysis ===
+
+1. Hyperlink struct definition (showing OnTapped field):
+type Hyperlink struct {
+	BaseWidget
+	Text      string
+	URL       *url.URL
+	Alignment fyne.TextAlign // The alignment of the Text
+	Wrapping  fyne.TextWrap  // The wrapping of the Text
+	TextStyle fyne.TextStyle // The style of the hyperlink text
+	// OnTapped is an optional callback that is called when the hyperlink is tapped.
+	// If set, it will be called instead of opening the URL.
+	//
+	// Since: 2.2
+	OnTapped func()
+
+	focused, hovered bool
+	provider         *RichText
+}
+
+2. Tapped() method implementation:
+func (hl *Hyperlink) Tapped(*fyne.PointEvent) {
+	hl.openURL()
+}
+
+
+3. openURL() method implementation:
+func (hl *Hyperlink) openURL() {
+	if hl.OnTapped != nil {
+		hl.OnTapped()
+		return
+	}
+	
+	if hl.URL != nil {
+		err := fyne.CurrentApp().OpenURL(hl.URL)
+		if err != nil {
+			fyne.LogError("Failed to open url", err)
+		}
+
+4. TypedKey Space handler (also triggers action):
+	if ev.Name == fyne.KeySpace {
+		hl.openURL()
+	}
+}
+
+func (hl *Hyperlink) openURL() {

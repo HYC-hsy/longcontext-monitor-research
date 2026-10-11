@@ -1,0 +1,1 @@
+find /app -type f -name "*.py" -o -name "*.txt" -o -name "*.md" -o -name "*.json" | head -20

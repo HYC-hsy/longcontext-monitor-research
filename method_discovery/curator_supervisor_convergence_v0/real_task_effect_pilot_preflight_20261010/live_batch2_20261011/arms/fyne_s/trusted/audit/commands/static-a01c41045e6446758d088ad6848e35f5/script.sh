@@ -1,0 +1,1 @@
+wc -l task/original_task.txt

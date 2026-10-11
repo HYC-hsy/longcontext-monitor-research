@@ -1,0 +1,1 @@
+cd /app && grep -A3 "func.*Set.*string.*error" data/binding/sprintf.go

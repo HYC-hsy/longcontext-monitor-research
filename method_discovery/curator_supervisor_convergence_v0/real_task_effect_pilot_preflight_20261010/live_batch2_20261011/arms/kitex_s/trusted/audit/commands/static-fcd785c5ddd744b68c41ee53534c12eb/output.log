@@ -1,0 +1,29 @@
+=== WithFallback current implementation ===
+func WithFallback(fb *fallback.Policy) Option {
+	return Option{F: func(o *client.Options, di *utils.Slice) {
+		if !fallback.IsPolicyValid(fb) {
+			panic(fmt.Errorf("WithFallback: invalid '%+v'", fb))
+		}
+		di.Push(fmt.Sprintf("WithFallback(%+v)", fb))
+		o.Fallback = fb
+	}}
+}
+
+=== WithSpecifiedResultRetry current implementation ===
+func WithSpecifiedResultRetry(rr *retry.ShouldResultRetry) Option {
+	return Option{F: func(o *client.Options, di *utils.Slice) {
+		if rr == nil || !rr.IsValid() {
+			panic(fmt.Errorf("WithSpecifiedResultRetry: invalid '%+v'", rr))
+		}
+		di.Push(fmt.Sprintf("WithSpecifiedResultRetry(%+v)", rr))
+		o.RetryWithResult = rr
+	}}
+}
+
+=== Checking if UnaryOptions has Fallback and RetryWithResult fields ===
+type UnaryOptions struct {
+	UnaryMiddlewares        []endpoint.UnaryMiddleware
+	UnaryMiddlewareBuilders []endpoint.UnaryMiddlewareBuilder
+	RetryMethodPolicies     map[string]retry.Policy
+}
+

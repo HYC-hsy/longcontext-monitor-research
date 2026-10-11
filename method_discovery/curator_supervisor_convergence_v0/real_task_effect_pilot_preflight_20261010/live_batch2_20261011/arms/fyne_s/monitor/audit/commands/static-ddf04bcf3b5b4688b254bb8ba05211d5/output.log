@@ -1,0 +1,39 @@
+=== Target 5: Toolbar constructor return types ===
+func NewToolbarAction(icon fyne.Resource, onActivated func()) *ToolbarAction {
+	return &ToolbarAction{icon, onActivated, nil}
+}
+func NewToolbarSpacer() *ToolbarSpacer {
+	return &ToolbarSpacer{}
+}
+func NewToolbarSeparator() *ToolbarSeparator {
+	return &ToolbarSeparator{}
+}
+
+=== Target 6: Widget improvements ===
+Container.RemoveAll:
+func (c *Container) RemoveAll() {
+	c.Objects = nil
+	c.layout()
+}
+
+// Visible returns true if the container is currently visible, false otherwise.
+
+Hyperlink.OnTapped:
+	// OnTapped is an optional callback that is called when the hyperlink is tapped.
+	OnTapped func()
+	if hl.OnTapped != nil {
+		hl.OnTapped()
+
+Entry.SetMinRowsVisible:
+func (e *Entry) SetMinRowsVisible(rows int) {
+	e.MinRowsVisible = rows
+	e.Refresh()
+}
+
+validation.NewAllStrings:
+func NewAllStrings(validators ...fyne.StringValidator) fyne.StringValidator {
+	return func(s string) error {
+		for _, validator := range validators {
+			if validator == nil {
+				continue
+			}
