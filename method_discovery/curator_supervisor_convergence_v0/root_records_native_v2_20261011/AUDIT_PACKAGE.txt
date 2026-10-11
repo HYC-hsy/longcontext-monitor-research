@@ -1,0 +1,1278 @@
+ROOT_RECORDS_NATIVE_V2 ZERO-MODEL AUDIT PACKAGE
+Code commit: 4e7d60dde41c17059169ddd84c2961ea8e1fc74c
+No live Task, Supervisor, provider, evaluator, training or scoring-model calls.
+Display-only trailing blanks are trimmed; the exact binary-safe diff is in the code commit.
+
+===== REPORT.md =====
+# root_records_native_v2: zero-model engineering record
+
+Status: implemented as an opt-in candidate; **not activated in the pilot profile** and not live-provider certified.
+
+## Identity and scope
+
+- Archive baseline: `afd9fbc21275ef3aa5d389ad27299e4b32882a69`.
+- Second-batch production code: `8cfc4ef2aac99c2378d98a0489fc0cad45511573`.
+- Current pilot profile remains `monitor_history_projection=root_records_v1`. The generic default remains `off`.
+- No Task Agent, Supervisor model, provider API, native evaluator, training, or scoring-model call occurred.
+- No CRS/RHR/RER decision rule, Task prompt, context/history limit, retry, or budget was changed.
+
+## Representation and transaction
+
+`root_records_native_v2` applies at the existing root-entry boundary, once per distinct handoff. It validates exact known Anthropic history blocks and complete unique tool-use/result pairing. It retains user blocks and native historical tool blocks byte-for-byte at the JSON value level, removing only the v1-defined assistant text, thinking, and redacted thinking. Assistant messages left empty are removed and identified in the manifest. It creates no text ledger and no new executable calls.
+
+Before replacing active history, the root hook durably writes and reads back the complete source, projected history, per-block manifest, and commit receipt. The candidate refuses use without the pilot pre-send capture hook. Existing tool-payload archival and complete-exchange-prefix retirement remain responsible for capacity. A v2-only callback records and checks each actual provider transform: archived before-image, after-image, safe cut, retained tail, and continuation-note hash. An unavailable or altered archive fails closed. No safe cut or an oversized retained tail still raises capacity failure.
+
+The pilot's actual pre-transport capture independently reads the committed projection and each transform receipt. It checks the current handoff, model/system/tools, exact initial root input, request-local context or maintenance prompt, and append-only continuity against the previous saved request. A continuation/format-repair usage record does not consume pending root verification. Only an accepted, matching review response marks it verified; an incomplete, empty, cancelled, expired, or discarded response does not. Subsequent review sends in that root review remain checked. Native RER's own branch reset remains native; the projection parent is not inserted into the fresh branch.
+
+## Read-only Kitex-S compatibility result
+
+Source: `live_batch2_20261011/arms/kitex_s/monitor/audit/provider_history.json`, raw SHA-256 `2105467ed7926f35fca0e2c0316c168f64c740966f83f0bdc143dac64c66b473`. Five archived projection directories were authenticated against their source, projected history, manifest, commit, and exact ledger text before recursive decoding. The test-only forensic helper rejects unproven ledger-like text, duplicate/cyclic references, altered rows, and altered manifests. It restores only retained v1 records; removed analysis is not reconstructed.
+
+The archived final provider history has two user messages and zero recognizable exchange cuts. Forensic rehydration yields 250 native messages, 189 paired historical tool exchanges, and 101 recognizable safe exchange cuts. The current v2 codec removes zero additional blocks from this forensic input; its UTF-8 JSON size is 630,786 bytes versus 702,649 bytes for the archived v1 final history. This is **not** historical online-state restoration, a rerun, or a successful Kitex outcome.
+
+No effective private `context_win` or history-limit value was recoverable from the archived public material. The explicit offline assumption is the provider default `context_win=200000`, limit 700,000 UTF-8 bytes, target 574,000. Under that assumption the 630,786-byte rehydrated history is below the trigger limit, so automatic maintenance would not yet run. A separately forced, model-free pressure check against the target archived three large tool results (578,126 bytes), then retired a 65-message complete prefix with `FAKE_CONTINUATION_TEST_ONLY`, leaving 186 messages and 430,346 bytes. That forced check uses a fake archive locator and does not prove a real continuation note preserves cognition or that the provider accepts the representation.
+
+The five projection source-byte SHA-256 values are recorded in `OFFLINE_RESULT.json` and the Git archive. Original batch files were only read, never modified.
+
+## Test evidence and limitations
+
+Zero-model tests cover parallel batches, empty assistant deletion, malformed/duplicate/open exchanges, repeated root handoffs, actual pre-send blocking before transport, tampered source/transform/prior request, fake SSE purpose switching and stopped-response discard, fake continuation transaction, native payload archival and safe retirement, no-safe-cut exhaustion, RER branch reset/parent restore, and no replay of historical tool calls.
+
+The targeted suite passed 141 tests with one deselected legacy byte-identity assertion. Running that assertion without deselection produced 1 failure because it requires `provider.py` to equal commit `29bdcb...` byte-for-byte; baseline `afd9fbc...` already differs from that old commit. This assertion was not edited. On this host pytest also prints an atexit permission warning about an old temporary directory after reporting exit code 0; it is not hidden or counted as a test pass.
+
+Live provider acceptance of an assistant tool-use message after removing its earlier signed thinking remains unverified. The forensic helper is test-only and is not enabled as a live history migration. No new pilot or historical run has been started. The separate CRS evidence re-display candidate remains untouched.
+
+===== OFFLINE_RESULT.json =====
+{
+  "status": "zero_model_engineering_only",
+  "baseline_archive_commit": "afd9fbc21275ef3aa5d389ad27299e4b32882a69",
+  "second_batch_run_code_commit": "8cfc4ef2aac99c2378d98a0489fc0cad45511573",
+  "source": "live_batch2_20261011/arms/kitex_s/monitor/audit/provider_history.json",
+  "source_raw_sha256": "2105467ed7926f35fca0e2c0316c168f64c740966f83f0bdc143dac64c66b473",
+  "source_canonical_sha256": "b46adedc05f54705c92dae138df43f1a82046e2ed752a1ed341ead26cf3dc93f",
+  "v1_source_messages": 2,
+  "authenticated_v1_ledger_depth": 5,
+  "authenticated_v1_source_sha256_by_directory": {
+    "15988ba662a04f0fbb0a4a93ac259375": "c4c6e4433bb9fd1db0103563b8803854792389e3473b9e408091fef58abd5507",
+    "1b6b5ca9860f4cb2bef6a543f6cdcb66": "8fbeeae86e96c0c559a19ca0c6d0e17d65e880ca403011fa97d08c5cbdb8ea6d",
+    "96ea9307be3e47fa8b7854bdd1595c5d": "dbc6a1e8d9105d8b30c431135c5045b723618e25ce0dd02164c95cf2b2a0c0f9",
+    "d0400f4188a74d2fa08ea36a10783f2b": "baddff5f0c56c79e742d11e93aa2d05e3c20784c45c9b8fa2cea3d7f58838b28",
+    "fded89fb54d44c2984c9488a3b8af1c5": "a607250a15d6305648a703576f16dfdeda811c2fd5bf9cbffaa1c97d07650d5e"
+  },
+  "rehydrated_native_messages": 250,
+  "rehydrated_tool_pairs": 189,
+  "rehydrated_canonical_sha256": "ff923125a928ba5c5a54b2104e5b799da657bbdbc0aaec2464dad2f4907d5461",
+  "v1_provider_history_utf8_bytes": 702649,
+  "rehydrated_native_history_utf8_bytes": 630786,
+  "v1_recognizable_exchange_cuts": 0,
+  "v2_recognizable_exchange_cuts": 101,
+  "v2_removed_blocks_after_forensic_rehydration": 0,
+  "assumed_context_win": 200000,
+  "assumed_history_char_limit_utf8_bytes": 700000,
+  "assumed_history_target_utf8_bytes": 574000,
+  "assumption_note": "The archived effective private profile did not expose context_win or monitor_history_char_limit; these reproduce MonitorProviderClient defaults, not a recovered historical setting.",
+  "forced_offline_target_pressure": {
+    "fake_archive_locator": "monitor/audit/history/FAKE_OFFLINE_ONLY.json",
+    "fake_continuation_note": "FAKE_CONTINUATION_TEST_ONLY",
+    "payload_results_archived": 3,
+    "after_payload_archival_utf8_bytes": 578126,
+    "safe_prefix_retired_messages": 65,
+    "retained_tail_plus_fake_note_messages": 186,
+    "final_utf8_bytes": 430346,
+    "note": "This is a forced zero-model pressure check to the assumed target, not a replay of the historical provider request or evidence of live compatibility."
+  },
+  "task_agent_calls": 0,
+  "supervisor_model_calls": 0,
+  "provider_api_calls": 0,
+  "native_evaluator_calls": 0,
+  "training_calls": 0,
+  "scoring_model_calls": 0
+}
+
+===== ENUMERATED SOURCE SHA-256 =====
+GenericAgent-main/monitor_agent_core/agent.py 183174971343b218c57d369899d832afddfc3ac13f7a0682138095f60144b83e
+GenericAgent-main/monitor_agent_core/provider.py 4e25194afb7a7e64a9442b0345ff1ba5bd7f1b08eb0ff351abb770cd99092c42
+GenericAgent-main/monitor_agent_core/runtime.py 58bde1231ac3714180327af0f8e65dd72d6be47b5bf1c7ec98276be7770e38e6
+GenericAgent-main/monitor_agent_core/root_records_native_v2.py e78cc4b848581877d687595bd92d154869deeb32cfd057d340b6f7fab8a75a5a
+GenericAgent-main/monitor_agent_core/native_projection_capture.py 5e4d1252098c5d10e9855568d2fb0bb5bda551ba2e5ced6e7a837ffefe5ff8cf
+GenericAgent-main/tests/test_root_records_native_v2.py 0dfb659d4964d3ac7884a6e4a673a62ab489e0c26b8a6525c9cfef5fd93e4aa0
+method_discovery/curator_supervisor_convergence_v0/root_records_native_v2_20261011/forensic_v1_rehydration.py 636de42e485db547ce3a7ec1c6bda010841ca2d8957f86ea0af3be0ff213cd8c
+method_discovery/curator_supervisor_convergence_v0/root_records_native_v2_20261011/test_forensic_v1_rehydration.py 7953dd2483a7d79a5ac1597a9ab94f043d1dbc08e9e0620225af73faee83dc13
+
+===== TARGETED ZERO-MODEL SUITE =====
+command: D:\python\python.exe -m pytest method_discovery/curator_supervisor_convergence_v0/root_records_native_v2_20261011/test_forensic_v1_rehydration.py GenericAgent-main/tests/test_root_records_v1.py GenericAgent-main/tests/test_root_records_native_v2.py GenericAgent-main/tests/test_monitor_provider.py GenericAgent-main/tests/test_crs_v0.py GenericAgent-main/tests/test_rhr_v0.py GenericAgent-main/tests/test_rer_v0.py GenericAgent-main/tests/test_root_turn_ceiling.py -q -k not test_frozen_prompt_and_provider
+exit_code: 0
+stdout:
+........................................................................ [ 51%]
+.....................................................................    [100%]
+141 passed, 1 deselected in 6.49s
+
+stderr:
+Error in atexit._run_exitfuncs:
+Traceback (most recent call last):
+  File "D:\python\lib\pathlib.py", line 215, in resolve
+    s = self._ext_to_normal(_getfinalpathname(s))
+PermissionError: [WinError 5] �ܾ����ʡ�: 'C:\\Users\\hsy\\AppData\\Local\\Temp\\pytest-of-hsy\\pytest-951'
+
+===== PRE-EXISTING LEGACY BYTE-FREEZE ASSERTION =====
+command: D:\python\python.exe -m pytest GenericAgent-main/tests/test_rer_v0.py::test_frozen_prompt_and_provider -q
+exit_code: 1
+stdout:
+F                                                                        [100%]
+================================== FAILURES ===================================
+_______________________ test_frozen_prompt_and_provider _______________________
+
+tmp_path = WindowsPath('C:/Users/hsy/AppData/Local/Temp/pytest-of-hsy/pytest-1505/test_frozen_prompt_and_provide0')
+
+    def test_frozen_prompt_and_provider(tmp_path):
+        root = Path(__file__).resolve().parents[2]
+        for source in ('ase_v0.py', 'provider.py'):
+            path = 'GenericAgent-main/monitor_agent_core/' + source
+            frozen = subprocess.check_output(['git', 'show',
+                '29bdcb1694835aa8a6007cfa95e595e714604fca:' + path], cwd=root)
+>           assert frozen == (root / path).read_bytes()
+E           assert b'"""Provider...ocks, usage\n' == b'"""Provider...ocks, usage\n'
+E             At index 616 diff: b'P' != b'I'
+E             Use -v to get more diff
+
+GenericAgent-main\tests\test_rer_v0.py:269: AssertionError
+=========================== short test summary info ===========================
+FAILED GenericAgent-main/tests/test_rer_v0.py::test_frozen_prompt_and_provider
+1 failed in 0.37s
+
+stderr:
+Error in atexit._run_exitfuncs:
+Traceback (most recent call last):
+  File "D:\python\lib\pathlib.py", line 215, in resolve
+    s = self._ext_to_normal(_getfinalpathname(s))
+PermissionError: [WinError 5] �ܾ����ʡ�: 'C:\\Users\\hsy\\AppData\\Local\\Temp\\pytest-of-hsy\\pytest-951'
+
+===== COMPLETE PRODUCTION DIFF =====
+exit_code: 0
+diff --git a/GenericAgent-main/monitor_agent_core/agent.py b/GenericAgent-main/monitor_agent_core/agent.py
+index dbcc1f84..d5fbdbc5 100644
+--- a/GenericAgent-main/monitor_agent_core/agent.py
++++ b/GenericAgent-main/monitor_agent_core/agent.py
+@@ -50,6 +50,7 @@ from .ase_v0 import (SYSTEM_PROMPT as ASE_SYSTEM_PROMPT, ControlEcho,
+ from .crs_v0 import ContrastiveReleaseBoundary
+ from .root_records_v1 import canonical as root_records_canonical, digest as root_records_digest
+ from .root_records_v1 import project as project_root_records
++from .root_records_native_v2 import project as project_root_records_native
+
+
+ class ProjectionIntegrityError(RuntimeError):
+@@ -465,9 +466,9 @@ class MonitorAgent:
+                 self.ase_v0 and self.crs_v0 and self.rhr_v0)):
+             raise ValueError('monitor_root_epistemic_reestimation must be boolean and requires ASE + CRS + RHR')
+         self.history_projection = getattr(client, 'config', {}).get('monitor_history_projection', 'off')
+-        if self.history_projection not in ('off', 'root_records_v1') or (
+-                self.history_projection == 'root_records_v1' and not self.rer_v0):
+-            raise ValueError('root_records_v1 requires ASE + CRS + RHR + RER')
++        if self.history_projection not in ('off', 'root_records_v1', 'root_records_native_v2') or (
++                self.history_projection != 'off' and not self.rer_v0):
++            raise ValueError('Root records projection requires ASE + CRS + RHR + RER')
+         self._projected_root_handoffs = set()
+         self._projection_integrity_failure = None
+         self._projection_pending_request = None
+@@ -639,6 +640,9 @@ class MonitorAgent:
+         if self.semantic_continuity:
+             self.client.prepare_continuation = self._prepare_continuation
+             self.client.archive_continuation_history = self._archive_continuation_history
++        if self.history_projection == 'root_records_native_v2':
++            self.client.history_transform_callback = self._record_native_projection_transform
++            self.client.native_projection_acceptance = True
+
+     def _active_working_context(self):
+         if self.frame_kind == 'root' and not (self.verification_loop_v0 or self.ase_v0):
+@@ -809,6 +813,48 @@ class MonitorAgent:
+         self._atomic_private_text(relative, json.dumps(history, ensure_ascii=False))
+         return "monitor/" + relative
+
++    def _record_native_projection_transform(self, kind, before, after, archive, details):
++        """Durably bind a native projection to each existing archival/retirement step."""
++        pending = self._projection_pending_request
++        if pending is None or self.history_projection != 'root_records_native_v2':
++            return
++        from .root_records_native_v2 import validate_transform
++        try:
++            anchor = (pending['transforms'][-1]['after_history'] if pending['transforms']
++                      else pending['projected_history'])
++            if before[:len(anchor)] != anchor:
++                raise ProjectionIntegrityError('Native projection transform predecessor mismatch')
++            if not archive.startswith('monitor/audit/history/') or '..' in archive.split('/'):
++                raise ProjectionIntegrityError('Native projection archive locator invalid')
++            archived = json.loads((self.workspace.private_root / archive[len('monitor/'):]).read_text(
++                encoding='utf-8'))
++            if archived != before:
++                raise ProjectionIntegrityError('Native projection history archive mismatch')
++            validate_transform(kind, before, after, archive, details)
++            record = {
++                'kind': kind, 'before_sha256': root_records_digest(root_records_canonical(before)),
++                'after_sha256': root_records_digest(root_records_canonical(after)),
++                'archive': archive, 'archive_sha256': root_records_digest(root_records_canonical(archived)),
++                'details': details,
++            }
++            relative = 'audit/root_projection_transforms/' + uuid.uuid4().hex
++            self._atomic_private_text(relative + '/after.json',
++                                      root_records_canonical(after).decode('utf-8'))
++            if json.loads((self.workspace.private_root / relative / 'after.json').read_text(
++                    encoding='utf-8')) != after:
++                raise ProjectionIntegrityError('Native projection transform after-image mismatch')
++            record['after_locator'] = 'monitor/' + relative + '/after.json'
++            raw = root_records_canonical(record)
++            self._atomic_private_text(relative + '/receipt.json', raw.decode('utf-8'))
++            if (self.workspace.private_root / relative / 'receipt.json').read_bytes() != raw:
++                raise ProjectionIntegrityError('Native projection transform receipt readback mismatch')
++            record['receipt'] = 'monitor/' + relative + '/receipt.json'
++            record['after_history'] = after
++            pending['transforms'].append(record)
++        except Exception as exc:
++            self._projection_integrity_failure = 'native_projection_transform'
++            raise ProjectionIntegrityError('Native projection transform failed') from exc
++
+     def _audit_dialogue(self, event, **payload):
+         """Persist completed observations immediately, independently of model input."""
+         if self.dcm is not None and event == 'tool_call':
+@@ -891,6 +937,7 @@ class MonitorAgent:
+                          if self.frame_kind == 'root' and not self.ase_v0 else self.system_prompt)
+         self.client.system = active_system + "\n\n" + CONTINUATION_MODE_PROMPT
+         self.client.history.append({"role": "user", "content": [{"type": "text", "text": prompt}]})
++        self.client.maintenance_prompt = prompt
+         stage = 'request'
+         try:
+             for attempt in range(2):
+@@ -959,12 +1006,22 @@ class MonitorAgent:
+             raise
+         finally:
+             self.client.history.pop()
++            self.client.maintenance_prompt = None
+             self.client.system = previous_system
+             self.client.request_purpose = previous_purpose
+
+     def _progress(self, event, **fields):
+-        if event == 'request_usage' and self._projection_pending_request is not None:
++        if (event == 'request_usage' and self._projection_pending_request is not None
++                and self.history_projection == 'root_records_v1'):
+             self._projection_pending_request = None
++        if (event == 'request_accepted' and self._projection_pending_request is not None
++                and self.history_projection == 'root_records_native_v2'
++                and getattr(self.client, 'request_purpose', 'review') == 'review'
++                and self.completion_state is not None
++                and self.completion_state() == self.root_frame_handoff
++                and fields.get('request_id') == self._projection_pending_request.get('request_id')):
++            self._projection_pending_request['verified'] = True
++            self._projection_pending_request['accepted_request_sha256'] = fields.get('request_sha256')
+         # Metadata only: never put credentials, prompts, code or reasoning here.
+         path = self.workspace.private_root / 'audit' / 'progress.jsonl'
+         try:
+@@ -1348,7 +1405,10 @@ class MonitorAgent:
+                 self._progress("advice_read_failed", error_type=type(exc).__name__)
+                 updates.append("Private advice note unavailable; use existing history and original evidence. "
+                                + type(exc).__name__)
+-        return "\n\n".join(update for update in updates if update) or None
++        result = "\n\n".join(update for update in updates if update) or None
++        if self.history_projection == 'root_records_native_v2' and self.frame_kind == 'root':
++            self._projection_latest_review_update = result
++        return result
+
+     def _commit_root_projection(self, identity, handoff):
+         original = self.client.export_history()
+@@ -1358,7 +1418,12 @@ class MonitorAgent:
+         try:
+             directory.mkdir(parents=True, exist_ok=False)
+             locator = 'monitor/' + relative + '/source.json'
+-            projected, manifest, _ = project_root_records(original, source_locator=locator)
++            if self.history_projection == 'root_records_native_v2':
++                if self.client.pre_send_capture is None:
++                    raise ProjectionIntegrityError('Native projection requires pilot capture hook')
++                projected, manifest, _ = project_root_records_native(original)
++            else:
++                projected, manifest, _ = project_root_records(original, source_locator=locator)
+             manifest.update(request_id=identity[0], generation=identity[1])
+             payloads = {
+                 'source.json': source,
+@@ -1388,9 +1453,14 @@ class MonitorAgent:
+             self._projected_root_handoffs.add(identity)
+             if manifest['applied']:
+                 self._projection_pending_request = {
+-                    'identity': identity, 'ledger_sha256': manifest['ledger_sha256'],
+                     'commit_locator': 'monitor/' + relative + '/committed.json',
+-                    'ledger': projected[0]['content'][0]['text'],
++                    'identity': identity,
++                    **({'ledger_sha256': manifest['ledger_sha256'],
++                        'ledger': projected[0]['content'][0]['text']}
++                       if self.history_projection == 'root_records_v1' else {
++                           'projected_sha256': manifest['projected_sha256'],
++                           'projected_history': projected,
++                           'transforms': [], 'request_id': None}),
+                 }
+             self._progress('root_records_projection', request_id=identity[0],
+                            generation=identity[1], applied=manifest['applied'],
+@@ -1411,7 +1481,7 @@ class MonitorAgent:
+     def _enter_root_frame(self, handoff):
+         if not handoff or self.completion_state is None or self.completion_state() != handoff:
+             raise ValueError('Root frame requires the current pending handoff')
+-        if self.history_projection == 'root_records_v1':
++        if self.history_projection in ('root_records_v1', 'root_records_native_v2'):
+             identity = (handoff['request_id'], handoff['generation'])
+             if identity not in self._projected_root_handoffs:
+                 self._commit_root_projection(identity, handoff)
+@@ -1469,6 +1539,8 @@ class MonitorAgent:
+                 self.crs.root_reorientation['root_horizon_digest'] != action.payload['root_horizon_digest']):
+             raise ValueError('Root re-estimation requires the same fresh pending handoff and horizon')
+         branch_measure = self.client.history_measure()
++        if self.history_projection == 'root_records_native_v2':
++            self._projection_pending_request = None
+         if self._rer_parent_history is None:
+             self._rer_parent_history = self.client.export_history()
+             self._rer_parent_history_measure = branch_measure
+@@ -1491,6 +1563,8 @@ class MonitorAgent:
+             return
+         branch_measure = self.client.history_measure()
+         self.client.restore_history(self._rer_parent_history)
++        if self.history_projection == 'root_records_native_v2':
++            self._projection_pending_request = None
+         self._audit_dialogue('rer_parent_history_restored', disposition=disposition,
+                              parent_history_sha256=self._rer_parent_history_measure['sha256'],
+                              discarded_branch_history_sha256=branch_measure['sha256'],
+@@ -1640,6 +1714,11 @@ class MonitorAgent:
+                     system_sha256=hashlib.sha256(system.encode('utf-8')).hexdigest(),
+                     tools_sha256=hashlib.sha256(json.dumps(
+                         tools, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest())
++            if self.history_projection == 'root_records_native_v2' and self.frame_kind == 'root':
++                from .provider import _claude_tools
++                self._projection_root_input = wake_context
++                self._projection_root_system = system
++                self._projection_root_tools = _claude_tools(tools)
+             action = run_review(
+                 self.client, system, wake_context, tools,
+                 self.dispatch, self.max_review_turns if max_turns_override is None else max_turns_override,
+@@ -1688,6 +1767,9 @@ class MonitorAgent:
+                 self.restore_rer_parent('error' if sys.exc_info()[1] is not None else
+                                         action.kind if action is not None else 'incomplete')
+             self._leave_root_frame()
++            if (self.history_projection == 'root_records_native_v2' and action is not None
++                    and action.kind != 'root_reestimate'):
++                self._projection_pending_request = None
+             self.workspace.write_text(
+                 "monitor/audit/provider_history.json",
+                 json.dumps(self.client.export_history(), ensure_ascii=False), mode="replace",
+diff --git a/GenericAgent-main/monitor_agent_core/native_projection_capture.py b/GenericAgent-main/monitor_agent_core/native_projection_capture.py
+new file mode 100644
+index 00000000..d1157d20
+--- /dev/null
++++ b/GenericAgent-main/monitor_agent_core/native_projection_capture.py
+@@ -0,0 +1,129 @@
++"""Pilot-only, pre-transport verification of native root projection lineage."""
++
++import json
++
++from .root_records_v1 import canonical, digest
++from .root_records_native_v2 import project, validate_transform
++
++
++def verify(private_root, monitor, request_id, payload):
++    pending = monitor._projection_pending_request
++    if pending is None:
++        return None
++    client = monitor.client
++    if client.provider != 'anthropic' or client.pre_send_capture is None:
++        raise ValueError('Native projection is restricted to the pilot Anthropic capture path')
++    if monitor.completion_state() != monitor.root_frame_handoff:
++        raise ValueError('Native projection handoff became stale')
++    if pending['identity'] != (monitor.root_frame_handoff['request_id'],
++                               monitor.root_frame_handoff['generation']):
++        raise ValueError('Native projection handoff identity changed')
++    if payload.get('messages') != client.history or payload.get('model') != client.model or (
++            payload.get('max_tokens') != client.max_tokens or payload.get('system') != client.system):
++        raise ValueError('Native projection request assembly changed')
++
++    def read(locator):
++        if not isinstance(locator, str) or not locator.startswith('monitor/audit/') or '..' in locator.split('/'):
++            raise ValueError('Native projection archive locator invalid')
++        return (private_root / locator[len('monitor/'):]).read_bytes()
++
++    commit = json.loads(read(pending['commit_locator']))
++    base = pending['commit_locator'].rsplit('/', 1)[0]
++    source = json.loads(read(base + '/source.json'))
++    projected = json.loads(read(base + '/projected_history.json'))
++    manifest = json.loads(read(base + '/manifest.json'))
++    recomputed, expected, _ = project(source)
++    expected.update(request_id=pending['identity'][0], generation=pending['identity'][1])
++    if manifest != expected or projected != recomputed or commit != {
++            'request_id': pending['identity'][0], 'generation': pending['identity'][1],
++            'source_sha256': expected['source_sha256'],
++            'projected_sha256': expected['projected_sha256'],
++            'applied': expected['applied'], 'source_locator': base + '/source.json',
++    }:
++        raise ValueError('Native projection archive or commit identity mismatch')
++    last_captured = pending.get('last_captured_history')
++    last_transform_count = pending.get('last_transform_count', 0)
++    if last_captured is not None:
++        previous = json.loads(read(pending['last_capture_locator']))
++        prior_payload = previous['payload']
++        prior_messages = json.loads(json.dumps(prior_payload['messages'], ensure_ascii=False))
++        transient = pending.get('last_transient')
++        if transient is not None and prior_messages[-1] == {
++                'role': 'user', 'content': [{'type': 'text', 'text': transient}]}:
++            prior_messages.pop()
++        if (digest(canonical(prior_payload)) != pending['last_payload_sha256']
++                or prior_messages != last_captured):
++            raise ValueError('Prior native request capture changed')
++        if len(pending['transforms']) > last_transform_count:
++            next_archive = pending['transforms'][last_transform_count]['archive']
++            if json.loads(read(next_archive))[:len(last_captured)] != last_captured:
++                raise ValueError('Native history changed before recorded transform')
++        elif payload['messages'][:len(last_captured)] != last_captured:
++            raise ValueError('Native history changed after prior request')
++    anchor = projected
++    for transform in pending['transforms']:
++        receipt = json.loads(read(transform['receipt']))
++        after = json.loads(read(transform['after_locator']))
++        archived = json.loads(read(transform['archive']))
++        if (receipt != {key: value for key, value in transform.items()
++                        if key not in ('receipt', 'after_history')}
++                or after != transform['after_history'] or archived[:len(anchor)] != anchor
++                or receipt['before_sha256'] != digest(canonical(archived))
++                or receipt['after_sha256'] != digest(canonical(after))):
++            raise ValueError('Native projection transform archive mismatch')
++        validate_transform(receipt['kind'], archived, after, receipt['archive'], receipt['details'])
++        anchor = after
++    messages = payload['messages']
++    if messages[:len(anchor)] != anchor:
++        raise ValueError('Native projection lineage absent from request')
++    root_input = getattr(monitor, '_projection_root_input', None)
++    if not isinstance(root_input, str) or not any(
++            block.get('type') == 'text' and block.get('text') == root_input
++            for history in [messages] + [json.loads(read(t['archive'])) for t in pending['transforms']]
++            for message in history for block in message.get('content', [])):
++        raise ValueError('Current root input not shown or archived at legal cut')
++    purpose = getattr(client, 'request_purpose', 'review')
++    if not pending.get('verified'):
++        root_suffix = [{'role': 'user', 'content': [{'type': 'text', 'text': root_input}]}]
++        update = getattr(monitor, '_projection_latest_review_update', None)
++        if update:
++            root_suffix.append({'role': 'user', 'content': [{'type': 'text', 'text': update}]})
++        if pending['transforms']:
++            first_before = json.loads(read(pending['transforms'][0]['archive']))
++            if first_before[len(projected):] != root_suffix:
++                raise ValueError('Native pre-maintenance root input suffix changed')
++            suffix = messages[len(anchor):]
++        else:
++            suffix = messages[len(anchor):]
++            if suffix[:len(root_suffix)] != root_suffix:
++                raise ValueError('Native current root input suffix changed')
++            suffix = suffix[len(root_suffix):]
++        expected_suffix = []
++        if purpose in ('continuation', 'format_repair'):
++            expected_suffix.append({'role': 'user', 'content': [
++                {'type': 'text', 'text': getattr(client, 'maintenance_prompt', None)}]})
++        elif getattr(client, 'request_local_context', None):
++            expected_suffix.append({'role': 'user', 'content': [
++                {'type': 'text', 'text': client.request_local_context}]})
++        if suffix != expected_suffix:
++            raise ValueError('Native request contains an unaccounted initial suffix')
++    if purpose == 'review':
++        if payload.get('system') != monitor._projection_root_system or (
++                payload.get('tools') != monitor._projection_root_tools):
++            raise ValueError('Native root review system or tools changed')
++        context = getattr(client, 'request_local_context', None)
++        if context and messages[-1] != {'role': 'user', 'content': [{'type': 'text', 'text': context}]}:
++            raise ValueError('Native request-local context changed')
++        pending['request_id'] = request_id
++    elif purpose in ('continuation', 'format_repair'):
++        if payload.get('tools') != [] or not isinstance(getattr(client, 'maintenance_prompt', None), str):
++            raise ValueError('Native maintenance input or tools changed')
++        if not any(block.get('text') == client.maintenance_prompt
++                   for message in messages for block in message.get('content', [])):
++            raise ValueError('Native maintenance prompt absent')
++    else:
++        raise ValueError('Unsupported native projection request purpose')
++    return {'commit': pending['commit_locator'], 'source_sha256': expected['source_sha256'],
++            'projected_sha256': expected['projected_sha256'],
++            'transform_receipts': [t['receipt'] for t in pending['transforms']],
++            'last_anchor_sha256': digest(canonical(anchor)), 'purpose': purpose}
+diff --git a/GenericAgent-main/monitor_agent_core/provider.py b/GenericAgent-main/monitor_agent_core/provider.py
+index 20376850..4c08b884 100644
+--- a/GenericAgent-main/monitor_agent_core/provider.py
++++ b/GenericAgent-main/monitor_agent_core/provider.py
+@@ -375,6 +375,7 @@ class MonitorProviderClient:
+     def _relieve_tool_result_pressure(self):
+         """Move oversized payloads, not decisions, to exact retrievable storage."""
+         before = self.history_measure()
++        before_history = self.export_history() if getattr(self, 'history_transform_callback', None) else None
+         archive = getattr(self, "archive_continuation_history", None)
+         if archive is None:
+             raise ProviderError("Semantic compaction requires a retrievable history archive")
+@@ -407,6 +408,10 @@ class MonitorProviderClient:
+             "kind": "monitor_tool_payload_archival", "before": before,
+             "after": self.history_measure(), "archive": location, "results_archived": changed,
+         })
++        if changed and before_history is not None:
++            self.history_transform_callback(
++                'monitor_tool_payload_archival', before_history,
++                self.export_history(), location, {'results_archived': changed})
+
+     def _compact_with_continuation(self, before):
+         """Retire a protocol-complete prefix, after planning and durable archival.
+@@ -414,6 +419,7 @@ class MonitorProviderClient:
+         Retain recent exchanges, not arbitrarily long review lifetimes. The
+         same-model continuation carries unresolved concerns across this cut.
+         """
++        before_history = self.export_history() if getattr(self, 'history_transform_callback', None) else None
+         boundaries = self._exchange_boundaries()
+         # Keep at least the latest exchange plus any pending one. Reserve room
+         # for the handoff; do not require a semantic issue to close to compact.
+@@ -467,6 +473,14 @@ class MonitorProviderClient:
+             "target_reached": after["characters"] <= self.history_target_chars,
+             "boundary_kind": "protocol_exchange", "size_unit": "utf8_bytes",
+         })
++        if before_history is not None:
++            self.history_transform_callback(
++                'monitor_history_compaction', before_history,
++                self.export_history(), location,
++                {'cut': cut, 'tail_sha256': hashlib.sha256(json.dumps(
++                    before_history[cut:], ensure_ascii=False, sort_keys=True,
++                    separators=(',', ':')).encode('utf-8')).hexdigest(),
++                 'continuation_note_sha256': hashlib.sha256(note.encode('utf-8')).hexdigest()})
+
+     def drain_telemetry(self):
+         value = {
+@@ -574,6 +588,7 @@ class MonitorProviderClient:
+         entry = {"role": "user", "content": [{"type": "text", "text": context}]} if context else None
+         if entry is not None:
+             self.history.append(entry)
++        self.request_local_context = context
+         try:
+             appended = getattr(self, 'active_context_appended', None)
+             callback = getattr(self, 'request_assembly_callback', None)
+@@ -595,6 +610,7 @@ class MonitorProviderClient:
+             if entry is not None:
+                 assert self.history[-1] is entry
+                 self.history.pop()
++            self.request_local_context = None
+
+     def _request_with_recovery(self, tools):
+         # Runtime-owned recovery stays inside this request: no new wake, tool
+@@ -676,6 +692,9 @@ class MonitorProviderClient:
+                     self._progress('response_empty', request_id=request_id)
+                     raise RetryableProviderError('Empty model response: no text or tool call')
+                 record['outcome'] = 'success'
++                if getattr(self, 'native_projection_acceptance', False):
++                    self._progress('request_accepted', request_id=request_id,
++                                   purpose=record['purpose'], request_sha256=self._last_payload_sha256)
+                 return result
+             except (RetryableProviderError, requests.Timeout, requests.ConnectionError,
+                     requests.exceptions.ChunkedEncodingError) as exc:
+diff --git a/GenericAgent-main/monitor_agent_core/root_records_native_v2.py b/GenericAgent-main/monitor_agent_core/root_records_native_v2.py
+new file mode 100644
+index 00000000..51327bcb
+--- /dev/null
++++ b/GenericAgent-main/monitor_agent_core/root_records_native_v2.py
+@@ -0,0 +1,123 @@
++"""Mechanical root projection retaining native, closed tool exchanges.
++
++This codec makes no judgment about the usefulness or truth of old content.
++The source is returned separately for durable archival before commit.
++"""
++
++import copy
++
++from .root_records_v1 import REMOVE, _closed, canonical, digest
++
++
++def project(history):
++    """Return (projected history, source/position manifest, exact source bytes)."""
++    pairs = _closed(history)
++    source = canonical(history)
++    projected, rows, removed_messages = [], [], []
++    removed = 0
++    for mi, message in enumerate(history):
++        kept = []
++        projected_index = len(projected)
++        for bi, block in enumerate(message['content']):
++            drop = (message['role'], block['type']) in REMOVE
++            row = {
++                'source_message': mi, 'source_block': bi,
++                'source_sha256': digest(canonical(block)),
++                'rule': 'remove_early_assistant_text' if drop else 'retain_native',
++                'projected_message': None if drop else projected_index,
++                'projected_block': None if drop else len(kept),
++            }
++            rows.append(row)
++            if drop:
++                removed += 1
++            else:
++                kept.append(copy.deepcopy(block))
++        if kept:
++            projected.append({'role': message['role'], 'content': kept})
++        elif message['role'] == 'assistant':
++            removed_messages.append(mi)
++        else:
++            raise ValueError('Empty non-assistant historical message')
++    _closed(projected)
++    for row in rows:
++        if row['rule'] == 'retain_native':
++            target = projected[row['projected_message']]['content'][row['projected_block']]
++            if digest(canonical(target)) != row['source_sha256']:
++                raise ValueError('Native root record round-trip mismatch')
++    projected_raw = canonical(projected)
++    return projected, {
++        'codec': 'root_records_native_v2', 'source_sha256': digest(source),
++        'projected_sha256': digest(projected_raw), 'source_items': len(history),
++        'projected_items': len(projected), 'tool_pairs': pairs,
++        'removed_blocks': removed, 'removed_messages': removed_messages,
++        'applied': bool(removed), 'rows': rows,
++    }, source
++
++
++def _closed_exchange_cuts(history):
++    cuts, outstanding = [], set()
++    for index, message in enumerate(history):
++        blocks = message['content']
++        if message['role'] == 'assistant':
++            calls = [block['id'] for block in blocks if block['type'] == 'tool_use']
++            outstanding.update(calls)
++            if not calls and not outstanding:
++                cuts.append(index + 1)
++        else:
++            results = [block for block in blocks if block['type'] == 'tool_result']
++            for block in results:
++                outstanding.discard(block['tool_use_id'])
++            if results and not outstanding:
++                cuts.append(index + 1)
++    return cuts
++
++
++def validate_transform(kind, before, after, archive, details):
++    """Check that an existing provider transform did only its documented operation."""
++    _closed(before)
++    _closed(after)
++    if kind == 'monitor_tool_payload_archival':
++        if len(before) != len(after):
++            raise ValueError('Payload archival changed message count')
++        changed = 0
++        for mi, (old_message, new_message) in enumerate(zip(before, after)):
++            if old_message['role'] != new_message['role'] or len(old_message['content']) != len(new_message['content']):
++                raise ValueError('Payload archival changed message shape')
++            for bi, (old, new) in enumerate(zip(old_message['content'], new_message['content'])):
++                if old == new:
++                    continue
++                if old_message['role'] != 'user' or old['type'] != 'tool_result':
++                    raise ValueError('Payload archival changed non-result block')
++                value = old['content']
++                expected = dict(old, content=(
++                    'Large tool result: only beginning/end excerpts are in this context, not the full evidence. '
++                    'Use file_read/code_run to inspect the full JSON string at ' + archive
++                    + f', JSON location [{mi}].content[{bi}].content (zero-based). '
++                    'The omitted middle may contain relevant evidence; excerpts alone cannot establish absence.\n'
++                    + value[:2000] + '\n[Middle archived, not shown]\n' + value[-2000:]))
++                if len(value.encode('utf-8')) <= 12000 or new != expected:
++                    raise ValueError('Payload archival changed invalid result')
++                changed += 1
++        if changed != details['results_archived']:
++            raise ValueError('Payload archival changed count mismatch')
++        return
++    if kind != 'monitor_history_compaction':
++        raise ValueError('Unknown native history transform')
++    cut = details.get('cut')
++    if type(cut) is not int or cut not in _closed_exchange_cuts(before)[:-1]:
++        raise ValueError('Compaction cut splits a tool exchange')
++    if len(after) != len(before) - cut + 1 or after[1:] != before[cut:]:
++        raise ValueError('Compaction altered retained tail')
++    carried = after[0]
++    if carried.get('role') != 'user' or len(carried.get('content', [])) != 1:
++        raise ValueError('Compaction continuation shape changed')
++    text = carried['content'][0].get('text')
++    prefix = ('Current working understanding, written after reviewing the retained dialogue below. '
++              'It is revisable, not a new task instruction. Full pre-compaction history: '
++              + archive + '\n')
++    if not isinstance(text, str) or not text.startswith(prefix):
++        raise ValueError('Compaction continuation identity changed')
++    if digest((text[len(prefix):]).encode('utf-8')) != details['continuation_note_sha256']:
++        raise ValueError('Compaction continuation note mismatch')
++    if digest(canonical(before[cut:])) != details['tail_sha256']:
++        raise ValueError('Compaction tail identity mismatch')
+diff --git a/GenericAgent-main/monitor_agent_core/runtime.py b/GenericAgent-main/monitor_agent_core/runtime.py
+index 3674ef2c..38e0fa63 100644
+--- a/GenericAgent-main/monitor_agent_core/runtime.py
++++ b/GenericAgent-main/monitor_agent_core/runtime.py
+@@ -236,7 +236,15 @@ def _capture_pilot_payload(private_root, monitor, request_id, payload):
+     """Fail before transport if the committed projection is absent or audit fails."""
+     from .agent import ProjectionIntegrityError
+     pending = monitor._projection_pending_request
+-    if pending is not None and not any(
++    native_lineage = None
++    if monitor.history_projection == 'root_records_native_v2' and pending is not None:
++        from .native_projection_capture import verify
++        try:
++            native_lineage = verify(Path(private_root), monitor, request_id, payload)
++        except Exception as exc:
++            monitor._projection_integrity_failure = 'native_projection_pre_send'
++            raise ProjectionIntegrityError('Native root projection request mismatch') from exc
++    elif pending is not None and not any(
+             block.get('type') == 'text' and block.get('text') == pending['ledger']
+             for message in payload.get('messages', [])
+             for block in message.get('content', []) if isinstance(block, dict)):
+@@ -245,6 +253,8 @@ def _capture_pilot_payload(private_root, monitor, request_id, payload):
+     path = Path(private_root) / 'audit' / 'provider_pre_send' / (request_id + '.json')
+     receipt = {'request_id': request_id, 'payload': payload,
+                'projection_commit': pending['commit_locator'] if pending else None}
++    if native_lineage is not None:
++        receipt['native_projection_lineage'] = native_lineage
+     try:
+         path.parent.mkdir(parents=True, exist_ok=True)
+         with path.open('x', encoding='utf-8') as stream:
+@@ -253,6 +263,22 @@ def _capture_pilot_payload(private_root, monitor, request_id, payload):
+             os.fsync(stream.fileno())
+         if json.loads(path.read_text(encoding='utf-8')) != receipt:
+             raise OSError('Provider pre-send archive readback mismatch')
++        if native_lineage is not None:
++            from .root_records_v1 import canonical as root_records_canonical
++            from .root_records_v1 import digest as root_records_digest
++            history = json.loads(json.dumps(payload['messages'], ensure_ascii=False))
++            purpose = native_lineage['purpose']
++            transient = (getattr(monitor.client, 'maintenance_prompt', None)
++                         if purpose in ('continuation', 'format_repair') else
++                         getattr(monitor.client, 'request_local_context', None))
++            if transient is not None and history[-1] == {
++                    'role': 'user', 'content': [{'type': 'text', 'text': transient}]}:
++                history.pop()
++            pending['last_captured_history'] = history
++            pending['last_transform_count'] = len(pending['transforms'])
++            pending['last_capture_locator'] = 'monitor/audit/provider_pre_send/' + request_id + '.json'
++            pending['last_payload_sha256'] = root_records_digest(root_records_canonical(payload))
++            pending['last_transient'] = transient
+     except (OSError, ValueError) as exc:
+         monitor._projection_integrity_failure = 'provider_pre_send_archive'
+         raise ProjectionIntegrityError('Provider pre-send archive failed') from exc
+@@ -594,7 +620,9 @@ def _worker(config, commands, outputs):
+                          "failed_at": time.time()})
+             # A terminal transport recovery must not silently restart via the
+             # queued patrol/completion commands after the parent has failed it.
+-            return not isinstance(exc, ProviderRecoveryExhausted)
++            return not (isinstance(exc, ProviderRecoveryExhausted) or
++                        (getattr(monitor, 'history_projection', 'off') == 'root_records_native_v2' and
++                         getattr(monitor, '_projection_integrity_failure', None) is not None))
+         if action.kind == "wait":
+             release_wake = close_watch or wake_receipts is not None
+             close_watch = action.payload.get('mode', 'follow') == 'follow'
+
+
+===== FULL ADDED FILE: GenericAgent-main/tests/test_root_records_native_v2.py =====
+"""Zero-model native root projection and actual pilot capture seam."""
+
+import copy
+import json
+import threading
+import time
+
+import pytest
+
+from monitor_agent_core.agent import MONITOR_TOOLS, MonitorAgent, ProjectionIntegrityError
+from monitor_agent_core.actions import MonitorAction, ToolOutcome
+from monitor_agent_core.loop import run_review
+from monitor_agent_core.provider import (HistoryCapacityError, MonitorProviderClient,
+                                          ProviderRecoveryExhausted, _claude_tools)
+from monitor_agent_core.root_records_native_v2 import project
+from monitor_agent_core.root_records_v1 import canonical, digest
+from monitor_agent_core.runtime import _capture_pilot_payload
+from test_crs_v0 import fixture
+
+
+def history():
+    return [
+        {'role': 'user', 'content': [{'type': 'text', 'text': '原任务 @RECORD'}]},
+        {'role': 'assistant', 'content': [
+            {'type': 'thinking', 'thinking': 'old claim', 'signature': 'sig'},
+            {'type': 'tool_use', 'id': 'a', 'name': 'file_read', 'input': {'path': 'a.go'}},
+            {'type': 'tool_use', 'id': 'b', 'name': 'code_run', 'input': {'code': 'echo ok'}}]},
+        {'role': 'user', 'content': [
+            {'type': 'tool_result', 'tool_use_id': 'b', 'content': 'ok'},
+            {'type': 'tool_result', 'tool_use_id': 'a', 'content': 'source'}]},
+        {'role': 'assistant', 'content': [{'type': 'text', 'text': 'verified earlier'}]},
+    ]
+
+
+def native_fixture(tmp_path, *, source=None):
+    monitor, client, workspace, handoff = fixture(tmp_path, rhr=True, rer=True)
+    monitor.history_projection = 'root_records_native_v2'
+    client.provider = 'anthropic'
+    client.native_projection_acceptance = True
+    client.pre_send_capture = lambda request_id, payload: _capture_pilot_payload(
+        workspace.private_root, monitor, request_id, payload)
+    client.history_transform_callback = monitor._record_native_projection_transform
+    client.restore_history(history() if source is None else source)
+    monitor._enter_root_frame(handoff)
+    monitor._projection_root_input = 'exact current root input'
+    monitor._projection_root_system = 'exact system'
+    monitor._projection_root_tools = _claude_tools(MONITOR_TOOLS)
+    client.system = 'exact system'
+    client.history.append({'role': 'user', 'content': [
+        {'type': 'text', 'text': monitor._projection_root_input}]})
+    return monitor, client, workspace, handoff
+
+
+def test_native_blocks_parallel_exchange_and_source_round_trip():
+    original = history()
+    frozen = copy.deepcopy(original)
+    projected, manifest, source = project(original)
+    assert original == frozen and source == canonical(original)
+    assert manifest['tool_pairs'] == 2 and manifest['removed_messages'] == [3]
+    assert manifest['removed_blocks'] == 2
+    assert projected[1]['content'] == original[1]['content'][1:]
+    assert projected[2] == original[2]
+    assert 'verified earlier' not in json.dumps(projected)
+    assert project(projected)[0] == projected
+    assert project(projected)[1]['applied'] is False
+
+
+@pytest.mark.parametrize('change', ['open', 'duplicate', 'unknown', 'early_result'])
+def test_invalid_history_fails_without_mutation(change):
+    original = history()
+    if change == 'open':
+        original[2]['content'].pop()
+    elif change == 'duplicate':
+        original[1]['content'][2]['id'] = 'a'
+    elif change == 'unknown':
+        original[2]['content'][0]['is_error'] = False
+    else:
+        original.insert(1, original.pop(2))
+    frozen = copy.deepcopy(original)
+    with pytest.raises(ValueError):
+        project(original)
+    assert original == frozen
+
+
+def test_actual_capture_archive_chain_and_tamper(tmp_path):
+    monitor, client, workspace, _ = native_fixture(tmp_path)
+    _, _, payload = client._anthropic_request(MONITOR_TOOLS)
+    _capture_pilot_payload(workspace.private_root, monitor, 'review-1', payload)
+    assert monitor._projection_pending_request['request_id'] == 'review-1'
+    saved = json.loads((workspace.private_root / 'audit/provider_pre_send/review-1.json').read_text(encoding='utf-8'))
+    assert saved['native_projection_lineage']['source_sha256'] == digest(canonical(history()))
+    monitor._progress('request_usage', request_id='maintenance', usage={})
+    assert monitor._projection_pending_request is not None
+    monitor._progress('request_accepted', request_id='maintenance')
+    assert monitor._projection_pending_request is not None
+    monitor._progress('request_accepted', request_id='review-1', request_sha256='accepted')
+    assert monitor._projection_pending_request['verified'] is True
+    _capture_pilot_payload(workspace.private_root, monitor, 'review-2', payload)
+
+    (tmp_path / 'tamper').mkdir()
+    monitor, client, workspace, _ = native_fixture(tmp_path / 'tamper')
+    commit = next((workspace.private_root / 'audit/root_projections').rglob('source.json'))
+    commit.write_text('[]', encoding='utf-8')
+    _, _, payload = client._anthropic_request(MONITOR_TOOLS)
+    with pytest.raises(ProjectionIntegrityError):
+        _capture_pilot_payload(workspace.private_root, monitor, 'blocked', payload)
+    assert monitor._projection_integrity_failure == 'native_projection_pre_send'
+    assert not (workspace.private_root / 'audit/provider_pre_send/blocked.json').exists()
+
+
+def test_no_pilot_capture_hook_rejected_before_history_mutation(tmp_path):
+    monitor, client, _, handoff = fixture(tmp_path, rhr=True, rer=True)
+    monitor.history_projection = 'root_records_native_v2'
+    client.restore_history(history())
+    with pytest.raises(ProjectionIntegrityError):
+        monitor._enter_root_frame(handoff)
+    assert client.export_history() == history()
+
+
+def test_existing_exchange_retirement_and_fake_continuation_chain(tmp_path):
+    monitor, client, workspace, _ = native_fixture(tmp_path)
+    assert 3 in client._exchange_boundaries()  # native parallel tool batch is a safe cut
+    _, _, first_payload = client._anthropic_request(MONITOR_TOOLS)
+    _capture_pilot_payload(workspace.private_root, monitor, 'first-review', first_payload)
+    monitor._progress('request_accepted', request_id='first-review', request_sha256='first')
+    client.history.extend([
+        {'role': 'assistant', 'content': [
+            {'type': 'tool_use', 'id': 'new', 'name': 'file_read', 'input': {'path': 'big'}}]},
+        {'role': 'user', 'content': [
+            {'type': 'tool_result', 'tool_use_id': 'new', 'content': 'Z' * 14000}]},
+        {'role': 'assistant', 'content': [{'type': 'text', 'text': 'new review text'}]},
+    ])
+    client.history_char_limit = 2400
+    client.history_target_chars = 1968
+    client.prepare_continuation = lambda: 'FAKE_CONTINUATION_TEST_ONLY'
+    client._relieve_tool_result_pressure()
+    assert client.history_transforms[-1]['kind'] == 'monitor_tool_payload_archival'
+    client._compact_with_continuation(client.history_measure())
+    assert client.history_transforms[-1]['kind'] == 'monitor_history_compaction'
+    assert len(monitor._projection_pending_request['transforms']) == 2
+    _, _, payload = client._anthropic_request(MONITOR_TOOLS)
+    _capture_pilot_payload(workspace.private_root, monitor, 'post-maintenance-review', payload)
+    receipt = json.loads((workspace.private_root / 'audit/provider_pre_send/'
+                          'post-maintenance-review.json').read_text(encoding='utf-8'))
+    assert len(receipt['native_projection_lineage']['transform_receipts']) == 2
+
+
+def test_first_review_after_fake_maintenance_keeps_exact_root_input(tmp_path):
+    source = history()
+    source[2]['content'][1]['content'] = 'Z' * 14000
+    monitor, client, workspace, _ = native_fixture(tmp_path, source=source)
+    client.history_char_limit = 7000
+    client.history_target_chars = 5740
+    client.prepare_continuation = lambda: 'FAKE_CONTINUATION_TEST_ONLY'
+    client._compact_history()
+    _, _, payload = client._anthropic_request(MONITOR_TOOLS)
+    _capture_pilot_payload(workspace.private_root, monitor, 'first-after-maintenance', payload)
+    assert monitor._projection_pending_request['request_id'] == 'first-after-maintenance'
+    assert monitor._projection_pending_request.get('verified') is None
+
+
+def test_illegal_transform_and_missing_archive_fail_before_send(tmp_path):
+    monitor, client, workspace, _ = native_fixture(tmp_path)
+    before = client.export_history()
+    after = copy.deepcopy(before)
+    after[0]['content'][0]['text'] = 'tampered'
+    archive = monitor._archive_continuation_history(before)
+    with pytest.raises(ProjectionIntegrityError):
+        monitor._record_native_projection_transform(
+            'monitor_history_compaction', before, after, archive,
+            {'cut': 1, 'tail_sha256': 'bad', 'continuation_note_sha256': 'bad'})
+    assert monitor._projection_integrity_failure == 'native_projection_transform'
+
+
+def test_real_request_purpose_switch_and_acceptance_with_fake_sse(tmp_path, monkeypatch):
+    monitor, client, workspace, _ = native_fixture(tmp_path)
+    events = [
+        {'type': 'message_start', 'message': {'usage': {'input_tokens': 4}}},
+        {'type': 'content_block_start', 'content_block': {'type': 'text'}},
+        {'type': 'content_block_delta', 'delta': {'type': 'text_delta', 'text': 'reviewed'}},
+        {'type': 'content_block_stop'},
+        {'type': 'message_delta', 'usage': {'output_tokens': 2}},
+        {'type': 'message_stop'},
+    ]
+    sent = []
+
+    class Response:
+        status_code = 200
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def iter_lines(self):
+            return [("data: " + json.dumps(event)).encode('utf-8') for event in events]
+
+    def post(*args, **kwargs):
+        sent.append(kwargs['json'])
+        return Response()
+
+    monkeypatch.setattr('monitor_agent_core.provider.requests.post', post)
+    client.progress_callback = monitor._progress
+    client.request_purpose = 'continuation'
+    client.maintenance_prompt = 'FAKE_CONTINUATION_TEST_ONLY'
+    client.history.append({'role': 'user', 'content': [
+        {'type': 'text', 'text': client.maintenance_prompt}]})
+    client._request([])
+    assert len(sent) == 1 and monitor._projection_pending_request.get('verified') is None
+    client.history.pop()
+    client.maintenance_prompt = None
+    client.request_purpose = 'review'
+    client._request(MONITOR_TOOLS)
+    assert len(sent) == 2 and monitor._projection_pending_request['verified'] is True
+    captures = list((workspace.private_root / 'audit/provider_pre_send').glob('*.json'))
+    assert len(captures) == 2
+
+
+def test_completed_but_stopped_response_does_not_verify_root(tmp_path, monkeypatch):
+    monitor, client, workspace, _ = native_fixture(tmp_path)
+    stop = threading.Event()
+    client.recovery_stop = stop
+    client.recovery_deadline = time.monotonic() + 60
+    events = [
+        {'type': 'message_start', 'message': {}},
+        {'type': 'content_block_start', 'content_block': {'type': 'text'}},
+        {'type': 'content_block_delta', 'delta': {'type': 'text_delta', 'text': 'ready'}},
+        {'type': 'content_block_stop'}, {'type': 'message_stop'},
+    ]
+
+    class Response:
+        status_code = 200
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def iter_lines(self):
+            for event in events:
+                if event['type'] == 'message_stop':
+                    stop.set()
+                yield ('data: ' + json.dumps(event)).encode('utf-8')
+
+    monkeypatch.setattr('monitor_agent_core.provider.requests.post', lambda *a, **k: Response())
+    with pytest.raises(ProviderRecoveryExhausted):
+        client._request(MONITOR_TOOLS)
+    assert monitor._projection_pending_request is not None
+    assert monitor._projection_pending_request.get('verified') is None
+    assert len(list((workspace.private_root / 'audit/provider_pre_send').glob('*.json'))) == 1
+
+
+def test_payload_mismatch_blocks_actual_transport(tmp_path, monkeypatch):
+    monitor, client, _, _ = native_fixture(tmp_path)
+    client.history[0]['content'][0]['text'] = 'unarchived mutation'
+    sent = []
+    monkeypatch.setattr('monitor_agent_core.provider.requests.post',
+                        lambda *a, **k: sent.append(k))
+    client._progress_request_id = 'blocked-review'
+    with pytest.raises(ProjectionIntegrityError):
+        client._request_once(MONITOR_TOOLS)
+    assert sent == []
+
+
+def test_historical_native_tool_calls_are_not_execution_queue(tmp_path, monkeypatch):
+    monitor, client, _, _ = native_fixture(tmp_path)
+    calls = []
+    monkeypatch.setattr(client, '_request_once', lambda tools: ([
+        {'type': 'tool_use', 'id': 'fresh', 'name': 'wait', 'input': {'after_turns': 1}}], {}))
+
+    def dispatch(name, arguments):
+        calls.append((name, arguments))
+        return ToolOutcome({'status': 'accepted'}, False, MonitorAction('wait', {'after_turns': 1}))
+
+    action = run_review(client, 'system', 'root input', MONITOR_TOOLS, dispatch, max_turns=1)
+    assert action.kind == 'wait'
+    assert calls == [('wait', {'after_turns': 1})]
+
+
+def test_second_handoff_reprojects_without_ledger_or_old_analysis(tmp_path):
+    monitor, client, workspace, _ = native_fixture(tmp_path)
+    client.history.append({'role': 'assistant', 'content': [
+        {'type': 'text', 'text': 'new removable analysis'}]})
+    next_handoff = {'request_id': 'completion-2', 'generation': 2, 'cursor': 2}
+    monitor.completion_state = lambda: next_handoff
+    monitor._enter_root_frame(next_handoff)
+    current = client.export_history()
+    assert 'new removable analysis' not in json.dumps(current)
+    assert not any('Historical records in original order' in str(block)
+                   for message in current for block in message['content'])
+    assert len(list((workspace.private_root / 'audit/root_projections').glob('*/committed.json'))) == 2
+
+
+def test_rer_branch_reset_and_parent_restore_do_not_replay_old_tools(tmp_path):
+    monitor, client, _, handoff = native_fixture(tmp_path)
+    client.history.extend([
+        {'role': 'assistant', 'content': [
+            {'type': 'tool_use', 'id': 'reestimate', 'name': 'allow_complete', 'input': {}}]},
+        {'role': 'user', 'content': [
+            {'type': 'tool_result', 'tool_use_id': 'reestimate', 'content': '{"status":"accepted"}'}]},
+    ])
+    parent = client.export_history()
+    monitor.crs.root_reorientation = {'root_horizon_digest': 'horizon'}
+    action = MonitorAction('root_reestimate', dict(
+        request_id=handoff['request_id'], generation=handoff['generation'],
+        root_horizon_digest='horizon'))
+    monitor.enter_root_reestimate(handoff, action)
+    assert client.export_history() == [] and monitor._projection_pending_request is None
+    monitor.restore_rer_parent('root_intervened')
+    assert client.export_history() == parent
+    assert monitor._projection_pending_request is None
+
+
+def test_wrong_handoff_and_transform_receipt_tamper_block_capture(tmp_path):
+    monitor, client, workspace, _ = native_fixture(tmp_path)
+    next_handoff = {'request_id': 'other', 'generation': 2, 'cursor': 2}
+    monitor.completion_state = lambda: next_handoff
+    _, _, payload = client._anthropic_request(MONITOR_TOOLS)
+    with pytest.raises(ProjectionIntegrityError):
+        _capture_pilot_payload(workspace.private_root, monitor, 'wrong-handoff', payload)
+    assert not (workspace.private_root / 'audit/provider_pre_send/wrong-handoff.json').exists()
+
+    (tmp_path / 'receipt').mkdir()
+    monitor, client, workspace, _ = native_fixture(tmp_path / 'receipt')
+    client.history.extend([
+        {'role': 'assistant', 'content': [
+            {'type': 'tool_use', 'id': 'big', 'name': 'file_read', 'input': {'path': 'big'}}]},
+        {'role': 'user', 'content': [
+            {'type': 'tool_result', 'tool_use_id': 'big', 'content': 'Z' * 14000}]},
+    ])
+    client.history_target_chars = 1000
+    client._relieve_tool_result_pressure()
+    receipt = monitor._projection_pending_request['transforms'][0]['receipt']
+    path = workspace.private_root / receipt[len('monitor/'):]
+    path.write_text('{}', encoding='utf-8')
+    _, _, payload = client._anthropic_request(MONITOR_TOOLS)
+    with pytest.raises(ProjectionIntegrityError):
+        _capture_pilot_payload(workspace.private_root, monitor, 'tampered-transform', payload)
+
+
+def test_replaced_prior_capture_blocks_subsequent_send(tmp_path):
+    monitor, client, workspace, _ = native_fixture(tmp_path)
+    _, _, payload = client._anthropic_request(MONITOR_TOOLS)
+    _capture_pilot_payload(workspace.private_root, monitor, 'first', payload)
+    path = workspace.private_root / 'audit/provider_pre_send/first.json'
+    path.write_text('{}', encoding='utf-8')
+    with pytest.raises(ProjectionIntegrityError):
+        _capture_pilot_payload(workspace.private_root, monitor, 'second', payload)
+
+
+def test_no_safe_cut_keeps_oversized_history_and_fails_closed(tmp_path):
+    monitor, client, _, _ = native_fixture(tmp_path)
+    client.restore_history([{'role': 'user', 'content': [
+        {'type': 'text', 'text': 'X' * 9000}]}])
+    frozen = client.export_history()
+    client.history_char_limit = 1000
+    client.history_target_chars = 820
+    client.prepare_continuation = lambda: 'FAKE_CONTINUATION_TEST_ONLY'
+    with pytest.raises(HistoryCapacityError, match='remains over capacity'):
+        client._compact_history()
+    assert client.export_history() == frozen
+
+
+def test_default_and_v1_configuration_unchanged(tmp_path):
+    monitor, client, workspace, _ = fixture(tmp_path, rhr=True, rer=True)
+    assert monitor.history_projection == 'off'
+    assert MonitorAgent(MonitorProviderClient('anthropic', dict(
+        client.config, monitor_history_projection='root_records_v1')), workspace).history_projection == 'root_records_v1'
+    assert MonitorAgent(MonitorProviderClient('anthropic', dict(
+        client.config, monitor_history_projection='root_records_native_v2')), workspace
+        ).history_projection == 'root_records_native_v2'
+
+===== FULL ADDED FILE: method_discovery/curator_supervisor_convergence_v0/root_records_native_v2_20261011/forensic_v1_rehydration.py =====
+"""Offline-only rehydration of authenticated v1 ledgers; never a live restore path."""
+
+import json
+from pathlib import Path
+
+from monitor_agent_core.root_records_v1 import PREFIX, _closed, canonical, digest, parse_ledger, project
+
+
+def _catalog(root):
+    entries = {}
+    for directory in sorted(Path(root).iterdir()):
+        if not directory.is_dir():
+            continue
+        source = json.loads((directory / 'source.json').read_text(encoding='utf-8'))
+        projected = json.loads((directory / 'projected_history.json').read_text(encoding='utf-8'))
+        manifest = json.loads((directory / 'manifest.json').read_text(encoding='utf-8'))
+        commit = json.loads((directory / 'committed.json').read_text(encoding='utf-8'))
+        locator = manifest['source_locator']
+        expected, check, _ = project(source, source_locator=locator)
+        check.update(request_id=manifest['request_id'], generation=manifest['generation'])
+        if (expected != projected or check != manifest or
+                commit['source_sha256'] != digest(canonical(source)) or
+                commit['projected_sha256'] != digest(canonical(projected)) or
+                commit['source_locator'] != locator or
+                locator != 'monitor/audit/root_projections/' + directory.name + '/source.json'):
+            raise ValueError('Unauthenticated v1 root projection: ' + directory.name)
+        if len(projected) != 1 or len(projected[0]['content']) != 1:
+            raise ValueError('Unexpected v1 projected shape')
+        ledger = projected[0]['content'][0]['text']
+        key = digest(ledger.encode('utf-8'))
+        if key in entries:
+            raise ValueError('Duplicate archived v1 ledger')
+        entries[key] = (ledger, manifest, directory.name)
+    return entries
+
+
+def rehydrate(history, root):
+    """Decode only exact, manifest-backed ledgers present in the supplied history."""
+    entries = _catalog(root)
+    visited, lineage = set(), []
+
+    def expand(messages):
+        result = []
+        for message in messages:
+            blocks = message['content']
+            candidate = (blocks[0].get('text') if message['role'] == 'user'
+                         and len(blocks) == 1 and blocks[0].get('type') == 'text' else None)
+            if isinstance(candidate, str) and candidate.startswith(PREFIX):
+                key = digest(candidate.encode('utf-8'))
+                if key not in entries or entries[key][0] != candidate:
+                    raise ValueError('Unproven ledger-like historical text')
+                if key in visited:
+                    raise ValueError('Duplicate or cyclic v1 ledger reference')
+                visited.add(key)
+                ledger, manifest, directory = entries[key]
+                rows = parse_ledger(ledger)
+                retained = [row for row in manifest['rows'] if row['rule'] == 'retain']
+                if len(rows) != len(retained):
+                    raise ValueError('v1 retained row count mismatch')
+                rebuilt = []
+                for (mi, bi, role, block), row in zip(rows, retained):
+                    if ((mi, bi, role) != (row['message_index'], row['block_index'], row['role'])
+                            or digest(canonical(block)) != row['source_sha256']):
+                        raise ValueError('v1 retained record identity mismatch')
+                    if not rebuilt or rebuilt[-1][0] != mi:
+                        rebuilt.append((mi, {'role': role, 'content': []}))
+                    rebuilt[-1][1]['content'].append(block)
+                nested = expand([item for _, item in rebuilt])
+                _closed(nested)
+                lineage.append({'directory': directory, 'ledger_sha256': key,
+                                'retained_blocks': len(rows),
+                                'source_sha256': manifest['source_sha256']})
+                result.extend(nested)
+            else:
+                if any(block.get('type') == 'text' and isinstance(block.get('text'), str)
+                       and block['text'].startswith(PREFIX) for block in blocks):
+                    raise ValueError('Ambiguous embedded ledger-like text')
+                result.append(message)
+        return result
+
+    restored = expand(history)
+    pairs = _closed(restored)
+    return restored, {'lineage': lineage, 'tool_pairs': pairs,
+                      'source_history_sha256': digest(canonical(history)),
+                      'restored_history_sha256': digest(canonical(restored))}
+
+===== FULL ADDED FILE: method_discovery/curator_supervisor_convergence_v0/root_records_native_v2_20261011/test_forensic_v1_rehydration.py =====
+"""Read-only zero-model compatibility check of the archived Kitex-S v1 failure."""
+
+import copy
+import json
+from pathlib import Path
+
+import pytest
+
+from monitor_agent_core.provider import MonitorProviderClient
+from monitor_agent_core.root_records_v1 import canonical, digest
+from monitor_agent_core.root_records_native_v2 import project
+
+from method_discovery.curator_supervisor_convergence_v0.root_records_native_v2_20261011.forensic_v1_rehydration import rehydrate
+
+
+AUDIT = (Path(__file__).resolve().parents[1] /
+         'real_task_effect_pilot_preflight_20261010/live_batch2_20261011/'
+         'arms/kitex_s/monitor/audit')
+
+
+def test_authenticated_nested_v1_records_restore_native_exchange_cuts():
+    source = json.loads((AUDIT / 'provider_history.json').read_text(encoding='utf-8'))
+    original = copy.deepcopy(source)
+    restored, lineage = rehydrate(source, AUDIT / 'root_projections')
+    assert source == original and len(source) == 2
+    assert len(lineage['lineage']) == 5
+    assert lineage['tool_pairs'] == 189
+    assert len(restored) == 250
+    projected, manifest, raw = project(restored)
+    assert raw == canonical(restored) and projected == restored
+    assert manifest['applied'] is False  # old removed reasoning is not reintroduced
+    client = MonitorProviderClient('claude', {
+        'apikey': 'offline', 'apibase': 'https://invalid.invalid',
+        'model': 'claude', 'context_win': 200000})
+    client.restore_history(projected)
+    assert client._exchange_boundaries()
+    assert len(client._exchange_boundaries()) == 101
+    assert not any(block['type'] == 'tool_use' for message in source
+                   for block in message['content'])
+    assert client.history_measure()['characters'] == 630786
+    assert client.history_char_limit == 700000 and client.history_target_chars == 574000
+
+
+def test_ledger_like_text_without_archive_provenance_fails():
+    source = json.loads((AUDIT / 'provider_history.json').read_text(encoding='utf-8'))
+    source[0]['content'][0]['text'] += 'changed'
+    with pytest.raises(ValueError, match='Unproven'):
+        rehydrate(source, AUDIT / 'root_projections')
+
+
+def test_archive_manifest_tamper_fails_without_source_rewrite(tmp_path):
+    source = json.loads((AUDIT / 'provider_history.json').read_text(encoding='utf-8'))
+    for original in (AUDIT / 'root_projections').iterdir():
+        if original.is_dir():
+            target = tmp_path / original.name
+            target.mkdir()
+            for name in ('source.json', 'projected_history.json', 'manifest.json', 'committed.json'):
+                (target / name).write_bytes((original / name).read_bytes())
+    manifest = next(tmp_path.glob('*/manifest.json'))
+    data = json.loads(manifest.read_text(encoding='utf-8'))
+    data['removed_blocks'] += 1
+    manifest.write_text(json.dumps(data), encoding='utf-8')
+    with pytest.raises(ValueError, match='Unauthenticated'):
+        rehydrate(source, tmp_path)
