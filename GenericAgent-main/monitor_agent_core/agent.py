@@ -50,6 +50,7 @@ from .ase_v0 import (SYSTEM_PROMPT as ASE_SYSTEM_PROMPT, ControlEcho,
 from .crs_v0 import ContrastiveReleaseBoundary
 from .root_records_v1 import canonical as root_records_canonical, digest as root_records_digest
 from .root_records_v1 import project as project_root_records
+from .root_records_native_v2 import project as project_root_records_native
 
 
 class ProjectionIntegrityError(RuntimeError):
@@ -465,9 +466,9 @@ class MonitorAgent:
                 self.ase_v0 and self.crs_v0 and self.rhr_v0)):
             raise ValueError('monitor_root_epistemic_reestimation must be boolean and requires ASE + CRS + RHR')
         self.history_projection = getattr(client, 'config', {}).get('monitor_history_projection', 'off')
-        if self.history_projection not in ('off', 'root_records_v1') or (
-                self.history_projection == 'root_records_v1' and not self.rer_v0):
-            raise ValueError('root_records_v1 requires ASE + CRS + RHR + RER')
+        if self.history_projection not in ('off', 'root_records_v1', 'root_records_native_v2') or (
+                self.history_projection != 'off' and not self.rer_v0):
+            raise ValueError('Root records projection requires ASE + CRS + RHR + RER')
         self._projected_root_handoffs = set()
         self._projection_integrity_failure = None
         self._projection_pending_request = None
@@ -639,6 +640,9 @@ class MonitorAgent:
         if self.semantic_continuity:
             self.client.prepare_continuation = self._prepare_continuation
             self.client.archive_continuation_history = self._archive_continuation_history
+        if self.history_projection == 'root_records_native_v2':
+            self.client.history_transform_callback = self._record_native_projection_transform
+            self.client.native_projection_acceptance = True
 
     def _active_working_context(self):
         if self.frame_kind == 'root' and not (self.verification_loop_v0 or self.ase_v0):
@@ -809,6 +813,48 @@ class MonitorAgent:
         self._atomic_private_text(relative, json.dumps(history, ensure_ascii=False))
         return "monitor/" + relative
 
+    def _record_native_projection_transform(self, kind, before, after, archive, details):
+        """Durably bind a native projection to each existing archival/retirement step."""
+        pending = self._projection_pending_request
+        if pending is None or self.history_projection != 'root_records_native_v2':
+            return
+        from .root_records_native_v2 import validate_transform
+        try:
+            anchor = (pending['transforms'][-1]['after_history'] if pending['transforms']
+                      else pending['projected_history'])
+            if before[:len(anchor)] != anchor:
+                raise ProjectionIntegrityError('Native projection transform predecessor mismatch')
+            if not archive.startswith('monitor/audit/history/') or '..' in archive.split('/'):
+                raise ProjectionIntegrityError('Native projection archive locator invalid')
+            archived = json.loads((self.workspace.private_root / archive[len('monitor/'):]).read_text(
+                encoding='utf-8'))
+            if archived != before:
+                raise ProjectionIntegrityError('Native projection history archive mismatch')
+            validate_transform(kind, before, after, archive, details)
+            record = {
+                'kind': kind, 'before_sha256': root_records_digest(root_records_canonical(before)),
+                'after_sha256': root_records_digest(root_records_canonical(after)),
+                'archive': archive, 'archive_sha256': root_records_digest(root_records_canonical(archived)),
+                'details': details,
+            }
+            relative = 'audit/root_projection_transforms/' + uuid.uuid4().hex
+            self._atomic_private_text(relative + '/after.json',
+                                      root_records_canonical(after).decode('utf-8'))
+            if json.loads((self.workspace.private_root / relative / 'after.json').read_text(
+                    encoding='utf-8')) != after:
+                raise ProjectionIntegrityError('Native projection transform after-image mismatch')
+            record['after_locator'] = 'monitor/' + relative + '/after.json'
+            raw = root_records_canonical(record)
+            self._atomic_private_text(relative + '/receipt.json', raw.decode('utf-8'))
+            if (self.workspace.private_root / relative / 'receipt.json').read_bytes() != raw:
+                raise ProjectionIntegrityError('Native projection transform receipt readback mismatch')
+            record['receipt'] = 'monitor/' + relative + '/receipt.json'
+            record['after_history'] = after
+            pending['transforms'].append(record)
+        except Exception as exc:
+            self._projection_integrity_failure = 'native_projection_transform'
+            raise ProjectionIntegrityError('Native projection transform failed') from exc
+
     def _audit_dialogue(self, event, **payload):
         """Persist completed observations immediately, independently of model input."""
         if self.dcm is not None and event == 'tool_call':
@@ -891,6 +937,7 @@ class MonitorAgent:
                          if self.frame_kind == 'root' and not self.ase_v0 else self.system_prompt)
         self.client.system = active_system + "\n\n" + CONTINUATION_MODE_PROMPT
         self.client.history.append({"role": "user", "content": [{"type": "text", "text": prompt}]})
+        self.client.maintenance_prompt = prompt
         stage = 'request'
         try:
             for attempt in range(2):
@@ -959,12 +1006,22 @@ class MonitorAgent:
             raise
         finally:
             self.client.history.pop()
+            self.client.maintenance_prompt = None
             self.client.system = previous_system
             self.client.request_purpose = previous_purpose
 
     def _progress(self, event, **fields):
-        if event == 'request_usage' and self._projection_pending_request is not None:
+        if (event == 'request_usage' and self._projection_pending_request is not None
+                and self.history_projection == 'root_records_v1'):
             self._projection_pending_request = None
+        if (event == 'request_accepted' and self._projection_pending_request is not None
+                and self.history_projection == 'root_records_native_v2'
+                and getattr(self.client, 'request_purpose', 'review') == 'review'
+                and self.completion_state is not None
+                and self.completion_state() == self.root_frame_handoff
+                and fields.get('request_id') == self._projection_pending_request.get('request_id')):
+            self._projection_pending_request['verified'] = True
+            self._projection_pending_request['accepted_request_sha256'] = fields.get('request_sha256')
         # Metadata only: never put credentials, prompts, code or reasoning here.
         path = self.workspace.private_root / 'audit' / 'progress.jsonl'
         try:
@@ -1348,7 +1405,10 @@ class MonitorAgent:
                 self._progress("advice_read_failed", error_type=type(exc).__name__)
                 updates.append("Private advice note unavailable; use existing history and original evidence. "
                                + type(exc).__name__)
-        return "\n\n".join(update for update in updates if update) or None
+        result = "\n\n".join(update for update in updates if update) or None
+        if self.history_projection == 'root_records_native_v2' and self.frame_kind == 'root':
+            self._projection_latest_review_update = result
+        return result
 
     def _commit_root_projection(self, identity, handoff):
         original = self.client.export_history()
@@ -1358,7 +1418,12 @@ class MonitorAgent:
         try:
             directory.mkdir(parents=True, exist_ok=False)
             locator = 'monitor/' + relative + '/source.json'
-            projected, manifest, _ = project_root_records(original, source_locator=locator)
+            if self.history_projection == 'root_records_native_v2':
+                if self.client.pre_send_capture is None:
+                    raise ProjectionIntegrityError('Native projection requires pilot capture hook')
+                projected, manifest, _ = project_root_records_native(original)
+            else:
+                projected, manifest, _ = project_root_records(original, source_locator=locator)
             manifest.update(request_id=identity[0], generation=identity[1])
             payloads = {
                 'source.json': source,
@@ -1388,9 +1453,14 @@ class MonitorAgent:
             self._projected_root_handoffs.add(identity)
             if manifest['applied']:
                 self._projection_pending_request = {
-                    'identity': identity, 'ledger_sha256': manifest['ledger_sha256'],
                     'commit_locator': 'monitor/' + relative + '/committed.json',
-                    'ledger': projected[0]['content'][0]['text'],
+                    'identity': identity,
+                    **({'ledger_sha256': manifest['ledger_sha256'],
+                        'ledger': projected[0]['content'][0]['text']}
+                       if self.history_projection == 'root_records_v1' else {
+                           'projected_sha256': manifest['projected_sha256'],
+                           'projected_history': projected,
+                           'transforms': [], 'request_id': None}),
                 }
             self._progress('root_records_projection', request_id=identity[0],
                            generation=identity[1], applied=manifest['applied'],
@@ -1411,7 +1481,7 @@ class MonitorAgent:
     def _enter_root_frame(self, handoff):
         if not handoff or self.completion_state is None or self.completion_state() != handoff:
             raise ValueError('Root frame requires the current pending handoff')
-        if self.history_projection == 'root_records_v1':
+        if self.history_projection in ('root_records_v1', 'root_records_native_v2'):
             identity = (handoff['request_id'], handoff['generation'])
             if identity not in self._projected_root_handoffs:
                 self._commit_root_projection(identity, handoff)
@@ -1469,6 +1539,8 @@ class MonitorAgent:
                 self.crs.root_reorientation['root_horizon_digest'] != action.payload['root_horizon_digest']):
             raise ValueError('Root re-estimation requires the same fresh pending handoff and horizon')
         branch_measure = self.client.history_measure()
+        if self.history_projection == 'root_records_native_v2':
+            self._projection_pending_request = None
         if self._rer_parent_history is None:
             self._rer_parent_history = self.client.export_history()
             self._rer_parent_history_measure = branch_measure
@@ -1491,6 +1563,8 @@ class MonitorAgent:
             return
         branch_measure = self.client.history_measure()
         self.client.restore_history(self._rer_parent_history)
+        if self.history_projection == 'root_records_native_v2':
+            self._projection_pending_request = None
         self._audit_dialogue('rer_parent_history_restored', disposition=disposition,
                              parent_history_sha256=self._rer_parent_history_measure['sha256'],
                              discarded_branch_history_sha256=branch_measure['sha256'],
@@ -1640,6 +1714,11 @@ class MonitorAgent:
                     system_sha256=hashlib.sha256(system.encode('utf-8')).hexdigest(),
                     tools_sha256=hashlib.sha256(json.dumps(
                         tools, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest())
+            if self.history_projection == 'root_records_native_v2' and self.frame_kind == 'root':
+                from .provider import _claude_tools
+                self._projection_root_input = wake_context
+                self._projection_root_system = system
+                self._projection_root_tools = _claude_tools(tools)
             action = run_review(
                 self.client, system, wake_context, tools,
                 self.dispatch, self.max_review_turns if max_turns_override is None else max_turns_override,
@@ -1688,6 +1767,9 @@ class MonitorAgent:
                 self.restore_rer_parent('error' if sys.exc_info()[1] is not None else
                                         action.kind if action is not None else 'incomplete')
             self._leave_root_frame()
+            if (self.history_projection == 'root_records_native_v2' and action is not None
+                    and action.kind != 'root_reestimate'):
+                self._projection_pending_request = None
             self.workspace.write_text(
                 "monitor/audit/provider_history.json",
                 json.dumps(self.client.export_history(), ensure_ascii=False), mode="replace",

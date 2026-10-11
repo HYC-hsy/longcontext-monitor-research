@@ -375,6 +375,7 @@ class MonitorProviderClient:
     def _relieve_tool_result_pressure(self):
         """Move oversized payloads, not decisions, to exact retrievable storage."""
         before = self.history_measure()
+        before_history = self.export_history() if getattr(self, 'history_transform_callback', None) else None
         archive = getattr(self, "archive_continuation_history", None)
         if archive is None:
             raise ProviderError("Semantic compaction requires a retrievable history archive")
@@ -407,6 +408,10 @@ class MonitorProviderClient:
             "kind": "monitor_tool_payload_archival", "before": before,
             "after": self.history_measure(), "archive": location, "results_archived": changed,
         })
+        if changed and before_history is not None:
+            self.history_transform_callback(
+                'monitor_tool_payload_archival', before_history,
+                self.export_history(), location, {'results_archived': changed})
 
     def _compact_with_continuation(self, before):
         """Retire a protocol-complete prefix, after planning and durable archival.
@@ -414,6 +419,7 @@ class MonitorProviderClient:
         Retain recent exchanges, not arbitrarily long review lifetimes. The
         same-model continuation carries unresolved concerns across this cut.
         """
+        before_history = self.export_history() if getattr(self, 'history_transform_callback', None) else None
         boundaries = self._exchange_boundaries()
         # Keep at least the latest exchange plus any pending one. Reserve room
         # for the handoff; do not require a semantic issue to close to compact.
@@ -467,6 +473,14 @@ class MonitorProviderClient:
             "target_reached": after["characters"] <= self.history_target_chars,
             "boundary_kind": "protocol_exchange", "size_unit": "utf8_bytes",
         })
+        if before_history is not None:
+            self.history_transform_callback(
+                'monitor_history_compaction', before_history,
+                self.export_history(), location,
+                {'cut': cut, 'tail_sha256': hashlib.sha256(json.dumps(
+                    before_history[cut:], ensure_ascii=False, sort_keys=True,
+                    separators=(',', ':')).encode('utf-8')).hexdigest(),
+                 'continuation_note_sha256': hashlib.sha256(note.encode('utf-8')).hexdigest()})
 
     def drain_telemetry(self):
         value = {
@@ -574,6 +588,7 @@ class MonitorProviderClient:
         entry = {"role": "user", "content": [{"type": "text", "text": context}]} if context else None
         if entry is not None:
             self.history.append(entry)
+        self.request_local_context = context
         try:
             appended = getattr(self, 'active_context_appended', None)
             callback = getattr(self, 'request_assembly_callback', None)
@@ -595,6 +610,7 @@ class MonitorProviderClient:
             if entry is not None:
                 assert self.history[-1] is entry
                 self.history.pop()
+            self.request_local_context = None
 
     def _request_with_recovery(self, tools):
         # Runtime-owned recovery stays inside this request: no new wake, tool
@@ -676,6 +692,9 @@ class MonitorProviderClient:
                     self._progress('response_empty', request_id=request_id)
                     raise RetryableProviderError('Empty model response: no text or tool call')
                 record['outcome'] = 'success'
+                if getattr(self, 'native_projection_acceptance', False):
+                    self._progress('request_accepted', request_id=request_id,
+                                   purpose=record['purpose'], request_sha256=self._last_payload_sha256)
                 return result
             except (RetryableProviderError, requests.Timeout, requests.ConnectionError,
                     requests.exceptions.ChunkedEncodingError) as exc:

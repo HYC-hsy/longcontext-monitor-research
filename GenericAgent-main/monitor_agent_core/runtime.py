@@ -236,7 +236,15 @@ def _capture_pilot_payload(private_root, monitor, request_id, payload):
     """Fail before transport if the committed projection is absent or audit fails."""
     from .agent import ProjectionIntegrityError
     pending = monitor._projection_pending_request
-    if pending is not None and not any(
+    native_lineage = None
+    if monitor.history_projection == 'root_records_native_v2' and pending is not None:
+        from .native_projection_capture import verify
+        try:
+            native_lineage = verify(Path(private_root), monitor, request_id, payload)
+        except Exception as exc:
+            monitor._projection_integrity_failure = 'native_projection_pre_send'
+            raise ProjectionIntegrityError('Native root projection request mismatch') from exc
+    elif pending is not None and not any(
             block.get('type') == 'text' and block.get('text') == pending['ledger']
             for message in payload.get('messages', [])
             for block in message.get('content', []) if isinstance(block, dict)):
@@ -245,6 +253,8 @@ def _capture_pilot_payload(private_root, monitor, request_id, payload):
     path = Path(private_root) / 'audit' / 'provider_pre_send' / (request_id + '.json')
     receipt = {'request_id': request_id, 'payload': payload,
                'projection_commit': pending['commit_locator'] if pending else None}
+    if native_lineage is not None:
+        receipt['native_projection_lineage'] = native_lineage
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open('x', encoding='utf-8') as stream:
@@ -253,6 +263,22 @@ def _capture_pilot_payload(private_root, monitor, request_id, payload):
             os.fsync(stream.fileno())
         if json.loads(path.read_text(encoding='utf-8')) != receipt:
             raise OSError('Provider pre-send archive readback mismatch')
+        if native_lineage is not None:
+            from .root_records_v1 import canonical as root_records_canonical
+            from .root_records_v1 import digest as root_records_digest
+            history = json.loads(json.dumps(payload['messages'], ensure_ascii=False))
+            purpose = native_lineage['purpose']
+            transient = (getattr(monitor.client, 'maintenance_prompt', None)
+                         if purpose in ('continuation', 'format_repair') else
+                         getattr(monitor.client, 'request_local_context', None))
+            if transient is not None and history[-1] == {
+                    'role': 'user', 'content': [{'type': 'text', 'text': transient}]}:
+                history.pop()
+            pending['last_captured_history'] = history
+            pending['last_transform_count'] = len(pending['transforms'])
+            pending['last_capture_locator'] = 'monitor/audit/provider_pre_send/' + request_id + '.json'
+            pending['last_payload_sha256'] = root_records_digest(root_records_canonical(payload))
+            pending['last_transient'] = transient
     except (OSError, ValueError) as exc:
         monitor._projection_integrity_failure = 'provider_pre_send_archive'
         raise ProjectionIntegrityError('Provider pre-send archive failed') from exc
@@ -594,7 +620,9 @@ def _worker(config, commands, outputs):
                          "failed_at": time.time()})
             # A terminal transport recovery must not silently restart via the
             # queued patrol/completion commands after the parent has failed it.
-            return not isinstance(exc, ProviderRecoveryExhausted)
+            return not (isinstance(exc, ProviderRecoveryExhausted) or
+                        (getattr(monitor, 'history_projection', 'off') == 'root_records_native_v2' and
+                         getattr(monitor, '_projection_integrity_failure', None) is not None))
         if action.kind == "wait":
             release_wake = close_watch or wake_receipts is not None
             close_watch = action.payload.get('mode', 'follow') == 'follow'
