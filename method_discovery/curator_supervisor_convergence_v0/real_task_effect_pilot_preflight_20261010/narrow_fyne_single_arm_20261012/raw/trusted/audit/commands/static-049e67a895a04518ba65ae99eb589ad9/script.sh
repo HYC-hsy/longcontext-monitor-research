@@ -1,0 +1,1 @@
+grep -n "func (e \*Entry) MinSize" /app/widget/entry.go

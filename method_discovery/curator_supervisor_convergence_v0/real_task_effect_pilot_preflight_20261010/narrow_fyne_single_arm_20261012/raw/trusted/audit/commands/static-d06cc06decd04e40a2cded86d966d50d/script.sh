@@ -1,0 +1,1 @@
+grep -n "^type Entry struct" /app/widget/entry.go

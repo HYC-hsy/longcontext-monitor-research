@@ -1,0 +1,1 @@
+grep -n "func NewSprintf\|func StringToStringWithFormat" /app/data/binding/format.go

@@ -1,0 +1,1 @@
+grep -n "type.*App.*interface\|func.*Metadata" /app/app/app.go | head -20

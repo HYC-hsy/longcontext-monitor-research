@@ -1,0 +1,1 @@
+cd /app && timeout 60 go build ./... 2>&1

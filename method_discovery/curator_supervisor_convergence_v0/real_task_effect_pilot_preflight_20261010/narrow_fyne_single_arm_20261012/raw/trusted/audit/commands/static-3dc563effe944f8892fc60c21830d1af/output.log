@@ -1,0 +1,22 @@
+	// ActionItem is a small item which is displayed at the outer right of the entry (like a password revealer)
+	ActionItem      fyne.CanvasObject `json:"-"`
+	binder          basicBinder
+	conversionError error
+
+	minRowsVisible int
+}
+
+// NewEntry creates a new single line entry widget.
+func NewEntry() *Entry {
+	e := &Entry{Wrapping: fyne.TextTruncate}
+}
+
+// SetMinRowsVisible sets the minimum number of rows that should be visible in a multiline entry.
+// This is used as a hint for computing the minimum height. A value of 0 means no minimum.
+func (e *Entry) SetMinRowsVisible(rows int) {
+	e.minRowsVisible = rows
+	e.Refresh()
+}
+
+// Tapped is called when this entry has been tapped. We update the cursor position in
+// device-specific callbacks (MouseDown() and TouchDown()).

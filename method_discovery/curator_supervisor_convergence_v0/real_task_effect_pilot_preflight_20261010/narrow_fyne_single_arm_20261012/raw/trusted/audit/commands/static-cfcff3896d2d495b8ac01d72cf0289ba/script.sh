@@ -1,0 +1,1 @@
+grep -A8 "if r.entry.MultiLine" /app/widget/entry.go | grep -A5 "rowHeight"

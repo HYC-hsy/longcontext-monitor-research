@@ -1,0 +1,1 @@
+grep -A5 "func (hl \*Hyperlink) Tapped" /app/widget/hyperlink.go
