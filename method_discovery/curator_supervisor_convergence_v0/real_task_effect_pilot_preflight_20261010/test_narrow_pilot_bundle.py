@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 import threading
@@ -118,3 +119,57 @@ def test_real_prepare_bundle_narrow_and_task_only(tmp_path, monkeypatch):
         'public_task_instruction_sha256': receipts[condition]['public_package']['included']['instruction.md'],
         'profile_public': receipts[condition]['profile_public'],
     } for condition in ('T', 'S')}, sort_keys=True))
+
+
+def test_narrow_staged_bundle_real_harbor_fake_provider(tmp_path):
+    """Run the real Harbor/agent entry with an offline Unix-socket provider."""
+    from .pilot_offline_harbor import run_offline
+
+    harbor = os.environ.get('PILOT_HARBOR_PYTHON')
+    if not SOURCE.exists() or not RUNTIME.exists() or not harbor:
+        pytest.skip('Pinned local pilot assets or Harbor Python unavailable')
+    task_profile = tmp_path / 'task_profile.py'
+    task_profile.write_text(
+        "native_claude_cc_vibe_opus48 = {'model': 'claude-opus-4-8', "
+        "'apikey': 'offline-test-key', 'apibase': 'https://offline.invalid'}\n",
+        encoding='utf-8')
+    monitor_profile = tmp_path / 'monitor_profile.json'
+    monitor_profile.write_text(json.dumps({'claude_monitor_opus48': {
+        'model': 'claude-opus-4-8', 'max_tokens': 8192, 'thinking_type': 'adaptive',
+        'reasoning_effort': 'high', 'apikey': 'offline-test-key',
+        'apibase': 'https://offline.invalid'}}), encoding='utf-8')
+    manifest_body = json.loads((HERE / 'FYNE_KITEX_FOUR_ARM_MANIFEST_DRAFT.json').read_text())
+    manifest_body['supervisor_variant'] = 'narrow_v1'
+    manifest_body['private_profile_file_sha256_only'] = {
+        'task': _sha(task_profile), 'supervisor': _sha(monitor_profile)}
+    manifest = tmp_path / 'offline_manifest.json'
+    manifest.write_text(json.dumps(manifest_body), encoding='utf-8')
+    root = tmp_path / 'narrow_harbor'
+    result = run_offline(manifest=manifest, task_id=TASK_ID, condition='S',
+        run_id='offline-narrow-harbor-001', run_root=root, source_root=SOURCE,
+        ga_source=GA, runtime_root=RUNTIME, task_profile_file=task_profile,
+        monitor_profile_file=monitor_profile,
+        python_home='cpython-3.12.12-linux-x86_64-gnu', harbor_python=Path(harbor),
+        timeout_seconds=360, verify_sentinel=True, supervisor_variant='narrow_v1')
+    assert result['returncode'] == 0 and not result['timed_out']
+    assert result['spool_errors'] == [] and result['offline_containers_removed'] == []
+    assert result['frozen_product'] and result['harbor_verifier_released']
+    frozen = json.loads((root / 'archive/agent_end_frozen.json').read_text())
+    assert frozen['task_terminal']['result'] == 'CURRENT_TASK_DONE'
+    assert frozen['legal_agent_end'] is True
+    captures = sorted((root / 'archive/fake_provider_requests').glob('*.json'))
+    monitor_requests = [record['body'] for path in captures
+                        if (record := json.loads(path.read_text(encoding='utf-8')))['route'] == 'monitor']
+    assert monitor_requests
+    assert any('You supervise the Task\'s current behavior' in str(request['system'])
+               for request in monitor_requests)
+    assert all(request['model'] == 'claude-opus-4-8' for request in monitor_requests)
+    loaded = json.loads((root / 'bundle/source/monitor_agent_core/models.local.json').read_text(
+        encoding='utf-8'))[
+        'claude_monitor_opus48']
+    assert loaded['monitor_narrow_supervisor_v1'] is True
+    assert loaded['monitor_history_projection'] == 'off'
+    assert result['fake_evaluator']['native_evaluator_calls'] == 0
+    print('OFFLINE_HARBOR_NARROW_EVIDENCE=' + json.dumps({
+        'result': result, 'task_terminal': frozen['task_terminal'],
+        'monitor_requests': len(monitor_requests), 'run_root': str(root)}, sort_keys=True))

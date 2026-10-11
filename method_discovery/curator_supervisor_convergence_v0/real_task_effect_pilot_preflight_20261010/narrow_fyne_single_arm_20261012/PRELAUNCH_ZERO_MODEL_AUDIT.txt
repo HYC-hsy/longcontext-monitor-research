@@ -1,0 +1,101 @@
+Fyne narrow Supervisor single-arm prelaunch, 2026-10-12
+
+Scope: test/fixture changes only. No production runtime, method prompt, Task
+source, native evaluator, profile or budget was edited. The prior audited
+checkout was 2c2cdaf7e24311f0de1b9313081ae3faa5164351. Unrelated
+untracked __pycache__ directories were left untouched.
+
+Authorized arm: roadmapbench:fyn-2.2.0-roadmap, S route,
+supervisor_variant=narrow_v1. This is a single exposed development task,
+not a concurrent T/N pair. Frozen manifest:
+FYNE_NARROW_SINGLE_ARM_MANIFEST.json, raw SHA-256
+544bf8dea094aeee1f69620918ec865308295b4a0980b5d569dea6b6ea46b137.
+The actual private profile file hashes match the manifest; no credential
+bytes are in this report. Public resolved Supervisor identity: model
+claude-opus-4-8, max_tokens 8192, adaptive/high, temperature 1 from the
+existing private profile, connect/read 120/300, max_retries 0,
+incomplete_stream_recovery_v1 true, ASE true, CRS/RHR/RER false,
+history_projection off, narrow switch true. Task profile and source are
+the previously pinned Fyne assets. The manifest remains unauthorized.
+
+Changed zero-model coverage:
+1. test_narrow_supervisor_v1.py now checks a pending submission, real
+   ControlEcho receipt transition to active=true, a new public Task event
+   in the next review, one-cycle Echo visibility/consumption, and exactly
+   two total review requests (no extra local release reconsideration).
+2. test_task_terminal_gate.py drives the actual agent_runner_loop generator
+   through GenericAgent.run into its done queue for CURRENT_TASK_DONE,
+   MAX_TURNS_EXCEEDED and EXCEPTION. Existing 42 hook cases check the
+   agent_end file-read identity/evaluation gate. This unit seam does not
+   alone exercise the CLI file writer; the Harbor fixture below does.
+3. The test-only Unix-socket fake gateway recognizes the narrow method
+   and returns file_write, ordinary patrol, then root allow_complete.
+   It does not contact any external endpoint.
+4. test_narrow_pilot_bundle.py runs real Harbor, real Fyne pinned image,
+   staged GenericAgent source, actual container config loader and native
+   Task/Monitor loops against that fake gateway. It asserts actual
+   Monitor requests, CURRENT_TASK_DONE in task_terminal.json read by the
+   hook, legal_agent_end, writer/sidecar stop, frozen product and fake
+   evaluator barrier. No native evaluator is run.
+
+Commands and complete result lines:
+  python -m pytest GenericAgent-main/tests/test_narrow_supervisor_v1.py
+    method_discovery/curator_supervisor_convergence_v0/
+    real_task_effect_pilot_preflight_20261010/test_task_terminal_gate.py
+    method_discovery/curator_supervisor_convergence_v0/
+    real_task_effect_pilot_preflight_20261010/
+    test_narrow_pilot_bundle.py::test_real_prepare_bundle_narrow_and_task_only
+    -q -s --import-mode=importlib --basetemp E:\narrow_unit_pytest_20261012
+  exit 0; 51 passed in 15.56s.
+  Final local request: system SHA dce64caf2ba7e7cec52c15177e9dca5acfdd1f22f45a00545524f93df095a338;
+  tools SHA 69390267fc3913c688c920a48766ab014b775309b38beb23ecc77bd9f390cb4f;
+  seven tools file_read/file_write/file_patch/code_run/wait/intervene/allow_complete.
+  Prepared S profile: narrow=true, projection=off, CRS/RHR/RER=false.
+
+  PILOT_HARBOR_PYTHON=E:\LongContext\bench_runtime\m4\harbor-env\Scripts\python.exe
+  PYTHONPATH=E:\longcontext-cqs-v0-20261005;E:\longcontext-cqs-v0-20261005\GenericAgent-main
+  python -m pytest method_discovery/curator_supervisor_convergence_v0/
+    real_task_effect_pilot_preflight_20261010/
+    test_narrow_pilot_bundle.py::test_narrow_staged_bundle_real_harbor_fake_provider
+    -q -s --import-mode=importlib --basetemp E:\narrow_offline_pytest_20261011c
+  exit 0; 1 passed in 327.32s. Fake provider requests=4, of which
+  Monitor=3. Harbor returncode=0, timed_out=false, spool_errors=[],
+  offline_containers_removed=[], frozen_product=true,
+  harbor_verifier_released=true. task_terminal result=CURRENT_TASK_DONE,
+  run_id=offline-narrow-harbor-001,
+  task_id=roadmapbench:fyn-2.2.0-roadmap, legal_agent_end=true.
+  Fake evaluator sentinel only: native_evaluator_calls=0.
+  Frozen product SHA-256:
+  590b1b610d21e3aecc04310a411c2fc26355824fff045d842b2a11782eb12354.
+  Raw local fixture: E:\narrow_offline_pytest_20261011c\test_narrow_staged_bundle_real0\narrow_harbor.
+
+  python -m pytest GenericAgent-main/tests/test_ase_v0.py -q -rs
+    --import-mode=importlib --basetemp E:\narrow_ase_pytest_20261012
+  exit 0; 21 passed, 8 skipped in 2.44s. The eight pre-existing
+  explicit skips are at test_ase_v0.py lines 179 and 259 (replaced by
+  delivery-acknowledged worker tests), 416 (queued intervention no longer
+  creates visible active control), 512 and 682 (retired persistent local
+  episode), 727 (retired experimental episode/meta-regulation), 783
+  (persistent episode context replaced by Echo), 803 (episode telemetry
+  removed). None were counted as passing.
+
+The first integration test attempt had Harbor success and a legal frozen
+product, but the test subsequently failed reading UTF-8 request JSON with
+Windows' default GBK decoder. Only the test's explicit UTF-8 decoding and
+its fake-evaluator result field access were corrected; the fresh fixture
+rerun above passed. The original attempt's raw root remains at
+E:\narrow_offline_pytest_20261011b\test_narrow_staged_bundle_real0\narrow_harbor.
+
+Nonfatal local pytest atexit warning in unit runs: Windows denied resolve
+of an older pytest temp directory; pytest reported exit 0 and all 51
+assertions passed. No ignored assertion or production failure is hidden.
+
+Current real Task calls=0; real Supervisor calls=0; external provider/API
+calls=0; native evaluator calls=0; training/scoring-model calls=0.
+The offline Harbor fixture did use the native Task and Monitor runtimes
+against a local deterministic fake provider, not a real experiment.
+
+Remaining live-time checks: exact authorization binding, fresh run root,
+actual image/source/profile/mount identity, agent-phase /tests isolation,
+and all evaluator/cleanup gates. This prelaunch record is not evidence of
+supervisory method quality or eventual native task correctness.

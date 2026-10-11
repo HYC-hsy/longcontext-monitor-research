@@ -108,10 +108,34 @@ def test_intervention_uses_existing_receipt_and_fresh_feedback(tmp_path, monkeyp
     receipts = []
     monitor.intervention_callback = lambda message: (
         receipts.append(message) or {'submission_id': 'sent-1', 'delivered': True})
-    responses(client, monkeypatch, [('intervene', {'message': 'Inspect the route behavior.'})])
+    snapshots = responses(client, monkeypatch, [
+        ('intervene', {'message': 'Inspect the route behavior.'}),
+        ('wait', {'after_turns': 1, 'mode': 'patrol'}),
+    ])
     assert monitor.review('Local wake').kind == 'local_intervened'
     assert receipts == ['Inspect the route behavior.']
-    assert monitor.control_echo.active is not None
+    assert monitor.control_echo.pending_submission['submission_id'] == 'sent-1'
+    assert monitor.control_echo.active is False
+    assert monitor.control_echo.reconcile_receipt({
+        'submission_id': 'sent-1', 'delivered': True,
+        'delivery_kind': 'task_interrupt', 'delivery_task_turn': 12,
+        'delivery_cursor': 1,
+    }) == 'delivered'
+    assert monitor.control_echo.active is True
+    events = workspace.evidence_root / 'public_events.jsonl'
+    events.write_text(json.dumps({
+        'archive_sequence': 2, 'task_turn': 13, 'boundary': 'post_model_pre_tool',
+        'text': 'I am inspecting the public route before changing it.',
+        'tool_calls': [], 'tool_results': [],
+    }) + '\n', encoding='utf-8')
+    action = monitor.review('Fresh Task feedback: public event 2')
+    assert action.kind == 'wait' and action.payload['mode'] == 'patrol'
+    assert len(snapshots) == 2  # Active Echo must not cause a release reconsideration.
+    assert 'Inspect the route behavior.' in json.dumps(snapshots[1]['messages'])
+    assert 'I am inspecting the public route' in json.dumps(snapshots[1]['messages'])
+    assert monitor.control_echo.active is False
+    assert monitor.control_echo.pending_submission is None
+    assert monitor.completion_pending is False
 
 
 def test_accepted_completion_keeps_no_objection_semantics():

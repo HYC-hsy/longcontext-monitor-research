@@ -37,6 +37,12 @@ class State:
                     'content': 'Offline fixture Task Book; task authority remains original_task.txt.\n',
                     'mode': 'replace',
                 }
+            if 'You supervise the Task\'s current behavior against the public task' in str(
+                    body.get('system', '')):
+                if 'Root decision input for the current pending handoff.' in json.dumps(
+                        body.get('messages', []), ensure_ascii=False):
+                    return sequence, 'allow_complete', '', {}
+                return sequence, 'wait', '', {'after_turns': 1, 'mode': 'patrol'}
             root = any(tool.get('name') == 'allow_complete' and
                        'release_blocking_state' in
                        tool.get('input_schema', {}).get('properties', {})
