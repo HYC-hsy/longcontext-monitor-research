@@ -10,6 +10,7 @@ PILOT_OVERRIDES = {
     'monitor_root_epistemic_reestimation': True,
     'monitor_history_projection': 'root_records_v1',
     'monitor_pilot_zero_ambiguous_retry': True,
+    'incomplete_stream_recovery_v1': True,
     'timeout': 120,
     'read_timeout': 300,
     'max_retries': 0,
@@ -36,5 +37,6 @@ def public_profile_identity(config: dict) -> dict:
     """Return a credential-free manifest subset."""
     keys = ('model', 'max_tokens', 'thinking_type', 'reasoning_effort', 'temperature',
             'timeout', 'read_timeout', 'max_retries', 'verify',
+            'incomplete_stream_recovery_v1',
             *tuple(key for key in PILOT_OVERRIDES if key.startswith('monitor_')))
     return {key: config.get(key) for key in keys}

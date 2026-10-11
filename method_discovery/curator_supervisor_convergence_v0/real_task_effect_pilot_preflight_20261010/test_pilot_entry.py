@@ -165,12 +165,16 @@ def test_staged_harbor_package_and_mount_contract_are_arm_specific(tmp_path, tas
         if condition == 'S':
             assert sorted(item['read_only'] for item in spool) == [False, True, True]
             assert receipt['profile_public']['monitor_history_projection'] == 'root_records_v1'
+            assert receipt['profile_public']['incomplete_stream_recovery_v1'] is True
+            resolved = json.loads((tmp_path / 'run/control/resolved_monitor_profile.private.json').read_text())
+            assert resolved['claude_monitor_opus48']['incomplete_stream_recovery_v1'] is True
             native_monitor = [item for item in mounts if isinstance(item, dict) and
                               item.get('target') == '/logs/agent/monitor']
             assert len(native_monitor) == 1 and native_monitor[0]['read_only'] is False
             assert list((tmp_path / 'run/monitor').iterdir()) == []
         else:
             assert receipt['profile_public'] is None
+            assert not (tmp_path / 'run/control/resolved_monitor_profile.private.json').exists()
         assert not list((tmp_path / 'run/public_agent_task/tests').iterdir())
         assert not (tmp_path / 'run/public_agent_task/solution').exists()
         archive = (tmp_path / 'run/archive/offline_preparation.json').read_text()

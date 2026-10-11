@@ -23,6 +23,20 @@ class PilotProfileTests(unittest.TestCase):
         self.assertNotIn('apibase', public)
         self.assertEqual(public['max_retries'], 0)
         self.assertEqual(public['monitor_history_projection'], 'root_records_v1')
+        self.assertIs(public['incomplete_stream_recovery_v1'], True)
+
+    def test_resolved_supervisor_client_opt_in_does_not_change_generic_default(self):
+        from monitor_agent_core.provider import MonitorProviderClient
+
+        base = {'model': 'claude-opus-4-8', 'max_tokens': 8192,
+                'thinking_type': 'adaptive', 'reasoning_effort': 'high',
+                'apikey': 'offline-secret', 'apibase': 'https://offline.invalid'}
+        resolved = resolved_supervisor_profile(base)
+        pilot = MonitorProviderClient('claude_monitor_opus48', resolved)
+        generic = MonitorProviderClient('claude_monitor_opus48', base)
+        self.assertIs(pilot.config['incomplete_stream_recovery_v1'], True)
+        self.assertEqual(pilot.max_retries, 0)
+        self.assertNotIn('incomplete_stream_recovery_v1', generic.config)
 
 
 if __name__ == '__main__':
