@@ -34,12 +34,14 @@ def verify(private_root, monitor, request_id, payload):
     manifest = json.loads(read(base + '/manifest.json'))
     recomputed, expected, _ = project(source)
     expected.update(request_id=pending['identity'][0], generation=pending['identity'][1])
-    if manifest != expected or projected != recomputed or commit != {
+    if (expected['source_sha256'] != pending['source_sha256'] or
+            expected['projected_sha256'] != pending['projected_sha256'] or
+            manifest != expected or projected != recomputed or commit != {
             'request_id': pending['identity'][0], 'generation': pending['identity'][1],
             'source_sha256': expected['source_sha256'],
             'projected_sha256': expected['projected_sha256'],
             'applied': expected['applied'], 'source_locator': base + '/source.json',
-    }:
+    }):
         raise ValueError('Native projection archive or commit identity mismatch')
     last_captured = pending.get('last_captured_history')
     last_transform_count = pending.get('last_transform_count', 0)

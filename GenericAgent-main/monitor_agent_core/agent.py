@@ -1458,6 +1458,7 @@ class MonitorAgent:
                     **({'ledger_sha256': manifest['ledger_sha256'],
                         'ledger': projected[0]['content'][0]['text']}
                        if self.history_projection == 'root_records_v1' else {
+                           'source_sha256': manifest['source_sha256'],
                            'projected_sha256': manifest['projected_sha256'],
                            'projected_history': projected,
                            'transforms': [], 'request_id': None}),

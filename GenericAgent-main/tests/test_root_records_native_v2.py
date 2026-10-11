@@ -340,6 +340,31 @@ def test_replaced_prior_capture_blocks_subsequent_send(tmp_path):
         _capture_pilot_payload(workspace.private_root, monitor, 'second', payload)
 
 
+def test_coherently_replaced_projection_archive_cannot_change_committed_source(tmp_path):
+    monitor, client, workspace, handoff = native_fixture(tmp_path)
+    base = (workspace.private_root / monitor._projection_pending_request[
+        'commit_locator'][len('monitor/'):]).parent
+    changed = history()
+    changed[0]['content'][0]['text'] = 'substituted history'
+    projected, manifest, source = project(changed)
+    manifest.update(request_id=handoff['request_id'], generation=handoff['generation'])
+    commit = {'request_id': handoff['request_id'], 'generation': handoff['generation'],
+              'source_sha256': manifest['source_sha256'],
+              'projected_sha256': manifest['projected_sha256'],
+              'applied': manifest['applied'],
+              'source_locator': 'monitor/audit/root_projections/' + base.name + '/source.json'}
+    for name, value in (('source.json', source),
+                        ('projected_history.json', canonical(projected)),
+                        ('manifest.json', canonical(manifest)),
+                        ('committed.json', canonical(commit))):
+        (base / name).write_bytes(value)
+    client.restore_history(projected + [
+        {'role': 'user', 'content': [{'type': 'text', 'text': monitor._projection_root_input}]}])
+    _, _, payload = client._anthropic_request(MONITOR_TOOLS)
+    with pytest.raises(ProjectionIntegrityError):
+        _capture_pilot_payload(workspace.private_root, monitor, 'forged', payload)
+
+
 def test_no_safe_cut_keeps_oversized_history_and_fails_closed(tmp_path):
     monitor, client, _, _ = native_fixture(tmp_path)
     client.restore_history([{'role': 'user', 'content': [
