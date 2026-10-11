@@ -1,0 +1,15 @@
+
+# Final verification of all requirements
+echo "=== FINAL VERIFICATION ==="
+echo ""
+echo "Target 2: Conversion methods in endpoint.go"
+grep -n "ToMiddleware\|ToUnaryMiddleware" /app/pkg/endpoint/endpoint.go || echo "MISSING"
+echo ""
+echo "Target 5: Required files exist"
+ls -1 /app/client/option_unary.go /app/client/option_stream.go /app/client/option_ttstream.go 2>/dev/null || echo "MISSING FILES"
+echo ""
+echo "Target 5: WithRecvTimeout in streamcall"
+grep -n "func WithRecvTimeout" /app/client/callopt/streamcall/*.go 2>/dev/null || echo "MISSING"
+echo ""
+echo "Build status:"
+cd /app && go build ./... 2>&1 && echo "✓ BUILD SUCCESS" || echo "✗ BUILD FAILED"

@@ -1,0 +1,40 @@
+=== Target 1: App.Metadata() interface method ===
+83:	Metadata() AppMetadata
+
+=== Target 2: JSON theme sections parsed to correct maps ===
+	// Parse colors (generic)
+	if colorsRaw, ok := raw["colors"].(map[string]interface{}); ok {
+		for name, value := range colorsRaw {
+			if hexStr, ok := value.(string); ok {
+				c, err := parseHexColor(hexStr)
+				if err != nil {
+					return nil, fmt.Errorf("invalid color for %s: %w", name, err)
+				}
+				theme.colorsGeneric[fyne.ThemeColorName(name)] = c
+	// Parse colors-dark
+	if colorsRaw, ok := raw["colors-dark"].(map[string]interface{}); ok {
+		for name, value := range colorsRaw {
+			if hexStr, ok := value.(string); ok {
+				c, err := parseHexColor(hexStr)
+				if err != nil {
+					return nil, fmt.Errorf("invalid color for %s: %w", name, err)
+				}
+				theme.colorsDark[fyne.ThemeColorName(name)] = c
+
+=== Target 5: Toolbar constructors return concrete types ===
+func NewToolbarAction(icon fyne.Resource, onActivated func()) *ToolbarAction {
+func NewToolbarSpacer() *ToolbarSpacer {
+func NewToolbarSeparator() *ToolbarSeparator {
+
+=== Target 6: NewAllStrings signature ===
+func NewAllStrings(validators ...fyne.StringValidator) fyne.StringValidator {
+
+=== Target 7: desktop.App methods ===
+	// SetSystemTrayMenu sets a menu to be displayed when the system tray icon is right-clicked.
+	// The system tray icon must be enabled for this to have an effect.
+	SetSystemTrayMenu(menu *fyne.Menu)
+
+	// SetSystemTrayIcon sets the icon to be displayed in the system tray.
+	// This icon represents the application in the system notification area.
+	SetSystemTrayIcon(icon fyne.Resource)
+}

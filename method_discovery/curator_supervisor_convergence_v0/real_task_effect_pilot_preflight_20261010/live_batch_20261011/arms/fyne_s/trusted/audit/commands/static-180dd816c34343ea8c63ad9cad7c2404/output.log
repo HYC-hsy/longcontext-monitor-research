@@ -1,0 +1,44 @@
+=== jsonTheme struct ===
+type jsonTheme struct {
+	colorsGeneric map[fyne.ThemeColorName]color.Color // Generic colors from "Colors" section
+	colorsDark    map[fyne.ThemeColorName]color.Color // Dark variant colors from "Colors-dark" section
+	colorsLight   map[fyne.ThemeColorName]color.Color // Light variant colors from "Colors-light" section
+	sizes         map[fyne.ThemeSizeName]float32
+	fonts         map[fyne.TextStyle]fyne.Resource
+	icons         map[fyne.ThemeIconName]fyne.Resource
+}
+
+
+=== Color() method ===
+func (t *jsonTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
+	// 1. Check variant-specific colors first
+	if variant == fyne.VariantDark {
+		if c, ok := t.colorsDark[name]; ok {
+			return c
+		}
+	} else if variant == fyne.VariantLight {
+		if c, ok := t.colorsLight[name]; ok {
+			return c
+		}
+	}
+	
+	// 2. Check generic colors
+	if c, ok := t.colorsGeneric[name]; ok {
+		return c
+	}
+	
+	// 3. Fallback to default theme
+	return DefaultTheme().Color(name, variant)
+}
+
+// Font returns the font resource for the specified text style
+func (t *jsonTheme) Font(style fyne.TextStyle) fyne.Resource {
+	if f, ok := t.fonts[style]; ok {
+		return f
+	}
+
+=== Build verification ===
+# fyne.io/fyne/v2/theme
+theme/json.go:29:21: undefined: fyne.VariantDark
+theme/json.go:33:28: undefined: fyne.VariantLight
+Exit code: 0

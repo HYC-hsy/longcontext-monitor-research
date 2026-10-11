@@ -1,0 +1,1 @@
+cat /app/data/binding/sprintf.go | grep -A 5 "func.*Set"

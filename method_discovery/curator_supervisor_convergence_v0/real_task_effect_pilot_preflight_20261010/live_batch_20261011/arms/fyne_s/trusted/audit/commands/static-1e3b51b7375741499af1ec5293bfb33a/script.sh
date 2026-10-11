@@ -1,0 +1,1 @@
+cd /app && go test -run TestSprintf data/binding 2>&1 | head -30

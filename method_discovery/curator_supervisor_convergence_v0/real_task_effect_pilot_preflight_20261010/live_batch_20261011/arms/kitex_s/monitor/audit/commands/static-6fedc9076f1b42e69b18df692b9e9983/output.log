@@ -1,0 +1,30 @@
+=== TARGET 1: Streaming Types ===
+Checking pkg/streaming for required interfaces...
+pkg/streaming/types.go:26:type Header map[string]string
+pkg/streaming/types.go:29:type Trailer map[string]string
+pkg/streaming/types.go:32:type ClientStream interface {
+pkg/streaming/types.go:48:type ServerStream interface {
+
+Checking for generic wrapper functions...
+pkg/streaming/types.go:74:func NewServerStreamingClient[Res any](st ClientStream) ServerStreamingClient[Res] {
+pkg/streaming/types.go:124:func NewClientStreamingClient[Req, Res any](st ClientStream) ClientStreamingClient[Req, Res] {
+pkg/streaming/types.go:193:func NewBidiStreamingClient[Req, Res any](st ClientStream) BidiStreamingClient[Req, Res] {
+
+=== TARGET 2: Endpoint Packages ===
+total 12
+drwxr-xr-x 2 root root 4096 Oct 11 06:10 .
+drwxrwxr-x 4 root root 4096 Oct 11 06:13 ..
+-rw-r--r-- 1 root root 1977 Oct 11 06:16 endpoint.go
+✓ cep exists
+total 12
+drwxr-xr-x 2 root root 4096 Oct 11 06:10 .
+drwxrwxr-x 4 root root 4096 Oct 11 06:13 ..
+-rw-r--r-- 1 root root 1977 Oct 11 06:17 endpoint.go
+✓ sep exists
+
+Checking for UnaryEndpoint and conversion methods...
+61:type UnaryEndpoint func(ctx context.Context, req, resp interface{}) (err error)
+76:// ToMiddleware converts a UnaryMiddleware to a generic Middleware
+77:func (mw UnaryMiddleware) ToMiddleware() Middleware {
+83:// ToUnaryMiddleware converts a generic Middleware to a UnaryMiddleware
+84:func (mw Middleware) ToUnaryMiddleware() UnaryMiddleware {

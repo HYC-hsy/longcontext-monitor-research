@@ -1,0 +1,1 @@
+cd /app && go test ./data/binding -v 2>&1 | grep -A5 -B5 "sprintf\|Sprintf" | head -60

@@ -1,0 +1,1 @@
+cd /app && grep -n "func.*MinSize" widget/entry.go | head -5

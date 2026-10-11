@@ -1,0 +1,1 @@
+cd /app && go test ./data/validation -v 2>&1

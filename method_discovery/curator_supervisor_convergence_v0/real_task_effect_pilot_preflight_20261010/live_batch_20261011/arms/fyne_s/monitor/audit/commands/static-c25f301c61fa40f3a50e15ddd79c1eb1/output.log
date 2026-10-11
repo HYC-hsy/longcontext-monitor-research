@@ -1,0 +1,59 @@
+=== Target 7: desktop.App (should have 2 methods) ===
+type App interface {
+	fyne.App
+
+	// SetSystemTrayMenu sets a menu to be displayed when the system tray icon is right-clicked.
+	// The system tray icon must be enabled for this to have an effect.
+	SetSystemTrayMenu(menu *fyne.Menu)
+
+	// SetSystemTrayIcon sets the icon to be displayed in the system tray.
+	// This icon represents the application in the system notification area.
+	SetSystemTrayIcon(icon fyne.Resource)
+}
+
+=== Target 6: NewAllStrings (should accept ...fyne.StringValidator) ===
+//	)
+//
+// Since: 2.5
+func NewAllStrings(validators ...fyne.StringValidator) fyne.StringValidator {
+	return func(s string) error {
+		for _, validator := range validators {
+			if err := validator(s); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+=== Target 2: JSON Theme struct (should have Sizes, Fonts, Icons) ===
+type jsonTheme struct {
+	colors map[fyne.ThemeColorName]color.Color
+	sizes  map[fyne.ThemeSizeName]float32
+	fonts  map[fyne.TextStyle]fyne.Resource
+	icons  map[fyne.ThemeIconName]fyne.Resource
+}
+
+// Color returns the color value for the specified theme color name
+func (t *jsonTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
+	if c, ok := t.colors[name]; ok {
+		return c
+	}
+	// Fallback to default theme
+	return DefaultTheme().Color(name, variant)
+}
+
+// Font returns the font resource for the specified text style
+func (t *jsonTheme) Font(style fyne.TextStyle) fyne.Resource {
+	if f, ok := t.fonts[style]; ok {
+		return f
+	}
+	return DefaultTheme().Font(style)
+}
+
+// Icon returns the resource for the specified theme icon name
+func (t *jsonTheme) Icon(name fyne.ThemeIconName) fyne.Resource {
+	if i, ok := t.icons[name]; ok {
+		return i
+	}
+	return DefaultTheme().Icon(name)
+}

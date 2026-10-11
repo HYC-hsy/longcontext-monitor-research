@@ -1,0 +1,30 @@
+=== jsonTheme struct definition ===
+type jsonTheme struct {
+	colors map[fyne.ThemeColorName]color.Color
+	sizes  map[fyne.ThemeSizeName]float32
+	fonts  map[fyne.TextStyle]fyne.Resource
+	icons  map[fyne.ThemeIconName]fyne.Resource
+}
+
+// Color returns the color value for the specified theme color name
+func (t *jsonTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
+	if c, ok := t.colors[name]; ok {
+		return c
+
+=== Color() method implementation ===
+func (t *jsonTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
+	if c, ok := t.colors[name]; ok {
+		return c
+	}
+	// Fallback to default theme
+	return DefaultTheme().Color(name, variant)
+}
+
+// Font returns the font resource for the specified text style
+func (t *jsonTheme) Font(style fyne.TextStyle) fyne.Resource {
+	if f, ok := t.fonts[style]; ok {
+		return f
+	}
+	return DefaultTheme().Font(style)
+}
+

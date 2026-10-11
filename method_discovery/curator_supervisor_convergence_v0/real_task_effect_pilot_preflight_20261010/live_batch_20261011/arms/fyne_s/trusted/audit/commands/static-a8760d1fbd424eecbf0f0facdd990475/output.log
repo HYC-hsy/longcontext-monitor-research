@@ -1,0 +1,57 @@
+=== 1. Set() method - should implement Sscanf parsing ===
+func (s *sprintfBinding) Set(str string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Create scan targets for each source type
+	targets := make([]interface{}, len(s.sources))
+	for i, source := range s.sources {
+		switch source.(type) {
+		case Bool:
+			var v bool
+			targets[i] = &v
+		case Float:
+			var v float64
+			targets[i] = &v
+		case Int:
+			var v int
+			targets[i] = &v
+		case Rune:
+			var v rune
+			targets[i] = &v
+		case String:
+			var v string
+			targets[i] = &v
+		case URI:
+			var v string
+			targets[i] = &v
+		case Untyped:
+			// Bytes cannot round-trip
+			return fmt.Errorf("sprintf binding with Bytes/Untyped cannot be set (no round-trip support)")
+		default:
+			return fmt.Errorf("unsupported source type for Set: %T", source)
+--
+func (s *stringToStringWithFormatBinding) Set(str string) error {
+	var val string
+	n, err := fmt.Sscanf(str, s.format, &val)
+
+=== 2. StringToStringWithFormat - should check format == '%s' ===
+//	// greeting.Get() returns "Hello, Alice!"
+//
+// Since: 2.5
+func StringToStringWithFormat(source String, format string) String {
+	// Optimization: return source directly for identity format
+	if format == "%s" {
+		return source
+	}
+
+	s := &stringToStringWithFormatBinding{
+		format: format,
+		source: source,
+	}
+
+
+=== 3. Type switches for DataItem support ===
+27:		switch src := source.(type) {
+87:		switch source.(type) {
+125:		switch src := source.(type) {

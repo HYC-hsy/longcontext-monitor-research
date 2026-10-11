@@ -1,0 +1,1 @@
+ls -la /app/client/ | grep -E "option_.*\.go"

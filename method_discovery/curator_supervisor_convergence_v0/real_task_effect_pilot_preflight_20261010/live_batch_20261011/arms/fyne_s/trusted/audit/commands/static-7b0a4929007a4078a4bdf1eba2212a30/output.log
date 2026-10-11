@@ -1,0 +1,37 @@
+=== Current jsonTheme struct definition ===
+type jsonTheme struct {
+	colorsGeneric map[fyne.ThemeColorName]color.Color // Generic colors from "Colors" section
+	colorsDark    map[fyne.ThemeColorName]color.Color // Dark variant colors from "Colors-dark" section
+	colorsLight   map[fyne.ThemeColorName]color.Color // Light variant colors from "Colors-light" section
+	sizes         map[fyne.ThemeSizeName]float32
+	fonts         map[fyne.TextStyle]fyne.Resource
+	icons         map[fyne.ThemeIconName]fyne.Resource
+}
+
+// Color returns the color value for the specified theme color name
+// Resolution order: variant-specific colors first, then generic Colors, then default theme fallback
+func (t *jsonTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
+	// 1. Check variant-specific colors first
+
+=== Color() method - check if it now uses variant parameter ===
+func (t *jsonTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
+	// 1. Check variant-specific colors first
+	if variant == fyne.VariantDark {
+		if c, ok := t.colorsDark[name]; ok {
+			return c
+		}
+	} else if variant == fyne.VariantLight {
+		if c, ok := t.colorsLight[name]; ok {
+			return c
+		}
+	}
+	
+	// 2. Check generic colors
+	if c, ok := t.colorsGeneric[name]; ok {
+		return c
+	}
+	
+	// 3. Fallback to default theme
+	return DefaultTheme().Color(name, variant)
+}
+

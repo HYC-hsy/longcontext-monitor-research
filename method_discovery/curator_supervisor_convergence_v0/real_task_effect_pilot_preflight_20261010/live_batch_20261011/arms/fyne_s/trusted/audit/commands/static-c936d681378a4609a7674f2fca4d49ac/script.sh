@@ -1,0 +1,1 @@
+cd /app && go test ./theme -v -run TestFromJSON 2>&1 | head -100

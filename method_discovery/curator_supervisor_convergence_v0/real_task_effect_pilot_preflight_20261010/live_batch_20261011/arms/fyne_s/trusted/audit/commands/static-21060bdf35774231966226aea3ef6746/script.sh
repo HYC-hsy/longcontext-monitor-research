@@ -1,0 +1,2 @@
+
+cat monitor/audit/commands/static-af9cb48da59940e3aee42f0c39745954/output.log

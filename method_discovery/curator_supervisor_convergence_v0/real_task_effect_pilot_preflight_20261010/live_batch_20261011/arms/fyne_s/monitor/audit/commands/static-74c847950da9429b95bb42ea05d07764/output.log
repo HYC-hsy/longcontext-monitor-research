@@ -1,0 +1,55 @@
+=== Checking color parsing logic in FromJSONReader ===
+17:	colors map[fyne.ThemeColorName]color.Color
+25:	if c, ok := t.colors[name]; ok {
+95://	  "colors": {
+123:		colors: make(map[fyne.ThemeColorName]color.Color),
+129:	// Parse colors (generic)
+130:	if colorsRaw, ok := raw["colors"].(map[string]interface{}); ok {
+131:		for name, value := range colorsRaw {
+137:				theme.colors[fyne.ThemeColorName(name)] = c
+142:	// Parse colors-dark
+143:	if colorsRaw, ok := raw["colors-dark"].(map[string]interface{}); ok {
+144:		for name, value := range colorsRaw {
+150:				theme.colors[fyne.ThemeColorName(name)] = c
+155:	// Parse colors-light
+156:	if colorsRaw, ok := raw["colors-light"].(map[string]interface{}); ok {
+157:		for name, value := range colorsRaw {
+163:				theme.colors[fyne.ThemeColorName(name)] = c
+
+=== Showing actual parsing code for colors sections ===
+	if colorsRaw, ok := raw["colors"].(map[string]interface{}); ok {
+		for name, value := range colorsRaw {
+			if hexStr, ok := value.(string); ok {
+				c, err := parseHexColor(hexStr)
+				if err != nil {
+					return nil, fmt.Errorf("invalid color for %s: %w", name, err)
+				}
+				theme.colors[fyne.ThemeColorName(name)] = c
+			}
+		}
+	}
+	
+	// Parse colors-dark
+	if colorsRaw, ok := raw["colors-dark"].(map[string]interface{}); ok {
+		for name, value := range colorsRaw {
+			if hexStr, ok := value.(string); ok {
+				c, err := parseHexColor(hexStr)
+				if err != nil {
+					return nil, fmt.Errorf("invalid color for %s: %w", name, err)
+				}
+				theme.colors[fyne.ThemeColorName(name)] = c
+			}
+		}
+	}
+	
+	// Parse colors-light
+	if colorsRaw, ok := raw["colors-light"].(map[string]interface{}); ok {
+		for name, value := range colorsRaw {
+			if hexStr, ok := value.(string); ok {
+				c, err := parseHexColor(hexStr)
+				if err != nil {
+					return nil, fmt.Errorf("invalid color for %s: %w", name, err)
+				}
+				theme.colors[fyne.ThemeColorName(name)] = c
+			}
+		}

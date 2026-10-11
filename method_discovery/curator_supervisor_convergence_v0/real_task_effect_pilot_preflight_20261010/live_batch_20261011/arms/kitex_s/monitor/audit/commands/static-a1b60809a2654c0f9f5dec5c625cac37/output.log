@@ -1,0 +1,26 @@
+// readAndCheckFrameHeader reads and validates a frame header with enhanced diagnostics.
+// On validation errors, it includes a hex dump of the malformed frame header.
+func (fr *Framer) readAndCheckFrameHeader() (http2.FrameHeader, error) {
+	buf, err := fr.reader.Next(frameHeaderLen)
+	if err != nil {
+		return http2.FrameHeader{}, err
+	}
+
+	fh := http2.FrameHeader{
+		Length:   uint32(buf[0])<<16 | uint32(buf[1])<<8 | uint32(buf[2]),
+		Type:     http2.FrameType(buf[3]),
+		Flags:    http2.Flags(buf[4]),
+		StreamID: binary.BigEndian.Uint32(buf[5:]) & (1<<31 - 1),
+	}
+
+	// Validate frame header and provide hex dump on error
+	if fh.Length > 0xffffff {
+		return http2.FrameHeader{}, fmt.Errorf("invalid frame length %d (max 16777215), header hex: % x", fh.Length, buf)
+	}
+
+	if fh.Type > 0x9 {
+		return http2.FrameHeader{}, fmt.Errorf("invalid frame type %d, header hex: % x", fh.Type, buf)
+	}
+
+	return fh, nil
+}

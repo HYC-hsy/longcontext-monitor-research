@@ -1,0 +1,50 @@
+=== minRowsVisible usage in entry.go ===
+58-	CursorRow, CursorColumn int
+59-	OnCursorChanged         func() `json:"-"`
+60-
+61:	// minRowsVisible sets the minimum number of rows to display for a multiline entry.
+62-	// Since: 2.5
+63:	minRowsVisible int
+64-
+65-	cursorAnim *entryCursorAnimation
+66-
+67-	dirty       bool
+68-	focused     bool
+69-	text        *RichText
+70-	placeholder *RichText
+71-	content     *entryContent
+72-	scroll      *widget.Scroll
+73-
+--
+468-//
+469-// Since: 2.5
+470-func (e *Entry) SetMinRowsVisible(rows int) {
+471:	e.minRowsVisible = rows
+472-	e.Refresh()
+473-}
+474-
+475-// Tapped is called when this entry has been tapped. We update the cursor position in
+476-// device-specific callbacks (MouseDown() and TouchDown()).
+477-//
+478-// Implements: fyne.Tappable
+479-func (e *Entry) Tapped(ev *fyne.PointEvent) {
+480-	if fyne.CurrentDevice().IsMobile() && e.selecting {
+481-		e.selecting = false
+
+
+=== MinSize method locations ===
+378:// MinSize returns the size that this widget should not shrink below.
+381:func (e *Entry) MinSize() fyne.Size {
+384:	min := e.BaseWidget.MinSize()
+828:	rowHeight := e.textProvider().charMinSize(e.Password, e.TextStyle).Height
+1310:// MinSize calculates the minimum size of an entry widget.
+1313:func (r *entryRenderer) MinSize() fyne.Size {
+1315:		return r.entry.content.MinSize().Add(fyne.NewSize(0, theme.InputBorderSize()*2))
+1318:	charMin := r.entry.placeholderProvider().charMinSize(r.entry.Password, r.entry.TextStyle)
+1322:		// ensure multiline height is at least charMinSize * multilineRows
+1487:func (r *entryContentRenderer) MinSize() fyne.Size {
+1488:	minSize := r.content.entry.placeholderProvider().MinSize()
+1491:		minSize = r.content.entry.text.MinSize()
+1571:	lineHeight := r.content.entry.text.charMinSize(r.content.entry.Password, r.content.entry.TextStyle).Height
+1669:	lineHeight := r.content.entry.text.charMinSize(r.content.entry.Password, r.content.entry.TextStyle).Height
+

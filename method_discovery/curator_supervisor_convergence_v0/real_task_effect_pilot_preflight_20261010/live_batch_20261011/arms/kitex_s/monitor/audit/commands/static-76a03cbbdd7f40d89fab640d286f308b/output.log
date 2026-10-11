@@ -1,0 +1,31 @@
+=== TARGET 3: Transport Protocol Constants ===
+Checking protocol constant values...
+grep: pkg/protocol/transport/transport.go: No such file or directory
+
+=== TARGET 4: Thrift Codec Fallback ===
+Checking MarshalThriftData for Basic codec fallback...
+42:	FastWrite CodecType = 0b0001
+45:	FastReadWrite = FastRead | FastWrite
+64:	return &thriftCodec{FastWrite | FastRead}
+74:// Eg: xxxservice.NewServer(handler, server.WithPayloadCodec(thrift.NewThriftCodecWithConfig(thrift.FastWrite | thrift.FastRead)))
+81:func NewThriftCodecDisableFastMode(disableFastWrite, disableFastRead bool) remote.PayloadCodec {
+86:	if !disableFastWrite {
+87:		c |= FastWrite
+142:	// encode with FastWrite
+143:	if c.IsSet(FastWrite) && typecodec.FastCodec {
+159:		// try FrugalWrite < - > FastWrite fallback
+
+=== TARGET 5: Client Options Structure ===
+-rw-rw-r-- 1 root root 20344 Oct 11 06:28 client/option.go
+-rw-rw-r-- 1 root root  7362 Apr 12 15:21 client/option_advanced.go
+-rw-r--r-- 1 root root  3198 Oct 11 06:26 client/option_stream.go
+-rw-rw-r-- 1 root root 27408 Apr 12 15:21 client/option_test.go
+-rw-r--r-- 1 root root  2671 Oct 11 06:29 client/option_ttstream.go
+-rw-r--r-- 1 root root  2298 Oct 11 06:26 client/option_unary.go
+
+Checking WithUnaryOptions and WithStreamOptions...
+client/option_stream.go:29:func WithStreamOptions(opts ...StreamOption) Option {
+client/option_ttstream.go:28:func WithTTHeaderStreamingOptions(opts ...TTHeaderStreamingOption) Option {
+client/option_unary.go:29:func WithUnaryOptions(opts ...UnaryOption) Option {
+
+=== TARGET 6: Connection Pool Dump ===
