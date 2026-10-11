@@ -1,0 +1,2591 @@
+EVIDENCE_PACKAGE_V1 ZERO-MODEL AUDIT
+base=cea43088039154505a162514880af99acfc1c0c1
+code_commit=18d3794aa1b427cb1a8323bbbb2aa1dc716842bf
+
+===== method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/REPORT.md =====
+git_blob=4d4d2b83f4082f8b922e0db603f582ece06274bb
+blob_bytes_sha256=9b0f91caf407fd812cb755a224e215c99b3ed312a0d217c071bd77f06376d2c5
+byte_count=10008
+# evidence_package_v1 zero-model engineering audit
+
+Status: **OFFLINE_BLOCKED; no real run authorized or started.** This is a default-off,
+partly implemented candidate, not an accepted method or an executable pilot.
+Baseline: `cea43088039154505a162514880af99acfc1c0c1` on
+`crs-v0-20261007`; recent N run code `32eb30f9e0d6d4c95cc02d1afa6e594ad2e14202`.
+The old archive and benchmark Task/evaluator are unchanged. Unrelated pycache remains.
+
+## Actual implementation and reuse
+
+`REUSE_MANIFEST.json` and `SOURCE_LOCK.json` record the fixed local and author
+sources, licenses, Git blobs, call chain and reasons not to import incompatible
+external runtimes. No CoverUp, Agentless, Haskell Build or PMA code was copied.
+The implementation calls the existing MonitorAgent, run_review, provider,
+workspace, spool and pilot preparation paths. Its added pieces are:
+
+- A strict `monitor_evidence_package_v1` boolean, explicit
+  `evidence_package_v1` profile variant, ASE+narrow enabled, CRS/RHR/RER disabled,
+  projection off. Off/legacy/narrow profiles retain their old paths.
+- Phase A exposes packet preparation, source investigation and the frontier,
+  but not Task control. Its `packet_ready` has `executed=false/input_sent=false`.
+  Phase B starts with fresh conversation History plus original task, packet and
+  frontier page, then uses the existing delivery/control path.
+- The versioned frontier retains distinct cases, leads, parent focus, receipt
+  provenance, revisions, packet and findings. Ordinary Monitor file tools
+  cannot write its sibling directory. Cursor revision changes fail visibly.
+  Incomplete process receipts are not labeled behavioral verification.
+- A/B share outer cycle and maintenance request counters; root cutover carries
+  the aggregate. A stage History snapshot is read back before B begins.
+  Existing provider pre-send capture checks stage system/tools/model and
+  continuation/format-repair purpose. The real installed pilot analysis port is
+  required; an explicit fake port is used only in tests.
+
+These are real modifications to Supervisor/pilot research paths, not zero
+production-code changes. `git diff cea43088..CODE_COMMIT` is reproduced in
+the TXT audit packet. No benchmark Task, prompt, evaluator or old result changed.
+
+## Deployment boundary that blocks an experiment
+
+`pilot_entry._augment_compose` bind-mounts `run_root/monitor` read-write at
+`/logs/agent/monitor` in the main Task/Monitor container. The frontier path
+`monitor/.evidence_package_v1` is outside the sidecar's read-only
+`monitor_private` cognition mount, but remains inside the Task container's
+read-write monitor bind. A Task-side generic command could reach the would-be
+canonical state. A direct `file_write` rejection is therefore insufficient to
+certify a host-managed, non-overridable frontier. This is a concrete information
+and integrity boundary, not a missing prompt. `MonitorRuntime` now refuses the
+candidate before process start/provider send with the tested error
+`Evidence package frontier is reachable from the Task container`.
+
+Minimal next engineering decision: a trusted host-owned frontier service/port
+with a Task-inaccessible store and request binding, or equivalent demonstrated
+OS isolation. It must not give the model Docker control or Task RW access.
+Until this is implemented and certified in the actual pilot, the candidate is
+**not live-ready**. The direct-agent fake/Docker tests below do not bypass this
+gate and are not deployment certification.
+
+Other acceptance items still unverified or incomplete: generic private probe
+classification does not yet distinguish actual matched test execution from
+compile-only output for arbitrary commands; oracle/config/dependency change
+invalidation has only narrow fixtures, not complete provenance coverage;
+same-container Task access to the protected frontier is unresolved; deployed
+first/next Supervisor requests were not executed through MonitorRuntime;
+future false-premise and environment-blocked static cases lack certified
+cutoffs. The candidate's `frontier_finding` validates ID existence, case/scope
+equality, receipt completion and some receipt kinds but cannot programmatically
+prove a natural-language causal claim or that a receipt actually covers the
+asserted scope. These are not silently promoted to pass.
+
+## Zero-model commands and observed raw output
+
+Working directory `GenericAgent-main`:
+
+```text
+python -m pytest tests/test_evidence_package_v1.py tests/test_narrow_supervisor_v1.py tests/test_monitor_agent.py tests/test_monitor_provider.py -q -s --tb=short
+......{"fake_request_stage": "A", "canonical_sha256": "5484012c57197e1d7a8efa6787646984bcde406aa9567bc3ab04afd5fbd596a9", "byte_count": 8276, "fields": ["max_tokens", "messages", "model", "stream", "system", "tools"], "message_count": 2, "tool_count": 9}
+{"fake_request_stage": "B", "canonical_sha256": "8906078a5bc47cf481cd93ee7bb5d800642030013520a91fe332d3e395067ccf", "byte_count": 10591, "fields": ["max_tokens", "messages", "model", "stream", "system", "tools"], "message_count": 2, "tool_count": 12}
+.........................................................................
+79 passed in 3.46s
+exit_code=0
+```
+
+Working directory repo root, with `PYTHONPATH` set to the actual
+`GenericAgent-main` path:
+
+```text
+python -m pytest --import-mode=importlib method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/test_profile.py method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/test_bundle.py -q --tb=short
+... [100%]
+3 passed in 14.31s
+exit_code=0
+```
+
+```text
+python -m pytest --import-mode=importlib method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/test_docker_candidate.py -q -s --tb=short
+{"image_id": "sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1", "fake_provider_requests": 9, "host_receipts": 6, "task_write_denied": true, "private_copy_changed": true, "go_result": "build_without_running_tests", "behavior_verified": false, "bridge_closed": true}
+.{"image_id": "sha256:7ffcd70e49d77031b8e67eaa99226dc8468fa046f33e615118e8922b89fff32e", "fake_provider_requests": 6, "host_receipts": 3, "task_write_denied": true, "private_copy_changed": true, "go_result": "no_test_files_compile_only", "behavior_verified": false, "bridge_closed": true}
+.
+2 passed in 44.43s
+exit_code=0
+```
+
+All three pytest invocations also printed an atexit warning after the pass
+summary: `PermissionError: [WinError 5]` while resolving the preexisting
+`C:\Users\hsy\AppData\Local\Temp\pytest-of-hsy\pytest-951`; process exit
+codes stayed 0. No unrelated temp/pycache was cleaned. The first Docker
+tool output decoded the localized message with replacement characters:
+
+```text
+Error in atexit._run_exitfuncs:
+Traceback (most recent call last):
+  File "D:\python\lib\pathlib.py", line 215, in resolve
+    s = self._ext_to_normal(_getfinalpathname(s))
+PermissionError: [WinError 5] �ܾ����ʡ�: 'C:\\Users\\hsy\\AppData\\Local\\Temp\\pytest-of-hsy\\pytest-951'
+```
+
+The first Docker
+fixture attempt lacked a `task_mounts['workspace']` entry; after that was
+corrected, the Kitex expectation of `ok` failed because the command returned
+`[no test files]`. The test was corrected to classify that as compile-only.
+The complete earlier failing stdout/stderr was not retained; those attempts
+are explicitly not counted as passing evidence.
+
+The fake request hashes above are for the unit fixture's six-field payloads,
+not a live resolved-profile request identity. They are not evidence that the
+real endpoint would accept this candidate. The Docker tests performed 15
+additional intercepted fake requests (Fyne 9, Kitex 6); the unit fake path
+performed 13 (six A/B, five root, two maintenance): 28 intercepted fake
+provider attempts across the cited final tests. No real endpoint was used.
+
+## Source and configuration identities
+
+The fixed Git source/author/license identities are in `SOURCE_LOCK.json`;
+`REUSE_MANIFEST.json` links actual and rejected call paths. Local Python was
+3.9.13 with pytest 7.1.2. Docker image IDs and RepoDigests were read from
+local `docker image inspect`, not inferred from a mutable tag. The test
+bundle stages the candidate module into the real isolated bundle, reads the
+resolved `models.local.json`, and confirms the explicit S candidate flags.
+It does not start a real MonitorRuntime; the launch gate above intentionally
+blocks that. The fake unit requests omit profile-only thinking parameters,
+so they are not passed off as the full deployed request.
+
+The public effective profile uses `claude-opus-4-8`, max_tokens 8192,
+adaptive/high, `timeout=120`, `read_timeout=300`, `max_retries=0`, TLS
+verification, pilot incomplete-stream recovery true, ASE true, CRS/RHR/RER
+false, projection off. Credentials and private endpoint strings are excluded
+from the public identity. Task profile/Task inputs and scoring were unchanged.
+
+## Future work is a draft, not authorization
+
+`FUTURE_DIAGNOSTIC_MANIFEST_DRAFT.json` records two certified static cutoffs
+and two missing case categories without inventing checkpoints. A later design
+must freeze the same model, public information, tools, budget, order and
+evidence rubric for current N versus this system candidate. Static diagnosis
+would measure investigation quality, not live Task repair or task score.
+Historical C01/C02 are exposed development fragments and not independent
+tasks. No experiment was authorized by this document.
+
+## Counts and disposition
+
+Real Task model runs: 0. Real Supervisor model runs: 0. Real provider/API
+requests: 0. Native evaluator: 0. Training/scoring-model calls: 0.
+Intercepted local fake-provider requests in the cited final paths: 28.
+Candidate live pilot starts: 0. The deployment mount boundary is a failed
+mandatory gate, so there is no claim of complete offline acceptance or
+method effectiveness. The independent research audit must decide whether to
+authorize a bounded host-frontier repair and remaining acceptance work.
+
+
+===== method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/REUSE_MANIFEST.json =====
+git_blob=fb3f9063e0f9642e600d1053ee65c31cbcfde109
+blob_bytes_sha256=e18b598d36d8a1583417f6a79676002a65d230f433bccdfe573f317e57ad7069
+byte_count=6424
+{
+  "candidate": "evidence_package_v1",
+  "base_commit": "cea43088039154505a162514880af99acfc1c0c1",
+  "rule": "direct author implementation when semantics fit; minimal adaptation otherwise; no nominal reuse",
+  "sources": [
+    {
+      "name": "longcontext-monitor-research",
+      "url": "https://github.com/HYC-hsy/longcontext-monitor-research",
+      "commit": "cea43088039154505a162514880af99acfc1c0c1",
+      "license": "repository-owned code; no third-party relicensing",
+      "status": "direct reuse with research-specific coordination",
+      "files_functions": [
+        "GenericAgent-main/monitor_agent_core/loop.py:run_review",
+        "GenericAgent-main/monitor_agent_core/provider.py:MonitorProviderClient.complete/record_tool_results/export_history/restore_history",
+        "GenericAgent-main/monitor_agent_core/agent.py:MonitorAgent.review/_dispatch/_active_working_context/_prepare_continuation",
+        "GenericAgent-main/monitor_agent_core/analysis_spool.py:SpoolAnalysisSessions",
+        "GenericAgent-main/monitor_agent_core/runtime.py:MonitorRuntime/_monitor_worker",
+        "method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_profile.py:resolved_supervisor_profile",
+        "method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_entry.py:prepare_run"
+      ],
+      "call_chain": "pilot_entry.prepare_run -> resolved_supervisor_profile -> isolated_run_bundle -> runtime._monitor_worker -> MonitorAgent.review -> run_review -> MonitorProviderClient.complete -> MonitorAgent.dispatch -> SpoolAnalysisSessions",
+      "adaptation": "A/B coordination, protected frontier and finding interfaces, explicit profile variant; retain existing model transport, tool loop, Task handoff and isolated analysis port",
+      "existing_tests": "Reuse pilot fake-provider, monitor-agent-core and analysis-spool tests; record actual commands in audit",
+      "new_tests": "candidate state, lifecycle, profile, fake-provider and Docker integration"
+    },
+    {
+      "name": "CoverUp",
+      "url": "https://github.com/plasma-umass/coverup",
+      "commit": "d9ca25b9282621d2779560f2be397ab0683a6733",
+      "license": "Apache-2.0",
+      "status": "source inspected; not integrated",
+      "files_functions": [
+        "src/coverup/codeinfo.py:get_info",
+        "src/coverup/llm.py:Chatter.chat",
+        "src/coverup/coverup.py:improve_coverage",
+        "src/coverup/testrunner.py:measure_suite_coverage"
+      ],
+      "call_chain": "improve_coverage -> Chatter.chat/get_info -> Python test runner and coverage feedback",
+      "reason": "Python AST/pytest and coverage-increase acceptance do not implement Go task-grounded diagnosis; separate chat loop would replace the existing provider/receipt path",
+      "adaptation": "Use local code_run, source reads and authentic process receipts for context requests and execution feedback; no CoverUp code copied",
+      "existing_tests": "Not imported because author runtime is not integrated",
+      "new_tests": "Execution-feedback classification and evidence provenance"
+    },
+    {
+      "name": "Agentless",
+      "url": "https://github.com/OpenAutoCoder/Agentless",
+      "commit": "5ce5888b9f149beaace393957a55ea8ee46c9f71",
+      "license": "MIT",
+      "status": "source inspected; not integrated",
+      "files_functions": [
+        "agentless/test/generate_reproduction_tests.py:gen_test",
+        "agentless/test/run_tests.py:run_reproduction_tests/run_tests",
+        "agentless/test/run_regression_tests.py:save_passing_tests",
+        "agentless/test/select_regression_tests.py",
+        "agentless/repair/rerank.py:majority_voting",
+        "agentless/util/preprocess_data.py:get_repo_structure"
+      ],
+      "call_chain": "generate tests -> SWE-bench harness execution -> reproduction/regression reports -> reranking",
+      "reason": "SWE-bench patch, test_patch and selection assumptions are outside the public Go task boundary; missing reports and minimum failure count cannot stand in for behavioral validity; dependencies are not locked here",
+      "adaptation": "Retain the baseline-versus-private-probe distinction and source paths as design references only; no Agentless code copied",
+      "existing_tests": "Not imported; SWE-bench dependencies unverified",
+      "new_tests": "Report absence, no matched tests and wrong oracle do not become a pass"
+    },
+    {
+      "name": "Build Systems à la Carte",
+      "url": "https://github.com/snowleopard/build",
+      "commit": "43b18b9a362d7d27b64679ea4122e4b8c5dfedd9",
+      "license": "MIT",
+      "status": "source inspected; conceptual provenance only",
+      "files_functions": [
+        "src/Build/Task/Monad.hs:track",
+        "src/Build/Trace.hs:recordVT/verifyVT",
+        "src/Build/Rebuilder.hs:vtRebuilder",
+        "src/Build/Scheduler.hs"
+      ],
+      "call_chain": "track actual fetches -> record value/dependency hashes -> verify trace -> rebuild invalidated values",
+      "reason": "Haskell build model is not a drop-in Python/Go monitor runtime; verifyST simplifications cannot certify unknown dependencies",
+      "adaptation": "Record actual observation dependencies and invalidate current applicability on relevant source/oracle/config changes; no Haskell code copied",
+      "existing_tests": "Not imported because no runtime code is reused",
+      "new_tests": "Relevant/unknown changes stale evidence, unrelated known changes do not"
+    },
+    {
+      "name": "Proactive Memory Agent",
+      "url": "https://github.com/yifannnwu/proactive-memory-agent",
+      "commit": "89e5c0d6aadfe531a1aee42fd290d48be89973dd",
+      "license": "Apache-2.0",
+      "status": "compatibility inspected; not integrated",
+      "files_functions": ["src/memory_agent/memory/memory_agent.py:MemoryAgent.process"],
+      "call_chain": "memory-bank maintenance stage -> reminder/decision stage",
+      "reason": "Bank operations and reminder emission are incompatible with the protected case frontier, existing Task Book and current control path; replacing them would not preserve author core logic",
+      "adaptation": "Compose two phases using existing run_review; no PMA classes or prompts copied",
+      "existing_tests": "Existing PMA tests remain historical and unmodified",
+      "new_tests": "A handoff is non-executing and B alone can use existing control path"
+    }
+  ]
+}
+
+
+===== method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/SOURCE_LOCK.json =====
+git_blob=21e238ef0ded41527c91e561c71636157c77dcaa
+blob_bytes_sha256=9558363983c6b6767fad626c07ef92cf7c82db475b77e3716e2cd7fbcf53572e
+byte_count=3538
+{
+  "local_project": {
+    "repository": "HYC-hsy/longcontext-monitor-research",
+    "base_commit": "cea43088039154505a162514880af99acfc1c0c1",
+    "local_execution_path": "E:/longcontext-cqs-v0-20261005",
+    "core_reuse": [
+      "GenericAgent-main/monitor_agent_core/loop.py:run_review",
+      "GenericAgent-main/monitor_agent_core/provider.py:MonitorProviderClient",
+      "GenericAgent-main/monitor_agent_core/agent.py:MonitorAgent",
+      "GenericAgent-main/monitor_agent_core/runtime.py:MonitorRuntime",
+      "GenericAgent-main/monitor_agent_core/analysis_spool.py:SpoolAnalysisSessions"
+    ]
+  },
+  "external_sources": [
+    {
+      "repository": "plasma-umass/coverup",
+      "commit": "d9ca25b9282621d2779560f2be397ab0683a6733",
+      "license": "Apache-2.0",
+      "git_blobs": {
+        "LICENSE": "d645695673349e3947e8e5ae42332d0ac3164cd7",
+        "src/coverup/codeinfo.py": "368d8058fd391f46eb8352859cfabc9db804e242",
+        "src/coverup/llm.py": "162e2035b9822bf5b6b632042d4a2f76aefacd57",
+        "src/coverup/coverup.py": "6ad93d812cdfe38e00c186e440d86b33e464ec64",
+        "src/coverup/testrunner.py": "f360a37647afffee7d9dc3ba36dc0a88e681555b"
+      },
+      "runtime_imported": false
+    },
+    {
+      "repository": "OpenAutoCoder/Agentless",
+      "commit": "5ce5888b9f149beaace393957a55ea8ee46c9f71",
+      "license": "MIT",
+      "git_blobs": {
+        "LICENSE": "c99d4d2ce279ca269d1a4d918dff73c105a8fa17",
+        "agentless/test/generate_reproduction_tests.py": "503f8728b971b50fd49a413c11d7babb4083af84",
+        "agentless/test/run_regression_tests.py": "ba329c66bb849718c9b63cdd5081ee47979df4ed",
+        "agentless/test/run_tests.py": "11bd7a4f9ee0ac95bd2d702328dfc800d1364e05",
+        "agentless/test/select_regression_tests.py": "c1cc4b13b96347fab72271ede6ab5152c160ccc7",
+        "agentless/repair/rerank.py": "5f1cab553fab0cc369027bd77f404e51bce373a3",
+        "agentless/util/preprocess_data.py": "bb9636c5b052eb75e5c48a82d87004af3816cb19"
+      },
+      "runtime_imported": false
+    },
+    {
+      "repository": "snowleopard/build",
+      "commit": "43b18b9a362d7d27b64679ea4122e4b8c5dfedd9",
+      "license": "MIT",
+      "git_blobs": {
+        "LICENSE": "b562127b284bb300a507594ab06e85c25beb7733",
+        "src/Build/Task/Monad.hs": "0c26aa4a349416c7c2f65d75c186a3697410bda7",
+        "src/Build/Trace.hs": "f543bca14b1de1eb5456ebb72e2e61c0676603fa",
+        "src/Build/Rebuilder.hs": "45233a9fb46ef7e3b7956cd61d2c7a8ce3ca5f15",
+        "src/Build/Scheduler.hs": "57fc2578aef538e065e361223206439bec883851"
+      },
+      "runtime_imported": false
+    },
+    {
+      "repository": "yifannnwu/proactive-memory-agent",
+      "commit": "89e5c0d6aadfe531a1aee42fd290d48be89973dd",
+      "license": "Apache-2.0",
+      "git_blobs": {
+        "LICENSE": "d64a49997871b36e78a2103cd1501785c0fa08d9",
+        "src/memory_agent/memory/memory_agent.py": "216cedf07837677c198cf9b7bafdea04858e6435"
+      },
+      "runtime_imported": false
+    }
+  ],
+  "zero_model_environment": {
+    "python": "3.9.13",
+    "pytest": "7.1.2",
+    "pinned_image_ids": {
+      "roadmapbench:fyn-2.2.0-roadmap": "sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1",
+      "roadmapbench:ktx-0.13.0-roadmap": "sha256:7ffcd70e49d77031b8e67eaa99226dc8468fa046f33e615118e8922b89fff32e"
+    },
+    "dependency_scope": "Only the existing repository environment and the two already installed pinned Docker images were used; external source runtime dependencies were not installed or treated as verified."
+  }
+}
+
+
+===== method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/FUTURE_DIAGNOSTIC_MANIFEST_DRAFT.json =====
+git_blob=0e7b381cce830ffe7f59b350077d3c815910fef3
+blob_bytes_sha256=515635834ebadfc6ce8fc905da684aa00acb4cd68cdcd5c0ba394aa6b0cbe1ad
+byte_count=3465
+{
+  "status": "draft_not_authorized_not_runnable",
+  "candidate": "evidence_package_v1",
+  "comparison": "existing N versus evidence_package_v1 on identical static public materials",
+  "interpretation": "system diagnosis, not a single-variable ablation or an online Task outcome test",
+  "selection_rule": "Freeze eligible cutoff, source identities, information boundary and inclusion reason before any model output; include a concrete concern, sound ongoing work, an erroneous supervisory premise and an environment-blocked inquiry. Do not select or replace cases using historical native scores or candidate output.",
+  "cases": [
+    {
+      "id": "C01",
+      "type": "productive investigation with an unresolved issue",
+      "source": "diagnostic_static_adapter_v1_20261009/C01_VISIBILITY_MANIFEST.json",
+      "dialogue_cutoff": 307,
+      "public_cursor": 120,
+      "ordinary_workspace_files": 2472,
+      "ordinary_workspace_sha256": "88b7f94d499368196bc8ac1870da4491769598eb4ce567b8c6e12a10bf289a0b",
+      "availability": "certified static material, not an online process restoration",
+      "caveat": "Not a mandatory silence or no-intervention label; assess whether any interruption has current grounds."
+    },
+    {
+      "id": "C02",
+      "type": "concrete concern already visible in the historical fragment",
+      "source": "diagnostic_static_adapter_v1_20261009/C02_VISIBILITY_MANIFEST.json",
+      "dialogue_cutoff": 418,
+      "public_cursor": 161,
+      "ordinary_workspace_files": 2476,
+      "ordinary_workspace_sha256": "40acbedf3c03d863cac8514298618f74ca999c706466dc426ae8eb638708d2f0",
+      "availability": "certified static material, not an online process restoration",
+      "caveat": "Historical defect knowledge is research-side only and must not enter either request or tool-visible environment."
+    },
+    {
+      "id": "PENDING_FALSE_PREMISE",
+      "type": "erroneous supervisory hypothesis",
+      "availability": "not selected; cutoff tree, Task Book, request and public evidence not certified",
+      "startup_gate": "Find a lawful historical cutoff and certify all static source identities before freezing order."
+    },
+    {
+      "id": "PENDING_ENVIRONMENT_BLOCK",
+      "type": "environment-blocked investigation",
+      "availability": "not selected; cutoff tree, Task Book, request and public evidence not certified",
+      "startup_gate": "Distinguish missing dependency/tool environment from task behavior without showing a hidden outcome."
+    }
+  ],
+  "model_and_budget": {
+    "model": "claude-opus-4-8 if a later approved manifest confirms the same resolved profile for both arms",
+    "task_model_calls": 0,
+    "turn_envelope": "not yet frozen; use the same approved envelope for N and candidate, count outer cycles and maintenance/provider attempts separately",
+    "tools": "same public source and isolated analysis port for both arms; no Task continuation",
+    "sequence": "not frozen because two required case types and the candidate host-state isolation gate remain unresolved"
+  },
+  "scoring": "Observe investigation choice, distinguishing observations, execution/completion, groundedness, erroneous interruption, missed warranted correction and actual cost; packet completeness or tool count alone is not success.",
+  "forbidden_inputs": [
+    "historical future events", "native evaluator", "gold patch", "candidate labels",
+    "known defect summary", "research audit", "another run's files"
+  ]
+}
+
+
+===== FULL BASE-TO-CODE-COMMIT DIFF =====
+diff --git a/GenericAgent-main/monitor_agent_core/agent.py b/GenericAgent-main/monitor_agent_core/agent.py
+index 5305e51a..d3c8e3bc 100644
+--- a/GenericAgent-main/monitor_agent_core/agent.py
++++ b/GenericAgent-main/monitor_agent_core/agent.py
+@@ -15,9 +15,9 @@ from collections import Counter
+ from dataclasses import asdict
+ 
+ from .actions import MonitorAction, ToolOutcome
+-from .loop import run_review
++from .loop import MonitorLoopError, run_review
+ from .process_runner import AnalysisSessions
+-from .analysis_spool import AnalysisPortIntegrityError
++from .analysis_spool import AnalysisPortIntegrityError, SpoolAnalysisSessions
+ from .workspace import MonitorWorkspace
+ from .grounded_context import read_with_sources
+ from .handoff_validation import validate_handoff, note_text, ContinuationContractError
+@@ -52,6 +52,9 @@ from .root_records_v1 import canonical as root_records_canonical, digest as root
+ from .root_records_v1 import project as project_root_records
+ from .root_records_native_v2 import project as project_root_records_native
+ from .narrow_supervisor_v1 import METHOD_PROMPT as NARROW_METHOD_PROMPT, REVIEW_MODE as NARROW_REVIEW_MODE
++from .evidence_package_v1 import (EvidenceFrontier, EvidencePackageIntegrityError,
++                                  METHOD_PROMPT as EVIDENCE_METHOD_PROMPT,
++                                  STAGE_A_PROMPT, STAGE_B_PROMPT)
+ 
+ 
+ class ProjectionIntegrityError(RuntimeError):
+@@ -110,6 +113,55 @@ MONITOR_TOOLS = [
+ ]
+ 
+ 
++EVIDENCE_TOOLS = [
++    _tool('frontier_page', 'Read one revision-bound page of the complete host inquiry frontier.', {
++        'cursor': {'type': 'string'}, 'limit': {'type': 'integer', 'minimum': 1, 'maximum': 50},
++    }, []),
++    _tool('frontier_open', 'Register a distinct local concern and its investigation leads.', {
++        'task_basis': {'type': 'string'}, 'scope': {'type': 'string'},
++        'observable_consequence': {'type': 'string'},
++        'leads': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1},
++        'hypothesis': {'type': 'string'}, 'parent_id': {'type': 'string'},
++    }, ['task_basis', 'scope', 'observable_consequence', 'leads']),
++    _tool('frontier_revise', 'Revise one local case without deleting old observations.', {
++        'case_id': {'type': 'string'}, 'status': {'type': 'string', 'enum': [
++            'pending', 'active', 'blocked', 'observed', 'counterexample', 'retracted', 'stale']},
++        'reason': {'type': 'string'}, 'receipt_ids': {'type': 'array', 'items': {'type': 'string'}},
++        'new_lead': {'type': 'string'}, 'hypothesis': {'type': 'string'},
++    }, ['case_id', 'status', 'reason']),
++    _tool('frontier_focus', 'Advance deterministically to an unvisited local case or return to its parent.', {
++        'return_parent': {'type': 'boolean'},
++    }, []),
++    _tool('frontier_finding', 'Record a bounded, source-linked finding for the current packet.', {
++        'packet_id': {'type': 'string'}, 'case_id': {'type': 'string'},
++        'scope': {'type': 'string'}, 'task_basis': {'type': 'string'},
++        'receipt_ids': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1},
++        'claim': {'type': 'string'}, 'kind': {'type': 'string', 'enum': [
++            'counterexample', 'correction', 'investigation_request',
++            'clarification', 'local_observation']},
++    }, ['packet_id', 'case_id', 'scope', 'task_basis', 'receipt_ids', 'claim', 'kind']),
++]
++
++
++def evidence_stage_tools(stage):
++    tools = json.loads(json.dumps(MONITOR_TOOLS + EVIDENCE_TOOLS))
++    if stage == 'A':
++        tools = [item for item in tools if item['function']['name'] not in {
++            'wait', 'intervene', 'allow_complete', 'frontier_finding'}]
++        tools.append(_tool('packet_ready', 'End material preparation without Task control.', {}, []))
++    else:
++        tools = [item for item in tools if item['function']['name'] != 'packet_ready']
++        for tool in tools:
++            function = tool['function']
++            if function['name'] == 'intervene':
++                function['parameters']['properties']['finding_id'] = {'type': 'string'}
++                function['parameters']['required'].append('finding_id')
++            elif function['name'] == 'allow_complete':
++                function['parameters']['properties']['frontier_revision'] = {'type': 'integer'}
++                function['parameters']['required'].append('frontier_revision')
++    return tools
++
++
+ def crs_tools():
+     """ASE root contrast on the existing allow_complete name; other tools unchanged."""
+     tools = json.loads(json.dumps(MONITOR_TOOLS))
+@@ -470,6 +522,19 @@ class MonitorAgent:
+         self.narrow_supervisor_v1 = getattr(client, 'config', {}).get('monitor_narrow_supervisor_v1', False)
+         if type(self.narrow_supervisor_v1) is not bool:
+             raise ValueError('monitor_narrow_supervisor_v1 must be a boolean')
++        self.evidence_package_v1 = getattr(client, 'config', {}).get('monitor_evidence_package_v1', False)
++        if type(self.evidence_package_v1) is not bool:
++            raise ValueError('monitor_evidence_package_v1 must be a boolean')
++        if self.evidence_package_v1 and (not self.narrow_supervisor_v1 or not self.ase_v0
++                or self.crs_v0 or self.rhr_v0 or self.rer_v0 or self.history_projection != 'off'):
++            raise ValueError('Evidence package requires narrow ASE, with CRS/RHR/RER and projection off')
++        self.evidence_frontier = None
++        self._evidence_stage = None
++        self._evidence_model_cycles = 0
++        self._evidence_maintenance_calls = 0
++        self._evidence_limit = None
++        self._evidence_expected_system = None
++        self._evidence_expected_tools = None
+         if self.narrow_supervisor_v1 and (not self.ase_v0 or self.crs_v0 or self.rhr_v0
+                                           or self.rer_v0 or self.history_projection != 'off'):
+             raise ValueError('narrow supervisor requires ASE on, CRS/RHR/RER off, projection off')
+@@ -505,6 +570,8 @@ class MonitorAgent:
+                     or getattr(client, 'config', {}).get('monitor_release_support_horizon', False)):
+                 raise ValueError('ASE-v0 is exclusive with historical candidate and research switches')
+             self.system_prompt = NARROW_METHOD_PROMPT if self.narrow_supervisor_v1 else ASE_SYSTEM_PROMPT
++            if self.evidence_package_v1:
++                self.system_prompt = EVIDENCE_METHOD_PROMPT
+             self.base_system_prompt = self.system_prompt
+             self.situation = SituationState(workspace, include_supervisory_control=False)
+             self.control_echo = ControlEcho(self._audit_dialogue)
+@@ -867,11 +934,15 @@ class MonitorAgent:
+ 
+     def _audit_dialogue(self, event, **payload):
+         """Persist completed observations immediately, independently of model input."""
++        if event == 'model_input' and self._evidence_stage in {'A', 'B'}:
++            self._evidence_model_cycles += 1
+         if self.dcm is not None and event == 'tool_call':
+             self.dcm.model_turn = payload.get('turn')
+         path = self.workspace.private_root / 'audit' / 'dialogue.jsonl'
+         path.parent.mkdir(parents=True, exist_ok=True)
+         record = dict(timestamp=time.time(), review_id=self.review_id, event=event, **payload)
++        if self.evidence_package_v1:
++            record['evidence_stage'] = self._evidence_stage
+         with path.open('a', encoding='utf-8') as stream:
+             stream.write(json.dumps(record, ensure_ascii=False, default=str) + '\n')
+             stream.flush()
+@@ -1026,6 +1097,9 @@ class MonitorAgent:
+             self.client.continuation_transaction_id = previous_transaction
+ 
+     def _progress(self, event, **fields):
++        if (event == 'request_started' and self._evidence_stage in {'A', 'B'}
++                and fields.get('purpose') in {'continuation', 'format_repair'}):
++            self._evidence_maintenance_calls += 1
+         if (event == 'request_usage' and self._projection_pending_request is not None
+                 and self.history_projection == 'root_records_v1'):
+             self._projection_pending_request = None
+@@ -1062,9 +1136,19 @@ class MonitorAgent:
+         try:
+             try:
+                 outcome = self._dispatch(name, arguments)
++                if (self.evidence_package_v1 and name in {'file_read', 'code_run'}
++                        and isinstance(outcome.data, dict)
++                        and not (outcome.data.get('status') == 'error'
++                                 and 'session_id' not in outcome.data)):
++                    receipt_id = self.evidence_frontier.register_receipt(
++                        name, arguments, outcome.data)
++                    outcome.data['host_receipt_id'] = receipt_id
+             except AnalysisPortIntegrityError:
+                 self._analysis_integrity_failure = True
+                 raise
++            except EvidencePackageIntegrityError:
++                self._analysis_integrity_failure = True
++                raise
+             if self.experimental_control is not None and name not in {'work_context', 'work_intent'}:
+                 try:
+                     self.experimental_control.audit(
+@@ -1128,6 +1212,51 @@ class MonitorAgent:
+     def _dispatch(self, name: str, arguments: dict) -> ToolOutcome:
+         ase_reference = False
+         try:
++            if self.evidence_package_v1:
++                if self._evidence_stage not in {'A', 'B'}:
++                    raise EvidencePackageIntegrityError('Evidence stage is not active')
++                if self._evidence_stage == 'A' and name in {
++                        'wait', 'intervene', 'allow_complete', 'frontier_finding'}:
++                    raise ValueError('Phase A cannot control the Task or record a final finding')
++                if name == 'frontier_page':
++                    return ToolOutcome(self.evidence_frontier.page(
++                        cursor=arguments.get('cursor'), limit=arguments.get('limit', 12)))
++                if name == 'frontier_open':
++                    original = self.workspace.resolve_read('task/original_task.txt').read_text(
++                        encoding='utf-8')
++                    basis = arguments.get('task_basis')
++                    if (not isinstance(basis, str) or
++                            basis.strip().casefold() not in original.casefold()):
++                        raise ValueError('Task basis must quote an existing original-task span')
++                    return ToolOutcome(self.evidence_frontier.open_case(arguments))
++                if name == 'frontier_revise':
++                    return ToolOutcome(self.evidence_frontier.revise_case(arguments))
++                if name == 'frontier_focus':
++                    return ToolOutcome(self.evidence_frontier.next_focus(
++                        return_parent=arguments.get('return_parent', False)))
++                if name == 'packet_ready':
++                    if self._evidence_stage != 'A':
++                        raise ValueError('packet_ready belongs only to phase A')
++                    handoff = (dict(self.root_frame_handoff) if self.frame_kind == 'root'
++                               else None)
++                    packet = self.evidence_frontier.packet_ready(
++                        handoff=handoff, task_cursor=(handoff or {}).get('cursor'))
++                    return ToolOutcome({'status': 'packet_ready', **packet}, False,
++                                       MonitorAction('packet_ready', packet))
++                if name == 'frontier_finding':
++                    if self._evidence_stage != 'B':
++                        raise ValueError('Finding requires phase B')
++                    return ToolOutcome(self.evidence_frontier.finding(
++                        arguments, handoff=self.root_frame_handoff))
++                if name == 'intervene':
++                    self._evidence_verify_finding_sources(arguments.get('finding_id'))
++                    self.evidence_frontier.check_intervention(
++                        arguments.get('finding_id'), handoff=self.root_frame_handoff)
++                if name == 'allow_complete':
++                    if self.evidence_frontier.reconcile_sources(self.workspace):
++                        raise ValueError('Cited Task source changed; review current evidence')
++                    self.evidence_frontier.check_allow(
++                        arguments.get('frontier_revision'), handoff=self.root_frame_handoff)
+             if name == 'work_context' and self.experimental_control is not None:
+                 if self.experimental_control.view == 'off':
+                     raise ValueError('work_context is disabled')
+@@ -1139,14 +1268,17 @@ class MonitorAgent:
+             if name == 'allow_complete':
+                 allowed = ({'_noargs', 'release_blocking_state', 'grounding', 'ground_refs',
+                             'exclusion_reason', 'observation_refs'} if self.crs is not None else
+-                           {'_noargs', 'result', 'reason'} if self.verification_loop_v0 else {'_noargs'})
++                           {'_noargs', 'result', 'reason'} if self.verification_loop_v0 else
++                           {'_noargs', 'frontier_revision'} if self.evidence_package_v1 else {'_noargs'})
+                 if set(arguments) - allowed:
+                     if self.crs is not None:
+                         raise ValueError('CRS root allow_complete uses flat required fields: '
+                                          'release_blocking_state, grounding, ground_refs, '
+                                          'exclusion_reason, observation_refs; do not nest contrast.')
+                     raise ValueError('allow_complete arguments do not match the active release condition')
+-                arguments = {key: value for key, value in arguments.items() if key != '_noargs'}
++                arguments = {key: value for key, value in arguments.items()
++                             if key not in ({'_noargs', 'frontier_revision'} if self.evidence_package_v1
++                                            else {'_noargs'})}
+             if name == "file_read":
+                 data = self.workspace.read_text(
+                     arguments["path"], arguments.get("start", 1), arguments.get("count", 200),
+@@ -1364,7 +1496,7 @@ class MonitorAgent:
+                 return ToolOutcome(None, False, MonitorAction("allow_complete", {}))
+             else:
+                 data = {"status": "error", "error": f"Unknown tool: {name}"}
+-        except AnalysisPortIntegrityError:
++        except (AnalysisPortIntegrityError, EvidencePackageIntegrityError):
+             raise
+         except Exception as exc:
+             if self.experimental_control is not None and name in {'work_context', 'work_intent'}:
+@@ -1595,9 +1727,122 @@ class MonitorAgent:
+         self._rer_frame_sequence = 0
+         self._rer_handoff = None
+ 
++    def _evidence_before_model(self):
++        self.evidence_frontier.verify()
++        if self._evidence_model_cycles + self._evidence_maintenance_calls >= self._evidence_limit:
++            raise MonitorLoopError('Shared evidence inquiry budget exhausted')
++        return self._refresh_review_context()
++
++    def _evidence_pre_send(self, payload):
++        self.evidence_frontier.verify()
++        if self._evidence_stage not in {'A', 'B'}:
++            raise EvidencePackageIntegrityError('Provider send outside active evidence stage')
++        purpose = getattr(self.client, 'request_purpose', 'review')
++        if payload.get('model') != self.client.model or not isinstance(payload.get('messages'), list):
++            raise EvidencePackageIntegrityError('Evidence provider model or history changed')
++        if purpose == 'review':
++            if (payload.get('system') != self._evidence_expected_system or
++                    payload.get('tools') != self._evidence_expected_tools):
++                raise EvidencePackageIntegrityError('Evidence stage system or tools changed')
++        elif purpose in {'continuation', 'format_repair'}:
++            prompt = getattr(self.client, 'maintenance_prompt', None)
++            if (payload.get('tools') != [] or not prompt or not any(
++                    block.get('type') == 'text' and block.get('text') == prompt
++                    for message in payload['messages'] for block in message.get('content', [])
++                    if isinstance(block, dict))):
++                raise EvidencePackageIntegrityError('Maintenance prompt or purpose changed')
++        else:
++            raise EvidencePackageIntegrityError('Unknown evidence request purpose')
++
++    def _evidence_verify_finding_sources(self, finding_id):
++        finding = self.evidence_frontier.state['findings'].get(finding_id)
++        if finding is None:
++            raise ValueError('Unknown local finding')
++        if self.evidence_frontier.reconcile_sources(self.workspace):
++            raise ValueError('Cited Task source changed; re-investigate before intervention')
++
++    def _review_evidence(self, wake_context, completion_pending, root_handoff,
++                         max_turns_override, root_transition_view):
++        if (not isinstance(self.analysis, SpoolAnalysisSessions)
++                and getattr(self.analysis, 'evidence_test_port', False) is not True):
++            raise EvidencePackageIntegrityError('Evidence inquiry requires the isolated analysis port')
++        if not callable(getattr(self.client, 'pre_send_capture', None)):
++            raise EvidencePackageIntegrityError('Evidence inquiry requires pre-send capture')
++        if self.evidence_frontier is None:
++            self.evidence_frontier = EvidenceFrontier(self.workspace.private_root)
++        self.evidence_frontier.verify()
++        limit = self.max_review_turns if max_turns_override is None else max_turns_override
++        if type(limit) is not int or limit < 1:
++            raise ValueError('Evidence review needs a positive shared turn limit')
++        self._evidence_limit = limit
++        self._evidence_model_cycles = 0
++        self._evidence_maintenance_calls = 0
++        parent_history = self.client.export_history()
++        self._evidence_stage = 'A'
++        try:
++            original_task = self.workspace.resolve_read('task/original_task.txt').read_text(
++                encoding='utf-8')
++            preparation_wake = (wake_context + '\n\nOriginal public task:\n' + original_task +
++                                '\n\nHost inquiry frontier:\n' +
++                                json.dumps(self.evidence_frontier.page(limit=12), ensure_ascii=False))
++            first = self.review(preparation_wake, completion_pending,
++                                root_handoff=root_handoff, max_turns_override=limit,
++                                root_transition_view=root_transition_view)
++            phase_a_history = self.client.export_history()
++            relative = 'audit/evidence_package/stages/' + uuid.uuid4().hex + '.json'
++            raw = json.dumps({'stage': 'A', 'history': phase_a_history,
++                              'action': asdict(first)}, ensure_ascii=False)
++            self._atomic_private_text(relative, raw)
++            if (self.workspace.private_root / relative).read_text(encoding='utf-8') != raw:
++                raise EvidencePackageIntegrityError('Phase A archive readback mismatch')
++            self._audit_dialogue('evidence_phase_archived', stage='A', locator='monitor/' + relative,
++                                 history_sha256=hashlib.sha256(
++                                     json.dumps(phase_a_history, ensure_ascii=False).encode('utf-8')).hexdigest())
++            if first.kind == 'root_route':
++                self.client.restore_history(parent_history)
++                first.payload['prior_model_turns'] = (
++                    self._evidence_model_cycles + self._evidence_maintenance_calls)
++                return first
++            if first.kind != 'packet_ready':
++                raise EvidencePackageIntegrityError('Phase A did not produce a packet handoff')
++            expected_handoff = dict(root_handoff) if root_handoff is not None else None
++            if self.evidence_frontier.state['packet']['handoff'] != expected_handoff:
++                raise EvidencePackageIntegrityError('Packet handoff identity changed')
++            active = self.completion_state() if self.completion_state is not None else None
++            if active != expected_handoff:
++                self.client.restore_history(parent_history)
++                return MonitorAction('root_route', {'prior_model_turns':
++                    self._evidence_model_cycles + self._evidence_maintenance_calls})
++            self.client.restore_history([])
++            self._evidence_stage = 'B'
++            remaining = limit - self._evidence_model_cycles - self._evidence_maintenance_calls
++            if remaining < 1:
++                raise MonitorLoopError('Shared evidence inquiry budget exhausted after packet')
++            packet = self.evidence_frontier.state['packet']
++            view = self.evidence_frontier.page(limit=12)
++            second_wake = (wake_context + '\n\nOriginal public task:\n' + original_task +
++                           '\n\nHost inquiry packet (not a conclusion):\n' +
++                           json.dumps({'packet': packet, 'frontier_page': view}, ensure_ascii=False))
++            outcome = self.review(second_wake, completion_pending, root_handoff=root_handoff,
++                                  max_turns_override=remaining,
++                                  root_transition_view=root_transition_view)
++            if outcome.kind == 'root_route':
++                outcome.payload['prior_model_turns'] = (
++                    self._evidence_model_cycles + self._evidence_maintenance_calls)
++            return outcome
++        except EvidencePackageIntegrityError:
++            self._analysis_integrity_failure = True
++            raise
++        finally:
++            self._evidence_stage = None
++            self._evidence_limit = None
++
+     def review(self, wake_context: str, completion_pending=False, *,
+                root_handoff=None, max_turns_override=None,
+                root_transition_view=None) -> MonitorAction:
++        if self.evidence_package_v1 and self._evidence_stage is None:
++            return self._review_evidence(wake_context, completion_pending,
++                                         root_handoff, max_turns_override, root_transition_view)
+         if self._projection_integrity_failure is not None:
+             raise ProjectionIntegrityError('Root projection integrity failed; no further review')
+         if self._analysis_integrity_failure:
+@@ -1655,6 +1900,8 @@ class MonitorAgent:
+                             "remains available at monitor/delivery_feedback.jsonl.")
+             if self.narrow_supervisor_v1:
+                 mode = NARROW_REVIEW_MODE
++            if self.evidence_package_v1:
++                mode = STAGE_A_PROMPT if self._evidence_stage == 'A' else STAGE_B_PROMPT
+             active_system = (self.base_system_prompt + "\n\n" + ROOT_SYSTEM_PROMPT
+                              if self.frame_kind == 'root' and not (self.verification_loop_v0 or self.ase_v0)
+                              else self.system_prompt)
+@@ -1673,6 +1920,8 @@ class MonitorAgent:
+                                      handoff=self.root_frame_handoff, content=wake_context)
+             tools = (crs_tools() if self.crs is not None and self.frame_kind == 'root' else
+                      verification_tools() if self.verification_loop_v0 and not self.ase_v0 else MONITOR_TOOLS)
++            if self.evidence_package_v1:
++                tools = evidence_stage_tools(self._evidence_stage)
+             if self.ase_v0:
+                 tools = json.loads(json.dumps(tools))
+                 next(tool['function'] for tool in tools if tool['function']['name'] == 'code_run')[
+@@ -1742,14 +1991,22 @@ class MonitorAgent:
+                 self._projection_root_input = wake_context
+                 self._projection_root_system = system
+                 self._projection_root_tools = _claude_tools(tools)
++            if self.evidence_package_v1:
++                from .provider import _claude_tools
++                self._evidence_expected_system = system
++                self._evidence_expected_tools = _claude_tools(tools)
+             action = run_review(
+                 self.client, system, wake_context, tools,
+                 self.dispatch, self.max_review_turns if max_turns_override is None else max_turns_override,
+                 audit=self._audit_dialogue,
+-                before_model=self._refresh_review_context,
+-                route_before_model=(lambda: bool(self.completion_state and self.completion_state())
+-                                    if self.root_routed and self.frame_kind == 'local'
+-                                    else None),
++                before_model=(self._evidence_before_model if self.evidence_package_v1 else
++                              self._refresh_review_context),
++                route_before_model=(
++                    (lambda: bool(self.completion_state and
++                                  self.completion_state() != self.root_frame_handoff))
++                    if self.evidence_package_v1 and self.frame_kind == 'root' else
++                    (lambda: bool(self.completion_state and self.completion_state()))
++                    if self.root_routed and self.frame_kind == 'local' else None),
+             )
+             if self.cqs is not None:
+                 if self.ase_v0:
+@@ -1783,6 +2040,11 @@ class MonitorAgent:
+                     "history_before": before, "history_after": self.client.history_measure(),
+                     "action": asdict(action) if action else None,
+                     "frame": self.frame_kind, "handoff": self.root_frame_handoff,
++                    **({'evidence_stage': self._evidence_stage,
++                        'evidence_model_cycles': self._evidence_model_cycles,
++                        'evidence_maintenance_attempts': self._evidence_maintenance_calls,
++                        'evidence_frontier_revision': self.evidence_frontier.state['revision']
++                         if self.evidence_frontier else None} if self.evidence_package_v1 else {}),
+                 }, ensure_ascii=False) + "\n", mode="append",
+             )
+             if self.rer_v0 and (sys.exc_info()[1] is not None or
+diff --git a/GenericAgent-main/monitor_agent_core/evidence_package_v1.py b/GenericAgent-main/monitor_agent_core/evidence_package_v1.py
+new file mode 100644
+index 00000000..0bac040b
+--- /dev/null
++++ b/GenericAgent-main/monitor_agent_core/evidence_package_v1.py
+@@ -0,0 +1,377 @@
++"""Opt-in local inquiry frontier; pilot host-isolation remains a launch gate."""
++
++from __future__ import annotations
++
++import hashlib
++import json
++import os
++import tempfile
++import uuid
++from pathlib import Path
++
++
++class EvidencePackageIntegrityError(RuntimeError):
++    """A protected state or stage transition cannot be trusted."""
++
++
++def canonical(value):
++    return json.dumps(value, ensure_ascii=False, sort_keys=True,
++                      separators=(',', ':')).encode('utf-8')
++
++
++def digest(value):
++    return hashlib.sha256(canonical(value)).hexdigest()
++
++
++def _text(value, field):
++    if not isinstance(value, str) or not value.strip():
++        raise ValueError(field + ' must be nonempty text')
++    return value.strip()
++
++
++class EvidenceFrontier:
++    """Durable canonical state; ordinary Monitor file tools cannot mutate it."""
++
++    def __init__(self, private_root):
++        # Sibling of monitor_private: ordinary monitor file tools and the
++        # diagnostic sidecar cannot write here. The current pilot Task
++        # container CAN reach the parent mount, so runtime launch is blocked.
++        self.root = Path(private_root).parent / '.evidence_package_v1'
++        self.state_path = self.root / 'frontier.json'
++        self.commit_path = self.root / 'frontier.commit.json'
++        if self.root.exists():
++            if self.root.is_symlink() or not self.root.is_dir():
++                raise EvidencePackageIntegrityError('Frontier root redirected')
++            self.state = self._read()
++        else:
++            self.root.mkdir(mode=0o700)
++            self.state = {'schema': 'evidence-package-frontier-v1', 'revision': 0,
++                          'cases': {}, 'order': [], 'receipts': {}, 'findings': {},
++                          'packet': None, 'focus': None, 'parents': [], 'history': []}
++            self._write(self.state)
++
++    @staticmethod
++    def _atomic(path, raw):
++        handle, temporary = tempfile.mkstemp(prefix='.pending-', dir=path.parent)
++        try:
++            with os.fdopen(handle, 'wb') as stream:
++                stream.write(raw)
++                stream.flush()
++                os.fsync(stream.fileno())
++            os.replace(temporary, path)
++            if path.read_bytes() != raw:
++                raise EvidencePackageIntegrityError('Frontier readback mismatch')
++        finally:
++            if os.path.exists(temporary):
++                os.unlink(temporary)
++
++    def _write(self, state):
++        raw = canonical(state)
++        self._atomic(self.state_path, raw)
++        self._atomic(self.commit_path, canonical({'sha256': hashlib.sha256(raw).hexdigest(),
++                                                   'revision': state['revision']}))
++
++    def _read(self):
++        try:
++            raw = self.state_path.read_bytes()
++            commit = json.loads(self.commit_path.read_bytes())
++            state = json.loads(raw)
++        except (OSError, ValueError, TypeError) as exc:
++            raise EvidencePackageIntegrityError('Canonical frontier missing or unreadable') from exc
++        if (not isinstance(state, dict) or state.get('schema') != 'evidence-package-frontier-v1'
++                or not isinstance(state.get('revision'), int)
++                or commit != {'sha256': hashlib.sha256(raw).hexdigest(),
++                              'revision': state['revision']}):
++            raise EvidencePackageIntegrityError('Canonical frontier commit mismatch')
++        return state
++
++    def verify(self):
++        current = self._read()
++        if current != self.state:
++            raise EvidencePackageIntegrityError('Canonical frontier changed outside host operation')
++
++    def change(self, kind, transform):
++        self.verify()
++        updated = json.loads(canonical(self.state))
++        result = transform(updated)
++        updated['revision'] += 1
++        updated['history'].append({'revision': updated['revision'], 'kind': kind,
++                                   'state_sha256_before': digest(self.state)})
++        self._write(updated)
++        self.state = updated
++        return result
++
++    def page(self, *, cursor=None, limit=12):
++        self.verify()
++        if type(limit) is not int or not 1 <= limit <= 50:
++            raise ValueError('limit must be 1..50')
++        revision = self.state['revision']
++        if cursor is None:
++            offset = 0
++        else:
++            if not isinstance(cursor, str) or ':' not in cursor:
++                raise ValueError('Invalid frontier cursor')
++            old, offset_text = cursor.split(':', 1)
++            if old != str(revision):
++                return {'status': 'stale_cursor', 'revision': revision,
++                        'message': 'Frontier changed; restart pagination'}
++            try:
++                offset = int(offset_text)
++            except ValueError as exc:
++                raise ValueError('Invalid frontier cursor') from exc
++        ordered = self.state['order']
++        if not 0 <= offset <= len(ordered):
++            raise ValueError('Invalid frontier offset')
++        selected = ordered[offset:offset + limit]
++        after = offset + len(selected)
++        return {'status': 'ok', 'revision': revision,
++                'cases': [self.state['cases'][key] for key in selected],
++                'remaining': len(ordered) - after,
++                'next_cursor': f'{revision}:{after}' if after < len(ordered) else None,
++                'focus': self.state['focus'], 'parents': self.state['parents']}
++
++    def open_case(self, args):
++        basis = _text(args.get('task_basis'), 'task_basis')
++        scope = _text(args.get('scope'), 'scope')
++        consequence = _text(args.get('observable_consequence'), 'observable_consequence')
++        if not isinstance(args.get('leads'), list) or not args['leads']:
++            raise ValueError('At least one investigation lead is required')
++        leads = [_text(item, 'lead') for item in args['leads']]
++        parent = args.get('parent_id')
++        if parent is not None and parent not in self.state['cases']:
++            raise ValueError('Unknown parent case')
++        if any(case['task_basis'] == basis and case['scope'] == scope and
++               case['observable_consequence'] == consequence and
++               case['parent_id'] == parent for case in self.state['cases'].values()):
++            raise ValueError('An identical local case already exists; revise it instead')
++        case_id = 'case-' + uuid.uuid4().hex
++        def apply(state):
++            state['cases'][case_id] = {'id': case_id, 'task_basis': basis, 'scope': scope,
++                'observable_consequence': consequence, 'leads': leads,
++                'dependencies': [], 'receipts': [], 'status': 'pending',
++                'hypothesis': args.get('hypothesis'), 'finding_ids': [],
++                'parent_id': parent, 'revision_opened': state['revision'] + 1}
++            state['order'].append(case_id)
++            if parent:
++                state['cases'][parent]['dependencies'].append(case_id)
++                state['parents'].append(parent)
++            state['focus'] = case_id
++            return case_id
++        self.change('case_opened', apply)
++        return {'status': 'recorded', 'case_id': case_id, 'revision': self.state['revision']}
++
++    def revise_case(self, args):
++        case_id = args.get('case_id')
++        if case_id not in self.state['cases']:
++            raise ValueError('Unknown case')
++        status = args.get('status')
++        if status not in {'pending', 'active', 'blocked', 'observed', 'counterexample',
++                          'retracted', 'stale'}:
++            raise ValueError('Unsupported local case status')
++        reason = _text(args.get('reason'), 'reason')
++        receipt_ids = args.get('receipt_ids', [])
++        if not isinstance(receipt_ids, list) or any(
++                item not in self.state['receipts'] for item in receipt_ids):
++            raise ValueError('Unknown receipt')
++        if status in {'observed', 'counterexample'} and not receipt_ids:
++            raise ValueError('Observed states require actual source receipts')
++        def apply(state):
++            case = state['cases'][case_id]
++            if args.get('hypothesis') is not None and args['hypothesis'] != case['hypothesis']:
++                for finding_id in case['finding_ids']:
++                    state['findings'][finding_id]['status'] = 'stale'
++            case['status'] = status
++            case['reason'] = reason
++            case['receipts'] = list(dict.fromkeys(case['receipts'] + receipt_ids))
++            if args.get('new_lead'):
++                case['leads'].append(_text(args['new_lead'], 'new_lead'))
++            if args.get('hypothesis') is not None:
++                case['hypothesis'] = _text(args['hypothesis'], 'hypothesis')
++            case.setdefault('revisions', []).append({'revision': state['revision'] + 1,
++                'status': status, 'reason': reason, 'receipt_ids': receipt_ids})
++            state['focus'] = case_id
++            return case_id
++        self.change('case_revised', apply)
++        return {'status': 'recorded', 'case_id': case_id, 'revision': self.state['revision']}
++
++    def reconcile_sources(self, workspace):
++        """Invalidate only findings whose actually cited live Task files changed."""
++        self.verify()
++        cited = {rid for finding in self.state['findings'].values()
++                 if finding['status'] == 'current' for rid in finding['receipt_ids']}
++        stale = []
++        for receipt_id in sorted(cited):
++            receipt = self.state['receipts'][receipt_id]
++            path = receipt.get('source_path')
++            if not isinstance(path, str) or not path.startswith('task/'):
++                continue
++            try:
++                actual = workspace.read_text(path, 1, 1, max_chars=1)['sha256']
++                if actual != receipt['result']['sha256']:
++                    stale.append(receipt_id)
++            except (OSError, ValueError, KeyError):
++                stale.append(receipt_id)
++        if stale:
++            self.stale_receipts(stale, 'cited_task_source_changed')
++        return stale
++
++    def next_focus(self, *, return_parent=False):
++        if type(return_parent) is not bool:
++            raise ValueError('return_parent must be boolean')
++        def apply(state):
++            if return_parent:
++                if not state['parents']:
++                    raise ValueError('No parent focus to restore')
++                state['focus'] = state['parents'].pop()
++            else:
++                candidates = [key for key in state['order'] if state['cases'][key]['status']
++                              not in {'retracted', 'stale'}]
++                if not candidates:
++                    state['focus'] = None
++                elif state['focus'] not in candidates:
++                    state['focus'] = candidates[0]
++                else:
++                    offset = candidates.index(state['focus'])
++                    state['focus'] = candidates[(offset + 1) % len(candidates)]
++            return state['focus']
++        focus = self.change('focus_advanced', apply)
++        return {'status': 'recorded', 'focus': focus, 'revision': self.state['revision']}
++
++    def register_receipt(self, tool, arguments, result):
++        if tool not in {'file_read', 'code_run'}:
++            raise ValueError('Only executed investigation tools issue receipts')
++        result = json.loads(canonical(result))
++        receipt_id = 'receipt-' + uuid.uuid4().hex
++        record = {'id': receipt_id, 'tool': tool, 'arguments_sha256': digest(arguments),
++                  'result_sha256': digest(result), 'result': result,
++                  'source_path': arguments.get('path') if tool == 'file_read' else None,
++                  'source_version': result.get('source_version', {'status': 'version_uncertain'}),
++                  'kind': ('source_read' if tool == 'file_read' else 'process_receipt'),
++                  'completion': (result.get('status') if tool == 'code_run' else 'read_completed'),
++                  'behavior_verified': False}
++        self.change('receipt_recorded', lambda state: state['receipts'].update({receipt_id: record}))
++        return receipt_id
++
++    def packet_ready(self, *, handoff, task_cursor):
++        packet_id = 'packet-' + uuid.uuid4().hex
++        def apply(state):
++            state['packet'] = {'id': packet_id, 'revision': state['revision'] + 1,
++                               'handoff': handoff, 'task_cursor': task_cursor,
++                               'executed': False, 'input_sent': False}
++        self.change('packet_ready', apply)
++        return dict(self.state['packet'])
++
++    def finding(self, args, *, handoff):
++        packet = self.state['packet']
++        if not packet or args.get('packet_id') != packet['id'] or packet['handoff'] != handoff:
++            raise ValueError('Finding packet or handoff identity mismatch')
++        case_id = args.get('case_id')
++        if case_id not in self.state['cases']:
++            raise ValueError('Unknown finding case')
++        case = self.state['cases'][case_id]
++        if args.get('scope') != case['scope'] or args.get('task_basis') != case['task_basis']:
++            raise ValueError('Finding scope or task basis differs from current case')
++        receipt_ids = args.get('receipt_ids')
++        if not isinstance(receipt_ids, list) or not receipt_ids or any(
++                item not in self.state['receipts'] for item in receipt_ids):
++            raise ValueError('Finding needs existing host-issued receipts')
++        if any(self.state['receipts'][item]['completion'] in {'running', 'unavailable', None}
++               for item in receipt_ids):
++            raise ValueError('Finding cannot promote an incomplete process receipt')
++        claim = _text(args.get('claim'), 'claim')
++        kind = args.get('kind')
++        if kind not in {'counterexample', 'correction', 'investigation_request',
++                        'clarification', 'local_observation'}:
++            raise ValueError('Finding kind must identify its bounded purpose')
++        if kind in {'counterexample', 'correction'} and not any(
++                self.state['receipts'][item]['tool'] == 'code_run' or
++                isinstance(self.state['receipts'][item].get('source_path'), str) and
++                self.state['receipts'][item]['source_path'].startswith('task/') and
++                self.state['receipts'][item]['source_path'] != 'task/original_task.txt'
++                for item in receipt_ids):
++            raise ValueError('Concrete correction needs an implementation, event or probe receipt')
++        finding_id = 'finding-' + uuid.uuid4().hex
++        def apply(state):
++            state['findings'][finding_id] = {'id': finding_id, 'packet_id': packet['id'],
++                'packet_revision': packet['revision'], 'handoff': handoff,
++                'case_id': case_id, 'scope': case['scope'], 'task_basis': case['task_basis'],
++                'receipt_ids': receipt_ids, 'claim': claim, 'kind': kind,
++                'status': 'current', 'revision': state['revision'] + 1}
++            state['cases'][case_id]['finding_ids'].append(finding_id)
++        self.change('finding_recorded', apply)
++        return {'status': 'recorded', 'finding_id': finding_id,
++                'revision': self.state['revision']}
++
++    def check_intervention(self, finding_id, *, handoff):
++        self.verify()
++        finding = self.state['findings'].get(finding_id)
++        if not finding or finding['status'] != 'current' or finding['handoff'] != handoff:
++            raise ValueError('Intervention needs a current, recorded local finding')
++        case = self.state['cases'][finding['case_id']]
++        if case['status'] in {'retracted', 'stale'}:
++            raise ValueError('Finding case was withdrawn or became stale')
++        return finding
++
++    def stale_receipts(self, receipt_ids, reason):
++        if not receipt_ids:
++            return
++        lost = set(receipt_ids)
++        def apply(state):
++            for case in state['cases'].values():
++                if lost.intersection(case['receipts']):
++                    case['status'] = 'stale'
++                    case.setdefault('revisions', []).append({
++                        'revision': state['revision'] + 1, 'status': 'stale',
++                        'reason': reason, 'receipt_ids': sorted(lost)})
++            for finding in state['findings'].values():
++                if lost.intersection(finding['receipt_ids']):
++                    finding['status'] = 'stale'
++        self.change('source_changed', apply)
++
++    def check_allow(self, revision, *, handoff):
++        self.verify()
++        if (type(revision) is not int or revision != self.state['revision'] or
++                self.state['packet'] is None or self.state['packet']['handoff'] != handoff):
++            raise ValueError('Allow requires current packet and latest frontier revision')
++        live = [item['id'] for item in self.state['findings'].values()
++                if item['status'] == 'current' and item['kind'] in
++                {'counterexample', 'correction'} and
++                self.state['cases'][item['case_id']]['status'] not in {'retracted', 'stale'}]
++        if live:
++            raise ValueError('Current concrete objection requires resolution or withdrawal: ' + ','.join(live))
++
++
++METHOD_PROMPT = """You are the same persistent Supervisor investigating the Task's current decision.
++The public task is authoritative. The Task alone implements and validates its submitted work.
++At initialization read the full public task and create the existing bounded Task Book at
++monitor/reference.md. Keep it revisable; it is not an acceptance checklist. Distinguish raw tool
++observations, source interpretation, Task claims and unresolved hypotheses. Investigate
++relevant definitions, callers, state consumers, test setup and observable effects where useful.
++A source-level counterexample can support a bounded correction; an unexecuted plan, mere
++field or method existence, failed compile, process label or missing report is not behavioral
++validation. Keep failed probes and question their oracle instead of making them pass by fiat.
++The protected frontier records local concerns, source scopes, dependencies and receipts.
++Pending or blocked cases are not a whole-task veto. Preserve unresolved cases when leaving.
++Do not write to the live Task tree, access hidden evaluation, or take over Task repair.
++Use the existing delivery and fresh-feedback path for any correction. Completion permission
++means no currently established supervisory objection, not whole-task certification."""
++
++
++STAGE_A_PROMPT = """Phase A: prepare a source-grounded local inquiry packet. Inspect the full
++public task, current Task behavior, Task Book and the paginated host frontier. Preserve relevant
++leads even if unconfirmed; record dependencies before investigating them. You may read public
++sources and use the isolated private analysis port. When the packet is ready call packet_ready.
++That handoff has executed=false and input_sent=false; it cannot control or message the Task.
++Do not call wait, intervene or allow_complete in this phase."""
++
++
++STAGE_B_PROMPT = """Phase B: investigate independently with a fresh conversation history.
++The full public task, original materials and entire frontier remain accessible. Phase A's
++packet is revisable, not a verdict; check it, reject bad hypotheses, pursue dependencies and
++return to the parent concern. Register a local finding tied to an existing case, original task
++basis and authentic source or tool receipt before intervening. Recheck fresh Task behavior and
++the relevant live source before a correction; private copies are not the live Task result.
++Only this phase may use the existing wait, intervene and allow_complete control path.
++For a pending root, completion requires the current packet/handoff and frontier revision;
++an unresolved pending item alone is not a reason to deny completion."""
++
+diff --git a/GenericAgent-main/monitor_agent_core/runtime.py b/GenericAgent-main/monitor_agent_core/runtime.py
+index a1724bea..5fa88dbe 100644
+--- a/GenericAgent-main/monitor_agent_core/runtime.py
++++ b/GenericAgent-main/monitor_agent_core/runtime.py
+@@ -235,6 +235,12 @@ def _verification_boundary_valid(state, generation):
+ def _capture_pilot_payload(private_root, monitor, request_id, payload):
+     """Fail before transport if the committed projection is absent or audit fails."""
+     from .agent import ProjectionIntegrityError
++    if getattr(monitor, 'evidence_package_v1', False):
++        try:
++            monitor._evidence_pre_send(payload)
++        except Exception:
++            monitor._analysis_integrity_failure = True
++            raise
+     pending = monitor._projection_pending_request
+     native_lineage = None
+     if monitor.history_projection == 'root_records_native_v2' and pending is not None:
+@@ -623,6 +629,7 @@ def _worker(config, commands, outputs):
+             # A terminal transport recovery must not silently restart via the
+             # queued patrol/completion commands after the parent has failed it.
+             return not (isinstance(exc, ProviderRecoveryExhausted) or
++                        getattr(monitor, '_analysis_integrity_failure', False) or
+                         (getattr(monitor, 'history_projection', 'off') == 'root_records_native_v2' and
+                          getattr(monitor, '_projection_integrity_failure', None) is not None))
+         if action.kind == "wait":
+@@ -797,6 +804,15 @@ class MonitorRuntime:
+         self.artifact_dir = Path(artifact_dir).resolve()
+         if model_config.get('monitor_pilot_zero_ambiguous_retry') and analysis_port_root is None:
+             raise ValueError('Pilot transport policy requires the fixed analysis port')
++        if model_config.get('monitor_evidence_package_v1') is True and analysis_port_root is None:
++            raise ValueError('Evidence package requires the isolated pilot analysis port')
++        if model_config.get('monitor_evidence_package_v1') is True:
++            # The pilot currently bind-mounts the whole monitor artifact root RW
++            # into the Task container. A frontier stored beside monitor_private
++            # is therefore not a host-protected canonical state, even though
++            # the diagnostic sidecar cannot see it. Do not send a model request
++            # until a truly host-owned state port is installed and certified.
++            raise ValueError('Evidence package frontier is reachable from the Task container')
+         if analysis_port_root is not None and (not run_id or not Path(analysis_port_root).is_absolute()):
+             raise ValueError('Pilot analysis port requires an absolute root and run identity')
+         if type(root_checkpoint_required) is not bool:
+diff --git a/GenericAgent-main/monitor_agent_core/workspace.py b/GenericAgent-main/monitor_agent_core/workspace.py
+index 7f17bd62..30ecd9b1 100644
+--- a/GenericAgent-main/monitor_agent_core/workspace.py
++++ b/GenericAgent-main/monitor_agent_core/workspace.py
+@@ -53,6 +53,8 @@ class MonitorWorkspace:
+ 
+     def resolve_read(self, virtual_path: str) -> Path:
+         namespace, parts = self._parts(virtual_path)
++        if namespace == 'monitor' and parts and parts[0] == '.evidence_package_v1':
++            raise MonitorPathError('Read the host frontier through its paginated tool')
+         if namespace == "monitor" and parts == ("working.md",):
+             parts = (self.working_note_target,)
+         root = self.evidence_root if namespace == "task" else self.private_root
+@@ -72,6 +74,8 @@ class MonitorWorkspace:
+             parts = (self.working_note_target,)
+         if namespace != "monitor" or not parts:
+             raise MonitorPathError("Writes require a file under monitor/")
++        if parts[0] == '.evidence_package_v1':
++            raise MonitorPathError('The evidence frontier is host-owned')
+         path = self._within(self.private_root, self.private_root.joinpath(*parts))
+         if path == self.snapshot_root or self.snapshot_root in path.parents:
+             raise MonitorPathError("The analysis snapshot is runtime-owned")
+diff --git a/GenericAgent-main/tests/test_evidence_package_v1.py b/GenericAgent-main/tests/test_evidence_package_v1.py
+new file mode 100644
+index 00000000..0ab8ccdc
+--- /dev/null
++++ b/GenericAgent-main/tests/test_evidence_package_v1.py
+@@ -0,0 +1,433 @@
++"""Zero-network tests of the opt-in evidence-package path."""
++
++import hashlib
++import json
++from pathlib import Path
++
++import pytest
++
++from monitor_agent_core.agent import MonitorAgent
++from monitor_agent_core.loop import MonitorLoopError
++from monitor_agent_core.evidence_package_v1 import EvidenceFrontier, EvidencePackageIntegrityError
++from monitor_agent_core.provider import MonitorProviderClient
++from monitor_agent_core.runtime import MonitorRuntime, _capture_pilot_payload
++from monitor_agent_core.workspace import MonitorWorkspace
++
++
++class TestPort:
++    evidence_test_port = True
++
++
++def make_monitor(tmp_path, **switches):
++    evidence = tmp_path / 'evidence'
++    evidence.mkdir(parents=True)
++    (evidence / 'original_task.txt').write_text('Keep the public route working.', encoding='utf-8')
++    (evidence / 'public_events.jsonl').write_text('', encoding='utf-8')
++    task = tmp_path / 'task'
++    task.mkdir()
++    workspace = MonitorWorkspace(evidence, tmp_path / 'monitor' / 'monitor_private',
++                                 task_mounts={'workspace': task})
++    config = {'apikey': 'offline-test', 'apibase': 'https://offline.invalid',
++              'model': 'claude-opus-4-8', 'provider': 'anthropic', 'max_retries': 0,
++              'monitor_adaptive_supervisory_environment': True,
++              'monitor_narrow_supervisor_v1': True,
++              'monitor_evidence_package_v1': True, **switches}
++    client = MonitorProviderClient('offline', config)
++    monitor = MonitorAgent(client, workspace)
++    monitor.task_budget_state = lambda: (12, 300)
++    return monitor, client, workspace
++
++
++def test_default_off_invalid_combinations_and_port_before_request(tmp_path):
++    for value in ('true', 1):
++        with pytest.raises(ValueError):
++            make_monitor(tmp_path / str(value), monitor_evidence_package_v1=value)
++    with pytest.raises(ValueError):
++        make_monitor(tmp_path / 'not-narrow', monitor_narrow_supervisor_v1=False)
++    monitor, _, _ = make_monitor(tmp_path / 'no-port')
++    with pytest.raises(EvidencePackageIntegrityError, match='isolated analysis port'):
++        monitor.review('Wake')
++
++
++def test_shared_task_container_frontier_is_rejected_before_runtime_start(tmp_path):
++    """The present pilot bind mount is not a protected host frontier."""
++    with pytest.raises(ValueError, match='reachable from the Task container'):
++        MonitorRuntime(public_task='Offline public task', task_workspace=tmp_path / 'app',
++                       artifact_dir=tmp_path / 'monitor', config_name='offline',
++                       model_config={'monitor_evidence_package_v1': True},
++                       interrupt_callback=lambda: None, task_id='offline-task',
++                       run_id='offline-run', analysis_port_root=tmp_path / 'spool')
++
++
++def test_frontier_durable_pages_tamper_and_protected_file_tools(tmp_path):
++    monitor, _, workspace = make_monitor(tmp_path)
++    state = EvidenceFrontier(workspace.private_root)
++    ids = []
++    for number in range(16):
++        row = state.open_case({'task_basis': 'Public route', 'scope': f'route-{number}',
++                               'observable_consequence': 'Public response',
++                               'leads': ['Read implementation']})
++        ids.append(row['case_id'])
++    first = state.page(limit=5)
++    assert len(first['cases']) == 5 and first['remaining'] == 11
++    assert state.page(cursor=first['next_cursor'], limit=20)['remaining'] == 0
++    state.revise_case({'case_id': ids[0], 'status': 'blocked', 'reason': 'Fixture unavailable'})
++    assert state.page(cursor=first['next_cursor'])['status'] == 'stale_cursor'
++    restored = EvidenceFrontier(workspace.private_root)
++    assert len(restored.state['cases']) == 16
++    with pytest.raises(ValueError):
++        restored.revise_case({'case_id': ids[0], 'status': 'observed',
++                             'reason': 'No receipt', 'receipt_ids': ['invented']})
++    with pytest.raises(ValueError):
++        workspace.write_text('monitor/.evidence_package_v1/frontier.json', 'forged')
++    state.state_path.write_text('{}', encoding='utf-8')
++    with pytest.raises(EvidencePackageIntegrityError):
++        restored.verify()
++
++
++def test_child_focus_finding_provenance_and_current_objection(tmp_path):
++    (tmp_path / 'monitor').mkdir()
++    state = EvidenceFrontier(tmp_path / 'monitor' / 'monitor_private')
++    parent = state.open_case({'task_basis': 'Original task', 'scope': 'interface-A',
++                              'observable_consequence': 'Visible effect', 'leads': ['Trace caller']})['case_id']
++    sibling = state.open_case({'task_basis': 'Original task', 'scope': 'interface-B',
++                               'observable_consequence': 'Visible effect', 'leads': ['Trace caller']})['case_id']
++    child = state.open_case({'task_basis': 'Original task', 'scope': 'implementation-A',
++                             'observable_consequence': 'State propagation', 'leads': ['Read state'],
++                             'parent_id': parent})['case_id']
++    assert state.next_focus(return_parent=True)['focus'] == parent
++    assert state.next_focus()['focus'] == sibling
++    assert state.next_focus()['focus'] == child
++    receipt = state.register_receipt('file_read', {'path': 'task/workspace/source.go'},
++                                     {'sha256': 'source-v1', 'status': 'ok'})
++    packet = state.packet_ready(handoff={'request_id': 'completion-1', 'generation': 1},
++                                task_cursor=3)
++    with pytest.raises(ValueError, match='host-issued receipts'):
++        state.finding({'packet_id': packet['id'], 'case_id': parent,
++                       'scope': 'interface-A', 'task_basis': 'Original task',
++                       'receipt_ids': ['made-up'], 'claim': 'not an observation',
++                       'kind': 'counterexample'}, handoff=packet['handoff'])
++    finding = state.finding({'packet_id': packet['id'], 'case_id': parent,
++                             'scope': 'interface-A', 'task_basis': 'Original task',
++                             'receipt_ids': [receipt], 'claim': 'bounded source contradiction',
++                             'kind': 'counterexample'}, handoff=packet['handoff'])['finding_id']
++    with pytest.raises(ValueError, match='concrete objection'):
++        state.check_allow(state.state['revision'], handoff=packet['handoff'])
++    state.revise_case({'case_id': parent, 'status': 'retracted',
++                       'reason': 'Source premise overturned', 'receipt_ids': [receipt]})
++    state.check_allow(state.state['revision'], handoff=packet['handoff'])
++    with pytest.raises(ValueError):
++        state.check_intervention(finding, handoff=packet['handoff'])
++
++
++def test_incomplete_process_is_not_behavioral_evidence(tmp_path):
++    (tmp_path / 'monitor').mkdir()
++    state = EvidenceFrontier(tmp_path / 'monitor' / 'monitor_private')
++    case = state.open_case({'task_basis': 'Original task', 'scope': 'route',
++                            'observable_consequence': 'Response', 'leads': ['Run probe']})['case_id']
++    running = state.register_receipt('code_run', {'code': 'go test ./...'},
++                                      {'status': 'running', 'session_id': 'session-1'})
++    assert state.state['receipts'][running]['behavior_verified'] is False
++    packet = state.packet_ready(handoff=None, task_cursor=0)
++    with pytest.raises(ValueError, match='incomplete process'):
++        state.finding({'packet_id': packet['id'], 'case_id': case,
++                       'scope': 'route', 'task_basis': 'Original task',
++                       'receipt_ids': [running], 'claim': 'tests passed',
++                       'kind': 'counterexample'}, handoff=None)
++
++
++def test_cited_source_change_stales_only_related_finding(tmp_path):
++    monitor, _, workspace = make_monitor(tmp_path)
++    task = workspace.task_mounts['workspace']
++    (task / 'a.go').write_text('package a\n', encoding='utf-8')
++    (task / 'b.go').write_text('package b\n', encoding='utf-8')
++    state = EvidenceFrontier(workspace.private_root)
++    cases = []
++    findings = []
++    packet = state.packet_ready(handoff=None, task_cursor=0)
++    for name in ('a', 'b'):
++        case = state.open_case({'task_basis': 'Task contract', 'scope': name,
++                                'observable_consequence': name + ' response',
++                                'leads': ['Read source']})['case_id']
++        result = workspace.read_text('task/workspace/' + name + '.go')
++        receipt = state.register_receipt('file_read', {'path': result['path']}, result)
++        finding = state.finding({'packet_id': packet['id'], 'case_id': case,
++                                 'scope': name, 'task_basis': 'Task contract',
++                                 'receipt_ids': [receipt], 'claim': 'Source-level local claim',
++                                 'kind': 'counterexample'}, handoff=None)['finding_id']
++        cases.append(case)
++        findings.append(finding)
++    assert state.reconcile_sources(workspace) == []
++    (task / 'a.go').write_text('package changed\n', encoding='utf-8')
++    assert len(state.reconcile_sources(workspace)) == 1
++    assert state.state['findings'][findings[0]]['status'] == 'stale'
++    assert state.state['findings'][findings[1]]['status'] == 'current'
++    assert state.state['cases'][cases[1]]['status'] == 'pending'
++    state.revise_case({'case_id': cases[1], 'status': 'active',
++                       'reason': 'Oracle changed after inspecting setup',
++                       'hypothesis': 'A different expected behavior'})
++    assert state.state['findings'][findings[1]]['status'] == 'stale'
++
++
++def test_real_provider_send_two_phase_packet_finding_and_delivery(tmp_path, monkeypatch):
++    monitor, client, workspace = make_monitor(tmp_path)
++    monitor.analysis = TestPort()
++    monitor.intervention_callback = lambda message: {
++        'submission_id': 'offline-delivery-1', 'delivery': 'queued',
++        'submitted_task_turn': 12, 'submitted_cursor': 0}
++    client.pre_send_capture = lambda request_id, payload: _capture_pilot_payload(
++        workspace.private_root, monitor, request_id, payload)
++    payloads = []
++    actions = ['file_write', 'frontier_open', 'packet_ready', 'file_read',
++               'frontier_finding', 'intervene']
++
++    class FakeResponse:
++        status_code = 200
++        headers = {'content-type': 'text/event-stream'}
++
++        def __init__(self, action, arguments):
++            self.action, self.arguments = action, arguments
++
++        def __enter__(self):
++            return self
++
++        def __exit__(self, *_):
++            return None
++
++        def iter_lines(self):
++            events = [
++                {'type': 'message_start', 'message': {'usage': {'input_tokens': 10}}},
++                {'type': 'content_block_start', 'content_block': {
++                    'type': 'tool_use', 'id': 'offline-tool-' + str(len(payloads)),
++                    'name': self.action}},
++                {'type': 'content_block_delta', 'delta': {
++                    'type': 'input_json_delta', 'partial_json': json.dumps(self.arguments)}},
++                {'type': 'content_block_stop'},
++                {'type': 'message_delta', 'usage': {'output_tokens': 5}},
++                {'type': 'message_stop'},
++            ]
++            return iter([('data: ' + json.dumps(item)).encode() for item in events])
++
++    def post(_url, **kwargs):
++        payload = json.loads(json.dumps(kwargs['json']))
++        payloads.append(payload)
++        index = len(payloads) - 1
++        action = actions[index]
++        if action == 'file_write':
++            arguments = {'path': 'monitor/reference.md', 'content': 'Public route obligation.'}
++        elif action == 'frontier_open':
++            arguments = {'task_basis': 'Public route', 'scope': 'route-handler',
++                         'observable_consequence': 'Response remains available',
++                         'leads': ['Read the route handler']}
++        elif action == 'packet_ready':
++            arguments = {}
++        elif action == 'file_read':
++            arguments = {'path': 'task/original_task.txt'}
++        elif action == 'frontier_finding':
++            state = monitor.evidence_frontier.state
++            arguments = {'packet_id': state['packet']['id'],
++                         'case_id': state['order'][0], 'task_basis': 'Public route',
++                         'scope': 'route-handler', 'receipt_ids': list(state['receipts']),
++                         'claim': 'Task basis was inspected; bounded advice remains possible.',
++                         'kind': 'investigation_request'}
++        else:
++            arguments = {'finding_id': next(iter(monitor.evidence_frontier.state['findings'])),
++                         'message': 'Please inspect the public route behavior.'}
++        return FakeResponse(action, arguments)
++
++    monkeypatch.setattr('monitor_agent_core.provider.requests.post', post)
++    action = monitor.review('Current public Task behavior.', max_turns_override=12)
++    assert action.kind == 'local_intervened'
++    assert len(payloads) == 6
++    assert 'Phase A' in payloads[0]['system']
++    assert 'Phase B' in payloads[3]['system']
++    assert payloads[3]['messages'][0]['role'] == 'user'
++    assert not any('offline-tool-1' in json.dumps(message)
++                   for message in payloads[3]['messages'])
++    assert monitor.evidence_frontier.state['packet']['executed'] is False
++    assert monitor.evidence_frontier.state['packet']['input_sent'] is False
++    assert monitor.control_echo.pending_submission['submission_id'] == 'offline-delivery-1'
++    assert len(list((workspace.private_root / 'audit' / 'provider_pre_send').glob('*.json'))) == 6
++    for stage, payload in [('A', payloads[0]), ('B', payloads[3])]:
++        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True,
++                         separators=(',', ':')).encode('utf-8')
++        print(json.dumps({'fake_request_stage': stage, 'canonical_sha256':
++                          hashlib.sha256(raw).hexdigest(), 'byte_count': len(raw),
++                          'fields': sorted(payload), 'message_count': len(payload['messages']),
++                          'tool_count': len(payload['tools'])}))
++
++
++def test_root_packet_reference_guard_and_no_objection_path(tmp_path, monkeypatch):
++    monitor, client, workspace = make_monitor(tmp_path)
++    monitor.analysis = TestPort()
++    handoff = {'generation': 1, 'request_id': 'completion-1', 'cursor': 1}
++    monitor.completion_state = lambda: handoff
++    (workspace.evidence_root / 'public_events.jsonl').write_text(json.dumps({
++        'archive_sequence': 1, 'task_turn': 12, 'boundary': 'completion',
++        'text': 'Task says done.', 'tool_calls': [], 'tool_results': []}) + '\n',
++        encoding='utf-8')
++    client.pre_send_capture = lambda request_id, payload: _capture_pilot_payload(
++        workspace.private_root, monitor, request_id, payload)
++    checkpoint_requests = []
++    client.request_assembly_callback = lambda snapshot: (
++        checkpoint_requests.append(snapshot) or True)
++    sent = []
++    actions = ['packet_ready', 'wait', 'allow_complete', 'file_write', 'allow_complete']
++
++    class Response:
++        status_code = 200
++        headers = {'content-type': 'text/event-stream'}
++
++        def __init__(self, name, arguments):
++            self.name, self.arguments = name, arguments
++
++        def __enter__(self):
++            return self
++
++        def __exit__(self, *_):
++            return None
++
++        def iter_lines(self):
++            events = [
++                {'type': 'message_start', 'message': {'usage': {}}},
++                {'type': 'content_block_start', 'content_block': {
++                    'type': 'tool_use', 'id': 'root-tool-' + str(len(sent)),
++                    'name': self.name}},
++                {'type': 'content_block_delta', 'delta': {
++                    'type': 'input_json_delta', 'partial_json': json.dumps(self.arguments)}},
++                {'type': 'content_block_stop'},
++                {'type': 'message_stop'},
++            ]
++            return iter([('data: ' + json.dumps(item)).encode() for item in events])
++
++    def post(_url, **kwargs):
++        sent.append(json.loads(json.dumps(kwargs['json'])))
++        index = len(sent) - 1
++        name = actions[index]
++        if name == 'allow_complete':
++            arguments = {'frontier_revision': monitor.evidence_frontier.state['revision']}
++        elif name == 'wait':
++            arguments = {'after_turns': 1, 'mode': 'follow'}
++        elif name == 'file_write':
++            arguments = {'path': 'monitor/reference.md', 'content': 'Public route contract.'}
++        else:
++            arguments = {}
++        return Response(name, arguments)
++
++    monkeypatch.setattr('monitor_agent_core.provider.requests.post', post)
++    action = monitor.review('Task completion handoff.', completion_pending=True,
++                            root_handoff=handoff, max_turns_override=8)
++    assert action.kind == 'allow_complete'
++    assert len(sent) == 5
++    assert monitor.evidence_frontier.state['packet']['handoff'] == handoff
++    assert checkpoint_requests and checkpoint_requests[0]['root_handoff'] == handoff
++    assert 'Phase A' in sent[0]['system'] and 'Phase B' in sent[1]['system']
++    dialogue = (workspace.private_root / 'audit' / 'dialogue.jsonl').read_text(
++        encoding='utf-8')
++    assert 'reference_invalid' in dialogue
++    assert 'handoff_pending' in dialogue
++    assert not any(row.get('event') == 'ase_reconsideration_boundary'
++                   for row in map(json.loads, dialogue.splitlines()))
++
++
++def test_mid_phase_root_cutover_preserves_budget_and_parent_history(tmp_path, monkeypatch):
++    monitor, client, workspace = make_monitor(tmp_path)
++    monitor.analysis = TestPort()
++    client.pre_send_capture = lambda *_: None
++    parent = [{'role': 'user', 'content': [{'type': 'text', 'text': 'prior context'}]}]
++    client.restore_history(parent)
++    current = {'generation': 2, 'request_id': 'completion-2', 'cursor': 1}
++    state = {'handoff': None, 'calls': 0}
++    monitor.completion_state = lambda: state['handoff']
++
++    def first(_tools):
++        state['calls'] += 1
++        assert state['calls'] == 1
++        state['handoff'] = current
++        return [{'type': 'text', 'text': 'Inspecting.'}], {}
++
++    monkeypatch.setattr(client, '_request_once', first)
++    action = monitor.review('Ordinary wake.', max_turns_override=5)
++    assert action.kind == 'root_route'
++    assert action.payload['prior_model_turns'] == 1
++    assert client.export_history() == parent
++    assert monitor.evidence_frontier.state['packet'] is None
++
++
++def test_shared_outer_budget_exhaustion_is_not_wait(tmp_path, monkeypatch):
++    monitor, client, _ = make_monitor(tmp_path)
++    monitor.analysis = TestPort()
++    client.pre_send_capture = lambda *_: None
++    calls = []
++
++    def fake(_tools):
++        calls.append(monitor._evidence_stage)
++        if monitor._evidence_stage == 'A':
++            return [{'type': 'tool_use', 'id': 'packet', 'name': 'packet_ready',
++                     'input': {}}], {}
++        return [{'type': 'text', 'text': 'Need more investigation.'}], {}
++
++    monkeypatch.setattr(client, '_request_once', fake)
++    with pytest.raises(MonitorLoopError):
++        monitor.review('Wake.', max_turns_override=2)
++    assert calls == ['A', 'B']
++    assert monitor.evidence_frontier.state['packet']['executed'] is False
++    assert monitor._evidence_stage is None
++
++
++def test_real_maintenance_format_repair_does_not_execute_or_finish_packet(tmp_path, monkeypatch):
++    monitor, client, workspace = make_monitor(tmp_path)
++    monitor.analysis = TestPort()
++    monitor.evidence_frontier = EvidenceFrontier(workspace.private_root)
++    packet = monitor.evidence_frontier.packet_ready(handoff=None, task_cursor=0)
++    monitor._evidence_stage = 'B'
++    monitor._evidence_limit = 8
++    sent = []
++    client.pre_send_capture = lambda request_id, payload: _capture_pilot_payload(
++        workspace.private_root, monitor, request_id, payload)
++
++    class Response:
++        status_code = 200
++        headers = {'content-type': 'text/event-stream'}
++
++        def __init__(self, number):
++            self.number = number
++
++        def __enter__(self):
++            return self
++
++        def __exit__(self, *_):
++            return None
++
++        def iter_lines(self):
++            if self.number == 1:
++                block = {'type': 'tool_use', 'id': 'unexecuted', 'name': 'wait'}
++                delta = {'type': 'input_json_delta', 'partial_json': '{"after_turns":1}'}
++            else:
++                block = {'type': 'text', 'text': ''}
++                delta = {'type': 'text_delta', 'text': 'Keep the bounded question open.'}
++            events = [
++                {'type': 'message_start', 'message': {'usage': {}}},
++                {'type': 'content_block_start', 'content_block': block},
++                {'type': 'content_block_delta', 'delta': delta},
++                {'type': 'content_block_stop'},
++                {'type': 'message_stop'},
++            ]
++            return iter([('data: ' + json.dumps(item)).encode() for item in events])
++
++    def post(_url, **kwargs):
++        sent.append(json.loads(json.dumps(kwargs['json'])))
++        return Response(len(sent))
++
++    monkeypatch.setattr('monitor_agent_core.provider.requests.post', post)
++    before = client.export_history()
++    note = monitor._prepare_continuation()
++    assert note == 'Keep the bounded question open.'
++    assert len(sent) == 2 and all(row['tools'] == [] for row in sent)
++    assert sent[0]['messages'][-1] != sent[1]['messages'][-1]
++    assert client.export_history() == before
++    assert getattr(client, 'request_purpose', 'review') == 'review'
++    assert monitor.evidence_frontier.state['packet'] == packet
++    assert monitor._evidence_maintenance_calls == 2
++    assert not monitor._sent_messages
++
+diff --git a/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/FUTURE_DIAGNOSTIC_MANIFEST_DRAFT.json b/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/FUTURE_DIAGNOSTIC_MANIFEST_DRAFT.json
+new file mode 100644
+index 00000000..0e7b381c
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/FUTURE_DIAGNOSTIC_MANIFEST_DRAFT.json
+@@ -0,0 +1,55 @@
++{
++  "status": "draft_not_authorized_not_runnable",
++  "candidate": "evidence_package_v1",
++  "comparison": "existing N versus evidence_package_v1 on identical static public materials",
++  "interpretation": "system diagnosis, not a single-variable ablation or an online Task outcome test",
++  "selection_rule": "Freeze eligible cutoff, source identities, information boundary and inclusion reason before any model output; include a concrete concern, sound ongoing work, an erroneous supervisory premise and an environment-blocked inquiry. Do not select or replace cases using historical native scores or candidate output.",
++  "cases": [
++    {
++      "id": "C01",
++      "type": "productive investigation with an unresolved issue",
++      "source": "diagnostic_static_adapter_v1_20261009/C01_VISIBILITY_MANIFEST.json",
++      "dialogue_cutoff": 307,
++      "public_cursor": 120,
++      "ordinary_workspace_files": 2472,
++      "ordinary_workspace_sha256": "88b7f94d499368196bc8ac1870da4491769598eb4ce567b8c6e12a10bf289a0b",
++      "availability": "certified static material, not an online process restoration",
++      "caveat": "Not a mandatory silence or no-intervention label; assess whether any interruption has current grounds."
++    },
++    {
++      "id": "C02",
++      "type": "concrete concern already visible in the historical fragment",
++      "source": "diagnostic_static_adapter_v1_20261009/C02_VISIBILITY_MANIFEST.json",
++      "dialogue_cutoff": 418,
++      "public_cursor": 161,
++      "ordinary_workspace_files": 2476,
++      "ordinary_workspace_sha256": "40acbedf3c03d863cac8514298618f74ca999c706466dc426ae8eb638708d2f0",
++      "availability": "certified static material, not an online process restoration",
++      "caveat": "Historical defect knowledge is research-side only and must not enter either request or tool-visible environment."
++    },
++    {
++      "id": "PENDING_FALSE_PREMISE",
++      "type": "erroneous supervisory hypothesis",
++      "availability": "not selected; cutoff tree, Task Book, request and public evidence not certified",
++      "startup_gate": "Find a lawful historical cutoff and certify all static source identities before freezing order."
++    },
++    {
++      "id": "PENDING_ENVIRONMENT_BLOCK",
++      "type": "environment-blocked investigation",
++      "availability": "not selected; cutoff tree, Task Book, request and public evidence not certified",
++      "startup_gate": "Distinguish missing dependency/tool environment from task behavior without showing a hidden outcome."
++    }
++  ],
++  "model_and_budget": {
++    "model": "claude-opus-4-8 if a later approved manifest confirms the same resolved profile for both arms",
++    "task_model_calls": 0,
++    "turn_envelope": "not yet frozen; use the same approved envelope for N and candidate, count outer cycles and maintenance/provider attempts separately",
++    "tools": "same public source and isolated analysis port for both arms; no Task continuation",
++    "sequence": "not frozen because two required case types and the candidate host-state isolation gate remain unresolved"
++  },
++  "scoring": "Observe investigation choice, distinguishing observations, execution/completion, groundedness, erroneous interruption, missed warranted correction and actual cost; packet completeness or tool count alone is not success.",
++  "forbidden_inputs": [
++    "historical future events", "native evaluator", "gold patch", "candidate labels",
++    "known defect summary", "research audit", "another run's files"
++  ]
++}
+diff --git a/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/REPORT.md b/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/REPORT.md
+new file mode 100644
+index 00000000..4d4d2b83
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/REPORT.md
+@@ -0,0 +1,166 @@
++# evidence_package_v1 zero-model engineering audit
++
++Status: **OFFLINE_BLOCKED; no real run authorized or started.** This is a default-off,
++partly implemented candidate, not an accepted method or an executable pilot.
++Baseline: `cea43088039154505a162514880af99acfc1c0c1` on
++`crs-v0-20261007`; recent N run code `32eb30f9e0d6d4c95cc02d1afa6e594ad2e14202`.
++The old archive and benchmark Task/evaluator are unchanged. Unrelated pycache remains.
++
++## Actual implementation and reuse
++
++`REUSE_MANIFEST.json` and `SOURCE_LOCK.json` record the fixed local and author
++sources, licenses, Git blobs, call chain and reasons not to import incompatible
++external runtimes. No CoverUp, Agentless, Haskell Build or PMA code was copied.
++The implementation calls the existing MonitorAgent, run_review, provider,
++workspace, spool and pilot preparation paths. Its added pieces are:
++
++- A strict `monitor_evidence_package_v1` boolean, explicit
++  `evidence_package_v1` profile variant, ASE+narrow enabled, CRS/RHR/RER disabled,
++  projection off. Off/legacy/narrow profiles retain their old paths.
++- Phase A exposes packet preparation, source investigation and the frontier,
++  but not Task control. Its `packet_ready` has `executed=false/input_sent=false`.
++  Phase B starts with fresh conversation History plus original task, packet and
++  frontier page, then uses the existing delivery/control path.
++- The versioned frontier retains distinct cases, leads, parent focus, receipt
++  provenance, revisions, packet and findings. Ordinary Monitor file tools
++  cannot write its sibling directory. Cursor revision changes fail visibly.
++  Incomplete process receipts are not labeled behavioral verification.
++- A/B share outer cycle and maintenance request counters; root cutover carries
++  the aggregate. A stage History snapshot is read back before B begins.
++  Existing provider pre-send capture checks stage system/tools/model and
++  continuation/format-repair purpose. The real installed pilot analysis port is
++  required; an explicit fake port is used only in tests.
++
++These are real modifications to Supervisor/pilot research paths, not zero
++production-code changes. `git diff cea43088..CODE_COMMIT` is reproduced in
++the TXT audit packet. No benchmark Task, prompt, evaluator or old result changed.
++
++## Deployment boundary that blocks an experiment
++
++`pilot_entry._augment_compose` bind-mounts `run_root/monitor` read-write at
++`/logs/agent/monitor` in the main Task/Monitor container. The frontier path
++`monitor/.evidence_package_v1` is outside the sidecar's read-only
++`monitor_private` cognition mount, but remains inside the Task container's
++read-write monitor bind. A Task-side generic command could reach the would-be
++canonical state. A direct `file_write` rejection is therefore insufficient to
++certify a host-managed, non-overridable frontier. This is a concrete information
++and integrity boundary, not a missing prompt. `MonitorRuntime` now refuses the
++candidate before process start/provider send with the tested error
++`Evidence package frontier is reachable from the Task container`.
++
++Minimal next engineering decision: a trusted host-owned frontier service/port
++with a Task-inaccessible store and request binding, or equivalent demonstrated
++OS isolation. It must not give the model Docker control or Task RW access.
++Until this is implemented and certified in the actual pilot, the candidate is
++**not live-ready**. The direct-agent fake/Docker tests below do not bypass this
++gate and are not deployment certification.
++
++Other acceptance items still unverified or incomplete: generic private probe
++classification does not yet distinguish actual matched test execution from
++compile-only output for arbitrary commands; oracle/config/dependency change
++invalidation has only narrow fixtures, not complete provenance coverage;
++same-container Task access to the protected frontier is unresolved; deployed
++first/next Supervisor requests were not executed through MonitorRuntime;
++future false-premise and environment-blocked static cases lack certified
++cutoffs. The candidate's `frontier_finding` validates ID existence, case/scope
++equality, receipt completion and some receipt kinds but cannot programmatically
++prove a natural-language causal claim or that a receipt actually covers the
++asserted scope. These are not silently promoted to pass.
++
++## Zero-model commands and observed raw output
++
++Working directory `GenericAgent-main`:
++
++```text
++python -m pytest tests/test_evidence_package_v1.py tests/test_narrow_supervisor_v1.py tests/test_monitor_agent.py tests/test_monitor_provider.py -q -s --tb=short
++......{"fake_request_stage": "A", "canonical_sha256": "5484012c57197e1d7a8efa6787646984bcde406aa9567bc3ab04afd5fbd596a9", "byte_count": 8276, "fields": ["max_tokens", "messages", "model", "stream", "system", "tools"], "message_count": 2, "tool_count": 9}
++{"fake_request_stage": "B", "canonical_sha256": "8906078a5bc47cf481cd93ee7bb5d800642030013520a91fe332d3e395067ccf", "byte_count": 10591, "fields": ["max_tokens", "messages", "model", "stream", "system", "tools"], "message_count": 2, "tool_count": 12}
++.........................................................................
++79 passed in 3.46s
++exit_code=0
++```
++
++Working directory repo root, with `PYTHONPATH` set to the actual
++`GenericAgent-main` path:
++
++```text
++python -m pytest --import-mode=importlib method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/test_profile.py method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/test_bundle.py -q --tb=short
++... [100%]
++3 passed in 14.31s
++exit_code=0
++```
++
++```text
++python -m pytest --import-mode=importlib method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/test_docker_candidate.py -q -s --tb=short
++{"image_id": "sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1", "fake_provider_requests": 9, "host_receipts": 6, "task_write_denied": true, "private_copy_changed": true, "go_result": "build_without_running_tests", "behavior_verified": false, "bridge_closed": true}
++.{"image_id": "sha256:7ffcd70e49d77031b8e67eaa99226dc8468fa046f33e615118e8922b89fff32e", "fake_provider_requests": 6, "host_receipts": 3, "task_write_denied": true, "private_copy_changed": true, "go_result": "no_test_files_compile_only", "behavior_verified": false, "bridge_closed": true}
++.
++2 passed in 44.43s
++exit_code=0
++```
++
++All three pytest invocations also printed an atexit warning after the pass
++summary: `PermissionError: [WinError 5]` while resolving the preexisting
++`C:\Users\hsy\AppData\Local\Temp\pytest-of-hsy\pytest-951`; process exit
++codes stayed 0. No unrelated temp/pycache was cleaned. The first Docker
++tool output decoded the localized message with replacement characters:
++
++```text
++Error in atexit._run_exitfuncs:
++Traceback (most recent call last):
++  File "D:\python\lib\pathlib.py", line 215, in resolve
++    s = self._ext_to_normal(_getfinalpathname(s))
++PermissionError: [WinError 5] �ܾ����ʡ�: 'C:\\Users\\hsy\\AppData\\Local\\Temp\\pytest-of-hsy\\pytest-951'
++```
++
++The first Docker
++fixture attempt lacked a `task_mounts['workspace']` entry; after that was
++corrected, the Kitex expectation of `ok` failed because the command returned
++`[no test files]`. The test was corrected to classify that as compile-only.
++The complete earlier failing stdout/stderr was not retained; those attempts
++are explicitly not counted as passing evidence.
++
++The fake request hashes above are for the unit fixture's six-field payloads,
++not a live resolved-profile request identity. They are not evidence that the
++real endpoint would accept this candidate. The Docker tests performed 15
++additional intercepted fake requests (Fyne 9, Kitex 6); the unit fake path
++performed 13 (six A/B, five root, two maintenance): 28 intercepted fake
++provider attempts across the cited final tests. No real endpoint was used.
++
++## Source and configuration identities
++
++The fixed Git source/author/license identities are in `SOURCE_LOCK.json`;
++`REUSE_MANIFEST.json` links actual and rejected call paths. Local Python was
++3.9.13 with pytest 7.1.2. Docker image IDs and RepoDigests were read from
++local `docker image inspect`, not inferred from a mutable tag. The test
++bundle stages the candidate module into the real isolated bundle, reads the
++resolved `models.local.json`, and confirms the explicit S candidate flags.
++It does not start a real MonitorRuntime; the launch gate above intentionally
++blocks that. The fake unit requests omit profile-only thinking parameters,
++so they are not passed off as the full deployed request.
++
++The public effective profile uses `claude-opus-4-8`, max_tokens 8192,
++adaptive/high, `timeout=120`, `read_timeout=300`, `max_retries=0`, TLS
++verification, pilot incomplete-stream recovery true, ASE true, CRS/RHR/RER
++false, projection off. Credentials and private endpoint strings are excluded
++from the public identity. Task profile/Task inputs and scoring were unchanged.
++
++## Future work is a draft, not authorization
++
++`FUTURE_DIAGNOSTIC_MANIFEST_DRAFT.json` records two certified static cutoffs
++and two missing case categories without inventing checkpoints. A later design
++must freeze the same model, public information, tools, budget, order and
++evidence rubric for current N versus this system candidate. Static diagnosis
++would measure investigation quality, not live Task repair or task score.
++Historical C01/C02 are exposed development fragments and not independent
++tasks. No experiment was authorized by this document.
++
++## Counts and disposition
++
++Real Task model runs: 0. Real Supervisor model runs: 0. Real provider/API
++requests: 0. Native evaluator: 0. Training/scoring-model calls: 0.
++Intercepted local fake-provider requests in the cited final paths: 28.
++Candidate live pilot starts: 0. The deployment mount boundary is a failed
++mandatory gate, so there is no claim of complete offline acceptance or
++method effectiveness. The independent research audit must decide whether to
++authorize a bounded host-frontier repair and remaining acceptance work.
+diff --git a/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/REUSE_MANIFEST.json b/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/REUSE_MANIFEST.json
+new file mode 100644
+index 00000000..fb3f9063
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/REUSE_MANIFEST.json
+@@ -0,0 +1,96 @@
++{
++  "candidate": "evidence_package_v1",
++  "base_commit": "cea43088039154505a162514880af99acfc1c0c1",
++  "rule": "direct author implementation when semantics fit; minimal adaptation otherwise; no nominal reuse",
++  "sources": [
++    {
++      "name": "longcontext-monitor-research",
++      "url": "https://github.com/HYC-hsy/longcontext-monitor-research",
++      "commit": "cea43088039154505a162514880af99acfc1c0c1",
++      "license": "repository-owned code; no third-party relicensing",
++      "status": "direct reuse with research-specific coordination",
++      "files_functions": [
++        "GenericAgent-main/monitor_agent_core/loop.py:run_review",
++        "GenericAgent-main/monitor_agent_core/provider.py:MonitorProviderClient.complete/record_tool_results/export_history/restore_history",
++        "GenericAgent-main/monitor_agent_core/agent.py:MonitorAgent.review/_dispatch/_active_working_context/_prepare_continuation",
++        "GenericAgent-main/monitor_agent_core/analysis_spool.py:SpoolAnalysisSessions",
++        "GenericAgent-main/monitor_agent_core/runtime.py:MonitorRuntime/_monitor_worker",
++        "method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_profile.py:resolved_supervisor_profile",
++        "method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_entry.py:prepare_run"
++      ],
++      "call_chain": "pilot_entry.prepare_run -> resolved_supervisor_profile -> isolated_run_bundle -> runtime._monitor_worker -> MonitorAgent.review -> run_review -> MonitorProviderClient.complete -> MonitorAgent.dispatch -> SpoolAnalysisSessions",
++      "adaptation": "A/B coordination, protected frontier and finding interfaces, explicit profile variant; retain existing model transport, tool loop, Task handoff and isolated analysis port",
++      "existing_tests": "Reuse pilot fake-provider, monitor-agent-core and analysis-spool tests; record actual commands in audit",
++      "new_tests": "candidate state, lifecycle, profile, fake-provider and Docker integration"
++    },
++    {
++      "name": "CoverUp",
++      "url": "https://github.com/plasma-umass/coverup",
++      "commit": "d9ca25b9282621d2779560f2be397ab0683a6733",
++      "license": "Apache-2.0",
++      "status": "source inspected; not integrated",
++      "files_functions": [
++        "src/coverup/codeinfo.py:get_info",
++        "src/coverup/llm.py:Chatter.chat",
++        "src/coverup/coverup.py:improve_coverage",
++        "src/coverup/testrunner.py:measure_suite_coverage"
++      ],
++      "call_chain": "improve_coverage -> Chatter.chat/get_info -> Python test runner and coverage feedback",
++      "reason": "Python AST/pytest and coverage-increase acceptance do not implement Go task-grounded diagnosis; separate chat loop would replace the existing provider/receipt path",
++      "adaptation": "Use local code_run, source reads and authentic process receipts for context requests and execution feedback; no CoverUp code copied",
++      "existing_tests": "Not imported because author runtime is not integrated",
++      "new_tests": "Execution-feedback classification and evidence provenance"
++    },
++    {
++      "name": "Agentless",
++      "url": "https://github.com/OpenAutoCoder/Agentless",
++      "commit": "5ce5888b9f149beaace393957a55ea8ee46c9f71",
++      "license": "MIT",
++      "status": "source inspected; not integrated",
++      "files_functions": [
++        "agentless/test/generate_reproduction_tests.py:gen_test",
++        "agentless/test/run_tests.py:run_reproduction_tests/run_tests",
++        "agentless/test/run_regression_tests.py:save_passing_tests",
++        "agentless/test/select_regression_tests.py",
++        "agentless/repair/rerank.py:majority_voting",
++        "agentless/util/preprocess_data.py:get_repo_structure"
++      ],
++      "call_chain": "generate tests -> SWE-bench harness execution -> reproduction/regression reports -> reranking",
++      "reason": "SWE-bench patch, test_patch and selection assumptions are outside the public Go task boundary; missing reports and minimum failure count cannot stand in for behavioral validity; dependencies are not locked here",
++      "adaptation": "Retain the baseline-versus-private-probe distinction and source paths as design references only; no Agentless code copied",
++      "existing_tests": "Not imported; SWE-bench dependencies unverified",
++      "new_tests": "Report absence, no matched tests and wrong oracle do not become a pass"
++    },
++    {
++      "name": "Build Systems à la Carte",
++      "url": "https://github.com/snowleopard/build",
++      "commit": "43b18b9a362d7d27b64679ea4122e4b8c5dfedd9",
++      "license": "MIT",
++      "status": "source inspected; conceptual provenance only",
++      "files_functions": [
++        "src/Build/Task/Monad.hs:track",
++        "src/Build/Trace.hs:recordVT/verifyVT",
++        "src/Build/Rebuilder.hs:vtRebuilder",
++        "src/Build/Scheduler.hs"
++      ],
++      "call_chain": "track actual fetches -> record value/dependency hashes -> verify trace -> rebuild invalidated values",
++      "reason": "Haskell build model is not a drop-in Python/Go monitor runtime; verifyST simplifications cannot certify unknown dependencies",
++      "adaptation": "Record actual observation dependencies and invalidate current applicability on relevant source/oracle/config changes; no Haskell code copied",
++      "existing_tests": "Not imported because no runtime code is reused",
++      "new_tests": "Relevant/unknown changes stale evidence, unrelated known changes do not"
++    },
++    {
++      "name": "Proactive Memory Agent",
++      "url": "https://github.com/yifannnwu/proactive-memory-agent",
++      "commit": "89e5c0d6aadfe531a1aee42fd290d48be89973dd",
++      "license": "Apache-2.0",
++      "status": "compatibility inspected; not integrated",
++      "files_functions": ["src/memory_agent/memory/memory_agent.py:MemoryAgent.process"],
++      "call_chain": "memory-bank maintenance stage -> reminder/decision stage",
++      "reason": "Bank operations and reminder emission are incompatible with the protected case frontier, existing Task Book and current control path; replacing them would not preserve author core logic",
++      "adaptation": "Compose two phases using existing run_review; no PMA classes or prompts copied",
++      "existing_tests": "Existing PMA tests remain historical and unmodified",
++      "new_tests": "A handoff is non-executing and B alone can use existing control path"
++    }
++  ]
++}
+diff --git a/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/SOURCE_LOCK.json b/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/SOURCE_LOCK.json
+new file mode 100644
+index 00000000..21e238ef
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/SOURCE_LOCK.json
+@@ -0,0 +1,76 @@
++{
++  "local_project": {
++    "repository": "HYC-hsy/longcontext-monitor-research",
++    "base_commit": "cea43088039154505a162514880af99acfc1c0c1",
++    "local_execution_path": "E:/longcontext-cqs-v0-20261005",
++    "core_reuse": [
++      "GenericAgent-main/monitor_agent_core/loop.py:run_review",
++      "GenericAgent-main/monitor_agent_core/provider.py:MonitorProviderClient",
++      "GenericAgent-main/monitor_agent_core/agent.py:MonitorAgent",
++      "GenericAgent-main/monitor_agent_core/runtime.py:MonitorRuntime",
++      "GenericAgent-main/monitor_agent_core/analysis_spool.py:SpoolAnalysisSessions"
++    ]
++  },
++  "external_sources": [
++    {
++      "repository": "plasma-umass/coverup",
++      "commit": "d9ca25b9282621d2779560f2be397ab0683a6733",
++      "license": "Apache-2.0",
++      "git_blobs": {
++        "LICENSE": "d645695673349e3947e8e5ae42332d0ac3164cd7",
++        "src/coverup/codeinfo.py": "368d8058fd391f46eb8352859cfabc9db804e242",
++        "src/coverup/llm.py": "162e2035b9822bf5b6b632042d4a2f76aefacd57",
++        "src/coverup/coverup.py": "6ad93d812cdfe38e00c186e440d86b33e464ec64",
++        "src/coverup/testrunner.py": "f360a37647afffee7d9dc3ba36dc0a88e681555b"
++      },
++      "runtime_imported": false
++    },
++    {
++      "repository": "OpenAutoCoder/Agentless",
++      "commit": "5ce5888b9f149beaace393957a55ea8ee46c9f71",
++      "license": "MIT",
++      "git_blobs": {
++        "LICENSE": "c99d4d2ce279ca269d1a4d918dff73c105a8fa17",
++        "agentless/test/generate_reproduction_tests.py": "503f8728b971b50fd49a413c11d7babb4083af84",
++        "agentless/test/run_regression_tests.py": "ba329c66bb849718c9b63cdd5081ee47979df4ed",
++        "agentless/test/run_tests.py": "11bd7a4f9ee0ac95bd2d702328dfc800d1364e05",
++        "agentless/test/select_regression_tests.py": "c1cc4b13b96347fab72271ede6ab5152c160ccc7",
++        "agentless/repair/rerank.py": "5f1cab553fab0cc369027bd77f404e51bce373a3",
++        "agentless/util/preprocess_data.py": "bb9636c5b052eb75e5c48a82d87004af3816cb19"
++      },
++      "runtime_imported": false
++    },
++    {
++      "repository": "snowleopard/build",
++      "commit": "43b18b9a362d7d27b64679ea4122e4b8c5dfedd9",
++      "license": "MIT",
++      "git_blobs": {
++        "LICENSE": "b562127b284bb300a507594ab06e85c25beb7733",
++        "src/Build/Task/Monad.hs": "0c26aa4a349416c7c2f65d75c186a3697410bda7",
++        "src/Build/Trace.hs": "f543bca14b1de1eb5456ebb72e2e61c0676603fa",
++        "src/Build/Rebuilder.hs": "45233a9fb46ef7e3b7956cd61d2c7a8ce3ca5f15",
++        "src/Build/Scheduler.hs": "57fc2578aef538e065e361223206439bec883851"
++      },
++      "runtime_imported": false
++    },
++    {
++      "repository": "yifannnwu/proactive-memory-agent",
++      "commit": "89e5c0d6aadfe531a1aee42fd290d48be89973dd",
++      "license": "Apache-2.0",
++      "git_blobs": {
++        "LICENSE": "d64a49997871b36e78a2103cd1501785c0fa08d9",
++        "src/memory_agent/memory/memory_agent.py": "216cedf07837677c198cf9b7bafdea04858e6435"
++      },
++      "runtime_imported": false
++    }
++  ],
++  "zero_model_environment": {
++    "python": "3.9.13",
++    "pytest": "7.1.2",
++    "pinned_image_ids": {
++      "roadmapbench:fyn-2.2.0-roadmap": "sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1",
++      "roadmapbench:ktx-0.13.0-roadmap": "sha256:7ffcd70e49d77031b8e67eaa99226dc8468fa046f33e615118e8922b89fff32e"
++    },
++    "dependency_scope": "Only the existing repository environment and the two already installed pinned Docker images were used; external source runtime dependencies were not installed or treated as verified."
++  }
++}
+diff --git a/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/build_audit_packet.py b/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/build_audit_packet.py
+new file mode 100644
+index 00000000..8ae725f7
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/build_audit_packet.py
+@@ -0,0 +1,52 @@
++"""Mechanically assemble the credential-free source and test audit TXT."""
++
++from __future__ import annotations
++
++import hashlib
++import subprocess
++from pathlib import Path
++
++
++BASE = 'cea43088039154505a162514880af99acfc1c0c1'
++ROOT = Path(__file__).resolve().parents[3]
++RELATIVE = Path('method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012')
++SECTIONS = ('REPORT.md', 'REUSE_MANIFEST.json', 'SOURCE_LOCK.json',
++            'FUTURE_DIAGNOSTIC_MANIFEST_DRAFT.json')
++
++
++def git(*args: str) -> bytes:
++    return subprocess.check_output(['git', *args], cwd=ROOT)
++
++
++def main() -> None:
++    head = git('rev-parse', 'HEAD').decode().strip()
++    if git('branch', '--show-current').decode().strip() != 'crs-v0-20261007':
++        raise RuntimeError('Unexpected branch')
++    changed = git('diff', '--name-only', BASE + '..' + head).decode().splitlines()
++    allowed = ('GenericAgent-main/monitor_agent_core/', 'GenericAgent-main/tests/',
++               'method_discovery/curator_supervisor_convergence_v0/')
++    if not changed or any(not path.startswith(allowed) for path in changed):
++        raise RuntimeError('Diff includes an out-of-scope file')
++    chunks = [f'EVIDENCE_PACKAGE_V1 ZERO-MODEL AUDIT\nbase={BASE}\ncode_commit={head}\n'
++              .encode('utf-8')]
++    for name in SECTIONS:
++        path = RELATIVE / name
++        raw = git('show', head + ':' + path.as_posix())
++        label = (f'\n===== {path.as_posix()} =====\n'
++                 f'git_blob={git("rev-parse", head + ":" + path.as_posix()).decode().strip()}\n'
++                 f'blob_bytes_sha256={hashlib.sha256(raw).hexdigest()}\n'
++                 f'byte_count={len(raw)}\n').encode('utf-8')
++        chunks.extend((label, raw, b'\n'))
++    patch = git('diff', '--binary', BASE + '..' + head)
++    chunks.extend((b'\n===== FULL BASE-TO-CODE-COMMIT DIFF =====\n', patch))
++    destination = ROOT / RELATIVE / 'AUDIT_PACKET.txt'
++    destination.write_bytes(b''.join(chunks))
++    print(f'code_commit={head}')
++    print(f'changed_files={len(changed)}')
++    print(f'diff_sha256={hashlib.sha256(patch).hexdigest()}')
++    print(f'audit_txt_sha256={hashlib.sha256(destination.read_bytes()).hexdigest()}')
++    print(f'audit_txt_bytes={destination.stat().st_size}')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/test_bundle.py b/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/test_bundle.py
+new file mode 100644
+index 00000000..503871dd
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/test_bundle.py
+@@ -0,0 +1,81 @@
++"""Exercise the unarmed pilot preparation and its copied runtime identity."""
++
++import hashlib
++import json
++from pathlib import Path
++from types import SimpleNamespace
++
++import pytest
++
++from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010 import pilot_entry
++
++
++HERE = Path(__file__).resolve().parent
++PILOT = HERE.parent / 'real_task_effect_pilot_preflight_20261010'
++ASSETS = Path('E:/LongContext/long_context_bench/.cache/m12_roadmap_tasks')
++RUNTIME = Path('E:/LongContext/bench_runtime/m2/linux')
++GA = HERE.parents[2] / 'GenericAgent-main'
++
++
++def sha(path):
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++@pytest.mark.parametrize('task_id', [
++    'roadmapbench:fyn-2.2.0-roadmap', 'roadmapbench:ktx-0.13.0-roadmap'])
++def test_real_unarmed_bundle_contains_candidate_and_readable_profile(tmp_path, monkeypatch,
++                                                                       task_id):
++    if not ASSETS.exists() or not RUNTIME.exists():
++        pytest.skip('Pinned Fyne/Kitex local assets unavailable')
++    manifest = json.loads((PILOT / 'FYNE_KITEX_FOUR_ARM_MANIFEST_DRAFT.json').read_text(
++        encoding='utf-8'))
++    manifest['supervisor_variant'] = 'evidence_package_v1'
++    task_profile = tmp_path / 'mykey.py'
++    task_profile.write_text("native_claude_cc_vibe_opus48 = {'model': 'claude-opus-4-8', "
++                            "'apikey': 'offline', 'apibase': 'https://offline.invalid'}\n",
++                            encoding='utf-8')
++    supervisor_profile = tmp_path / 'monitor.json'
++    supervisor_profile.write_text(json.dumps({'claude_monitor_opus48': {
++        'model': 'claude-opus-4-8', 'max_tokens': 8192,
++        'thinking_type': 'adaptive', 'reasoning_effort': 'high',
++        'apikey': 'offline', 'apibase': 'https://offline.invalid'}}), encoding='utf-8')
++    manifest['private_profile_file_sha256_only'] = {
++        'task': sha(task_profile), 'supervisor': sha(supervisor_profile)}
++    draft = tmp_path / 'manifest.json'
++    draft.write_text(json.dumps(manifest), encoding='utf-8')
++    row = manifest['task_assets'][task_id]
++    monkeypatch.setattr(pilot_entry, '_image_identity', lambda image: {
++        'image_id': image, 'repo_digests': row['repo_digests']})
++
++    def volume(command, **_):
++        assert command[:3] == ['docker', 'volume', 'create']
++        return SimpleNamespace(returncode=0, stdout=command[3] + '\n')
++
++    monkeypatch.setattr(pilot_entry.subprocess, 'run', volume)
++    receipt = pilot_entry.prepare_run(
++        manifest=draft, task_id=task_id, condition='S',
++        run_id='offline-evidence-' + ('fyne' if ':fyn-' in task_id else 'kitex'),
++        run_root=tmp_path / 'run', source_root=ASSETS, ga_source=GA,
++        runtime_root=RUNTIME, task_profile_file=task_profile,
++        monitor_profile_file=supervisor_profile,
++        python_home='cpython-3.12.12-linux-x86_64-gnu',
++        supervisor_variant='evidence_package_v1')
++    bundle = tmp_path / 'run' / 'bundle' / 'source' / 'monitor_agent_core'
++    assert (bundle / 'evidence_package_v1.py').is_file()
++    profile = json.loads((bundle / 'models.local.json').read_text(
++        encoding='utf-8'))['claude_monitor_opus48']
++    assert profile['monitor_evidence_package_v1'] is True
++    assert profile['monitor_narrow_supervisor_v1'] is True
++    assert profile['monitor_history_projection'] == 'off'
++    assert receipt['profile_public']['monitor_evidence_package_v1'] is True
++    from monitor_agent_core.provider import MonitorProviderClient
++    from monitor_agent_core.agent import MonitorAgent
++    from monitor_agent_core.workspace import MonitorWorkspace
++    evidence = tmp_path / 'test-evidence'
++    evidence.mkdir()
++    (evidence / 'original_task.txt').write_text('Offline public task.', encoding='utf-8')
++    client = MonitorProviderClient('claude_monitor_opus48', profile)
++    agent = MonitorAgent(client, MonitorWorkspace(evidence, tmp_path / 'test-private'))
++    assert client.config['monitor_evidence_package_v1'] is True
++    assert agent.evidence_package_v1 and agent.narrow_supervisor_v1
++
+diff --git a/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/test_docker_candidate.py b/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/test_docker_candidate.py
+new file mode 100644
+index 00000000..7633b3c1
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/test_docker_candidate.py
+@@ -0,0 +1,179 @@
++"""Pinned target-image A/B inquiry through fake SSE and the real pilot spool port."""
++
++import json
++import subprocess
++import threading
++import time
++import uuid
++from pathlib import Path
++
++import pytest
++
++from monitor_agent_core.agent import MonitorAgent
++from monitor_agent_core.analysis_spool import SpoolAnalysisSessions
++from monitor_agent_core.provider import MonitorProviderClient
++from monitor_agent_core.runtime import _capture_pilot_payload
++from monitor_agent_core.workspace import MonitorWorkspace
++from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.pilot_analysis_bridge import (
++    PilotDockerToolPort, PilotHostBridge)
++
++
++IMAGES = (
++    'sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1',
++    'sha256:7ffcd70e49d77031b8e67eaa99226dc8468fa046f33e615118e8922b89fff32e',
++)
++
++
++def docker(*args):
++    return subprocess.run(['docker', *args], text=True, capture_output=True, timeout=90)
++
++
++class SSE:
++    status_code = 200
++    headers = {'content-type': 'text/event-stream'}
++
++    def __init__(self, tool_id, name, arguments):
++        self.tool_id, self.name, self.arguments = tool_id, name, arguments
++
++    def __enter__(self):
++        return self
++
++    def __exit__(self, *_):
++        return None
++
++    def iter_lines(self):
++        events = [
++            {'type': 'message_start', 'message': {'usage': {'input_tokens': 5}}},
++            {'type': 'content_block_start', 'content_block': {
++                'type': 'tool_use', 'id': self.tool_id, 'name': self.name}},
++            {'type': 'content_block_delta', 'delta': {
++                'type': 'input_json_delta', 'partial_json': json.dumps(self.arguments)}},
++            {'type': 'content_block_stop'},
++            {'type': 'message_delta', 'usage': {'output_tokens': 5}},
++            {'type': 'message_stop'},
++        ]
++        return iter([('data: ' + json.dumps(item)).encode() for item in events])
++
++
++@pytest.mark.parametrize('image', IMAGES)
++def test_pinned_image_fake_provider_two_stages_and_private_probe(tmp_path, monkeypatch, image):
++    inspected = docker('image', 'inspect', image, '--format', '{{.Id}}')
++    if inspected.returncode:
++        pytest.skip('Pinned local target image unavailable')
++    volume = 'lc-evpkg-fixture-' + uuid.uuid4().hex
++    assert docker('volume', 'create', volume).returncode == 0
++    bridge = None
++    thread = None
++    stop = threading.Event()
++    failures = []
++    try:
++        seeded = docker('run', '--rm', '--network', 'none', '--mount',
++                        f'type=volume,source={volume},destination=/app',
++                        '--entrypoint', 'sh', image, '-c',
++                        'printf task-v1 >/app/.evidence_package_probe.txt')
++        assert seeded.returncode == 0, seeded.stderr
++        monitor_root = tmp_path / 'monitor'
++        private, evidence = monitor_root / 'monitor_private', monitor_root / 'task_evidence'
++        trusted, scratch = tmp_path / 'trusted', tmp_path / 'scratch'
++        for path in (private, evidence, trusted, scratch):
++            path.mkdir(parents=True)
++        (evidence / 'original_task.txt').write_text('Keep the current code observable.',
++                                                    encoding='utf-8')
++        (evidence / 'public_events.jsonl').write_text('', encoding='utf-8')
++        port = PilotDockerToolPort(image=image, task_volume=volume,
++                                   trusted_root=trusted, cognition_root=private,
++                                   scratch_root=scratch, evidence_root=evidence)
++        run_id = 'offline-' + uuid.uuid4().hex
++        bridge = PilotHostBridge(root=tmp_path / 'bridge', run_id=run_id, port=port)
++
++        def serve():
++            try:
++                while not stop.is_set() and not bridge.closed:
++                    bridge.serve_once()
++                    time.sleep(.02)
++            except Exception as exc:
++                failures.append(exc)
++
++        thread = threading.Thread(target=serve, daemon=True)
++        thread.start()
++        analysis = SpoolAnalysisSessions(tmp_path / 'bridge', run_id, threading.Event(),
++                                         response_timeout=60)
++        task_view = tmp_path / 'task_view'
++        task_view.mkdir()
++        (task_view / '.evidence_package_probe.txt').write_text('task-v1', encoding='utf-8')
++        workspace = MonitorWorkspace(evidence, private, task_mounts={'workspace': task_view})
++        config = {'apikey': 'offline', 'apibase': 'https://offline.invalid',
++                  'model': 'claude-opus-4-8', 'provider': 'anthropic', 'max_retries': 0,
++                  'monitor_adaptive_supervisory_environment': True,
++                  'monitor_narrow_supervisor_v1': True,
++                  'monitor_evidence_package_v1': True}
++        client = MonitorProviderClient('offline', config)
++        monitor = MonitorAgent(client, workspace)
++        monitor.analysis = analysis
++        monitor.task_budget_state = lambda: (1, 300)
++        client.pre_send_capture = lambda request_id, payload: _capture_pilot_payload(
++            private, monitor, request_id, payload)
++        requests = []
++
++        def post(_url, **kwargs):
++            requests.append(json.loads(json.dumps(kwargs['json'])))
++            index = len(requests)
++            if index == 1:
++                name, arguments = 'file_write', {'path': 'monitor/reference.md',
++                                                  'content': 'Observe the current public code.'}
++            elif index == 2:
++                name, arguments = 'packet_ready', {}
++            elif index == 3:
++                name, arguments = 'code_run', {'type': 'bash', 'timeout': 300,
++                    'wait_seconds': 5, 'code': (
++                        'cat /app/.evidence_package_probe.txt; '
++                        'if printf forbidden >/app/.evidence_package_probe.txt 2>/dev/null; '
++                        'then exit 19; fi; '
++                        'mkdir -p /tmp/evidence_probe; '
++                        'cp /app/.evidence_package_probe.txt /tmp/evidence_probe/private.txt; '
++                        'printf private-v2 >/tmp/evidence_probe/private.txt; '
++                        'test "$(cat /tmp/evidence_probe/private.txt)" = private-v2; '
++                        'test "$(cat /app/.evidence_package_probe.txt)" = task-v1; '
++                        'cd /app; GOPROXY=off go test -run "^$" .')}
++            else:
++                receipts = list(monitor.evidence_frontier.state['receipts'].values())
++                result = receipts[-1]['result']
++                if result['status'] == 'running':
++                    name, arguments = 'code_run', {'session_id': result['session_id'],
++                                                    'wait_seconds': 5}
++                else:
++                    name, arguments = 'wait', {'after_turns': 1, 'mode': 'follow'}
++            return SSE('fixture-tool-' + str(index), name, arguments)
++
++        monkeypatch.setattr('monitor_agent_core.provider.requests.post', post)
++        action = monitor.review('Public task wake.', max_turns_override=30)
++        assert action.kind == 'wait'
++        assert any(row['result'].get('status') == 'success'
++                   for row in monitor.evidence_frontier.state['receipts'].values())
++        output = ''.join(row['result'].get('stdout', '')
++                         for row in monitor.evidence_frontier.state['receipts'].values())
++        assert 'task-v1' in output and ('ok' in output or '[no test files]' in output)
++        go_result = ('no_test_files_compile_only' if '[no test files]' in output
++                     else 'build_without_running_tests')
++        assert (scratch / 'tmp' / 'evidence_probe' / 'private.txt').read_text() == 'private-v2'
++        assert len(requests) >= 4 and 'Phase A' in requests[0]['system']
++        assert 'Phase B' in requests[2]['system']
++        assert not failures
++        analysis.close()
++        thread.join(timeout=12)
++        assert not thread.is_alive() and bridge.closed
++        assert not failures
++        print(json.dumps({'image_id': image, 'fake_provider_requests': len(requests),
++                          'host_receipts': len(monitor.evidence_frontier.state['receipts']),
++                          'task_write_denied': True, 'private_copy_changed': True,
++                          'go_result': go_result, 'behavior_verified': False,
++                          'bridge_closed': bridge.closed}))
++    finally:
++        stop.set()
++        if thread is not None:
++            thread.join(timeout=12)
++        if bridge is not None and not bridge.closed:
++            bridge.close()
++        removed = docker('volume', 'rm', volume)
++        assert removed.returncode == 0, removed.stderr
++
+diff --git a/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/test_profile.py b/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/test_profile.py
+new file mode 100644
+index 00000000..4523eedf
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/evidence_package_v1_20261012/test_profile.py
+@@ -0,0 +1,35 @@
++"""Research-only, no-provider configuration checks."""
++
++import pytest
++
++from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.pilot_profile import (
++    public_profile_identity, resolved_supervisor_profile)
++
++
++BASE = {'model': 'claude-opus-4-8', 'max_tokens': 8192,
++        'thinking_type': 'adaptive', 'reasoning_effort': 'high',
++        'apikey': 'offline-test', 'apibase': 'https://offline.invalid'}
++
++
++def test_explicit_candidate_resolution_and_old_paths():
++    candidate = resolved_supervisor_profile(BASE, variant='evidence_package_v1')
++    assert candidate['monitor_evidence_package_v1'] is True
++    assert candidate['monitor_narrow_supervisor_v1'] is True
++    assert candidate['monitor_adaptive_supervisory_environment'] is True
++    assert candidate['monitor_history_projection'] == 'off'
++    assert all(candidate[key] is False for key in (
++        'monitor_contrastive_release_state', 'monitor_receding_horizon_release',
++        'monitor_root_epistemic_reestimation'))
++    assert public_profile_identity(candidate)['monitor_evidence_package_v1'] is True
++    assert 'monitor_evidence_package_v1' not in public_profile_identity(
++        resolved_supervisor_profile(BASE, variant='narrow_v1'))
++    assert 'monitor_evidence_package_v1' not in public_profile_identity(
++        resolved_supervisor_profile(BASE, variant='legacy'))
++    for variant in ('legacy', 'narrow_v1'):
++        with pytest.raises(ValueError):
++            resolved_supervisor_profile({**BASE, 'monitor_evidence_package_v1': True},
++                                        variant=variant)
++    with pytest.raises(ValueError):
++        resolved_supervisor_profile({**BASE, 'monitor_root_epistemic_reestimation': True},
++                                    variant='evidence_package_v1')
++
+diff --git a/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_entry.py b/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_entry.py
+index 2f5d2803..e4bb3c38 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_entry.py
++++ b/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_entry.py
+@@ -96,9 +96,9 @@ def prepare_run(*, manifest: Path, task_id: str, condition: str, run_id: str,
+         raise ValueError('Pilot run_id must be a short lowercase opaque ID')
+     manifest = Path(manifest).resolve(strict=True)
+     frozen = json.loads(manifest.read_text(encoding='utf-8'))
+-    if supervisor_variant not in {'legacy', 'narrow_v1'} or (
+-            supervisor_variant == 'narrow_v1' and
+-            (condition != 'S' or frozen.get('supervisor_variant') != 'narrow_v1')) or (
++    if supervisor_variant not in {'legacy', 'narrow_v1', 'evidence_package_v1'} or (
++            supervisor_variant in {'narrow_v1', 'evidence_package_v1'} and
++            (condition != 'S' or frozen.get('supervisor_variant') != supervisor_variant)) or (
+             supervisor_variant == 'legacy' and condition == 'S' and
+             frozen.get('supervisor_variant', 'legacy') != 'legacy'):
+         raise ValueError('Supervisor variant is absent or mismatched in draft')
+@@ -259,7 +259,8 @@ def main():
+     parser.add_argument('--manifest', type=Path, required=True)
+     parser.add_argument('--task-id', required=True)
+     parser.add_argument('--condition', choices=['T', 'S'], required=True)
+-    parser.add_argument('--supervisor-variant', choices=['legacy', 'narrow_v1'], default='legacy')
++    parser.add_argument('--supervisor-variant',
++                        choices=['legacy', 'narrow_v1', 'evidence_package_v1'], default='legacy')
+     parser.add_argument('--run-id', required=True)
+     parser.add_argument('--run-root', type=Path, required=True)
+     parser.add_argument('--source-root', type=Path, required=True)
+diff --git a/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_profile.py b/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_profile.py
+index 3898c1ea..66db4500 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_profile.py
++++ b/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_profile.py
+@@ -27,9 +27,14 @@ NARROW_OVERRIDES = {
+     'monitor_history_projection': 'off',
+ }
+ 
++EVIDENCE_PACKAGE_OVERRIDES = {
++    **NARROW_OVERRIDES,
++    'monitor_evidence_package_v1': True,
++}
++
+ 
+ def resolved_supervisor_profile(base: dict, *, variant: str = 'legacy') -> dict:
+-    if variant not in {'legacy', 'narrow_v1'}:
++    if variant not in {'legacy', 'narrow_v1', 'evidence_package_v1'}:
+         raise ValueError('Unsupported Supervisor variant')
+     if base.get('model') != 'claude-opus-4-8':
+         raise ValueError('Pilot Supervisor model identity mismatch')
+@@ -41,12 +46,17 @@ def resolved_supervisor_profile(base: dict, *, variant: str = 'legacy') -> dict:
+         raise ValueError('Pilot Supervisor transport profile incomplete')
+     if variant == 'legacy' and base.get('monitor_narrow_supervisor_v1', False) is not False:
+         raise ValueError('Narrow Supervisor requires the explicit narrow_v1 variant')
++    if variant != 'evidence_package_v1' and base.get('monitor_evidence_package_v1', False) is not False:
++        raise ValueError('Evidence package requires its explicit profile variant')
+     configured = dict(base)
+-    if variant == 'narrow_v1':
+-        for key, expected in NARROW_OVERRIDES.items():
++    if variant in {'narrow_v1', 'evidence_package_v1'}:
++        overrides = (EVIDENCE_PACKAGE_OVERRIDES if variant == 'evidence_package_v1'
++                     else NARROW_OVERRIDES)
++        for key, expected in overrides.items():
+             if key.startswith('monitor_') and key in base and base[key] != expected:
+-                raise ValueError('Incompatible narrow Supervisor switch: ' + key)
+-    configured.update(NARROW_OVERRIDES if variant == 'narrow_v1' else PILOT_OVERRIDES)
++                raise ValueError('Incompatible Supervisor switch: ' + key)
++    configured.update(EVIDENCE_PACKAGE_OVERRIDES if variant == 'evidence_package_v1' else
++                      NARROW_OVERRIDES if variant == 'narrow_v1' else PILOT_OVERRIDES)
+     return configured
+ 
+ 
+@@ -57,4 +67,7 @@ def public_profile_identity(config: dict) -> dict:
+             'incomplete_stream_recovery_v1',
+             'monitor_narrow_supervisor_v1',
+             *tuple(key for key in PILOT_OVERRIDES if key.startswith('monitor_')))
+-    return {key: config.get(key) for key in keys}
++    result = {key: config.get(key) for key in keys}
++    if 'monitor_evidence_package_v1' in config:
++        result['monitor_evidence_package_v1'] = config['monitor_evidence_package_v1']
++    return result
