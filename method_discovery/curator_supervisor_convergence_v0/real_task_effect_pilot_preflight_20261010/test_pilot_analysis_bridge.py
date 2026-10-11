@@ -188,8 +188,8 @@ class PilotAnalysisBridgeFixture(unittest.TestCase):
                         'GO111MODULE=off go test .')
                     self.assertEqual(private_test['status'], 'success', private_test)
                     self.assertIn('ok', private_test['stdout'])
-                    self.assertIn('tmp/probe/source.txt',
-                                  private_test['private_scratch_diff']['added'])
+                    self.assertEqual((scratch / 'tmp' / 'probe' / 'source.txt').read_text(),
+                                     'private-v2')
                     public_build = self._completed(client,
                         'cd /app; go env GOMODCACHE; go test -run "^$" .', timeout=300)
                     self.assertEqual(public_build['status'], 'success', public_build)

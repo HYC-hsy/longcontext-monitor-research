@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 
-from .pilot_analysis_bridge import PilotDockerToolPort, PilotHostBridge
+from .pilot_analysis_bridge import PilotDockerToolPort, PilotHostBridge, _atomic_json
 from .pilot_entry import TASKS, prepare_run, require_live_authorization
 from long_context_bench.scripts.isolated_run_bundle import digest_tree
 
@@ -53,6 +53,7 @@ def _serve_spool(root: Path, image: str, volume: str, run_id: str,
                  stopped: threading.Event, errors: list[str]) -> None:
     control = root / 'control'
     bridge = None
+    port = None
     try:
         while not stopped.is_set():
             private = root / 'monitor' / 'monitor_private'
@@ -67,21 +68,22 @@ def _serve_spool(root: Path, image: str, volume: str, run_id: str,
             if bridge is not None:
                 bridge.serve_once()
             if (control / 'agent_end_pending.json').exists():
-                if bridge is not None:
-                    bridge.close()
-                clearance = control / 'sidecar_stopped.json'
-                clearance.write_text(json.dumps({'run_id': run_id, 'clean': True}), encoding='utf-8')
                 return
             time.sleep(.05)
     except BaseException as exc:
         errors.append(f'{type(exc).__name__}: {exc}')
         stopped.set()
     finally:
-        if bridge is not None and not bridge.closed:
-            try:
+        try:
+            if bridge is not None and not bridge.closed:
                 bridge.close()
-            except BaseException as exc:
-                errors.append(f'cleanup: {type(exc).__name__}: {exc}')
+            elif bridge is None and port is not None:
+                port.close()
+            if bridge is not None and not bridge.closed:
+                raise RuntimeError('Sidecar close did not certify stopped state')
+            _atomic_json(control / 'sidecar_stopped.json', {'run_id': run_id, 'clean': True})
+        except BaseException as exc:
+            errors.append(f'cleanup: {type(exc).__name__}: {exc}')
 
 
 def _cleanup_offline_containers(run_root: Path) -> list[str]:

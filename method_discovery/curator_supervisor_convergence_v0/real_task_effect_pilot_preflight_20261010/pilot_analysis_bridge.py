@@ -8,14 +8,18 @@ import errno
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
+import warnings
 
 from method_discovery.curator_supervisor_convergence_v0.diagnostic_static_adapter_v1_20261009.docker_tool import DockerToolPort
 
 
 SCHEMA = 'pilot-analysis-spool-v1'
+SCRATCH_SCAN_LIMITS = {'entries': 20000, 'file_bytes': 8 * 1024 * 1024,
+                       'total_bytes': 32 * 1024 * 1024, 'seconds': 5, 'chunk_bytes': 64 * 1024}
 
 
 def _atomic_json(path: Path, value: dict) -> None:
@@ -159,16 +163,17 @@ class PilotHostBridge:
         self.run_id = str(run_id)
         self.port = port
         self.closed = False
-        self._session_scratch_before = {}
+        self.scratch_observation_errors = []
         if adopt_existing:
             expected = {'schema': SCHEMA, 'run_id': self.run_id}
             identity = json.loads((self.root / 'identity.json').read_text(encoding='utf-8'))
             if identity != expected or any(not (self.root / name).is_dir()
                                            for name in ('requests', 'accepted', 'responses')):
                 raise RuntimeError('Existing pilot spool identity mismatch')
+            (self.root / 'scratch_observations').mkdir(exist_ok=True)
         else:
             self.root.mkdir(parents=True, exist_ok=False)
-            for name in ('requests', 'accepted', 'responses'):
+            for name in ('requests', 'accepted', 'responses', 'scratch_observations'):
                 (self.root / name).mkdir()
             _atomic_json(self.root / 'identity.json', {'schema': SCHEMA, 'run_id': self.run_id})
 
@@ -180,7 +185,6 @@ class PilotHostBridge:
         if op == 'start':
             if set(request) != common | {'code', 'code_type', 'timeout', 'wait_seconds'}:
                 raise ValueError('Analysis start fields mismatch')
-            before = self._scratch_snapshot()
             result = self.port.execute('code_run', {
                 'code': request['code'], 'type': request['code_type'],
                 'timeout': request['timeout'], 'wait_seconds': request['wait_seconds']})
@@ -188,9 +192,6 @@ class PilotHostBridge:
                 self.port.mirror_output(result['session_id'])
             result['source_version'] = {'status': 'version_uncertain',
                                         'task_volume': self.port.task_volume}
-            if result.get('session_id'):
-                self._session_scratch_before[result['session_id']] = before
-            result['private_scratch_diff_at_return'] = self._scratch_diff(before, self._scratch_snapshot())
             return result
         if op == 'read':
             if set(request) != common | {'session_id', 'wait_seconds', 'cancel'}:
@@ -202,9 +203,6 @@ class PilotHostBridge:
                 self.port.mirror_output(result['session_id'])
             result['source_version'] = {'status': 'version_uncertain',
                                         'task_volume': self.port.task_volume}
-            before = self._session_scratch_before.get(request['session_id'])
-            if before is not None and result.get('status') != 'running':
-                result['private_scratch_diff'] = self._scratch_diff(before, self._scratch_snapshot())
             return result
         if op == 'close' and set(request) == common:
             self.port.close()
@@ -221,50 +219,87 @@ class PilotHostBridge:
         except OSError as exc:
             return {'files': {}, 'skipped': [{'path': str(getattr(exc, 'filename', None)),
                                               'reason': type(exc).__name__}],
-                    'snapshot_incomplete': True, 'limit_reached': False}
+                    'snapshot_incomplete': True, 'limit_reached': False,
+                    'scanned_bytes': 0, 'entries': 0, 'limits': dict(SCRATCH_SCAN_LIMITS)}
 
     def _scratch_files(self):
         root = self.port.scratch
         files, skipped = {}, []
         started = time.monotonic()
-        limit = 20000
-        for name in ('tmp', 'output'):
-            def vanished(exc):
-                if exc.errno in (errno.ENOENT, errno.ENOTDIR):
-                    skipped.append({'path': str(exc.filename), 'reason': 'disappeared'})
-                else:
-                    raise exc
-            for directory, dirs, names in os.walk(root / name, onerror=vanished):
-                if time.monotonic() - started > 5 or len(files) + len(skipped) >= limit:
-                    return {'files': files, 'skipped': skipped,
-                            'snapshot_incomplete': True, 'limit_reached': True}
-                for filename in names:
-                    if time.monotonic() - started > 5 or len(files) + len(skipped) >= limit:
-                        return {'files': files, 'skipped': skipped,
-                                'snapshot_incomplete': True, 'limit_reached': True}
-                    path = Path(directory) / filename
-                    relative = path.relative_to(root).as_posix()
-                    try:
-                        if path.is_symlink() or not path.is_file():
-                            continue
-                        files[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
-                    except OSError as exc:
-                        if exc.errno not in (errno.ENOENT, errno.ENOTDIR):
-                            raise
-                        skipped.append({'path': relative, 'reason': 'disappeared'})
+        limits = SCRATCH_SCAN_LIMITS
+        scanned_bytes = 0
+        entries = 0
+        limit_reached = False
+        pending = [root / 'output', root / 'tmp']
+        while pending and not limit_reached:
+            directory = pending.pop()
+            try:
+                if not directory.resolve(strict=True).is_relative_to(root):
+                    skipped.append({'path': directory.relative_to(root).as_posix(),
+                                    'reason': 'redirected_directory'})
+                    continue
+                with os.scandir(directory) as listing:
+                    for entry in listing:
+                        if time.monotonic() - started >= limits['seconds'] or entries >= limits['entries']:
+                            limit_reached = True
+                            break
+                        entries += 1
+                        path = Path(entry.path)
+                        relative = path.relative_to(root).as_posix()
+                        try:
+                            info = path.lstat()
+                            if stat.S_ISDIR(info.st_mode):
+                                pending.append(path)
+                                continue
+                            if not stat.S_ISREG(info.st_mode):
+                                skipped.append({'path': relative, 'reason': 'not_regular_file'})
+                                continue
+                            if not path.resolve(strict=True).is_relative_to(root):
+                                skipped.append({'path': relative, 'reason': 'redirected_file'})
+                                continue
+                            if (info.st_size > limits['file_bytes'] or
+                                    info.st_size > limits['total_bytes'] - scanned_bytes):
+                                skipped.append({'path': relative, 'reason': 'byte_limit'})
+                                limit_reached = True
+                                continue
+                            digest = hashlib.sha256()
+                            file_bytes = 0
+                            with path.open('rb') as stream:
+                                opened = os.fstat(stream.fileno())
+                                if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
+                                    skipped.append({'path': relative, 'reason': 'changed_before_read'})
+                                    continue
+                                while True:
+                                    if time.monotonic() - started >= limits['seconds']:
+                                        limit_reached = True
+                                        skipped.append({'path': relative, 'reason': 'time_limit'})
+                                        break
+                                    chunk = stream.read(min(limits['chunk_bytes'],
+                                        limits['file_bytes'] - file_bytes + 1,
+                                        limits['total_bytes'] - scanned_bytes + 1))
+                                    if not chunk:
+                                        files[relative] = digest.hexdigest()
+                                        break
+                                    file_bytes += len(chunk)
+                                    scanned_bytes += len(chunk)
+                                    if (file_bytes > limits['file_bytes'] or
+                                            scanned_bytes > limits['total_bytes']):
+                                        limit_reached = True
+                                        skipped.append({'path': relative, 'reason': 'byte_limit'})
+                                        break
+                                    digest.update(chunk)
+                        except OSError as exc:
+                            skipped.append({'path': relative, 'reason':
+                                            'disappeared' if exc.errno in (errno.ENOENT, errno.ENOTDIR)
+                                            else type(exc).__name__})
+            except OSError as exc:
+                skipped.append({'path': directory.relative_to(root).as_posix(),
+                                'reason': 'disappeared' if exc.errno in (errno.ENOENT, errno.ENOTDIR)
+                                else type(exc).__name__})
         return {'files': files, 'skipped': skipped,
-                'snapshot_incomplete': bool(skipped), 'limit_reached': False}
-
-    @staticmethod
-    def _scratch_diff(before, after):
-        old, new = before['files'], after['files']
-        return {'added': sorted(new.keys() - old.keys()),
-                'changed': sorted(path for path in new.keys() & old.keys()
-                                  if new[path] != old[path]),
-                'removed': sorted(old.keys() - new.keys()),
-                'snapshot_incomplete': before['snapshot_incomplete'] or after['snapshot_incomplete'],
-                'skipped_before': before['skipped'], 'skipped_after': after['skipped'],
-                'limit_reached': before['limit_reached'] or after['limit_reached']}
+                'snapshot_incomplete': bool(skipped) or limit_reached,
+                'limit_reached': limit_reached, 'scanned_bytes': scanned_bytes,
+                'entries': entries, 'limits': dict(limits)}
 
     def serve_once(self):
         for request_path in sorted((self.root / 'requests').glob('*.json')):
@@ -294,6 +329,24 @@ class PilotHostBridge:
                 receipt = {'run_id': self.run_id, 'request_id': request_id,
                            'status': 'ok', 'result': {'status': 'error', 'error': str(exc)}}
             _atomic_json(receipt_path, receipt)
+            if request.get('operation') in ('start', 'read'):
+                # Optional observation is deliberately after the durable main
+                # receipt.  It never changes that receipt or replays the command.
+                observation_path = self.root / 'scratch_observations' / request_path.name
+                try:
+                    snapshot = self._scratch_snapshot()
+                    observation = {'run_id': self.run_id, 'request_id': request_id,
+                                   'kind': 'post_receipt_snapshot', 'diff_unavailable': True,
+                                   'snapshot': snapshot}
+                    _atomic_json(observation_path, observation)
+                except OSError as exc:
+                    # Scratch statistics are auxiliary; accepted/result/receipt
+                    # identities and mount checks remain hard gates.
+                    self.scratch_observation_errors.append({
+                        'request_id': request_id, 'error_type': type(exc).__name__,
+                        'error': str(exc)})
+                    warnings.warn(f'Optional scratch observation unavailable for {request_id}: '
+                                  f'{type(exc).__name__}')
 
     def close(self):
         if not self.closed:

@@ -34,14 +34,14 @@ def test_vanished_file_marks_incomplete_without_losing_receipt(tmp_path, monkeyp
     vanished.write_text('temporary')
     port = Port(scratch)
     bridge = PilotHostBridge(root=tmp_path / 'spool', run_id='offline', port=port)
-    original = Path.read_bytes
+    original = Path.lstat
 
-    def racing_read(path):
+    def racing_stat(path):
         if path == vanished:
-            raise FileNotFoundError(2, 'removed during scan', str(path))
+            raise FileNotFoundError(2, 'removed before stat', str(path))
         return original(path)
 
-    monkeypatch.setattr(Path, 'read_bytes', racing_read)
+    monkeypatch.setattr(Path, 'lstat', racing_stat)
     request = {'schema': SCHEMA, 'run_id': 'offline', 'request_id': 'one',
                'operation': 'start', 'code': 'echo known', 'code_type': 'bash',
                'timeout': 60, 'wait_seconds': 0}
@@ -50,8 +50,11 @@ def test_vanished_file_marks_incomplete_without_losing_receipt(tmp_path, monkeyp
     receipt = json.loads((bridge.root / 'responses' / 'one.json').read_text())
     assert receipt['status'] == 'ok'
     assert receipt['result']['stdout'] == 'known command failure'
-    assert receipt['result']['private_scratch_diff_at_return']['snapshot_incomplete']
-    assert receipt['result']['private_scratch_diff_at_return']['skipped_after'][0]['reason'] == 'disappeared'
+    observation = json.loads((bridge.root / 'scratch_observations' / 'one.json').read_text())
+    assert observation['kind'] == 'post_receipt_snapshot'
+    assert observation['diff_unavailable'] is True
+    assert observation['snapshot']['snapshot_incomplete']
+    assert observation['snapshot']['skipped'][0]['reason'] == 'disappeared'
     assert port.calls == 1
     (bridge.root / 'responses' / 'one.json').unlink()
     bridge.serve_once()

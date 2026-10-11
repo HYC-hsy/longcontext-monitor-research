@@ -651,9 +651,21 @@ class MonitorProviderClient:
                 result = self._request_once(tools)
                 self._progress('response_metadata', request_id=request_id,
                                metadata=getattr(self, 'last_response_metadata', {}))
-                if self._cancelled.is_set():
-                    raise ProviderError('Provider request cancelled')
                 self._progress('request_usage', request_id=request_id, usage=result[1])
+                stop = getattr(self, 'recovery_stop', None)
+                current_deadline = getattr(self, 'recovery_deadline', None)
+                discard_reason = ('cancelled' if self._cancelled.is_set() else
+                                  'stopped' if stop is not None and stop.is_set() else
+                                  'deadline' if current_deadline is not None and time.monotonic() >= current_deadline
+                                  else None)
+                if discard_reason is not None:
+                    record['outcome'] = 'response_discarded'
+                    record['discard_reason'] = discard_reason
+                    record['response_usage'] = result[1]
+                    self._progress('response_discarded', request_id=request_id,
+                                   reason=discard_reason, usage=result[1])
+                    raise ProviderRecoveryExhausted(
+                        f'Completed provider response discarded after {discard_reason}')
                 # Completed transport is not necessarily a usable agent response.
                 # Retry before committing history or consuming a review turn.
                 if record['purpose'] not in ('continuation', 'format_repair') and not any(
@@ -691,8 +703,9 @@ class MonitorProviderClient:
                 if deadline is not None and time.monotonic() >= deadline:
                     raise ProviderRecoveryExhausted('Monitor stopped or task budget exhausted') from exc
             except Exception as exc:
-                record.update(outcome='error', error_type=type(exc).__name__,
-                             error_chain=failure_chain(exc))
+                if record.get('outcome') != 'response_discarded':
+                    record['outcome'] = 'error'
+                record.update(error_type=type(exc).__name__, error_chain=failure_chain(exc))
                 raise
             finally:
                 record['request_sha256'] = self._last_payload_sha256
@@ -700,7 +713,8 @@ class MonitorProviderClient:
                     record['server_execution'] = 'unknown'
                     record['partial_usage_if_reported'] = getattr(
                         self, 'last_response_metadata', {}).get('partial_usage')
-                if self._cancelled.is_set(): record['outcome'] = 'cancelled'
+                if self._cancelled.is_set() and record.get('outcome') != 'response_discarded':
+                    record['outcome'] = 'cancelled'
                 record['duration_seconds'] = time.monotonic() - started
                 self.request_attempts.append(record)
                 self._progress('request_finished', request_id=request_id, **record)
