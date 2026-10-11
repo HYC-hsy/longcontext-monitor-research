@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 from pathlib import Path
+import sys
 
 from .archive_run import HERE, check_public, secret_markers, sha
 
@@ -22,7 +23,7 @@ def main() -> None:
     sources.extend(HERE / row["path"] for row in rows if not row["path"].endswith(".gz"))
     unique = list(dict.fromkeys(sources))
     target = HERE / "NARROW_FYNE_SINGLE_ARM_AUDIT.txt"
-    if target.exists():
+    if target.exists() and "--rebuild" not in sys.argv[1:]:
         raise FileExistsError(target)
     with target.open("wb") as output:
         output.write(b"NARROW FYNE SINGLE-ARM AUDIT PACKAGE\n")
