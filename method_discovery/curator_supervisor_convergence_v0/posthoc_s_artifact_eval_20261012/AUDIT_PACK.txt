@@ -1,0 +1,1325 @@
+POST-HOC S ARTIFACT EVALUATION AND INFRASTRUCTURE REPAIR — CREDENTIAL-FREE AUDIT PACK
+Original archive ea3261b7a1ef8426e744bb2351404183861f0d8b. Native calls: 2. Model/API/Task/Supervisor calls: 0.
+Raw input tar.gz files remain in the original immutable archive; no duplicate input.tar is included here.
+
+========== EVALUATION_REPORT.md ==========
+# Post-hoc evaluation of two fixed S artifacts
+
+This is not a continuation of either original agent run. Original archive commit:
+`ea3261b7a1ef8426e744bb2351404183861f0d8b`; original execution code:
+`155d30e12e261417f9fa14a86689850221b40056`. The source archive was not edited.
+
+The evaluator was invoked exactly once for Kitex S, then once for Fyne S.
+No Task Agent, Supervisor, provider, training, or scoring-model request was made.
+The native test inputs were staged only after the artifact was placed in a
+disposable Docker volume. The evaluator container had network disabled and no
+model credentials or Docker socket mount. The pinned task image, task.toml,
+test.sh, and tests-tree identities are in each `preflight.json`.
+
+| Artifact | Input status | Native return code | Raw reward | Native phases |
+|---|---|---:|---:|---:|
+| Kitex S | `legal_agent_end=false`, monitor review incomplete | 0 | 0.4 | 2/6 |
+| Fyne S | best-effort, non-atomic failure filesystem copy | 0 | 0.7272727272727273 | 5/7 |
+
+`reward.json`, `reward.txt`, and full `test-stdout.txt` are the unedited native
+outputs. `docker_commands_and_results.json` records each command, raw stdout,
+stderr, and return code. Both disposable evaluator containers and volumes were
+positively absent after cleanup. The original four-arm records remain failed /
+unevaluated; these post-hoc outputs are not substituted for native scores in
+that batch.
+
+Kitex input: compressed SHA
+`05a805653dc448228f82afd1c81eaff7a2b39d0f017761189c1c7d9d5906bb4a`;
+uncompressed tar SHA
+`5cefacd222d91056b316e06151566a6574e703f316978e370a8a2a48af78e3b4`.
+Its `agent_end_frozen.json` states `writers_stopped=true`, `sidecar_clean=true`,
+and `legal_agent_end=false`. The input tar contained 828 regular files and 182
+directories; no links or special files.
+
+Fyne input: compressed SHA
+`5738bf9e45d11c73b06626a3f64cf0e3013b81f510c1ddb571cab1fa6b70ab55`;
+uncompressed tar SHA
+`568a6464c6fdcfc34884beaa06c5b500b422afb0874f2ecfe4b866ab23495eee`.
+The original `failure_workspace/report.json` says capture began at epoch
+`1791696989.5692542`, ended at `1791696995.7901752`, and labels consistency
+`best_effort_filesystem_copy_not_atomic`. The archive has 2503 regular files
+and 297 directories; no links or special files. The final public Task event is
+turn 156, followed by completion review `ERROR_FAIL_CLOSED`. The archive does
+not provide per-file atomic version evidence for the capture interval. A
+one-to-one match of each key file to its last write/read is therefore unknown;
+the tar is certified as these exact bytes, not as one historical atomic state.
+
+Pre-evaluator setup note: an initial Kitex preflight stopped before evaluator
+launch because the new script contained a one-character typo in the expected
+tests-tree SHA. The actual tree SHA matched the frozen manifest, the constant
+was corrected, and preflight was rerun in a fresh output directory. This was
+not a second evaluator invocation. `kitex_s/preflight.json` preserves the
+failed preflight observation.
+
+All tar members were scanned before extraction. Absolute paths, parent
+traversal, backslashes, links and special files were rejected. The evaluator
+used `/tests/test.sh` with stdout redirected to `/logs/verifier/test-stdout.txt`
+and the frozen 1800-second limit. It did not edit the original tar or source
+archive. `input.tar` is a disposable decompression of the archived gzip and is
+not duplicated in this commit; the input SHA and source locator identify it.
+
+========== FYNE_CAPTURE_COMPARISON.json ==========
+{
+  "source_capture_report": "real_task_effect_pilot_preflight_20261010/live_batch_20261011/arms/fyne_s/job/trial/agent/failure_workspace/report.json",
+  "capture_started_at_epoch": 1791696989.5692542,
+  "capture_finished_at_epoch": 1791696995.7901752,
+  "consistency": "best_effort_filesystem_copy_not_atomic",
+  "last_located_task_event": "Task turn 156 completion proposal, then ERROR_FAIL_CLOSED completion decision",
+  "comparison_rule": "Archive file SHA compared with an independently retained exact-byte last-write/read receipt only when such a receipt exists. Task prose claims and command names are not byte receipts.",
+  "key_files": [
+    {"path": "app.go", "archive_sha256": "e836b7ecc07daf2760810309f9f51f1121845c1652a85f2ba8b22ce0afe0da38", "last_exact_byte_receipt": null, "match": "unknown"},
+    {"path": "app/meta.go", "archive_sha256": "9e8dd74f8c47b9ba146f0d1b134cecf00cda2252a9b68bbd459072750695b03a", "last_exact_byte_receipt": null, "match": "unknown"},
+    {"path": "data/binding/sprintf.go", "archive_sha256": "48c1fff7b4da066e2376c04290971ab4e146c638b2bf3fecff3c5da18d705329", "last_exact_byte_receipt": null, "match": "unknown"},
+    {"path": "data/validation/all.go", "archive_sha256": "19fa0fc5e708be0ed24c47bda58d0c53051a9bbd5b19d928d3667983c47525d7", "last_exact_byte_receipt": null, "match": "unknown"},
+    {"path": "driver/desktop/app.go", "archive_sha256": "f2593c44ffaaaff5a2142b481af24516c787aa16af69532a630fd0b361fdc684", "last_exact_byte_receipt": null, "match": "unknown"},
+    {"path": "theme/json.go", "archive_sha256": "3b8dff89845e52482b996fbc1fbb1303fd3a789eed2385e49a5da895d396e3de", "last_exact_byte_receipt": null, "match": "unknown"},
+    {"path": "widget/entry.go", "archive_sha256": "e75341f69822c19bd6b9da6a78202f0617f27511a167a214296b7a31bdcd510b", "last_exact_byte_receipt": null, "match": "unknown"},
+    {"path": "widget/menu.go", "archive_sha256": "5e130de234f9ecb802f6644d637179bcb5e5cbb995b93313741a5096f40d5c66", "last_exact_byte_receipt": null, "match": "unknown"},
+    {"path": "widget/toolbar.go", "archive_sha256": "03bd95de708c262c9bd11932f1759d3c754a84ab1157a3e6b67108209104f7cf", "last_exact_byte_receipt": null, "match": "unknown"}
+  ],
+  "historical_atomic_workspace_certified": false
+}
+
+========== kitex_s_eval/preflight.json ==========
+{
+  "arm": "kitex_s",
+  "expected_gzip_sha": "05a805653dc448228f82afd1c81eaff7a2b39d0f017761189c1c7d9d5906bb4a",
+  "file_count": 828,
+  "image_id": "sha256:7ffcd70e49d77031b8e67eaa99226dc8468fa046f33e615118e8922b89fff32e",
+  "input_gzip_sha": "05a805653dc448228f82afd1c81eaff7a2b39d0f017761189c1c7d9d5906bb4a",
+  "input_tar_sha": "5cefacd222d91056b316e06151566a6574e703f316978e370a8a2a48af78e3b4",
+  "member_count": 1010,
+  "repo_digests": [
+    "znpt/roadmapbench-ktx-0.13.0-roadmap@sha256:7ffcd70e49d77031b8e67eaa99226dc8468fa046f33e615118e8922b89fff32e"
+  ],
+  "safe_extraction": true,
+  "source": "E:\\longcontext-cqs-v0-20261005\\method_discovery\\curator_supervisor_convergence_v0\\real_task_effect_pilot_preflight_20261010\\live_batch_20261011\\arms\\kitex_s\\archive\\pre_evaluation_app.tar.gz",
+  "source_status": "legal_agent_end=false; monitor_review_incomplete",
+  "task_toml_sha": "cd08b0c7d55b3059dba27c9970240e856aeb0a7ae301673675e3cc37d3f82a54",
+  "test_sh_sha": "f0a24e1ac883c65e04eec6a7ecc9e74ffb6214a7a0e1dcf7974eeb7bd3144324",
+  "tests_tree_sha": "2c78b005db4c21e2b6e71117d553e3c1c00e43e978fa166533b864d00235ce1b"
+}
+
+========== kitex_s_eval/evaluation_result.json ==========
+{
+  "arm": "kitex_s",
+  "cleanup_confirmed": true,
+  "expected_gzip_sha": "05a805653dc448228f82afd1c81eaff7a2b39d0f017761189c1c7d9d5906bb4a",
+  "file_count": 828,
+  "image_id": "sha256:7ffcd70e49d77031b8e67eaa99226dc8468fa046f33e615118e8922b89fff32e",
+  "input_gzip_sha": "05a805653dc448228f82afd1c81eaff7a2b39d0f017761189c1c7d9d5906bb4a",
+  "input_tar_sha": "5cefacd222d91056b316e06151566a6574e703f316978e370a8a2a48af78e3b4",
+  "member_count": 1010,
+  "native_evaluator_started": true,
+  "native_returncode": 0,
+  "native_reward_json": "{\"reward\": 0.4, \"phases_passed\": 2, \"total_phases\": 6}\n",
+  "native_reward_txt": "0.4\n",
+  "repo_digests": [
+    "znpt/roadmapbench-ktx-0.13.0-roadmap@sha256:7ffcd70e49d77031b8e67eaa99226dc8468fa046f33e615118e8922b89fff32e"
+  ],
+  "safe_extraction": true,
+  "source": "E:\\longcontext-cqs-v0-20261005\\method_discovery\\curator_supervisor_convergence_v0\\real_task_effect_pilot_preflight_20261010\\live_batch_20261011\\arms\\kitex_s\\archive\\pre_evaluation_app.tar.gz",
+  "source_status": "legal_agent_end=false; monitor_review_incomplete",
+  "task_toml_sha": "cd08b0c7d55b3059dba27c9970240e856aeb0a7ae301673675e3cc37d3f82a54",
+  "test_sh_sha": "f0a24e1ac883c65e04eec6a7ecc9e74ffb6214a7a0e1dcf7974eeb7bd3144324",
+  "tests_tree_sha": "2c78b005db4c21e2b6e71117d553e3c1c00e43e978fa166533b864d00235ce1b"
+}
+
+========== kitex_s_eval/docker_commands_and_results.json ==========
+[
+  {
+    "argv": [
+      "docker",
+      "volume",
+      "create",
+      "posthoc-s-1791705502-kitex-s"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "posthoc-s-1791705502-kitex-s\n"
+  },
+  {
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "-i",
+      "--network",
+      "none",
+      "--mount",
+      "type=volume,source=posthoc-s-1791705502-kitex-s,destination=/artifact",
+      "--entrypoint",
+      "/bin/sh",
+      "sha256:7ffcd70e49d77031b8e67eaa99226dc8468fa046f33e615118e8922b89fff32e",
+      "-c",
+      "cd /artifact && tar -xpf -"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "run",
+      "-d",
+      "--name",
+      "posthoc-eval-1791705502-kitex-s",
+      "--network",
+      "none",
+      "--cpus",
+      "2",
+      "--memory",
+      "4096m",
+      "--storage-opt",
+      "size=10G",
+      "--mount",
+      "type=volume,source=posthoc-s-1791705502-kitex-s,destination=/app",
+      "--entrypoint",
+      "/bin/sh",
+      "sha256:7ffcd70e49d77031b8e67eaa99226dc8468fa046f33e615118e8922b89fff32e",
+      "-c",
+      "sleep infinity"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "89f95d3463d60c87438e7e5a5b8b64198c73fcc611a0f5c1aeacc3807d9fa1d0\n"
+  },
+  {
+    "argv": [
+      "docker",
+      "cp",
+      "E:\\LongContext\\long_context_bench\\.cache\\m12_roadmap_tasks\\ktx-0.13.0-roadmap\\tests/.",
+      "posthoc-eval-1791705502-kitex-s:/tests/"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "exec",
+      "-u",
+      "root",
+      "posthoc-eval-1791705502-kitex-s",
+      "chmod",
+      "+x",
+      "/tests/test.sh"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "exec",
+      "posthoc-eval-1791705502-kitex-s",
+      "/bin/sh",
+      "-c",
+      "mkdir -p /logs/verifier && (/tests/test.sh) > /logs/verifier/test-stdout.txt 2>&1"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "cp",
+      "posthoc-eval-1791705502-kitex-s:/logs/verifier/test-stdout.txt",
+      "E:\\longcontext-cqs-v0-20261005\\method_discovery\\curator_supervisor_convergence_v0\\posthoc_s_artifact_eval_20261012\\kitex_s_eval\\test-stdout.txt"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "cp",
+      "posthoc-eval-1791705502-kitex-s:/logs/verifier/reward.json",
+      "E:\\longcontext-cqs-v0-20261005\\method_discovery\\curator_supervisor_convergence_v0\\posthoc_s_artifact_eval_20261012\\kitex_s_eval\\reward.json"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "cp",
+      "posthoc-eval-1791705502-kitex-s:/logs/verifier/reward.txt",
+      "E:\\longcontext-cqs-v0-20261005\\method_discovery\\curator_supervisor_convergence_v0\\posthoc_s_artifact_eval_20261012\\kitex_s_eval\\reward.txt"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "rm",
+      "-f",
+      "posthoc-eval-1791705502-kitex-s"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "posthoc-eval-1791705502-kitex-s\n"
+  },
+  {
+    "argv": [
+      "docker",
+      "volume",
+      "rm",
+      "posthoc-s-1791705502-kitex-s"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "posthoc-s-1791705502-kitex-s\n"
+  },
+  {
+    "argv": [
+      "docker",
+      "inspect",
+      "posthoc-eval-1791705502-kitex-s"
+    ],
+    "returncode": 1,
+    "stderr": "error: no such object: posthoc-eval-1791705502-kitex-s\n",
+    "stdout": "[]\n"
+  },
+  {
+    "argv": [
+      "docker",
+      "volume",
+      "inspect",
+      "posthoc-s-1791705502-kitex-s"
+    ],
+    "returncode": 1,
+    "stderr": "Error response from daemon: get posthoc-s-1791705502-kitex-s: no such volume\n",
+    "stdout": "[]\n"
+  }
+]
+
+========== kitex_s_eval/test-stdout.txt ==========
+=== Phase 1: Streaming Types and Generic Interfaces ===
+=== RUN   TestStreamingTypesHeaderTrailer
+--- PASS: TestStreamingTypesHeaderTrailer (0.00s)
+=== RUN   TestStreamingTypesServerStreamingClient
+--- PASS: TestStreamingTypesServerStreamingClient (0.00s)
+=== RUN   TestStreamingTypesServerStreamingServer
+--- PASS: TestStreamingTypesServerStreamingServer (0.00s)
+=== RUN   TestStreamingTypesClientStreamingClient
+=== RUN   TestStreamingTypesClientStreamingClient/Send_delegates_to_SendMsg
+=== RUN   TestStreamingTypesClientStreamingClient/CloseAndRecv_calls_CloseSend_then_RecvMsg
+=== RUN   TestStreamingTypesClientStreamingClient/CloseAndRecv_returns_error_if_CloseSend_fails
+--- PASS: TestStreamingTypesClientStreamingClient (0.00s)
+    --- PASS: TestStreamingTypesClientStreamingClient/Send_delegates_to_SendMsg (0.00s)
+    --- PASS: TestStreamingTypesClientStreamingClient/CloseAndRecv_calls_CloseSend_then_RecvMsg (0.00s)
+    --- PASS: TestStreamingTypesClientStreamingClient/CloseAndRecv_returns_error_if_CloseSend_fails (0.00s)
+=== RUN   TestStreamingTypesClientStreamingServer
+--- PASS: TestStreamingTypesClientStreamingServer (0.00s)
+=== RUN   TestStreamingTypesBidiStreamingClient
+--- PASS: TestStreamingTypesBidiStreamingClient (0.00s)
+=== RUN   TestStreamingTypesBidiStreamingServer
+--- PASS: TestStreamingTypesBidiStreamingServer (0.00s)
+=== RUN   TestStreamingTypesArgsResult
+--- PASS: TestStreamingTypesArgsResult (0.00s)
+=== RUN   TestStreamingTypesInterfaces
+--- PASS: TestStreamingTypesInterfaces (0.00s)
+PASS
+ok  	github.com/cloudwego/kitex/pkg/streaming	0.004s
+PASSED
+
+=== Phase 2: Endpoint Architecture Reorganization ===
+# github.com/cloudwego/kitex/pkg/endpoint/sep_test [github.com/cloudwego/kitex/pkg/endpoint/sep.test]
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:19:11: undefined: sep.StreamMiddleware
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:36:10: cannot use func(ctx context.Context, st streaming.ServerStream) error {鈥 (value of type func(ctx context.Context, st streaming.ServerStream) error) as sep.StreamEndpoint value in return statement
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:38:11: assignment mismatch: 1 variable but next returns 2 values
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:38:21: too many arguments in call to next
+	have (context.Context, streaming.ServerStream)
+	want (context.Context)
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:44:10: cannot use func(ctx context.Context, st streaming.ServerStream) error {鈥 (value of type func(ctx context.Context, st streaming.ServerStream) error) as sep.StreamEndpoint value in return statement
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:46:11: assignment mismatch: 1 variable but next returns 2 values
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:46:21: too many arguments in call to next
+	have (context.Context, streaming.ServerStream)
+	want (context.Context)
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:52:15: undefined: sep.StreamChain
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:89:15: undefined: sep.StreamRecvChain
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:124:15: undefined: sep.StreamSendChain
+pkg/endpoint/sep/test_02_sep_endpoint_test.go:124:15: too many errors
+# github.com/cloudwego/kitex/pkg/endpoint/cep_test [github.com/cloudwego/kitex/pkg/endpoint/cep.test]
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:19:11: undefined: cep.StreamMiddleware
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:21:11: undefined: cep.StreamRecvMiddleware
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:23:11: undefined: cep.StreamSendMiddleware
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:55:15: undefined: cep.StreamChain
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:92:15: undefined: cep.StreamRecvChain
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:127:15: undefined: cep.StreamSendChain
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:165:6: invalid operation: operator ! not defined on e1.EqualsTo(e2) (value of type error)
+pkg/endpoint/cep/test_02_cep_endpoint_test.go:172:5: non-boolean condition in if statement
+FAIL	github.com/cloudwego/kitex/pkg/endpoint/cep [build failed]
+FAIL	github.com/cloudwego/kitex/pkg/endpoint/sep [build failed]
+=== RUN   TestEndpointArchUnaryChain
+--- PASS: TestEndpointArchUnaryChain (0.00s)
+=== RUN   TestEndpointArchToMiddleware
+--- PASS: TestEndpointArchToMiddleware (0.00s)
+=== RUN   TestEndpointArchToUnaryMiddleware
+--- PASS: TestEndpointArchToUnaryMiddleware (0.00s)
+=== RUN   TestEndpointArchDeprecatedTypes
+--- PASS: TestEndpointArchDeprecatedTypes (0.00s)
+PASS
+ok  	github.com/cloudwego/kitex/pkg/endpoint	0.003s
+FAIL
+FAILED
+
+=== Phase 3: Transport Protocol Reorganization ===
+=== RUN   TestTransportProtocolConstants
+--- PASS: TestTransportProtocolConstants (0.00s)
+=== RUN   TestTransportProtocolString
+    test_03_transport_test.go:76: Protocol(6).String() = "TTHeaderFramed", want "TTHeader|Framed"
+--- FAIL: TestTransportProtocolString (0.00s)
+=== RUN   TestTransportProtocolStringBitwise
+    test_03_transport_test.go:87: TTHeaderFramed.String() should be "TTHeader|Framed" (bitwise), got "TTHeaderFramed"
+--- FAIL: TestTransportProtocolStringBitwise (0.00s)
+FAIL
+FAIL	github.com/cloudwego/kitex/transport	0.002s
+FAIL
+FAILED
+
+=== Phase 4: Thrift Codec Fallback Enhancement ===
+=== RUN   TestThriftCodecFallbackMarshalBasic
+    test_04_codec_fallback_test.go:21: assertion failed:  encode failed, codec msg type not match with thriftCodec
+--- FAIL: TestThriftCodecFallbackMarshalBasic (0.00s)
+=== RUN   TestThriftCodecFallbackUnmarshalBasic
+    test_04_codec_fallback_test.go:29: assertion failed:  decode failed, codec msg type not match with thriftCodec
+--- FAIL: TestThriftCodecFallbackUnmarshalBasic (0.00s)
+=== RUN   TestThriftCodecFallbackMarshalFrugalBasic
+    test_04_codec_fallback_test.go:38: assertion failed:  encode failed, codec msg type not match with thriftCodec
+--- FAIL: TestThriftCodecFallbackMarshalFrugalBasic (0.00s)
+=== RUN   TestThriftCodecFallbackUnmarshalFrugalBasic
+    test_04_codec_fallback_test.go:45: assertion failed:  decode failed, codec msg type not match with thriftCodec
+--- FAIL: TestThriftCodecFallbackUnmarshalFrugalBasic (0.00s)
+FAIL
+FAIL	github.com/cloudwego/kitex/pkg/remote/codec/thrift	0.014s
+FAIL
+FAILED
+
+=== Phase 5: Client Option Category System ===
+# github.com/cloudwego/kitex/client/callopt/streamcall [github.com/cloudwego/kitex/client/callopt/streamcall.test]
+client/callopt/streamcall/test_05_streamcall_test.go:23:26: callOpts.StreamOptions undefined (type callopt.CallOptions has no field or method StreamOptions)
+client/callopt/streamcall/test_05_streamcall_test.go:39:27: callOpts.StreamOptions undefined (type callopt.CallOptions has no field or method StreamOptions)
+# github.com/cloudwego/kitex/client [github.com/cloudwego/kitex/client.test]
+client/test_05_client_options_test.go:26:20: unknown field F in struct literal of type UnaryOption
+client/test_05_client_options_test.go:26:31: undefined: UnaryOptions
+client/test_05_client_options_test.go:30:21: unknown field F in struct literal of type StreamOption
+client/test_05_client_options_test.go:30:32: undefined: StreamOptions
+client/test_05_client_options_test.go:34:34: unknown field F in struct literal of type TTHeaderStreamingOption
+client/test_05_client_options_test.go:34:45: undefined: TTHeaderStreamingOptions
+client/test_05_client_options_test.go:73:23: o.TailOptions undefined (type *"github.com/cloudwego/kitex/internal/client".Options has no field or method TailOptions)
+client/test_05_client_options_test.go:84:19: o.UnaryOptions undefined (type *"github.com/cloudwego/kitex/internal/client".Options has no field or method UnaryOptions)
+client/test_05_client_options_test.go:85:23: o.UnaryOptions undefined (type *"github.com/cloudwego/kitex/internal/client".Options has no field or method UnaryOptions)
+client/test_05_client_options_test.go:92:15: undefined: client.StreamOptions
+client/test_05_client_options_test.go:92:15: too many errors
+FAIL	github.com/cloudwego/kitex/client [build failed]
+FAIL	github.com/cloudwego/kitex/client/callopt/streamcall [build failed]
+testing: warning: no tests to run
+PASS
+ok  	github.com/cloudwego/kitex/client/callopt	0.014s [no tests to run]
+?   	github.com/cloudwego/kitex/client/streamclient	[no test files]
+?   	github.com/cloudwego/kitex/client/streamxclient	[no test files]
+?   	github.com/cloudwego/kitex/client/streamxclient/streamxcallopt	[no test files]
+testing: warning: no tests to run
+PASS
+ok  	github.com/cloudwego/kitex/client/genericclient	0.014s [no tests to run]
+FAIL
+FAILED
+
+=== Phase 6: gRPC Diagnostics Enhancement ===
+=== RUN   TestGRPCDiagnosticsFrameReader
+=== RUN   TestGRPCDiagnosticsFrameReader/thrift_ApplicationException_produces_detailed_error
+    test_06_grpc_diagnostics_test.go:63: http2: frame too large or invalid frame (first4Bytes=0x80010003, second4Bytes=0x00000004)
+=== RUN   TestGRPCDiagnosticsFrameReader/normal_HTTP2_FrameHeader_succeeds
+--- PASS: TestGRPCDiagnosticsFrameReader (0.00s)
+    --- PASS: TestGRPCDiagnosticsFrameReader/thrift_ApplicationException_produces_detailed_error (0.00s)
+    --- PASS: TestGRPCDiagnosticsFrameReader/normal_HTTP2_FrameHeader_succeeds (0.00s)
+=== RUN   TestGRPCDiagnosticsFrameReaderErrorFormat
+--- PASS: TestGRPCDiagnosticsFrameReaderErrorFormat (0.00s)
+PASS
+ok  	github.com/cloudwego/kitex/pkg/remote/trans/nphttp2/grpc/grpcframe	0.005s
+PASSED
+
+=== Summary ===
+Result: 2/6 phases | Reward: 0.4
+
+========== fyne_s_eval/preflight.json ==========
+{
+  "arm": "fyne_s",
+  "expected_gzip_sha": "5738bf9e45d11c73b06626a3f64cf0e3013b81f510c1ddb571cab1fa6b70ab55",
+  "file_count": 2503,
+  "image_id": "sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1",
+  "input_gzip_sha": "5738bf9e45d11c73b06626a3f64cf0e3013b81f510c1ddb571cab1fa6b70ab55",
+  "input_tar_sha": "568a6464c6fdcfc34884beaa06c5b500b422afb0874f2ecfe4b866ab23495eee",
+  "member_count": 2800,
+  "repo_digests": [
+    "znpt/roadmapbench-fyn-2.2.0-roadmap@sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1"
+  ],
+  "safe_extraction": true,
+  "source": "E:\\longcontext-cqs-v0-20261005\\method_discovery\\curator_supervisor_convergence_v0\\real_task_effect_pilot_preflight_20261010\\live_batch_20261011\\arms\\fyne_s\\job\\trial\\agent\\failure_workspace\\workspace.tar.gz",
+  "source_status": "best_effort_filesystem_copy_not_atomic; legal termination not certified",
+  "task_toml_sha": "db81f4ee37e4f69e7ace0fa7b7cb6ab8b2cd3469463091b1bcf073da4237dd6d",
+  "test_sh_sha": "77637bf7eb621697259e7fad7428ed4cc578b17aef171fc76f44cf5474b8bda2",
+  "tests_tree_sha": "9da32be9bee4f850d6c31d8bbdf463919477bbdc473437c09d9227c0cace6752"
+}
+
+========== fyne_s_eval/evaluation_result.json ==========
+{
+  "arm": "fyne_s",
+  "cleanup_confirmed": true,
+  "expected_gzip_sha": "5738bf9e45d11c73b06626a3f64cf0e3013b81f510c1ddb571cab1fa6b70ab55",
+  "file_count": 2503,
+  "image_id": "sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1",
+  "input_gzip_sha": "5738bf9e45d11c73b06626a3f64cf0e3013b81f510c1ddb571cab1fa6b70ab55",
+  "input_tar_sha": "568a6464c6fdcfc34884beaa06c5b500b422afb0874f2ecfe4b866ab23495eee",
+  "member_count": 2800,
+  "native_evaluator_started": true,
+  "native_returncode": 0,
+  "native_reward_json": "{\"reward\": 0.7272727272727273, \"phases_passed\": 5, \"total_phases\": 7}\n",
+  "native_reward_txt": "0.7272727272727273\n",
+  "repo_digests": [
+    "znpt/roadmapbench-fyn-2.2.0-roadmap@sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1"
+  ],
+  "safe_extraction": true,
+  "source": "E:\\longcontext-cqs-v0-20261005\\method_discovery\\curator_supervisor_convergence_v0\\real_task_effect_pilot_preflight_20261010\\live_batch_20261011\\arms\\fyne_s\\job\\trial\\agent\\failure_workspace\\workspace.tar.gz",
+  "source_status": "best_effort_filesystem_copy_not_atomic; legal termination not certified",
+  "task_toml_sha": "db81f4ee37e4f69e7ace0fa7b7cb6ab8b2cd3469463091b1bcf073da4237dd6d",
+  "test_sh_sha": "77637bf7eb621697259e7fad7428ed4cc578b17aef171fc76f44cf5474b8bda2",
+  "tests_tree_sha": "9da32be9bee4f850d6c31d8bbdf463919477bbdc473437c09d9227c0cace6752"
+}
+
+========== fyne_s_eval/docker_commands_and_results.json ==========
+[
+  {
+    "argv": [
+      "docker",
+      "volume",
+      "create",
+      "posthoc-s-1791705713-fyne-s"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "posthoc-s-1791705713-fyne-s\n"
+  },
+  {
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "-i",
+      "--network",
+      "none",
+      "--mount",
+      "type=volume,source=posthoc-s-1791705713-fyne-s,destination=/artifact",
+      "--entrypoint",
+      "/bin/sh",
+      "sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1",
+      "-c",
+      "cd /artifact && tar -xpf -"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "run",
+      "-d",
+      "--name",
+      "posthoc-eval-1791705713-fyne-s",
+      "--network",
+      "none",
+      "--cpus",
+      "2",
+      "--memory",
+      "4096m",
+      "--storage-opt",
+      "size=10G",
+      "--mount",
+      "type=volume,source=posthoc-s-1791705713-fyne-s,destination=/app",
+      "--entrypoint",
+      "/bin/sh",
+      "sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1",
+      "-c",
+      "sleep infinity"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "0667df14f0736cdd42aa6b1598a092855ad392809fa2dae6da07c6954d1596ef\n"
+  },
+  {
+    "argv": [
+      "docker",
+      "cp",
+      "E:\\LongContext\\long_context_bench\\.cache\\m12_roadmap_tasks\\fyn-2.2.0-roadmap\\tests/.",
+      "posthoc-eval-1791705713-fyne-s:/tests/"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "exec",
+      "-u",
+      "root",
+      "posthoc-eval-1791705713-fyne-s",
+      "chmod",
+      "+x",
+      "/tests/test.sh"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "exec",
+      "posthoc-eval-1791705713-fyne-s",
+      "/bin/sh",
+      "-c",
+      "mkdir -p /logs/verifier && (/tests/test.sh) > /logs/verifier/test-stdout.txt 2>&1"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "cp",
+      "posthoc-eval-1791705713-fyne-s:/logs/verifier/test-stdout.txt",
+      "E:\\longcontext-cqs-v0-20261005\\method_discovery\\curator_supervisor_convergence_v0\\posthoc_s_artifact_eval_20261012\\fyne_s_eval\\test-stdout.txt"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "cp",
+      "posthoc-eval-1791705713-fyne-s:/logs/verifier/reward.json",
+      "E:\\longcontext-cqs-v0-20261005\\method_discovery\\curator_supervisor_convergence_v0\\posthoc_s_artifact_eval_20261012\\fyne_s_eval\\reward.json"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "cp",
+      "posthoc-eval-1791705713-fyne-s:/logs/verifier/reward.txt",
+      "E:\\longcontext-cqs-v0-20261005\\method_discovery\\curator_supervisor_convergence_v0\\posthoc_s_artifact_eval_20261012\\fyne_s_eval\\reward.txt"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "rm",
+      "-f",
+      "posthoc-eval-1791705713-fyne-s"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "posthoc-eval-1791705713-fyne-s\n"
+  },
+  {
+    "argv": [
+      "docker",
+      "volume",
+      "rm",
+      "posthoc-s-1791705713-fyne-s"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "posthoc-s-1791705713-fyne-s\n"
+  },
+  {
+    "argv": [
+      "docker",
+      "inspect",
+      "posthoc-eval-1791705713-fyne-s"
+    ],
+    "returncode": 1,
+    "stderr": "error: no such object: posthoc-eval-1791705713-fyne-s\n",
+    "stdout": "[]\n"
+  },
+  {
+    "argv": [
+      "docker",
+      "volume",
+      "inspect",
+      "posthoc-s-1791705713-fyne-s"
+    ],
+    "returncode": 1,
+    "stderr": "Error response from daemon: get posthoc-s-1791705713-fyne-s: no such volume\n",
+    "stdout": "[]\n"
+  }
+]
+
+========== fyne_s_eval/test-stdout.txt ==========
+=== Phase 1: App Metadata System ===
+=== RUN   TestPhase1_AppMetadataStruct
+--- PASS: TestPhase1_AppMetadataStruct (0.00s)
+=== RUN   TestPhase1_AppMetadataDefaultFields
+--- PASS: TestPhase1_AppMetadataDefaultFields (0.00s)
+=== RUN   TestPhase1_AppMetadataIconField
+--- PASS: TestPhase1_AppMetadataIconField (0.00s)
+=== RUN   TestPhase1_AppInterfaceHasMetadata
+--- PASS: TestPhase1_AppInterfaceHasMetadata (0.00s)
+PASS
+ok  	fyne.io/fyne/v2	0.002s
+PASSED
+=== Phase 2: JSON Theme Support ===
+=== RUN   TestPhase2_FromJSONColors
+    test_02_json_theme_test.go:42: expected background dark &{192 192 192 255}, got {48 48 48 255}
+    test_02_json_theme_test.go:46: expected background light (generic) &{192 192 192 255}, got {255 255 255 255}
+    test_02_json_theme_test.go:53: expected foreground light &{255 255 255 255}, got {33 33 33 255}
+    test_02_json_theme_test.go:59: expected size 5.0, got 20.000000
+--- FAIL: TestPhase2_FromJSONColors (0.00s)
+=== RUN   TestPhase2_FromJSONFallback
+--- PASS: TestPhase2_FromJSONFallback (0.00s)
+=== RUN   TestPhase2_FromJSONReader
+    test_02_json_theme_test.go:95: expected &{171 205 239 255}, got {48 48 48 255}
+    test_02_json_theme_test.go:100: expected 12.5, got 20.000000
+--- FAIL: TestPhase2_FromJSONReader (0.00s)
+=== RUN   TestPhase2_FromJSONInvalid
+    test_02_json_theme_test.go:111: expected non-nil default theme on error
+--- FAIL: TestPhase2_FromJSONInvalid (0.00s)
+=== RUN   TestPhase2_HexColorFormats
+    test_02_json_theme_test.go:143: hex "#abc": expected {170 187 204 255}, got {48 48 48 255}
+    test_02_json_theme_test.go:143: hex "#abcd": expected {170 187 204 221}, got {48 48 48 255}
+    test_02_json_theme_test.go:143: hex "a1b2c3": expected {161 178 195 255}, got {48 48 48 255}
+    test_02_json_theme_test.go:143: hex "#a1b2c3": expected {161 178 195 255}, got {48 48 48 255}
+    test_02_json_theme_test.go:143: hex "a1b2c3f4": expected {161 178 195 244}, got {48 48 48 255}
+    test_02_json_theme_test.go:143: hex "#a1b2c3f4": expected {161 178 195 244}, got {48 48 48 255}
+--- FAIL: TestPhase2_HexColorFormats (0.00s)
+=== RUN   TestPhase2_FromJSONVariantSpecificColors
+    test_02_json_theme_test.go:162: dark foreground: expected &{0 0 0 255}, got {255 255 255 255}
+    test_02_json_theme_test.go:169: light background: expected &{48 48 48 255}, got {255 255 255 255}
+    test_02_json_theme_test.go:176: light foreground: expected generic &{255 255 255 255}, got {33 33 33 255}
+--- FAIL: TestPhase2_FromJSONVariantSpecificColors (0.00s)
+=== RUN   TestPhase2_FromJSONFontStyleMapping
+--- PASS: TestPhase2_FromJSONFontStyleMapping (0.00s)
+FAIL
+FAIL	fyne.io/fyne/v2/theme	0.004s
+FAIL
+FAILED
+=== Phase 3: Data Binding Formatting ===
+=== RUN   TestPhase3_SprintfConversionRead
+--- PASS: TestPhase3_SprintfConversionRead (0.00s)
+=== RUN   TestPhase3_SprintfConversionReadWrite
+--- PASS: TestPhase3_SprintfConversionReadWrite (0.00s)
+=== RUN   TestPhase3_StringToStringWithFormat
+--- PASS: TestPhase3_StringToStringWithFormat (0.00s)
+PASS
+ok  	fyne.io/fyne/v2/data/binding	0.004s
+PASSED
+=== Phase 4: Menu System Enhancements ===
+=== RUN   TestPhase4_MenuItemIconField
+--- PASS: TestPhase4_MenuItemIconField (0.00s)
+=== RUN   TestPhase4_MenuItemShortcutField
+--- PASS: TestPhase4_MenuItemShortcutField (0.00s)
+=== RUN   TestPhase4_MenuItemFieldsCoexist
+--- PASS: TestPhase4_MenuItemFieldsCoexist (0.00s)
+=== RUN   TestPhase4_MenuRefreshMethod
+--- PASS: TestPhase4_MenuRefreshMethod (0.00s)
+=== RUN   TestPhase4_MainMenuRefreshMethod
+--- PASS: TestPhase4_MainMenuRefreshMethod (0.00s)
+=== RUN   TestPhase4_MenuNewMenuItemPreservesFields
+--- PASS: TestPhase4_MenuNewMenuItemPreservesFields (0.00s)
+PASS
+ok  	fyne.io/fyne/v2	0.003s
+PASSED
+=== Phase 5: Toolbar Enhancements ===
+=== RUN   TestPhase5_ToolbarSetIcon
+--- PASS: TestPhase5_ToolbarSetIcon (0.00s)
+=== RUN   TestPhase5_NewToolbarActionConcreteType
+--- PASS: TestPhase5_NewToolbarActionConcreteType (0.00s)
+=== RUN   TestPhase5_NewToolbarSpacerConcreteType
+--- PASS: TestPhase5_NewToolbarSpacerConcreteType (0.00s)
+=== RUN   TestPhase5_NewToolbarSeparatorConcreteType
+--- PASS: TestPhase5_NewToolbarSeparatorConcreteType (0.00s)
+=== RUN   TestPhase5_ToolbarSetIconUpdatesField
+--- PASS: TestPhase5_ToolbarSetIconUpdatesField (0.00s)
+PASS
+ok  	fyne.io/fyne/v2/widget	0.008s
+PASSED
+=== Phase 6: Widget and Container Improvements ===
+=== RUN   TestPhase6_ContainerRemoveAll
+2026/10/11 08:02:28 Fyne error:  Attempt to access current Fyne app when none is started
+2026/10/11 08:02:28   At: /app/app.go:103
+2026/10/11 08:02:28 Fyne error:  Attempt to access current Fyne app when none is started
+2026/10/11 08:02:28   At: /app/app.go:103
+2026/10/11 08:02:28 Fyne error:  Attempt to access current Fyne app when none is started
+2026/10/11 08:02:28   At: /app/app.go:103
+2026/10/11 08:02:28 Fyne error:  Attempt to access current Fyne app when none is started
+2026/10/11 08:02:28   At: /app/app.go:103
+2026/10/11 08:02:28 Fyne error:  Attempt to access current Fyne app when none is started
+2026/10/11 08:02:28   At: /app/app.go:103
+--- PASS: TestPhase6_ContainerRemoveAll (0.00s)
+=== RUN   TestPhase6_ContainerRemoveAllEmpty
+2026/10/11 08:02:28 Fyne error:  Attempt to access current Fyne app when none is started
+2026/10/11 08:02:28   At: /app/app.go:103
+2026/10/11 08:02:28 Fyne error:  Attempt to access current Fyne app when none is started
+2026/10/11 08:02:28   At: /app/app.go:103
+--- PASS: TestPhase6_ContainerRemoveAllEmpty (0.00s)
+=== RUN   TestPhase6_ContainerAddNilSafe
+2026/10/11 08:02:28 Fyne error:  Attempt to access current Fyne app when none is started
+2026/10/11 08:02:28   At: /app/app.go:103
+2026/10/11 08:02:28 Fyne error:  Attempt to access current Fyne app when none is started
+2026/10/11 08:02:28   At: /app/app.go:103
+--- PASS: TestPhase6_ContainerAddNilSafe (0.00s)
+PASS
+ok  	fyne.io/fyne/v2	0.004s
+=== RUN   TestPhase6_HyperlinkOnTapped
+--- PASS: TestPhase6_HyperlinkOnTapped (0.00s)
+=== RUN   TestPhase6_HyperlinkOnTappedNil
+--- PASS: TestPhase6_HyperlinkOnTappedNil (0.00s)
+=== RUN   TestPhase6_HyperlinkOnTappedMultiple
+--- PASS: TestPhase6_HyperlinkOnTappedMultiple (0.00s)
+=== RUN   TestPhase6_EntrySetMinRowsVisible
+--- PASS: TestPhase6_EntrySetMinRowsVisible (0.00s)
+=== RUN   TestPhase6_EntrySetMinRowsVisibleDefault
+--- PASS: TestPhase6_EntrySetMinRowsVisibleDefault (0.00s)
+PASS
+ok  	fyne.io/fyne/v2/widget	0.009s
+=== RUN   TestPhase6_NewAllStrings
+--- PASS: TestPhase6_NewAllStrings (0.00s)
+=== RUN   TestPhase6_NewAllStringsSingleValidator
+--- PASS: TestPhase6_NewAllStringsSingleValidator (0.00s)
+=== RUN   TestPhase6_NewAllStringsAllPass
+--- PASS: TestPhase6_NewAllStringsAllPass (0.00s)
+=== RUN   TestPhase6_NewAllStringsEmpty
+--- PASS: TestPhase6_NewAllStringsEmpty (0.00s)
+PASS
+ok  	fyne.io/fyne/v2/data/validation	0.003s
+PASSED
+=== Phase 7: Desktop App Interface ===
+# fyne.io/fyne/v2/driver/desktop_test [fyne.io/fyne/v2/driver/desktop.test]
+driver/desktop/test_07_desktop_app_test.go:52:22: cannot use &mockDesktopApp{} (value of type *mockDesktopApp) as desktop.App value in variable declaration: *mockDesktopApp does not implement desktop.App (missing method Driver)
+FAIL	fyne.io/fyne/v2/driver/desktop [build failed]
+FAIL
+FAILED
+Result: 5/7 phases | Reward: 0.7272727272727273
+
+========== EVALUATION_FILE_HASHES.json ==========
+[
+  {
+    "path": "artifact_eval.py",
+    "bytes": 10595,
+    "sha256": "9c37b37193c05e58e3143ca71dacff02f4fa3a806d463dc42704e8caa046905a"
+  },
+  {
+    "path": "EVALUATION_REPORT.md",
+    "bytes": 3475,
+    "sha256": "9e5a8e7ea28ccac0218b6ad20dc2306a9caabe21070d807eda9da4272b19a7e5"
+  },
+  {
+    "path": "fyne_s_attempt/input_tar_manifest.json",
+    "bytes": 572827,
+    "sha256": "70a0e8759c443f80b7c0fc04a1e7239e95752285ad8142aa283f4fae31293d32"
+  },
+  {
+    "path": "fyne_s_attempt/preflight.json",
+    "bytes": 1195,
+    "sha256": "1ec37441f85937d0db63741df50d00f7d7cdee9be078d16992156c772bb65856"
+  },
+  {
+    "path": "fyne_s_eval/docker_commands_and_results.json",
+    "bytes": 4078,
+    "sha256": "fa0e38a31533f83059b6f6a4e551c56960890257f9b8b0aeb5b8aff26699bf30"
+  },
+  {
+    "path": "fyne_s_eval/evaluation_result.json",
+    "bytes": 1443,
+    "sha256": "e4865e6ba6afd39004d4c1586d898b73151da0915692b06f54073ac1d9f61fbb"
+  },
+  {
+    "path": "fyne_s_eval/EVALUATOR_ATTEMPT_STARTED.json",
+    "bytes": 140,
+    "sha256": "c04e488be9cbde919f047430f216a61c58967a137aa0af8d6b2fb456e110e128"
+  },
+  {
+    "path": "fyne_s_eval/input_tar_manifest.json",
+    "bytes": 572827,
+    "sha256": "70a0e8759c443f80b7c0fc04a1e7239e95752285ad8142aa283f4fae31293d32"
+  },
+  {
+    "path": "fyne_s_eval/preflight.json",
+    "bytes": 1195,
+    "sha256": "1ec37441f85937d0db63741df50d00f7d7cdee9be078d16992156c772bb65856"
+  },
+  {
+    "path": "fyne_s_eval/reward.json",
+    "bytes": 70,
+    "sha256": "cbc73c7f75cc643e1c2e2e4232f61ce17e6ae8102d865d5341ce7b57e8631dfd"
+  },
+  {
+    "path": "fyne_s_eval/reward.txt",
+    "bytes": 19,
+    "sha256": "0e64f53cc478aff81649375742c8c58518a4097847b9222a07c654e19918a173"
+  },
+  {
+    "path": "fyne_s_eval/test-stdout.txt",
+    "bytes": 7237,
+    "sha256": "b522bbb8a734f1a2ac6ed52631b463d9d7e5ccf88c89ba76123d98a38f81cd96"
+  },
+  {
+    "path": "kitex_s/input_tar_manifest.json",
+    "bytes": 191924,
+    "sha256": "cd95b5244950271d744852d3d476064108c512763a20cf2985c2eb881509451b"
+  },
+  {
+    "path": "kitex_s/preflight.json",
+    "bytes": 893,
+    "sha256": "a5a9ce88a4b88cf75bb4f8fddfee28338c401efb8c20dd5e22f8cba2ee10c9e4"
+  },
+  {
+    "path": "kitex_s_attempt/input_tar_manifest.json",
+    "bytes": 191924,
+    "sha256": "cd95b5244950271d744852d3d476064108c512763a20cf2985c2eb881509451b"
+  },
+  {
+    "path": "kitex_s_attempt/preflight.json",
+    "bytes": 1154,
+    "sha256": "82f61cc7641934524abb62ee6c39c2bde0bbe887b530bae8ddae6868cf1419eb"
+  },
+  {
+    "path": "kitex_s_eval/docker_commands_and_results.json",
+    "bytes": 4101,
+    "sha256": "772edf108421b3884100918aed9b909f1e5968b9f5da361833db615b51d66e2f"
+  },
+  {
+    "path": "kitex_s_eval/evaluation_result.json",
+    "bytes": 1372,
+    "sha256": "0fac606a788f6fd9f3f5fe90e941be5f5b21d1a15b7073a2b8c055edcc617f55"
+  },
+  {
+    "path": "kitex_s_eval/EVALUATOR_ATTEMPT_STARTED.json",
+    "bytes": 139,
+    "sha256": "0ad31a2885afd0d084549ea749cb20846550cc56f3df7e770b398fcdda0d12a9"
+  },
+  {
+    "path": "kitex_s_eval/input_tar_manifest.json",
+    "bytes": 191924,
+    "sha256": "cd95b5244950271d744852d3d476064108c512763a20cf2985c2eb881509451b"
+  },
+  {
+    "path": "kitex_s_eval/preflight.json",
+    "bytes": 1154,
+    "sha256": "82f61cc7641934524abb62ee6c39c2bde0bbe887b530bae8ddae6868cf1419eb"
+  },
+  {
+    "path": "kitex_s_eval/reward.json",
+    "bytes": 55,
+    "sha256": "b88a951994a628b9ee786481ba072818aab22bfd3d97e25741d74d43717caa39"
+  },
+  {
+    "path": "kitex_s_eval/reward.txt",
+    "bytes": 4,
+    "sha256": "c36fdbcf57ed3348e59da37beebc5c3696b3e451b7ffe16f2ebb6c9b5ee5916b"
+  },
+  {
+    "path": "kitex_s_eval/test-stdout.txt",
+    "bytes": 9410,
+    "sha256": "b60886ac473422fab2c6de19c42c996a2d4f5b1ab9baf0e66f8cddbeaa24e82b"
+  }
+]
+
+========== REPAIR_REPORT.md ==========
+# Bounded infrastructure repair (no live model calls)
+
+Baseline: original run code `155d30e12e261417f9fa14a86689850221b40056`;
+original archive `ea3261b7a1ef8426e744bb2351404183861f0d8b`.
+The worktree HEAD at start was that archive commit. The unrelated pre-existing
+untracked `__pycache__` directories were left untouched.
+
+Changed infrastructure files:
+
+- `real_task_effect_pilot_preflight_20261010/pilot_analysis_bridge.py`:
+  bounded scratch observation (20,000 entries or 5 seconds), explicit
+  `snapshot_incomplete`, skipped-path/reason reporting for a Go temporary
+  file/directory disappearing during scan. Optional observation failures no
+  longer erase an already known command result. Fixed mount-source identity
+  remains a hard gate. Exact-session shutdown still checks Docker inspect and
+  daemon state; watcher `cleanup_error` cannot receive a clean certificate.
+- `GenericAgent-main/monitor_agent_core/provider.py`: opt-in
+  `incomplete_stream_recovery_v1` (default absent/false). Only an Anthropic
+  stream ending without a complete `message_stop` may retry. The same logical
+  request has at most three actual attempts, with 2- and 5-second waits,
+  regardless of `max_retries` or `recovery_batches`. No incomplete content is
+  committed to provider history or dispatched as tools. The payload hash must
+  remain identical before a replay send. Other remote failures are not
+  replayed by this option. Native deadline, stop event and cancellation remain
+  mandatory. Request-attempt records carry logical ID, attempt, request SHA,
+  timing, error chain, partial usage if provided, and unknown server-execution
+  status. No future run manifest enables the option in this stage.
+
+Tests actually executed (all zero-model):
+
+| Command | Exit | Result |
+|---|---:|---|
+| `python -m pytest -q tests/test_monitor_incomplete_stream_recovery.py` from `GenericAgent-main` | 0 | 6 passed |
+| `python -m pytest -q method_discovery/.../posthoc_s_artifact_eval_20261012/test_scratch_observation.py` from repo root | 0 | 3 passed; unrelated pytest atexit temp-path PermissionError after result |
+| `python -m unittest method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.test_pilot_analysis_bridge -q` | 0 | 4 passed in 63.457 s, real pinned Docker images, no model |
+| `python -m pytest -q tests/test_monitor_continuation_diagnostics.py tests/test_monitor_continuation_repair.py tests/test_monitor_continuation_purpose_boundary.py` from `GenericAgent-main` | 1 | 20 passed, 1 collection/runtime failure: pre-existing optional `shortuuid` dependency unavailable in local Python 3.9; no production code adjusted to mask it |
+
+The scratch regression injects an actual disappearing-file read into the
+receipt path and checks that a known command result survives, the diff is
+marked incomplete, and the accepted request is never executed twice. It also
+checks mount identity remains fatal and cleanup-error cannot be certified.
+The provider regression covers partial-then-complete, three-attempt exhaustion,
+cross-layer cap despite `max_retries=4` and `recovery_batches=2`, non-stream
+failure no-replay, cancellation, deadline, default-off behavior, and partial
+usage from an incomplete parser stream. The original Docker bridge suite
+exercises the production Monitor dispatch through the fixed read-only port on
+both pinned task images.
+
+Remaining technical limits: no real provider call was authorized or made;
+stream-recovery behavior is verified with fake transport only. A mid-stream
+socket exception, as distinct from a structurally ended-but-incomplete
+Anthropic stream, is not replayed by the new opt-in. A scratch observation
+marked incomplete cannot be used as a complete clean diff. Native evaluation
+of Fyne's exact failure tar does not prove it was an atomic final workspace.
+
+Actual calls in this stage: Task Agent 0; Supervisor/model/provider 0;
+training/scoring model 0; native deterministic evaluator 2 (one per fixed
+artifact). No old Task was resumed and no new batch was launched.
+
+========== TEST_COMMAND_TRANSCRIPT.txt ==========
+1) workdir E:\longcontext-cqs-v0-20261005\GenericAgent-main
+command: python -m pytest -q tests/test_monitor_incomplete_stream_recovery.py
+exit_code: 0
+stdout:
+......                                                                   [100%]
+6 passed in 0.08s
+stderr: empty
+
+2) workdir E:\longcontext-cqs-v0-20261005
+command: python -m pytest -q method_discovery/curator_supervisor_convergence_v0/posthoc_s_artifact_eval_20261012/test_scratch_observation.py
+exit_code: 0
+stdout:
+...                                                                      [100%]
+3 passed in 0.09s
+stderr after pytest result (local temp-path issue; not suppressed):
+Error in atexit._run_exitfuncs:
+Traceback (most recent call last):
+  File "D:\python\lib\pathlib.py", line 215, in resolve
+    s = self._ext_to_normal(_getfinalpathname(s))
+PermissionError: [WinError 5] Access denied: 'C:\Users\hsy\AppData\Local\Temp\pytest-of-hsy\pytest-951'
+
+3) workdir E:\longcontext-cqs-v0-20261005
+command: python -m unittest method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.test_pilot_analysis_bridge -q
+exit_code: 0
+stdout/stderr:
+----------------------------------------------------------------------
+Ran 4 tests in 63.457s
+
+OK
+
+4) workdir E:\longcontext-cqs-v0-20261005\GenericAgent-main
+command: python -m pytest -q tests/test_monitor_continuation_diagnostics.py tests/test_monitor_continuation_repair.py tests/test_monitor_continuation_purpose_boundary.py
+exit_code: 1
+stdout summary:
+...............F.....                                                    [100%]
+FAILED tests/test_monitor_continuation_repair.py::test_forced_compaction_then_replaced_root_uses_current_contract
+1 failed, 20 passed in 0.76s
+error cause:
+ModuleNotFoundError: No module named 'shortuuid'
+import path: monitor_agent_core/vendor/pma_memory/universal_memory.py
+An unrelated pytest atexit temp-path PermissionError also appeared after the test result.
+
+5) workdir E:\longcontext-cqs-v0-20261005
+command: git diff --check
+exit_code: 0
+stderr: Git warned that LF in two modified production/research source files may be replaced by CRLF on future checkout; no whitespace errors were reported.
+
+All tests used fake transport or local Docker, not an external model/provider.
+
+========== INFRASTRUCTURE_CODE_DIFF.patch ==========
+diff --git a/GenericAgent-main/monitor_agent_core/provider.py b/GenericAgent-main/monitor_agent_core/provider.py
+index f7ab3883..176bbc2b 100644
+--- a/GenericAgent-main/monitor_agent_core/provider.py
++++ b/GenericAgent-main/monitor_agent_core/provider.py
+@@ -35,6 +35,10 @@ class RetryableProviderError(ProviderError):
+     """Explicit temporary remote failure, not a model/tool decision."""
+ 
+ 
++class IncompleteStreamError(RetryableProviderError):
++    """A response stream ended without the provider's completion marker."""
++
++
+ class ProviderRecoveryExhausted(ProviderError):
+     """Bounded transport recovery ended; do not start another review to retry."""
+ 
+@@ -596,6 +600,10 @@ class MonitorProviderClient:
+         # Runtime-owned recovery stays inside this request: no new wake, tool
+         # replay, history append, or synthetic completion decision.
+         deadline = getattr(self, 'recovery_deadline', None)
++        if self.config.get('incomplete_stream_recovery_v1'):
++            if deadline is None or getattr(self, 'recovery_stop', None) is None:
++                raise ValueError('Incomplete-stream recovery requires the native deadline and stop event')
++            return self._request_batch(tools, incomplete_stream_only=True)
+         if deadline is None:
+             return self._request_batch(tools)
+         stop = self.recovery_stop
+@@ -616,18 +624,23 @@ class MonitorProviderClient:
+                 if stop.wait(delay) or time.monotonic() >= deadline:
+                     raise ProviderRecoveryExhausted('Monitor stopped or task budget exhausted') from exc
+ 
+-    def _request_batch(self, tools):
++    def _request_batch(self, tools, incomplete_stream_only=False):
+         last_error = None
+         self._cancelled.clear()
+-        for attempt in range(self.max_retries + 1):
++        self._incomplete_retry_expected_sha = None
++        logical_request_id = uuid.uuid4().hex
++        attempts = 3 if incomplete_stream_only else self.max_retries + 1
++        for attempt in range(attempts):
+             deadline = getattr(self, 'recovery_deadline', None)
+             if deadline is not None and (self.recovery_stop.is_set() or time.monotonic() >= deadline):
+                 raise ProviderRecoveryExhausted('Monitor stopped or task budget exhausted')
+             started = time.monotonic()
+             request_id = uuid.uuid4().hex
+             self._progress_request_id = request_id
++            self._last_payload_sha256 = None
+             self.last_response_metadata = {}
+-            record = {'attempt': attempt + 1, 'started_at': time.time(),
++            record = {'attempt': attempt + 1, 'logical_request_id': logical_request_id,
++                      'started_at': time.time(),
+                       'history_characters': self.history_measure()['characters'],
+                       'purpose': getattr(self, 'request_purpose', 'review'),
+                       'transaction_id': (getattr(self, 'continuation_transaction_id', None)
+@@ -659,24 +672,40 @@ class MonitorProviderClient:
+                              error_chain=failure_chain(exc))
+                 if self._cancelled.is_set():
+                     raise ProviderError('Provider request cancelled') from exc
+-                if attempt >= self.max_retries:
++                if incomplete_stream_only and not isinstance(exc, IncompleteStreamError):
++                    record['outcome'] = 'unreplayed_non_stream_failure'
++                    raise ProviderRecoveryExhausted(str(exc)) from exc
++                if incomplete_stream_only and self._last_payload_sha256 is not None:
++                    self._incomplete_retry_expected_sha = self._last_payload_sha256
++                if attempt >= attempts - 1:
+                     record['outcome'] = 'retries_exhausted'
+                     break
+-                delay = min(8, 1.5 * (2 ** attempt))
++                delay = (2, 5)[attempt] if incomplete_stream_only else min(8, 1.5 * (2 ** attempt))
++                if deadline is not None:
++                    delay = min(delay, max(0, deadline - time.monotonic()))
+                 record['retry_delay_seconds'] = delay
+                 self._progress('request_retry_wait', request_id=request_id, seconds=delay,
+                                error_type=type(exc).__name__)
+                 if self._cancelled.wait(delay):
+                     raise ProviderError('Provider request cancelled') from exc
++                if deadline is not None and time.monotonic() >= deadline:
++                    raise ProviderRecoveryExhausted('Monitor stopped or task budget exhausted') from exc
+             except Exception as exc:
+                 record.update(outcome='error', error_type=type(exc).__name__,
+                              error_chain=failure_chain(exc))
+                 raise
+             finally:
++                record['request_sha256'] = self._last_payload_sha256
++                if incomplete_stream_only and record.get('outcome') != 'success':
++                    record['server_execution'] = 'unknown'
++                    record['partial_usage_if_reported'] = getattr(
++                        self, 'last_response_metadata', {}).get('partial_usage')
+                 if self._cancelled.is_set(): record['outcome'] = 'cancelled'
+                 record['duration_seconds'] = time.monotonic() - started
+                 self.request_attempts.append(record)
+                 self._progress('request_finished', request_id=request_id, **record)
++        if incomplete_stream_only:
++            raise ProviderRecoveryExhausted('Incomplete stream recovery exhausted') from last_error
+         raise RetryableProviderError(f"Provider request failed: {last_error}") from last_error
+ 
+     def _request_once(self, tools):
+@@ -689,6 +718,13 @@ class MonitorProviderClient:
+         if self.config.get('transport_route'):
+             headers['x-model-route'] = self.config['transport_route']
+         capture = getattr(self, 'pre_send_capture', None)
++        self._last_payload_sha256 = hashlib.sha256(json.dumps(
++            payload, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest()
++        if (getattr(self, '_incomplete_retry_expected_sha', None) is not None
++                and self._last_payload_sha256 != self._incomplete_retry_expected_sha):
++            raise ProviderError('Incomplete-stream retry payload changed before send')
++        self._progress('request_payload_identity', request_id=self._progress_request_id,
++                       sha256=self._last_payload_sha256)
+         if capture is not None:
+             capture(self._progress_request_id, payload)
+         with requests.post(
+@@ -871,7 +907,8 @@ class MonitorProviderClient:
+                 completed = True
+                 break
+         if not completed or current is not None:
+-            raise RetryableProviderError('Anthropic stream ended before a complete message_stop')
++            metadata['partial_usage'] = dict(usage) if usage else None
++            raise IncompleteStreamError('Anthropic stream ended before a complete message_stop')
+         metadata.update(stream_complete=True, response_block_types=[b['type'] for b in blocks])
+         return blocks, usage
+ 
+diff --git a/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_analysis_bridge.py b/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_analysis_bridge.py
+index 0b21b0a7..769ffb7b 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_analysis_bridge.py
++++ b/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_analysis_bridge.py
+@@ -4,6 +4,7 @@ from __future__ import annotations
+ 
+ import json
+ import hashlib
++import errno
+ import os
+ from pathlib import Path
+ import shutil
+@@ -114,8 +115,22 @@ class PilotDockerToolPort(DockerToolPort):
+         os.replace(staged, destination)
+ 
+     def close(self):
+-        super().close()
++        primary_error = None
++        try:
++            super().close()
++        except Exception as exc:
++            primary_error = exc
+         for session in self.new_sessions:
++            entry = self.new_sessions[session]
++            process = entry.get('process')
++            if process is not None and process.poll() is None:
++                # Attempt exact-session cleanup even after a watcher failure.
++                subprocess.run(['docker', 'rm', '-f', session], text=True,
++                               capture_output=True, timeout=15)
++                try:
++                    process.wait(timeout=15)
++                except subprocess.TimeoutExpired as exc:
++                    raise RuntimeError('cleanup_unknown: analysis writer still running') from exc
+             try:
+                 found = subprocess.run(['docker', 'inspect', session], text=True,
+                                        capture_output=True, timeout=15)
+@@ -132,6 +147,10 @@ class PilotDockerToolPort(DockerToolPort):
+                 raise RuntimeError('cleanup_unknown: Docker daemon unavailable') from exc
+             if daemon.returncode != 0 or not daemon.stdout.strip():
+                 raise RuntimeError('cleanup_unknown: Docker daemon state unconfirmed')
++            if entry.get('reason') == 'cleanup_error':
++                raise RuntimeError('cleanup_unknown: session watcher reported cleanup_error')
++        if primary_error is not None:
++            raise RuntimeError('cleanup_unknown: base session cleanup failed') from primary_error
+ 
+ 
+ class PilotHostBridge:
+@@ -161,7 +180,7 @@ class PilotHostBridge:
+         if op == 'start':
+             if set(request) != common | {'code', 'code_type', 'timeout', 'wait_seconds'}:
+                 raise ValueError('Analysis start fields mismatch')
+-            before = self._scratch_files()
++            before = self._scratch_snapshot()
+             result = self.port.execute('code_run', {
+                 'code': request['code'], 'type': request['code_type'],
+                 'timeout': request['timeout'], 'wait_seconds': request['wait_seconds']})
+@@ -171,7 +190,7 @@ class PilotHostBridge:
+                                         'task_volume': self.port.task_volume}
+             if result.get('session_id'):
+                 self._session_scratch_before[result['session_id']] = before
+-            result['private_scratch_diff_at_return'] = self._scratch_diff(before, self._scratch_files())
++            result['private_scratch_diff_at_return'] = self._scratch_diff(before, self._scratch_snapshot())
+             return result
+         if op == 'read':
+             if set(request) != common | {'session_id', 'wait_seconds', 'cancel'}:
+@@ -185,7 +204,7 @@ class PilotHostBridge:
+                                         'task_volume': self.port.task_volume}
+             before = self._session_scratch_before.get(request['session_id'])
+             if before is not None and result.get('status') != 'running':
+-                result['private_scratch_diff'] = self._scratch_diff(before, self._scratch_files())
++                result['private_scratch_diff'] = self._scratch_diff(before, self._scratch_snapshot())
+             return result
+         if op == 'close' and set(request) == common:
+             self.port.close()
+@@ -193,21 +212,59 @@ class PilotHostBridge:
+             return {'status': 'closed'}
+         raise ValueError('Unsupported analysis operation')
+ 
++    def _scratch_snapshot(self):
++        # Source identity remains a hard gate; optional statistics do not own
++        # the execution receipt after a command has already run.
++        self.port._check_mount_sources()
++        try:
++            return self._scratch_files()
++        except OSError as exc:
++            return {'files': {}, 'skipped': [{'path': str(getattr(exc, 'filename', None)),
++                                              'reason': type(exc).__name__}],
++                    'snapshot_incomplete': True, 'limit_reached': False}
++
+     def _scratch_files(self):
+         root = self.port.scratch
+-        files = {}
++        files, skipped = {}, []
++        started = time.monotonic()
++        limit = 20000
+         for name in ('tmp', 'output'):
+-            for path in (root / name).rglob('*'):
+-                if path.is_file() and not path.is_symlink():
+-                    files[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+-        return files
++            def vanished(exc):
++                if exc.errno in (errno.ENOENT, errno.ENOTDIR):
++                    skipped.append({'path': str(exc.filename), 'reason': 'disappeared'})
++                else:
++                    raise exc
++            for directory, dirs, names in os.walk(root / name, onerror=vanished):
++                if time.monotonic() - started > 5 or len(files) + len(skipped) >= limit:
++                    return {'files': files, 'skipped': skipped,
++                            'snapshot_incomplete': True, 'limit_reached': True}
++                for filename in names:
++                    if time.monotonic() - started > 5 or len(files) + len(skipped) >= limit:
++                        return {'files': files, 'skipped': skipped,
++                                'snapshot_incomplete': True, 'limit_reached': True}
++                    path = Path(directory) / filename
++                    relative = path.relative_to(root).as_posix()
++                    try:
++                        if path.is_symlink() or not path.is_file():
++                            continue
++                        files[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
++                    except OSError as exc:
++                        if exc.errno not in (errno.ENOENT, errno.ENOTDIR):
++                            raise
++                        skipped.append({'path': relative, 'reason': 'disappeared'})
++        return {'files': files, 'skipped': skipped,
++                'snapshot_incomplete': bool(skipped), 'limit_reached': False}
+ 
+     @staticmethod
+     def _scratch_diff(before, after):
+-        return {'added': sorted(after.keys() - before.keys()),
+-                'changed': sorted(path for path in after.keys() & before.keys()
+-                                  if after[path] != before[path]),
+-                'removed': sorted(before.keys() - after.keys())}
++        old, new = before['files'], after['files']
++        return {'added': sorted(new.keys() - old.keys()),
++                'changed': sorted(path for path in new.keys() & old.keys()
++                                  if new[path] != old[path]),
++                'removed': sorted(old.keys() - new.keys()),
++                'snapshot_incomplete': before['snapshot_incomplete'] or after['snapshot_incomplete'],
++                'skipped_before': before['skipped'], 'skipped_after': after['skipped'],
++                'limit_reached': before['limit_reached'] or after['limit_reached']}
+ 
+     def serve_once(self):
+         for request_path in sorted((self.root / 'requests').glob('*.json')):

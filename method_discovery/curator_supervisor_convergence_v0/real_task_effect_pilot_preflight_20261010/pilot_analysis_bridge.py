@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import errno
 import os
 from pathlib import Path
 import shutil
@@ -114,8 +115,22 @@ class PilotDockerToolPort(DockerToolPort):
         os.replace(staged, destination)
 
     def close(self):
-        super().close()
+        primary_error = None
+        try:
+            super().close()
+        except Exception as exc:
+            primary_error = exc
         for session in self.new_sessions:
+            entry = self.new_sessions[session]
+            process = entry.get('process')
+            if process is not None and process.poll() is None:
+                # Attempt exact-session cleanup even after a watcher failure.
+                subprocess.run(['docker', 'rm', '-f', session], text=True,
+                               capture_output=True, timeout=15)
+                try:
+                    process.wait(timeout=15)
+                except subprocess.TimeoutExpired as exc:
+                    raise RuntimeError('cleanup_unknown: analysis writer still running') from exc
             try:
                 found = subprocess.run(['docker', 'inspect', session], text=True,
                                        capture_output=True, timeout=15)
@@ -132,6 +147,10 @@ class PilotDockerToolPort(DockerToolPort):
                 raise RuntimeError('cleanup_unknown: Docker daemon unavailable') from exc
             if daemon.returncode != 0 or not daemon.stdout.strip():
                 raise RuntimeError('cleanup_unknown: Docker daemon state unconfirmed')
+            if entry.get('reason') == 'cleanup_error':
+                raise RuntimeError('cleanup_unknown: session watcher reported cleanup_error')
+        if primary_error is not None:
+            raise RuntimeError('cleanup_unknown: base session cleanup failed') from primary_error
 
 
 class PilotHostBridge:
@@ -161,7 +180,7 @@ class PilotHostBridge:
         if op == 'start':
             if set(request) != common | {'code', 'code_type', 'timeout', 'wait_seconds'}:
                 raise ValueError('Analysis start fields mismatch')
-            before = self._scratch_files()
+            before = self._scratch_snapshot()
             result = self.port.execute('code_run', {
                 'code': request['code'], 'type': request['code_type'],
                 'timeout': request['timeout'], 'wait_seconds': request['wait_seconds']})
@@ -171,7 +190,7 @@ class PilotHostBridge:
                                         'task_volume': self.port.task_volume}
             if result.get('session_id'):
                 self._session_scratch_before[result['session_id']] = before
-            result['private_scratch_diff_at_return'] = self._scratch_diff(before, self._scratch_files())
+            result['private_scratch_diff_at_return'] = self._scratch_diff(before, self._scratch_snapshot())
             return result
         if op == 'read':
             if set(request) != common | {'session_id', 'wait_seconds', 'cancel'}:
@@ -185,7 +204,7 @@ class PilotHostBridge:
                                         'task_volume': self.port.task_volume}
             before = self._session_scratch_before.get(request['session_id'])
             if before is not None and result.get('status') != 'running':
-                result['private_scratch_diff'] = self._scratch_diff(before, self._scratch_files())
+                result['private_scratch_diff'] = self._scratch_diff(before, self._scratch_snapshot())
             return result
         if op == 'close' and set(request) == common:
             self.port.close()
@@ -193,21 +212,59 @@ class PilotHostBridge:
             return {'status': 'closed'}
         raise ValueError('Unsupported analysis operation')
 
+    def _scratch_snapshot(self):
+        # Source identity remains a hard gate; optional statistics do not own
+        # the execution receipt after a command has already run.
+        self.port._check_mount_sources()
+        try:
+            return self._scratch_files()
+        except OSError as exc:
+            return {'files': {}, 'skipped': [{'path': str(getattr(exc, 'filename', None)),
+                                              'reason': type(exc).__name__}],
+                    'snapshot_incomplete': True, 'limit_reached': False}
+
     def _scratch_files(self):
         root = self.port.scratch
-        files = {}
+        files, skipped = {}, []
+        started = time.monotonic()
+        limit = 20000
         for name in ('tmp', 'output'):
-            for path in (root / name).rglob('*'):
-                if path.is_file() and not path.is_symlink():
-                    files[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
-        return files
+            def vanished(exc):
+                if exc.errno in (errno.ENOENT, errno.ENOTDIR):
+                    skipped.append({'path': str(exc.filename), 'reason': 'disappeared'})
+                else:
+                    raise exc
+            for directory, dirs, names in os.walk(root / name, onerror=vanished):
+                if time.monotonic() - started > 5 or len(files) + len(skipped) >= limit:
+                    return {'files': files, 'skipped': skipped,
+                            'snapshot_incomplete': True, 'limit_reached': True}
+                for filename in names:
+                    if time.monotonic() - started > 5 or len(files) + len(skipped) >= limit:
+                        return {'files': files, 'skipped': skipped,
+                                'snapshot_incomplete': True, 'limit_reached': True}
+                    path = Path(directory) / filename
+                    relative = path.relative_to(root).as_posix()
+                    try:
+                        if path.is_symlink() or not path.is_file():
+                            continue
+                        files[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+                    except OSError as exc:
+                        if exc.errno not in (errno.ENOENT, errno.ENOTDIR):
+                            raise
+                        skipped.append({'path': relative, 'reason': 'disappeared'})
+        return {'files': files, 'skipped': skipped,
+                'snapshot_incomplete': bool(skipped), 'limit_reached': False}
 
     @staticmethod
     def _scratch_diff(before, after):
-        return {'added': sorted(after.keys() - before.keys()),
-                'changed': sorted(path for path in after.keys() & before.keys()
-                                  if after[path] != before[path]),
-                'removed': sorted(before.keys() - after.keys())}
+        old, new = before['files'], after['files']
+        return {'added': sorted(new.keys() - old.keys()),
+                'changed': sorted(path for path in new.keys() & old.keys()
+                                  if new[path] != old[path]),
+                'removed': sorted(old.keys() - new.keys()),
+                'snapshot_incomplete': before['snapshot_incomplete'] or after['snapshot_incomplete'],
+                'skipped_before': before['skipped'], 'skipped_after': after['skipped'],
+                'limit_reached': before['limit_reached'] or after['limit_reached']}
 
     def serve_once(self):
         for request_path in sorted((self.root / 'requests').glob('*.json')):

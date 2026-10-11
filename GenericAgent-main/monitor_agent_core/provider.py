@@ -35,6 +35,10 @@ class RetryableProviderError(ProviderError):
     """Explicit temporary remote failure, not a model/tool decision."""
 
 
+class IncompleteStreamError(RetryableProviderError):
+    """A response stream ended without the provider's completion marker."""
+
+
 class ProviderRecoveryExhausted(ProviderError):
     """Bounded transport recovery ended; do not start another review to retry."""
 
@@ -596,6 +600,10 @@ class MonitorProviderClient:
         # Runtime-owned recovery stays inside this request: no new wake, tool
         # replay, history append, or synthetic completion decision.
         deadline = getattr(self, 'recovery_deadline', None)
+        if self.config.get('incomplete_stream_recovery_v1'):
+            if deadline is None or getattr(self, 'recovery_stop', None) is None:
+                raise ValueError('Incomplete-stream recovery requires the native deadline and stop event')
+            return self._request_batch(tools, incomplete_stream_only=True)
         if deadline is None:
             return self._request_batch(tools)
         stop = self.recovery_stop
@@ -616,18 +624,23 @@ class MonitorProviderClient:
                 if stop.wait(delay) or time.monotonic() >= deadline:
                     raise ProviderRecoveryExhausted('Monitor stopped or task budget exhausted') from exc
 
-    def _request_batch(self, tools):
+    def _request_batch(self, tools, incomplete_stream_only=False):
         last_error = None
         self._cancelled.clear()
-        for attempt in range(self.max_retries + 1):
+        self._incomplete_retry_expected_sha = None
+        logical_request_id = uuid.uuid4().hex
+        attempts = 3 if incomplete_stream_only else self.max_retries + 1
+        for attempt in range(attempts):
             deadline = getattr(self, 'recovery_deadline', None)
             if deadline is not None and (self.recovery_stop.is_set() or time.monotonic() >= deadline):
                 raise ProviderRecoveryExhausted('Monitor stopped or task budget exhausted')
             started = time.monotonic()
             request_id = uuid.uuid4().hex
             self._progress_request_id = request_id
+            self._last_payload_sha256 = None
             self.last_response_metadata = {}
-            record = {'attempt': attempt + 1, 'started_at': time.time(),
+            record = {'attempt': attempt + 1, 'logical_request_id': logical_request_id,
+                      'started_at': time.time(),
                       'history_characters': self.history_measure()['characters'],
                       'purpose': getattr(self, 'request_purpose', 'review'),
                       'transaction_id': (getattr(self, 'continuation_transaction_id', None)
@@ -659,24 +672,40 @@ class MonitorProviderClient:
                              error_chain=failure_chain(exc))
                 if self._cancelled.is_set():
                     raise ProviderError('Provider request cancelled') from exc
-                if attempt >= self.max_retries:
+                if incomplete_stream_only and not isinstance(exc, IncompleteStreamError):
+                    record['outcome'] = 'unreplayed_non_stream_failure'
+                    raise ProviderRecoveryExhausted(str(exc)) from exc
+                if incomplete_stream_only and self._last_payload_sha256 is not None:
+                    self._incomplete_retry_expected_sha = self._last_payload_sha256
+                if attempt >= attempts - 1:
                     record['outcome'] = 'retries_exhausted'
                     break
-                delay = min(8, 1.5 * (2 ** attempt))
+                delay = (2, 5)[attempt] if incomplete_stream_only else min(8, 1.5 * (2 ** attempt))
+                if deadline is not None:
+                    delay = min(delay, max(0, deadline - time.monotonic()))
                 record['retry_delay_seconds'] = delay
                 self._progress('request_retry_wait', request_id=request_id, seconds=delay,
                                error_type=type(exc).__name__)
                 if self._cancelled.wait(delay):
                     raise ProviderError('Provider request cancelled') from exc
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise ProviderRecoveryExhausted('Monitor stopped or task budget exhausted') from exc
             except Exception as exc:
                 record.update(outcome='error', error_type=type(exc).__name__,
                              error_chain=failure_chain(exc))
                 raise
             finally:
+                record['request_sha256'] = self._last_payload_sha256
+                if incomplete_stream_only and record.get('outcome') != 'success':
+                    record['server_execution'] = 'unknown'
+                    record['partial_usage_if_reported'] = getattr(
+                        self, 'last_response_metadata', {}).get('partial_usage')
                 if self._cancelled.is_set(): record['outcome'] = 'cancelled'
                 record['duration_seconds'] = time.monotonic() - started
                 self.request_attempts.append(record)
                 self._progress('request_finished', request_id=request_id, **record)
+        if incomplete_stream_only:
+            raise ProviderRecoveryExhausted('Incomplete stream recovery exhausted') from last_error
         raise RetryableProviderError(f"Provider request failed: {last_error}") from last_error
 
     def _request_once(self, tools):
@@ -689,6 +718,13 @@ class MonitorProviderClient:
         if self.config.get('transport_route'):
             headers['x-model-route'] = self.config['transport_route']
         capture = getattr(self, 'pre_send_capture', None)
+        self._last_payload_sha256 = hashlib.sha256(json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest()
+        if (getattr(self, '_incomplete_retry_expected_sha', None) is not None
+                and self._last_payload_sha256 != self._incomplete_retry_expected_sha):
+            raise ProviderError('Incomplete-stream retry payload changed before send')
+        self._progress('request_payload_identity', request_id=self._progress_request_id,
+                       sha256=self._last_payload_sha256)
         if capture is not None:
             capture(self._progress_request_id, payload)
         with requests.post(
@@ -871,7 +907,8 @@ class MonitorProviderClient:
                 completed = True
                 break
         if not completed or current is not None:
-            raise RetryableProviderError('Anthropic stream ended before a complete message_stop')
+            metadata['partial_usage'] = dict(usage) if usage else None
+            raise IncompleteStreamError('Anthropic stream ended before a complete message_stop')
         metadata.update(stream_complete=True, response_block_types=[b['type'] for b in blocks])
         return blocks, usage
 
