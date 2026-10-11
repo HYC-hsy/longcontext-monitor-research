@@ -78,3 +78,9 @@ def test_real_prepare_bundle_narrow_and_task_only(tmp_path, monkeypatch):
     for name in ('instruction.md', 'task.toml'):
         assert _sha(tmp_path / 'T/public_agent_task' / name) == _sha(
             tmp_path / 'S/public_agent_task' / name)
+    print('PREPARED_BUNDLE_EVIDENCE=' + json.dumps({condition: {
+        'bundle_source_sha256': receipts[condition]['bundle_source_sha256'],
+        'compose_sha256': receipts[condition]['compose_sha256'],
+        'public_task_instruction_sha256': receipts[condition]['public_package']['included']['instruction.md'],
+        'profile_public': receipts[condition]['profile_public'],
+    } for condition in ('T', 'S')}, sort_keys=True))
