@@ -466,9 +466,12 @@ class MonitorAgent:
                 self.ase_v0 and self.crs_v0 and self.rhr_v0)):
             raise ValueError('monitor_root_epistemic_reestimation must be boolean and requires ASE + CRS + RHR')
         self.history_projection = getattr(client, 'config', {}).get('monitor_history_projection', 'off')
-        if self.history_projection not in ('off', 'root_records_v1', 'root_records_native_v2') or (
-                self.history_projection != 'off' and not self.rer_v0):
-            raise ValueError('Root records projection requires ASE + CRS + RHR + RER')
+        if self.history_projection not in ('off', 'root_records_v1', 'root_records_native_v2'):
+            raise ValueError('Unsupported monitor_history_projection')
+        if self.history_projection == 'root_records_v1' and not self.rer_v0:
+            raise ValueError('root_records_v1 requires ASE + CRS + RHR + RER')
+        if self.history_projection == 'root_records_native_v2' and not self.rer_v0:
+            raise ValueError('root_records_native_v2 requires ASE + CRS + RHR + RER')
         self._projected_root_handoffs = set()
         self._projection_integrity_failure = None
         self._projection_pending_request = None
@@ -1419,7 +1422,8 @@ class MonitorAgent:
             directory.mkdir(parents=True, exist_ok=False)
             locator = 'monitor/' + relative + '/source.json'
             if self.history_projection == 'root_records_native_v2':
-                if self.client.pre_send_capture is None:
+                if (self.client.pre_send_capture is None or
+                        getattr(self.client, 'native_projection_pilot_capture_installed', False) is not True):
                     raise ProjectionIntegrityError('Native projection requires pilot capture hook')
                 projected, manifest, _ = project_root_records_native(original)
             else:

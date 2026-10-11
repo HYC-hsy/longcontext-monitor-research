@@ -415,6 +415,7 @@ def _worker(config, commands, outputs):
                 config['analysis_port_root'], config['run_id'], config['stop_event'])
             client.pre_send_capture = lambda request_id, payload: _capture_pilot_payload(
                 config['private_root'], monitor, request_id, payload)
+            client.native_projection_pilot_capture_installed = True
         root_turn_ceiling = _root_turn_ceiling(config, config['max_review_turns'])
         used_turns = config.get('task_budget_turns_used')
         max_turns = config.get('task_max_turns')

@@ -39,6 +39,7 @@ def native_fixture(tmp_path, *, source=None):
     client.native_projection_acceptance = True
     client.pre_send_capture = lambda request_id, payload: _capture_pilot_payload(
         workspace.private_root, monitor, request_id, payload)
+    client.native_projection_pilot_capture_installed = True
     client.history_transform_callback = monitor._record_native_projection_transform
     client.restore_history(history() if source is None else source)
     monitor._enter_root_frame(handoff)
@@ -113,6 +114,16 @@ def test_no_pilot_capture_hook_rejected_before_history_mutation(tmp_path):
     monitor.history_projection = 'root_records_native_v2'
     client.restore_history(history())
     with pytest.raises(ProjectionIntegrityError):
+        monitor._enter_root_frame(handoff)
+    assert client.export_history() == history()
+
+
+def test_unverified_capture_callback_is_not_pilot_capability(tmp_path):
+    monitor, client, _, handoff = fixture(tmp_path, rhr=True, rer=True)
+    monitor.history_projection = 'root_records_native_v2'
+    client.pre_send_capture = lambda request_id, payload: None
+    client.restore_history(history())
+    with pytest.raises(ProjectionIntegrityError, match='archive or commit'):
         monitor._enter_root_frame(handoff)
     assert client.export_history() == history()
 

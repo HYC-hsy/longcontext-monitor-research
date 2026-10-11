@@ -11,7 +11,8 @@ def verify(private_root, monitor, request_id, payload):
     if pending is None:
         return None
     client = monitor.client
-    if client.provider != 'anthropic' or client.pre_send_capture is None:
+    if (client.provider != 'anthropic' or client.pre_send_capture is None or
+            getattr(client, 'native_projection_pilot_capture_installed', False) is not True):
         raise ValueError('Native projection is restricted to the pilot Anthropic capture path')
     if monitor.completion_state() != monitor.root_frame_handoff:
         raise ValueError('Native projection handoff became stale')
