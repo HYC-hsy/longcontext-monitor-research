@@ -1,0 +1,65 @@
+PILOT SCRATCH-SCAN SUBTRACTION — ZERO-MODEL AUDIT PACK
+
+Identity and scope
+------------------
+Repository: E:\longcontext-cqs-v0-20261005
+Branch: crs-v0-20261007
+Starting commit: a2a4f5f1651250b083ded66b73a9698d2c236cce
+Code/test commit: f205f4b903600a1c8df7017d56039ddd6a5bcf87
+Full exact code/test diff: sibling 0001-Disable-live-pilot-scratch-scans-and-preserve-indepe.patch
+No Task Agent, Supervisor model, real provider, native evaluator, training or scoring-model invocation was made. Counts: 0 for each.
+The previous pilot archive and unrelated untracked __pycache__ were not changed or removed.
+
+Implementation facts
+--------------------
+The live PilotHostBridge start/read/close and serve_once paths no longer call optional scratch traversal, hashing, snapshot or post-receipt observation. The scratch scan methods, limits and observation directory were removed from this live adapter. A trusted spool-local scratch_statistics_policy.json records `scratch_content_statistics: disabled`; no empty diff or purported complete snapshot is returned to the model. Command, output, session, accepted and response receipts remain unchanged except for removal of the nonessential scratch-diff fields.
+
+PilotDockerToolPort._safe_mount_identity now performs a bounded source-root readability probe (one directory entry at most), in addition to its existing non-symlink, resolved-path, directory and device/inode checks. This is not a recursive scratch-content scan and reads no scratch file contents. PilotHostBridge._handle independently invokes _check_mount_sources before execution/read, after port.execute, and after any mirror_output, before delivering a normal result. Identity mismatch, FileNotFoundError and PermissionError escape as hard failures; serve_once does not turn them into optional statistics warnings. An already accepted request with no receipt remains uncertain and is never re-executed.
+
+No change was made to Task workspace RO mounts, scratch RW mounts, the receipt persistence machinery, abnormal cleanup certification, or provider response stop/deadline guard. No prompt, projection, RER, task code, model setting or evaluator setting changed.
+
+Changed files and SHA-256 (working-file bytes at code commit)
+--------------------------------------------------------------
+method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_analysis_bridge.py
+  8BE09E764E906C7EB5E23680BB35B8D3D0AAC8FDA2EBCF1A2B52EBB89EAC8D5E
+method_discovery/curator_supervisor_convergence_v0/posthoc_s_artifact_eval_20261012/test_scratch_observation.py
+  282B7F2127D9642E3CF90E0754448AED35A09CA2CF626E89A29ABBF04A6C225F
+method_discovery/curator_supervisor_convergence_v0/posthoc_s_artifact_eval_20261012/test_receipt_and_cleanup_boundaries.py
+  1E5BEED43450A905CE06F0689C769FF4C4A05062063FA5316465F764C47EDE84
+
+Targeted zero-model regression
+------------------------------
+Command, from repository root, with PYTHONPATH=GenericAgent-main;.:
+python -m pytest -q method_discovery/curator_supervisor_convergence_v0/posthoc_s_artifact_eval_20261012/test_scratch_observation.py method_discovery/curator_supervisor_convergence_v0/posthoc_s_artifact_eval_20261012/test_receipt_and_cleanup_boundaries.py GenericAgent-main/tests/test_monitor_incomplete_stream_recovery.py GenericAgent-main/tests/test_monitor_provider.py
+Exit code: 0
+stdout:
+........................................................................ [ 96%]
+...                                                                      [100%]
+75 passed in 0.48s
+stderr after pytest completion: `Error in atexit._run_exitfuncs: PermissionError: [WinError 5]` for `C:\Users\hsy\AppData\Local\Temp\pytest-of-hsy\pytest-951`. This Windows host temporary-directory cleanup warning did not alter the command exit code. No cleanup was performed manually.
+
+Specific assertions include real spool start/running/read/close without a scratch scan; the exact disabled-policy marker; pre/post identity checks; mismatched identity, missing protected root and unreadable protected root through serve_once for both start and read; post-execution identity loss without a success receipt; accepted-request non-replay; normal and abnormal sidecar clean certificate behavior; complete fake provider transport and stop/deadline guard. These are offline fixtures, not real model requests.
+
+One complete target-image integration execution
+-----------------------------------------------
+Command, from repository root, with PYTHONPATH=GenericAgent-main;.:
+python -m unittest -v method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.test_pilot_analysis_bridge
+Exit code: 0
+Complete test runner output:
+test_docker_unavailable_is_cleanup_unknown_not_success (method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.test_pilot_analysis_bridge.PilotAnalysisBridgeFixture) ... ok
+test_malformed_or_misowned_spool_receipt_is_integrity_failure (method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.test_pilot_analysis_bridge.PilotAnalysisBridgeFixture) ... ok
+test_target_image_read_only_monitor_dispatch (method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.test_pilot_analysis_bridge.PilotAnalysisBridgeFixture) ... ok
+test_unanswered_accepted_request_never_falls_back_to_local_process (method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.test_pilot_analysis_bridge.PilotAnalysisBridgeFixture) ... ok
+----------------------------------------------------------------------
+Ran 4 tests in 75.495s
+OK
+
+This was one execution of the four-test integration suite, not repeated until green. The prior baseline's Fyne Go temporary importcfg cleanup PermissionError did not occur in this execution. No causal conclusion about that earlier permission failure follows from one passing run. The integration test's finally branch removes its exact generated containers, volume and temporary host directory; no manual cleanup or permission modification was performed. No further diagnostic rerun was launched.
+
+Static diff check
+-----------------
+`git diff --check` and `git diff --cached --check` on the scoped code/test change exited 0, with Windows Git LF/CRLF conversion warnings but no whitespace errors.
+
+Limits and independent review
+-----------------------------
+The source-root readability probe checks the registered mount-source roots only; it does not inspect scratch content or certify that a concurrent Task workspace stayed at one version. The historical permission failure remains unexplained. A passing zero-model fixture is not evidence of live task or Supervisor success. This package is for independent main-brain audit before any separately authorized run.
