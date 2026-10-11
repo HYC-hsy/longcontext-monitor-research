@@ -1,0 +1,175 @@
+[
+  {
+    "argv": [
+      "docker",
+      "volume",
+      "create",
+      "posthoc-s-1791705502-kitex-s"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "posthoc-s-1791705502-kitex-s\n"
+  },
+  {
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "-i",
+      "--network",
+      "none",
+      "--mount",
+      "type=volume,source=posthoc-s-1791705502-kitex-s,destination=/artifact",
+      "--entrypoint",
+      "/bin/sh",
+      "sha256:7ffcd70e49d77031b8e67eaa99226dc8468fa046f33e615118e8922b89fff32e",
+      "-c",
+      "cd /artifact && tar -xpf -"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "run",
+      "-d",
+      "--name",
+      "posthoc-eval-1791705502-kitex-s",
+      "--network",
+      "none",
+      "--cpus",
+      "2",
+      "--memory",
+      "4096m",
+      "--storage-opt",
+      "size=10G",
+      "--mount",
+      "type=volume,source=posthoc-s-1791705502-kitex-s,destination=/app",
+      "--entrypoint",
+      "/bin/sh",
+      "sha256:7ffcd70e49d77031b8e67eaa99226dc8468fa046f33e615118e8922b89fff32e",
+      "-c",
+      "sleep infinity"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "89f95d3463d60c87438e7e5a5b8b64198c73fcc611a0f5c1aeacc3807d9fa1d0\n"
+  },
+  {
+    "argv": [
+      "docker",
+      "cp",
+      "E:\\LongContext\\long_context_bench\\.cache\\m12_roadmap_tasks\\ktx-0.13.0-roadmap\\tests/.",
+      "posthoc-eval-1791705502-kitex-s:/tests/"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "exec",
+      "-u",
+      "root",
+      "posthoc-eval-1791705502-kitex-s",
+      "chmod",
+      "+x",
+      "/tests/test.sh"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "exec",
+      "posthoc-eval-1791705502-kitex-s",
+      "/bin/sh",
+      "-c",
+      "mkdir -p /logs/verifier && (/tests/test.sh) > /logs/verifier/test-stdout.txt 2>&1"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "cp",
+      "posthoc-eval-1791705502-kitex-s:/logs/verifier/test-stdout.txt",
+      "E:\\longcontext-cqs-v0-20261005\\method_discovery\\curator_supervisor_convergence_v0\\posthoc_s_artifact_eval_20261012\\kitex_s_eval\\test-stdout.txt"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "cp",
+      "posthoc-eval-1791705502-kitex-s:/logs/verifier/reward.json",
+      "E:\\longcontext-cqs-v0-20261005\\method_discovery\\curator_supervisor_convergence_v0\\posthoc_s_artifact_eval_20261012\\kitex_s_eval\\reward.json"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "cp",
+      "posthoc-eval-1791705502-kitex-s:/logs/verifier/reward.txt",
+      "E:\\longcontext-cqs-v0-20261005\\method_discovery\\curator_supervisor_convergence_v0\\posthoc_s_artifact_eval_20261012\\kitex_s_eval\\reward.txt"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "rm",
+      "-f",
+      "posthoc-eval-1791705502-kitex-s"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "posthoc-eval-1791705502-kitex-s\n"
+  },
+  {
+    "argv": [
+      "docker",
+      "volume",
+      "rm",
+      "posthoc-s-1791705502-kitex-s"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "posthoc-s-1791705502-kitex-s\n"
+  },
+  {
+    "argv": [
+      "docker",
+      "inspect",
+      "posthoc-eval-1791705502-kitex-s"
+    ],
+    "returncode": 1,
+    "stderr": "error: no such object: posthoc-eval-1791705502-kitex-s\n",
+    "stdout": "[]\n"
+  },
+  {
+    "argv": [
+      "docker",
+      "volume",
+      "inspect",
+      "posthoc-s-1791705502-kitex-s"
+    ],
+    "returncode": 1,
+    "stderr": "Error response from daemon: get posthoc-s-1791705502-kitex-s: no such volume\n",
+    "stdout": "[]\n"
+  }
+]

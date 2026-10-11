@@ -1,0 +1,175 @@
+[
+  {
+    "argv": [
+      "docker",
+      "volume",
+      "create",
+      "posthoc-s-1791705713-fyne-s"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "posthoc-s-1791705713-fyne-s\n"
+  },
+  {
+    "argv": [
+      "docker",
+      "run",
+      "--rm",
+      "-i",
+      "--network",
+      "none",
+      "--mount",
+      "type=volume,source=posthoc-s-1791705713-fyne-s,destination=/artifact",
+      "--entrypoint",
+      "/bin/sh",
+      "sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1",
+      "-c",
+      "cd /artifact && tar -xpf -"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "run",
+      "-d",
+      "--name",
+      "posthoc-eval-1791705713-fyne-s",
+      "--network",
+      "none",
+      "--cpus",
+      "2",
+      "--memory",
+      "4096m",
+      "--storage-opt",
+      "size=10G",
+      "--mount",
+      "type=volume,source=posthoc-s-1791705713-fyne-s,destination=/app",
+      "--entrypoint",
+      "/bin/sh",
+      "sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1",
+      "-c",
+      "sleep infinity"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "0667df14f0736cdd42aa6b1598a092855ad392809fa2dae6da07c6954d1596ef\n"
+  },
+  {
+    "argv": [
+      "docker",
+      "cp",
+      "E:\\LongContext\\long_context_bench\\.cache\\m12_roadmap_tasks\\fyn-2.2.0-roadmap\\tests/.",
+      "posthoc-eval-1791705713-fyne-s:/tests/"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "exec",
+      "-u",
+      "root",
+      "posthoc-eval-1791705713-fyne-s",
+      "chmod",
+      "+x",
+      "/tests/test.sh"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "exec",
+      "posthoc-eval-1791705713-fyne-s",
+      "/bin/sh",
+      "-c",
+      "mkdir -p /logs/verifier && (/tests/test.sh) > /logs/verifier/test-stdout.txt 2>&1"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "cp",
+      "posthoc-eval-1791705713-fyne-s:/logs/verifier/test-stdout.txt",
+      "E:\\longcontext-cqs-v0-20261005\\method_discovery\\curator_supervisor_convergence_v0\\posthoc_s_artifact_eval_20261012\\fyne_s_eval\\test-stdout.txt"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "cp",
+      "posthoc-eval-1791705713-fyne-s:/logs/verifier/reward.json",
+      "E:\\longcontext-cqs-v0-20261005\\method_discovery\\curator_supervisor_convergence_v0\\posthoc_s_artifact_eval_20261012\\fyne_s_eval\\reward.json"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "cp",
+      "posthoc-eval-1791705713-fyne-s:/logs/verifier/reward.txt",
+      "E:\\longcontext-cqs-v0-20261005\\method_discovery\\curator_supervisor_convergence_v0\\posthoc_s_artifact_eval_20261012\\fyne_s_eval\\reward.txt"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  {
+    "argv": [
+      "docker",
+      "rm",
+      "-f",
+      "posthoc-eval-1791705713-fyne-s"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "posthoc-eval-1791705713-fyne-s\n"
+  },
+  {
+    "argv": [
+      "docker",
+      "volume",
+      "rm",
+      "posthoc-s-1791705713-fyne-s"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "posthoc-s-1791705713-fyne-s\n"
+  },
+  {
+    "argv": [
+      "docker",
+      "inspect",
+      "posthoc-eval-1791705713-fyne-s"
+    ],
+    "returncode": 1,
+    "stderr": "error: no such object: posthoc-eval-1791705713-fyne-s\n",
+    "stdout": "[]\n"
+  },
+  {
+    "argv": [
+      "docker",
+      "volume",
+      "inspect",
+      "posthoc-s-1791705713-fyne-s"
+    ],
+    "returncode": 1,
+    "stderr": "Error response from daemon: get posthoc-s-1791705713-fyne-s: no such volume\n",
+    "stdout": "[]\n"
+  }
+]
