@@ -1222,6 +1222,12 @@ class MonitorAgent:
                     return ToolOutcome(self.evidence_frontier.page(
                         cursor=arguments.get('cursor'), limit=arguments.get('limit', 12)))
                 if name == 'frontier_open':
+                    original = self.workspace.resolve_read('task/original_task.txt').read_text(
+                        encoding='utf-8')
+                    basis = arguments.get('task_basis')
+                    if (not isinstance(basis, str) or
+                            basis.strip().casefold() not in original.casefold()):
+                        raise ValueError('Task basis must quote an existing original-task span')
                     return ToolOutcome(self.evidence_frontier.open_case(arguments))
                 if name == 'frontier_revise':
                     return ToolOutcome(self.evidence_frontier.revise_case(arguments))
@@ -1800,11 +1806,13 @@ class MonitorAgent:
             if first.kind != 'packet_ready':
                 raise EvidencePackageIntegrityError('Phase A did not produce a packet handoff')
             expected_handoff = dict(root_handoff) if root_handoff is not None else None
-            if (self.evidence_frontier.state['packet']['handoff'] != expected_handoff
-                    or (expected_handoff is not None and
-                        (self.completion_state is None or
-                         self.completion_state() != expected_handoff))):
-                raise EvidencePackageIntegrityError('Packet handoff became stale before phase B')
+            if self.evidence_frontier.state['packet']['handoff'] != expected_handoff:
+                raise EvidencePackageIntegrityError('Packet handoff identity changed')
+            active = self.completion_state() if self.completion_state is not None else None
+            if active != expected_handoff:
+                self.client.restore_history(parent_history)
+                return MonitorAction('root_route', {'prior_model_turns':
+                    self._evidence_model_cycles + self._evidence_maintenance_calls})
             self.client.restore_history([])
             self._evidence_stage = 'B'
             remaining = limit - self._evidence_model_cycles - self._evidence_maintenance_calls
@@ -1993,9 +2001,12 @@ class MonitorAgent:
                 audit=self._audit_dialogue,
                 before_model=(self._evidence_before_model if self.evidence_package_v1 else
                               self._refresh_review_context),
-                route_before_model=(lambda: bool(self.completion_state and self.completion_state())
-                                    if self.root_routed and self.frame_kind == 'local'
-                                    else None),
+                route_before_model=(
+                    (lambda: bool(self.completion_state and
+                                  self.completion_state() != self.root_frame_handoff))
+                    if self.evidence_package_v1 and self.frame_kind == 'root' else
+                    (lambda: bool(self.completion_state and self.completion_state()))
+                    if self.root_routed and self.frame_kind == 'local' else None),
             )
             if self.cqs is not None:
                 if self.ase_v0:

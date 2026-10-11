@@ -1,4 +1,4 @@
-"""Opt-in, host-owned local inquiry frontier; never a whole-task proof ledger."""
+"""Opt-in local inquiry frontier; pilot host-isolation remains a launch gate."""
 
 from __future__ import annotations
 
@@ -33,8 +33,9 @@ class EvidenceFrontier:
     """Durable canonical state; ordinary Monitor file tools cannot mutate it."""
 
     def __init__(self, private_root):
-        # Sibling of monitor_private: neither model file tools nor the pilot
-        # diagnostic container's read-only cognition mount expose this root.
+        # Sibling of monitor_private: ordinary monitor file tools and the
+        # diagnostic sidecar cannot write here. The current pilot Task
+        # container CAN reach the parent mount, so runtime launch is blocked.
         self.root = Path(private_root).parent / '.evidence_package_v1'
         self.state_path = self.root / 'frontier.json'
         self.commit_path = self.root / 'frontier.commit.json'
@@ -284,8 +285,10 @@ class EvidenceFrontier:
             raise ValueError('Finding kind must identify its bounded purpose')
         if kind in {'counterexample', 'correction'} and not any(
                 self.state['receipts'][item]['tool'] == 'code_run' or
-                self.state['receipts'][item].get('source_path') not in {
-                    None, 'task/original_task.txt'} for item in receipt_ids):
+                isinstance(self.state['receipts'][item].get('source_path'), str) and
+                self.state['receipts'][item]['source_path'].startswith('task/') and
+                self.state['receipts'][item]['source_path'] != 'task/original_task.txt'
+                for item in receipt_ids):
             raise ValueError('Concrete correction needs an implementation, event or probe receipt')
         finding_id = 'finding-' + uuid.uuid4().hex
         def apply(state):

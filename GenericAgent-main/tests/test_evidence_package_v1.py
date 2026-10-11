@@ -9,7 +9,7 @@ from monitor_agent_core.agent import MonitorAgent
 from monitor_agent_core.loop import MonitorLoopError
 from monitor_agent_core.evidence_package_v1 import EvidenceFrontier, EvidencePackageIntegrityError
 from monitor_agent_core.provider import MonitorProviderClient
-from monitor_agent_core.runtime import _capture_pilot_payload
+from monitor_agent_core.runtime import MonitorRuntime, _capture_pilot_payload
 from monitor_agent_core.workspace import MonitorWorkspace
 
 
@@ -46,6 +46,16 @@ def test_default_off_invalid_combinations_and_port_before_request(tmp_path):
     monitor, _, _ = make_monitor(tmp_path / 'no-port')
     with pytest.raises(EvidencePackageIntegrityError, match='isolated analysis port'):
         monitor.review('Wake')
+
+
+def test_shared_task_container_frontier_is_rejected_before_runtime_start(tmp_path):
+    """The present pilot bind mount is not a protected host frontier."""
+    with pytest.raises(ValueError, match='reachable from the Task container'):
+        MonitorRuntime(public_task='Offline public task', task_workspace=tmp_path / 'app',
+                       artifact_dir=tmp_path / 'monitor', config_name='offline',
+                       model_config={'monitor_evidence_package_v1': True},
+                       interrupt_callback=lambda: None, task_id='offline-task',
+                       run_id='offline-run', analysis_port_root=tmp_path / 'spool')
 
 
 def test_frontier_durable_pages_tamper_and_protected_file_tools(tmp_path):
@@ -152,6 +162,10 @@ def test_cited_source_change_stales_only_related_finding(tmp_path):
     assert state.state['findings'][findings[0]]['status'] == 'stale'
     assert state.state['findings'][findings[1]]['status'] == 'current'
     assert state.state['cases'][cases[1]]['status'] == 'pending'
+    state.revise_case({'case_id': cases[1], 'status': 'active',
+                       'reason': 'Oracle changed after inspecting setup',
+                       'hypothesis': 'A different expected behavior'})
+    assert state.state['findings'][findings[1]]['status'] == 'stale'
 
 
 def test_real_provider_send_two_phase_packet_finding_and_delivery(tmp_path, monkeypatch):
@@ -194,7 +208,7 @@ def test_real_provider_send_two_phase_packet_finding_and_delivery(tmp_path, monk
             return iter([('data: ' + json.dumps(item)).encode() for item in events])
 
     def post(_url, **kwargs):
-        payload = kwargs['json']
+        payload = json.loads(json.dumps(kwargs['json']))
         payloads.append(payload)
         index = len(payloads) - 1
         action = actions[index]
@@ -250,7 +264,7 @@ def test_root_packet_reference_guard_and_no_objection_path(tmp_path, monkeypatch
     client.request_assembly_callback = lambda snapshot: (
         checkpoint_requests.append(snapshot) or True)
     sent = []
-    actions = ['packet_ready', 'allow_complete', 'file_write', 'allow_complete']
+    actions = ['packet_ready', 'wait', 'allow_complete', 'file_write', 'allow_complete']
 
     class Response:
         status_code = 200
@@ -279,11 +293,13 @@ def test_root_packet_reference_guard_and_no_objection_path(tmp_path, monkeypatch
             return iter([('data: ' + json.dumps(item)).encode() for item in events])
 
     def post(_url, **kwargs):
-        sent.append(kwargs['json'])
+        sent.append(json.loads(json.dumps(kwargs['json'])))
         index = len(sent) - 1
         name = actions[index]
         if name == 'allow_complete':
             arguments = {'frontier_revision': monitor.evidence_frontier.state['revision']}
+        elif name == 'wait':
+            arguments = {'after_turns': 1, 'mode': 'follow'}
         elif name == 'file_write':
             arguments = {'path': 'monitor/reference.md', 'content': 'Public route contract.'}
         else:
@@ -294,13 +310,14 @@ def test_root_packet_reference_guard_and_no_objection_path(tmp_path, monkeypatch
     action = monitor.review('Task completion handoff.', completion_pending=True,
                             root_handoff=handoff, max_turns_override=8)
     assert action.kind == 'allow_complete'
-    assert len(sent) == 4
+    assert len(sent) == 5
     assert monitor.evidence_frontier.state['packet']['handoff'] == handoff
     assert checkpoint_requests and checkpoint_requests[0]['root_handoff'] == handoff
     assert 'Phase A' in sent[0]['system'] and 'Phase B' in sent[1]['system']
     dialogue = (workspace.private_root / 'audit' / 'dialogue.jsonl').read_text(
         encoding='utf-8')
     assert 'reference_invalid' in dialogue
+    assert 'handoff_pending' in dialogue
     assert not any(row.get('event') == 'ase_reconsideration_boundary'
                    for row in map(json.loads, dialogue.splitlines()))
 
@@ -348,4 +365,61 @@ def test_shared_outer_budget_exhaustion_is_not_wait(tmp_path, monkeypatch):
     assert calls == ['A', 'B']
     assert monitor.evidence_frontier.state['packet']['executed'] is False
     assert monitor._evidence_stage is None
+
+
+def test_real_maintenance_format_repair_does_not_execute_or_finish_packet(tmp_path, monkeypatch):
+    monitor, client, workspace = make_monitor(tmp_path)
+    monitor.analysis = TestPort()
+    monitor.evidence_frontier = EvidenceFrontier(workspace.private_root)
+    packet = monitor.evidence_frontier.packet_ready(handoff=None, task_cursor=0)
+    monitor._evidence_stage = 'B'
+    monitor._evidence_limit = 8
+    sent = []
+    client.pre_send_capture = lambda request_id, payload: _capture_pilot_payload(
+        workspace.private_root, monitor, request_id, payload)
+
+    class Response:
+        status_code = 200
+        headers = {'content-type': 'text/event-stream'}
+
+        def __init__(self, number):
+            self.number = number
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def iter_lines(self):
+            if self.number == 1:
+                block = {'type': 'tool_use', 'id': 'unexecuted', 'name': 'wait'}
+                delta = {'type': 'input_json_delta', 'partial_json': '{"after_turns":1}'}
+            else:
+                block = {'type': 'text', 'text': ''}
+                delta = {'type': 'text_delta', 'text': 'Keep the bounded question open.'}
+            events = [
+                {'type': 'message_start', 'message': {'usage': {}}},
+                {'type': 'content_block_start', 'content_block': block},
+                {'type': 'content_block_delta', 'delta': delta},
+                {'type': 'content_block_stop'},
+                {'type': 'message_stop'},
+            ]
+            return iter([('data: ' + json.dumps(item)).encode() for item in events])
+
+    def post(_url, **kwargs):
+        sent.append(json.loads(json.dumps(kwargs['json'])))
+        return Response(len(sent))
+
+    monkeypatch.setattr('monitor_agent_core.provider.requests.post', post)
+    before = client.export_history()
+    note = monitor._prepare_continuation()
+    assert note == 'Keep the bounded question open.'
+    assert len(sent) == 2 and all(row['tools'] == [] for row in sent)
+    assert sent[0]['messages'][-1] != sent[1]['messages'][-1]
+    assert client.export_history() == before
+    assert getattr(client, 'request_purpose', 'review') == 'review'
+    assert monitor.evidence_frontier.state['packet'] == packet
+    assert monitor._evidence_maintenance_calls == 2
+    assert not monitor._sent_messages
 

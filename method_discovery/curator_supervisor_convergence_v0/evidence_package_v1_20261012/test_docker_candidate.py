@@ -116,7 +116,7 @@ def test_pinned_image_fake_provider_two_stages_and_private_probe(tmp_path, monke
         requests = []
 
         def post(_url, **kwargs):
-            requests.append(kwargs['json'])
+            requests.append(json.loads(json.dumps(kwargs['json'])))
             index = len(requests)
             if index == 1:
                 name, arguments = 'file_write', {'path': 'monitor/reference.md',
@@ -150,6 +150,11 @@ def test_pinned_image_fake_provider_two_stages_and_private_probe(tmp_path, monke
         assert action.kind == 'wait'
         assert any(row['result'].get('status') == 'success'
                    for row in monitor.evidence_frontier.state['receipts'].values())
+        output = ''.join(row['result'].get('stdout', '')
+                         for row in monitor.evidence_frontier.state['receipts'].values())
+        assert 'task-v1' in output and ('ok' in output or '[no test files]' in output)
+        go_result = ('no_test_files_compile_only' if '[no test files]' in output
+                     else 'build_without_running_tests')
         assert (scratch / 'tmp' / 'evidence_probe' / 'private.txt').read_text() == 'private-v2'
         assert len(requests) >= 4 and 'Phase A' in requests[0]['system']
         assert 'Phase B' in requests[2]['system']
@@ -158,6 +163,11 @@ def test_pinned_image_fake_provider_two_stages_and_private_probe(tmp_path, monke
         thread.join(timeout=12)
         assert not thread.is_alive() and bridge.closed
         assert not failures
+        print(json.dumps({'image_id': image, 'fake_provider_requests': len(requests),
+                          'host_receipts': len(monitor.evidence_frontier.state['receipts']),
+                          'task_write_denied': True, 'private_copy_changed': True,
+                          'go_result': go_result, 'behavior_verified': False,
+                          'bridge_closed': bridge.closed}))
     finally:
         stop.set()
         if thread is not None:

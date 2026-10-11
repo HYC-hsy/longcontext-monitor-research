@@ -806,6 +806,13 @@ class MonitorRuntime:
             raise ValueError('Pilot transport policy requires the fixed analysis port')
         if model_config.get('monitor_evidence_package_v1') is True and analysis_port_root is None:
             raise ValueError('Evidence package requires the isolated pilot analysis port')
+        if model_config.get('monitor_evidence_package_v1') is True:
+            # The pilot currently bind-mounts the whole monitor artifact root RW
+            # into the Task container. A frontier stored beside monitor_private
+            # is therefore not a host-protected canonical state, even though
+            # the diagnostic sidecar cannot see it. Do not send a model request
+            # until a truly host-owned state port is installed and certified.
+            raise ValueError('Evidence package frontier is reachable from the Task container')
         if analysis_port_root is not None and (not run_id or not Path(analysis_port_root).is_absolute()):
             raise ValueError('Pilot analysis port requires an absolute root and run identity')
         if type(root_checkpoint_required) is not bool:
