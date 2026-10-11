@@ -9,7 +9,8 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[3]
 HERE = Path(__file__).resolve().parent
-CODE_COMMIT = '4e7d60dde41c17059169ddd84c2961ea8e1fc74c'
+BASELINE = 'afd9fbc21275ef3aa5d389ad27299e4b32882a69'
+CODE_COMMIT = '084b8411f5ce3744d074a64d286e2b9a166965c0'
 TESTS = [
     'method_discovery/curator_supervisor_convergence_v0/root_records_native_v2_20261011/test_forensic_v1_rehydration.py',
     'GenericAgent-main/tests/test_root_records_v1.py',
@@ -48,7 +49,7 @@ def main():
               'GenericAgent-main/tests/test_rer_v0.py::test_frozen_prompt_and_provider', '-q']
     result_focused = run(focused, env)
     result_legacy = run(legacy, env)
-    diff = run(['git', 'show', '--format=', '--no-ext-diff', CODE_COMMIT, '--',
+    diff = run(['git', 'diff', '--no-ext-diff', BASELINE, CODE_COMMIT, '--',
                 *SOURCES[:5]])
     parts = [
         'ROOT_RECORDS_NATIVE_V2 ZERO-MODEL AUDIT PACKAGE\n',

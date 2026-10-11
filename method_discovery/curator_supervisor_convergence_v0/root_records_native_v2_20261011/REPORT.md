@@ -6,6 +6,7 @@ Status: implemented as an opt-in candidate; **not activated in the pilot profile
 
 - Archive baseline: `afd9fbc21275ef3aa5d389ad27299e4b32882a69`.
 - Second-batch production code: `8cfc4ef2aac99c2378d98a0489fc0cad45511573`.
+- Candidate implementation commits: `4e7d60dde41c17059169ddd84c2961ea8e1fc74c`, `084b8411f5ce3744d074a64d286e2b9a166965c0`.
 - Current pilot profile remains `monitor_history_projection=root_records_v1`. The generic default remains `off`.
 - No Task Agent, Supervisor model, provider API, native evaluator, training, or scoring-model call occurred.
 - No CRS/RHR/RER decision rule, Task prompt, context/history limit, retry, or budget was changed.
@@ -16,7 +17,7 @@ Status: implemented as an opt-in candidate; **not activated in the pilot profile
 
 Before replacing active history, the root hook durably writes and reads back the complete source, projected history, per-block manifest, and commit receipt. The candidate refuses use without the pilot pre-send capture hook. Existing tool-payload archival and complete-exchange-prefix retirement remain responsible for capacity. A v2-only callback records and checks each actual provider transform: archived before-image, after-image, safe cut, retained tail, and continuation-note hash. An unavailable or altered archive fails closed. No safe cut or an oversized retained tail still raises capacity failure.
 
-The pilot's actual pre-transport capture independently reads the committed projection and each transform receipt. It checks the current handoff, model/system/tools, exact initial root input, request-local context or maintenance prompt, and append-only continuity against the previous saved request. A continuation/format-repair usage record does not consume pending root verification. Only an accepted, matching review response marks it verified; an incomplete, empty, cancelled, expired, or discarded response does not. Subsequent review sends in that root review remain checked. Native RER's own branch reset remains native; the projection parent is not inserted into the fresh branch.
+The pilot's actual pre-transport capture independently reads the committed projection and each transform receipt. It binds their source/projected digests to the original in-memory commit, so even a coherent multi-file archive replacement fails. It checks the current handoff, model/system/tools, exact initial root input, request-local context or maintenance prompt, and append-only continuity against the previous saved request. A continuation/format-repair usage record does not consume pending root verification. Only an accepted, matching review response marks it verified; an incomplete, empty, cancelled, expired, or discarded response does not. Subsequent review sends in that root review remain checked. Native RER's own branch reset remains native; the projection parent is not inserted into the fresh branch.
 
 ## Read-only Kitex-S compatibility result
 
@@ -32,6 +33,6 @@ The five projection source-byte SHA-256 values are recorded in `OFFLINE_RESULT.j
 
 Zero-model tests cover parallel batches, empty assistant deletion, malformed/duplicate/open exchanges, repeated root handoffs, actual pre-send blocking before transport, tampered source/transform/prior request, fake SSE purpose switching and stopped-response discard, fake continuation transaction, native payload archival and safe retirement, no-safe-cut exhaustion, RER branch reset/parent restore, and no replay of historical tool calls.
 
-The targeted suite passed 141 tests with one deselected legacy byte-identity assertion. Running that assertion without deselection produced 1 failure because it requires `provider.py` to equal commit `29bdcb...` byte-for-byte; baseline `afd9fbc...` already differs from that old commit. This assertion was not edited. On this host pytest also prints an atexit permission warning about an old temporary directory after reporting exit code 0; it is not hidden or counted as a test pass.
+The targeted suite passed 142 tests with one deselected legacy byte-identity assertion. Running that assertion without deselection produced 1 failure because it requires `provider.py` to equal commit `29bdcb...` byte-for-byte; baseline `afd9fbc...` already differs from that old commit. This assertion was not edited. On this host pytest also prints an atexit permission warning about an old temporary directory after reporting exit code 0; it is not hidden or counted as a test pass.
 
 Live provider acceptance of an assistant tool-use message after removing its earlier signed thinking remains unverified. The forensic helper is test-only and is not enabled as a live history migration. No new pilot or historical run has been started. The separate CRS evidence re-display candidate remains untouched.

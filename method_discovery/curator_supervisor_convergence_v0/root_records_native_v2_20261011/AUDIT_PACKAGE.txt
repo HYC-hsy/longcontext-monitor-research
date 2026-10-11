@@ -1,5 +1,5 @@
 ROOT_RECORDS_NATIVE_V2 ZERO-MODEL AUDIT PACKAGE
-Code commit: 4e7d60dde41c17059169ddd84c2961ea8e1fc74c
+Code commit: 084b8411f5ce3744d074a64d286e2b9a166965c0
 No live Task, Supervisor, provider, evaluator, training or scoring-model calls.
 Display-only trailing blanks are trimmed; the exact binary-safe diff is in the code commit.
 
@@ -12,6 +12,7 @@ Status: implemented as an opt-in candidate; **not activated in the pilot profile
 
 - Archive baseline: `afd9fbc21275ef3aa5d389ad27299e4b32882a69`.
 - Second-batch production code: `8cfc4ef2aac99c2378d98a0489fc0cad45511573`.
+- Candidate implementation commits: `4e7d60dde41c17059169ddd84c2961ea8e1fc74c`, `084b8411f5ce3744d074a64d286e2b9a166965c0`.
 - Current pilot profile remains `monitor_history_projection=root_records_v1`. The generic default remains `off`.
 - No Task Agent, Supervisor model, provider API, native evaluator, training, or scoring-model call occurred.
 - No CRS/RHR/RER decision rule, Task prompt, context/history limit, retry, or budget was changed.
@@ -22,7 +23,7 @@ Status: implemented as an opt-in candidate; **not activated in the pilot profile
 
 Before replacing active history, the root hook durably writes and reads back the complete source, projected history, per-block manifest, and commit receipt. The candidate refuses use without the pilot pre-send capture hook. Existing tool-payload archival and complete-exchange-prefix retirement remain responsible for capacity. A v2-only callback records and checks each actual provider transform: archived before-image, after-image, safe cut, retained tail, and continuation-note hash. An unavailable or altered archive fails closed. No safe cut or an oversized retained tail still raises capacity failure.
 
-The pilot's actual pre-transport capture independently reads the committed projection and each transform receipt. It checks the current handoff, model/system/tools, exact initial root input, request-local context or maintenance prompt, and append-only continuity against the previous saved request. A continuation/format-repair usage record does not consume pending root verification. Only an accepted, matching review response marks it verified; an incomplete, empty, cancelled, expired, or discarded response does not. Subsequent review sends in that root review remain checked. Native RER's own branch reset remains native; the projection parent is not inserted into the fresh branch.
+The pilot's actual pre-transport capture independently reads the committed projection and each transform receipt. It binds their source/projected digests to the original in-memory commit, so even a coherent multi-file archive replacement fails. It checks the current handoff, model/system/tools, exact initial root input, request-local context or maintenance prompt, and append-only continuity against the previous saved request. A continuation/format-repair usage record does not consume pending root verification. Only an accepted, matching review response marks it verified; an incomplete, empty, cancelled, expired, or discarded response does not. Subsequent review sends in that root review remain checked. Native RER's own branch reset remains native; the projection parent is not inserted into the fresh branch.
 
 ## Read-only Kitex-S compatibility result
 
@@ -38,7 +39,7 @@ The five projection source-byte SHA-256 values are recorded in `OFFLINE_RESULT.j
 
 Zero-model tests cover parallel batches, empty assistant deletion, malformed/duplicate/open exchanges, repeated root handoffs, actual pre-send blocking before transport, tampered source/transform/prior request, fake SSE purpose switching and stopped-response discard, fake continuation transaction, native payload archival and safe retirement, no-safe-cut exhaustion, RER branch reset/parent restore, and no replay of historical tool calls.
 
-The targeted suite passed 141 tests with one deselected legacy byte-identity assertion. Running that assertion without deselection produced 1 failure because it requires `provider.py` to equal commit `29bdcb...` byte-for-byte; baseline `afd9fbc...` already differs from that old commit. This assertion was not edited. On this host pytest also prints an atexit permission warning about an old temporary directory after reporting exit code 0; it is not hidden or counted as a test pass.
+The targeted suite passed 142 tests with one deselected legacy byte-identity assertion. Running that assertion without deselection produced 1 failure because it requires `provider.py` to equal commit `29bdcb...` byte-for-byte; baseline `afd9fbc...` already differs from that old commit. This assertion was not edited. On this host pytest also prints an atexit permission warning about an old temporary directory after reporting exit code 0; it is not hidden or counted as a test pass.
 
 Live provider acceptance of an assistant tool-use message after removing its earlier signed thinking remains unverified. The forensic helper is test-only and is not enabled as a live history migration. No new pilot or historical run has been started. The separate CRS evidence re-display candidate remains untouched.
 
@@ -47,6 +48,10 @@ Live provider acceptance of an assistant tool-use message after removing its ear
   "status": "zero_model_engineering_only",
   "baseline_archive_commit": "afd9fbc21275ef3aa5d389ad27299e4b32882a69",
   "second_batch_run_code_commit": "8cfc4ef2aac99c2378d98a0489fc0cad45511573",
+  "candidate_code_commits": [
+    "4e7d60dde41c17059169ddd84c2961ea8e1fc74c",
+    "084b8411f5ce3744d074a64d286e2b9a166965c0"
+  ],
   "source": "live_batch2_20261011/arms/kitex_s/monitor/audit/provider_history.json",
   "source_raw_sha256": "2105467ed7926f35fca0e2c0316c168f64c740966f83f0bdc143dac64c66b473",
   "source_canonical_sha256": "b46adedc05f54705c92dae138df43f1a82046e2ed752a1ed341ead26cf3dc93f",
@@ -90,12 +95,12 @@ Live provider acceptance of an assistant tool-use message after removing its ear
 }
 
 ===== ENUMERATED SOURCE SHA-256 =====
-GenericAgent-main/monitor_agent_core/agent.py 183174971343b218c57d369899d832afddfc3ac13f7a0682138095f60144b83e
+GenericAgent-main/monitor_agent_core/agent.py 62eec53be8ae887f3016fed29b8c9241bcc7d8fd3313934bf34cce8889bb13f5
 GenericAgent-main/monitor_agent_core/provider.py 4e25194afb7a7e64a9442b0345ff1ba5bd7f1b08eb0ff351abb770cd99092c42
 GenericAgent-main/monitor_agent_core/runtime.py 58bde1231ac3714180327af0f8e65dd72d6be47b5bf1c7ec98276be7770e38e6
 GenericAgent-main/monitor_agent_core/root_records_native_v2.py e78cc4b848581877d687595bd92d154869deeb32cfd057d340b6f7fab8a75a5a
-GenericAgent-main/monitor_agent_core/native_projection_capture.py 5e4d1252098c5d10e9855568d2fb0bb5bda551ba2e5ced6e7a837ffefe5ff8cf
-GenericAgent-main/tests/test_root_records_native_v2.py 0dfb659d4964d3ac7884a6e4a673a62ab489e0c26b8a6525c9cfef5fd93e4aa0
+GenericAgent-main/monitor_agent_core/native_projection_capture.py 5f722a6445542f71c53eec032dc1e5897f1590062b0b3c88ba75c30aa2bdcdc3
+GenericAgent-main/tests/test_root_records_native_v2.py 9eb534720f4ac9d2e77b3c8494d06c2bf72aeab4411a09625db9a5ddcf195a87
 method_discovery/curator_supervisor_convergence_v0/root_records_native_v2_20261011/forensic_v1_rehydration.py 636de42e485db547ce3a7ec1c6bda010841ca2d8957f86ea0af3be0ff213cd8c
 method_discovery/curator_supervisor_convergence_v0/root_records_native_v2_20261011/test_forensic_v1_rehydration.py 7953dd2483a7d79a5ac1597a9ab94f043d1dbc08e9e0620225af73faee83dc13
 
@@ -103,9 +108,9 @@ method_discovery/curator_supervisor_convergence_v0/root_records_native_v2_202610
 command: D:\python\python.exe -m pytest method_discovery/curator_supervisor_convergence_v0/root_records_native_v2_20261011/test_forensic_v1_rehydration.py GenericAgent-main/tests/test_root_records_v1.py GenericAgent-main/tests/test_root_records_native_v2.py GenericAgent-main/tests/test_monitor_provider.py GenericAgent-main/tests/test_crs_v0.py GenericAgent-main/tests/test_rhr_v0.py GenericAgent-main/tests/test_rer_v0.py GenericAgent-main/tests/test_root_turn_ceiling.py -q -k not test_frozen_prompt_and_provider
 exit_code: 0
 stdout:
-........................................................................ [ 51%]
-.....................................................................    [100%]
-141 passed, 1 deselected in 6.49s
+........................................................................ [ 50%]
+......................................................................   [100%]
+142 passed, 1 deselected in 6.16s
 
 stderr:
 Error in atexit._run_exitfuncs:
@@ -122,7 +127,7 @@ F                                                                        [100%]
 ================================== FAILURES ===================================
 _______________________ test_frozen_prompt_and_provider _______________________
 
-tmp_path = WindowsPath('C:/Users/hsy/AppData/Local/Temp/pytest-of-hsy/pytest-1505/test_frozen_prompt_and_provide0')
+tmp_path = WindowsPath('C:/Users/hsy/AppData/Local/Temp/pytest-of-hsy/pytest-1508/test_frozen_prompt_and_provide0')
 
     def test_frozen_prompt_and_provider(tmp_path):
         root = Path(__file__).resolve().parents[2]
@@ -138,7 +143,7 @@ E             Use -v to get more diff
 GenericAgent-main\tests\test_rer_v0.py:269: AssertionError
 =========================== short test summary info ===========================
 FAILED GenericAgent-main/tests/test_rer_v0.py::test_frozen_prompt_and_provider
-1 failed in 0.37s
+1 failed in 0.38s
 
 stderr:
 Error in atexit._run_exitfuncs:
@@ -150,7 +155,7 @@ PermissionError: [WinError 5] �ܾ����ʡ�: 'C:\\Users\\hsy\\AppData\\
 ===== COMPLETE PRODUCTION DIFF =====
 exit_code: 0
 diff --git a/GenericAgent-main/monitor_agent_core/agent.py b/GenericAgent-main/monitor_agent_core/agent.py
-index dbcc1f84..d5fbdbc5 100644
+index dbcc1f84..be32e788 100644
 --- a/GenericAgent-main/monitor_agent_core/agent.py
 +++ b/GenericAgent-main/monitor_agent_core/agent.py
 @@ -50,6 +50,7 @@ from .ase_v0 import (SYSTEM_PROMPT as ASE_SYSTEM_PROMPT, ControlEcho,
@@ -291,7 +296,7 @@ index dbcc1f84..d5fbdbc5 100644
              manifest.update(request_id=identity[0], generation=identity[1])
              payloads = {
                  'source.json': source,
-@@ -1388,9 +1453,14 @@ class MonitorAgent:
+@@ -1388,9 +1453,15 @@ class MonitorAgent:
              self._projected_root_handoffs.add(identity)
              if manifest['applied']:
                  self._projection_pending_request = {
@@ -302,13 +307,14 @@ index dbcc1f84..d5fbdbc5 100644
 +                    **({'ledger_sha256': manifest['ledger_sha256'],
 +                        'ledger': projected[0]['content'][0]['text']}
 +                       if self.history_projection == 'root_records_v1' else {
++                           'source_sha256': manifest['source_sha256'],
 +                           'projected_sha256': manifest['projected_sha256'],
 +                           'projected_history': projected,
 +                           'transforms': [], 'request_id': None}),
                  }
              self._progress('root_records_projection', request_id=identity[0],
                             generation=identity[1], applied=manifest['applied'],
-@@ -1411,7 +1481,7 @@ class MonitorAgent:
+@@ -1411,7 +1482,7 @@ class MonitorAgent:
      def _enter_root_frame(self, handoff):
          if not handoff or self.completion_state is None or self.completion_state() != handoff:
              raise ValueError('Root frame requires the current pending handoff')
@@ -317,7 +323,7 @@ index dbcc1f84..d5fbdbc5 100644
              identity = (handoff['request_id'], handoff['generation'])
              if identity not in self._projected_root_handoffs:
                  self._commit_root_projection(identity, handoff)
-@@ -1469,6 +1539,8 @@ class MonitorAgent:
+@@ -1469,6 +1540,8 @@ class MonitorAgent:
                  self.crs.root_reorientation['root_horizon_digest'] != action.payload['root_horizon_digest']):
              raise ValueError('Root re-estimation requires the same fresh pending handoff and horizon')
          branch_measure = self.client.history_measure()
@@ -326,7 +332,7 @@ index dbcc1f84..d5fbdbc5 100644
          if self._rer_parent_history is None:
              self._rer_parent_history = self.client.export_history()
              self._rer_parent_history_measure = branch_measure
-@@ -1491,6 +1563,8 @@ class MonitorAgent:
+@@ -1491,6 +1564,8 @@ class MonitorAgent:
              return
          branch_measure = self.client.history_measure()
          self.client.restore_history(self._rer_parent_history)
@@ -335,7 +341,7 @@ index dbcc1f84..d5fbdbc5 100644
          self._audit_dialogue('rer_parent_history_restored', disposition=disposition,
                               parent_history_sha256=self._rer_parent_history_measure['sha256'],
                               discarded_branch_history_sha256=branch_measure['sha256'],
-@@ -1640,6 +1714,11 @@ class MonitorAgent:
+@@ -1640,6 +1715,11 @@ class MonitorAgent:
                      system_sha256=hashlib.sha256(system.encode('utf-8')).hexdigest(),
                      tools_sha256=hashlib.sha256(json.dumps(
                          tools, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest())
@@ -347,7 +353,7 @@ index dbcc1f84..d5fbdbc5 100644
              action = run_review(
                  self.client, system, wake_context, tools,
                  self.dispatch, self.max_review_turns if max_turns_override is None else max_turns_override,
-@@ -1688,6 +1767,9 @@ class MonitorAgent:
+@@ -1688,6 +1768,9 @@ class MonitorAgent:
                  self.restore_rer_parent('error' if sys.exc_info()[1] is not None else
                                          action.kind if action is not None else 'incomplete')
              self._leave_root_frame()
@@ -359,10 +365,10 @@ index dbcc1f84..d5fbdbc5 100644
                  json.dumps(self.client.export_history(), ensure_ascii=False), mode="replace",
 diff --git a/GenericAgent-main/monitor_agent_core/native_projection_capture.py b/GenericAgent-main/monitor_agent_core/native_projection_capture.py
 new file mode 100644
-index 00000000..d1157d20
+index 00000000..25874ca3
 --- /dev/null
 +++ b/GenericAgent-main/monitor_agent_core/native_projection_capture.py
-@@ -0,0 +1,129 @@
+@@ -0,0 +1,131 @@
 +"""Pilot-only, pre-transport verification of native root projection lineage."""
 +
 +import json
@@ -399,12 +405,14 @@ index 00000000..d1157d20
 +    manifest = json.loads(read(base + '/manifest.json'))
 +    recomputed, expected, _ = project(source)
 +    expected.update(request_id=pending['identity'][0], generation=pending['identity'][1])
-+    if manifest != expected or projected != recomputed or commit != {
++    if (expected['source_sha256'] != pending['source_sha256'] or
++            expected['projected_sha256'] != pending['projected_sha256'] or
++            manifest != expected or projected != recomputed or commit != {
 +            'request_id': pending['identity'][0], 'generation': pending['identity'][1],
 +            'source_sha256': expected['source_sha256'],
 +            'projected_sha256': expected['projected_sha256'],
 +            'applied': expected['applied'], 'source_locator': base + '/source.json',
-+    }:
++    }):
 +        raise ValueError('Native projection archive or commit identity mismatch')
 +    last_captured = pending.get('last_captured_history')
 +    last_transform_count = pending.get('last_transform_count', 0)
@@ -1100,6 +1108,31 @@ def test_replaced_prior_capture_blocks_subsequent_send(tmp_path):
     path.write_text('{}', encoding='utf-8')
     with pytest.raises(ProjectionIntegrityError):
         _capture_pilot_payload(workspace.private_root, monitor, 'second', payload)
+
+
+def test_coherently_replaced_projection_archive_cannot_change_committed_source(tmp_path):
+    monitor, client, workspace, handoff = native_fixture(tmp_path)
+    base = (workspace.private_root / monitor._projection_pending_request[
+        'commit_locator'][len('monitor/'):]).parent
+    changed = history()
+    changed[0]['content'][0]['text'] = 'substituted history'
+    projected, manifest, source = project(changed)
+    manifest.update(request_id=handoff['request_id'], generation=handoff['generation'])
+    commit = {'request_id': handoff['request_id'], 'generation': handoff['generation'],
+              'source_sha256': manifest['source_sha256'],
+              'projected_sha256': manifest['projected_sha256'],
+              'applied': manifest['applied'],
+              'source_locator': 'monitor/audit/root_projections/' + base.name + '/source.json'}
+    for name, value in (('source.json', source),
+                        ('projected_history.json', canonical(projected)),
+                        ('manifest.json', canonical(manifest)),
+                        ('committed.json', canonical(commit))):
+        (base / name).write_bytes(value)
+    client.restore_history(projected + [
+        {'role': 'user', 'content': [{'type': 'text', 'text': monitor._projection_root_input}]}])
+    _, _, payload = client._anthropic_request(MONITOR_TOOLS)
+    with pytest.raises(ProjectionIntegrityError):
+        _capture_pilot_payload(workspace.private_root, monitor, 'forged', payload)
 
 
 def test_no_safe_cut_keeps_oversized_history_and_fails_closed(tmp_path):
