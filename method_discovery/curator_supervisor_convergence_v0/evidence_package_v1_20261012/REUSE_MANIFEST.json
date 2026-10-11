@@ -1,0 +1,96 @@
+{
+  "candidate": "evidence_package_v1",
+  "base_commit": "cea43088039154505a162514880af99acfc1c0c1",
+  "rule": "direct author implementation when semantics fit; minimal adaptation otherwise; no nominal reuse",
+  "sources": [
+    {
+      "name": "longcontext-monitor-research",
+      "url": "https://github.com/HYC-hsy/longcontext-monitor-research",
+      "commit": "cea43088039154505a162514880af99acfc1c0c1",
+      "license": "repository-owned code; no third-party relicensing",
+      "status": "direct reuse with research-specific coordination",
+      "files_functions": [
+        "GenericAgent-main/monitor_agent_core/loop.py:run_review",
+        "GenericAgent-main/monitor_agent_core/provider.py:MonitorProviderClient.complete/record_tool_results/export_history/restore_history",
+        "GenericAgent-main/monitor_agent_core/agent.py:MonitorAgent.review/_dispatch/_active_working_context/_prepare_continuation",
+        "GenericAgent-main/monitor_agent_core/analysis_spool.py:SpoolAnalysisSessions",
+        "GenericAgent-main/monitor_agent_core/runtime.py:MonitorRuntime/_monitor_worker",
+        "method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_profile.py:resolved_supervisor_profile",
+        "method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_entry.py:prepare_run"
+      ],
+      "call_chain": "pilot_entry.prepare_run -> resolved_supervisor_profile -> isolated_run_bundle -> runtime._monitor_worker -> MonitorAgent.review -> run_review -> MonitorProviderClient.complete -> MonitorAgent.dispatch -> SpoolAnalysisSessions",
+      "adaptation": "A/B coordination, protected frontier and finding interfaces, explicit profile variant; retain existing model transport, tool loop, Task handoff and isolated analysis port",
+      "existing_tests": "Reuse pilot fake-provider, monitor-agent-core and analysis-spool tests; record actual commands in audit",
+      "new_tests": "candidate state, lifecycle, profile, fake-provider and Docker integration"
+    },
+    {
+      "name": "CoverUp",
+      "url": "https://github.com/plasma-umass/coverup",
+      "commit": "d9ca25b9282621d2779560f2be397ab0683a6733",
+      "license": "Apache-2.0",
+      "status": "source inspected; not integrated",
+      "files_functions": [
+        "src/coverup/codeinfo.py:get_info",
+        "src/coverup/llm.py:Chatter.chat",
+        "src/coverup/coverup.py:improve_coverage",
+        "src/coverup/testrunner.py:run_tests"
+      ],
+      "call_chain": "improve_coverage -> Chatter.chat/get_info -> Python test runner and coverage feedback",
+      "reason": "Python AST/pytest and coverage-increase acceptance do not implement Go task-grounded diagnosis; separate chat loop would replace the existing provider/receipt path",
+      "adaptation": "Use local code_run, source reads and authentic process receipts for context requests and execution feedback; no CoverUp code copied",
+      "existing_tests": "Not imported because author runtime is not integrated",
+      "new_tests": "Execution-feedback classification and evidence provenance"
+    },
+    {
+      "name": "Agentless",
+      "url": "https://github.com/OpenAutoCoder/Agentless",
+      "commit": "5ce5888b9f149beaace393957a55ea8ee46c9f71",
+      "license": "MIT",
+      "status": "source inspected; not integrated",
+      "files_functions": [
+        "agentless/test/generate_reproduction_tests.py:gen_test",
+        "agentless/test/run_tests.py:run_reproduction_tests/run_tests",
+        "agentless/test/run_regression_tests.py:save_passing_tests",
+        "agentless/test/select_regression_tests.py",
+        "agentless/repair/rerank.py:majority_voting",
+        "agentless/util/preprocess_data.py:get_repo_structure"
+      ],
+      "call_chain": "generate tests -> SWE-bench harness execution -> reproduction/regression reports -> reranking",
+      "reason": "SWE-bench patch, test_patch and selection assumptions are outside the public Go task boundary; missing reports and minimum failure count cannot stand in for behavioral validity; dependencies are not locked here",
+      "adaptation": "Retain the baseline-versus-private-probe distinction and source paths as design references only; no Agentless code copied",
+      "existing_tests": "Not imported; SWE-bench dependencies unverified",
+      "new_tests": "Report absence, no matched tests and wrong oracle do not become a pass"
+    },
+    {
+      "name": "Build Systems à la Carte",
+      "url": "https://github.com/snowleopard/build",
+      "commit": "43b18b9a362d7d27b64679ea4122e4b8c5dfedd9",
+      "license": "MIT",
+      "status": "source inspected; conceptual provenance only",
+      "files_functions": [
+        "src/Build/Task/Monad.hs:track",
+        "src/Build/Trace.hs:recordVT/verifyVT",
+        "src/Build/Rebuilder.hs:vtRebuilder",
+        "src/Build/Scheduler.hs"
+      ],
+      "call_chain": "track actual fetches -> record value/dependency hashes -> verify trace -> rebuild invalidated values",
+      "reason": "Haskell build model is not a drop-in Python/Go monitor runtime; verifyST simplifications cannot certify unknown dependencies",
+      "adaptation": "Record actual observation dependencies and invalidate current applicability on relevant source/oracle/config changes; no Haskell code copied",
+      "existing_tests": "Not imported because no runtime code is reused",
+      "new_tests": "Relevant/unknown changes stale evidence, unrelated known changes do not"
+    },
+    {
+      "name": "Proactive Memory Agent",
+      "url": "https://github.com/yifannnwu/proactive-memory-agent",
+      "commit": "89e5c0d6aadfe531a1aee42fd290d48be89973dd",
+      "license": "Apache-2.0",
+      "status": "compatibility inspected; not integrated",
+      "files_functions": ["src/memory_agent/memory/memory_agent.py:MemoryAgent.process"],
+      "call_chain": "memory-bank maintenance stage -> reminder/decision stage",
+      "reason": "Bank operations and reminder emission are incompatible with the protected case frontier, existing Task Book and current control path; replacing them would not preserve author core logic",
+      "adaptation": "Compose two phases using existing run_review; no PMA classes or prompts copied",
+      "existing_tests": "Existing PMA tests remain historical and unmodified",
+      "new_tests": "A handoff is non-executing and B alone can use existing control path"
+    }
+  ]
+}
