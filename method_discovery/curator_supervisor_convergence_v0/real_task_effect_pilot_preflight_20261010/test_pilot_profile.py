@@ -2,7 +2,8 @@
 
 import unittest
 
-from .pilot_profile import PILOT_OVERRIDES, public_profile_identity, resolved_supervisor_profile
+from .pilot_profile import (PILOT_OVERRIDES, public_profile_identity,
+                            resolved_supervisor_profile)
 
 
 class PilotProfileTests(unittest.TestCase):
@@ -37,6 +38,38 @@ class PilotProfileTests(unittest.TestCase):
         self.assertIs(pilot.config['incomplete_stream_recovery_v1'], True)
         self.assertEqual(pilot.max_retries, 0)
         self.assertNotIn('incomplete_stream_recovery_v1', generic.config)
+
+    def test_narrow_variant_is_explicit_and_publicly_identified(self):
+        from monitor_agent_core.provider import MonitorProviderClient
+        from monitor_agent_core.agent import MonitorAgent
+        from monitor_agent_core.workspace import MonitorWorkspace
+        import tempfile
+        from pathlib import Path
+
+        base = {'model': 'claude-opus-4-8', 'max_tokens': 8192,
+                'thinking_type': 'adaptive', 'reasoning_effort': 'high',
+                'apikey': 'offline-secret', 'apibase': 'https://offline.invalid'}
+        resolved = resolved_supervisor_profile(base, variant='narrow_v1')
+        public = public_profile_identity(resolved)
+        self.assertIs(public['monitor_narrow_supervisor_v1'], True)
+        self.assertIs(public['monitor_adaptive_supervisory_environment'], True)
+        for key in ('monitor_contrastive_release_state', 'monitor_receding_horizon_release',
+                    'monitor_root_epistemic_reestimation'):
+            self.assertIs(public[key], False)
+        self.assertEqual(public['monitor_history_projection'], 'off')
+        client = MonitorProviderClient('claude_monitor_opus48', resolved)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            evidence = root / 'evidence'
+            evidence.mkdir()
+            (evidence / 'original_task.txt').write_text('Public task.', encoding='utf-8')
+            monitor = MonitorAgent(client, MonitorWorkspace(evidence, root / 'private'))
+            self.assertTrue(monitor.narrow_supervisor_v1)
+            self.assertTrue(monitor.ase_v0)
+            self.assertIsNone(monitor.crs)
+        with self.assertRaisesRegex(ValueError, 'Incompatible'):
+            resolved_supervisor_profile({**base, 'monitor_contrastive_release_state': True},
+                                        variant='narrow_v1')
 
 
 if __name__ == '__main__':

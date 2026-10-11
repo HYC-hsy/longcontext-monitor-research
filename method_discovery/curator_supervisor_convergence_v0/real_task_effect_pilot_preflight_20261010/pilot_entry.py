@@ -89,13 +89,19 @@ def _augment_compose(path: Path, *, volume: str, condition: str, root: Path) -> 
 def prepare_run(*, manifest: Path, task_id: str, condition: str, run_id: str,
                 run_root: Path, source_root: Path, ga_source: Path,
                 runtime_root: Path, task_profile_file: Path, monitor_profile_file: Path,
-                python_home: str) -> dict:
+                python_home: str, supervisor_variant: str = 'legacy') -> dict:
     if condition not in {'T', 'S'} or task_id not in TASKS:
         raise ValueError('Pilot task/condition is not approved in this draft')
     if not re.fullmatch(r'[a-z0-9][a-z0-9-]{3,54}', run_id):
         raise ValueError('Pilot run_id must be a short lowercase opaque ID')
     manifest = Path(manifest).resolve(strict=True)
     frozen = json.loads(manifest.read_text(encoding='utf-8'))
+    if supervisor_variant not in {'legacy', 'narrow_v1'} or (
+            supervisor_variant == 'narrow_v1' and
+            (condition != 'S' or frozen.get('supervisor_variant') != 'narrow_v1')) or (
+            supervisor_variant == 'legacy' and condition == 'S' and
+            frozen.get('supervisor_variant', 'legacy') != 'legacy'):
+        raise ValueError('Supervisor variant is absent or mismatched in draft')
     if frozen.get('execution_authorized') is not False:
         raise ValueError('Offline staging requires an unarmed draft manifest')
     if not any(row['task_id'] == task_id and row['condition'] == condition
@@ -138,7 +144,8 @@ def prepare_run(*, manifest: Path, task_id: str, condition: str, run_id: str,
     profile_path = None
     if condition == 'S':
         profiles = json.loads(Path(monitor_profile_file).read_text(encoding='utf-8'))
-        resolved = resolved_supervisor_profile(profiles[MONITOR_PROFILE])
+        resolved = resolved_supervisor_profile(profiles[MONITOR_PROFILE],
+                                               variant=supervisor_variant)
         private_profiles = {MONITOR_PROFILE: resolved}
         profile_path = run_root / 'control' / 'resolved_monitor_profile.private.json'
         profile_path.write_text(json.dumps(private_profiles), encoding='utf-8')
@@ -168,12 +175,14 @@ def prepare_run(*, manifest: Path, task_id: str, condition: str, run_id: str,
     spec = {'schema': 'pilot-harbor-run-v1', 'mode': 'unarmed',
             'execution_authorized': False, 'run_id': run_id, 'task_id': task_id,
             'condition': condition, 'image_id': image, 'git_head': git_head,
+            'supervisor_variant': supervisor_variant,
             'task_volume': volume, 'control_root': str((run_root / 'control').resolve()),
             'archive_root': str((run_root / 'archive').resolve())}
     (run_root / 'control' / 'harbor_spec.json').write_text(
         json.dumps(spec, indent=2), encoding='utf-8')
     receipt = {'manifest_sha256': sha_file(manifest), 'task_id': task_id,
                'condition': condition, 'run_id': run_id, 'image': image_identity,
+               'supervisor_variant': supervisor_variant,
                'public_package': package_identity,
                'current_cache_non_git_tree_sha256': source_tree,
                'current_cache_non_git_file_count': source_files,
@@ -250,6 +259,7 @@ def main():
     parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--task-id', required=True)
     parser.add_argument('--condition', choices=['T', 'S'], required=True)
+    parser.add_argument('--supervisor-variant', choices=['legacy', 'narrow_v1'], default='legacy')
     parser.add_argument('--run-id', required=True)
     parser.add_argument('--run-root', type=Path, required=True)
     parser.add_argument('--source-root', type=Path, required=True)
@@ -273,6 +283,7 @@ def main():
             task_profile_file=args.task_profile_file,
             monitor_profile_file=args.monitor_profile_file,
             python_home=args.python_home, harbor_python=args.harbor_python,
+            supervisor_variant=args.supervisor_variant,
             timeout_seconds=10000, execution_mode='authorized_live',
             authorization=args.authorization)
         print(json.dumps(result, ensure_ascii=False, indent=2))

@@ -286,6 +286,7 @@ def _capture_pilot_payload(private_root, monitor, request_id, payload):
 
 def _worker(config, commands, outputs):
     from .agent import MonitorAgent
+    from .narrow_supervisor_v1 import ROOT_WAKE as NARROW_ROOT_WAKE
     from .analysis_spool import SpoolAnalysisSessions
     from .checkpoint import capture_live_root_checkpoint
     from .provider import MonitorProviderClient, ProviderRecoveryExhausted
@@ -676,7 +677,10 @@ def _worker(config, commands, outputs):
                              "completion": True, "request_id": approval_id})
                 return False
             outputs.put({"kind": "completion", "decision": "allow", "cursor": cursor,
-                         "request_id": approval_id})
+                         "request_id": approval_id,
+                         "completion_semantics": ('no_supervisory_objection' if
+                             config['model_config'].get('monitor_narrow_supervisor_v1') else
+                             'monitor_allowed')})
             # Delivery, not the model's proposal, determines whether this task ended.
             # Do not consume patrol backlog while the parent resolves this approval.
             while not config['stop_event'].is_set():
@@ -764,12 +768,14 @@ def _worker(config, commands, outputs):
                              'request_id': command['request_id'],
                              'message': 'Continue with the pending monitor correction.'})
                 continue
-            if not review(
-                f"The host requested a root handoff review at cursor {cursor}. Read the Task Agent's actual "
+            root_wake = (NARROW_ROOT_WAKE.format(cursor=cursor) if
+                         config['model_config'].get('monitor_narrow_supervisor_v1') else
+                         f"The host requested a root handoff review at cursor {cursor}. Read the Task Agent's actual "
                 "message in the public evidence: it may claim completion, ask for clarification, or report "
                 "a blocker. Judge its meaning yourself. Answer missing information or correct drift with "
                 "intervene; use allow_complete only if the task is actually complete. A clarification "
-                "request is not itself a false completion claim.", completion=True,
+                "request is not itself a false completion claim.")
+            if not review(root_wake, completion=True,
                 request_id=command["request_id"],
             ):
                 return
@@ -821,6 +827,9 @@ class MonitorRuntime:
         self.synopsis_path = self.evidence_root / "synopsis.jsonl"
         self.events_path = self.evidence_root / "public_events.jsonl"
         self._eis_enabled = model_config.get("monitor_executable_interpretation_surface", False)
+        self._completion_semantics = ('no_supervisory_objection' if
+                                      model_config.get('monitor_narrow_supervisor_v1') is True else
+                                      'monitor_allowed')
         if type(self._eis_enabled) is not bool:
             raise ValueError("monitor_executable_interpretation_surface must be a boolean")
         self._archive_lock = threading.Lock()
@@ -1146,7 +1155,13 @@ class MonitorRuntime:
                 self._pending.pop(request_id, None)
                 if self._active_completion.value == generation:
                     self._active_completion.value = 0
-        if value.get("decision") == "allow": return CompletionOutcome(True, reason="monitor_allowed")
+        if value.get("decision") == "allow":
+            if value.get('completion_semantics') != self._completion_semantics:
+                return self._incomplete('completion_semantics_mismatch', request_id)
+            self._append_receipt({'kind': 'completion_semantics', 'request_id': request_id,
+                                  'completion_semantics': self._completion_semantics,
+                                  'timestamp': time.time()})
+            return CompletionOutcome(True, reason=self._completion_semantics)
         if value.get("decision") == "incomplete":
             return CompletionOutcome(False, value.get('message') or 'Verification limited.',
                                      'verification_limited', True)

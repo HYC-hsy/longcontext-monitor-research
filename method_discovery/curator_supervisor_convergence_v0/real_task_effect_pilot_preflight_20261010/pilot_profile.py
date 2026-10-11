@@ -18,8 +18,19 @@ PILOT_OVERRIDES = {
     'proxy': None,
 }
 
+NARROW_OVERRIDES = {
+    **PILOT_OVERRIDES,
+    'monitor_narrow_supervisor_v1': True,
+    'monitor_contrastive_release_state': False,
+    'monitor_receding_horizon_release': False,
+    'monitor_root_epistemic_reestimation': False,
+    'monitor_history_projection': 'off',
+}
 
-def resolved_supervisor_profile(base: dict) -> dict:
+
+def resolved_supervisor_profile(base: dict, *, variant: str = 'legacy') -> dict:
+    if variant not in {'legacy', 'narrow_v1'}:
+        raise ValueError('Unsupported Supervisor variant')
     if base.get('model') != 'claude-opus-4-8':
         raise ValueError('Pilot Supervisor model identity mismatch')
     if base.get('max_tokens') != 8192 or base.get('thinking_type') != 'adaptive':
@@ -28,8 +39,14 @@ def resolved_supervisor_profile(base: dict) -> dict:
         raise ValueError('Pilot Supervisor reasoning setting mismatch')
     if not base.get('apikey') or not base.get('apibase'):
         raise ValueError('Pilot Supervisor transport profile incomplete')
+    if variant == 'legacy' and base.get('monitor_narrow_supervisor_v1', False) is not False:
+        raise ValueError('Narrow Supervisor requires the explicit narrow_v1 variant')
     configured = dict(base)
-    configured.update(PILOT_OVERRIDES)
+    if variant == 'narrow_v1':
+        for key, expected in NARROW_OVERRIDES.items():
+            if key.startswith('monitor_') and key in base and base[key] != expected:
+                raise ValueError('Incompatible narrow Supervisor switch: ' + key)
+    configured.update(NARROW_OVERRIDES if variant == 'narrow_v1' else PILOT_OVERRIDES)
     return configured
 
 
@@ -38,5 +55,6 @@ def public_profile_identity(config: dict) -> dict:
     keys = ('model', 'max_tokens', 'thinking_type', 'reasoning_effort', 'temperature',
             'timeout', 'read_timeout', 'max_retries', 'verify',
             'incomplete_stream_recovery_v1',
+            'monitor_narrow_supervisor_v1',
             *tuple(key for key in PILOT_OVERRIDES if key.startswith('monitor_')))
     return {key: config.get(key) for key in keys}

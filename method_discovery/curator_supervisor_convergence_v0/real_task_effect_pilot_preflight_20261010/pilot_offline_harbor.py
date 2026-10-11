@@ -164,7 +164,8 @@ def run_offline(*, manifest: Path, task_id: str, condition: str, run_id: str,
                 monitor_profile_file: Path, python_home: str,
                 harbor_python: Path, timeout_seconds: int = 360,
                 verify_sentinel: bool = False,
-                execution_mode: str = 'offline_fake', authorization: Path | None = None) -> dict:
+                execution_mode: str = 'offline_fake', authorization: Path | None = None,
+                supervisor_variant: str = 'legacy') -> dict:
     if condition not in {'T', 'S'} or task_id not in TASKS:
         raise ValueError('Unsupported offline task or condition')
     if execution_mode not in {'offline_fake', 'authorized_live'}:
@@ -178,7 +179,8 @@ def run_offline(*, manifest: Path, task_id: str, condition: str, run_id: str,
         condition=condition, run_id=run_id, run_root=run_root,
         source_root=source_root, ga_source=ga_source,
         runtime_root=runtime_root, task_profile_file=task_profile_file,
-        monitor_profile_file=monitor_profile_file, python_home=python_home)
+        monitor_profile_file=monitor_profile_file, python_home=python_home,
+        supervisor_variant=supervisor_variant)
     if execution_mode == 'offline_fake':
         _offline_gateway(run_root, runtime_root, python_home)
     control = run_root / 'control'

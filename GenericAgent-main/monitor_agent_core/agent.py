@@ -51,6 +51,7 @@ from .crs_v0 import ContrastiveReleaseBoundary
 from .root_records_v1 import canonical as root_records_canonical, digest as root_records_digest
 from .root_records_v1 import project as project_root_records
 from .root_records_native_v2 import project as project_root_records_native
+from .narrow_supervisor_v1 import METHOD_PROMPT as NARROW_METHOD_PROMPT, REVIEW_MODE as NARROW_REVIEW_MODE
 
 
 class ProjectionIntegrityError(RuntimeError):
@@ -466,6 +467,12 @@ class MonitorAgent:
                 self.ase_v0 and self.crs_v0 and self.rhr_v0)):
             raise ValueError('monitor_root_epistemic_reestimation must be boolean and requires ASE + CRS + RHR')
         self.history_projection = getattr(client, 'config', {}).get('monitor_history_projection', 'off')
+        self.narrow_supervisor_v1 = getattr(client, 'config', {}).get('monitor_narrow_supervisor_v1', False)
+        if type(self.narrow_supervisor_v1) is not bool:
+            raise ValueError('monitor_narrow_supervisor_v1 must be a boolean')
+        if self.narrow_supervisor_v1 and (not self.ase_v0 or self.crs_v0 or self.rhr_v0
+                                          or self.rer_v0 or self.history_projection != 'off'):
+            raise ValueError('narrow supervisor requires ASE on, CRS/RHR/RER off, projection off')
         if self.history_projection not in ('off', 'root_records_v1', 'root_records_native_v2'):
             raise ValueError('Unsupported monitor_history_projection')
         if self.history_projection == 'root_records_v1' and not self.rer_v0:
@@ -497,8 +504,8 @@ class MonitorAgent:
                     or getattr(client, 'config', {}).get('monitor_research_intent', 'off') != 'off'
                     or getattr(client, 'config', {}).get('monitor_release_support_horizon', False)):
                 raise ValueError('ASE-v0 is exclusive with historical candidate and research switches')
-            self.system_prompt = ASE_SYSTEM_PROMPT
-            self.base_system_prompt = ASE_SYSTEM_PROMPT
+            self.system_prompt = NARROW_METHOD_PROMPT if self.narrow_supervisor_v1 else ASE_SYSTEM_PROMPT
+            self.base_system_prompt = self.system_prompt
             self.situation = SituationState(workspace, include_supervisory_control=False)
             self.control_echo = ControlEcho(self._audit_dialogue)
             self.dcm = (ContrastiveReleaseBoundary(
@@ -1228,7 +1235,9 @@ class MonitorAgent:
                 if reference_block is not None:
                     return reference_block
                 if self.dcm is not None:
-                    if mode == 'patrol' and (not self.ase_v0 or self.control_echo.active):
+                    if mode == 'patrol' and self.narrow_supervisor_v1:
+                        self.dcm.abandon('narrow_patrol')
+                    elif mode == 'patrol' and (not self.ase_v0 or self.control_echo.active):
                         boundary = self.dcm.release('patrol', 'local', arguments)
                         if boundary is not None:
                             return ToolOutcome(boundary)
@@ -1327,6 +1336,8 @@ class MonitorAgent:
                                         'model_turns_used_in_this_subreview': self.dcm.model_turn,
                                     }))
                                 return ToolOutcome(boundary)
+                        elif self.narrow_supervisor_v1:
+                            self.dcm.abandon('narrow_allow')
                         elif self.ase_v0 or arguments['result'] == 'resolve':
                             boundary = self.dcm.release('allow_complete', 'root', arguments)
                             if boundary is not None:
@@ -1642,6 +1653,8 @@ class MonitorAgent:
                             "new public feedback to assess. Use wait to finish without intervention, or "
                             "allow_complete only for a current justified root handoff. Delivery feedback "
                             "remains available at monitor/delivery_feedback.jsonl.")
+            if self.narrow_supervisor_v1:
+                mode = NARROW_REVIEW_MODE
             active_system = (self.base_system_prompt + "\n\n" + ROOT_SYSTEM_PROMPT
                              if self.frame_kind == 'root' and not (self.verification_loop_v0 or self.ase_v0)
                              else self.system_prompt)

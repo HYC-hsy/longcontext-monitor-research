@@ -129,8 +129,11 @@ class GenericAgentMonitorAdapter:
             "tool_results": [],
         }))
         if outcome.allow:
+            reason_codes = (("MONITOR_ALLOWED", "NO_SUPERVISORY_OBJECTION")
+                            if outcome.reason == 'no_supervisory_objection' else
+                            ("MONITOR_ALLOWED",))
             return CompletionDecision(
-                decision="ALLOW_COMPLETE", reason_codes=("MONITOR_ALLOWED",)
+                decision="ALLOW_COMPLETE", reason_codes=reason_codes
             )
         if outcome.incomplete:
             return CompletionDecision(
