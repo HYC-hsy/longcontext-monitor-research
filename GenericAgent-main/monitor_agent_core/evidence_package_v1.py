@@ -176,6 +176,9 @@ class EvidenceFrontier:
             raise ValueError('Observed states require actual source receipts')
         def apply(state):
             case = state['cases'][case_id]
+            if args.get('hypothesis') is not None and args['hypothesis'] != case['hypothesis']:
+                for finding_id in case['finding_ids']:
+                    state['findings'][finding_id]['status'] = 'stale'
             case['status'] = status
             case['reason'] = reason
             case['receipts'] = list(dict.fromkeys(case['receipts'] + receipt_ids))
@@ -189,6 +192,27 @@ class EvidenceFrontier:
             return case_id
         self.change('case_revised', apply)
         return {'status': 'recorded', 'case_id': case_id, 'revision': self.state['revision']}
+
+    def reconcile_sources(self, workspace):
+        """Invalidate only findings whose actually cited live Task files changed."""
+        self.verify()
+        cited = {rid for finding in self.state['findings'].values()
+                 if finding['status'] == 'current' for rid in finding['receipt_ids']}
+        stale = []
+        for receipt_id in sorted(cited):
+            receipt = self.state['receipts'][receipt_id]
+            path = receipt.get('source_path')
+            if not isinstance(path, str) or not path.startswith('task/'):
+                continue
+            try:
+                actual = workspace.read_text(path, 1, 1, max_chars=1)['sha256']
+                if actual != receipt['result']['sha256']:
+                    stale.append(receipt_id)
+            except (OSError, ValueError, KeyError):
+                stale.append(receipt_id)
+        if stale:
+            self.stale_receipts(stale, 'cited_task_source_changed')
+        return stale
 
     def next_focus(self, *, return_parent=False):
         if type(return_parent) is not bool:

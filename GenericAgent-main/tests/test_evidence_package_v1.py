@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from monitor_agent_core.agent import MonitorAgent
+from monitor_agent_core.loop import MonitorLoopError
 from monitor_agent_core.evidence_package_v1 import EvidenceFrontier, EvidencePackageIntegrityError
 from monitor_agent_core.provider import MonitorProviderClient
 from monitor_agent_core.runtime import _capture_pilot_payload
@@ -124,6 +125,35 @@ def test_incomplete_process_is_not_behavioral_evidence(tmp_path):
                        'kind': 'counterexample'}, handoff=None)
 
 
+def test_cited_source_change_stales_only_related_finding(tmp_path):
+    monitor, _, workspace = make_monitor(tmp_path)
+    task = workspace.task_mounts['workspace']
+    (task / 'a.go').write_text('package a\n', encoding='utf-8')
+    (task / 'b.go').write_text('package b\n', encoding='utf-8')
+    state = EvidenceFrontier(workspace.private_root)
+    cases = []
+    findings = []
+    packet = state.packet_ready(handoff=None, task_cursor=0)
+    for name in ('a', 'b'):
+        case = state.open_case({'task_basis': 'Task contract', 'scope': name,
+                                'observable_consequence': name + ' response',
+                                'leads': ['Read source']})['case_id']
+        result = workspace.read_text('task/workspace/' + name + '.go')
+        receipt = state.register_receipt('file_read', {'path': result['path']}, result)
+        finding = state.finding({'packet_id': packet['id'], 'case_id': case,
+                                 'scope': name, 'task_basis': 'Task contract',
+                                 'receipt_ids': [receipt], 'claim': 'Source-level local claim',
+                                 'kind': 'counterexample'}, handoff=None)['finding_id']
+        cases.append(case)
+        findings.append(finding)
+    assert state.reconcile_sources(workspace) == []
+    (task / 'a.go').write_text('package changed\n', encoding='utf-8')
+    assert len(state.reconcile_sources(workspace)) == 1
+    assert state.state['findings'][findings[0]]['status'] == 'stale'
+    assert state.state['findings'][findings[1]]['status'] == 'current'
+    assert state.state['cases'][cases[1]]['status'] == 'pending'
+
+
 def test_real_provider_send_two_phase_packet_finding_and_delivery(tmp_path, monkeypatch):
     monitor, client, workspace = make_monitor(tmp_path)
     monitor.analysis = TestPort()
@@ -203,4 +233,119 @@ def test_real_provider_send_two_phase_packet_finding_and_delivery(tmp_path, monk
     assert monitor.evidence_frontier.state['packet']['input_sent'] is False
     assert monitor.control_echo.pending_submission['submission_id'] == 'offline-delivery-1'
     assert len(list((workspace.private_root / 'audit' / 'provider_pre_send').glob('*.json'))) == 6
+
+
+def test_root_packet_reference_guard_and_no_objection_path(tmp_path, monkeypatch):
+    monitor, client, workspace = make_monitor(tmp_path)
+    monitor.analysis = TestPort()
+    handoff = {'generation': 1, 'request_id': 'completion-1', 'cursor': 1}
+    monitor.completion_state = lambda: handoff
+    (workspace.evidence_root / 'public_events.jsonl').write_text(json.dumps({
+        'archive_sequence': 1, 'task_turn': 12, 'boundary': 'completion',
+        'text': 'Task says done.', 'tool_calls': [], 'tool_results': []}) + '\n',
+        encoding='utf-8')
+    client.pre_send_capture = lambda request_id, payload: _capture_pilot_payload(
+        workspace.private_root, monitor, request_id, payload)
+    checkpoint_requests = []
+    client.request_assembly_callback = lambda snapshot: (
+        checkpoint_requests.append(snapshot) or True)
+    sent = []
+    actions = ['packet_ready', 'allow_complete', 'file_write', 'allow_complete']
+
+    class Response:
+        status_code = 200
+        headers = {'content-type': 'text/event-stream'}
+
+        def __init__(self, name, arguments):
+            self.name, self.arguments = name, arguments
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def iter_lines(self):
+            events = [
+                {'type': 'message_start', 'message': {'usage': {}}},
+                {'type': 'content_block_start', 'content_block': {
+                    'type': 'tool_use', 'id': 'root-tool-' + str(len(sent)),
+                    'name': self.name}},
+                {'type': 'content_block_delta', 'delta': {
+                    'type': 'input_json_delta', 'partial_json': json.dumps(self.arguments)}},
+                {'type': 'content_block_stop'},
+                {'type': 'message_stop'},
+            ]
+            return iter([('data: ' + json.dumps(item)).encode() for item in events])
+
+    def post(_url, **kwargs):
+        sent.append(kwargs['json'])
+        index = len(sent) - 1
+        name = actions[index]
+        if name == 'allow_complete':
+            arguments = {'frontier_revision': monitor.evidence_frontier.state['revision']}
+        elif name == 'file_write':
+            arguments = {'path': 'monitor/reference.md', 'content': 'Public route contract.'}
+        else:
+            arguments = {}
+        return Response(name, arguments)
+
+    monkeypatch.setattr('monitor_agent_core.provider.requests.post', post)
+    action = monitor.review('Task completion handoff.', completion_pending=True,
+                            root_handoff=handoff, max_turns_override=8)
+    assert action.kind == 'allow_complete'
+    assert len(sent) == 4
+    assert monitor.evidence_frontier.state['packet']['handoff'] == handoff
+    assert checkpoint_requests and checkpoint_requests[0]['root_handoff'] == handoff
+    assert 'Phase A' in sent[0]['system'] and 'Phase B' in sent[1]['system']
+    dialogue = (workspace.private_root / 'audit' / 'dialogue.jsonl').read_text(
+        encoding='utf-8')
+    assert 'reference_invalid' in dialogue
+    assert not any(row.get('event') == 'ase_reconsideration_boundary'
+                   for row in map(json.loads, dialogue.splitlines()))
+
+
+def test_mid_phase_root_cutover_preserves_budget_and_parent_history(tmp_path, monkeypatch):
+    monitor, client, workspace = make_monitor(tmp_path)
+    monitor.analysis = TestPort()
+    client.pre_send_capture = lambda *_: None
+    parent = [{'role': 'user', 'content': [{'type': 'text', 'text': 'prior context'}]}]
+    client.restore_history(parent)
+    current = {'generation': 2, 'request_id': 'completion-2', 'cursor': 1}
+    state = {'handoff': None, 'calls': 0}
+    monitor.completion_state = lambda: state['handoff']
+
+    def first(_tools):
+        state['calls'] += 1
+        assert state['calls'] == 1
+        state['handoff'] = current
+        return [{'type': 'text', 'text': 'Inspecting.'}], {}
+
+    monkeypatch.setattr(client, '_request_once', first)
+    action = monitor.review('Ordinary wake.', max_turns_override=5)
+    assert action.kind == 'root_route'
+    assert action.payload['prior_model_turns'] == 1
+    assert client.export_history() == parent
+    assert monitor.evidence_frontier.state['packet'] is None
+
+
+def test_shared_outer_budget_exhaustion_is_not_wait(tmp_path, monkeypatch):
+    monitor, client, _ = make_monitor(tmp_path)
+    monitor.analysis = TestPort()
+    client.pre_send_capture = lambda *_: None
+    calls = []
+
+    def fake(_tools):
+        calls.append(monitor._evidence_stage)
+        if monitor._evidence_stage == 'A':
+            return [{'type': 'tool_use', 'id': 'packet', 'name': 'packet_ready',
+                     'input': {}}], {}
+        return [{'type': 'text', 'text': 'Need more investigation.'}], {}
+
+    monkeypatch.setattr(client, '_request_once', fake)
+    with pytest.raises(MonitorLoopError):
+        monitor.review('Wake.', max_turns_override=2)
+    assert calls == ['A', 'B']
+    assert monitor.evidence_frontier.state['packet']['executed'] is False
+    assert monitor._evidence_stage is None
 

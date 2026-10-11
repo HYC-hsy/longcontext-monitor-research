@@ -1247,6 +1247,8 @@ class MonitorAgent:
                     self.evidence_frontier.check_intervention(
                         arguments.get('finding_id'), handoff=self.root_frame_handoff)
                 if name == 'allow_complete':
+                    if self.evidence_frontier.reconcile_sources(self.workspace):
+                        raise ValueError('Cited Task source changed; review current evidence')
                     self.evidence_frontier.check_allow(
                         arguments.get('frontier_revision'), handoff=self.root_frame_handoff)
             if name == 'work_context' and self.experimental_control is not None:
@@ -1750,20 +1752,7 @@ class MonitorAgent:
         finding = self.evidence_frontier.state['findings'].get(finding_id)
         if finding is None:
             raise ValueError('Unknown local finding')
-        stale = []
-        for receipt_id in finding['receipt_ids']:
-            receipt = self.evidence_frontier.state['receipts'][receipt_id]
-            path = receipt.get('source_path')
-            if not isinstance(path, str) or not path.startswith('task/'):
-                continue
-            try:
-                current = self.workspace.read_text(path, 1, 1, max_chars=1)
-                if current['sha256'] != receipt['result']['sha256']:
-                    stale.append(receipt_id)
-            except (OSError, ValueError, KeyError):
-                stale.append(receipt_id)
-        if stale:
-            self.evidence_frontier.stale_receipts(stale, 'cited_task_source_changed')
+        if self.evidence_frontier.reconcile_sources(self.workspace):
             raise ValueError('Cited Task source changed; re-investigate before intervention')
 
     def _review_evidence(self, wake_context, completion_pending, root_handoff,
