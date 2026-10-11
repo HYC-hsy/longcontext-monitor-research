@@ -350,7 +350,7 @@ relevant definitions, callers, state consumers, test setup and observable effect
 A source-level counterexample can support a bounded correction; an unexecuted plan, mere
 field or method existence, failed compile, process label or missing report is not behavioral
 validation. Keep failed probes and question their oracle instead of making them pass by fiat.
-The host-owned frontier records local concerns, source scopes, dependencies and receipts.
+The protected frontier records local concerns, source scopes, dependencies and receipts.
 Pending or blocked cases are not a whole-task veto. Preserve unresolved cases when leaving.
 Do not write to the live Task tree, access hidden evaluation, or take over Task repair.
 Use the existing delivery and fresh-feedback path for any correction. Completion permission

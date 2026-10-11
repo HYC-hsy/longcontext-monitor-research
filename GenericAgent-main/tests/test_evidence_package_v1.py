@@ -1,5 +1,6 @@
 """Zero-network tests of the opt-in evidence-package path."""
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -247,6 +248,13 @@ def test_real_provider_send_two_phase_packet_finding_and_delivery(tmp_path, monk
     assert monitor.evidence_frontier.state['packet']['input_sent'] is False
     assert monitor.control_echo.pending_submission['submission_id'] == 'offline-delivery-1'
     assert len(list((workspace.private_root / 'audit' / 'provider_pre_send').glob('*.json'))) == 6
+    for stage, payload in [('A', payloads[0]), ('B', payloads[3])]:
+        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True,
+                         separators=(',', ':')).encode('utf-8')
+        print(json.dumps({'fake_request_stage': stage, 'canonical_sha256':
+                          hashlib.sha256(raw).hexdigest(), 'byte_count': len(raw),
+                          'fields': sorted(payload), 'message_count': len(payload['messages']),
+                          'tool_count': len(payload['tools'])}))
 
 
 def test_root_packet_reference_guard_and_no_objection_path(tmp_path, monkeypatch):
