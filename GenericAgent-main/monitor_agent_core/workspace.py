@@ -53,6 +53,8 @@ class MonitorWorkspace:
 
     def resolve_read(self, virtual_path: str) -> Path:
         namespace, parts = self._parts(virtual_path)
+        if namespace == 'monitor' and parts and parts[0] == '.evidence_package_v1':
+            raise MonitorPathError('Read the host frontier through its paginated tool')
         if namespace == "monitor" and parts == ("working.md",):
             parts = (self.working_note_target,)
         root = self.evidence_root if namespace == "task" else self.private_root

@@ -235,6 +235,12 @@ def _verification_boundary_valid(state, generation):
 def _capture_pilot_payload(private_root, monitor, request_id, payload):
     """Fail before transport if the committed projection is absent or audit fails."""
     from .agent import ProjectionIntegrityError
+    if getattr(monitor, 'evidence_package_v1', False):
+        try:
+            monitor._evidence_pre_send(payload)
+        except Exception:
+            monitor._analysis_integrity_failure = True
+            raise
     pending = monitor._projection_pending_request
     native_lineage = None
     if monitor.history_projection == 'root_records_native_v2' and pending is not None:
@@ -623,6 +629,7 @@ def _worker(config, commands, outputs):
             # A terminal transport recovery must not silently restart via the
             # queued patrol/completion commands after the parent has failed it.
             return not (isinstance(exc, ProviderRecoveryExhausted) or
+                        getattr(monitor, '_analysis_integrity_failure', False) or
                         (getattr(monitor, 'history_projection', 'off') == 'root_records_native_v2' and
                          getattr(monitor, '_projection_integrity_failure', None) is not None))
         if action.kind == "wait":
@@ -797,6 +804,8 @@ class MonitorRuntime:
         self.artifact_dir = Path(artifact_dir).resolve()
         if model_config.get('monitor_pilot_zero_ambiguous_retry') and analysis_port_root is None:
             raise ValueError('Pilot transport policy requires the fixed analysis port')
+        if model_config.get('monitor_evidence_package_v1') is True and analysis_port_root is None:
+            raise ValueError('Evidence package requires the isolated pilot analysis port')
         if analysis_port_root is not None and (not run_id or not Path(analysis_port_root).is_absolute()):
             raise ValueError('Pilot analysis port requires an absolute root and run identity')
         if type(root_checkpoint_required) is not bool:

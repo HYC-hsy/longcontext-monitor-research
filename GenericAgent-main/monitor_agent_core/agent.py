@@ -15,9 +15,9 @@ from collections import Counter
 from dataclasses import asdict
 
 from .actions import MonitorAction, ToolOutcome
-from .loop import run_review
+from .loop import MonitorLoopError, run_review
 from .process_runner import AnalysisSessions
-from .analysis_spool import AnalysisPortIntegrityError
+from .analysis_spool import AnalysisPortIntegrityError, SpoolAnalysisSessions
 from .workspace import MonitorWorkspace
 from .grounded_context import read_with_sources
 from .handoff_validation import validate_handoff, note_text, ContinuationContractError
@@ -52,6 +52,9 @@ from .root_records_v1 import canonical as root_records_canonical, digest as root
 from .root_records_v1 import project as project_root_records
 from .root_records_native_v2 import project as project_root_records_native
 from .narrow_supervisor_v1 import METHOD_PROMPT as NARROW_METHOD_PROMPT, REVIEW_MODE as NARROW_REVIEW_MODE
+from .evidence_package_v1 import (EvidenceFrontier, EvidencePackageIntegrityError,
+                                  METHOD_PROMPT as EVIDENCE_METHOD_PROMPT,
+                                  STAGE_A_PROMPT, STAGE_B_PROMPT)
 
 
 class ProjectionIntegrityError(RuntimeError):
@@ -108,6 +111,50 @@ MONITOR_TOOLS = [
     }, ["message"]),
     _tool("allow_complete", "Allow only the currently pending root completion.", {}, []),
 ]
+
+
+EVIDENCE_TOOLS = [
+    _tool('frontier_page', 'Read one revision-bound page of the complete host inquiry frontier.', {
+        'cursor': {'type': 'string'}, 'limit': {'type': 'integer', 'minimum': 1, 'maximum': 50},
+    }, []),
+    _tool('frontier_open', 'Register a distinct local concern and its investigation leads.', {
+        'task_basis': {'type': 'string'}, 'scope': {'type': 'string'},
+        'observable_consequence': {'type': 'string'},
+        'leads': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1},
+        'hypothesis': {'type': 'string'}, 'parent_id': {'type': 'string'},
+    }, ['task_basis', 'scope', 'observable_consequence', 'leads']),
+    _tool('frontier_revise', 'Revise one local case without deleting old observations.', {
+        'case_id': {'type': 'string'}, 'status': {'type': 'string', 'enum': [
+            'pending', 'active', 'blocked', 'observed', 'counterexample', 'retracted', 'stale']},
+        'reason': {'type': 'string'}, 'receipt_ids': {'type': 'array', 'items': {'type': 'string'}},
+        'new_lead': {'type': 'string'}, 'hypothesis': {'type': 'string'},
+    }, ['case_id', 'status', 'reason']),
+    _tool('frontier_finding', 'Record a bounded, source-linked finding for the current packet.', {
+        'packet_id': {'type': 'string'}, 'case_id': {'type': 'string'},
+        'scope': {'type': 'string'}, 'task_basis': {'type': 'string'},
+        'receipt_ids': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1},
+        'claim': {'type': 'string'},
+    }, ['packet_id', 'case_id', 'scope', 'task_basis', 'receipt_ids', 'claim']),
+]
+
+
+def evidence_stage_tools(stage):
+    tools = json.loads(json.dumps(MONITOR_TOOLS + EVIDENCE_TOOLS))
+    if stage == 'A':
+        tools = [item for item in tools if item['function']['name'] not in {
+            'wait', 'intervene', 'allow_complete', 'frontier_finding'}]
+        tools.append(_tool('packet_ready', 'End material preparation without Task control.', {}, []))
+    else:
+        tools = [item for item in tools if item['function']['name'] != 'packet_ready']
+        for tool in tools:
+            function = tool['function']
+            if function['name'] == 'intervene':
+                function['parameters']['properties']['finding_id'] = {'type': 'string'}
+                function['parameters']['required'].append('finding_id')
+            elif function['name'] == 'allow_complete':
+                function['parameters']['properties']['frontier_revision'] = {'type': 'integer'}
+                function['parameters']['required'].append('frontier_revision')
+    return tools
 
 
 def crs_tools():
@@ -470,6 +517,19 @@ class MonitorAgent:
         self.narrow_supervisor_v1 = getattr(client, 'config', {}).get('monitor_narrow_supervisor_v1', False)
         if type(self.narrow_supervisor_v1) is not bool:
             raise ValueError('monitor_narrow_supervisor_v1 must be a boolean')
+        self.evidence_package_v1 = getattr(client, 'config', {}).get('monitor_evidence_package_v1', False)
+        if type(self.evidence_package_v1) is not bool:
+            raise ValueError('monitor_evidence_package_v1 must be a boolean')
+        if self.evidence_package_v1 and (not self.narrow_supervisor_v1 or not self.ase_v0
+                or self.crs_v0 or self.rhr_v0 or self.rer_v0 or self.history_projection != 'off'):
+            raise ValueError('Evidence package requires narrow ASE, with CRS/RHR/RER and projection off')
+        self.evidence_frontier = None
+        self._evidence_stage = None
+        self._evidence_model_cycles = 0
+        self._evidence_maintenance_calls = 0
+        self._evidence_limit = None
+        self._evidence_expected_system = None
+        self._evidence_expected_tools = None
         if self.narrow_supervisor_v1 and (not self.ase_v0 or self.crs_v0 or self.rhr_v0
                                           or self.rer_v0 or self.history_projection != 'off'):
             raise ValueError('narrow supervisor requires ASE on, CRS/RHR/RER off, projection off')
@@ -505,6 +565,8 @@ class MonitorAgent:
                     or getattr(client, 'config', {}).get('monitor_release_support_horizon', False)):
                 raise ValueError('ASE-v0 is exclusive with historical candidate and research switches')
             self.system_prompt = NARROW_METHOD_PROMPT if self.narrow_supervisor_v1 else ASE_SYSTEM_PROMPT
+            if self.evidence_package_v1:
+                self.system_prompt = EVIDENCE_METHOD_PROMPT
             self.base_system_prompt = self.system_prompt
             self.situation = SituationState(workspace, include_supervisory_control=False)
             self.control_echo = ControlEcho(self._audit_dialogue)
@@ -867,6 +929,8 @@ class MonitorAgent:
 
     def _audit_dialogue(self, event, **payload):
         """Persist completed observations immediately, independently of model input."""
+        if event == 'model_input' and self._evidence_stage in {'A', 'B'}:
+            self._evidence_model_cycles += 1
         if self.dcm is not None and event == 'tool_call':
             self.dcm.model_turn = payload.get('turn')
         path = self.workspace.private_root / 'audit' / 'dialogue.jsonl'
@@ -1026,6 +1090,9 @@ class MonitorAgent:
             self.client.continuation_transaction_id = previous_transaction
 
     def _progress(self, event, **fields):
+        if (event == 'request_started' and self._evidence_stage in {'A', 'B'}
+                and fields.get('purpose') in {'continuation', 'format_repair'}):
+            self._evidence_maintenance_calls += 1
         if (event == 'request_usage' and self._projection_pending_request is not None
                 and self.history_projection == 'root_records_v1'):
             self._projection_pending_request = None
@@ -1062,7 +1129,17 @@ class MonitorAgent:
         try:
             try:
                 outcome = self._dispatch(name, arguments)
+                if (self.evidence_package_v1 and name in {'file_read', 'code_run'}
+                        and isinstance(outcome.data, dict)
+                        and not (outcome.data.get('status') == 'error'
+                                 and 'session_id' not in outcome.data)):
+                    receipt_id = self.evidence_frontier.register_receipt(
+                        name, arguments, outcome.data)
+                    outcome.data['host_receipt_id'] = receipt_id
             except AnalysisPortIntegrityError:
+                self._analysis_integrity_failure = True
+                raise
+            except EvidencePackageIntegrityError:
                 self._analysis_integrity_failure = True
                 raise
             if self.experimental_control is not None and name not in {'work_context', 'work_intent'}:
@@ -1128,6 +1205,39 @@ class MonitorAgent:
     def _dispatch(self, name: str, arguments: dict) -> ToolOutcome:
         ase_reference = False
         try:
+            if self.evidence_package_v1:
+                if self._evidence_stage not in {'A', 'B'}:
+                    raise EvidencePackageIntegrityError('Evidence stage is not active')
+                if self._evidence_stage == 'A' and name in {
+                        'wait', 'intervene', 'allow_complete', 'frontier_finding'}:
+                    raise ValueError('Phase A cannot control the Task or record a final finding')
+                if name == 'frontier_page':
+                    return ToolOutcome(self.evidence_frontier.page(
+                        cursor=arguments.get('cursor'), limit=arguments.get('limit', 12)))
+                if name == 'frontier_open':
+                    return ToolOutcome(self.evidence_frontier.open_case(arguments))
+                if name == 'frontier_revise':
+                    return ToolOutcome(self.evidence_frontier.revise_case(arguments))
+                if name == 'packet_ready':
+                    if self._evidence_stage != 'A':
+                        raise ValueError('packet_ready belongs only to phase A')
+                    handoff = (dict(self.root_frame_handoff) if self.frame_kind == 'root'
+                               else None)
+                    packet = self.evidence_frontier.packet_ready(
+                        handoff=handoff, task_cursor=(handoff or {}).get('cursor'))
+                    return ToolOutcome({'status': 'packet_ready', **packet}, False,
+                                       MonitorAction('packet_ready', packet))
+                if name == 'frontier_finding':
+                    if self._evidence_stage != 'B':
+                        raise ValueError('Finding requires phase B')
+                    return ToolOutcome(self.evidence_frontier.finding(
+                        arguments, handoff=self.root_frame_handoff))
+                if name == 'intervene':
+                    self.evidence_frontier.check_intervention(
+                        arguments.get('finding_id'), handoff=self.root_frame_handoff)
+                if name == 'allow_complete':
+                    self.evidence_frontier.check_allow(
+                        arguments.get('frontier_revision'), handoff=self.root_frame_handoff)
             if name == 'work_context' and self.experimental_control is not None:
                 if self.experimental_control.view == 'off':
                     raise ValueError('work_context is disabled')
@@ -1139,14 +1249,17 @@ class MonitorAgent:
             if name == 'allow_complete':
                 allowed = ({'_noargs', 'release_blocking_state', 'grounding', 'ground_refs',
                             'exclusion_reason', 'observation_refs'} if self.crs is not None else
-                           {'_noargs', 'result', 'reason'} if self.verification_loop_v0 else {'_noargs'})
+                           {'_noargs', 'result', 'reason'} if self.verification_loop_v0 else
+                           {'_noargs', 'frontier_revision'} if self.evidence_package_v1 else {'_noargs'})
                 if set(arguments) - allowed:
                     if self.crs is not None:
                         raise ValueError('CRS root allow_complete uses flat required fields: '
                                          'release_blocking_state, grounding, ground_refs, '
                                          'exclusion_reason, observation_refs; do not nest contrast.')
                     raise ValueError('allow_complete arguments do not match the active release condition')
-                arguments = {key: value for key, value in arguments.items() if key != '_noargs'}
+                arguments = {key: value for key, value in arguments.items()
+                             if key not in ({'_noargs', 'frontier_revision'} if self.evidence_package_v1
+                                            else {'_noargs'})}
             if name == "file_read":
                 data = self.workspace.read_text(
                     arguments["path"], arguments.get("start", 1), arguments.get("count", 200),
@@ -1364,7 +1477,7 @@ class MonitorAgent:
                 return ToolOutcome(None, False, MonitorAction("allow_complete", {}))
             else:
                 data = {"status": "error", "error": f"Unknown tool: {name}"}
-        except AnalysisPortIntegrityError:
+        except (AnalysisPortIntegrityError, EvidencePackageIntegrityError):
             raise
         except Exception as exc:
             if self.experimental_control is not None and name in {'work_context', 'work_intent'}:
@@ -1595,9 +1708,110 @@ class MonitorAgent:
         self._rer_frame_sequence = 0
         self._rer_handoff = None
 
+    def _evidence_before_model(self):
+        self.evidence_frontier.verify()
+        if self._evidence_model_cycles + self._evidence_maintenance_calls >= self._evidence_limit:
+            raise MonitorLoopError('Shared evidence inquiry budget exhausted')
+        return self._refresh_review_context()
+
+    def _evidence_pre_send(self, payload):
+        self.evidence_frontier.verify()
+        if self._evidence_stage not in {'A', 'B'}:
+            raise EvidencePackageIntegrityError('Provider send outside active evidence stage')
+        purpose = getattr(self.client, 'request_purpose', 'review')
+        if payload.get('model') != self.client.model or not isinstance(payload.get('messages'), list):
+            raise EvidencePackageIntegrityError('Evidence provider model or history changed')
+        if purpose == 'review':
+            if (payload.get('system') != self._evidence_expected_system or
+                    payload.get('tools') != self._evidence_expected_tools):
+                raise EvidencePackageIntegrityError('Evidence stage system or tools changed')
+        elif purpose in {'continuation', 'format_repair'}:
+            prompt = getattr(self.client, 'maintenance_prompt', None)
+            if (payload.get('tools') != [] or not prompt or not any(
+                    block.get('type') == 'text' and block.get('text') == prompt
+                    for message in payload['messages'] for block in message.get('content', [])
+                    if isinstance(block, dict))):
+                raise EvidencePackageIntegrityError('Maintenance prompt or purpose changed')
+        else:
+            raise EvidencePackageIntegrityError('Unknown evidence request purpose')
+
+    def _review_evidence(self, wake_context, completion_pending, root_handoff,
+                         max_turns_override, root_transition_view):
+        if (not isinstance(self.analysis, SpoolAnalysisSessions)
+                and getattr(self.analysis, 'evidence_test_port', False) is not True):
+            raise EvidencePackageIntegrityError('Evidence inquiry requires the isolated analysis port')
+        if not callable(getattr(self.client, 'pre_send_capture', None)):
+            raise EvidencePackageIntegrityError('Evidence inquiry requires pre-send capture')
+        if self.evidence_frontier is None:
+            self.evidence_frontier = EvidenceFrontier(self.workspace.private_root)
+        self.evidence_frontier.verify()
+        limit = self.max_review_turns if max_turns_override is None else max_turns_override
+        if type(limit) is not int or limit < 1:
+            raise ValueError('Evidence review needs a positive shared turn limit')
+        self._evidence_limit = limit
+        self._evidence_model_cycles = 0
+        self._evidence_maintenance_calls = 0
+        parent_history = self.client.export_history()
+        self._evidence_stage = 'A'
+        try:
+            original_task = self.workspace.resolve_read('task/original_task.txt').read_text(
+                encoding='utf-8')
+            preparation_wake = (wake_context + '\n\nOriginal public task:\n' + original_task +
+                                '\n\nHost inquiry frontier:\n' +
+                                json.dumps(self.evidence_frontier.page(limit=12), ensure_ascii=False))
+            first = self.review(preparation_wake, completion_pending,
+                                root_handoff=root_handoff, max_turns_override=limit,
+                                root_transition_view=root_transition_view)
+            phase_a_history = self.client.export_history()
+            relative = 'audit/evidence_package/stages/' + uuid.uuid4().hex + '.json'
+            raw = json.dumps({'stage': 'A', 'history': phase_a_history,
+                              'action': asdict(first)}, ensure_ascii=False)
+            self._atomic_private_text(relative, raw)
+            if (self.workspace.private_root / relative).read_text(encoding='utf-8') != raw:
+                raise EvidencePackageIntegrityError('Phase A archive readback mismatch')
+            self._audit_dialogue('evidence_phase_archived', stage='A', locator='monitor/' + relative,
+                                 history_sha256=hashlib.sha256(
+                                     json.dumps(phase_a_history, ensure_ascii=False).encode('utf-8')).hexdigest())
+            if first.kind == 'root_route':
+                self.client.restore_history(parent_history)
+                return first
+            if first.kind != 'packet_ready':
+                raise EvidencePackageIntegrityError('Phase A did not produce a packet handoff')
+            expected_handoff = dict(root_handoff) if root_handoff is not None else None
+            if (self.evidence_frontier.state['packet']['handoff'] != expected_handoff
+                    or (expected_handoff is not None and
+                        (self.completion_state is None or
+                         self.completion_state() != expected_handoff))):
+                raise EvidencePackageIntegrityError('Packet handoff became stale before phase B')
+            self.client.restore_history([])
+            self._evidence_stage = 'B'
+            remaining = limit - self._evidence_model_cycles - self._evidence_maintenance_calls
+            if remaining < 1:
+                raise MonitorLoopError('Shared evidence inquiry budget exhausted after packet')
+            packet = self.evidence_frontier.state['packet']
+            view = self.evidence_frontier.page(limit=12)
+            second_wake = (wake_context + '\n\nOriginal public task:\n' + original_task +
+                           '\n\nHost inquiry packet (not a conclusion):\n' +
+                           json.dumps({'packet': packet, 'frontier_page': view}, ensure_ascii=False))
+            outcome = self.review(second_wake, completion_pending, root_handoff=root_handoff,
+                                  max_turns_override=remaining,
+                                  root_transition_view=root_transition_view)
+            if outcome.kind == 'root_route':
+                outcome.payload['prior_model_turns'] = self._evidence_model_cycles
+            return outcome
+        except EvidencePackageIntegrityError:
+            self._analysis_integrity_failure = True
+            raise
+        finally:
+            self._evidence_stage = None
+            self._evidence_limit = None
+
     def review(self, wake_context: str, completion_pending=False, *,
                root_handoff=None, max_turns_override=None,
                root_transition_view=None) -> MonitorAction:
+        if self.evidence_package_v1 and self._evidence_stage is None:
+            return self._review_evidence(wake_context, completion_pending,
+                                         root_handoff, max_turns_override, root_transition_view)
         if self._projection_integrity_failure is not None:
             raise ProjectionIntegrityError('Root projection integrity failed; no further review')
         if self._analysis_integrity_failure:
@@ -1655,6 +1869,8 @@ class MonitorAgent:
                             "remains available at monitor/delivery_feedback.jsonl.")
             if self.narrow_supervisor_v1:
                 mode = NARROW_REVIEW_MODE
+            if self.evidence_package_v1:
+                mode = STAGE_A_PROMPT if self._evidence_stage == 'A' else STAGE_B_PROMPT
             active_system = (self.base_system_prompt + "\n\n" + ROOT_SYSTEM_PROMPT
                              if self.frame_kind == 'root' and not (self.verification_loop_v0 or self.ase_v0)
                              else self.system_prompt)
@@ -1673,6 +1889,8 @@ class MonitorAgent:
                                      handoff=self.root_frame_handoff, content=wake_context)
             tools = (crs_tools() if self.crs is not None and self.frame_kind == 'root' else
                      verification_tools() if self.verification_loop_v0 and not self.ase_v0 else MONITOR_TOOLS)
+            if self.evidence_package_v1:
+                tools = evidence_stage_tools(self._evidence_stage)
             if self.ase_v0:
                 tools = json.loads(json.dumps(tools))
                 next(tool['function'] for tool in tools if tool['function']['name'] == 'code_run')[
@@ -1742,11 +1960,16 @@ class MonitorAgent:
                 self._projection_root_input = wake_context
                 self._projection_root_system = system
                 self._projection_root_tools = _claude_tools(tools)
+            if self.evidence_package_v1:
+                from .provider import _claude_tools
+                self._evidence_expected_system = system
+                self._evidence_expected_tools = _claude_tools(tools)
             action = run_review(
                 self.client, system, wake_context, tools,
                 self.dispatch, self.max_review_turns if max_turns_override is None else max_turns_override,
                 audit=self._audit_dialogue,
-                before_model=self._refresh_review_context,
+                before_model=(self._evidence_before_model if self.evidence_package_v1 else
+                              self._refresh_review_context),
                 route_before_model=(lambda: bool(self.completion_state and self.completion_state())
                                     if self.root_routed and self.frame_kind == 'local'
                                     else None),

@@ -33,7 +33,9 @@ class EvidenceFrontier:
     """Durable canonical state; ordinary Monitor file tools cannot mutate it."""
 
     def __init__(self, private_root):
-        self.root = Path(private_root) / '.evidence_package_v1'
+        # Sibling of monitor_private: neither model file tools nor the pilot
+        # diagnostic container's read-only cognition mount expose this root.
+        self.root = Path(private_root).parent / '.evidence_package_v1'
         self.state_path = self.root / 'frontier.json'
         self.commit_path = self.root / 'frontier.commit.json'
         if self.root.exists():
@@ -187,6 +189,7 @@ class EvidenceFrontier:
     def register_receipt(self, tool, arguments, result):
         if tool not in {'file_read', 'code_run'}:
             raise ValueError('Only executed investigation tools issue receipts')
+        result = json.loads(canonical(result))
         receipt_id = 'receipt-' + uuid.uuid4().hex
         record = {'id': receipt_id, 'tool': tool, 'arguments_sha256': digest(arguments),
                   'result_sha256': digest(result), 'result': result,
@@ -251,4 +254,39 @@ class EvidenceFrontier:
                 if item['status'] == 'counterexample']
         if live:
             raise ValueError('Current concrete objection requires resolution or withdrawal: ' + ','.join(live))
+
+
+METHOD_PROMPT = """You are the same persistent Supervisor investigating the Task's current decision.
+The public task is authoritative. The Task alone implements and validates its submitted work.
+At initialization read the full public task and create the existing bounded Task Book at
+monitor/reference.md. Keep it revisable; it is not an acceptance checklist. Distinguish raw tool
+observations, source interpretation, Task claims and unresolved hypotheses. Investigate
+relevant definitions, callers, state consumers, test setup and observable effects where useful.
+A source-level counterexample can support a bounded correction; an unexecuted plan, mere
+field or method existence, failed compile, process label or missing report is not behavioral
+validation. Keep failed probes and question their oracle instead of making them pass by fiat.
+The host-owned frontier records local concerns, source scopes, dependencies and receipts.
+Pending or blocked cases are not a whole-task veto. Preserve unresolved cases when leaving.
+Do not write to the live Task tree, access hidden evaluation, or take over Task repair.
+Use the existing delivery and fresh-feedback path for any correction. Completion permission
+means no currently established supervisory objection, not whole-task certification."""
+
+
+STAGE_A_PROMPT = """Phase A: prepare a source-grounded local inquiry packet. Inspect the full
+public task, current Task behavior, Task Book and the paginated host frontier. Preserve relevant
+leads even if unconfirmed; record dependencies before investigating them. You may read public
+sources and use the isolated private analysis port. When the packet is ready call packet_ready.
+That handoff has executed=false and input_sent=false; it cannot control or message the Task.
+Do not call wait, intervene or allow_complete in this phase."""
+
+
+STAGE_B_PROMPT = """Phase B: investigate independently with a fresh conversation history.
+The full public task, original materials and entire frontier remain accessible. Phase A's
+packet is revisable, not a verdict; check it, reject bad hypotheses, pursue dependencies and
+return to the parent concern. Register a local finding tied to an existing case, original task
+basis and authentic source or tool receipt before intervening. Recheck fresh Task behavior and
+the relevant live source before a correction; private copies are not the live Task result.
+Only this phase may use the existing wait, intervene and allow_complete control path.
+For a pending root, completion requires the current packet/handoff and frontier revision;
+an unresolved pending item alone is not a reason to deny completion."""
 

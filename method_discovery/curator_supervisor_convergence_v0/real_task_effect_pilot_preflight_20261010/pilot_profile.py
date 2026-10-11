@@ -27,9 +27,14 @@ NARROW_OVERRIDES = {
     'monitor_history_projection': 'off',
 }
 
+EVIDENCE_PACKAGE_OVERRIDES = {
+    **NARROW_OVERRIDES,
+    'monitor_evidence_package_v1': True,
+}
+
 
 def resolved_supervisor_profile(base: dict, *, variant: str = 'legacy') -> dict:
-    if variant not in {'legacy', 'narrow_v1'}:
+    if variant not in {'legacy', 'narrow_v1', 'evidence_package_v1'}:
         raise ValueError('Unsupported Supervisor variant')
     if base.get('model') != 'claude-opus-4-8':
         raise ValueError('Pilot Supervisor model identity mismatch')
@@ -41,12 +46,17 @@ def resolved_supervisor_profile(base: dict, *, variant: str = 'legacy') -> dict:
         raise ValueError('Pilot Supervisor transport profile incomplete')
     if variant == 'legacy' and base.get('monitor_narrow_supervisor_v1', False) is not False:
         raise ValueError('Narrow Supervisor requires the explicit narrow_v1 variant')
+    if variant != 'evidence_package_v1' and base.get('monitor_evidence_package_v1', False) is not False:
+        raise ValueError('Evidence package requires its explicit profile variant')
     configured = dict(base)
-    if variant == 'narrow_v1':
-        for key, expected in NARROW_OVERRIDES.items():
+    if variant in {'narrow_v1', 'evidence_package_v1'}:
+        overrides = (EVIDENCE_PACKAGE_OVERRIDES if variant == 'evidence_package_v1'
+                     else NARROW_OVERRIDES)
+        for key, expected in overrides.items():
             if key.startswith('monitor_') and key in base and base[key] != expected:
-                raise ValueError('Incompatible narrow Supervisor switch: ' + key)
-    configured.update(NARROW_OVERRIDES if variant == 'narrow_v1' else PILOT_OVERRIDES)
+                raise ValueError('Incompatible Supervisor switch: ' + key)
+    configured.update(EVIDENCE_PACKAGE_OVERRIDES if variant == 'evidence_package_v1' else
+                      NARROW_OVERRIDES if variant == 'narrow_v1' else PILOT_OVERRIDES)
     return configured
 
 
@@ -57,4 +67,7 @@ def public_profile_identity(config: dict) -> dict:
             'incomplete_stream_recovery_v1',
             'monitor_narrow_supervisor_v1',
             *tuple(key for key in PILOT_OVERRIDES if key.startswith('monitor_')))
-    return {key: config.get(key) for key in keys}
+    result = {key: config.get(key) for key in keys}
+    if 'monitor_evidence_package_v1' in config:
+        result['monitor_evidence_package_v1'] = config['monitor_evidence_package_v1']
+    return result

@@ -96,9 +96,9 @@ def prepare_run(*, manifest: Path, task_id: str, condition: str, run_id: str,
         raise ValueError('Pilot run_id must be a short lowercase opaque ID')
     manifest = Path(manifest).resolve(strict=True)
     frozen = json.loads(manifest.read_text(encoding='utf-8'))
-    if supervisor_variant not in {'legacy', 'narrow_v1'} or (
-            supervisor_variant == 'narrow_v1' and
-            (condition != 'S' or frozen.get('supervisor_variant') != 'narrow_v1')) or (
+    if supervisor_variant not in {'legacy', 'narrow_v1', 'evidence_package_v1'} or (
+            supervisor_variant in {'narrow_v1', 'evidence_package_v1'} and
+            (condition != 'S' or frozen.get('supervisor_variant') != supervisor_variant)) or (
             supervisor_variant == 'legacy' and condition == 'S' and
             frozen.get('supervisor_variant', 'legacy') != 'legacy'):
         raise ValueError('Supervisor variant is absent or mismatched in draft')
@@ -259,7 +259,8 @@ def main():
     parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--task-id', required=True)
     parser.add_argument('--condition', choices=['T', 'S'], required=True)
-    parser.add_argument('--supervisor-variant', choices=['legacy', 'narrow_v1'], default='legacy')
+    parser.add_argument('--supervisor-variant',
+                        choices=['legacy', 'narrow_v1', 'evidence_package_v1'], default='legacy')
     parser.add_argument('--run-id', required=True)
     parser.add_argument('--run-root', type=Path, required=True)
     parser.add_argument('--source-root', type=Path, required=True)
