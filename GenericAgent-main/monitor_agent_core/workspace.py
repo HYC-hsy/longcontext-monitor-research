@@ -72,6 +72,8 @@ class MonitorWorkspace:
             parts = (self.working_note_target,)
         if namespace != "monitor" or not parts:
             raise MonitorPathError("Writes require a file under monitor/")
+        if parts[0] == '.evidence_package_v1':
+            raise MonitorPathError('The evidence frontier is host-owned')
         path = self._within(self.private_root, self.private_root.joinpath(*parts))
         if path == self.snapshot_root or self.snapshot_root in path.parents:
             raise MonitorPathError("The analysis snapshot is runtime-owned")
