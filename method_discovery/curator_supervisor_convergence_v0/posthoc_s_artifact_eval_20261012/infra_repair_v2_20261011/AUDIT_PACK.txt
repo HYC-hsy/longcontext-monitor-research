@@ -1,0 +1,62 @@
+LIMITED INFRASTRUCTURE REPAIR — ZERO-MODEL AUDIT PACK
+
+Scope and identity
+------------------
+Repository: E:\longcontext-cqs-v0-20261005
+Branch: crs-v0-20261007
+Starting commit: 91b8ef2e39c8fe1cff81973d2db7a5c91f1eb144
+Repair commit: 85adad6a068d0cdc1899250a86d993c7197a7906
+The sibling 0001-Keep-pilot-receipts-independent-of-scratch-telemetry.patch is the complete mail-format diff of the repair commit.
+No Task Agent, Supervisor model, provider API, native evaluator, training, or scoring-model call was made. Each actual call count is 0.
+Unrelated pre-existing __pycache__ directories were left untouched and uncommitted.
+
+Implemented changes
+-------------------
+1. pilot_analysis_bridge.py: the accepted command result and spool response are written before optional scratch observation. Accepted IDs are never re-executed when the response file is absent. The observation is a separate post-receipt file keyed by request ID, not an alteration of the committed receipt. A pre/post diff is explicitly unavailable, rather than claimed from an incomplete scan. The optional scan uses 64 KiB read chunks; limits are 8 MiB per file, 32 MiB total bytes, 20,000 entries, and five seconds. Missing paths, non-regular files and limits mark the observation incomplete. Mount-source identity remains a hard gate. File identity is rechecked before read. Optional I/O errors are logged separately and cannot erase the known execution result.
+2. pilot_offline_harbor.py: normal and abnormal _serve_spool exits now share a finally cleanup path. A sidecar_stopped.json clean certificate is atomically written only after the bridge/port close succeeds and stopped state is positively confirmed. Primary and secondary cleanup errors are both retained. This certificate does not assert legal_agent_end or authorize evaluation.
+3. provider.py: after a complete parsed response but before success/history/tool dispatch, the client rechecks cancellation, stop event and current deadline. A late response is logged as response_discarded with reason and available usage, then fails without retry or assistant-history/tool commitment. The existing default-off incomplete-stream recovery scope, attempt count and backoff are unchanged.
+
+Changed files
+-------------
+GenericAgent-main/monitor_agent_core/provider.py
+GenericAgent-main/tests/test_monitor_incomplete_stream_recovery.py
+method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_analysis_bridge.py
+method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_offline_harbor.py
+method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/test_pilot_analysis_bridge.py
+method_discovery/curator_supervisor_convergence_v0/posthoc_s_artifact_eval_20261012/test_scratch_observation.py
+method_discovery/curator_supervisor_convergence_v0/posthoc_s_artifact_eval_20261012/test_receipt_and_cleanup_boundaries.py
+
+Selected SHA-256 of checked-in source and tests (working-file bytes at code commit)
+-------------------------------------------------------------------------------
+provider.py AF67070A321CFF89E3505F98211E39E7D5594AC0BC60C58CBC4DF8A5AB5295AC
+test_monitor_incomplete_stream_recovery.py 888ABBC66B46425EEC991CBDA6716809EF0602D409642885C6F571D946DE9C86
+pilot_analysis_bridge.py C4B9E3C230F57E047FEB9E5E8BB72EAB43A85C4A159CD5BEE389B9DAE6CC1219
+pilot_offline_harbor.py CD53DFB56FE5BEE1EAB573381043155D087A7D192CAF175814A14513C7908A97
+test_receipt_and_cleanup_boundaries.py EDFAE4FAC6032B49217CC33656F32952CB8AABB0000AEEFC993BF312BACC9E7D
+
+Actual tests and results
+------------------------
+Command (host Python D:\python\python.exe, PYTHONPATH=GenericAgent-main;.):
+python -m pytest -q method_discovery/curator_supervisor_convergence_v0/posthoc_s_artifact_eval_20261012/test_scratch_observation.py method_discovery/curator_supervisor_convergence_v0/posthoc_s_artifact_eval_20261012/test_receipt_and_cleanup_boundaries.py GenericAgent-main/tests/test_monitor_incomplete_stream_recovery.py GenericAgent-main/tests/test_monitor_provider.py
+Exit code: 0
+stdout: 73 passed, 1 warning in 0.35s
+warning: test-injected optional OSError emitted "Optional scratch observation unavailable for one: OSError".
+An atexit pytest temporary-directory cleanup warning also appeared in this Windows host: PermissionError [WinError 5] for C:\Users\hsy\AppData\Local\Temp\pytest-of-hsy\pytest-951. It did not change pytest's exit code. No temporary directory was deleted manually.
+
+Assertions exercised: slow optional scan while durable receipt is already readable; accepted-ID non-replay; oversized file marked incomplete without reading; file/directory disappearance; optional scan I/O error; mount identity remains hard; abnormal cleanup with and without positive close; normal cleanup; complete fake transport with partial SSE then full SSE; exactly one probe execution; tool-result linkage on next request; response-complete stop/cancel/deadline discard; default recovery and existing provider regression.
+
+Target-image integration regression command:
+python -m unittest method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.test_pilot_analysis_bridge
+Exit code: 1; ran 4 tests in 48.489s, 1 failure (Fyne image subcase). The private Go probe printed `ok _/tmp/probe 0.019s` and then `go: unlinkat /tmp/go-build2952585142/b034/importcfg: permission denied`; returned tool status error. This integration test is NOT reported as passed. No production task or model was run. The failure does not establish whether Go cleanup permission behavior predates this repair; it remains an environment/port regression item for independent review. Other 3 tests completed.
+
+Additional environment check: `python -m pip show shortuuid` reported package not found in D:\python; `GenericAgent-main/monitor_agent_core/pyproject.toml` declares `shortuuid>=1.0`. None of the 73 targeted tests were blocked by this missing dependency. No package was installed and no tests were deleted or weakened to mask it.
+
+Static validation: `git diff --cached --check` before the code commit exited 0. Git printed LF/CRLF working-tree conversion warnings on this Windows host; no whitespace errors were reported.
+
+Limitations and open items
+--------------------------
+The scratch observation is post-receipt only and cannot certify a before/after diff. A scan may be incomplete under its limits or racing filesystem changes. It is not task truth and does not upgrade a version_uncertain source observation. One existing target-image integration test failed due to Go temporary-file cleanup permission denial; no change to task source, mounts or permissions was made to make it green. The pytest atexit warning and absent host shortuuid are recorded above. No real provider, Task, Supervisor or evaluator path was exercised this round; main-brain independent audit is still required before any new run decision.
+
+Delivery
+--------
+The complete repair diff is in 0001-Keep-pilot-receipts-independent-of-scratch-telemetry.patch beside this TXT. This TXT and patch are research-only evidence; the historical run archive and its outputs were not modified.

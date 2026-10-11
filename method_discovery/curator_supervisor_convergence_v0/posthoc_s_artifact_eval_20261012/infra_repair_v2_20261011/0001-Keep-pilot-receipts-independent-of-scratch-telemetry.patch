@@ -1,0 +1,736 @@
+From 85adad6a068d0cdc1899250a86d993c7197a7906 Mon Sep 17 00:00:00 2001
+From: HYC-hsy <3510069313@qq.com>
+Date: Sun, 11 Oct 2026 16:56:09 +0800
+Subject: [PATCH] Keep pilot receipts independent of scratch telemetry and
+ guard late responses
+
+---
+ .../monitor_agent_core/provider.py            |  24 ++-
+ ...test_monitor_incomplete_stream_recovery.py | 106 ++++++++-
+ .../test_receipt_and_cleanup_boundaries.py    | 202 ++++++++++++++++++
+ .../test_scratch_observation.py               |  15 +-
+ .../pilot_analysis_bridge.py                  | 147 +++++++++----
+ .../pilot_offline_harbor.py                   |  20 +-
+ .../test_pilot_analysis_bridge.py             |   4 +-
+ 7 files changed, 448 insertions(+), 70 deletions(-)
+ create mode 100644 method_discovery/curator_supervisor_convergence_v0/posthoc_s_artifact_eval_20261012/test_receipt_and_cleanup_boundaries.py
+
+diff --git a/GenericAgent-main/monitor_agent_core/provider.py b/GenericAgent-main/monitor_agent_core/provider.py
+index 176bbc2b..20376850 100644
+--- a/GenericAgent-main/monitor_agent_core/provider.py
++++ b/GenericAgent-main/monitor_agent_core/provider.py
+@@ -651,9 +651,21 @@ class MonitorProviderClient:
+                 result = self._request_once(tools)
+                 self._progress('response_metadata', request_id=request_id,
+                                metadata=getattr(self, 'last_response_metadata', {}))
+-                if self._cancelled.is_set():
+-                    raise ProviderError('Provider request cancelled')
+                 self._progress('request_usage', request_id=request_id, usage=result[1])
++                stop = getattr(self, 'recovery_stop', None)
++                current_deadline = getattr(self, 'recovery_deadline', None)
++                discard_reason = ('cancelled' if self._cancelled.is_set() else
++                                  'stopped' if stop is not None and stop.is_set() else
++                                  'deadline' if current_deadline is not None and time.monotonic() >= current_deadline
++                                  else None)
++                if discard_reason is not None:
++                    record['outcome'] = 'response_discarded'
++                    record['discard_reason'] = discard_reason
++                    record['response_usage'] = result[1]
++                    self._progress('response_discarded', request_id=request_id,
++                                   reason=discard_reason, usage=result[1])
++                    raise ProviderRecoveryExhausted(
++                        f'Completed provider response discarded after {discard_reason}')
+                 # Completed transport is not necessarily a usable agent response.
+                 # Retry before committing history or consuming a review turn.
+                 if record['purpose'] not in ('continuation', 'format_repair') and not any(
+@@ -691,8 +703,9 @@ class MonitorProviderClient:
+                 if deadline is not None and time.monotonic() >= deadline:
+                     raise ProviderRecoveryExhausted('Monitor stopped or task budget exhausted') from exc
+             except Exception as exc:
+-                record.update(outcome='error', error_type=type(exc).__name__,
+-                             error_chain=failure_chain(exc))
++                if record.get('outcome') != 'response_discarded':
++                    record['outcome'] = 'error'
++                record.update(error_type=type(exc).__name__, error_chain=failure_chain(exc))
+                 raise
+             finally:
+                 record['request_sha256'] = self._last_payload_sha256
+@@ -700,7 +713,8 @@ class MonitorProviderClient:
+                     record['server_execution'] = 'unknown'
+                     record['partial_usage_if_reported'] = getattr(
+                         self, 'last_response_metadata', {}).get('partial_usage')
+-                if self._cancelled.is_set(): record['outcome'] = 'cancelled'
++                if self._cancelled.is_set() and record.get('outcome') != 'response_discarded':
++                    record['outcome'] = 'cancelled'
+                 record['duration_seconds'] = time.monotonic() - started
+                 self.request_attempts.append(record)
+                 self._progress('request_finished', request_id=request_id, **record)
+diff --git a/GenericAgent-main/tests/test_monitor_incomplete_stream_recovery.py b/GenericAgent-main/tests/test_monitor_incomplete_stream_recovery.py
+index 5173116e..bdfdf0b5 100644
+--- a/GenericAgent-main/tests/test_monitor_incomplete_stream_recovery.py
++++ b/GenericAgent-main/tests/test_monitor_incomplete_stream_recovery.py
+@@ -1,5 +1,6 @@
+ import threading
+ import time
++import json
+ 
+ import pytest
+ 
+@@ -7,12 +8,15 @@ from monitor_agent_core.provider import (
+     IncompleteStreamError, MonitorProviderClient, ProviderRecoveryExhausted,
+     RetryableProviderError,
+ )
++from monitor_agent_core.loop import run_review
++from monitor_agent_core.actions import MonitorAction, ToolOutcome
+ 
+ 
+ def client(enabled=True):
+     instance = MonitorProviderClient('anthropic', {
+         'apikey': 'offline', 'apibase': 'https://offline.invalid', 'model': 'offline',
+-        'max_retries': 0, 'incomplete_stream_recovery_v1': enabled,
++        'provider': 'anthropic', 'max_retries': 0,
++        'incomplete_stream_recovery_v1': enabled,
+     })
+     instance.recovery_deadline = time.monotonic() + 100
+     instance.recovery_stop = threading.Event()
+@@ -111,3 +115,103 @@ def test_cancel_after_partial_stream_does_not_retry(monkeypatch):
+     with pytest.raises(Exception, match='cancelled'):
+         instance._request_with_recovery([])
+     assert len(attempts) == 1
++
++
++def _sse(*events):
++    return [b'data: ' + json.dumps(event).encode('utf-8') for event in events]
++
++
++def _tool_stream(tool_id, name, complete=True):
++    events = [
++        {'type': 'message_start', 'message': {'id': 'offline', 'usage': {'input_tokens': 3}}},
++        {'type': 'content_block_start', 'index': 0,
++         'content_block': {'type': 'tool_use', 'id': tool_id, 'name': name}},
++        {'type': 'content_block_delta', 'index': 0,
++         'delta': {'type': 'input_json_delta', 'partial_json': '{}'}},
++        {'type': 'content_block_stop', 'index': 0},
++        {'type': 'message_delta', 'delta': {'stop_reason': 'tool_use'},
++         'usage': {'output_tokens': 2}},
++    ]
++    if complete:
++        events.append({'type': 'message_stop'})
++    return _sse(*events)
++
++
++class _OfflineResponse:
++    status_code = 200
++
++    def __init__(self, lines, after=None):
++        self.lines = lines
++        self.after = after
++
++    def __enter__(self):
++        return self
++
++    def __exit__(self, *_):
++        return False
++
++    def iter_lines(self):
++        for index, line in enumerate(self.lines):
++            if self.after and index == len(self.lines) - 1:
++                self.after()
++            yield line
++
++
++def test_full_transport_partial_then_complete_tool_dispatch_once(monkeypatch):
++    instance = client()
++    payloads = []
++    streams = [_tool_stream('discarded', 'probe', False),
++               _tool_stream('accepted', 'probe'), _tool_stream('terminal', 'wait')]
++
++    def post(*args, **kwargs):
++        payloads.append(kwargs['json'])
++        return _OfflineResponse(streams.pop(0))
++
++    monkeypatch.setattr('monitor_agent_core.provider.requests.post', post)
++    executed = []
++
++    def dispatch(name, args):
++        executed.append(name)
++        if name == 'wait':
++            return ToolOutcome({'status': 'ok'}, action=MonitorAction('wait', {}))
++        return ToolOutcome({'status': 'ok'})
++
++    action = run_review(instance, 'system', 'wake', [], dispatch, max_turns=2)
++    assert action.kind == 'wait'
++    assert executed == ['probe', 'wait']
++    assert len(payloads) == 3
++    assert [x['outcome'] for x in instance.request_attempts] == [
++        'retryable_error', 'success', 'success']
++    assert len([block for message in instance.history if message['role'] == 'assistant'
++                for block in message['content'] if block.get('name') == 'probe']) == 1
++    assert payloads[1]['messages'] == payloads[0]['messages']
++    assert any(block.get('tool_use_id') == 'accepted' for message in payloads[2]['messages']
++               for block in message['content'])
++
++
++@pytest.mark.parametrize('reason', ['stopped', 'deadline', 'cancelled'])
++def test_complete_response_discarded_before_history_or_tool_commit(monkeypatch, reason):
++    instance = client()
++    if reason == 'cancelled':
++        change = instance._cancelled.set
++    elif reason == 'stopped':
++        change = instance.recovery_stop.set
++    else:
++        change = lambda: setattr(instance, 'recovery_deadline', time.monotonic() - 1)
++    sent = []
++
++    def post(*args, **kwargs):
++        sent.append(kwargs['json'])
++        return _OfflineResponse(_tool_stream('late', 'probe'), after=change)
++
++    monkeypatch.setattr('monitor_agent_core.provider.requests.post', post)
++    executed = []
++    with pytest.raises(ProviderRecoveryExhausted, match='discarded'):
++        run_review(instance, 'system', 'wake', [],
++                   lambda name, args: executed.append(name), max_turns=2)
++    assert len(sent) == 1
++    assert not executed
++    assert not any(message['role'] == 'assistant' for message in instance.history)
++    assert instance.request_attempts[0]['outcome'] == 'response_discarded'
++    assert instance.request_attempts[0]['discard_reason'] == reason
++    assert instance.request_attempts[0]['response_usage']['input_tokens'] == 3
+diff --git a/method_discovery/curator_supervisor_convergence_v0/posthoc_s_artifact_eval_20261012/test_receipt_and_cleanup_boundaries.py b/method_discovery/curator_supervisor_convergence_v0/posthoc_s_artifact_eval_20261012/test_receipt_and_cleanup_boundaries.py
+new file mode 100644
+index 00000000..5d58f3bd
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/posthoc_s_artifact_eval_20261012/test_receipt_and_cleanup_boundaries.py
+@@ -0,0 +1,202 @@
++"""Zero-model checks for receipt ordering and pilot sidecar cleanup."""
++
++import json
++from pathlib import Path
++import threading
++
++import pytest
++
++from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010 import pilot_offline_harbor
++from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.pilot_analysis_bridge import (
++    PilotHostBridge, SCHEMA, SCRATCH_SCAN_LIMITS,
++)
++
++
++class Port:
++    def __init__(self, scratch):
++        self.scratch = scratch
++        self.task_volume = 'offline-volume'
++        self.calls = 0
++
++    def _check_mount_sources(self):
++        return None
++
++    def execute(self, *_):
++        self.calls += 1
++        return {'status': 'success', 'stdout': 'known result', 'session_id': None}
++
++    def close(self):
++        return None
++
++
++def _request(bridge):
++    path = bridge.root / 'requests' / 'one.json'
++    path.write_text(json.dumps({'schema': SCHEMA, 'run_id': 'offline',
++        'request_id': 'one', 'operation': 'start', 'code': 'echo known',
++        'code_type': 'bash', 'timeout': 60, 'wait_seconds': 0}), encoding='utf-8')
++
++
++def test_slow_optional_scan_cannot_hold_known_receipt_or_replay(tmp_path, monkeypatch):
++    scratch = tmp_path / 'scratch'
++    (scratch / 'tmp').mkdir(parents=True)
++    (scratch / 'output').mkdir()
++    port = Port(scratch)
++    bridge = PilotHostBridge(root=tmp_path / 'spool', run_id='offline', port=port)
++    _request(bridge)
++    entered, release = threading.Event(), threading.Event()
++
++    def slow_scan():
++        entered.set()
++        assert release.wait(2)
++        return {'files': {}, 'skipped': [], 'snapshot_incomplete': False,
++                'limit_reached': False}
++
++    monkeypatch.setattr(bridge, '_scratch_snapshot', slow_scan)
++    worker = threading.Thread(target=bridge.serve_once)
++    worker.start()
++    assert entered.wait(2)
++    receipt = json.loads((bridge.root / 'responses' / 'one.json').read_text())
++    assert receipt['result']['stdout'] == 'known result'
++    assert port.calls == 1
++    release.set()
++    worker.join(timeout=2)
++    assert not worker.is_alive()
++    (bridge.root / 'responses' / 'one.json').unlink()
++    bridge.serve_once()
++    uncertain = json.loads((bridge.root / 'responses' / 'one.json').read_text())
++    assert uncertain['status'] == 'uncertain'
++    assert port.calls == 1
++
++
++def test_large_file_is_bounded_and_never_reported_as_complete_hash(tmp_path):
++    scratch = tmp_path / 'scratch'
++    (scratch / 'tmp').mkdir(parents=True)
++    (scratch / 'output').mkdir()
++    oversized = scratch / 'tmp' / 'large'
++    with oversized.open('wb') as stream:
++        stream.truncate(SCRATCH_SCAN_LIMITS['file_bytes'] + 1)
++    bridge = PilotHostBridge(root=tmp_path / 'spool', run_id='offline', port=Port(scratch))
++    snapshot = bridge._scratch_snapshot()
++    assert snapshot['snapshot_incomplete'] and snapshot['limit_reached']
++    assert snapshot['limits'] == SCRATCH_SCAN_LIMITS
++    assert 'tmp/large' not in snapshot['files']
++    assert snapshot['skipped'][0] == {'path': 'tmp/large', 'reason': 'byte_limit'}
++    assert snapshot['scanned_bytes'] == 0
++
++
++def test_directory_disappears_after_enumeration(tmp_path, monkeypatch):
++    scratch = tmp_path / 'scratch'
++    vanished = scratch / 'tmp' / 'go-temp-dir'
++    vanished.mkdir(parents=True)
++    (scratch / 'output').mkdir()
++    bridge = PilotHostBridge(root=tmp_path / 'spool', run_id='offline', port=Port(scratch))
++    original = __import__('os').scandir
++
++    def racing_scandir(path):
++        if Path(path) == vanished:
++            raise FileNotFoundError(2, 'directory removed', str(path))
++        return original(path)
++
++    monkeypatch.setattr('method_discovery.curator_supervisor_convergence_v0.'
++                        'real_task_effect_pilot_preflight_20261010.pilot_analysis_bridge.'
++                        'os.scandir', racing_scandir)
++    snapshot = bridge._scratch_snapshot()
++    assert snapshot['snapshot_incomplete']
++    assert {'path': 'tmp/go-temp-dir', 'reason': 'disappeared'} in snapshot['skipped']
++
++
++def test_optional_scan_error_does_not_change_durable_result(tmp_path, monkeypatch):
++    scratch = tmp_path / 'scratch'
++    (scratch / 'tmp').mkdir(parents=True)
++    (scratch / 'output').mkdir()
++    port = Port(scratch)
++    bridge = PilotHostBridge(root=tmp_path / 'spool', run_id='offline', port=port)
++    _request(bridge)
++    monkeypatch.setattr(bridge, '_scratch_snapshot',
++                        lambda: (_ for _ in ()).throw(OSError('optional scan failed')))
++    bridge.serve_once()
++    receipt = json.loads((bridge.root / 'responses' / 'one.json').read_text())
++    assert receipt['status'] == 'ok' and receipt['result']['stdout'] == 'known result'
++    assert bridge.scratch_observation_errors[0]['error_type'] == 'OSError'
++    assert port.calls == 1
++
++
++@pytest.mark.parametrize('cleanup_fails', [False, True])
++def test_abnormal_spool_exit_certifies_only_positive_cleanup(tmp_path, monkeypatch, cleanup_fails):
++    root = tmp_path / 'run'
++    (root / 'control').mkdir(parents=True)
++    (root / 'monitor' / 'monitor_private').mkdir(parents=True)
++    (root / 'monitor' / 'task_evidence').mkdir()
++    (root / 'monitor' / 'task_identity.json').write_text('{}')
++    closes = []
++
++    class FakePort:
++        def __init__(self, **_):
++            pass
++
++        def close(self):
++            closes.append('port')
++
++    class FakeBridge:
++        def __init__(self, **_):
++            self.closed = False
++
++        def serve_once(self):
++            raise RuntimeError('primary spool failure')
++
++        def close(self):
++            closes.append('bridge')
++            if cleanup_fails:
++                raise RuntimeError('cleanup unknown')
++            self.closed = True
++
++    monkeypatch.setattr(pilot_offline_harbor, 'PilotDockerToolPort', FakePort)
++    monkeypatch.setattr(pilot_offline_harbor, 'PilotHostBridge', FakeBridge)
++    stopped, errors = threading.Event(), []
++    pilot_offline_harbor._serve_spool(root, 'offline-image', 'offline-volume',
++                                      'offline-run', stopped, errors)
++    assert stopped.is_set()
++    assert closes == ['bridge']
++    assert any('primary spool failure' in error for error in errors)
++    certificate = root / 'control' / 'sidecar_stopped.json'
++    if cleanup_fails:
++        assert not certificate.exists()
++        assert any('cleanup unknown' in error for error in errors)
++    else:
++        assert json.loads(certificate.read_text()) == {'run_id': 'offline-run', 'clean': True}
++        assert not any('cleanup:' in error for error in errors)
++
++
++def test_normal_spool_exit_uses_same_cleanup_certificate(tmp_path, monkeypatch):
++    root = tmp_path / 'run'
++    (root / 'control').mkdir(parents=True)
++    (root / 'control' / 'agent_end_pending.json').write_text('{}')
++    (root / 'monitor' / 'monitor_private').mkdir(parents=True)
++    (root / 'monitor' / 'task_evidence').mkdir()
++    (root / 'monitor' / 'task_identity.json').write_text('{}')
++    closes = []
++
++    class FakePort:
++        def __init__(self, **_):
++            pass
++
++    class FakeBridge:
++        def __init__(self, **_):
++            self.closed = False
++
++        def serve_once(self):
++            pass
++
++        def close(self):
++            closes.append('bridge')
++            self.closed = True
++
++    monkeypatch.setattr(pilot_offline_harbor, 'PilotDockerToolPort', FakePort)
++    monkeypatch.setattr(pilot_offline_harbor, 'PilotHostBridge', FakeBridge)
++    stopped, errors = threading.Event(), []
++    pilot_offline_harbor._serve_spool(root, 'offline-image', 'offline-volume',
++                                      'offline-run', stopped, errors)
++    assert errors == []
++    assert closes == ['bridge']
++    assert json.loads((root / 'control' / 'sidecar_stopped.json').read_text()) == {
++        'run_id': 'offline-run', 'clean': True}
+diff --git a/method_discovery/curator_supervisor_convergence_v0/posthoc_s_artifact_eval_20261012/test_scratch_observation.py b/method_discovery/curator_supervisor_convergence_v0/posthoc_s_artifact_eval_20261012/test_scratch_observation.py
+index e61eb9f8..8a4592c4 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/posthoc_s_artifact_eval_20261012/test_scratch_observation.py
++++ b/method_discovery/curator_supervisor_convergence_v0/posthoc_s_artifact_eval_20261012/test_scratch_observation.py
+@@ -34,14 +34,14 @@ def test_vanished_file_marks_incomplete_without_losing_receipt(tmp_path, monkeyp
+     vanished.write_text('temporary')
+     port = Port(scratch)
+     bridge = PilotHostBridge(root=tmp_path / 'spool', run_id='offline', port=port)
+-    original = Path.read_bytes
++    original = Path.lstat
+ 
+-    def racing_read(path):
++    def racing_stat(path):
+         if path == vanished:
+-            raise FileNotFoundError(2, 'removed during scan', str(path))
++            raise FileNotFoundError(2, 'removed before stat', str(path))
+         return original(path)
+ 
+-    monkeypatch.setattr(Path, 'read_bytes', racing_read)
++    monkeypatch.setattr(Path, 'lstat', racing_stat)
+     request = {'schema': SCHEMA, 'run_id': 'offline', 'request_id': 'one',
+                'operation': 'start', 'code': 'echo known', 'code_type': 'bash',
+                'timeout': 60, 'wait_seconds': 0}
+@@ -50,8 +50,11 @@ def test_vanished_file_marks_incomplete_without_losing_receipt(tmp_path, monkeyp
+     receipt = json.loads((bridge.root / 'responses' / 'one.json').read_text())
+     assert receipt['status'] == 'ok'
+     assert receipt['result']['stdout'] == 'known command failure'
+-    assert receipt['result']['private_scratch_diff_at_return']['snapshot_incomplete']
+-    assert receipt['result']['private_scratch_diff_at_return']['skipped_after'][0]['reason'] == 'disappeared'
++    observation = json.loads((bridge.root / 'scratch_observations' / 'one.json').read_text())
++    assert observation['kind'] == 'post_receipt_snapshot'
++    assert observation['diff_unavailable'] is True
++    assert observation['snapshot']['snapshot_incomplete']
++    assert observation['snapshot']['skipped'][0]['reason'] == 'disappeared'
+     assert port.calls == 1
+     (bridge.root / 'responses' / 'one.json').unlink()
+     bridge.serve_once()
+diff --git a/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_analysis_bridge.py b/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_analysis_bridge.py
+index 769ffb7b..67751d9d 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_analysis_bridge.py
++++ b/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_analysis_bridge.py
+@@ -8,14 +8,18 @@ import errno
+ import os
+ from pathlib import Path
+ import shutil
++import stat
+ import subprocess
+ import tempfile
+ import time
++import warnings
+ 
+ from method_discovery.curator_supervisor_convergence_v0.diagnostic_static_adapter_v1_20261009.docker_tool import DockerToolPort
+ 
+ 
+ SCHEMA = 'pilot-analysis-spool-v1'
++SCRATCH_SCAN_LIMITS = {'entries': 20000, 'file_bytes': 8 * 1024 * 1024,
++                       'total_bytes': 32 * 1024 * 1024, 'seconds': 5, 'chunk_bytes': 64 * 1024}
+ 
+ 
+ def _atomic_json(path: Path, value: dict) -> None:
+@@ -159,16 +163,17 @@ class PilotHostBridge:
+         self.run_id = str(run_id)
+         self.port = port
+         self.closed = False
+-        self._session_scratch_before = {}
++        self.scratch_observation_errors = []
+         if adopt_existing:
+             expected = {'schema': SCHEMA, 'run_id': self.run_id}
+             identity = json.loads((self.root / 'identity.json').read_text(encoding='utf-8'))
+             if identity != expected or any(not (self.root / name).is_dir()
+                                            for name in ('requests', 'accepted', 'responses')):
+                 raise RuntimeError('Existing pilot spool identity mismatch')
++            (self.root / 'scratch_observations').mkdir(exist_ok=True)
+         else:
+             self.root.mkdir(parents=True, exist_ok=False)
+-            for name in ('requests', 'accepted', 'responses'):
++            for name in ('requests', 'accepted', 'responses', 'scratch_observations'):
+                 (self.root / name).mkdir()
+             _atomic_json(self.root / 'identity.json', {'schema': SCHEMA, 'run_id': self.run_id})
+ 
+@@ -180,7 +185,6 @@ class PilotHostBridge:
+         if op == 'start':
+             if set(request) != common | {'code', 'code_type', 'timeout', 'wait_seconds'}:
+                 raise ValueError('Analysis start fields mismatch')
+-            before = self._scratch_snapshot()
+             result = self.port.execute('code_run', {
+                 'code': request['code'], 'type': request['code_type'],
+                 'timeout': request['timeout'], 'wait_seconds': request['wait_seconds']})
+@@ -188,9 +192,6 @@ class PilotHostBridge:
+                 self.port.mirror_output(result['session_id'])
+             result['source_version'] = {'status': 'version_uncertain',
+                                         'task_volume': self.port.task_volume}
+-            if result.get('session_id'):
+-                self._session_scratch_before[result['session_id']] = before
+-            result['private_scratch_diff_at_return'] = self._scratch_diff(before, self._scratch_snapshot())
+             return result
+         if op == 'read':
+             if set(request) != common | {'session_id', 'wait_seconds', 'cancel'}:
+@@ -202,9 +203,6 @@ class PilotHostBridge:
+                 self.port.mirror_output(result['session_id'])
+             result['source_version'] = {'status': 'version_uncertain',
+                                         'task_volume': self.port.task_volume}
+-            before = self._session_scratch_before.get(request['session_id'])
+-            if before is not None and result.get('status') != 'running':
+-                result['private_scratch_diff'] = self._scratch_diff(before, self._scratch_snapshot())
+             return result
+         if op == 'close' and set(request) == common:
+             self.port.close()
+@@ -221,50 +219,87 @@ class PilotHostBridge:
+         except OSError as exc:
+             return {'files': {}, 'skipped': [{'path': str(getattr(exc, 'filename', None)),
+                                               'reason': type(exc).__name__}],
+-                    'snapshot_incomplete': True, 'limit_reached': False}
++                    'snapshot_incomplete': True, 'limit_reached': False,
++                    'scanned_bytes': 0, 'entries': 0, 'limits': dict(SCRATCH_SCAN_LIMITS)}
+ 
+     def _scratch_files(self):
+         root = self.port.scratch
+         files, skipped = {}, []
+         started = time.monotonic()
+-        limit = 20000
+-        for name in ('tmp', 'output'):
+-            def vanished(exc):
+-                if exc.errno in (errno.ENOENT, errno.ENOTDIR):
+-                    skipped.append({'path': str(exc.filename), 'reason': 'disappeared'})
+-                else:
+-                    raise exc
+-            for directory, dirs, names in os.walk(root / name, onerror=vanished):
+-                if time.monotonic() - started > 5 or len(files) + len(skipped) >= limit:
+-                    return {'files': files, 'skipped': skipped,
+-                            'snapshot_incomplete': True, 'limit_reached': True}
+-                for filename in names:
+-                    if time.monotonic() - started > 5 or len(files) + len(skipped) >= limit:
+-                        return {'files': files, 'skipped': skipped,
+-                                'snapshot_incomplete': True, 'limit_reached': True}
+-                    path = Path(directory) / filename
+-                    relative = path.relative_to(root).as_posix()
+-                    try:
+-                        if path.is_symlink() or not path.is_file():
+-                            continue
+-                        files[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+-                    except OSError as exc:
+-                        if exc.errno not in (errno.ENOENT, errno.ENOTDIR):
+-                            raise
+-                        skipped.append({'path': relative, 'reason': 'disappeared'})
++        limits = SCRATCH_SCAN_LIMITS
++        scanned_bytes = 0
++        entries = 0
++        limit_reached = False
++        pending = [root / 'output', root / 'tmp']
++        while pending and not limit_reached:
++            directory = pending.pop()
++            try:
++                if not directory.resolve(strict=True).is_relative_to(root):
++                    skipped.append({'path': directory.relative_to(root).as_posix(),
++                                    'reason': 'redirected_directory'})
++                    continue
++                with os.scandir(directory) as listing:
++                    for entry in listing:
++                        if time.monotonic() - started >= limits['seconds'] or entries >= limits['entries']:
++                            limit_reached = True
++                            break
++                        entries += 1
++                        path = Path(entry.path)
++                        relative = path.relative_to(root).as_posix()
++                        try:
++                            info = path.lstat()
++                            if stat.S_ISDIR(info.st_mode):
++                                pending.append(path)
++                                continue
++                            if not stat.S_ISREG(info.st_mode):
++                                skipped.append({'path': relative, 'reason': 'not_regular_file'})
++                                continue
++                            if not path.resolve(strict=True).is_relative_to(root):
++                                skipped.append({'path': relative, 'reason': 'redirected_file'})
++                                continue
++                            if (info.st_size > limits['file_bytes'] or
++                                    info.st_size > limits['total_bytes'] - scanned_bytes):
++                                skipped.append({'path': relative, 'reason': 'byte_limit'})
++                                limit_reached = True
++                                continue
++                            digest = hashlib.sha256()
++                            file_bytes = 0
++                            with path.open('rb') as stream:
++                                opened = os.fstat(stream.fileno())
++                                if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
++                                    skipped.append({'path': relative, 'reason': 'changed_before_read'})
++                                    continue
++                                while True:
++                                    if time.monotonic() - started >= limits['seconds']:
++                                        limit_reached = True
++                                        skipped.append({'path': relative, 'reason': 'time_limit'})
++                                        break
++                                    chunk = stream.read(min(limits['chunk_bytes'],
++                                        limits['file_bytes'] - file_bytes + 1,
++                                        limits['total_bytes'] - scanned_bytes + 1))
++                                    if not chunk:
++                                        files[relative] = digest.hexdigest()
++                                        break
++                                    file_bytes += len(chunk)
++                                    scanned_bytes += len(chunk)
++                                    if (file_bytes > limits['file_bytes'] or
++                                            scanned_bytes > limits['total_bytes']):
++                                        limit_reached = True
++                                        skipped.append({'path': relative, 'reason': 'byte_limit'})
++                                        break
++                                    digest.update(chunk)
++                        except OSError as exc:
++                            skipped.append({'path': relative, 'reason':
++                                            'disappeared' if exc.errno in (errno.ENOENT, errno.ENOTDIR)
++                                            else type(exc).__name__})
++            except OSError as exc:
++                skipped.append({'path': directory.relative_to(root).as_posix(),
++                                'reason': 'disappeared' if exc.errno in (errno.ENOENT, errno.ENOTDIR)
++                                else type(exc).__name__})
+         return {'files': files, 'skipped': skipped,
+-                'snapshot_incomplete': bool(skipped), 'limit_reached': False}
+-
+-    @staticmethod
+-    def _scratch_diff(before, after):
+-        old, new = before['files'], after['files']
+-        return {'added': sorted(new.keys() - old.keys()),
+-                'changed': sorted(path for path in new.keys() & old.keys()
+-                                  if new[path] != old[path]),
+-                'removed': sorted(old.keys() - new.keys()),
+-                'snapshot_incomplete': before['snapshot_incomplete'] or after['snapshot_incomplete'],
+-                'skipped_before': before['skipped'], 'skipped_after': after['skipped'],
+-                'limit_reached': before['limit_reached'] or after['limit_reached']}
++                'snapshot_incomplete': bool(skipped) or limit_reached,
++                'limit_reached': limit_reached, 'scanned_bytes': scanned_bytes,
++                'entries': entries, 'limits': dict(limits)}
+ 
+     def serve_once(self):
+         for request_path in sorted((self.root / 'requests').glob('*.json')):
+@@ -294,6 +329,24 @@ class PilotHostBridge:
+                 receipt = {'run_id': self.run_id, 'request_id': request_id,
+                            'status': 'ok', 'result': {'status': 'error', 'error': str(exc)}}
+             _atomic_json(receipt_path, receipt)
++            if request.get('operation') in ('start', 'read'):
++                # Optional observation is deliberately after the durable main
++                # receipt.  It never changes that receipt or replays the command.
++                observation_path = self.root / 'scratch_observations' / request_path.name
++                try:
++                    snapshot = self._scratch_snapshot()
++                    observation = {'run_id': self.run_id, 'request_id': request_id,
++                                   'kind': 'post_receipt_snapshot', 'diff_unavailable': True,
++                                   'snapshot': snapshot}
++                    _atomic_json(observation_path, observation)
++                except OSError as exc:
++                    # Scratch statistics are auxiliary; accepted/result/receipt
++                    # identities and mount checks remain hard gates.
++                    self.scratch_observation_errors.append({
++                        'request_id': request_id, 'error_type': type(exc).__name__,
++                        'error': str(exc)})
++                    warnings.warn(f'Optional scratch observation unavailable for {request_id}: '
++                                  f'{type(exc).__name__}')
+ 
+     def close(self):
+         if not self.closed:
+diff --git a/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_offline_harbor.py b/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_offline_harbor.py
+index 66494f8f..8040c52e 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_offline_harbor.py
++++ b/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_offline_harbor.py
+@@ -18,7 +18,7 @@ import sys
+ import threading
+ import time
+ 
+-from .pilot_analysis_bridge import PilotDockerToolPort, PilotHostBridge
++from .pilot_analysis_bridge import PilotDockerToolPort, PilotHostBridge, _atomic_json
+ from .pilot_entry import TASKS, prepare_run, require_live_authorization
+ from long_context_bench.scripts.isolated_run_bundle import digest_tree
+ 
+@@ -53,6 +53,7 @@ def _serve_spool(root: Path, image: str, volume: str, run_id: str,
+                  stopped: threading.Event, errors: list[str]) -> None:
+     control = root / 'control'
+     bridge = None
++    port = None
+     try:
+         while not stopped.is_set():
+             private = root / 'monitor' / 'monitor_private'
+@@ -67,21 +68,22 @@ def _serve_spool(root: Path, image: str, volume: str, run_id: str,
+             if bridge is not None:
+                 bridge.serve_once()
+             if (control / 'agent_end_pending.json').exists():
+-                if bridge is not None:
+-                    bridge.close()
+-                clearance = control / 'sidecar_stopped.json'
+-                clearance.write_text(json.dumps({'run_id': run_id, 'clean': True}), encoding='utf-8')
+                 return
+             time.sleep(.05)
+     except BaseException as exc:
+         errors.append(f'{type(exc).__name__}: {exc}')
+         stopped.set()
+     finally:
+-        if bridge is not None and not bridge.closed:
+-            try:
++        try:
++            if bridge is not None and not bridge.closed:
+                 bridge.close()
+-            except BaseException as exc:
+-                errors.append(f'cleanup: {type(exc).__name__}: {exc}')
++            elif bridge is None and port is not None:
++                port.close()
++            if bridge is not None and not bridge.closed:
++                raise RuntimeError('Sidecar close did not certify stopped state')
++            _atomic_json(control / 'sidecar_stopped.json', {'run_id': run_id, 'clean': True})
++        except BaseException as exc:
++            errors.append(f'cleanup: {type(exc).__name__}: {exc}')
+ 
+ 
+ def _cleanup_offline_containers(run_root: Path) -> list[str]:
+diff --git a/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/test_pilot_analysis_bridge.py b/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/test_pilot_analysis_bridge.py
+index 3d9c5635..b7c1d545 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/test_pilot_analysis_bridge.py
++++ b/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/test_pilot_analysis_bridge.py
+@@ -188,8 +188,8 @@ class PilotAnalysisBridgeFixture(unittest.TestCase):
+                         'GO111MODULE=off go test .')
+                     self.assertEqual(private_test['status'], 'success', private_test)
+                     self.assertIn('ok', private_test['stdout'])
+-                    self.assertIn('tmp/probe/source.txt',
+-                                  private_test['private_scratch_diff']['added'])
++                    self.assertEqual((scratch / 'tmp' / 'probe' / 'source.txt').read_text(),
++                                     'private-v2')
+                     public_build = self._completed(client,
+                         'cd /app; go env GOMODCACHE; go test -run "^$" .', timeout=300)
+                     self.assertEqual(public_build['status'], 'success', public_build)
+-- 
+2.49.0.windows.1
+
