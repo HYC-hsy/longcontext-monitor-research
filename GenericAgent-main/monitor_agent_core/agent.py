@@ -129,12 +129,17 @@ EVIDENCE_TOOLS = [
         'reason': {'type': 'string'}, 'receipt_ids': {'type': 'array', 'items': {'type': 'string'}},
         'new_lead': {'type': 'string'}, 'hypothesis': {'type': 'string'},
     }, ['case_id', 'status', 'reason']),
+    _tool('frontier_focus', 'Advance deterministically to an unvisited local case or return to its parent.', {
+        'return_parent': {'type': 'boolean'},
+    }, []),
     _tool('frontier_finding', 'Record a bounded, source-linked finding for the current packet.', {
         'packet_id': {'type': 'string'}, 'case_id': {'type': 'string'},
         'scope': {'type': 'string'}, 'task_basis': {'type': 'string'},
         'receipt_ids': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1},
-        'claim': {'type': 'string'},
-    }, ['packet_id', 'case_id', 'scope', 'task_basis', 'receipt_ids', 'claim']),
+        'claim': {'type': 'string'}, 'kind': {'type': 'string', 'enum': [
+            'counterexample', 'correction', 'investigation_request',
+            'clarification', 'local_observation']},
+    }, ['packet_id', 'case_id', 'scope', 'task_basis', 'receipt_ids', 'claim', 'kind']),
 ]
 
 
@@ -936,6 +941,8 @@ class MonitorAgent:
         path = self.workspace.private_root / 'audit' / 'dialogue.jsonl'
         path.parent.mkdir(parents=True, exist_ok=True)
         record = dict(timestamp=time.time(), review_id=self.review_id, event=event, **payload)
+        if self.evidence_package_v1:
+            record['evidence_stage'] = self._evidence_stage
         with path.open('a', encoding='utf-8') as stream:
             stream.write(json.dumps(record, ensure_ascii=False, default=str) + '\n')
             stream.flush()
@@ -1218,6 +1225,9 @@ class MonitorAgent:
                     return ToolOutcome(self.evidence_frontier.open_case(arguments))
                 if name == 'frontier_revise':
                     return ToolOutcome(self.evidence_frontier.revise_case(arguments))
+                if name == 'frontier_focus':
+                    return ToolOutcome(self.evidence_frontier.next_focus(
+                        return_parent=arguments.get('return_parent', False)))
                 if name == 'packet_ready':
                     if self._evidence_stage != 'A':
                         raise ValueError('packet_ready belongs only to phase A')
@@ -1233,6 +1243,7 @@ class MonitorAgent:
                     return ToolOutcome(self.evidence_frontier.finding(
                         arguments, handoff=self.root_frame_handoff))
                 if name == 'intervene':
+                    self._evidence_verify_finding_sources(arguments.get('finding_id'))
                     self.evidence_frontier.check_intervention(
                         arguments.get('finding_id'), handoff=self.root_frame_handoff)
                 if name == 'allow_complete':
@@ -1735,6 +1746,26 @@ class MonitorAgent:
         else:
             raise EvidencePackageIntegrityError('Unknown evidence request purpose')
 
+    def _evidence_verify_finding_sources(self, finding_id):
+        finding = self.evidence_frontier.state['findings'].get(finding_id)
+        if finding is None:
+            raise ValueError('Unknown local finding')
+        stale = []
+        for receipt_id in finding['receipt_ids']:
+            receipt = self.evidence_frontier.state['receipts'][receipt_id]
+            path = receipt.get('source_path')
+            if not isinstance(path, str) or not path.startswith('task/'):
+                continue
+            try:
+                current = self.workspace.read_text(path, 1, 1, max_chars=1)
+                if current['sha256'] != receipt['result']['sha256']:
+                    stale.append(receipt_id)
+            except (OSError, ValueError, KeyError):
+                stale.append(receipt_id)
+        if stale:
+            self.evidence_frontier.stale_receipts(stale, 'cited_task_source_changed')
+            raise ValueError('Cited Task source changed; re-investigate before intervention')
+
     def _review_evidence(self, wake_context, completion_pending, root_handoff,
                          max_turns_override, root_transition_view):
         if (not isinstance(self.analysis, SpoolAnalysisSessions)
@@ -1774,6 +1805,8 @@ class MonitorAgent:
                                      json.dumps(phase_a_history, ensure_ascii=False).encode('utf-8')).hexdigest())
             if first.kind == 'root_route':
                 self.client.restore_history(parent_history)
+                first.payload['prior_model_turns'] = (
+                    self._evidence_model_cycles + self._evidence_maintenance_calls)
                 return first
             if first.kind != 'packet_ready':
                 raise EvidencePackageIntegrityError('Phase A did not produce a packet handoff')
@@ -1797,7 +1830,8 @@ class MonitorAgent:
                                   max_turns_override=remaining,
                                   root_transition_view=root_transition_view)
             if outcome.kind == 'root_route':
-                outcome.payload['prior_model_turns'] = self._evidence_model_cycles
+                outcome.payload['prior_model_turns'] = (
+                    self._evidence_model_cycles + self._evidence_maintenance_calls)
             return outcome
         except EvidencePackageIntegrityError:
             self._analysis_integrity_failure = True
@@ -2006,6 +2040,11 @@ class MonitorAgent:
                     "history_before": before, "history_after": self.client.history_measure(),
                     "action": asdict(action) if action else None,
                     "frame": self.frame_kind, "handoff": self.root_frame_handoff,
+                    **({'evidence_stage': self._evidence_stage,
+                        'evidence_model_cycles': self._evidence_model_cycles,
+                        'evidence_maintenance_attempts': self._evidence_maintenance_calls,
+                        'evidence_frontier_revision': self.evidence_frontier.state['revision']
+                         if self.evidence_frontier else None} if self.evidence_package_v1 else {}),
                 }, ensure_ascii=False) + "\n", mode="append",
             )
             if self.rer_v0 and (sys.exc_info()[1] is not None or

@@ -139,6 +139,10 @@ class EvidenceFrontier:
         parent = args.get('parent_id')
         if parent is not None and parent not in self.state['cases']:
             raise ValueError('Unknown parent case')
+        if any(case['task_basis'] == basis and case['scope'] == scope and
+               case['observable_consequence'] == consequence and
+               case['parent_id'] == parent for case in self.state['cases'].values()):
+            raise ValueError('An identical local case already exists; revise it instead')
         case_id = 'case-' + uuid.uuid4().hex
         def apply(state):
             state['cases'][case_id] = {'id': case_id, 'task_basis': basis, 'scope': scope,
@@ -186,6 +190,28 @@ class EvidenceFrontier:
         self.change('case_revised', apply)
         return {'status': 'recorded', 'case_id': case_id, 'revision': self.state['revision']}
 
+    def next_focus(self, *, return_parent=False):
+        if type(return_parent) is not bool:
+            raise ValueError('return_parent must be boolean')
+        def apply(state):
+            if return_parent:
+                if not state['parents']:
+                    raise ValueError('No parent focus to restore')
+                state['focus'] = state['parents'].pop()
+            else:
+                candidates = [key for key in state['order'] if state['cases'][key]['status']
+                              not in {'retracted', 'stale'}]
+                if not candidates:
+                    state['focus'] = None
+                elif state['focus'] not in candidates:
+                    state['focus'] = candidates[0]
+                else:
+                    offset = candidates.index(state['focus'])
+                    state['focus'] = candidates[(offset + 1) % len(candidates)]
+            return state['focus']
+        focus = self.change('focus_advanced', apply)
+        return {'status': 'recorded', 'focus': focus, 'revision': self.state['revision']}
+
     def register_receipt(self, tool, arguments, result):
         if tool not in {'file_read', 'code_run'}:
             raise ValueError('Only executed investigation tools issue receipts')
@@ -193,9 +219,11 @@ class EvidenceFrontier:
         receipt_id = 'receipt-' + uuid.uuid4().hex
         record = {'id': receipt_id, 'tool': tool, 'arguments_sha256': digest(arguments),
                   'result_sha256': digest(result), 'result': result,
+                  'source_path': arguments.get('path') if tool == 'file_read' else None,
                   'source_version': result.get('source_version', {'status': 'version_uncertain'}),
                   'kind': ('source_read' if tool == 'file_read' else 'process_receipt'),
-                  'completion': (result.get('status') if tool == 'code_run' else 'read_completed')}
+                  'completion': (result.get('status') if tool == 'code_run' else 'read_completed'),
+                  'behavior_verified': False}
         self.change('receipt_recorded', lambda state: state['receipts'].update({receipt_id: record}))
         return receipt_id
 
@@ -222,13 +250,25 @@ class EvidenceFrontier:
         if not isinstance(receipt_ids, list) or not receipt_ids or any(
                 item not in self.state['receipts'] for item in receipt_ids):
             raise ValueError('Finding needs existing host-issued receipts')
+        if any(self.state['receipts'][item]['completion'] in {'running', 'unavailable', None}
+               for item in receipt_ids):
+            raise ValueError('Finding cannot promote an incomplete process receipt')
         claim = _text(args.get('claim'), 'claim')
+        kind = args.get('kind')
+        if kind not in {'counterexample', 'correction', 'investigation_request',
+                        'clarification', 'local_observation'}:
+            raise ValueError('Finding kind must identify its bounded purpose')
+        if kind in {'counterexample', 'correction'} and not any(
+                self.state['receipts'][item]['tool'] == 'code_run' or
+                self.state['receipts'][item].get('source_path') not in {
+                    None, 'task/original_task.txt'} for item in receipt_ids):
+            raise ValueError('Concrete correction needs an implementation, event or probe receipt')
         finding_id = 'finding-' + uuid.uuid4().hex
         def apply(state):
             state['findings'][finding_id] = {'id': finding_id, 'packet_id': packet['id'],
                 'packet_revision': packet['revision'], 'handoff': handoff,
                 'case_id': case_id, 'scope': case['scope'], 'task_basis': case['task_basis'],
-                'receipt_ids': receipt_ids, 'claim': claim,
+                'receipt_ids': receipt_ids, 'claim': claim, 'kind': kind,
                 'status': 'current', 'revision': state['revision'] + 1}
             state['cases'][case_id]['finding_ids'].append(finding_id)
         self.change('finding_recorded', apply)
@@ -245,13 +285,31 @@ class EvidenceFrontier:
             raise ValueError('Finding case was withdrawn or became stale')
         return finding
 
+    def stale_receipts(self, receipt_ids, reason):
+        if not receipt_ids:
+            return
+        lost = set(receipt_ids)
+        def apply(state):
+            for case in state['cases'].values():
+                if lost.intersection(case['receipts']):
+                    case['status'] = 'stale'
+                    case.setdefault('revisions', []).append({
+                        'revision': state['revision'] + 1, 'status': 'stale',
+                        'reason': reason, 'receipt_ids': sorted(lost)})
+            for finding in state['findings'].values():
+                if lost.intersection(finding['receipt_ids']):
+                    finding['status'] = 'stale'
+        self.change('source_changed', apply)
+
     def check_allow(self, revision, *, handoff):
         self.verify()
         if (type(revision) is not int or revision != self.state['revision'] or
                 self.state['packet'] is None or self.state['packet']['handoff'] != handoff):
             raise ValueError('Allow requires current packet and latest frontier revision')
-        live = [item['id'] for item in self.state['cases'].values()
-                if item['status'] == 'counterexample']
+        live = [item['id'] for item in self.state['findings'].values()
+                if item['status'] == 'current' and item['kind'] in
+                {'counterexample', 'correction'} and
+                self.state['cases'][item['case_id']]['status'] not in {'retracted', 'stale'}]
         if live:
             raise ValueError('Current concrete objection requires resolution or withdrawal: ' + ','.join(live))
 

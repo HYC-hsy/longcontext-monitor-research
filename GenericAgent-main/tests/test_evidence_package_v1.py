@@ -73,6 +73,57 @@ def test_frontier_durable_pages_tamper_and_protected_file_tools(tmp_path):
         restored.verify()
 
 
+def test_child_focus_finding_provenance_and_current_objection(tmp_path):
+    (tmp_path / 'monitor').mkdir()
+    state = EvidenceFrontier(tmp_path / 'monitor' / 'monitor_private')
+    parent = state.open_case({'task_basis': 'Original task', 'scope': 'interface-A',
+                              'observable_consequence': 'Visible effect', 'leads': ['Trace caller']})['case_id']
+    sibling = state.open_case({'task_basis': 'Original task', 'scope': 'interface-B',
+                               'observable_consequence': 'Visible effect', 'leads': ['Trace caller']})['case_id']
+    child = state.open_case({'task_basis': 'Original task', 'scope': 'implementation-A',
+                             'observable_consequence': 'State propagation', 'leads': ['Read state'],
+                             'parent_id': parent})['case_id']
+    assert state.next_focus(return_parent=True)['focus'] == parent
+    assert state.next_focus()['focus'] == sibling
+    assert state.next_focus()['focus'] == child
+    receipt = state.register_receipt('file_read', {'path': 'task/workspace/source.go'},
+                                     {'sha256': 'source-v1', 'status': 'ok'})
+    packet = state.packet_ready(handoff={'request_id': 'completion-1', 'generation': 1},
+                                task_cursor=3)
+    with pytest.raises(ValueError, match='host-issued receipts'):
+        state.finding({'packet_id': packet['id'], 'case_id': parent,
+                       'scope': 'interface-A', 'task_basis': 'Original task',
+                       'receipt_ids': ['made-up'], 'claim': 'not an observation',
+                       'kind': 'counterexample'}, handoff=packet['handoff'])
+    finding = state.finding({'packet_id': packet['id'], 'case_id': parent,
+                             'scope': 'interface-A', 'task_basis': 'Original task',
+                             'receipt_ids': [receipt], 'claim': 'bounded source contradiction',
+                             'kind': 'counterexample'}, handoff=packet['handoff'])['finding_id']
+    with pytest.raises(ValueError, match='concrete objection'):
+        state.check_allow(state.state['revision'], handoff=packet['handoff'])
+    state.revise_case({'case_id': parent, 'status': 'retracted',
+                       'reason': 'Source premise overturned', 'receipt_ids': [receipt]})
+    state.check_allow(state.state['revision'], handoff=packet['handoff'])
+    with pytest.raises(ValueError):
+        state.check_intervention(finding, handoff=packet['handoff'])
+
+
+def test_incomplete_process_is_not_behavioral_evidence(tmp_path):
+    (tmp_path / 'monitor').mkdir()
+    state = EvidenceFrontier(tmp_path / 'monitor' / 'monitor_private')
+    case = state.open_case({'task_basis': 'Original task', 'scope': 'route',
+                            'observable_consequence': 'Response', 'leads': ['Run probe']})['case_id']
+    running = state.register_receipt('code_run', {'code': 'go test ./...'},
+                                      {'status': 'running', 'session_id': 'session-1'})
+    assert state.state['receipts'][running]['behavior_verified'] is False
+    packet = state.packet_ready(handoff=None, task_cursor=0)
+    with pytest.raises(ValueError, match='incomplete process'):
+        state.finding({'packet_id': packet['id'], 'case_id': case,
+                       'scope': 'route', 'task_basis': 'Original task',
+                       'receipt_ids': [running], 'claim': 'tests passed',
+                       'kind': 'counterexample'}, handoff=None)
+
+
 def test_real_provider_send_two_phase_packet_finding_and_delivery(tmp_path, monkeypatch):
     monitor, client, workspace = make_monitor(tmp_path)
     monitor.analysis = TestPort()
@@ -132,7 +183,8 @@ def test_real_provider_send_two_phase_packet_finding_and_delivery(tmp_path, monk
             arguments = {'packet_id': state['packet']['id'],
                          'case_id': state['order'][0], 'task_basis': 'Public route',
                          'scope': 'route-handler', 'receipt_ids': list(state['receipts']),
-                         'claim': 'Task basis was inspected; bounded advice remains possible.'}
+                         'claim': 'Task basis was inspected; bounded advice remains possible.',
+                         'kind': 'investigation_request'}
         else:
             arguments = {'finding_id': next(iter(monitor.evidence_frontier.state['findings'])),
                          'message': 'Please inspect the public route behavior.'}
