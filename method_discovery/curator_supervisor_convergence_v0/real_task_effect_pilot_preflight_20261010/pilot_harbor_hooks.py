@@ -107,9 +107,22 @@ class PilotTrialHooks:
     async def agent_end(self, _event):
         agent_result = getattr(self.trial.result, 'agent_result', None)
         metadata = getattr(agent_result, 'metadata', None) or {}
+        terminal_read = await self.trial.agent_environment.exec(
+            'cat /logs/agent/task_terminal.json', timeout_sec=30, user='root')
+        try:
+            terminal = json.loads(terminal_read.stdout) if terminal_read.return_code == 0 else None
+        except (TypeError, ValueError):
+            terminal = None
+        terminal_identity_valid = (isinstance(terminal, dict) and
+                                   terminal.get('run_id') == self.spec['run_id'] and
+                                   terminal.get('task_id') == self.spec['task_id'] and
+                                   set(terminal) == {'run_id', 'task_id', 'result'})
+        incomplete = self.archive.parent / 'monitor' / 'completion_incomplete.json'
         legal_agent_end = (metadata.get('round_end_seen') is True and
                            metadata.get('wrapper_return_code') == 0 and
-                           metadata.get('archive_status') == 'finished')
+                           metadata.get('archive_status') == 'finished' and
+                           terminal_identity_valid and terminal['result'] == 'CURRENT_TASK_DONE' and
+                           not incomplete.exists())
         _atomic(self.control / 'agent_end_pending.json',
                 {'run_id': self.spec['run_id'], 'container_id': self.container_id})
         deadline = time.monotonic() + 120
@@ -156,6 +169,9 @@ class PilotTrialHooks:
             'sidecar_clean': True, 'writers_stopped': True,
             'tar_sha256': self.product_sha256, 'tar_bytes': destination.stat().st_size,
             'evaluator_released': False, 'legal_agent_end': legal_agent_end,
+            'task_terminal': terminal if terminal_identity_valid else None,
+            'task_terminal_identity_valid': bool(terminal_identity_valid),
+            'completion_incomplete_present': incomplete.exists(),
             'agent_metadata_public': {key: metadata.get(key) for key in
                 ('round_end_seen', 'wrapper_return_code', 'archive_status')},
         })

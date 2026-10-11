@@ -445,7 +445,13 @@ class GenericAgent:
                         os.path.join(manual_root, 'interventions'),
                         self.request_monitor_interruption,
                     ).start()
-                for chunk in gen:
+                task_terminal = None
+                while True:
+                    try:
+                        chunk = next(gen)
+                    except StopIteration as stopped:
+                        task_terminal = stopped.value
+                        break
                     if consume_file(self.task_dir, '_stop'): self.abort() 
                     if self.stop_sig: break
                     if isinstance(chunk, dict) and 'turn' in chunk: 
@@ -458,11 +464,14 @@ class GenericAgent:
                 if self.inc_out and last_pos < len(full_resp):
                     display_queue.put({'next': full_resp[last_pos:], 'source': source,
                                     'turn': curr_turn, 'outputs': turn_resps[-2:]})
-                display_queue.put({'done': full_resp, 'source': source, 'turn': curr_turn, 'outputs': turn_resps.copy()})
+                display_queue.put({'done': full_resp, 'source': source, 'turn': curr_turn,
+                                   'outputs': turn_resps.copy(), 'task_terminal': task_terminal})
                 self.history = handler.history_info
             except Exception as e:
                 print(f"Backend Error: {format_error(e)}")
-                display_queue.put({'done': full_resp + f'\n```\n{format_error(e)}\n```', 'source': source, 'turn': curr_turn, 'outputs': turn_resps.copy()})
+                display_queue.put({'done': full_resp + f'\n```\n{format_error(e)}\n```', 'source': source,
+                                   'turn': curr_turn, 'outputs': turn_resps.copy(),
+                                   'task_terminal': {'result': 'EXCEPTION'}})
             finally:
                 if manual_inbox is not None:
                     manual_inbox.close()
@@ -535,6 +544,19 @@ if __name__ == '__main__':
             while 'done' not in (item := dq.get(timeout=2200)): 
                 if 'next' in item: 
                     with open(outfile, 'w', encoding='utf-8') as f: f.write(item.get('next', ''))
+            if args.task and os.environ.get('GA_BENCH_RUN_ID') and os.path.isdir('/logs/agent'):
+                terminal = item.get('task_terminal')
+                terminal_record = {
+                    'run_id': os.environ['GA_BENCH_RUN_ID'],
+                    'task_id': os.environ.get('GA_BENCH_TASK_ID'),
+                    'result': terminal.get('result') if isinstance(terminal, dict) else None,
+                }
+                terminal_path = '/logs/agent/task_terminal.json'
+                with open(terminal_path + '.pending', 'x', encoding='utf-8') as f:
+                    json.dump(terminal_record, f, sort_keys=True)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(terminal_path + '.pending', terminal_path)
             with open(outfile, 'w', encoding='utf-8') as f: f.write(item['done'] + '\n\n[ROUND END]\n')
             if not args.task: break
             consume_file(d, '_stop')  # 已经成功停下来了，避免打断下次reply
