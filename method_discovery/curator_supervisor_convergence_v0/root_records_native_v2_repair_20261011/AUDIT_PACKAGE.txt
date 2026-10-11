@@ -1,0 +1,509 @@
+ROOT_RECORDS_NATIVE_V2 LIMITED REPAIR — ZERO-MODEL AUDIT
+Code commit: db36f67e75ad9c10f7bcb124ad060a6505e6bcf5
+Archive baseline: 3c50e34cae5b01c9859928ef068f22196b6f2ee6
+Task/Supervisor/provider/evaluator/training/scoring-model calls: 0
+
+===== REPORT.md =====
+# root_records_native_v2 limited repair — zero-model delivery
+
+Code baseline: `65f7058a143a997f33471d76800af1d3add28630`.
+Archive baseline: `3c50e34cae5b01c9859928ef068f22196b6f2ee6`.
+Repair code commit: `db36f67e75ad9c10f7bcb124ad060a6505e6bcf5`.
+The archived baseline and Kitex forensic results were not modified.
+
+## Exact changes
+
+- `agent.py`: the bounded second continuation attempt now puts the identical repair text in the temporary history entry and `maintenance_prompt`, with `request_purpose=format_repair`. The original system, purpose, maintenance prompt, transaction marker, and history tail are restored in `finally`; rejected response blocks are not appended or executed. The existing pre-send suffix validator remains strict.
+- `agent.py`: each committed v2 root, including `applied=false`, creates the same handoff/source/projected pending verification record. The manifest still truthfully reports `applied=false`; off and v1 retain their prior condition. No RER rule changed.
+- `test_root_records_native_v2.py`: fake SSE through the real `_prepare_continuation` and pre-send hook exercises both unverified and verified roots, bounded format repair, cleanup, and a tampered prompt rejected before a second transport. Empty and already-native histories exercise no-op commit, valid capture, wrong handoff, tampered archive, and a recorded/verified native tool-payload archival transform. Historical tool calls are not executed.
+
+## Source identity correction
+
+The prior `AUDIT_PACKAGE.txt` enumerated SHA-256 from `Path.read_bytes()` on the Windows working tree, not bytes from the cited Git commit. Its `agent.py` claim was `68777d578a3081f14f716f0be6f5887f2e527dd2aa0d77cb664ea76ddf01136b`; its `runtime.py` claim was `8c124dc37c0d64de5e4040a095c8aa16ebefec3e422ecc02d2ae4155d0557642`. The old Git blob byte SHA-256 values are `34d2feff37c2931744bf9e8c19ee44160dfa66bba2537a971266881f872ef507` and `1ff1e28202661873d77fede233f8b0c94ff032cfb7513f83453290727b4f5b9e`, respectively. The old audit wording was wrong; those worktree hashes were not commit-byte identities. The attached identity table independently computes `git cat-file blob COMMIT:path`, Git object IDs, current `Path.read_bytes()` hashes, byte sizes, and whether CRLF-to-LF normalization makes current workspace bytes equal the committed blob. `core.autocrlf=true`; current `runtime.py` and repaired `agent.py` normalize exactly to their respective committed blobs. The old pre-repair `agent.py` working-tree bytes themselves were not separately retained, so their exact byte-level difference cannot be reconstructed solely from its old SHA; no semantic difference is inferred from the hash mismatch.
+
+## Test and validity limits
+
+The attached package records the exact zero-model command, exit code, complete stdout/stderr, and full code diff. The targeted suite covers provider/projection/CRS/RHR/RER/root ceiling and continuation seams. Two pre-existing tests are explicitly excluded: `test_frozen_prompt_and_provider` asserts an obsolete provider-byte identity from `29bdcb...`, and `test_forced_compaction_then_replaced_root_uses_current_contract` cannot import `shortuuid` in this host Python. Neither is counted as passed. The Windows pytest atexit warning about an unrelated old temporary directory is included verbatim; pytest's actual exit status is recorded.
+
+No real Task, Supervisor, provider API, native evaluator, training, or scoring-model calls were made. Pilot profile selection remains `root_records_v1`; v2 remains opt-in and default-off. Real endpoint acceptance of native historical tool messages after signed thinking removal remains unverified. This repair makes no claim about live Kitex outcomes, cognition, or scientific effect.
+
+===== SOURCE IDENTITIES =====
+65f7058a143a997f33471d76800af1d3add28630 GenericAgent-main/monitor_agent_core/agent.py
+Git blob OID: 77b529bd0cd9658df185c0d05877e0bc1b73f46d
+Git blob bytes SHA-256: 34d2feff37c2931744bf9e8c19ee44160dfa66bba2537a971266881f872ef507 (120426 bytes)
+Current worktree bytes SHA-256: 8b6b9592e0ebad6a3ad773bed30992cff85a0344be899c569eb90436970df315 (122142 bytes)
+Current worktree CRLF-to-LF equals that blob: False
+65f7058a143a997f33471d76800af1d3add28630 GenericAgent-main/monitor_agent_core/runtime.py
+Git blob OID: 81082d0ac218b95ea2dbd465f143980e9e11f9ef
+Git blob bytes SHA-256: 1ff1e28202661873d77fede233f8b0c94ff032cfb7513f83453290727b4f5b9e (64287 bytes)
+Current worktree bytes SHA-256: 8c124dc37c0d64de5e4040a095c8aa16ebefec3e422ecc02d2ae4155d0557642 (65187 bytes)
+Current worktree CRLF-to-LF equals that blob: True
+db36f67e75ad9c10f7bcb124ad060a6505e6bcf5 GenericAgent-main/monitor_agent_core/agent.py
+Git blob OID: 148662f49a327bde8864b95c8c543acc394d087d
+Git blob bytes SHA-256: 6962cab52f9e2bbab258638172fa7a99153804d3f5640a986eab058df1052520 (120872 bytes)
+Current worktree bytes SHA-256: 8b6b9592e0ebad6a3ad773bed30992cff85a0344be899c569eb90436970df315 (122142 bytes)
+Current worktree CRLF-to-LF equals that blob: True
+db36f67e75ad9c10f7bcb124ad060a6505e6bcf5 GenericAgent-main/monitor_agent_core/runtime.py
+Git blob OID: 81082d0ac218b95ea2dbd465f143980e9e11f9ef
+Git blob bytes SHA-256: 1ff1e28202661873d77fede233f8b0c94ff032cfb7513f83453290727b4f5b9e (64287 bytes)
+Current worktree bytes SHA-256: 8c124dc37c0d64de5e4040a095c8aa16ebefec3e422ecc02d2ae4155d0557642 (65187 bytes)
+Current worktree CRLF-to-LF equals that blob: True
+
+===== TARGETED ZERO-MODEL TESTS =====
+command: D:\python\python.exe -m pytest method_discovery/curator_supervisor_convergence_v0/root_records_native_v2_20261011/test_forensic_v1_rehydration.py GenericAgent-main/tests/test_root_records_v1.py GenericAgent-main/tests/test_root_records_native_v2.py GenericAgent-main/tests/test_monitor_provider.py GenericAgent-main/tests/test_crs_v0.py GenericAgent-main/tests/test_rhr_v0.py GenericAgent-main/tests/test_rer_v0.py GenericAgent-main/tests/test_root_turn_ceiling.py GenericAgent-main/tests/test_monitor_continuation_purpose_boundary.py GenericAgent-main/tests/test_monitor_continuation_mode.py GenericAgent-main/tests/test_monitor_continuation_repair.py -q -k not test_frozen_prompt_and_provider and not test_forced_compaction_then_replaced_root_uses_current_contract
+exit_code: 0
+stdout:
+........................................................................ [ 42%]
+........................................................................ [ 84%]
+..........................                                               [100%]
+170 passed, 2 deselected in 7.31s
+
+stderr:
+Error in atexit._run_exitfuncs:
+Traceback (most recent call last):
+  File "D:\python\lib\pathlib.py", line 215, in resolve
+    s = self._ext_to_normal(_getfinalpathname(s))
+PermissionError: [WinError 5] �ܾ����ʡ�: 'C:\\Users\\hsy\\AppData\\Local\\Temp\\pytest-of-hsy\\pytest-951'
+
+
+===== NEW INTEGRATION SEAMS =====
+command: D:\python\python.exe -m pytest GenericAgent-main/tests/test_root_records_native_v2.py -vv -k real_continuation_format_repair_capture or format_repair_prompt_tamper_fails_before_transport_and_cleans_up or native_noop_projection_still_binds_capture or noop_projection_tracks_native_maintenance
+exit_code: 0
+stdout:
+============================= test session starts =============================
+platform win32 -- Python 3.9.13, pytest-7.1.2, pluggy-1.0.0 -- D:\python\python.exe
+cachedir: .pytest_cache
+rootdir: E:\longcontext-cqs-v0-20261005
+plugins: anyio-4.9.0, langsmith-0.4.4
+collecting ... collected 28 items / 22 deselected / 6 selected
+
+GenericAgent-main/tests/test_root_records_native_v2.py::test_real_continuation_format_repair_capture[False] PASSED [ 16%]
+GenericAgent-main/tests/test_root_records_native_v2.py::test_real_continuation_format_repair_capture[True] PASSED [ 33%]
+GenericAgent-main/tests/test_root_records_native_v2.py::test_native_noop_projection_still_binds_capture[source0] PASSED [ 50%]
+GenericAgent-main/tests/test_root_records_native_v2.py::test_native_noop_projection_still_binds_capture[source1] PASSED [ 66%]
+GenericAgent-main/tests/test_root_records_native_v2.py::test_noop_projection_tracks_native_maintenance PASSED [ 83%]
+GenericAgent-main/tests/test_root_records_native_v2.py::test_format_repair_prompt_tamper_fails_before_transport_and_cleans_up PASSED [100%]
+
+====================== 6 passed, 22 deselected in 0.52s =======================
+
+stderr:
+Error in atexit._run_exitfuncs:
+Traceback (most recent call last):
+  File "D:\python\lib\pathlib.py", line 215, in resolve
+    s = self._ext_to_normal(_getfinalpathname(s))
+PermissionError: [WinError 5] �ܾ����ʡ�: 'C:\\Users\\hsy\\AppData\\Local\\Temp\\pytest-of-hsy\\pytest-951'
+
+
+===== EXCLUDED OLD PROVIDER BYTE FREEZE =====
+command: D:\python\python.exe -m pytest GenericAgent-main/tests/test_rer_v0.py::test_frozen_prompt_and_provider -q
+exit_code: 1
+stdout:
+F                                                                        [100%]
+================================== FAILURES ===================================
+_______________________ test_frozen_prompt_and_provider _______________________
+
+tmp_path = WindowsPath('C:/Users/hsy/AppData/Local/Temp/pytest-of-hsy/pytest-1525/test_frozen_prompt_and_provide0')
+
+    def test_frozen_prompt_and_provider(tmp_path):
+        root = Path(__file__).resolve().parents[2]
+        for source in ('ase_v0.py', 'provider.py'):
+            path = 'GenericAgent-main/monitor_agent_core/' + source
+            frozen = subprocess.check_output(['git', 'show',
+                '29bdcb1694835aa8a6007cfa95e595e714604fca:' + path], cwd=root)
+>           assert frozen == (root / path).read_bytes()
+E           assert b'"""Provider...ocks, usage\n' == b'"""Provider...ocks, usage\n'
+E             At index 616 diff: b'P' != b'I'
+E             Use -v to get more diff
+
+GenericAgent-main\tests\test_rer_v0.py:269: AssertionError
+=========================== short test summary info ===========================
+FAILED GenericAgent-main/tests/test_rer_v0.py::test_frozen_prompt_and_provider
+1 failed in 0.34s
+
+stderr:
+Error in atexit._run_exitfuncs:
+Traceback (most recent call last):
+  File "D:\python\lib\pathlib.py", line 215, in resolve
+    s = self._ext_to_normal(_getfinalpathname(s))
+PermissionError: [WinError 5] �ܾ����ʡ�: 'C:\\Users\\hsy\\AppData\\Local\\Temp\\pytest-of-hsy\\pytest-951'
+
+
+===== EXCLUDED SHORTUUID DEPENDENCY =====
+command: D:\python\python.exe -m pytest GenericAgent-main/tests/test_monitor_continuation_repair.py::test_forced_compaction_then_replaced_root_uses_current_contract -q
+exit_code: 1
+stdout:
+F                                                                        [100%]
+================================== FAILURES ===================================
+_______ test_forced_compaction_then_replaced_root_uses_current_contract _______
+
+tmp_path = WindowsPath('C:/Users/hsy/AppData/Local/Temp/pytest-of-hsy/pytest-1526/test_forced_compaction_then_re0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000282CCDB0B80>
+
+    def test_forced_compaction_then_replaced_root_uses_current_contract(tmp_path, monkeypatch):
+        from monitor_agent_core.agent import MonitorAgent
+>       from monitor_agent_core.pma_fused import ROOT_DECISION
+
+GenericAgent-main\tests\test_monitor_continuation_repair.py:79: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+GenericAgent-main\monitor_agent_core\pma_fused.py:18: in <module>
+    from .vendor.pma_memory.memory_agent import MemoryAgent, BANK_TOOLS
+GenericAgent-main\monitor_agent_core\vendor\pma_memory\memory_agent.py:16: in <module>
+    from .universal_memory import UniversalMemory, MemoryEntry
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Universal Memory class for storing status, knowledge, and procedural memories.
+    
+    Memory types:
+    - status: Working memory for current task progress (always in context)
+    - knowledge: Environmental facts observed by the agent [ENV], [PATH], [FACT]
+    - procedural: Historical solutions and experiences [BUG], [PERF]
+    """
+    
+    import json
+>   import shortuuid
+E   ModuleNotFoundError: No module named 'shortuuid'
+
+GenericAgent-main\monitor_agent_core\vendor\pma_memory\universal_memory.py:10: ModuleNotFoundError
+=========================== short test summary info ===========================
+FAILED GenericAgent-main/tests/test_monitor_continuation_repair.py::test_forced_compaction_then_replaced_root_uses_current_contract
+1 failed in 0.32s
+
+stderr:
+Error in atexit._run_exitfuncs:
+Traceback (most recent call last):
+  File "D:\python\lib\pathlib.py", line 215, in resolve
+    s = self._ext_to_normal(_getfinalpathname(s))
+PermissionError: [WinError 5] �ܾ����ʡ�: 'C:\\Users\\hsy\\AppData\\Local\\Temp\\pytest-of-hsy\\pytest-951'
+
+
+===== COMPLETE CODE DIFF =====
+command: git diff --no-ext-diff 65f7058a143a997f33471d76800af1d3add28630 db36f67e75ad9c10f7bcb124ad060a6505e6bcf5 -- GenericAgent-main/monitor_agent_core/agent.py GenericAgent-main/tests/test_root_records_native_v2.py
+exit_code: 0
+stdout:
+diff --git a/GenericAgent-main/monitor_agent_core/agent.py b/GenericAgent-main/monitor_agent_core/agent.py
+index 77b529bd..148662f4 100644
+--- a/GenericAgent-main/monitor_agent_core/agent.py
++++ b/GenericAgent-main/monitor_agent_core/agent.py
+@@ -933,6 +933,8 @@ class MonitorAgent:
+                        "can restore the actual grounds. Do not replace source links with invented quotations.")
+         previous_system = self.client.system
+         previous_purpose = getattr(self.client, 'request_purpose', 'review')
++        previous_maintenance_prompt = getattr(self.client, 'maintenance_prompt', None)
++        previous_transaction = getattr(self.client, 'continuation_transaction_id', None)
+         transaction = uuid.uuid4().hex
+         self.client.continuation_transaction_id = transaction
+         self.client.request_purpose = 'continuation'
+@@ -983,11 +985,13 @@ class MonitorAgent:
+                         raise ProviderRecoveryExhausted('Continuation repair cancelled or budget exhausted') from exc
+                     # Replace only our temporary instruction. Rejected blocks never
+                     # enter live History and no tool or phase operation is replayed.
+-                    self.client.history[-1]['content'][0]['text'] = prompt + (
++                    repair_prompt = prompt + (
+                         '\nYour previous response did not satisfy the note-only output contract ('
+                         + exc.code + '). Return only a concise complete continuation note. '
+                         'Do not call tools or decide task control. Keep essential unresolved grounds '
+                         'and source references; fit the note within the existing output limit.')
++                    self.client.history[-1]['content'][0]['text'] = repair_prompt
++                    self.client.maintenance_prompt = repair_prompt
+                     self.client.request_purpose = 'format_repair'
+                     self._progress('continuation_format_repair', transaction_id=transaction)
+             self._progress('continuation_note_validated', transaction_id=transaction)
+@@ -1009,9 +1013,10 @@ class MonitorAgent:
+             raise
+         finally:
+             self.client.history.pop()
+-            self.client.maintenance_prompt = None
++            self.client.maintenance_prompt = previous_maintenance_prompt
+             self.client.system = previous_system
+             self.client.request_purpose = previous_purpose
++            self.client.continuation_transaction_id = previous_transaction
+ 
+     def _progress(self, event, **fields):
+         if (event == 'request_usage' and self._projection_pending_request is not None
+@@ -1455,7 +1460,7 @@ class MonitorAgent:
+             if (directory / 'committed.json').read_bytes() != commit:
+                 raise ProjectionIntegrityError('Root projection commit receipt readback mismatch')
+             self._projected_root_handoffs.add(identity)
+-            if manifest['applied']:
++            if manifest['applied'] or self.history_projection == 'root_records_native_v2':
+                 self._projection_pending_request = {
+                     'commit_locator': 'monitor/' + relative + '/committed.json',
+                     'identity': identity,
+diff --git a/GenericAgent-main/tests/test_root_records_native_v2.py b/GenericAgent-main/tests/test_root_records_native_v2.py
+index 45ae6d6e..d5c51b2a 100644
+--- a/GenericAgent-main/tests/test_root_records_native_v2.py
++++ b/GenericAgent-main/tests/test_root_records_native_v2.py
+@@ -223,6 +223,149 @@ def test_real_request_purpose_switch_and_acceptance_with_fake_sse(tmp_path, monk
+     assert len(captures) == 2
+ 
+ 
++@pytest.mark.parametrize('review_verified', [False, True])
++def test_real_continuation_format_repair_capture(tmp_path, monkeypatch, review_verified):
++    monitor, client, workspace, _ = native_fixture(tmp_path)
++    if review_verified:
++        _, _, first = client._anthropic_request(MONITOR_TOOLS)
++        _capture_pilot_payload(workspace.private_root, monitor, 'accepted-review', first)
++        monitor._progress('request_accepted', request_id='accepted-review',
++                          purpose='review', request_sha256='accepted')
++    saved = (client.export_history(), client.system, getattr(client, 'request_purpose', 'review'),
++             getattr(client, 'maintenance_prompt', None),
++             getattr(client, 'continuation_transaction_id', None))
++    sent = []
++
++    class Response:
++        status_code = 200
++        def __enter__(self): return self
++        def __exit__(self, *args): return False
++        def iter_lines(self):
++            reason = 'max_tokens' if len(sent) == 1 else 'end_turn'
++            events = [
++                {'type': 'message_start', 'message': {'usage': {'input_tokens': 1}}},
++                {'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text'}},
++                {'type': 'content_block_delta', 'index': 0,
++                 'delta': {'type': 'text_delta', 'text': 'current note'}},
++                {'type': 'content_block_stop', 'index': 0},
++                {'type': 'message_delta', 'delta': {'stop_reason': reason},
++                 'usage': {'output_tokens': 2}}, {'type': 'message_stop'},
++            ]
++            return [('data: ' + json.dumps(event)).encode('utf-8') for event in events]
++
++    def post(*args, **kwargs):
++        sent.append(copy.deepcopy(kwargs['json']))
++        return Response()
++
++    monkeypatch.setattr('monitor_agent_core.provider.requests.post', post)
++    assert monitor._prepare_continuation() == 'current note'
++    assert len(sent) == 2
++    assert sent[0]['messages'][-1]['content'][0]['text'] != sent[1]['messages'][-1]['content'][0]['text']
++    assert 'truncated_note' in sent[1]['messages'][-1]['content'][0]['text']
++    assert (client.export_history(), client.system, client.request_purpose,
++            client.maintenance_prompt, client.continuation_transaction_id) == saved
++    assert monitor._projection_pending_request.get('verified') is (True if review_verified else None)
++    captures = sorted((workspace.private_root / 'audit/provider_pre_send').glob('*.json'))
++    assert len(captures) == 2 + int(review_verified)
++    assert {json.loads(path.read_text(encoding='utf-8'))['native_projection_lineage']['purpose']
++            for path in captures} == ({'review'} if review_verified else set()) | {
++                'continuation', 'format_repair'}
++
++
++@pytest.mark.parametrize('source', [[], [{'role': 'user', 'content': [
++    {'type': 'text', 'text': 'already-native history'}]}]])
++def test_native_noop_projection_still_binds_capture(tmp_path, monkeypatch, source):
++    monitor, client, workspace, handoff = native_fixture(tmp_path, source=source)
++    pending = monitor._projection_pending_request
++    assert pending is not None
++    commit = workspace.private_root / pending['commit_locator'][len('monitor/'):]
++    assert json.loads(commit.read_text(encoding='utf-8'))['applied'] is False
++    _, _, payload = client._anthropic_request(MONITOR_TOOLS)
++    _capture_pilot_payload(workspace.private_root, monitor, 'noop-review', payload)
++    assert pending['request_id'] == 'noop-review'
++    assert client.export_history()[:-1] == source
++    assert client.usage_records == []
++    assert monitor._projection_pending_request.get('verified') is None
++    monitor.completion_state = lambda: dict(handoff, generation=2)
++    with pytest.raises(ProjectionIntegrityError):
++        _capture_pilot_payload(workspace.private_root, monitor, 'wrong-handoff', payload)
++    assert not (workspace.private_root / 'audit/provider_pre_send/wrong-handoff.json').exists()
++    monitor.completion_state = lambda: handoff
++    commit.write_text('{}', encoding='utf-8')
++    sent = []
++    monkeypatch.setattr('monitor_agent_core.provider.requests.post',
++                        lambda *a, **k: sent.append(k))
++    client._progress_request_id = 'tampered-noop'
++    with pytest.raises(ProjectionIntegrityError):
++        client._request_once(MONITOR_TOOLS)
++    assert sent == []
++
++
++def test_noop_projection_tracks_native_maintenance(tmp_path):
++    source = [{'role': 'user', 'content': [{'type': 'text', 'text': 'already-native'}]}]
++    monitor, client, workspace, _ = native_fixture(tmp_path, source=source)
++    _, _, first = client._anthropic_request(MONITOR_TOOLS)
++    _capture_pilot_payload(workspace.private_root, monitor, 'first-review', first)
++    monitor._progress('request_accepted', request_id='first-review',
++                      purpose='review', request_sha256='accepted')
++    client.history.extend([
++        {'role': 'assistant', 'content': [
++            {'type': 'tool_use', 'id': 'large', 'name': 'file_read', 'input': {'path': 'large'}}]},
++        {'role': 'user', 'content': [
++            {'type': 'tool_result', 'tool_use_id': 'large', 'content': 'Z' * 14000}]},
++    ])
++    client.history_target_chars = 1000
++    client._relieve_tool_result_pressure()
++    assert len(monitor._projection_pending_request['transforms']) == 1
++    _, _, payload = client._anthropic_request(MONITOR_TOOLS)
++    _capture_pilot_payload(workspace.private_root, monitor, 'post-archival', payload)
++    assert len(json.loads((workspace.private_root / 'audit/provider_pre_send/'
++                           'post-archival.json').read_text(encoding='utf-8'))[
++                               'native_projection_lineage']['transform_receipts']) == 1
++
++
++def test_format_repair_prompt_tamper_fails_before_transport_and_cleans_up(tmp_path, monkeypatch):
++    monitor, client, workspace, _ = native_fixture(tmp_path)
++    original = client.export_history()
++    sent = []
++
++    class TruncatedResponse:
++        status_code = 200
++        def __enter__(self): return self
++        def __exit__(self, *args): return False
++        def iter_lines(self):
++            events = [
++                {'type': 'message_start', 'message': {}},
++                {'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text'}},
++                {'type': 'content_block_delta', 'index': 0,
++                 'delta': {'type': 'text_delta', 'text': 'incomplete'}},
++                {'type': 'content_block_stop', 'index': 0},
++                {'type': 'message_delta', 'delta': {'stop_reason': 'max_tokens'}},
++                {'type': 'message_stop'},
++            ]
++            return [('data: ' + json.dumps(event)).encode('utf-8') for event in events]
++
++    def post(*args, **kwargs):
++        sent.append(kwargs['json'])
++        return TruncatedResponse()
++
++    capture = client.pre_send_capture
++    def tampered_capture(request_id, payload):
++        if client.request_purpose == 'format_repair':
++            client.maintenance_prompt += ' unauthorized suffix'
++        return capture(request_id, payload)
++
++    monkeypatch.setattr('monitor_agent_core.provider.requests.post', post)
++    client.pre_send_capture = tampered_capture
++    with pytest.raises(ProjectionIntegrityError):
++        monitor._prepare_continuation()
++    assert len(sent) == 1
++    assert client.export_history() == original
++    assert client.maintenance_prompt is None and client.request_purpose == 'review'
++    assert monitor._projection_pending_request.get('verified') is None
++    assert len(list((workspace.private_root / 'audit/provider_pre_send').glob('*.json'))) == 1
++
++
+ def test_completed_but_stopped_response_does_not_verify_root(tmp_path, monkeypatch):
+     monitor, client, workspace, _ = native_fixture(tmp_path)
+     stop = threading.Event()
+
+stderr:
+
+
+===== DIFF CHECK =====
+command: git diff --check 65f7058a143a997f33471d76800af1d3add28630 db36f67e75ad9c10f7bcb124ad060a6505e6bcf5 -- GenericAgent-main/monitor_agent_core/agent.py GenericAgent-main/tests/test_root_records_native_v2.py
+exit_code: 0
+stdout:
+
+stderr:
+
+
+===== AUDIT BUILDER SOURCE =====
+"""Create a credential-free, reproducible TXT of this limited zero-model repair."""
+
+import hashlib
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+
+ROOT = Path(__file__).resolve().parents[3]
+HERE = Path(__file__).resolve().parent
+BASE = '65f7058a143a997f33471d76800af1d3add28630'
+CODE = 'db36f67e75ad9c10f7bcb124ad060a6505e6bcf5'
+SOURCE_PATHS = [
+    'GenericAgent-main/monitor_agent_core/agent.py',
+    'GenericAgent-main/monitor_agent_core/runtime.py',
+]
+CHANGED = [
+    'GenericAgent-main/monitor_agent_core/agent.py',
+    'GenericAgent-main/tests/test_root_records_native_v2.py',
+]
+TESTS = [
+    'method_discovery/curator_supervisor_convergence_v0/root_records_native_v2_20261011/test_forensic_v1_rehydration.py',
+    'GenericAgent-main/tests/test_root_records_v1.py',
+    'GenericAgent-main/tests/test_root_records_native_v2.py',
+    'GenericAgent-main/tests/test_monitor_provider.py',
+    'GenericAgent-main/tests/test_crs_v0.py',
+    'GenericAgent-main/tests/test_rhr_v0.py',
+    'GenericAgent-main/tests/test_rer_v0.py',
+    'GenericAgent-main/tests/test_root_turn_ceiling.py',
+    'GenericAgent-main/tests/test_monitor_continuation_purpose_boundary.py',
+    'GenericAgent-main/tests/test_monitor_continuation_mode.py',
+    'GenericAgent-main/tests/test_monitor_continuation_repair.py',
+]
+
+
+def run(args, env=None):
+    return subprocess.run(args, cwd=ROOT, env=env, text=True, encoding='utf-8',
+                          errors='replace', capture_output=True, check=False)
+
+
+def identity(commit, path):
+    blob = subprocess.check_output(['git', 'cat-file', 'blob', commit + ':' + path], cwd=ROOT)
+    oid = subprocess.check_output(['git', 'rev-parse', commit + ':' + path], cwd=ROOT).decode().strip()
+    worktree = (ROOT / path).read_bytes()
+    return (f'{commit} {path}\nGit blob OID: {oid}\n'
+            f'Git blob bytes SHA-256: {hashlib.sha256(blob).hexdigest()} ({len(blob)} bytes)\n'
+            f'Current worktree bytes SHA-256: {hashlib.sha256(worktree).hexdigest()} '
+            f'({len(worktree)} bytes)\n'
+            f'Current worktree CRLF-to-LF equals that blob: '
+            f'{worktree.replace(bytes([13, 10]), bytes([10])) == blob}\n')
+
+
+def section(title, result, command):
+    return (f'\n===== {title} =====\ncommand: {" ".join(command)}\n'
+            f'exit_code: {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}\n')
+
+
+def main():
+    if run(['git', 'diff', '--quiet', CODE, 'HEAD', '--', *CHANGED]).returncode != 0:
+        raise SystemExit('Audited code files changed after the repair commit')
+    env = dict(os.environ)
+    env['PYTHONPATH'] = os.pathsep.join(['GenericAgent-main', '.', env.get('PYTHONPATH', '')])
+    tests = [sys.executable, '-m', 'pytest', *TESTS, '-q', '-k',
+             'not test_frozen_prompt_and_provider and not '
+             'test_forced_compaction_then_replaced_root_uses_current_contract']
+    diff = ['git', 'diff', '--no-ext-diff', BASE, CODE, '--', *CHANGED]
+    check = ['git', 'diff', '--check', BASE, CODE, '--', *CHANGED]
+    tested, changed, checked = run(tests, env), run(diff), run(check)
+    seams = [sys.executable, '-m', 'pytest',
+             'GenericAgent-main/tests/test_root_records_native_v2.py', '-vv', '-k',
+             'real_continuation_format_repair_capture or '
+             'format_repair_prompt_tamper_fails_before_transport_and_cleans_up or '
+             'native_noop_projection_still_binds_capture or '
+             'noop_projection_tracks_native_maintenance']
+    seam_result = run(seams, env)
+    legacy = [sys.executable, '-m', 'pytest',
+              'GenericAgent-main/tests/test_rer_v0.py::test_frozen_prompt_and_provider', '-q']
+    dependency = [sys.executable, '-m', 'pytest',
+                  'GenericAgent-main/tests/test_monitor_continuation_repair.py::'
+                  'test_forced_compaction_then_replaced_root_uses_current_contract', '-q']
+    legacy_result, dependency_result = run(legacy, env), run(dependency, env)
+    report = (HERE / 'REPORT.md').read_text(encoding='utf-8')
+    parts = ['ROOT_RECORDS_NATIVE_V2 LIMITED REPAIR — ZERO-MODEL AUDIT\n',
+             'Code commit: ' + CODE + '\n', 'Archive baseline: 3c50e34cae5b01c9859928ef068f22196b6f2ee6\n',
+             'Task/Supervisor/provider/evaluator/training/scoring-model calls: 0\n',
+             '\n===== REPORT.md =====\n', report,
+             '\n===== SOURCE IDENTITIES =====\n']
+    for commit in (BASE, CODE):
+        for path in SOURCE_PATHS:
+            parts.append(identity(commit, path))
+    parts.extend([section('TARGETED ZERO-MODEL TESTS', tested, tests),
+                  section('NEW INTEGRATION SEAMS', seam_result, seams),
+                  section('EXCLUDED OLD PROVIDER BYTE FREEZE', legacy_result, legacy),
+                  section('EXCLUDED SHORTUUID DEPENDENCY', dependency_result, dependency),
+                  section('COMPLETE CODE DIFF', changed, diff),
+                  section('DIFF CHECK', checked, check)])
+    parts.append('\n===== AUDIT BUILDER SOURCE =====\n' + Path(__file__).read_text(encoding='utf-8'))
+    output = HERE / 'AUDIT_PACKAGE.txt'
+    output.write_bytes(''.join(parts).encode('utf-8'))
+    print('audit_package=' + str(output))
+    print('sha256=' + hashlib.sha256(output.read_bytes()).hexdigest())
+    print('test_exit_code=' + str(tested.returncode))
+    print('diff_exit_code=' + str(changed.returncode))
+    print('check_exit_code=' + str(checked.returncode))
+    return 0 if all(result.returncode == 0 for result in (
+        tested, seam_result, changed, checked)) else 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
