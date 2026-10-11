@@ -1,6 +1,7 @@
 """Create a credential-free, reproducible TXT of this limited zero-model repair."""
 
 import hashlib
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -53,7 +54,9 @@ def identity(commit, path):
 
 def section(title, result, command):
     return (f'\n===== {title} =====\ncommand: {" ".join(command)}\n'
-            f'exit_code: {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}\n')
+            f'exit_code: {result.returncode}\n'
+            f'stdout_json: {json.dumps(result.stdout, ensure_ascii=False)}\n'
+            f'stderr_json: {json.dumps(result.stderr, ensure_ascii=False)}\n')
 
 
 def main():
