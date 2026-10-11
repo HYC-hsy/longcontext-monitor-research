@@ -933,6 +933,8 @@ class MonitorAgent:
                        "can restore the actual grounds. Do not replace source links with invented quotations.")
         previous_system = self.client.system
         previous_purpose = getattr(self.client, 'request_purpose', 'review')
+        previous_maintenance_prompt = getattr(self.client, 'maintenance_prompt', None)
+        previous_transaction = getattr(self.client, 'continuation_transaction_id', None)
         transaction = uuid.uuid4().hex
         self.client.continuation_transaction_id = transaction
         self.client.request_purpose = 'continuation'
@@ -983,11 +985,13 @@ class MonitorAgent:
                         raise ProviderRecoveryExhausted('Continuation repair cancelled or budget exhausted') from exc
                     # Replace only our temporary instruction. Rejected blocks never
                     # enter live History and no tool or phase operation is replayed.
-                    self.client.history[-1]['content'][0]['text'] = prompt + (
+                    repair_prompt = prompt + (
                         '\nYour previous response did not satisfy the note-only output contract ('
                         + exc.code + '). Return only a concise complete continuation note. '
                         'Do not call tools or decide task control. Keep essential unresolved grounds '
                         'and source references; fit the note within the existing output limit.')
+                    self.client.history[-1]['content'][0]['text'] = repair_prompt
+                    self.client.maintenance_prompt = repair_prompt
                     self.client.request_purpose = 'format_repair'
                     self._progress('continuation_format_repair', transaction_id=transaction)
             self._progress('continuation_note_validated', transaction_id=transaction)
@@ -1009,9 +1013,10 @@ class MonitorAgent:
             raise
         finally:
             self.client.history.pop()
-            self.client.maintenance_prompt = None
+            self.client.maintenance_prompt = previous_maintenance_prompt
             self.client.system = previous_system
             self.client.request_purpose = previous_purpose
+            self.client.continuation_transaction_id = previous_transaction
 
     def _progress(self, event, **fields):
         if (event == 'request_usage' and self._projection_pending_request is not None
@@ -1455,7 +1460,7 @@ class MonitorAgent:
             if (directory / 'committed.json').read_bytes() != commit:
                 raise ProjectionIntegrityError('Root projection commit receipt readback mismatch')
             self._projected_root_handoffs.add(identity)
-            if manifest['applied']:
+            if manifest['applied'] or self.history_projection == 'root_records_native_v2':
                 self._projection_pending_request = {
                     'commit_locator': 'monitor/' + relative + '/committed.json',
                     'identity': identity,

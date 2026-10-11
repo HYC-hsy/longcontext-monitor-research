@@ -223,6 +223,149 @@ def test_real_request_purpose_switch_and_acceptance_with_fake_sse(tmp_path, monk
     assert len(captures) == 2
 
 
+@pytest.mark.parametrize('review_verified', [False, True])
+def test_real_continuation_format_repair_capture(tmp_path, monkeypatch, review_verified):
+    monitor, client, workspace, _ = native_fixture(tmp_path)
+    if review_verified:
+        _, _, first = client._anthropic_request(MONITOR_TOOLS)
+        _capture_pilot_payload(workspace.private_root, monitor, 'accepted-review', first)
+        monitor._progress('request_accepted', request_id='accepted-review',
+                          purpose='review', request_sha256='accepted')
+    saved = (client.export_history(), client.system, getattr(client, 'request_purpose', 'review'),
+             getattr(client, 'maintenance_prompt', None),
+             getattr(client, 'continuation_transaction_id', None))
+    sent = []
+
+    class Response:
+        status_code = 200
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def iter_lines(self):
+            reason = 'max_tokens' if len(sent) == 1 else 'end_turn'
+            events = [
+                {'type': 'message_start', 'message': {'usage': {'input_tokens': 1}}},
+                {'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text'}},
+                {'type': 'content_block_delta', 'index': 0,
+                 'delta': {'type': 'text_delta', 'text': 'current note'}},
+                {'type': 'content_block_stop', 'index': 0},
+                {'type': 'message_delta', 'delta': {'stop_reason': reason},
+                 'usage': {'output_tokens': 2}}, {'type': 'message_stop'},
+            ]
+            return [('data: ' + json.dumps(event)).encode('utf-8') for event in events]
+
+    def post(*args, **kwargs):
+        sent.append(copy.deepcopy(kwargs['json']))
+        return Response()
+
+    monkeypatch.setattr('monitor_agent_core.provider.requests.post', post)
+    assert monitor._prepare_continuation() == 'current note'
+    assert len(sent) == 2
+    assert sent[0]['messages'][-1]['content'][0]['text'] != sent[1]['messages'][-1]['content'][0]['text']
+    assert 'truncated_note' in sent[1]['messages'][-1]['content'][0]['text']
+    assert (client.export_history(), client.system, client.request_purpose,
+            client.maintenance_prompt, client.continuation_transaction_id) == saved
+    assert monitor._projection_pending_request.get('verified') is (True if review_verified else None)
+    captures = sorted((workspace.private_root / 'audit/provider_pre_send').glob('*.json'))
+    assert len(captures) == 2 + int(review_verified)
+    assert {json.loads(path.read_text(encoding='utf-8'))['native_projection_lineage']['purpose']
+            for path in captures} == ({'review'} if review_verified else set()) | {
+                'continuation', 'format_repair'}
+
+
+@pytest.mark.parametrize('source', [[], [{'role': 'user', 'content': [
+    {'type': 'text', 'text': 'already-native history'}]}]])
+def test_native_noop_projection_still_binds_capture(tmp_path, monkeypatch, source):
+    monitor, client, workspace, handoff = native_fixture(tmp_path, source=source)
+    pending = monitor._projection_pending_request
+    assert pending is not None
+    commit = workspace.private_root / pending['commit_locator'][len('monitor/'):]
+    assert json.loads(commit.read_text(encoding='utf-8'))['applied'] is False
+    _, _, payload = client._anthropic_request(MONITOR_TOOLS)
+    _capture_pilot_payload(workspace.private_root, monitor, 'noop-review', payload)
+    assert pending['request_id'] == 'noop-review'
+    assert client.export_history()[:-1] == source
+    assert client.usage_records == []
+    assert monitor._projection_pending_request.get('verified') is None
+    monitor.completion_state = lambda: dict(handoff, generation=2)
+    with pytest.raises(ProjectionIntegrityError):
+        _capture_pilot_payload(workspace.private_root, monitor, 'wrong-handoff', payload)
+    assert not (workspace.private_root / 'audit/provider_pre_send/wrong-handoff.json').exists()
+    monitor.completion_state = lambda: handoff
+    commit.write_text('{}', encoding='utf-8')
+    sent = []
+    monkeypatch.setattr('monitor_agent_core.provider.requests.post',
+                        lambda *a, **k: sent.append(k))
+    client._progress_request_id = 'tampered-noop'
+    with pytest.raises(ProjectionIntegrityError):
+        client._request_once(MONITOR_TOOLS)
+    assert sent == []
+
+
+def test_noop_projection_tracks_native_maintenance(tmp_path):
+    source = [{'role': 'user', 'content': [{'type': 'text', 'text': 'already-native'}]}]
+    monitor, client, workspace, _ = native_fixture(tmp_path, source=source)
+    _, _, first = client._anthropic_request(MONITOR_TOOLS)
+    _capture_pilot_payload(workspace.private_root, monitor, 'first-review', first)
+    monitor._progress('request_accepted', request_id='first-review',
+                      purpose='review', request_sha256='accepted')
+    client.history.extend([
+        {'role': 'assistant', 'content': [
+            {'type': 'tool_use', 'id': 'large', 'name': 'file_read', 'input': {'path': 'large'}}]},
+        {'role': 'user', 'content': [
+            {'type': 'tool_result', 'tool_use_id': 'large', 'content': 'Z' * 14000}]},
+    ])
+    client.history_target_chars = 1000
+    client._relieve_tool_result_pressure()
+    assert len(monitor._projection_pending_request['transforms']) == 1
+    _, _, payload = client._anthropic_request(MONITOR_TOOLS)
+    _capture_pilot_payload(workspace.private_root, monitor, 'post-archival', payload)
+    assert len(json.loads((workspace.private_root / 'audit/provider_pre_send/'
+                           'post-archival.json').read_text(encoding='utf-8'))[
+                               'native_projection_lineage']['transform_receipts']) == 1
+
+
+def test_format_repair_prompt_tamper_fails_before_transport_and_cleans_up(tmp_path, monkeypatch):
+    monitor, client, workspace, _ = native_fixture(tmp_path)
+    original = client.export_history()
+    sent = []
+
+    class TruncatedResponse:
+        status_code = 200
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def iter_lines(self):
+            events = [
+                {'type': 'message_start', 'message': {}},
+                {'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text'}},
+                {'type': 'content_block_delta', 'index': 0,
+                 'delta': {'type': 'text_delta', 'text': 'incomplete'}},
+                {'type': 'content_block_stop', 'index': 0},
+                {'type': 'message_delta', 'delta': {'stop_reason': 'max_tokens'}},
+                {'type': 'message_stop'},
+            ]
+            return [('data: ' + json.dumps(event)).encode('utf-8') for event in events]
+
+    def post(*args, **kwargs):
+        sent.append(kwargs['json'])
+        return TruncatedResponse()
+
+    capture = client.pre_send_capture
+    def tampered_capture(request_id, payload):
+        if client.request_purpose == 'format_repair':
+            client.maintenance_prompt += ' unauthorized suffix'
+        return capture(request_id, payload)
+
+    monkeypatch.setattr('monitor_agent_core.provider.requests.post', post)
+    client.pre_send_capture = tampered_capture
+    with pytest.raises(ProjectionIntegrityError):
+        monitor._prepare_continuation()
+    assert len(sent) == 1
+    assert client.export_history() == original
+    assert client.maintenance_prompt is None and client.request_purpose == 'review'
+    assert monitor._projection_pending_request.get('verified') is None
+    assert len(list((workspace.private_root / 'audit/provider_pre_send').glob('*.json'))) == 1
+
+
 def test_completed_but_stopped_response_does_not_verify_root(tmp_path, monkeypatch):
     monitor, client, workspace, _ = native_fixture(tmp_path)
     stop = threading.Event()
