@@ -3,7 +3,7 @@ Status: IMPLEMENTED_READY_FOR_BRAIN_AUDIT (engineering only; no live experiment)
 Actual baseline: 27226b6b94b19e88a288f41ead62d7dd09a794b4
 Shared host terminal fix: be9f14c9
 Narrow method commit: 89fa9d2e
-Checkout at capture: 89fa9d2e2efda3f60f82ba09db505e8d5d989747
+Checkout at capture: a088c2ebb07706def82bad5494571a71e9ded62e
 Branch: crs-v0-20261007; planned remote: public/crs-v0-20261007
 No Task, Supervisor, provider API, native evaluator, training, or scoring model calls.
 Real-call counts: Task=0 Supervisor=0 provider=0 native_evaluator=0 training=0 scoring=0.
@@ -31,6 +31,12 @@ is deleted by pytest; this phase does not prepare a live manifest or authorizati
 The S bundle contains narrow_supervisor_v1.py and resolved models.local.json;
 the T bundle has no Monitor models.local.json. Both Task client configs and
 original public instruction/task.toml identities are asserted equal.
+The test then loads that bundled Monitor config into the real provider client,
+intercepts its first assembled request before transport, and prints the
+system/messages/tools SHA-256 and seven tool names. No provider send occurs.
+The client snapshot reports its existing temperature default separately from
+the public profile identity; the narrow resolver did not add temperature.
+The test compose hash contains temporary host paths and is not a live identity.
 
 UNVERIFIED / EXCLUDED
 No live provider compatibility or real Task/Supervisor deployment was tested.
@@ -40,6 +46,7 @@ The future Fyne N single-run design is only a planning record: S routing with
 narrow_v1, no new Task-only run, no Kitex or additional repeats authorized.
 
 GIT STATUS AT CAPTURE (unrelated __pycache__ preserved):
+ M method_discovery/curator_supervisor_convergence_v0/narrow_supervisor_v1_20261011/build_audit.py
  M method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/test_narrow_pilot_bundle.py
 ?? GenericAgent-main/monitor_agent_core/__pycache__/
 ?? GenericAgent-main/monitor_agent_core/vendor/__pycache__/
@@ -89,16 +96,17 @@ GenericAgent-main/tests/test_narrow_supervisor_v1.py
   byte_equal=True
 method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/test_narrow_pilot_bundle.py
   git_blob_sha256=e5109e851d60869e0ae59201d73cf26e972e701cb2f868262f23ae3ddb459e2d
-  worktree_sha256=9038f04e0d354f72bd648da88c4bf986532110d3833f40575032151523406d2a
+  worktree_sha256=693ff197f8bda3917b265fb9d3c2eff84f1b3574d988658e68057a8506203f9d
   byte_equal=False
 
 TEST COMMAND:
 D:\python\python.exe -m pytest --import-mode=importlib -s -q GenericAgent-main/tests/test_narrow_supervisor_v1.py GenericAgent-main/tests/test_ase_v0.py method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/test_narrow_pilot_bundle.py method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/test_pilot_profile.py method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/test_task_terminal_gate.py
 TEST EXIT CODE: 0
 TEST STDOUT (complete):
-.........ss..s......s......s.sss..PREPARED_BUNDLE_EVIDENCE={"S": {"bundle_source_sha256": "e3b75f119daa9609c7b565601d818d9b5090acc8ebe4041c6c6872b80179816e", "compose_sha256": "aeb989873121d82fcc3d45c9479de59d755a7931021c00a4e04cf8dd4eab26b5", "profile_public": {"incomplete_stream_recovery_v1": true, "max_retries": 0, "max_tokens": 8192, "model": "claude-opus-4-8", "monitor_adaptive_supervisory_environment": true, "monitor_contrastive_release_state": false, "monitor_history_projection": "off", "monitor_narrow_supervisor_v1": true, "monitor_pilot_zero_ambiguous_retry": true, "monitor_receding_horizon_release": false, "monitor_root_epistemic_reestimation": false, "read_timeout": 300, "reasoning_effort": "high", "temperature": null, "thinking_type": "adaptive", "timeout": 120, "verify": true}, "public_task_instruction_sha256": "c0df6c1cdc6c2d61e7129bd515dcf1f5746e606b72fa9cdd13e101aa405c778c"}, "T": {"bundle_source_sha256": "a93e5f365aa6a38a635f8f3911072a417aa873649e52eb0e3f70cde87dddad6a", "compose_sha256": "63dca6c46cf59903c5bba271aba8df15121e7b2514890ac7257907a5d945b967", "profile_public": null, "public_task_instruction_sha256": "c0df6c1cdc6c2d61e7129bd515dcf1f5746e606b72fa9cdd13e101aa405c778c"}}
+.........ss..s......s......s.sss..FINAL_MONITOR_REQUEST_EVIDENCE={"component_sha256": {"messages": "5b43387e383b67c2840281850436d148ec702ec06a6eaae821306b191852063d", "system": "dce64caf2ba7e7cec52c15177e9dca5acfdd1f22f45a00545524f93df095a338", "tools": "69390267fc3913c688c920a48766ab014b775309b38beb23ecc77bd9f390cb4f"}, "model_parameters": {"api_mode": "messages", "max_tokens": 8192, "model": "claude-opus-4-8", "reasoning_effort": "high", "temperature": 1, "thinking_type": "adaptive"}, "tool_names": ["file_read", "file_write", "file_patch", "code_run", "wait", "intervene", "allow_complete"]}
+PREPARED_BUNDLE_EVIDENCE={"S": {"bundle_source_sha256": "e3b75f119daa9609c7b565601d818d9b5090acc8ebe4041c6c6872b80179816e", "compose_sha256": "b30907a81746d95fbdf3faa0c8b839814cdef620db36f57b6c3cb95bb84d6e3d", "profile_public": {"incomplete_stream_recovery_v1": true, "max_retries": 0, "max_tokens": 8192, "model": "claude-opus-4-8", "monitor_adaptive_supervisory_environment": true, "monitor_contrastive_release_state": false, "monitor_history_projection": "off", "monitor_narrow_supervisor_v1": true, "monitor_pilot_zero_ambiguous_retry": true, "monitor_receding_horizon_release": false, "monitor_root_epistemic_reestimation": false, "read_timeout": 300, "reasoning_effort": "high", "temperature": null, "thinking_type": "adaptive", "timeout": 120, "verify": true}, "public_task_instruction_sha256": "c0df6c1cdc6c2d61e7129bd515dcf1f5746e606b72fa9cdd13e101aa405c778c"}, "T": {"bundle_source_sha256": "a93e5f365aa6a38a635f8f3911072a417aa873649e52eb0e3f70cde87dddad6a", "compose_sha256": "e06a5e93dcf3aa7cca45f9e39fc0669b882bcf10d12615b6fca64bf616543094", "profile_public": null, "public_task_instruction_sha256": "c0df6c1cdc6c2d61e7129bd515dcf1f5746e606b72fa9cdd13e101aa405c778c"}}
 ..............................................
-72 passed, 8 skipped in 20.44s
+72 passed, 8 skipped in 18.77s
 
 TEST STDERR (complete):
 Error in atexit._run_exitfuncs:
@@ -883,13 +891,54 @@ index 00000000..0ddde045
 
 POST-METHOD TEST EVIDENCE-PRINT DIFF:
 diff --git a/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/test_narrow_pilot_bundle.py b/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/test_narrow_pilot_bundle.py
-index 1059e576..b308f24c 100644
+index 1059e576..3943d9a0 100644
 --- a/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/test_narrow_pilot_bundle.py
 +++ b/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/test_narrow_pilot_bundle.py
-@@ -78,3 +78,9 @@ def test_real_prepare_bundle_narrow_and_task_only(tmp_path, monkeypatch):
+@@ -4,6 +4,8 @@ import hashlib
+ import json
+ from pathlib import Path
+ from types import SimpleNamespace
++import threading
++import time
+ 
+ import pytest
+ 
+@@ -78,3 +80,41 @@ def test_real_prepare_bundle_narrow_and_task_only(tmp_path, monkeypatch):
      for name in ('instruction.md', 'task.toml'):
          assert _sha(tmp_path / 'T/public_agent_task' / name) == _sha(
              tmp_path / 'S/public_agent_task' / name)
++    from monitor_agent_core.agent import MonitorAgent
++    from monitor_agent_core.provider import MonitorProviderClient
++    from monitor_agent_core.workspace import MonitorWorkspace
++    evidence = tmp_path / 'S/request_evidence'
++    evidence.mkdir()
++    (evidence / 'original_task.txt').write_text('Public task for request test.', encoding='utf-8')
++    client = MonitorProviderClient('claude_monitor_opus48', monitor)
++    client.recovery_deadline = time.monotonic() + 100
++    client.recovery_stop = threading.Event()
++    agent = MonitorAgent(client, MonitorWorkspace(evidence, tmp_path / 'S/request_private',
++        task_mounts={'workspace': tmp_path / 'S/public_agent_task/environment'}))
++    agent.workspace.write_text('monitor/reference.md', 'Public task for request test.')
++    sent = []
++
++    def fake_send(tools):
++        sent.append(client.assembled_request_snapshot(tools))
++        return [{'type': 'tool_use', 'id': 'offline-request', 'name': 'wait',
++                 'input': {'after_turns': 1, 'mode': 'patrol'}}], {}
++
++    monkeypatch.setattr(client, '_request_once', fake_send)
++    assert agent.review('Neutral offline wake').kind == 'wait'
++    assert len(sent) == 1
++    payload = sent[0]
++    assert payload['model_parameters']['model'] == 'claude-opus-4-8'
++    assert 'You supervise the Task\'s current behavior' in payload['system']
++    assert len(payload['tools']) == 7
++    request_identity = {key: hashlib.sha256(json.dumps(payload[key], ensure_ascii=False,
++        sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest()
++        for key in ('system', 'tools', 'messages')}
++    print('FINAL_MONITOR_REQUEST_EVIDENCE=' + json.dumps({
++        'model_parameters': payload['model_parameters'], 'component_sha256': request_identity,
++        'tool_names': [tool['function']['name'] for tool in payload['tools']]}, sort_keys=True))
 +    print('PREPARED_BUNDLE_EVIDENCE=' + json.dumps({condition: {
 +        'bundle_source_sha256': receipts[condition]['bundle_source_sha256'],
 +        'compose_sha256': receipts[condition]['compose_sha256'],

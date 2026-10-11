@@ -4,6 +4,8 @@ import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
+import threading
+import time
 
 import pytest
 
@@ -78,6 +80,38 @@ def test_real_prepare_bundle_narrow_and_task_only(tmp_path, monkeypatch):
     for name in ('instruction.md', 'task.toml'):
         assert _sha(tmp_path / 'T/public_agent_task' / name) == _sha(
             tmp_path / 'S/public_agent_task' / name)
+    from monitor_agent_core.agent import MonitorAgent
+    from monitor_agent_core.provider import MonitorProviderClient
+    from monitor_agent_core.workspace import MonitorWorkspace
+    evidence = tmp_path / 'S/request_evidence'
+    evidence.mkdir()
+    (evidence / 'original_task.txt').write_text('Public task for request test.', encoding='utf-8')
+    client = MonitorProviderClient('claude_monitor_opus48', monitor)
+    client.recovery_deadline = time.monotonic() + 100
+    client.recovery_stop = threading.Event()
+    agent = MonitorAgent(client, MonitorWorkspace(evidence, tmp_path / 'S/request_private',
+        task_mounts={'workspace': tmp_path / 'S/public_agent_task/environment'}))
+    agent.workspace.write_text('monitor/reference.md', 'Public task for request test.')
+    sent = []
+
+    def fake_send(tools):
+        sent.append(client.assembled_request_snapshot(tools))
+        return [{'type': 'tool_use', 'id': 'offline-request', 'name': 'wait',
+                 'input': {'after_turns': 1, 'mode': 'patrol'}}], {}
+
+    monkeypatch.setattr(client, '_request_once', fake_send)
+    assert agent.review('Neutral offline wake').kind == 'wait'
+    assert len(sent) == 1
+    payload = sent[0]
+    assert payload['model_parameters']['model'] == 'claude-opus-4-8'
+    assert 'You supervise the Task\'s current behavior' in payload['system']
+    assert len(payload['tools']) == 7
+    request_identity = {key: hashlib.sha256(json.dumps(payload[key], ensure_ascii=False,
+        sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest()
+        for key in ('system', 'tools', 'messages')}
+    print('FINAL_MONITOR_REQUEST_EVIDENCE=' + json.dumps({
+        'model_parameters': payload['model_parameters'], 'component_sha256': request_identity,
+        'tool_names': [tool['function']['name'] for tool in payload['tools']]}, sort_keys=True))
     print('PREPARED_BUNDLE_EVIDENCE=' + json.dumps({condition: {
         'bundle_source_sha256': receipts[condition]['bundle_source_sha256'],
         'compose_sha256': receipts[condition]['compose_sha256'],

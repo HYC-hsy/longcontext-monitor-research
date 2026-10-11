@@ -40,8 +40,9 @@ def sha(data):
 
 def main():
     git_head = run('git', 'rev-parse', 'HEAD')
-    if git_head.returncode or not git_head.stdout.strip().startswith(METHOD):
-        raise RuntimeError('Audit renderer must start from the frozen method commit')
+    ancestry = run('git', 'merge-base', '--is-ancestor', METHOD, 'HEAD')
+    if git_head.returncode or ancestry.returncode:
+        raise RuntimeError('Audit renderer requires the frozen method commit in ancestry')
     status = run('git', 'status', '--short')
     if status.returncode:
         raise RuntimeError('Git status unavailable')
@@ -93,6 +94,12 @@ def main():
         'The S bundle contains narrow_supervisor_v1.py and resolved models.local.json;',
         'the T bundle has no Monitor models.local.json. Both Task client configs and',
         'original public instruction/task.toml identities are asserted equal.',
+        'The test then loads that bundled Monitor config into the real provider client,',
+        'intercepts its first assembled request before transport, and prints the',
+        'system/messages/tools SHA-256 and seven tool names. No provider send occurs.',
+        'The client snapshot reports its existing temperature default separately from',
+        'the public profile identity; the narrow resolver did not add temperature.',
+        'The test compose hash contains temporary host paths and is not a live identity.',
         '',
         'UNVERIFIED / EXCLUDED',
         'No live provider compatibility or real Task/Supervisor deployment was tested.',
