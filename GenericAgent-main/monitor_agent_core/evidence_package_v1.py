@@ -52,7 +52,10 @@ class EvidenceFrontier:
 
     @staticmethod
     def _atomic(path, raw):
-        handle, temporary = tempfile.mkstemp(prefix='.pending-', dir=path.parent)
+        try:
+            handle, temporary = tempfile.mkstemp(prefix='.pending-', dir=path.parent)
+        except OSError as exc:
+            raise EvidencePackageIntegrityError('Frontier staging failed') from exc
         try:
             with os.fdopen(handle, 'wb') as stream:
                 stream.write(raw)
@@ -61,9 +64,14 @@ class EvidenceFrontier:
             os.replace(temporary, path)
             if path.read_bytes() != raw:
                 raise EvidencePackageIntegrityError('Frontier readback mismatch')
+        except OSError as exc:
+            raise EvidencePackageIntegrityError('Frontier commit or readback failed') from exc
         finally:
             if os.path.exists(temporary):
-                os.unlink(temporary)
+                try:
+                    os.unlink(temporary)
+                except OSError as exc:
+                    raise EvidencePackageIntegrityError('Frontier staging cleanup failed') from exc
 
     def _write(self, state):
         raw = canonical(state)
@@ -129,6 +137,48 @@ class EvidenceFrontier:
                 'remaining': len(ordered) - after,
                 'next_cursor': f'{revision}:{after}' if after < len(ordered) else None,
                 'focus': self.state['focus'], 'parents': self.state['parents']}
+
+    def get(self, kind, identifier):
+        """Return one canonical object, including the original host-issued receipt."""
+        self.verify()
+        collection = {'case': 'cases', 'finding': 'findings',
+                      'receipt': 'receipts'}.get(kind)
+        if collection is None or not isinstance(identifier, str):
+            raise ValueError('Unknown frontier object kind or identity')
+        value = self.state[collection].get(identifier)
+        if value is None:
+            raise ValueError('Unknown frontier object identity')
+        return {'status': 'ok', 'kind': kind, 'revision': self.state['revision'],
+                'object': json.loads(canonical(value))}
+
+    def validate_receipt_scope(self, arguments):
+        self.verify()
+        case_id = arguments.get('evidence_case_id')
+        scope = arguments.get('evidence_scope')
+        if case_id is None:
+            if scope is not None:
+                raise ValueError('Receipt scope requires a case identity')
+            return
+        case = self.state['cases'].get(case_id)
+        if case is None or scope != case['scope']:
+            raise ValueError('Receipt case or original scope mismatch')
+
+    def link_receipt(self, args):
+        receipt_id = args.get('receipt_id')
+        case_id = args.get('case_id')
+        if receipt_id not in self.state['receipts'] or case_id not in self.state['cases']:
+            raise ValueError('Unknown receipt or case')
+        basis = _text(args.get('basis'), 'basis')
+        limitation = _text(args.get('limitation'), 'limitation')
+        def apply(state):
+            receipt = state['receipts'][receipt_id]
+            receipt.setdefault('links', []).append({'case_id': case_id, 'basis': basis,
+                'limitation': limitation, 'original_case_id': receipt.get('case_id'),
+                'original_scope': receipt.get('scope'), 'revision': state['revision'] + 1})
+            state['cases'][case_id]['receipts'] = list(dict.fromkeys(
+                state['cases'][case_id]['receipts'] + [receipt_id]))
+        self.change('receipt_linked', apply)
+        return {'status': 'recorded', 'revision': self.state['revision']}
 
     def open_case(self, args):
         basis = _text(args.get('task_basis'), 'task_basis')
@@ -225,7 +275,7 @@ class EvidenceFrontier:
                 state['focus'] = state['parents'].pop()
             else:
                 candidates = [key for key in state['order'] if state['cases'][key]['status']
-                              not in {'retracted', 'stale'}]
+                              != 'retracted']
                 if not candidates:
                     state['focus'] = None
                 elif state['focus'] not in candidates:
@@ -241,15 +291,24 @@ class EvidenceFrontier:
         if tool not in {'file_read', 'code_run'}:
             raise ValueError('Only executed investigation tools issue receipts')
         result = json.loads(canonical(result))
+        self.validate_receipt_scope(arguments)
+        case_id = arguments.get('evidence_case_id')
+        scope = arguments.get('evidence_scope')
         receipt_id = 'receipt-' + uuid.uuid4().hex
         record = {'id': receipt_id, 'tool': tool, 'arguments_sha256': digest(arguments),
+                  'arguments': json.loads(canonical(arguments)),
                   'result_sha256': digest(result), 'result': result,
+                  'case_id': case_id, 'scope': scope, 'check_id': arguments.get('check_id'),
                   'source_path': arguments.get('path') if tool == 'file_read' else None,
                   'source_version': result.get('source_version', {'status': 'version_uncertain'}),
                   'kind': ('source_read' if tool == 'file_read' else 'process_receipt'),
                   'completion': (result.get('status') if tool == 'code_run' else 'read_completed'),
                   'behavior_verified': False}
-        self.change('receipt_recorded', lambda state: state['receipts'].update({receipt_id: record}))
+        def apply(state):
+            state['receipts'][receipt_id] = record
+            if case_id is not None:
+                state['cases'][case_id]['receipts'].append(receipt_id)
+        self.change('receipt_recorded', apply)
         return receipt_id
 
     def packet_ready(self, *, handoff, task_cursor):
@@ -275,6 +334,10 @@ class EvidenceFrontier:
         if not isinstance(receipt_ids, list) or not receipt_ids or any(
                 item not in self.state['receipts'] for item in receipt_ids):
             raise ValueError('Finding needs existing host-issued receipts')
+        if any(self.state['receipts'][item].get('case_id') != case_id and not any(
+                link['case_id'] == case_id for link in
+                self.state['receipts'][item].get('links', [])) for item in receipt_ids):
+            raise ValueError('Finding requires original case binding or explicit source link')
         if any(self.state['receipts'][item]['completion'] in {'running', 'unavailable', None}
                for item in receipt_ids):
             raise ValueError('Finding cannot promote an incomplete process receipt')
@@ -305,7 +368,9 @@ class EvidenceFrontier:
     def check_intervention(self, finding_id, *, handoff):
         self.verify()
         finding = self.state['findings'].get(finding_id)
-        if not finding or finding['status'] != 'current' or finding['handoff'] != handoff:
+        packet = self.state['packet']
+        if (not finding or finding['status'] != 'current' or finding['handoff'] != handoff
+                or packet is None or finding['packet_id'] != packet['id']):
             raise ValueError('Intervention needs a current, recorded local finding')
         case = self.state['cases'][finding['case_id']]
         if case['status'] in {'retracted', 'stale'}:

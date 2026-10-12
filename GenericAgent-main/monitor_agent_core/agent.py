@@ -117,6 +117,14 @@ EVIDENCE_TOOLS = [
     _tool('frontier_page', 'Read one revision-bound page of the complete host inquiry frontier.', {
         'cursor': {'type': 'string'}, 'limit': {'type': 'integer', 'minimum': 1, 'maximum': 50},
     }, []),
+    _tool('frontier_get', 'Read one canonical case, finding or original host-issued receipt by ID.', {
+        'kind': {'type': 'string', 'enum': ['case', 'finding', 'receipt']},
+        'id': {'type': 'string'},
+    }, ['kind', 'id']),
+    _tool('frontier_link', 'Explicitly relate an existing receipt to another case without changing its original scope.', {
+        'receipt_id': {'type': 'string'}, 'case_id': {'type': 'string'},
+        'basis': {'type': 'string'}, 'limitation': {'type': 'string'},
+    }, ['receipt_id', 'case_id', 'basis', 'limitation']),
     _tool('frontier_open', 'Register a distinct local concern and its investigation leads.', {
         'task_basis': {'type': 'string'}, 'scope': {'type': 'string'},
         'observable_consequence': {'type': 'string'},
@@ -145,6 +153,14 @@ EVIDENCE_TOOLS = [
 
 def evidence_stage_tools(stage):
     tools = json.loads(json.dumps(MONITOR_TOOLS + EVIDENCE_TOOLS))
+    for tool in tools:
+        function = tool['function']
+        if function['name'] in {'file_read', 'code_run'}:
+            function['parameters']['properties'].update({
+                'evidence_case_id': {'type': 'string'},
+                'evidence_scope': {'type': 'string'},
+                'check_id': {'type': 'string'},
+            })
     if stage == 'A':
         tools = [item for item in tools if item['function']['name'] not in {
             'wait', 'intervene', 'allow_complete', 'frontier_finding'}]
@@ -1135,6 +1151,8 @@ class MonitorAgent:
         self._progress('tool_started', tool_id=tool_id, name=name)
         try:
             try:
+                if self.evidence_package_v1 and name in {'file_read', 'code_run'}:
+                    self.evidence_frontier.validate_receipt_scope(arguments)
                 outcome = self._dispatch(name, arguments)
                 if (self.evidence_package_v1 and name in {'file_read', 'code_run'}
                         and isinstance(outcome.data, dict)
@@ -1221,6 +1239,11 @@ class MonitorAgent:
                 if name == 'frontier_page':
                     return ToolOutcome(self.evidence_frontier.page(
                         cursor=arguments.get('cursor'), limit=arguments.get('limit', 12)))
+                if name == 'frontier_get':
+                    return ToolOutcome(self.evidence_frontier.get(
+                        arguments.get('kind'), arguments.get('id')))
+                if name == 'frontier_link':
+                    return ToolOutcome(self.evidence_frontier.link_receipt(arguments))
                 if name == 'frontier_open':
                     original = self.workspace.resolve_read('task/original_task.txt').read_text(
                         encoding='utf-8')
@@ -1729,14 +1752,24 @@ class MonitorAgent:
 
     def _evidence_before_model(self):
         self.evidence_frontier.verify()
-        if self._evidence_model_cycles + self._evidence_maintenance_calls >= self._evidence_limit:
+        if self._evidence_model_cycles >= self._evidence_limit:
             raise MonitorLoopError('Shared evidence inquiry budget exhausted')
+        if self.stop_event.is_set():
+            raise MonitorLoopError('Evidence inquiry cancelled')
+        deadline = getattr(self.client, 'recovery_deadline', None)
+        if deadline is not None and time.monotonic() >= deadline:
+            raise MonitorLoopError('Evidence inquiry deadline exhausted')
         return self._refresh_review_context()
 
     def _evidence_pre_send(self, payload):
         self.evidence_frontier.verify()
         if self._evidence_stage not in {'A', 'B'}:
             raise EvidencePackageIntegrityError('Provider send outside active evidence stage')
+        if self.stop_event.is_set() or self._evidence_model_cycles > self._evidence_limit:
+            raise EvidencePackageIntegrityError('Evidence send after stop or cycle budget')
+        deadline = getattr(self.client, 'recovery_deadline', None)
+        if deadline is not None and time.monotonic() >= deadline:
+            raise EvidencePackageIntegrityError('Evidence send after deadline')
         purpose = getattr(self.client, 'request_purpose', 'review')
         if payload.get('model') != self.client.model or not isinstance(payload.get('messages'), list):
             raise EvidencePackageIntegrityError('Evidence provider model or history changed')
@@ -1761,6 +1794,22 @@ class MonitorAgent:
         if self.evidence_frontier.reconcile_sources(self.workspace):
             raise ValueError('Cited Task source changed; re-investigate before intervention')
 
+    def _evidence_archive_stage(self, stage, history, action=None):
+        """Keep stage reasoning in the protected host archive, not B's input."""
+        raw = json.dumps({'stage': stage, 'history': history,
+                          'action': asdict(action) if action is not None else None},
+                         ensure_ascii=False).encode('utf-8')
+        path = self.evidence_frontier.root / 'stages' / (uuid.uuid4().hex + '.json')
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            EvidenceFrontier._atomic(path, raw)
+        except OSError as exc:
+            raise EvidencePackageIntegrityError('Evidence stage archive failed') from exc
+        self._audit_dialogue('evidence_phase_archived', stage=stage,
+                             locator='host_frontier/stages/' + path.name,
+                             history_sha256=hashlib.sha256(raw).hexdigest())
+        return path
+
     def _review_evidence(self, wake_context, completion_pending, root_handoff,
                          max_turns_override, root_transition_view):
         if (not isinstance(self.analysis, SpoolAnalysisSessions)
@@ -1779,6 +1828,9 @@ class MonitorAgent:
         self._evidence_maintenance_calls = 0
         parent_history = self.client.export_history()
         self._evidence_stage = 'A'
+        archived_a = False
+        archived_b = False
+        primary_error = None
         try:
             original_task = self.workspace.resolve_read('task/original_task.txt').read_text(
                 encoding='utf-8')
@@ -1788,20 +1840,12 @@ class MonitorAgent:
             first = self.review(preparation_wake, completion_pending,
                                 root_handoff=root_handoff, max_turns_override=limit,
                                 root_transition_view=root_transition_view)
-            phase_a_history = self.client.export_history()
-            relative = 'audit/evidence_package/stages/' + uuid.uuid4().hex + '.json'
-            raw = json.dumps({'stage': 'A', 'history': phase_a_history,
-                              'action': asdict(first)}, ensure_ascii=False)
-            self._atomic_private_text(relative, raw)
-            if (self.workspace.private_root / relative).read_text(encoding='utf-8') != raw:
-                raise EvidencePackageIntegrityError('Phase A archive readback mismatch')
-            self._audit_dialogue('evidence_phase_archived', stage='A', locator='monitor/' + relative,
-                                 history_sha256=hashlib.sha256(
-                                     json.dumps(phase_a_history, ensure_ascii=False).encode('utf-8')).hexdigest())
+            self._evidence_archive_stage('A', self.client.export_history(), first)
+            archived_a = True
             if first.kind == 'root_route':
                 self.client.restore_history(parent_history)
                 first.payload['prior_model_turns'] = (
-                    self._evidence_model_cycles + self._evidence_maintenance_calls)
+                    self._evidence_model_cycles)
                 return first
             if first.kind != 'packet_ready':
                 raise EvidencePackageIntegrityError('Phase A did not produce a packet handoff')
@@ -1812,10 +1856,10 @@ class MonitorAgent:
             if active != expected_handoff:
                 self.client.restore_history(parent_history)
                 return MonitorAction('root_route', {'prior_model_turns':
-                    self._evidence_model_cycles + self._evidence_maintenance_calls})
+                    self._evidence_model_cycles})
             self.client.restore_history([])
             self._evidence_stage = 'B'
-            remaining = limit - self._evidence_model_cycles - self._evidence_maintenance_calls
+            remaining = limit - self._evidence_model_cycles
             if remaining < 1:
                 raise MonitorLoopError('Shared evidence inquiry budget exhausted after packet')
             packet = self.evidence_frontier.state['packet']
@@ -1826,16 +1870,36 @@ class MonitorAgent:
             outcome = self.review(second_wake, completion_pending, root_handoff=root_handoff,
                                   max_turns_override=remaining,
                                   root_transition_view=root_transition_view)
+            self._evidence_archive_stage('B', self.client.export_history(), outcome)
+            archived_b = True
             if outcome.kind == 'root_route':
                 outcome.payload['prior_model_turns'] = (
-                    self._evidence_model_cycles + self._evidence_maintenance_calls)
+                    self._evidence_model_cycles)
             return outcome
-        except EvidencePackageIntegrityError:
-            self._analysis_integrity_failure = True
+        except BaseException as exc:
+            primary_error = exc
+            if isinstance(exc, EvidencePackageIntegrityError):
+                self._analysis_integrity_failure = True
             raise
         finally:
-            self._evidence_stage = None
-            self._evidence_limit = None
+            try:
+                try:
+                    if self._evidence_stage == 'A' and not archived_a:
+                        self._evidence_archive_stage('A', self.client.export_history())
+                    elif self._evidence_stage == 'B' and not archived_b:
+                        self._evidence_archive_stage('B', self.client.export_history())
+                except Exception as archive_exc:
+                    self._analysis_integrity_failure = True
+                    if primary_error is None:
+                        raise
+                    self._audit_dialogue('evidence_secondary_archive_failure',
+                                         error_type=type(archive_exc).__name__)
+            finally:
+                try:
+                    self.client.restore_history(parent_history)
+                finally:
+                    self._evidence_stage = None
+                    self._evidence_limit = None
 
     def review(self, wake_context: str, completion_pending=False, *,
                root_handoff=None, max_turns_override=None,

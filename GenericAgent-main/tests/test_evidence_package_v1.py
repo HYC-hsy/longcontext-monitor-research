@@ -85,6 +85,47 @@ def test_frontier_durable_pages_tamper_and_protected_file_tools(tmp_path):
         restored.verify()
 
 
+def test_host_frontier_prewrite_failure_is_integrity_not_tool_error(tmp_path, monkeypatch):
+    monitor, _, workspace = make_monitor(tmp_path)
+    state = EvidenceFrontier(workspace.private_root)
+    monitor.evidence_frontier = state
+    monitor._evidence_stage = 'A'
+    def denied(*_args, **_kwargs):
+        raise PermissionError('offline injected staging denial')
+    monkeypatch.setattr('monitor_agent_core.evidence_package_v1.tempfile.mkstemp', denied)
+    with pytest.raises(EvidencePackageIntegrityError, match='staging failed'):
+        monitor.dispatch('frontier_open', {'task_basis': 'Public route', 'scope': 'source',
+                         'observable_consequence': 'Public result',
+                         'leads': ['Read implementation']})
+    assert monitor._analysis_integrity_failure
+    with pytest.raises(Exception, match='integrity|failed'):
+        monitor.dispatch('file_read', {'path': 'task/original_task.txt'})
+
+
+def test_stale_case_is_next_focus_and_cross_case_receipt_needs_link(tmp_path):
+    (tmp_path / 'monitor').mkdir()
+    state = EvidenceFrontier(tmp_path / 'monitor' / 'monitor_private')
+    one = state.open_case({'task_basis': 'Task', 'scope': 'one',
+        'observable_consequence': 'one result', 'leads': ['Read']})['case_id']
+    two = state.open_case({'task_basis': 'Task', 'scope': 'two',
+        'observable_consequence': 'two result', 'leads': ['Read']})['case_id']
+    receipt = state.register_receipt('file_read', {'path': 'task/workspace/a.go',
+        'evidence_case_id': one, 'evidence_scope': 'one'}, {'status': 'ok', 'sha256': 'v1'})
+    packet = state.packet_ready(handoff=None, task_cursor=0)
+    finding_args = {'packet_id': packet['id'], 'case_id': two, 'scope': 'two',
+        'task_basis': 'Task', 'receipt_ids': [receipt], 'claim': 'Bounded',
+        'kind': 'local_observation'}
+    with pytest.raises(ValueError, match='explicit source link'):
+        state.finding(finding_args, handoff=None)
+    state.link_receipt({'receipt_id': receipt, 'case_id': two,
+                        'basis': 'Same source feeds second object',
+                        'limitation': 'Original scope was one'})
+    state.finding(finding_args, handoff=None)
+    assert state.get('receipt', receipt)['object']['scope'] == 'one'
+    state.stale_receipts([receipt], 'source changed')
+    assert state.next_focus()['focus'] in {one, two}
+
+
 def test_child_focus_finding_provenance_and_current_objection(tmp_path):
     (tmp_path / 'monitor').mkdir()
     state = EvidenceFrontier(tmp_path / 'monitor' / 'monitor_private')
@@ -100,6 +141,9 @@ def test_child_focus_finding_provenance_and_current_objection(tmp_path):
     assert state.next_focus()['focus'] == child
     receipt = state.register_receipt('file_read', {'path': 'task/workspace/source.go'},
                                      {'sha256': 'source-v1', 'status': 'ok'})
+    state.link_receipt({'receipt_id': receipt, 'case_id': parent,
+                        'basis': 'Same source path informs the parent interface',
+                        'limitation': 'Read-only source evidence, not a behavior test'})
     packet = state.packet_ready(handoff={'request_id': 'completion-1', 'generation': 1},
                                 task_cursor=3)
     with pytest.raises(ValueError, match='host-issued receipts'):
@@ -127,6 +171,9 @@ def test_incomplete_process_is_not_behavioral_evidence(tmp_path):
                             'observable_consequence': 'Response', 'leads': ['Run probe']})['case_id']
     running = state.register_receipt('code_run', {'code': 'go test ./...'},
                                       {'status': 'running', 'session_id': 'session-1'})
+    state.link_receipt({'receipt_id': running, 'case_id': case,
+                        'basis': 'Probe was submitted for this route',
+                        'limitation': 'Still running; no result'})
     assert state.state['receipts'][running]['behavior_verified'] is False
     packet = state.packet_ready(handoff=None, task_cursor=0)
     with pytest.raises(ValueError, match='incomplete process'):
@@ -150,7 +197,9 @@ def test_cited_source_change_stales_only_related_finding(tmp_path):
                                 'observable_consequence': name + ' response',
                                 'leads': ['Read source']})['case_id']
         result = workspace.read_text('task/workspace/' + name + '.go')
-        receipt = state.register_receipt('file_read', {'path': result['path']}, result)
+        receipt = state.register_receipt('file_read', {'path': result['path'],
+                                         'evidence_case_id': case,
+                                         'evidence_scope': name}, result)
         finding = state.finding({'packet_id': packet['id'], 'case_id': case,
                                  'scope': name, 'task_basis': 'Task contract',
                                  'receipt_ids': [receipt], 'claim': 'Source-level local claim',
@@ -170,6 +219,7 @@ def test_cited_source_change_stales_only_related_finding(tmp_path):
 
 
 def test_real_provider_send_two_phase_packet_finding_and_delivery(tmp_path, monkeypatch):
+    import re
     monitor, client, workspace = make_monitor(tmp_path)
     monitor.analysis = TestPort()
     monitor.intervention_callback = lambda message: {
@@ -222,16 +272,20 @@ def test_real_provider_send_two_phase_packet_finding_and_delivery(tmp_path, monk
         elif action == 'packet_ready':
             arguments = {}
         elif action == 'file_read':
-            arguments = {'path': 'task/original_task.txt'}
+            case_id = re.search(r'case-[0-9a-f]{32}', json.dumps(payload)).group()
+            arguments = {'path': 'task/original_task.txt',
+                         'evidence_case_id': case_id, 'evidence_scope': 'route-handler'}
         elif action == 'frontier_finding':
-            state = monitor.evidence_frontier.state
-            arguments = {'packet_id': state['packet']['id'],
-                         'case_id': state['order'][0], 'task_basis': 'Public route',
-                         'scope': 'route-handler', 'receipt_ids': list(state['receipts']),
+            visible = json.dumps(payload)
+            arguments = {'packet_id': re.search(r'packet-[0-9a-f]{32}', visible).group(),
+                         'case_id': re.search(r'case-[0-9a-f]{32}', visible).group(),
+                         'task_basis': 'Public route', 'scope': 'route-handler',
+                         'receipt_ids': [re.search(r'receipt-[0-9a-f]{32}', visible).group()],
                          'claim': 'Task basis was inspected; bounded advice remains possible.',
                          'kind': 'investigation_request'}
         else:
-            arguments = {'finding_id': next(iter(monitor.evidence_frontier.state['findings'])),
+            arguments = {'finding_id': re.search(r'finding-[0-9a-f]{32}',
+                                                  json.dumps(payload)).group(),
                          'message': 'Please inspect the public route behavior.'}
         return FakeResponse(action, arguments)
 

@@ -760,7 +760,10 @@ class MonitorProviderClient:
                        sha256=self._last_payload_sha256)
         if capture is not None:
             capture(self._progress_request_id, payload)
-        with requests.post(
+        # Research-only static fixtures can install a strict per-client fake
+        # sender; the ordinary deployed transport remains unchanged.
+        sender = getattr(self, 'transport_post', None) or requests.post
+        with sender(
             url, headers=headers, json=payload, stream=True,
             timeout=(self.connect_timeout, self.read_timeout), proxies=self.proxies, verify=self.verify,
         ) as response:
