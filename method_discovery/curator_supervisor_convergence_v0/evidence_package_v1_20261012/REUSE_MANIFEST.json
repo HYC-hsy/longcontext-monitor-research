@@ -19,9 +19,28 @@
         "method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_entry.py:prepare_run"
       ],
       "call_chain": "pilot_entry.prepare_run -> resolved_supervisor_profile -> isolated_run_bundle -> runtime._monitor_worker -> MonitorAgent.review -> run_review -> MonitorProviderClient.complete -> MonitorAgent.dispatch -> SpoolAnalysisSessions",
+      "static_call_chain": "static_host.prepare_static -> diagnostic_static_adapter.adapter.materialize -> StaticDiagnosticSession -> resolved_supervisor_profile -> MonitorAgent.review/_review_evidence -> loop.run_review -> MonitorProviderClient.complete/_request_once(instance fake transport) -> MonitorAgent.dispatch -> SpoolAnalysisSessions -> PilotHostBridge -> StaticHostPort/DockerToolPort",
+      "static_boundary": "host-owned frontier/stage/provider archives are outside every Docker mount; candidate live MonitorRuntime launch rejection remains installed",
       "adaptation": "A/B coordination, protected frontier and finding interfaces, explicit profile variant; retain existing model transport, tool loop, Task handoff and isolated analysis port",
       "existing_tests": "Reuse pilot fake-provider, monitor-agent-core and analysis-spool tests; record actual commands in audit",
       "new_tests": "candidate state, lifecycle, profile, fake-provider and Docker integration"
+    },
+    {
+      "name": "Go native test JSON protocol",
+      "url": "https://go.dev/src/cmd/go/internal/test/test.go",
+      "documentation": "https://pkg.go.dev/cmd/test2json",
+      "version_identity": {
+        "Fyne_image": "go1.22.12; go binary sha256 929407e69c08952cd944a7457ae4eb289078a35473dd5dad2179369db7c5a6ec; test.go sha256 3fc930cbcffd7a1fa2326a17677d9eb092b2c788b1f88a44855bd534523a1a72",
+        "Kitex_image": "go1.23.12; go binary sha256 b0cc8eb31a9143fda5ec0972f337732cd935765e1db5cfda625f7a34e4a6e974; test.go sha256 3da708dcac3f1b9be4082252d743d8aea6a8cc0c432ce0f88adfadee048600c2",
+        "LICENSE_sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",
+        "test2json_implementation_sha256": "19b8bd6362a5101dd04f76d3ce6e937755048f1a9989648b9f524ddbda9fd482"
+      },
+      "license": "Go distribution BSD-style license, frozen image /usr/local/go/LICENSE; no Go source copied",
+      "status": "native go test command directly executed in isolated private directory; minimal JSON classification adapter",
+      "call_chain": "MonitorAgent._dispatch(go_check) -> evidence_package_v1.run_native_go_check -> SpoolAnalysisSessions -> PilotHostBridge -> DockerToolPort -> image go test -json -count=1 -> host raw output reader -> classify_go_test -> EvidenceFrontier.register_go_check",
+      "reason": "CoverUp/Agentless Python/SWE-bench runners do not match this Go task or native event protocol",
+      "existing_tests": "Go's own command exercised in pinned Fyne/Kitex images; no upstream Go tests copied",
+      "new_tests": "test_go_checks and test_static_session distinguish pass/fail/skip/zero-match/build failure and verify host-issued raw receipt"
     },
     {
       "name": "CoverUp",

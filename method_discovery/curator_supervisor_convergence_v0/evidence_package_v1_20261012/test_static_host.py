@@ -37,6 +37,8 @@ def test_c02_host_and_container_read_same_cutoff_without_control_mount(tmp_path)
             'test ! -e /tests/test.sh\n'
             'test ! -e /logs/agent/monitor/.evidence_package_v1/frontier.json\n'
             'test ! -e /host_spool/identity.json\n'
+            'test ! -e /host_audit/dialogue.jsonl\n'
+            'test ! -e /host_requests\n'
             'if printf changed >/app/go.mod 2>/dev/null; then exit 31; fi\n'
             'if printf changed >/pilot_control/identity_probe 2>/dev/null; then exit 32; fi\n'
             'printf writable >/tmp/private_probe\n'

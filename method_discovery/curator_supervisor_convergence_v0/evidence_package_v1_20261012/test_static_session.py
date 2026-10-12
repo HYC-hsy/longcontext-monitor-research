@@ -1,9 +1,12 @@
 """Actual MonitorAgent/provider/run_review through a zero-network host session."""
 
 import json
+import hashlib
 import re
 
-from .static_session import StaticDiagnosticSession
+from monitor_agent_core.evidence_package_v1 import EvidenceFrontier
+
+from .static_session import STATIC_COMMON_CONTEXT, StaticDiagnosticSession
 
 
 class FakeSSE:
@@ -89,17 +92,86 @@ def test_c02_root_packet_raw_receipt_query_and_simulated_control(tmp_path):
                                 max_turns=12)
         assert result['simulated'] and result['input_sent'] is False
         assert result['kind'] in {'intervene', 'local_intervened', 'root_intervened'}
+        assert session.public_config['monitor_evidence_package_v1'] is True
+        assert session.public_config['monitor_history_projection'] == 'off'
+        assert payloads[0]['model'] == 'claude-opus-4-8'
+        assert payloads[0]['max_tokens'] == 8192
+        assert 'temperature' not in payloads[0]
         assert session.monitor.control_echo.pending_submission is None
         assert len(payloads) == 6
         assert 'Original public task:' in json.dumps(payloads[0], ensure_ascii=False)
+        assert STATIC_COMMON_CONTEXT in json.dumps(payloads[0], ensure_ascii=False)
         assert 'Host inquiry packet' in json.dumps(payloads[3], ensure_ascii=False)
         assert 'frontier_get' in json.dumps(payloads[3]['tools'])
         assert len(list(session.capture_root.glob('*.json'))) == 6
         assert session.client.export_history() == []
         stages = list((session.monitor.evidence_frontier.root / 'stages').glob('*.json'))
         assert len(stages) == 2
+        dialogue = (session.port.cognition / 'audit' / 'dialogue.jsonl').read_bytes()
+        assert hashlib.sha256(dialogue).hexdigest() == session.manifest['dialogue_prefix_sha256']
+        assert (session.monitor.evidence_host_audit_root / 'dialogue.jsonl').is_file()
         assert all(not (session.port.cognition / 'audit' / 'evidence_package' /
                         'stages' / path.name).exists() for path in stages)
         print({'fake_requests': len(payloads), 'host_only_capture': True,
                'raw_receipt_query': True, 'stage_branches_host_only': len(stages),
                'real_task_controls': 0})
+
+
+def test_native_go_check_uses_monitor_dispatch_and_host_raw_receipt(tmp_path):
+    def no_network(*_args, **_kwargs):
+        raise AssertionError('No model request expected in this tool-path fixture')
+    with StaticDiagnosticSession('C02', tmp_path / 'cutoff',
+                                 condition='evidence_package_v1', fake_post=no_network) as session:
+        monitor = session.monitor
+        monitor.evidence_frontier = EvidenceFrontier(session.port.workspace.private_root)
+        monitor._evidence_stage = 'B'
+        case = monitor.evidence_frontier.open_case({
+            'task_basis': 'public task', 'scope': 'private-fixture',
+            'observable_consequence': 'synthetic test result',
+            'leads': ['Run one named Go test']})['case_id']
+        setup = ('mkdir -p /tmp/go_check\ncd /tmp/go_check\n'
+                 "printf '%s\\n' 'module offlinecheck' '' 'go 1.18' >go.mod\n"
+                 "printf '%s\\n' 'package check' 'import \"testing\"' "
+                 "'func TestPass(t *testing.T) {}' >check_test.go\n")
+        result = monitor.dispatch('code_run', {'code': setup, 'type': 'bash',
+            'timeout': 60, 'wait_seconds': 5, 'evidence_case_id': case,
+            'evidence_scope': 'private-fixture'}).data
+        for _ in range(20):
+            if result['status'] != 'running':
+                break
+            result = monitor.dispatch('code_run', {'session_id': result['session_id'],
+                'wait_seconds': 5, 'evidence_case_id': case,
+                'evidence_scope': 'private-fixture'}).data
+        assert result['status'] == 'success', result
+        check = monitor.dispatch('go_check', {
+            'evidence_case_id': case, 'evidence_scope': 'private-fixture',
+            'check_id': 'synthetic-pass-1', 'private_workdir': '/tmp/go_check',
+            'package': '.', 'test_name': 'TestPass', 'timeout': 120,
+            'expected_source': 'synthetic private fixture only'}).data
+        assert check['classification'] == 'test_passed'
+        assert check['tests_run'] == ['TestPass']
+        receipt = monitor.evidence_frontier.get('receipt', check['host_receipt_id'])['object']
+        assert receipt['kind'] == 'native_go_test'
+        assert receipt['result']['raw_sha256'] == check['raw_sha256']
+        assert session.request_count == 0
+        monitor._evidence_stage = None
+
+
+def test_c01_narrow_baseline_uses_same_static_host_and_no_task_delivery(tmp_path):
+    requests = []
+    def sender(_url, **kwargs):
+        payload = json.loads(json.dumps(kwargs['json']))
+        requests.append(payload)
+        if len(requests) != 1:
+            raise AssertionError('Unexpected static baseline request')
+        return FakeSSE('wait', {'after_turns': 1, 'mode': 'patrol'}, 0)
+    with StaticDiagnosticSession('C01', tmp_path / 'cutoff',
+                                 condition='N', fake_post=sender) as session:
+        result = session.review('Inspect only the certified public cutoff.', max_turns=4)
+        assert result['kind'] == 'wait' and result['simulated']
+        assert session.public_config['monitor_evidence_package_v1'] is False
+        assert session.monitor.intervention_callback is None
+        assert len(requests) == 1 and 'temperature' not in requests[0]
+        assert requests[0]['model'] == 'claude-opus-4-8'
+        assert STATIC_COMMON_CONTEXT in json.dumps(requests[0], ensure_ascii=False)
+        assert not session.monitor.evidence_frontier

@@ -123,6 +123,8 @@ def test_stale_case_is_next_focus_and_cross_case_receipt_needs_link(tmp_path):
     state.finding(finding_args, handoff=None)
     assert state.get('receipt', receipt)['object']['scope'] == 'one'
     state.stale_receipts([receipt], 'source changed')
+    with pytest.raises(ValueError, match='Stale receipt'):
+        state.finding(finding_args, handoff=None)
     assert state.next_focus()['focus'] in {one, two}
 
 

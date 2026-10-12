@@ -53,6 +53,7 @@ from .root_records_v1 import project as project_root_records
 from .root_records_native_v2 import project as project_root_records_native
 from .narrow_supervisor_v1 import METHOD_PROMPT as NARROW_METHOD_PROMPT, REVIEW_MODE as NARROW_REVIEW_MODE
 from .evidence_package_v1 import (EvidenceFrontier, EvidencePackageIntegrityError,
+                                  run_native_go_check,
                                   METHOD_PROMPT as EVIDENCE_METHOD_PROMPT,
                                   STAGE_A_PROMPT, STAGE_B_PROMPT)
 
@@ -125,6 +126,14 @@ EVIDENCE_TOOLS = [
         'receipt_id': {'type': 'string'}, 'case_id': {'type': 'string'},
         'basis': {'type': 'string'}, 'limitation': {'type': 'string'},
     }, ['receipt_id', 'case_id', 'basis', 'limitation']),
+    _tool('go_check', 'Run one named Go test in a private copy through the isolated analysis port; return native JSON classification.', {
+        'evidence_case_id': {'type': 'string'}, 'evidence_scope': {'type': 'string'},
+        'check_id': {'type': 'string'}, 'private_workdir': {'type': 'string'},
+        'package': {'type': 'string'}, 'test_name': {'type': 'string'},
+        'timeout': {'type': 'integer', 'minimum': 1, 'maximum': 300},
+        'expected_source': {'type': 'string'},
+    }, ['evidence_case_id', 'evidence_scope', 'check_id', 'private_workdir',
+        'package', 'test_name', 'expected_source']),
     _tool('frontier_open', 'Register a distinct local concern and its investigation leads.', {
         'task_basis': {'type': 'string'}, 'scope': {'type': 'string'},
         'observable_consequence': {'type': 'string'},
@@ -545,6 +554,8 @@ class MonitorAgent:
                 or self.crs_v0 or self.rhr_v0 or self.rer_v0 or self.history_projection != 'off'):
             raise ValueError('Evidence package requires narrow ASE, with CRS/RHR/RER and projection off')
         self.evidence_frontier = None
+        self.evidence_raw_output = None
+        self.evidence_host_audit_root = None
         self._evidence_stage = None
         self._evidence_model_cycles = 0
         self._evidence_maintenance_calls = 0
@@ -954,7 +965,9 @@ class MonitorAgent:
             self._evidence_model_cycles += 1
         if self.dcm is not None and event == 'tool_call':
             self.dcm.model_turn = payload.get('turn')
-        path = self.workspace.private_root / 'audit' / 'dialogue.jsonl'
+        path = (self.evidence_host_audit_root / 'dialogue.jsonl'
+                if self.evidence_package_v1 and self.evidence_host_audit_root is not None
+                else self.workspace.private_root / 'audit' / 'dialogue.jsonl')
         path.parent.mkdir(parents=True, exist_ok=True)
         record = dict(timestamp=time.time(), review_id=self.review_id, event=event, **payload)
         if self.evidence_package_v1:
@@ -1244,6 +1257,18 @@ class MonitorAgent:
                         arguments.get('kind'), arguments.get('id')))
                 if name == 'frontier_link':
                     return ToolOutcome(self.evidence_frontier.link_receipt(arguments))
+                if name == 'go_check':
+                    self.evidence_frontier.validate_receipt_scope(arguments)
+                    if not callable(self.evidence_raw_output):
+                        raise EvidencePackageIntegrityError('Host Go output reader unavailable')
+                    if not isinstance(arguments.get('check_id'), str) or not arguments['check_id'].strip():
+                        raise ValueError('Go check identity required')
+                    if not isinstance(arguments.get('expected_source'), str) or not arguments['expected_source'].strip():
+                        raise ValueError('Go check expectation source required')
+                    result = run_native_go_check(self.analysis, self.evidence_raw_output, arguments)
+                    result['host_receipt_id'] = self.evidence_frontier.register_go_check(
+                        arguments, result)
+                    return ToolOutcome(result)
                 if name == 'frontier_open':
                     original = self.workspace.resolve_read('task/original_task.txt').read_text(
                         encoding='utf-8')

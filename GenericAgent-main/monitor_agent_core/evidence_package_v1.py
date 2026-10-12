@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -21,6 +23,120 @@ def canonical(value):
 
 def digest(value):
     return hashlib.sha256(canonical(value)).hexdigest()
+
+
+def classify_go_test(raw, *, exit_code, reason, requested_test):
+    """Conservatively classify an actual Go -json process output, not an oracle."""
+    if not isinstance(raw, bytes):
+        raise TypeError('Raw native Go output must be bytes')
+    record = {'kind': 'go_test_native_json', 'raw_sha256': hashlib.sha256(raw).hexdigest(),
+              'raw_bytes': len(raw), 'exit_code': exit_code, 'reason': reason,
+              'requested_test': requested_test, 'events': 0, 'tests_run': [],
+              'tests_passed': [], 'tests_failed': [], 'tests_skipped': [],
+              'package_passed': False, 'package_failed': False,
+              'behavior_verified': False}
+    if reason in {'timeout', 'cancelled', 'cleanup_error'}:
+        record['classification'] = reason
+        return record
+    if not raw or not raw.endswith(b'\n'):
+        record['classification'] = 'output_incomplete'
+        return record
+    events, diagnostics = [], []
+    try:
+        for line in raw.splitlines():
+            if not line.startswith(b'{') and not events:
+                diagnostics.append(line)
+                continue
+            event = json.loads(line)
+            if not isinstance(event, dict) or not isinstance(event.get('Action'), str):
+                raise ValueError('Non-event in native Go output')
+            events.append(event)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        record['classification'] = 'output_incomplete'
+        return record
+    record['events'] = len(events)
+    record['compiler_diagnostic_sha256'] = (hashlib.sha256(b'\n'.join(
+        diagnostics)).hexdigest() if diagnostics else None)
+    for event in events:
+        action, test = event['Action'], event.get('Test')
+        if action == 'run' and test:
+            record['tests_run'].append(test)
+        elif action in {'pass', 'fail', 'skip'} and test:
+            record[{'pass': 'tests_passed', 'fail': 'tests_failed',
+                    'skip': 'tests_skipped'}[action]].append(test)
+        elif action == 'pass' and not test:
+            record['package_passed'] = True
+        elif action == 'fail' and not test:
+            record['package_failed'] = True
+    runs = set(record['tests_run'])
+    passed = set(record['tests_passed'])
+    failed = set(record['tests_failed'])
+    skipped = set(record['tests_skipped'])
+    native_build_failed = any('[build failed]' in event.get('Output', '')
+                              for event in events if event.get('Action') == 'output')
+    if diagnostics and not (exit_code and record['package_failed'] and native_build_failed):
+        record['classification'] = 'output_incomplete'
+    elif exit_code is None:
+        record['classification'] = 'process_incomplete'
+    elif not runs:
+        record['classification'] = 'build_or_environment_failure' if exit_code else 'zero_matching_tests'
+    elif failed:
+        record['classification'] = 'test_failed'
+    elif runs <= skipped:
+        record['classification'] = 'all_skipped'
+    elif exit_code != 0 or record['package_failed']:
+        record['classification'] = 'package_or_environment_failure'
+    elif not record['package_passed'] or not runs <= passed | skipped:
+        record['classification'] = 'output_incomplete'
+    elif requested_test and requested_test not in runs:
+        record['classification'] = 'requested_test_not_run'
+    else:
+        record['classification'] = 'test_passed'
+        record['behavior_verified'] = True
+    return record
+
+
+def run_native_go_check(analysis, raw_output_reader, args):
+    """One bounded native command via the already isolated analysis session."""
+    workdir = args.get('private_workdir')
+    package = args.get('package', '.')
+    selected = args.get('test_name')
+    timeout = args.get('timeout', 60)
+    if (not isinstance(workdir, str) or not re.fullmatch(r'/tmp/[A-Za-z0-9_/-]+', workdir)
+            or '..' in workdir or not isinstance(package, str)
+            or not re.fullmatch(r'[A-Za-z0-9_./-]+', package) or '..' in package
+            or not isinstance(selected, str)
+            or not re.fullmatch(r'[A-Za-z0-9_/]+', selected)
+            or type(timeout) is not int or not 1 <= timeout <= 300):
+        raise ValueError('Go check needs a bounded private path, package, test and timeout')
+    command = f"cd {workdir}\ngo test -json -count=1 -run '^{selected}$' {package}\n"
+    result = analysis.start(command, 'bash', timeout, 5)
+    session = result.get('session_id')
+    if not isinstance(session, str) or not session:
+        raise EvidencePackageIntegrityError('Go check did not receive a session identity')
+    polls = 0
+    until = time.monotonic() + timeout + 15
+    while result.get('status') == 'running' or result.get('next_read'):
+        if time.monotonic() >= until:
+            analysis.read(session, 0, True)
+            raise EvidencePackageIntegrityError('Go check polling exceeded process bound')
+        result = analysis.read(session, 5)
+        if result.get('session_id') != session:
+            raise EvidencePackageIntegrityError('Go check poll identity changed')
+        polls += 1
+    try:
+        raw = raw_output_reader(session)
+    except Exception as exc:
+        raise EvidencePackageIntegrityError('Go check raw output unavailable') from exc
+    summary = classify_go_test(raw, exit_code=result.get('exit_code'),
+                               reason=result.get('reason'), requested_test=selected)
+    summary.update({'session_id': session, 'polls': polls, 'command': command,
+                    'source_version': result.get('source_version',
+                                                 {'status': 'version_uncertain'}),
+                    'raw_output_path': f'monitor/audit/commands/{session}/output.log',
+                    'raw_output_text': raw.decode('utf-8', errors='replace')
+                    if len(raw) <= 20000 else None})
+    return summary
 
 
 def _text(value, field):
@@ -225,6 +341,16 @@ class EvidenceFrontier:
             raise ValueError('Unknown receipt')
         if status in {'observed', 'counterexample'} and not receipt_ids:
             raise ValueError('Observed states require actual source receipts')
+        if status in {'observed', 'counterexample', 'retracted'} and any(
+                self.state['receipts'][item].get('applicability_status') == 'stale'
+                for item in receipt_ids):
+            raise ValueError('Current case revision cannot rely on stale receipts')
+        if status == 'retracted':
+            if not receipt_ids:
+                raise ValueError('Withdrawal needs a cited current source or tool receipt')
+            if any(self.state['receipts'][item]['completion'] in
+                   {'running', 'unavailable', None} for item in receipt_ids):
+                raise ValueError('Withdrawal cannot rely on incomplete receipts')
         def apply(state):
             case = state['cases'][case_id]
             if args.get('hypothesis') is not None and args['hypothesis'] != case['hypothesis']:
@@ -232,6 +358,9 @@ class EvidenceFrontier:
                     state['findings'][finding_id]['status'] = 'stale'
             case['status'] = status
             case['reason'] = reason
+            if status == 'retracted':
+                for finding_id in case['finding_ids']:
+                    state['findings'][finding_id]['status'] = 'retracted'
             case['receipts'] = list(dict.fromkeys(case['receipts'] + receipt_ids))
             if args.get('new_lead'):
                 case['leads'].append(_text(args['new_lead'], 'new_lead'))
@@ -303,12 +432,36 @@ class EvidenceFrontier:
                   'source_version': result.get('source_version', {'status': 'version_uncertain'}),
                   'kind': ('source_read' if tool == 'file_read' else 'process_receipt'),
                   'completion': (result.get('status') if tool == 'code_run' else 'read_completed'),
+                  'applicability_status': 'current',
                   'behavior_verified': False}
         def apply(state):
             state['receipts'][receipt_id] = record
             if case_id is not None:
                 state['cases'][case_id]['receipts'].append(receipt_id)
         self.change('receipt_recorded', apply)
+        return receipt_id
+
+    def register_go_check(self, arguments, result):
+        """Host-issued receipt from a controlled native Go test invocation."""
+        self.validate_receipt_scope(arguments)
+        case_id = arguments.get('evidence_case_id')
+        if case_id is None:
+            raise ValueError('Controlled Go check requires a case identity')
+        receipt_id = 'receipt-' + uuid.uuid4().hex
+        record = {'id': receipt_id, 'tool': 'go_check',
+                  'arguments': json.loads(canonical(arguments)),
+                  'arguments_sha256': digest(arguments),
+                  'result': json.loads(canonical(result)), 'result_sha256': digest(result),
+                  'case_id': case_id, 'scope': arguments['evidence_scope'],
+                  'check_id': arguments['check_id'], 'kind': 'native_go_test',
+                  'completion': result['classification'],
+                  'behavior_verified': result['classification'] == 'test_passed',
+                  'applicability_status': 'current',
+                  'source_version': {'status': 'private_copy_or_version_uncertain'}}
+        def apply(state):
+            state['receipts'][receipt_id] = record
+            state['cases'][case_id]['receipts'].append(receipt_id)
+        self.change('go_check_recorded', apply)
         return receipt_id
 
     def packet_ready(self, *, handoff, task_cursor):
@@ -338,6 +491,9 @@ class EvidenceFrontier:
                 link['case_id'] == case_id for link in
                 self.state['receipts'][item].get('links', [])) for item in receipt_ids):
             raise ValueError('Finding requires original case binding or explicit source link')
+        if any(self.state['receipts'][item].get('applicability_status') == 'stale'
+               for item in receipt_ids):
+            raise ValueError('Stale receipt cannot become a current finding')
         if any(self.state['receipts'][item]['completion'] in {'running', 'unavailable', None}
                for item in receipt_ids):
             raise ValueError('Finding cannot promote an incomplete process receipt')
@@ -347,7 +503,7 @@ class EvidenceFrontier:
                         'clarification', 'local_observation'}:
             raise ValueError('Finding kind must identify its bounded purpose')
         if kind in {'counterexample', 'correction'} and not any(
-                self.state['receipts'][item]['tool'] == 'code_run' or
+                self.state['receipts'][item]['tool'] in {'code_run', 'go_check'} or
                 isinstance(self.state['receipts'][item].get('source_path'), str) and
                 self.state['receipts'][item]['source_path'].startswith('task/') and
                 self.state['receipts'][item]['source_path'] != 'task/original_task.txt'
@@ -382,6 +538,10 @@ class EvidenceFrontier:
             return
         lost = set(receipt_ids)
         def apply(state):
+            for receipt_id in lost:
+                if receipt_id in state['receipts']:
+                    state['receipts'][receipt_id]['applicability_status'] = 'stale'
+                    state['receipts'][receipt_id]['stale_reason'] = reason
             for case in state['cases'].values():
                 if lost.intersection(case['receipts']):
                     case['status'] = 'stale'
