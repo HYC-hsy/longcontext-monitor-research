@@ -6,7 +6,7 @@ import re
 
 import pytest
 
-from monitor_agent_core.evidence_package_v1 import EvidenceFrontier
+from monitor_agent_core.evidence_package_v1 import EvidenceFrontier, EvidencePackageIntegrityError
 
 from .static_session import STATIC_COMMON_CONTEXT, StaticDiagnosticSession
 from .static_host import IMAGE, KITEX_IMAGE
@@ -177,6 +177,16 @@ def test_native_go_check_uses_monitor_dispatch_and_host_raw_receipt(tmp_path, im
                 'expected_source': 'synthetic private fixture only'}).data
             assert observed.get('classification') == expected, observed
             assert not observed['behavior_verified']
+        before_scripts = set((session.port.private / 'audit' / 'commands').glob('*/script.sh'))
+        with pytest.raises(EvidencePackageIntegrityError, match='Private source identity'):
+            monitor.dispatch('go_check', {
+                'evidence_case_id': case, 'evidence_scope': 'private-fixture',
+                'check_id': 'missing-cwd', 'private_workdir': '/tmp/absent_check',
+                'package': '.', 'test_name': 'TestPass', 'timeout': 60,
+                'expected_source': 'synthetic private fixture only'})
+        added = set((session.port.private / 'audit' / 'commands').glob('*/script.sh')) - before_scripts
+        assert len(added) == 1
+        assert b'go test' not in next(iter(added)).read_bytes()
         assert session.request_count == 0
         monitor._evidence_stage = None
 
@@ -246,9 +256,11 @@ def test_c01_candidate_and_c02_narrow_use_real_tool_result_backfill(tmp_path):
             if index >= len(sequence):
                 raise AssertionError('Unexpected fake request; real transport is disabled')
             visible = json.dumps(payload['messages'], ensure_ascii=False)
+            visible_text = '\n'.join(block['text'] for message in payload['messages']
+                for block in message.get('content', []) if block.get('type') == 'text')
             name = sequence[index]
             if name == 'frontier_open':
-                original = visible.split('Original public task:', 1)[1]
+                original = visible_text.split('Original public task:', 1)[1]
                 basis = next(line.strip() for line in original.splitlines() if line.strip())[:12]
                 args = {'task_basis': basis, 'scope': 'public-source',
                         'observable_consequence': 'Current public task behavior',
@@ -272,7 +284,80 @@ def test_c01_candidate_and_c02_narrow_use_real_tool_result_backfill(tmp_path):
             assert proposal['simulated'] and proposal['input_sent'] is False
             assert len(sent) == len(sequence)
             for index in range(1, len(sent)):
-                assert f'fake-tool-{index - 1}' in json.dumps(sent[index]['messages'])
+                current = json.dumps(sent[index]['messages'])
+                if condition == 'evidence_package_v1' and index == 3:
+                    assert 'Host inquiry packet' in current
+                    assert re.search(r'packet-[0-9a-f]{32}', current)
+                else:
+                    assert f'fake-tool-{index - 1}' in current
             assert session.monitor.intervention_callback is None
             print({'scene': scene, 'condition': condition, 'fake_requests': len(sent),
                    'tool_backfill_verified': True, 'terminal': proposal['kind']})
+
+
+def test_candidate_go_checks_pass_fail_skip_through_actual_provider_loop(tmp_path):
+    sent, phase = [], {'step': 'open', 'checks': 0}
+    setup = ('mkdir -p /tmp/loop_go_check\ncd /tmp/loop_go_check\n'
+             "printf '%s\\n' 'module offlinecheck' '' 'go 1.18' >go.mod\n"
+             "printf '%s\\n' 'package check' 'import \"testing\"' "
+             "'func TestPass(t *testing.T) {}' "
+             "'func TestFail(t *testing.T) { t.Fatal(\"fixture failure\") }' "
+             "'func TestParent(t *testing.T) { t.Run(\"child\", func(t *testing.T) { t.Skip(\"fixture skip\") }) }' >check_test.go\n")
+    selectors = [('TestPass', 'test_passed'), ('TestFail', 'test_failed'),
+                 ('TestParent/child', 'all_skipped')]
+    def sender(_url, **kwargs):
+        payload = json.loads(json.dumps(kwargs['json']))
+        sent.append(payload)
+        assert len(sent) <= 18, 'Unexpected provider cycle; no network fallback'
+        visible = json.dumps(payload['messages'], ensure_ascii=False)
+        visible_text = '\n'.join(block['text'] for message in payload['messages']
+            for block in message.get('content', []) if block.get('type') == 'text')
+        results = [block for message in payload['messages']
+                   for block in message.get('content', [])
+                   if block.get('type') == 'tool_result']
+        last = json.loads(results[-1]['content']) if results else None
+        step = phase['step']
+        if step == 'open':
+            basis = next(line.strip() for line in visible_text.split('Original public task:', 1)[1]
+                         .splitlines() if line.strip())[:12]
+            name, args = 'frontier_open', {'task_basis': basis, 'scope': 'private-loop',
+                'observable_consequence': 'Synthetic probe result', 'leads': ['Run a private test']}
+            phase['step'] = 'setup'
+        elif step == 'setup':
+            name, args = 'code_run', {'code': setup, 'type': 'bash', 'timeout': 60,
+                'wait_seconds': 5, 'evidence_case_id': re.search(r'case-[0-9a-f]{32}', visible).group(),
+                'evidence_scope': 'private-loop'}
+            phase['step'] = 'setup_result'
+        elif step == 'setup_result' and last['status'] == 'running':
+            name, args = 'code_run', {'session_id': last['session_id'], 'wait_seconds': 5}
+        elif step == 'setup_result':
+            assert last['status'] == 'success', last
+            name, args = 'packet_ready', {}
+            phase['step'] = 'checks'
+        elif step == 'checks':
+            if last and last.get('classification'):
+                expected = selectors[phase['checks'] - 1][1]
+                assert last['classification'] == expected, last
+            if phase['checks'] == len(selectors):
+                name, args = 'wait', {'after_turns': 1, 'mode': 'patrol'}
+                phase['step'] = 'done'
+            else:
+                selector = selectors[phase['checks']][0]
+                name, args = 'go_check', {
+                    'evidence_case_id': re.search(r'case-[0-9a-f]{32}', visible).group(),
+                    'evidence_scope': 'private-loop', 'check_id': 'loop-' + selector,
+                    'private_workdir': '/tmp/loop_go_check', 'package': '.',
+                    'test_name': selector, 'timeout': 120,
+                    'expected_source': 'synthetic private fixture only'}
+                phase['checks'] += 1
+        else:
+            raise AssertionError('Unexpected request after terminal proposal')
+        return FakeSSE(name, args, len(sent) - 1)
+    with StaticDiagnosticSession('C01', tmp_path / 'cutoff',
+                                 condition='evidence_package_v1', fake_post=sender) as session:
+        proposal = session.review(max_turns=18)
+        assert proposal['kind'] == 'wait' and proposal['input_sent'] is False
+        assert phase == {'step': 'done', 'checks': 3}
+        assert session.request_count == len(sent)
+        print({'go_check_actual_provider_loop': True, 'fake_requests': len(sent),
+               'classifications': [item[1] for item in selectors], 'real_provider_calls': 0})

@@ -47,9 +47,10 @@ def test_c02_host_and_container_read_same_cutoff_without_control_mount(tmp_path)
             'if printf changed >/pilot_control/identity_probe 2>/dev/null; then exit 32; fi\n'
             'printf writable >/tmp/private_probe\n'
             'test "$(cat /tmp/private_probe)" = writable && echo scratch_writable=pass\n'
-            'sleep 8\n'
+            'sleep 60\n'
         )
-        result = analysis.start(script, 'bash', timeout=60, wait_seconds=1)
+        result = analysis.start(script, 'bash', timeout=120, wait_seconds=1)
+        assert result['status'] == 'running', result
         inspected = subprocess.run(['docker', 'inspect', result['session_id']],
                                    capture_output=True, timeout=20)
         assert inspected.returncode == 0, inspected.stderr

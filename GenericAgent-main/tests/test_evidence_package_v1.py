@@ -539,6 +539,7 @@ def test_real_maintenance_format_repair_does_not_execute_or_finish_packet(tmp_pa
     packet = monitor.evidence_frontier.packet_ready(handoff=None, task_cursor=0)
     monitor._evidence_stage = phase
     monitor._evidence_limit = 8
+    monitor._evidence_model_cycles = 7
     sent = []
     client.pre_send_capture = lambda request_id, payload: _capture_pilot_payload(
         workspace.private_root, monitor, request_id, payload)
@@ -587,5 +588,6 @@ def test_real_maintenance_format_repair_does_not_execute_or_finish_packet(tmp_pa
     assert getattr(client, 'request_purpose', 'review') == 'review'
     assert monitor.evidence_frontier.state['packet'] == packet
     assert monitor._evidence_maintenance_calls == 2
+    assert monitor._evidence_model_cycles == 7
     assert not monitor._sent_messages
 
