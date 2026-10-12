@@ -140,11 +140,12 @@ EVIDENCE_TOOLS = [
         'leads': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1},
         'hypothesis': {'type': 'string'}, 'parent_id': {'type': 'string'},
     }, ['task_basis', 'scope', 'observable_consequence', 'leads']),
-    _tool('frontier_revise', 'Revise one local case without deleting old observations.', {
+    _tool('frontier_revise', 'Revise one local case without deleting old observations; retracted requires current cited evidence and resolution_kind.', {
         'case_id': {'type': 'string'}, 'status': {'type': 'string', 'enum': [
             'pending', 'active', 'blocked', 'observed', 'counterexample', 'retracted', 'stale']},
         'reason': {'type': 'string'}, 'receipt_ids': {'type': 'array', 'items': {'type': 'string'}},
         'new_lead': {'type': 'string'}, 'hypothesis': {'type': 'string'},
+        'resolution_kind': {'type': 'string', 'enum': ['premise_refuted', 'problem_repaired']},
     }, ['case_id', 'status', 'reason']),
     _tool('frontier_focus', 'Advance deterministically to an unvisited local case or return to its parent.', {
         'return_parent': {'type': 'boolean'},
@@ -554,6 +555,7 @@ class MonitorAgent:
                 or self.crs_v0 or self.rhr_v0 or self.rer_v0 or self.history_projection != 'off'):
             raise ValueError('Evidence package requires narrow ASE, with CRS/RHR/RER and projection off')
         self.evidence_frontier = None
+        self._evidence_sessions = {}
         self.evidence_raw_output = None
         self.evidence_host_audit_root = None
         self._evidence_stage = None
@@ -1023,6 +1025,11 @@ class MonitorAgent:
             "Keep details that change future decisions, not a chronology. No fixed schema; return only the note. "
             "Do not issue task interventions in this maintenance response. Existing private working note:\n" + previous
         )
+        if self.evidence_package_v1 and self._evidence_stage in {'A', 'B'}:
+            prompt += ('\n\nThis continuation belongs only to evidence phase ' +
+                       self._evidence_stage +
+                       '. Do not import another phase’s private reasoning; original task, '
+                       'Task Book and raw receipts remain available by their normal paths.')
         if self.frame_kind == 'root' and not (self.verification_loop_v0 or self.ase_v0):
             prompt += ("\n\nPreserve the current handoff question, observed public grounds and limits, "
                        "and the next useful root decision. Do not turn prior local conclusions into "
@@ -1157,6 +1164,18 @@ class MonitorAgent:
             raise ProjectionIntegrityError('Root projection integrity failed; no further control')
         if self._analysis_integrity_failure:
             raise AnalysisPortIntegrityError('Pilot analysis port integrity failed; no further control')
+        if self.evidence_package_v1 and name == 'code_run':
+            arguments = dict(arguments)
+            owner = self._evidence_sessions.get(arguments.get('session_id'))
+            if owner is not None:
+                for field in ('evidence_case_id', 'evidence_scope', 'check_id'):
+                    if field in arguments and arguments[field] != owner.get(field):
+                        raise ValueError('Session evidence identity differs from its start')
+                    if owner.get(field) is not None:
+                        arguments[field] = owner[field]
+            elif 'session_id' not in arguments:
+                self.evidence_frontier.invalidate_private_checks(
+                    'new_private_command_may_change_probe_or_source')
         tool_id = uuid.uuid4().hex
         started = time.monotonic()
         if self.dcm is not None:
@@ -1167,6 +1186,18 @@ class MonitorAgent:
                 if self.evidence_package_v1 and name in {'file_read', 'code_run'}:
                     self.evidence_frontier.validate_receipt_scope(arguments)
                 outcome = self._dispatch(name, arguments)
+                if (self.evidence_package_v1 and name == 'code_run'
+                        and 'session_id' not in arguments and isinstance(outcome.data, dict)
+                        and isinstance(outcome.data.get('session_id'), str)):
+                    self._evidence_sessions[outcome.data['session_id']] = {
+                        field: arguments.get(field) for field in
+                        ('evidence_case_id', 'evidence_scope', 'check_id')}
+                if (self.evidence_package_v1 and name == 'code_run'
+                        and isinstance(outcome.data, dict)
+                        and outcome.data.get('session_id') in self._evidence_sessions):
+                    self._evidence_sessions[outcome.data['session_id']]['running'] = (
+                        outcome.data.get('status') == 'running' or
+                        bool(outcome.data.get('next_read')))
                 if (self.evidence_package_v1 and name in {'file_read', 'code_run'}
                         and isinstance(outcome.data, dict)
                         and not (outcome.data.get('status') == 'error'
@@ -1265,7 +1296,13 @@ class MonitorAgent:
                         raise ValueError('Go check identity required')
                     if not isinstance(arguments.get('expected_source'), str) or not arguments['expected_source'].strip():
                         raise ValueError('Go check expectation source required')
+                    concurrent_private_writer_possible = any(
+                        owner.get('running') for owner in self._evidence_sessions.values())
                     result = run_native_go_check(self.analysis, self.evidence_raw_output, arguments)
+                    if concurrent_private_writer_possible:
+                        result['classification'] = 'private_source_identity_uncertain'
+                        result['behavior_verified'] = False
+                        result['concurrent_session_limit'] = 'an earlier private session was still running'
                     result['host_receipt_id'] = self.evidence_frontier.register_go_check(
                         arguments, result)
                     return ToolOutcome(result)
@@ -1821,7 +1858,9 @@ class MonitorAgent:
 
     def _evidence_archive_stage(self, stage, history, action=None):
         """Keep stage reasoning in the protected host archive, not B's input."""
-        raw = json.dumps({'stage': stage, 'history': history,
+        working = self.workspace.resolve_private('monitor/working.md')
+        note = working.read_text(encoding='utf-8') if working.exists() else None
+        raw = json.dumps({'stage': stage, 'history': history, 'working_note': note,
                           'action': asdict(action) if action is not None else None},
                          ensure_ascii=False).encode('utf-8')
         path = self.evidence_frontier.root / 'stages' / (uuid.uuid4().hex + '.json')
@@ -1852,6 +1891,14 @@ class MonitorAgent:
         self._evidence_model_cycles = 0
         self._evidence_maintenance_calls = 0
         parent_history = self.client.export_history()
+        working_path = self.workspace.resolve_private('monitor/working.md')
+        parent_working = working_path.read_bytes() if working_path.exists() else None
+        def restore_working():
+            if parent_working is None:
+                if working_path.exists():
+                    working_path.unlink()
+            else:
+                EvidenceFrontier._atomic(working_path, parent_working)
         self._evidence_stage = 'A'
         archived_a = False
         archived_b = False
@@ -1883,6 +1930,7 @@ class MonitorAgent:
                 return MonitorAction('root_route', {'prior_model_turns':
                     self._evidence_model_cycles})
             self.client.restore_history([])
+            restore_working()
             self._evidence_stage = 'B'
             remaining = limit - self._evidence_model_cycles
             if remaining < 1:
@@ -1923,8 +1971,11 @@ class MonitorAgent:
                 try:
                     self.client.restore_history(parent_history)
                 finally:
-                    self._evidence_stage = None
-                    self._evidence_limit = None
+                    try:
+                        restore_working()
+                    finally:
+                        self._evidence_stage = None
+                        self._evidence_limit = None
 
     def review(self, wake_context: str, completion_pending=False, *,
                root_handoff=None, max_turns_override=None,

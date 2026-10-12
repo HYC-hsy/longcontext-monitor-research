@@ -59,8 +59,8 @@ def main():
                   'stdout_sha256': hashlib.sha256(stdout).hexdigest(),
                   'stderr_sha256': hashlib.sha256(stderr).hexdigest(),
                   'stdout_bytes': len(stdout), 'stderr_bytes': len(stderr),
-                  'real_provider_calls': 0, 'real_task_calls': 0,
-                  'native_evaluator_calls': 0}
+                  'transport_evidence': 'see test fake_post counters and offline.invalid configuration; '
+                                        'this runner does not measure external calls'}
         (directory / 'result.json').write_text(json.dumps(record, ensure_ascii=False,
             sort_keys=True, indent=2) + '\n', encoding='utf-8')
         print(label, status, round(record['duration_seconds'], 2),

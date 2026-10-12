@@ -4,9 +4,12 @@ import json
 import hashlib
 import re
 
+import pytest
+
 from monitor_agent_core.evidence_package_v1 import EvidenceFrontier
 
 from .static_session import STATIC_COMMON_CONTEXT, StaticDiagnosticSession
+from .static_host import IMAGE, KITEX_IMAGE
 
 
 class FakeSSE:
@@ -84,12 +87,10 @@ def test_c02_root_packet_raw_receipt_query_and_simulated_control(tmp_path):
                     'message': 'Please inspect this bounded public source path.'}
         return FakeSSE(name, args, index)
 
-    handoff = {'request_id': 'static-test-completion-1', 'generation': 1,
-               'cursor': 161, 'task_turn': 83}
     with StaticDiagnosticSession('C02', tmp_path / 'cutoff',
                                  condition='evidence_package_v1', fake_post=sender) as session:
-        result = session.review('Public static root handoff.', root_handoff=handoff,
-                                max_turns=12)
+        assert session.cutoff['task_turn'] == 83 and session.cutoff['completion_pending']
+        result = session.review(max_turns=12)
         assert result['simulated'] and result['input_sent'] is False
         assert result['kind'] in {'intervene', 'local_intervened', 'root_intervened'}
         assert session.public_config['monitor_evidence_package_v1'] is True
@@ -122,11 +123,13 @@ def test_c02_root_packet_raw_receipt_query_and_simulated_control(tmp_path):
                'real_task_controls': 0})
 
 
-def test_native_go_check_uses_monitor_dispatch_and_host_raw_receipt(tmp_path):
+@pytest.mark.parametrize('image', [IMAGE, KITEX_IMAGE])
+def test_native_go_check_uses_monitor_dispatch_and_host_raw_receipt(tmp_path, image):
     def no_network(*_args, **_kwargs):
         raise AssertionError('No model request expected in this tool-path fixture')
     with StaticDiagnosticSession('C02', tmp_path / 'cutoff',
-                                 condition='evidence_package_v1', fake_post=no_network) as session:
+                                 condition='evidence_package_v1', fake_post=no_network,
+                                 image=image) as session:
         monitor = session.monitor
         monitor.evidence_frontier = EvidenceFrontier(session.port.workspace.private_root)
         monitor._evidence_stage = 'B'
@@ -137,7 +140,9 @@ def test_native_go_check_uses_monitor_dispatch_and_host_raw_receipt(tmp_path):
         setup = ('mkdir -p /tmp/go_check\ncd /tmp/go_check\n'
                  "printf '%s\\n' 'module offlinecheck' '' 'go 1.18' >go.mod\n"
                  "printf '%s\\n' 'package check' 'import \"testing\"' "
-                 "'func TestPass(t *testing.T) {}' >check_test.go\n")
+                 "'func TestPass(t *testing.T) {}' "
+                 "'func TestFail(t *testing.T) { t.Fatal(\"fixture failure\") }' "
+                 "'func TestParent(t *testing.T) { t.Run(\"child\", func(t *testing.T) { t.Skip(\"fixture skip\") }) }' >check_test.go\n")
         result = monitor.dispatch('code_run', {'code': setup, 'type': 'bash',
             'timeout': 60, 'wait_seconds': 5, 'evidence_case_id': case,
             'evidence_scope': 'private-fixture'}).data
@@ -153,11 +158,25 @@ def test_native_go_check_uses_monitor_dispatch_and_host_raw_receipt(tmp_path):
             'check_id': 'synthetic-pass-1', 'private_workdir': '/tmp/go_check',
             'package': '.', 'test_name': 'TestPass', 'timeout': 120,
             'expected_source': 'synthetic private fixture only'}).data
-        assert check['classification'] == 'test_passed'
+        assert check.get('classification') == 'test_passed', check
+        assert check['command'].startswith('cd -- /tmp/go_check && go test ')
+        assert check['normalized_workdir'] == '/tmp/go_check'
         assert check['tests_run'] == ['TestPass']
         receipt = monitor.evidence_frontier.get('receipt', check['host_receipt_id'])['object']
         assert receipt['kind'] == 'native_go_test'
         assert receipt['result']['raw_sha256'] == check['raw_sha256']
+        assert check['private_source_before']['sha256'] == check['private_source_after']['sha256']
+        assert any(item[0] == 'check_test.go' for item in
+                   check['private_source_before']['identity']['files'])
+        for selector, expected in [('TestFail', 'test_failed'),
+                                   ('TestParent/child', 'all_skipped')]:
+            observed = monitor.dispatch('go_check', {
+                'evidence_case_id': case, 'evidence_scope': 'private-fixture',
+                'check_id': 'synthetic-' + selector, 'private_workdir': '/tmp/go_check',
+                'package': '.', 'test_name': selector, 'timeout': 120,
+                'expected_source': 'synthetic private fixture only'}).data
+            assert observed.get('classification') == expected, observed
+            assert not observed['behavior_verified']
         assert session.request_count == 0
         monitor._evidence_stage = None
 
@@ -172,7 +191,8 @@ def test_c01_narrow_baseline_uses_same_static_host_and_no_task_delivery(tmp_path
         return FakeSSE('wait', {'after_turns': 1, 'mode': 'patrol'}, 0)
     with StaticDiagnosticSession('C01', tmp_path / 'cutoff',
                                  condition='N', fake_post=sender) as session:
-        result = session.review('Inspect only the certified public cutoff.', max_turns=4)
+        assert session.cutoff['task_turn'] == 61
+        result = session.review(max_turns=4)
         assert result['kind'] == 'wait' and result['simulated']
         assert session.public_config['monitor_evidence_package_v1'] is False
         assert session.monitor.intervention_callback is None
@@ -181,3 +201,33 @@ def test_c01_narrow_baseline_uses_same_static_host_and_no_task_delivery(tmp_path
         assert STATIC_COMMON_CONTEXT in json.dumps(requests[0], ensure_ascii=False)
         assert 'FUTURE_DIAGNOSTIC_MANIFEST' not in json.dumps(requests[0])
         assert not session.monitor.evidence_frontier
+
+
+@pytest.mark.parametrize('scene,turn,cursor', [('C01', 61, 120), ('C02', 83, 161)])
+def test_same_certified_first_input_for_narrow_and_candidate(scene, turn, cursor, tmp_path):
+    captured = {}
+    for condition in ('N', 'evidence_package_v1'):
+        def capture_once(_url, **kwargs):
+            captured[condition] = json.loads(json.dumps(kwargs['json']))
+            raise RuntimeError('FAKE_FIRST_REQUEST_CAPTURED')
+        with StaticDiagnosticSession(scene, tmp_path / condition,
+                                     condition=condition, fake_post=capture_once) as session:
+            assert session.cutoff['task_turn'] == turn
+            assert session.cutoff['public_cursor'] == cursor
+            assert session.client.export_history() == []
+            with pytest.raises(RuntimeError, match='FAKE_FIRST_REQUEST_CAPTURED'):
+                session.review(max_turns=4)
+            assert session.request_count == 1
+    for condition, payload in captured.items():
+        visible = json.dumps(payload, ensure_ascii=False)
+        assert 'Original public task:' in visible and 'Current Task Book' in visible
+        assert STATIC_COMMON_CONTEXT in visible
+        assert f'cursor={cursor}' in visible and f'Task turn={turn}' in visible
+        assert payload['model'] == 'claude-opus-4-8' and payload['max_tokens'] == 8192
+        assert 'temperature' not in payload
+    assert captured['N']['model'] == captured['evidence_package_v1']['model']
+    assert captured['N']['max_tokens'] == captured['evidence_package_v1']['max_tokens']
+    print({'scene': scene, 'task_turn': turn, 'cursor': cursor,
+           'first_request_sha256': {name: hashlib.sha256(json.dumps(value,
+               ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+               for name, value in captured.items()}, 'real_provider_calls': 0})

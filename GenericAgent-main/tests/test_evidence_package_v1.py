@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from monitor_agent_core.agent import MonitorAgent
+from monitor_agent_core.agent import MonitorAction
 from monitor_agent_core.loop import MonitorLoopError
 from monitor_agent_core.evidence_package_v1 import EvidenceFrontier, EvidencePackageIntegrityError
 from monitor_agent_core.provider import MonitorProviderClient
@@ -160,7 +161,8 @@ def test_child_focus_finding_provenance_and_current_objection(tmp_path):
     with pytest.raises(ValueError, match='concrete objection'):
         state.check_allow(state.state['revision'], handoff=packet['handoff'])
     state.revise_case({'case_id': parent, 'status': 'retracted',
-                       'reason': 'Source premise overturned', 'receipt_ids': [receipt]})
+                       'reason': 'Source premise overturned', 'receipt_ids': [receipt],
+                       'resolution_kind': 'premise_refuted'})
     state.check_allow(state.state['revision'], handoff=packet['handoff'])
     with pytest.raises(ValueError):
         state.check_intervention(finding, handoff=packet['handoff'])
@@ -183,6 +185,67 @@ def test_incomplete_process_is_not_behavioral_evidence(tmp_path):
                        'scope': 'route', 'task_basis': 'Original task',
                        'receipt_ids': [running], 'claim': 'tests passed',
                        'kind': 'counterexample'}, handoff=None)
+
+
+def test_revision_cannot_launder_other_case_or_incomplete_go_receipt(tmp_path):
+    (tmp_path / 'monitor').mkdir()
+    state = EvidenceFrontier(tmp_path / 'monitor' / 'monitor_private')
+    first = state.open_case({'task_basis': 'Original task', 'scope': 'first',
+        'observable_consequence': 'A', 'leads': ['Read A']})['case_id']
+    second = state.open_case({'task_basis': 'Original task', 'scope': 'second',
+        'observable_consequence': 'B', 'leads': ['Read B']})['case_id']
+    receipt = state.register_receipt('file_read', {
+        'path': 'task/workspace/a.go', 'evidence_case_id': first,
+        'evidence_scope': 'first'}, {'status': 'ok', 'sha256': 'a'})
+    with pytest.raises(ValueError, match='case binding'):
+        state.revise_case({'case_id': second, 'status': 'observed',
+            'reason': 'Wrong sibling', 'receipt_ids': [receipt]})
+    state.link_receipt({'receipt_id': receipt, 'case_id': second,
+        'basis': 'Explicitly relevant source', 'limitation': 'Source only'})
+    state.revise_case({'case_id': second, 'status': 'observed',
+        'reason': 'Linked source observation', 'receipt_ids': [receipt]})
+    pending = state.register_receipt('code_run', {
+        'code': 'go test', 'evidence_case_id': first, 'evidence_scope': 'first'},
+        {'status': 'running', 'session_id': 's'})
+    with pytest.raises(ValueError, match='incomplete process'):
+        state.revise_case({'case_id': first, 'status': 'counterexample',
+            'reason': 'Still running', 'receipt_ids': [pending]})
+    with pytest.raises(ValueError, match='distinguish'):
+        state.revise_case({'case_id': first, 'status': 'retracted',
+            'reason': 'Unsupported withdrawal', 'receipt_ids': [receipt]})
+
+
+def test_code_session_poll_inherits_original_case_and_scope(tmp_path):
+    monitor, _, workspace = make_monitor(tmp_path)
+    class SessionPort:
+        evidence_test_port = True
+        def start(self, *_):
+            return {'session_id': 'new-session', 'status': 'running'}
+        def read(self, *_):
+            return {'session_id': 'new-session', 'status': 'success', 'exit_code': 0}
+    monitor.analysis = SessionPort()
+    monitor.evidence_frontier = EvidenceFrontier(workspace.private_root)
+    monitor._evidence_stage = 'B'
+    first = monitor.evidence_frontier.open_case({'task_basis': 'Original task',
+        'scope': 'first', 'observable_consequence': 'A', 'leads': ['Run']})['case_id']
+    second = monitor.evidence_frontier.open_case({'task_basis': 'Original task',
+        'scope': 'second', 'observable_consequence': 'B', 'leads': ['Run']})['case_id']
+    old_check = monitor.evidence_frontier.register_go_check({
+        'evidence_case_id': first, 'evidence_scope': 'first', 'check_id': 'old'},
+        {'classification': 'test_passed', 'normalized_workdir': '/tmp/fixture',
+         'private_source_before': {'sha256': 'old'},
+         'private_source_after': {'sha256': 'old'}})
+    started = monitor.dispatch('code_run', {'code': 'printf probe', 'type': 'bash',
+        'evidence_case_id': first, 'evidence_scope': 'first', 'check_id': 'check-1'}).data
+    assert started['status'] == 'running'
+    assert monitor.evidence_frontier.get('receipt', old_check)['object'][
+        'applicability_status'] == 'stale'
+    with pytest.raises(ValueError, match='Session evidence identity'):
+        monitor.dispatch('code_run', {'session_id': 'new-session',
+            'evidence_case_id': second, 'evidence_scope': 'second'})
+    result = monitor.dispatch('code_run', {'session_id': 'new-session'}).data
+    receipt = monitor.evidence_frontier.get('receipt', result['host_receipt_id'])['object']
+    assert receipt['case_id'] == first and receipt['scope'] == 'first'
 
 
 def test_cited_source_change_stales_only_related_finding(tmp_path):
@@ -217,7 +280,10 @@ def test_cited_source_change_stales_only_related_finding(tmp_path):
     state.revise_case({'case_id': cases[1], 'status': 'active',
                        'reason': 'Oracle changed after inspecting setup',
                        'hypothesis': 'A different expected behavior'})
-    assert state.state['findings'][findings[1]]['status'] == 'stale'
+    assert state.state['findings'][findings[1]]['status'] == 'current'
+    with pytest.raises(ValueError, match='cannot clear'):
+        state.revise_case({'case_id': cases[1], 'status': 'stale',
+                           'reason': 'I changed my mind'})
 
 
 def test_real_provider_send_two_phase_packet_finding_and_delivery(tmp_path, monkeypatch):
@@ -439,12 +505,39 @@ def test_shared_outer_budget_exhaustion_is_not_wait(tmp_path, monkeypatch):
     assert monitor._evidence_stage is None
 
 
-def test_real_maintenance_format_repair_does_not_execute_or_finish_packet(tmp_path, monkeypatch):
+def test_stage_working_note_is_archived_and_restored_across_fresh_b(tmp_path, monkeypatch):
+    monitor, client, workspace = make_monitor(tmp_path)
+    monitor.analysis = TestPort()
+    client.pre_send_capture = lambda *_: None
+    working = workspace.resolve_private('monitor/working.md')
+    working.write_text('parent note', encoding='utf-8')
+    monitor.completion_state = lambda: None
+    def phase_review(*_args, **_kwargs):
+        if monitor._evidence_stage == 'A':
+            working.write_text('A private reasoning', encoding='utf-8')
+            packet = monitor.evidence_frontier.packet_ready(handoff=None, task_cursor=None)
+            monitor._evidence_model_cycles += 1
+            return MonitorAction('packet_ready', packet)
+        assert working.read_text(encoding='utf-8') == 'parent note'
+        working.write_text('B private reasoning', encoding='utf-8')
+        monitor._evidence_model_cycles += 1
+        return MonitorAction('wait', {'after_turns': 1, 'mode': 'patrol'})
+    monkeypatch.setattr(monitor, 'review', phase_review)
+    result = monitor._review_evidence('Neutral wake', False, None, 4, None)
+    assert result.kind == 'wait' and working.read_text(encoding='utf-8') == 'parent note'
+    stages = sorted((monitor.evidence_frontier.root / 'stages').glob('*.json'))
+    archived = [json.loads(path.read_text(encoding='utf-8')) for path in stages]
+    assert {row['stage']: row['working_note'] for row in archived} == {
+        'A': 'A private reasoning', 'B': 'B private reasoning'}
+
+
+@pytest.mark.parametrize('phase', ['A', 'B'])
+def test_real_maintenance_format_repair_does_not_execute_or_finish_packet(tmp_path, monkeypatch, phase):
     monitor, client, workspace = make_monitor(tmp_path)
     monitor.analysis = TestPort()
     monitor.evidence_frontier = EvidenceFrontier(workspace.private_root)
     packet = monitor.evidence_frontier.packet_ready(handoff=None, task_cursor=0)
-    monitor._evidence_stage = 'B'
+    monitor._evidence_stage = phase
     monitor._evidence_limit = 8
     sent = []
     client.pre_send_capture = lambda request_id, payload: _capture_pilot_payload(
@@ -488,6 +581,7 @@ def test_real_maintenance_format_repair_does_not_execute_or_finish_packet(tmp_pa
     note = monitor._prepare_continuation()
     assert note == 'Keep the bounded question open.'
     assert len(sent) == 2 and all(row['tools'] == [] for row in sent)
+    assert all('evidence phase ' + phase in json.dumps(row['messages']) for row in sent)
     assert sent[0]['messages'][-1] != sent[1]['messages'][-1]
     assert client.export_history() == before
     assert getattr(client, 'request_purpose', 'review') == 'review'

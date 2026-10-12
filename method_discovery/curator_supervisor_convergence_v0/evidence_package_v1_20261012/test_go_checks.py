@@ -1,10 +1,13 @@
 """Native Go JSON checks through the already isolated Docker tool port."""
 
 import hashlib
+import json
+import os
+from pathlib import Path
 
 import pytest
 
-from .go_checks import classify_go_test
+from monitor_agent_core.evidence_package_v1 import classify_go_test, run_native_go_check
 from .static_host import IMAGE, KITEX_IMAGE, StaticHostPort, adapter
 
 
@@ -15,6 +18,32 @@ def test_fault_injected_go_timeout_and_incomplete_output_remain_unknown():
                             requested_test='TestX')['classification'] == 'timeout'
     assert classify_go_test(b'PASS\n', exit_code=0, reason=None,
                             requested_test='TestX')['behavior_verified'] is False
+
+
+def test_parent_pass_does_not_promote_selected_skipped_subtest():
+    import json
+    rows = [
+        {'Action': 'run', 'Package': 'fixture', 'Test': 'TestParent'},
+        {'Action': 'run', 'Package': 'fixture', 'Test': 'TestParent/child'},
+        {'Action': 'skip', 'Package': 'fixture', 'Test': 'TestParent/child'},
+        {'Action': 'pass', 'Package': 'fixture', 'Test': 'TestParent'},
+        {'Action': 'pass', 'Package': 'fixture'},
+    ]
+    raw = b''.join((json.dumps(row) + '\n').encode() for row in rows)
+    result = classify_go_test(raw, exit_code=0, reason=None,
+                              requested_test='TestParent/child')
+    assert result['classification'] == 'all_skipped', result
+    assert result['target_terminal'] == 'skip' and not result['behavior_verified']
+
+
+def test_go_check_rejects_option_like_package_before_execution():
+    class NoExecution:
+        def start(self, *_):
+            raise AssertionError('Invalid package executed')
+    with pytest.raises(ValueError, match='bounded private path'):
+        run_native_go_check(NoExecution(), lambda _: b'', {
+            'private_workdir': '/tmp/check', 'package': '-exec=sh',
+            'test_name': 'TestX', 'timeout': 60})
 
 
 def _run(port, command):
@@ -28,6 +57,12 @@ def _run(port, command):
     assert result['status'] != 'running', result
     output = (port.private / 'audit' / 'commands' / result['session_id'] /
               'output.log').read_bytes()
+    if os.environ.get('STATIC_AUDIT_ROOT'):
+        target = Path(os.environ['STATIC_AUDIT_ROOT']) / 'go_raw' / result['session_id']
+        target.mkdir(parents=True, exist_ok=False)
+        (target / 'output.log').write_bytes(output)
+        (target / 'result.json').write_text(json.dumps(result, ensure_ascii=False,
+            sort_keys=True, indent=2) + '\n', encoding='utf-8')
     return result, output
 
 

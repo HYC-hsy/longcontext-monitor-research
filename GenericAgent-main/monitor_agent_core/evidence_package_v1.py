@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import tempfile
 import time
 import uuid
@@ -33,7 +34,7 @@ def classify_go_test(raw, *, exit_code, reason, requested_test):
               'raw_bytes': len(raw), 'exit_code': exit_code, 'reason': reason,
               'requested_test': requested_test, 'events': 0, 'tests_run': [],
               'tests_passed': [], 'tests_failed': [], 'tests_skipped': [],
-              'package_passed': False, 'package_failed': False,
+              'package_passed': False, 'package_failed': False, 'target_terminal': None,
               'behavior_verified': False}
     if reason in {'timeout', 'cancelled', 'cleanup_error'}:
         record['classification'] = reason
@@ -57,8 +58,11 @@ def classify_go_test(raw, *, exit_code, reason, requested_test):
     record['events'] = len(events)
     record['compiler_diagnostic_sha256'] = (hashlib.sha256(b'\n'.join(
         diagnostics)).hexdigest() if diagnostics else None)
+    target_events = []
     for event in events:
         action, test = event['Action'], event.get('Test')
+        if test == requested_test:
+            target_events.append((event.get('Package'), action))
         if action == 'run' and test:
             record['tests_run'].append(test)
         elif action in {'pass', 'fail', 'skip'} and test:
@@ -80,6 +84,14 @@ def classify_go_test(raw, *, exit_code, reason, requested_test):
         record['classification'] = 'process_incomplete'
     elif not runs:
         record['classification'] = 'build_or_environment_failure' if exit_code else 'zero_matching_tests'
+    elif requested_test and requested_test not in runs:
+        record['classification'] = 'requested_test_not_run'
+    elif requested_test and any(action == 'fail' for _, action in target_events):
+        record['target_terminal'] = 'fail'
+        record['classification'] = 'test_failed'
+    elif requested_test and any(action == 'skip' for _, action in target_events):
+        record['target_terminal'] = 'skip'
+        record['classification'] = 'all_skipped'
     elif failed:
         record['classification'] = 'test_failed'
     elif runs <= skipped:
@@ -88,9 +100,10 @@ def classify_go_test(raw, *, exit_code, reason, requested_test):
         record['classification'] = 'package_or_environment_failure'
     elif not record['package_passed'] or not runs <= passed | skipped:
         record['classification'] = 'output_incomplete'
-    elif requested_test and requested_test not in runs:
-        record['classification'] = 'requested_test_not_run'
+    elif requested_test and not any(action == 'pass' for _, action in target_events):
+        record['classification'] = 'output_incomplete'
     else:
+        record['target_terminal'] = 'pass' if requested_test else None
         record['classification'] = 'test_passed'
         record['behavior_verified'] = True
     return record
@@ -103,13 +116,54 @@ def run_native_go_check(analysis, raw_output_reader, args):
     selected = args.get('test_name')
     timeout = args.get('timeout', 60)
     if (not isinstance(workdir, str) or not re.fullmatch(r'/tmp/[A-Za-z0-9_/-]+', workdir)
-            or '..' in workdir or not isinstance(package, str)
-            or not re.fullmatch(r'[A-Za-z0-9_./-]+', package) or '..' in package
+            or '..' in workdir.split('/') or not isinstance(package, str)
+            or (package != '.' and not re.fullmatch(
+                r'(?:\./)?[A-Za-z0-9_][A-Za-z0-9_./-]*', package))
+            or '..' in package.split('/')
             or not isinstance(selected, str)
             or not re.fullmatch(r'[A-Za-z0-9_/]+', selected)
             or type(timeout) is not int or not 1 <= timeout <= 300):
         raise ValueError('Go check needs a bounded private path, package, test and timeout')
-    command = f"cd {workdir}\ngo test -json -count=1 -run '^{selected}$' {package}\n"
+    normalized_workdir = '/' + '/'.join(part for part in workdir.split('/') if part)
+    snapshot_code = (
+        'import hashlib,itertools,json,pathlib,sys\n'
+        'root=pathlib.Path(sys.argv[1]); rows=[]; incomplete=False\n'
+        'if not root.is_dir(): sys.exit(2)\n'
+        'for index,path in enumerate(itertools.islice(root.rglob("*"),501)):\n'
+        ' if index>=500: incomplete=True; break\n'
+        ' if path.is_symlink(): incomplete=True; continue\n'
+        ' if not path.is_file(): continue\n'
+        ' try:\n'
+        '  size=path.stat().st_size\n'
+        '  if size>4194304: incomplete=True; continue\n'
+        '  h=hashlib.sha256()\n'
+        '  with path.open("rb") as stream:\n'
+        '   for chunk in iter(lambda:stream.read(65536),b""): h.update(chunk)\n'
+        '  rows.append([path.relative_to(root).as_posix(),size,h.hexdigest()])\n'
+        ' except OSError: incomplete=True\n'
+        'rows.sort()\n'
+        'print(json.dumps({"files":rows,"incomplete":incomplete},sort_keys=True))\n')
+    def private_identity():
+        probe = analysis.start('python3 -c ' + shlex.quote(snapshot_code) + ' ' +
+                               shlex.quote(normalized_workdir) + '\n', 'bash', 60, 5)
+        probe_id = probe.get('session_id')
+        if not probe_id:
+            raise EvidencePackageIntegrityError('Private source identity probe lacks session')
+        for _ in range(20):
+            if probe.get('status') != 'running' and not probe.get('next_read'):
+                break
+            probe = analysis.read(probe_id, 5)
+        if probe.get('status') != 'success' or probe.get('exit_code') != 0:
+            raise EvidencePackageIntegrityError('Private source identity unavailable')
+        try:
+            identity = json.loads(raw_output_reader(probe_id))
+        except (ValueError, TypeError) as exc:
+            raise EvidencePackageIntegrityError('Private source identity malformed') from exc
+        return {'session_id': probe_id, 'identity': identity,
+                'sha256': digest(identity)}
+    before = private_identity()
+    command = (f"cd -- {shlex.quote(normalized_workdir)} && "
+               f"go test -json -count=1 -run '^{selected}$' {shlex.quote(package)}\n")
     result = analysis.start(command, 'bash', timeout, 5)
     session = result.get('session_id')
     if not isinstance(session, str) or not session:
@@ -130,7 +184,15 @@ def run_native_go_check(analysis, raw_output_reader, args):
         raise EvidencePackageIntegrityError('Go check raw output unavailable') from exc
     summary = classify_go_test(raw, exit_code=result.get('exit_code'),
                                reason=result.get('reason'), requested_test=selected)
+    after = private_identity()
+    if before['sha256'] != after['sha256'] or before['identity']['incomplete'] or after['identity']['incomplete']:
+        summary['classification'] = 'private_source_identity_uncertain'
+        summary['behavior_verified'] = False
     summary.update({'session_id': session, 'polls': polls, 'command': command,
+                    'normalized_workdir': normalized_workdir,
+                    'private_source_before': before, 'private_source_after': after,
+                    'source_identity_probe_sessions': 2,
+                    'declared_dependencies': 'unknown_unless_explicitly_listed',
                     'source_version': result.get('source_version',
                                                  {'status': 'version_uncertain'}),
                     'raw_output_path': f'monitor/audit/commands/{session}/output.log',
@@ -279,6 +341,23 @@ class EvidenceFrontier:
         if case is None or scope != case['scope']:
             raise ValueError('Receipt case or original scope mismatch')
 
+    def _validate_case_receipts(self, case_id, receipt_ids, *, require_complete=True):
+        if not isinstance(receipt_ids, list) or any(
+                item not in self.state['receipts'] for item in receipt_ids):
+            raise ValueError('Unknown receipt')
+        for item in receipt_ids:
+            receipt = self.state['receipts'][item]
+            if receipt.get('case_id') != case_id and not any(
+                    link['case_id'] == case_id for link in receipt.get('links', [])):
+                raise ValueError('Receipt needs original case binding or explicit source link')
+            if receipt.get('applicability_status') == 'stale':
+                raise ValueError('Stale receipt cannot support a current conclusion')
+            if require_complete and receipt.get('completion') in {
+                    'running', 'unavailable', 'timeout', 'output_incomplete',
+                    'process_incomplete', 'private_source_identity_uncertain',
+                    'cancelled', 'cleanup_error', None}:
+                raise ValueError('incomplete process receipt cannot support a conclusion')
+
     def link_receipt(self, args):
         receipt_id = args.get('receipt_id')
         case_id = args.get('case_id')
@@ -336,26 +415,21 @@ class EvidenceFrontier:
             raise ValueError('Unsupported local case status')
         reason = _text(args.get('reason'), 'reason')
         receipt_ids = args.get('receipt_ids', [])
-        if not isinstance(receipt_ids, list) or any(
-                item not in self.state['receipts'] for item in receipt_ids):
-            raise ValueError('Unknown receipt')
+        self._validate_case_receipts(case_id, receipt_ids,
+                                     require_complete=status in {'observed', 'counterexample',
+                                                                 'retracted'})
         if status in {'observed', 'counterexample'} and not receipt_ids:
             raise ValueError('Observed states require actual source receipts')
-        if status in {'observed', 'counterexample', 'retracted'} and any(
-                self.state['receipts'][item].get('applicability_status') == 'stale'
-                for item in receipt_ids):
-            raise ValueError('Current case revision cannot rely on stale receipts')
         if status == 'retracted':
             if not receipt_ids:
                 raise ValueError('Withdrawal needs a cited current source or tool receipt')
-            if any(self.state['receipts'][item]['completion'] in
-                   {'running', 'unavailable', None} for item in receipt_ids):
-                raise ValueError('Withdrawal cannot rely on incomplete receipts')
+            if args.get('resolution_kind') not in {'premise_refuted', 'problem_repaired'}:
+                raise ValueError('Withdrawal must distinguish refuted premise from repair')
         def apply(state):
             case = state['cases'][case_id]
-            if args.get('hypothesis') is not None and args['hypothesis'] != case['hypothesis']:
-                for finding_id in case['finding_ids']:
-                    state['findings'][finding_id]['status'] = 'stale'
+            if status == 'stale' and any(state['findings'][fid]['status'] == 'current'
+                                          for fid in case['finding_ids']):
+                raise ValueError('Model-declared stale cannot clear a current objection')
             case['status'] = status
             case['reason'] = reason
             if status == 'retracted':
@@ -367,7 +441,8 @@ class EvidenceFrontier:
             if args.get('hypothesis') is not None:
                 case['hypothesis'] = _text(args['hypothesis'], 'hypothesis')
             case.setdefault('revisions', []).append({'revision': state['revision'] + 1,
-                'status': status, 'reason': reason, 'receipt_ids': receipt_ids})
+                'status': status, 'reason': reason, 'receipt_ids': receipt_ids,
+                'resolution_kind': args.get('resolution_kind')})
             state['focus'] = case_id
             return case_id
         self.change('case_revised', apply)
@@ -459,10 +534,28 @@ class EvidenceFrontier:
                   'applicability_status': 'current',
                   'source_version': {'status': 'private_copy_or_version_uncertain'}}
         def apply(state):
+            for previous in state['receipts'].values():
+                old = previous.get('result', {})
+                if (previous.get('tool') == 'go_check' and
+                        old.get('normalized_workdir') == result['normalized_workdir'] and
+                        old.get('private_source_after', {}).get('sha256') !=
+                        result['private_source_before']['sha256']):
+                    previous['applicability_status'] = 'stale'
+                    previous['stale_reason'] = 'private_source_changed_before_next_check'
+                    for finding in state['findings'].values():
+                        if previous['id'] in finding['receipt_ids']:
+                            finding['status'] = 'stale'
             state['receipts'][receipt_id] = record
             state['cases'][case_id]['receipts'].append(receipt_id)
         self.change('go_check_recorded', apply)
         return receipt_id
+
+    def invalidate_private_checks(self, reason):
+        affected = [rid for rid, receipt in self.state['receipts'].items()
+                    if receipt['tool'] == 'go_check' and
+                    receipt['applicability_status'] == 'current']
+        if affected:
+            self.stale_receipts(affected, reason)
 
     def packet_ready(self, *, handoff, task_cursor):
         packet_id = 'packet-' + uuid.uuid4().hex
@@ -487,23 +580,16 @@ class EvidenceFrontier:
         if not isinstance(receipt_ids, list) or not receipt_ids or any(
                 item not in self.state['receipts'] for item in receipt_ids):
             raise ValueError('Finding needs existing host-issued receipts')
-        if any(self.state['receipts'][item].get('case_id') != case_id and not any(
-                link['case_id'] == case_id for link in
-                self.state['receipts'][item].get('links', [])) for item in receipt_ids):
-            raise ValueError('Finding requires original case binding or explicit source link')
-        if any(self.state['receipts'][item].get('applicability_status') == 'stale'
-               for item in receipt_ids):
-            raise ValueError('Stale receipt cannot become a current finding')
-        if any(self.state['receipts'][item]['completion'] in {'running', 'unavailable', None}
-               for item in receipt_ids):
-            raise ValueError('Finding cannot promote an incomplete process receipt')
+        self._validate_case_receipts(case_id, receipt_ids)
         claim = _text(args.get('claim'), 'claim')
         kind = args.get('kind')
         if kind not in {'counterexample', 'correction', 'investigation_request',
                         'clarification', 'local_observation'}:
             raise ValueError('Finding kind must identify its bounded purpose')
         if kind in {'counterexample', 'correction'} and not any(
-                self.state['receipts'][item]['tool'] in {'code_run', 'go_check'} or
+                self.state['receipts'][item]['tool'] == 'code_run' or
+                (self.state['receipts'][item]['tool'] == 'go_check' and
+                 self.state['receipts'][item]['completion'] in {'test_passed', 'test_failed'}) or
                 isinstance(self.state['receipts'][item].get('source_path'), str) and
                 self.state['receipts'][item]['source_path'].startswith('task/') and
                 self.state['receipts'][item]['source_path'] != 'task/original_task.txt'

@@ -79,10 +79,10 @@ class StaticHostPort(PilotDockerToolPort):
                 '--entrypoint', interpreter, self.image, virtual_script]
 
 
-def prepare_static(scene: str, destination: Path) -> tuple[dict, StaticHostPort, PilotHostBridge]:
+def prepare_static(scene: str, destination: Path, *, image: str = IMAGE) -> tuple[dict, StaticHostPort, PilotHostBridge]:
     """Materialize authenticated cutoff and create host-only control queues."""
     manifest = adapter.materialize(scene, destination)
-    port = StaticHostPort(destination)
+    port = StaticHostPort(destination, image=image)
     bridge = PilotHostBridge(root=destination / 'host_spool',
                              run_id='static-' + hashlib.sha256(
                                  str(destination.resolve()).encode()).hexdigest()[:20], port=port)
