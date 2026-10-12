@@ -16,12 +16,15 @@ from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_p
 
 
 IMAGE = 'sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1'
+KITEX_IMAGE = 'sha256:7ffcd70e49d77031b8e67eaa99226dc8468fa046f33e615118e8922b89fff32e'
 
 
 class StaticHostPort(PilotDockerToolPort):
     """Same trusted spool/session path, with one certified static /app bind."""
 
-    def __init__(self, fixture: Path):
+    def __init__(self, fixture: Path, *, image: str = IMAGE):
+        if image not in {IMAGE, KITEX_IMAGE}:
+            raise RuntimeError('Unregistered static diagnostic image')
         self.fixture = Path(fixture).resolve(strict=True)
         self.app = self.fixture / 'app'
         self.evidence = self.fixture / 'task_evidence'
@@ -37,10 +40,10 @@ class StaticHostPort(PilotDockerToolPort):
         self.scratch.mkdir()
         for name in ('home', 'tmp', 'build_cache', 'output'):
             (self.scratch / name).mkdir()
-        self.image = IMAGE
-        image = subprocess.run(['docker', 'image', 'inspect', IMAGE, '--format', '{{.Id}}'],
-                               text=True, capture_output=True, timeout=20)
-        if image.returncode or image.stdout.strip() != IMAGE:
+        self.image = image
+        inspected = subprocess.run(['docker', 'image', 'inspect', image, '--format', '{{.Id}}'],
+                                   text=True, capture_output=True, timeout=20)
+        if inspected.returncode or inspected.stdout.strip() != image:
             raise RuntimeError('Pinned static Fyne image identity mismatch')
         self.workspace = _workspace_class()(self.evidence, self.cognition,
                                              task_mounts={'workspace': self.app})
@@ -73,7 +76,7 @@ class StaticHostPort(PilotDockerToolPort):
                 '--mount', f'type=bind,source={scratch / "output"},destination=/output',
                 '--env', 'HOME=/home/monitor', '--env', 'TMPDIR=/tmp',
                 '--env', 'GOCACHE=/cache/go', '--env', 'GOPROXY=off',
-                '--entrypoint', interpreter, IMAGE, virtual_script]
+                '--entrypoint', interpreter, self.image, virtual_script]
 
 
 def prepare_static(scene: str, destination: Path) -> tuple[dict, StaticHostPort, PilotHostBridge]:
