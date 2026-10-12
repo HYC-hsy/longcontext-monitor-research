@@ -231,3 +231,48 @@ def test_same_certified_first_input_for_narrow_and_candidate(scene, turn, cursor
            'first_request_sha256': {name: hashlib.sha256(json.dumps(value,
                ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
                for name, value in captured.items()}, 'real_provider_calls': 0})
+
+
+def test_c01_candidate_and_c02_narrow_use_real_tool_result_backfill(tmp_path):
+    for scene, condition, sequence in (
+            ('C01', 'evidence_package_v1',
+             ['frontier_open', 'file_read', 'packet_ready', 'frontier_get', 'wait']),
+            ('C02', 'N', ['file_read', 'allow_complete'])):
+        sent = []
+        def sender(_url, **kwargs):
+            payload = json.loads(json.dumps(kwargs['json']))
+            sent.append(payload)
+            index = len(sent) - 1
+            if index >= len(sequence):
+                raise AssertionError('Unexpected fake request; real transport is disabled')
+            visible = json.dumps(payload['messages'], ensure_ascii=False)
+            name = sequence[index]
+            if name == 'frontier_open':
+                original = visible.split('Original public task:', 1)[1]
+                basis = next(line.strip() for line in original.splitlines() if line.strip())[:12]
+                args = {'task_basis': basis, 'scope': 'public-source',
+                        'observable_consequence': 'Current public task behavior',
+                        'leads': ['Read the current source']}
+            elif name == 'file_read':
+                args = {'path': 'task/workspace/go.mod'}
+                if condition != 'N':
+                    args.update({'evidence_case_id': re.search(r'case-[0-9a-f]{32}', visible).group(),
+                                 'evidence_scope': 'public-source'})
+            elif name == 'frontier_get':
+                args = {'kind': 'receipt',
+                        'id': re.search(r'receipt-[0-9a-f]{32}', visible).group()}
+            elif name == 'wait':
+                args = {'after_turns': 1, 'mode': 'patrol'}
+            else:
+                args = {}
+            return FakeSSE(name, args, index)
+        with StaticDiagnosticSession(scene, tmp_path / scene,
+                                     condition=condition, fake_post=sender) as session:
+            proposal = session.review(max_turns=8)
+            assert proposal['simulated'] and proposal['input_sent'] is False
+            assert len(sent) == len(sequence)
+            for index in range(1, len(sent)):
+                assert f'fake-tool-{index - 1}' in json.dumps(sent[index]['messages'])
+            assert session.monitor.intervention_callback is None
+            print({'scene': scene, 'condition': condition, 'fake_requests': len(sent),
+                   'tool_backfill_verified': True, 'terminal': proposal['kind']})
