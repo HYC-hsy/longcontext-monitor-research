@@ -8,6 +8,15 @@ from .go_checks import classify_go_test
 from .static_host import IMAGE, KITEX_IMAGE, StaticHostPort, adapter
 
 
+def test_fault_injected_go_timeout_and_incomplete_output_remain_unknown():
+    assert classify_go_test(b'{"Action":"run","Test":"TestX"}', exit_code=0,
+                            reason=None, requested_test='TestX')['classification'] == 'output_incomplete'
+    assert classify_go_test(b'', exit_code=None, reason='timeout',
+                            requested_test='TestX')['classification'] == 'timeout'
+    assert classify_go_test(b'PASS\n', exit_code=0, reason=None,
+                            requested_test='TestX')['behavior_verified'] is False
+
+
 def _run(port, command):
     result = port.execute('code_run', {'code': command, 'type': 'bash',
                                        'timeout': 120, 'wait_seconds': 5})

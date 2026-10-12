@@ -103,6 +103,11 @@ def test_c02_root_packet_raw_receipt_query_and_simulated_control(tmp_path):
         assert STATIC_COMMON_CONTEXT in json.dumps(payloads[0], ensure_ascii=False)
         assert 'Host inquiry packet' in json.dumps(payloads[3], ensure_ascii=False)
         assert 'frontier_get' in json.dumps(payloads[3]['tools'])
+        for payload in payloads:
+            visible = json.dumps(payload, ensure_ascii=False)
+            assert 'FUTURE_DIAGNOSTIC_MANIFEST' not in visible
+            assert 'STATIC_HOST_REPORT' not in visible
+            assert 'evidence_package_v1_20261012' not in visible
         assert len(list(session.capture_root.glob('*.json'))) == 6
         assert session.client.export_history() == []
         stages = list((session.monitor.evidence_frontier.root / 'stages').glob('*.json'))
@@ -174,4 +179,5 @@ def test_c01_narrow_baseline_uses_same_static_host_and_no_task_delivery(tmp_path
         assert len(requests) == 1 and 'temperature' not in requests[0]
         assert requests[0]['model'] == 'claude-opus-4-8'
         assert STATIC_COMMON_CONTEXT in json.dumps(requests[0], ensure_ascii=False)
+        assert 'FUTURE_DIAGNOSTIC_MANIFEST' not in json.dumps(requests[0])
         assert not session.monitor.evidence_frontier
