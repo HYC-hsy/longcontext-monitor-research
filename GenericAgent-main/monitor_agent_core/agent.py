@@ -1907,6 +1907,7 @@ class MonitorAgent:
                              else self.system_prompt)
             system = active_system + "\n\n" + mode
             if self.frame_kind == 'root':
+                phase_context = wake_context if self.evidence_package_v1 else None
                 remaining = getattr(self.client, 'recovery_deadline', None)
                 used, limit = self.task_budget_state() if self.task_budget_state else (None, None)
                 wake_context = root_input(
@@ -1916,6 +1917,10 @@ class MonitorAgent:
                     single_session=self.verification_loop_v0 or self.ase_v0)
                 if root_transition_view:
                     wake_context += "\n\n" + root_transition_view
+                if phase_context is not None:
+                    # root_input is authoritative for the handoff, but must
+                    # not erase the A/B packet and frontier assembled above.
+                    wake_context += "\n\nCurrent evidence inquiry:\n" + phase_context
                 self._audit_dialogue('root_frame_input', mode=self.root_scope_v1,
                                      handoff=self.root_frame_handoff, content=wake_context)
             tools = (crs_tools() if self.crs is not None and self.frame_kind == 'root' else

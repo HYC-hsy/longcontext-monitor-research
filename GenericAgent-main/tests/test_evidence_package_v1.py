@@ -322,6 +322,14 @@ def test_root_packet_reference_guard_and_no_objection_path(tmp_path, monkeypatch
     assert monitor.evidence_frontier.state['packet']['handoff'] == handoff
     assert checkpoint_requests and checkpoint_requests[0]['root_handoff'] == handoff
     assert 'Phase A' in sent[0]['system'] and 'Phase B' in sent[1]['system']
+    first_input = json.dumps(sent[0]['messages'], ensure_ascii=False)
+    second_input = json.dumps(sent[1]['messages'], ensure_ascii=False)
+    assert 'Task completion handoff.' in first_input
+    assert 'Keep the public route working.' in first_input
+    assert 'Host inquiry frontier' in first_input
+    assert monitor.evidence_frontier.state['packet']['id'] in second_input
+    assert 'Host inquiry packet' in second_input
+    assert 'Keep the public route working.' in second_input
     dialogue = (workspace.private_root / 'audit' / 'dialogue.jsonl').read_text(
         encoding='utf-8')
     assert 'reference_invalid' in dialogue
