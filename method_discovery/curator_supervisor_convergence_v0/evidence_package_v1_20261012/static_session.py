@@ -1,7 +1,7 @@
-"""Host-owned, fake-transport-only static diagnostic entry.
+"""Host-owned static diagnostic assembly; the public constructor requires fake transport.
 
-No live mode is exposed here. The Task is a certified, immutable cutoff tree;
-controls are archived as proposals and never delivered to a Task process.
+Only the separate authority-gated batch entry passes the private live config seam.
+The Task is a certified, immutable cutoff tree; controls are proposals only.
 """
 
 from __future__ import annotations
@@ -41,10 +41,13 @@ def _canonical(value):
 class StaticDiagnosticSession:
     """One fresh process should own one instance and one immutable cutoff."""
 
-    def __init__(self, scene: str, destination: Path, *, condition: str, fake_post,
-                 deadline_seconds: int = 3600, image: str = IMAGE):
-        if condition not in {'N', 'evidence_package_v1'} or not callable(fake_post):
-            raise ValueError('Static session requires a named condition and fake transport')
+    def __init__(self, scene: str, destination: Path, *, condition: str, fake_post=None,
+                 deadline_seconds: int = 3600, image: str = IMAGE, _live_config=None):
+        if condition not in {'N', 'evidence_package_v1'}:
+            raise ValueError('Static session requires a named condition')
+        if (_live_config is None and not callable(fake_post)) or (
+                _live_config is not None and fake_post is not None):
+            raise ValueError('Static session needs fake transport or an authority-gated live config')
         if type(deadline_seconds) is not int or deadline_seconds < 1:
             raise ValueError('Static session needs one positive shared deadline')
         self.manifest, self.port, self.bridge = prepare_static(scene, destination, image=image)
@@ -53,20 +56,27 @@ class StaticDiagnosticSession:
         self.cutoff = self._cutoff_input()
         self.stop = threading.Event()
         self.errors = []
-        config = resolved_supervisor_profile({
+        offline_profile = {
             'apikey': 'offline-test-only', 'apibase': 'https://offline.invalid',
             'provider': 'anthropic', 'model': 'claude-opus-4-8', 'max_tokens': 8192,
             'thinking_type': 'adaptive', 'reasoning_effort': 'high',
             'max_retries': 0, 'verify': True,
-        }, variant='narrow_v1' if condition == 'N' else 'evidence_package_v1')
+        }
+        config = resolved_supervisor_profile(
+            offline_profile if _live_config is None else _live_config,
+            variant='narrow_v1' if condition == 'N' else 'evidence_package_v1')
         self.public_config = public_profile_identity(config)
         self.public_config['monitor_evidence_package_v1'] = config.get(
             'monitor_evidence_package_v1', False)
         self.client = MonitorProviderClient('offline-static', config)
-        self.client.transport_post = fake_post
+        if fake_post is not None:
+            self.client.transport_post = fake_post
         self.deadline_seconds = deadline_seconds
         self.client.recovery_deadline = time.monotonic() + deadline_seconds
         self.client.recovery_stop = self.stop
+        self._live = _live_config is not None
+        self._deadline_timer = None
+        self.first_send_monotonic = None
         self.monitor = MonitorAgent(self.client, self.port.workspace,
                                     max_review_turns=20, stop_event=self.stop)
         self.monitor.evidence_host_audit_root = Path(destination) / 'host_audit'
@@ -86,10 +96,30 @@ class StaticDiagnosticSession:
         self.capture_root = Path(destination) / 'host_requests'
         self.capture_root.mkdir()
         self.request_count = 0
+        if self._live:
+            progress_path = self.capture_root / 'provider_events.jsonl'
+            upstream_progress = self.client.progress_callback
+            def progress(event, **fields):
+                if upstream_progress is not None:
+                    upstream_progress(event, **fields)
+                raw = json.dumps({'timestamp': time.time(), 'event': event, **fields},
+                                 ensure_ascii=False, default=str)
+                for secret in (str(config.get('apikey') or ''), str(config.get('apibase') or '')):
+                    if secret:
+                        raw = raw.replace(secret, '[REDACTED]')
+                with progress_path.open('a', encoding='utf-8') as stream:
+                    stream.write(raw + '\n')
+            self.client.progress_callback = progress
 
         def capture(request_id, payload):
             if self.stop.is_set():
                 raise RuntimeError('Static session stopped before provider send')
+            if self._live and (payload.get('model') != 'claude-opus-4-8' or
+                    payload.get('max_tokens') != 8192 or payload.get('stream') is not True or
+                    payload.get('thinking') != {'type': 'adaptive'} or
+                    payload.get('output_config') != {'effort': 'high'} or
+                    'temperature' in payload):
+                raise RuntimeError('Static provider payload differs from frozen generation contract')
             if self.monitor.evidence_package_v1:
                 self.monitor._evidence_pre_send(payload)
             if not isinstance(request_id, str) or not request_id or '/' in request_id:
@@ -104,6 +134,14 @@ class StaticDiagnosticSession:
                 raise RuntimeError('Static request archive readback mismatch')
             (self.capture_root / (path.name + '.sha256')).write_text(
                 hashlib.sha256(raw).hexdigest() + '\n', encoding='ascii')
+            if self._live and self.first_send_monotonic is None:
+                self.first_send_monotonic = time.monotonic()
+                self.client.recovery_deadline = self.first_send_monotonic + deadline_seconds
+                self._deadline_timer = threading.Timer(deadline_seconds, self._expire)
+                self._deadline_timer.daemon = True
+                self._deadline_timer.start()
+            if self.stop.is_set():
+                raise RuntimeError('Static session stopped after request archive, before transport')
 
         self.client.pre_send_capture = capture
         self.thread = threading.Thread(target=self._serve, name='static-host-spool', daemon=True)
@@ -117,6 +155,14 @@ class StaticDiagnosticSession:
         except Exception as exc:
             self.errors.append(exc)
             self.stop.set()
+
+    def _expire(self):
+        self.stop.set()
+        self.client.cancel_active_response()
+        try:
+            self.bridge.close()
+        except Exception as exc:
+            self.errors.append(exc)
 
     def _cutoff_input(self):
         rows = (self.port.evidence / 'public_events.jsonl').read_bytes().splitlines()
@@ -178,7 +224,21 @@ class StaticDiagnosticSession:
 
     def close(self):
         self.stop.set()
+        if self._deadline_timer is not None:
+            self._deadline_timer.cancel()
         failures = []
+        if self._live:
+            try:
+                path = self.capture_root / 'provider_history.json'
+                if path.exists():
+                    raise RuntimeError('Provider history archive would be overwritten')
+                path.write_bytes(_canonical({'history': self.client.export_history(),
+                    'complete_calls': self.client.complete_calls,
+                    'request_attempts_pending': self.client.request_attempts,
+                    'usage_pending': self.client.usage_records,
+                    'history_transforms_pending': self.client.history_transforms}))
+            except Exception as exc:
+                failures.append(exc)
         try:
             self.monitor.analysis.close()
         except Exception as exc:
