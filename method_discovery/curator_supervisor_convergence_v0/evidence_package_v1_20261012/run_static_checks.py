@@ -26,6 +26,7 @@ CHECKS = [
         'test_bundle.py')]),
     ('static_host_session', [RESEARCH + name for name in ('test_static_host.py',
         'test_static_session.py')]),
+    ('static_live_gate', [RESEARCH + 'test_static_live_batch.py']),
     ('native_go', [RESEARCH + 'test_go_checks.py']),
     ('existing_docker_candidate', [RESEARCH + 'test_docker_candidate.py']),
 ]

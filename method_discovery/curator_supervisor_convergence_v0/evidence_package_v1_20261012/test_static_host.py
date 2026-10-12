@@ -51,8 +51,16 @@ def test_c02_host_and_container_read_same_cutoff_without_control_mount(tmp_path)
         )
         result = analysis.start(script, 'bash', timeout=120, wait_seconds=1)
         assert result['status'] == 'running', result
-        inspected = subprocess.run(['docker', 'inspect', result['session_id']],
-                                   capture_output=True, timeout=20)
+        inspected = None
+        inspect_attempts = 0
+        until = time.monotonic() + 25
+        while time.monotonic() < until:
+            inspected = subprocess.run(['docker', 'inspect', result['session_id']],
+                                       capture_output=True, timeout=20)
+            inspect_attempts += 1
+            if inspected.returncode == 0:
+                break
+            time.sleep(.2)
         assert inspected.returncode == 0, inspected.stderr
         state = json.loads(inspected.stdout)[0]
         mounts = [{'destination': mount['Destination'], 'source': mount['Source'],
@@ -94,7 +102,8 @@ def test_c02_host_and_container_read_same_cutoff_without_control_mount(tmp_path)
         assert not (fixture / 'trusted_control' / 'identity_probe').exists()
         print({'scene': 'C02', 'host_sha256': host_sha,
                'checks': output, 'exposed_sentinel_status': negative['status'],
-               'task_and_control_read_only': result['status'] == 'success'})
+               'task_and_control_read_only': result['status'] == 'success',
+               'inspect_attempts': inspect_attempts})
     finally:
         try:
             analysis.close()
