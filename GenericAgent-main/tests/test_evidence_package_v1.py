@@ -168,6 +168,40 @@ def test_child_focus_finding_provenance_and_current_objection(tmp_path):
         state.check_intervention(finding, handoff=packet['handoff'])
 
 
+def test_unrelated_stale_receipt_does_not_hide_current_source_finding(tmp_path):
+    (tmp_path / 'monitor').mkdir()
+    state = EvidenceFrontier(tmp_path / 'monitor' / 'monitor_private')
+    case = state.open_case({'task_basis': 'Original task', 'scope': 'entry',
+        'observable_consequence': 'Visible response', 'leads': ['Trace source']})['case_id']
+    source = state.register_receipt('file_read', {'path': 'task/workspace/entry.go',
+        'evidence_case_id': case, 'evidence_scope': 'entry'},
+        {'status': 'ok', 'sha256': 'source-v1'})
+    go = state.register_go_check({'evidence_case_id': case, 'evidence_scope': 'entry',
+        'check_id': 'private-probe'}, {'classification': 'test_passed',
+        'normalized_workdir': '/tmp/private',
+        'private_source_before': {'sha256': 'private-v1'},
+        'private_source_after': {'sha256': 'private-v1'}})
+    packet = state.packet_ready(handoff=None, task_cursor=1)
+    def finding(receipt):
+        return state.finding({'packet_id': packet['id'], 'case_id': case,
+            'scope': 'entry', 'task_basis': 'Original task', 'receipt_ids': [receipt],
+            'claim': 'Bounded objection', 'kind': 'counterexample'},
+            handoff=None)['finding_id']
+    source_finding, go_finding = finding(source), finding(go)
+    state.stale_receipts([go], 'private probe changed')
+    assert state.state['cases'][case]['status'] == 'stale'
+    with pytest.raises(ValueError, match='Current concrete objection'):
+        state.check_allow(state.state['revision'], handoff=None)
+    assert state.check_intervention(source_finding, handoff=None)['id'] == source_finding
+    with pytest.raises(ValueError, match='current, recorded'):
+        state.check_intervention(go_finding, handoff=None)
+    state.revise_case({'case_id': case, 'status': 'retracted',
+        'reason': 'Current source refutes original premise', 'receipt_ids': [source],
+        'resolution_kind': 'premise_refuted'})
+    state.check_allow(state.state['revision'], handoff=None)
+    assert state.state['receipts'][go]['applicability_status'] == 'stale'
+
+
 def test_incomplete_process_is_not_behavioral_evidence(tmp_path):
     (tmp_path / 'monitor').mkdir()
     state = EvidenceFrontier(tmp_path / 'monitor' / 'monitor_private')
@@ -219,11 +253,14 @@ def test_code_session_poll_inherits_original_case_and_scope(tmp_path):
     monitor, _, workspace = make_monitor(tmp_path)
     class SessionPort:
         evidence_test_port = True
+        reads = 0
         def start(self, *_):
             return {'session_id': 'new-session', 'status': 'running'}
         def read(self, *_):
+            self.reads += 1
             return {'session_id': 'new-session', 'status': 'success', 'exit_code': 0}
-    monitor.analysis = SessionPort()
+    port = SessionPort()
+    monitor.analysis = port
     monitor.evidence_frontier = EvidenceFrontier(workspace.private_root)
     monitor._evidence_stage = 'B'
     first = monitor.evidence_frontier.open_case({'task_basis': 'Original task',
@@ -232,9 +269,16 @@ def test_code_session_poll_inherits_original_case_and_scope(tmp_path):
         'scope': 'second', 'observable_consequence': 'B', 'leads': ['Run']})['case_id']
     old_check = monitor.evidence_frontier.register_go_check({
         'evidence_case_id': first, 'evidence_scope': 'first', 'check_id': 'old'},
-        {'classification': 'test_passed', 'normalized_workdir': '/tmp/fixture',
+        {'classification': 'test_passed', 'session_id': 'go-session',
+         'normalized_workdir': '/tmp/fixture',
          'private_source_before': {'sha256': 'old'},
          'private_source_after': {'sha256': 'old'}})
+    with pytest.raises(ValueError, match='Unknown active code_run session origin'):
+        monitor.dispatch('code_run', {'session_id': 'go-session',
+            'evidence_case_id': second, 'evidence_scope': 'second'})
+    with pytest.raises(ValueError, match='Unknown active code_run session origin'):
+        monitor.dispatch('code_run', {'session_id': 'historic-session'})
+    assert port.reads == 0
     started = monitor.dispatch('code_run', {'code': 'printf probe', 'type': 'bash',
         'evidence_case_id': first, 'evidence_scope': 'first', 'check_id': 'check-1'}).data
     assert started['status'] == 'running'
@@ -246,6 +290,7 @@ def test_code_session_poll_inherits_original_case_and_scope(tmp_path):
     result = monitor.dispatch('code_run', {'session_id': 'new-session'}).data
     receipt = monitor.evidence_frontier.get('receipt', result['host_receipt_id'])['object']
     assert receipt['case_id'] == first and receipt['scope'] == 'first'
+    assert port.reads == 1
 
 
 def test_cited_source_change_stales_only_related_finding(tmp_path):

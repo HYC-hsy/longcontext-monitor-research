@@ -1167,6 +1167,8 @@ class MonitorAgent:
         if self.evidence_package_v1 and name == 'code_run':
             arguments = dict(arguments)
             owner = self._evidence_sessions.get(arguments.get('session_id'))
+            if 'session_id' in arguments and owner is None:
+                raise ValueError('Unknown active code_run session origin')
             if owner is not None:
                 for field in ('evidence_case_id', 'evidence_scope', 'check_id'):
                     if field in arguments and arguments[field] != owner.get(field):

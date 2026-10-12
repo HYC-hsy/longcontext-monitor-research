@@ -615,8 +615,9 @@ class EvidenceFrontier:
                 or packet is None or finding['packet_id'] != packet['id']):
             raise ValueError('Intervention needs a current, recorded local finding')
         case = self.state['cases'][finding['case_id']]
-        if case['status'] in {'retracted', 'stale'}:
-            raise ValueError('Finding case was withdrawn or became stale')
+        if case['status'] == 'retracted':
+            raise ValueError('Finding case was withdrawn')
+        self._validate_case_receipts(finding['case_id'], finding['receipt_ids'])
         return finding
 
     def stale_receipts(self, receipt_ids, reason):
@@ -644,10 +645,18 @@ class EvidenceFrontier:
         if (type(revision) is not int or revision != self.state['revision'] or
                 self.state['packet'] is None or self.state['packet']['handoff'] != handoff):
             raise ValueError('Allow requires current packet and latest frontier revision')
-        live = [item['id'] for item in self.state['findings'].values()
-                if item['status'] == 'current' and item['kind'] in
-                {'counterexample', 'correction'} and
-                self.state['cases'][item['case_id']]['status'] not in {'retracted', 'stale'}]
+        live = []
+        for item in self.state['findings'].values():
+            if (item['status'] != 'current' or item['kind'] not in
+                    {'counterexample', 'correction'} or item['handoff'] != handoff or
+                    item['packet_id'] != self.state['packet']['id'] or
+                    self.state['cases'][item['case_id']]['status'] == 'retracted'):
+                continue
+            try:
+                self._validate_case_receipts(item['case_id'], item['receipt_ids'])
+            except ValueError:
+                continue
+            live.append(item['id'])
         if live:
             raise ValueError('Current concrete objection requires resolution or withdrawal: ' + ','.join(live))
 
