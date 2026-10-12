@@ -1,0 +1,1 @@
+cd /app && grep -A 20 "func (hl \*Hyperlink) Tapped" widget/hyperlink.go

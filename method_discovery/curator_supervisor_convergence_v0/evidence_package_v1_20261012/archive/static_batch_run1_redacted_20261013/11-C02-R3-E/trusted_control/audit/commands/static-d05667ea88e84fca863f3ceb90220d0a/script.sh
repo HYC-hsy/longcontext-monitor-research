@@ -1,0 +1,1 @@
+cd /app && grep -A 15 "func.*openURL" widget/hyperlink.go

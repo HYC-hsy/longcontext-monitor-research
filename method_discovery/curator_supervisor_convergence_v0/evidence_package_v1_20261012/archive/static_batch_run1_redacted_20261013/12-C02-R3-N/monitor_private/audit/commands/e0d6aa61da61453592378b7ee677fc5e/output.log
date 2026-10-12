@@ -1,0 +1,31 @@
+func parseHexColor(hex string) (color.Color, error) {
+	// Remove '#' prefix if present
+	hex = strings.TrimPrefix(hex, "#")
+	
+	if len(hex) == 0 {
+		return nil, fmt.Errorf("empty color string")
+	}
+	
+	var r, g, b, a uint8
+	a = 0xff // Default alpha
+	
+	switch len(hex) {
+	case 3: // RGB - each digit doubled
+		if err := parseHexDigit(hex[0], &r); err != nil {
+			return nil, err
+		}
+		r = r*16 + r
+		if err := parseHexDigit(hex[1], &g); err != nil {
+			return nil, err
+		}
+		g = g*16 + g
+		if err := parseHexDigit(hex[2], &b); err != nil {
+			return nil, err
+		}
+		b = b*16 + b
+		
+	case 4: // RGBA - each digit doubled
+		if err := parseHexDigit(hex[0], &r); err != nil {
+			return nil, err
+		}
+		r = r*16 + r

@@ -1,0 +1,74 @@
+func (b *sprintfBinding) Set(str string) error {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	// Create destination pointers for Sscanf based on source types
+	values := make([]interface{}, len(b.sources))
+	for i, source := range b.sources {
+		switch source.(type) {
+		case String:
+			var s string
+			values[i] = &s
+		case Int:
+			var n int
+			values[i] = &n
+		case Float:
+			var f float64
+			values[i] = &f
+		case Bool:
+			var bo bool
+			values[i] = &bo
+		default:
+			// For other types, use interface{}
+			var v interface{}
+			values[i] = &v
+		}
+	}
+
+	// Parse the string using the format
+	n, err := fmt.Sscanf(str, b.format, values...)
+	if err != nil {
+		return fmt.Errorf("failed to parse sprintf binding value: %w", err)
+	}
+	if n != len(b.sources) {
+		return fmt.Errorf("parsed %d values but expected %d", n, len(b.sources))
+	}
+
+	// Set the parsed values back to sources
+	for i, source := range b.sources {
+		switch s := source.(type) {
+		case String:
+			if strVal, ok := values[i].(*string); ok {
+				if err := s.Set(*strVal); err != nil {
+					return err
+				}
+			}
+		case Int:
+			if intVal, ok := values[i].(*int); ok {
+				if err := s.Set(*intVal); err != nil {
+					return err
+				}
+			}
+		case Float:
+			if floatVal, ok := values[i].(*float64); ok {
+				if err := s.Set(*floatVal); err != nil {
+					return err
+				}
+			}
+		case Bool:
+			if boolVal, ok := values[i].(*bool); ok {
+				if err := s.Set(*boolVal); err != nil {
+					return err
+				}
+			}
+		case Untyped:
+			if untypedVal, ok := values[i].(*interface{}); ok {
+				if err := s.Set(*untypedVal); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	return nil
+}

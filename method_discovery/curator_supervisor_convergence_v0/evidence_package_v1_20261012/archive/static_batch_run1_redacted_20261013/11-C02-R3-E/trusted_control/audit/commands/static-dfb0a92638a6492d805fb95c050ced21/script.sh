@@ -1,0 +1,1 @@
+cd /app && grep -n "func.*Metadata" app/app.go

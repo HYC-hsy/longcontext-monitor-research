@@ -1,0 +1,19 @@
+Entry.go MinSize analysis (lines 1300-1316):
+======================================================================
+
+Line 1301-1314 shows the MinSize calculation:
+  - Uses multiLineRows constant (defined as 3 at line 19)
+  - Line 1310-1312:
+    if r.entry.MultiLine {
+      rowHeight := charMin.Height * multiLineRows
+      minSize.Height = fyne.Max(minSize.Height, rowHeight+(multiLineRows-1)*theme.Padding())
+    }
+
+ISSUE: The code uses the constant 'multiLineRows' directly.
+       No reference to 'minRowsVisible' field in MinSize calculation.
+
+The minRowsVisible field exists (line 69) but:
+  1. SetMinRowsVisible() method NOT FOUND in any searched section
+  2. MinSize() doesn't use minRowsVisible field
+
+STATUS: Entry.SetMinRowsVisible is NOT IMPLEMENTED

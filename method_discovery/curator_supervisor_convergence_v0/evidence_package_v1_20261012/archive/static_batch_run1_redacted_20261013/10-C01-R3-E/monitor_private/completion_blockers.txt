@@ -1,0 +1,130 @@
+COMPLETION BLOCKERS - Task Turn 61 Investigation
+================================================
+
+Found 5 critical issues preventing completion:
+
+ISSUE 1: Hyperlink.OnTapped Not Invoked
+---------------------------------------
+File: widget/hyperlink.go
+Lines: 160-162 (Tapped method), 26-30 (OnTapped field)
+
+Requirement (task line 141):
+"When OnTapped is non-nil, tapping the hyperlink calls OnTapped instead of 
+opening the URL. When OnTapped is nil, the existing URL-opening behavior is preserved."
+
+Current Code:
+  func (hl *Hyperlink) Tapped(*fyne.PointEvent) {
+      hl.openURL()  // ALWAYS calls this, never checks OnTapped
+  }
+
+Problem: OnTapped field exists but is NEVER checked or invoked.
+
+Expected Fix:
+  func (hl *Hyperlink) Tapped(*fyne.PointEvent) {
+      if hl.OnTapped != nil {
+          hl.OnTapped()
+          return
+      }
+      hl.openURL()
+  }
+
+
+ISSUE 2: StringToStringWithFormat Missing "%s" Optimization
+-----------------------------------------------------------
+File: data/binding/sprintf.go
+Lines: 200-210
+
+Requirement (task line 95):
+"If the format is "%s" (identity), return the original binding directly 
+(no wrapping). Otherwise, delegate to NewSprintf(format, str)."
+
+Current Code:
+  func StringToStringWithFormat(str String, format string) String {
+      b := &stringToStringWithFormat{...}  // Always creates wrapper
+      str.AddListener(b)
+      return b
+  }
+
+Problem: No check for format == "%s" optimization.
+
+Expected Fix:
+  func StringToStringWithFormat(str String, format string) String {
+      if format == "%s" {
+          return str  // Identity optimization
+      }
+      // ... rest of implementation
+  }
+
+
+ISSUE 3: Entry.SetMinRowsVisible Not Implemented
+------------------------------------------------
+File: widget/entry.go
+Field: Line 69 (minRowsVisible int)
+MinSize: Lines 1310-1312
+
+Requirement (task lines 143-144):
+"The method stores the count internally, and the entry's MinSize() calculation 
+uses this count instead of the global default when it is greater than 0."
+
+Current State:
+  - Field minRowsVisible exists at line 69
+  - SetMinRowsVisible() method NOT FOUND in entire file (1731 lines)
+  - MinSize() uses constant multiLineRows (=3), not minRowsVisible field:
+    
+    if r.entry.MultiLine {
+        rowHeight := charMin.Height * multiLineRows  // Uses constant!
+        minSize.Height = fyne.Max(minSize.Height, ...)
+    }
+
+Problem: Method doesn't exist, MinSize() doesn't use the field.
+
+Expected:
+  - Implement SetMinRowsVisible(count int) method
+  - Update MinSize() to check minRowsVisible field when > 0
+
+
+ISSUE 4: validation.NewAllStrings Missing
+-----------------------------------------
+File: data/validation/all.go
+
+Requirement (task line 145):
+"Add a validator combinator in the data/validation package (data/validation/all.go)"
+
+Current State: FILE DOES NOT EXIST
+
+Expected: Create file with NewAllStrings implementation
+
+
+ISSUE 5: driver/desktop/app.go Missing
+--------------------------------------
+File: driver/desktop/app.go
+
+Requirement (task lines 154-157):
+"Define a new interface in driver/desktop/app.go with two methods:
+- SetSystemTrayMenu(menu *fyne.Menu)
+- SetSystemTrayIcon(icon fyne.Resource)"
+
+Current State: FILE DOES NOT EXIST
+
+Expected: Create file with desktop.App interface definition
+
+
+VERIFIED CORRECT (12 implementations)
+======================================
+✓ Target 1: AppMetadata struct, App.Metadata(), SetMetadata, fyneApp.Metadata()
+✓ Target 2: JSON theme FromJSON/FromJSONReader
+✓ Target 3: NewSprintf with Get/Set methods
+✓ Target 4: MenuItem.Icon, MenuItem.Shortcut, Menu.Refresh(), MainMenu.Refresh()
+✓ Target 5: ToolbarAction.SetIcon(), concrete constructor return types
+✓ Target 6: Container.RemoveAll(), Container.Add() nil-safety, Hyperlink.OnTapped field
+
+
+SUMMARY
+=======
+- 12 requirements verified correct
+- 5 critical blockers prevent completion
+- 2 missing files (targets 6 & 7 incomplete)
+- 2 behavioral defects (features exist but broken)
+- 1 missing method (field exists but accessor missing)
+
+All 5 issues must be resolved before implementation meets requirements.

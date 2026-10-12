@@ -1,0 +1,21 @@
+func (b *sprintfBinding) Set(str string) error {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	// Create destination pointers for Sscanf based on source types
+	values := make([]interface{}, len(b.sources))
+	for i, source := range b.sources {
+		switch source.(type) {
+		case String:
+			var s string
+			values[i] = &s
+		case Int:
+			var n int
+			values[i] = &n
+		case Float:
+			var f float64
+			values[i] = &f
+		case Bool:
+			var bo bool
+			values[i] = &bo
+		default:

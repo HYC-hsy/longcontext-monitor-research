@@ -1,0 +1,1 @@
+cd /app && grep -A 5 "func (t \*ToolbarAction) SetIcon" widget/toolbar.go

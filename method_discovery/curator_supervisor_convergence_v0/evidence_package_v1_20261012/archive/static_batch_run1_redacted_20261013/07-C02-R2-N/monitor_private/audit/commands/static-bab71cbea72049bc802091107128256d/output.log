@@ -1,0 +1,14 @@
+-rwxrwxrwx 1 root root 600 Oct 12 16:35 data/validation/all.go
+func NewAllStrings(validators ...fyne.StringValidator) fyne.StringValidator {
+	return func(text string) error {
+		for _, validator := range validators {
+			if validator == nil {
+				continue
+			}
+			if err := validator(text); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}

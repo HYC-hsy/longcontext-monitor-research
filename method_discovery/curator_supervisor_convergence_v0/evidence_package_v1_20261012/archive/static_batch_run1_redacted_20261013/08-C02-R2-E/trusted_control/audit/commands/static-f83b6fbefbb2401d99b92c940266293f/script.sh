@@ -1,0 +1,1 @@
+cd /app && grep -A 5 "Shortcut Shortcut" menu.go

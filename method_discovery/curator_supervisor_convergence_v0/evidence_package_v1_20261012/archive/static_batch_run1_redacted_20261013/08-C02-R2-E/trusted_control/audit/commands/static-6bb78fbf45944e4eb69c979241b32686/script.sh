@@ -1,0 +1,1 @@
+cd /app && grep -A 5 "type Hyperlink struct" widget/hyperlink.go | head -20

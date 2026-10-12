@@ -1,0 +1,40 @@
+		if err := parseHexDigit(hex[1], &g); err != nil {
+			return nil, err
+		}
+		g = g*16 + g
+		if err := parseHexDigit(hex[2], &b); err != nil {
+			return nil, err
+		}
+		b = b*16 + b
+		if err := parseHexDigit(hex[3], &a); err != nil {
+			return nil, err
+		}
+		a = a*16 + a
+		
+	case 6: // RRGGBB
+		if err := parseHexByte(hex[0:2], &r); err != nil {
+			return nil, err
+		}
+		if err := parseHexByte(hex[2:4], &g); err != nil {
+			return nil, err
+		}
+		if err := parseHexByte(hex[4:6], &b); err != nil {
+			return nil, err
+		}
+		
+	case 8: // RRGGBBAA
+		if err := parseHexByte(hex[0:2], &r); err != nil {
+			return nil, err
+		}
+		if err := parseHexByte(hex[2:4], &g); err != nil {
+			return nil, err
+		}
+		if err := parseHexByte(hex[4:6], &b); err != nil {
+			return nil, err
+		}
+		if err := parseHexByte(hex[6:8], &a); err != nil {
+			return nil, err
+		}
+		
+	default:
+		return nil, fmt.Errorf("invalid hex color length: %d", len(hex))

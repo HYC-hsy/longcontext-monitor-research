@@ -1,0 +1,1 @@
+cd /app && ls -la data/validation/all.go 2>&1
