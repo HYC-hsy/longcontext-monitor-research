@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +86,7 @@ class PMAEpisode:
         with (self.archive / "events.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(line + "\n")
             stream.flush()
+            os.fsync(stream.fileno())
 
     async def handle(self, event: dict[str, Any]) -> dict[str, Any]:
         async with self._lock:
@@ -110,6 +112,7 @@ class PMAEpisode:
                 stream.write(json.dumps({"event_id": event_id, "sequence": sequence,
                                          "sha256": digest}, sort_keys=True) + "\n")
                 stream.flush()
+                os.fsync(stream.fileno())
             kind = event.get("kind")
             if kind == "task_start":
                 result = await self._task_start(event)
@@ -214,6 +217,10 @@ class PMAEpisode:
             if not all((self.archive / name).is_file() for name in
                        ("memory.json", "trajectory_memory.json")):
                 raise RuntimeError("upstream did not save both memory artifacts")
+            for name in ("memory.json", "trajectory_memory.json"):
+                with (self.archive / name).open("r", encoding="utf-8") as stream:
+                    if not isinstance(json.load(stream), dict):
+                        raise RuntimeError("upstream memory artifact is not an object")
         except Exception as exc:
             self._record(event, {"status": "save_failed", "error_type": type(exc).__name__,
                                  "terminal": terminal})

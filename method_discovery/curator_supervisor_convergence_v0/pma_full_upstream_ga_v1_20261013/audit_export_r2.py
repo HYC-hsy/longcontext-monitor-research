@@ -16,7 +16,7 @@ EVIDENCE = STAGE / "offline_evidence_r2"
 RUNS = {
     "db_A": Path("E:/pma-ga-offline-db-a-20261013-r2"),
     "db_B": Path("E:/pma-ga-offline-db-b-20261013-r6"),
-    "code_B": Path("E:/pma-ga-offline-code-b-20261013-r2"),
+    "code_B": Path("E:/pma-ga-offline-code-b-20261013-r4"),
     "code_A": Path("E:/pma-ga-offline-code-a-20261013"),
 }
 
@@ -71,6 +71,7 @@ def export_runs() -> dict:
         if (root / "host_private" / "archive").is_dir():
             paths += [root / "host_private" / "archive" / name for name in (
                 "accepted.jsonl", "events.jsonl", "memory_transport.jsonl",
+                "memory_payload.jsonl",
                 "memory.json", "trajectory_memory.json")]
             paths += [root / "host_private" / "worker_exit.json"]
         paths += list((root / "jobs").rglob("task_terminal.json"))
@@ -115,7 +116,13 @@ def export_runs() -> dict:
 
 def finish_packet() -> None:
     files = [path for path in sorted(EVIDENCE.rglob("*")) if path.is_file()]
-    hashes = {path.relative_to(STAGE).as_posix(): {
+    files += [STAGE / name for name in (
+        "episode.py", "event_spool.py", "worker_main.py", "offline_launcher.py",
+        "audit_export_r2.py", "test_episode.py", "harbor_adapter.py",
+        "FOUR_RUN_MANIFEST_PREPARED.json", "REPORT_R2.md", "TEST_RESULTS_R2.txt")]
+    files += [REPO / "GenericAgent-main" / name for name in (
+        "agentmain.py", "agent_loop.py", "pma_upstream_bridge.py")]
+    hashes = {path.relative_to(REPO).as_posix(): {
         "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "bytes": path.stat().st_size}
         for path in files}
     (STAGE / "FILE_HASHES_R2.json").write_text(json.dumps(hashes, indent=2), encoding="utf-8")
@@ -131,7 +138,7 @@ def finish_packet() -> None:
                         (STAGE / name).read_text(encoding="utf-8"))
     sections.append("===== FULL DIFF FROM ccb841ea =====\n" + diff.decode("utf-8", "replace"))
     for path in files:
-        sections.append("===== " + path.relative_to(STAGE).as_posix() + " =====\n" +
+        sections.append("===== " + path.relative_to(REPO).as_posix() + " =====\n" +
                         path.read_text(encoding="utf-8", errors="replace"))
     (STAGE / "AUDIT_PACKET_R2.txt").write_text("\n\n".join(sections), encoding="utf-8")
 

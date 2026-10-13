@@ -14,6 +14,21 @@ from episode import PMAEpisode, construct_upstream
 from event_spool import EventDispatcher
 
 
+class PMAAuditIntegrityError(BaseException):
+    """Must cross the upstream `except Exception` phase-silence handler."""
+
+
+def append_private_audit(path: Path, row: dict) -> None:
+    try:
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(row, ensure_ascii=False, sort_keys=True,
+                                    default=str) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+    except Exception as exc:
+        raise PMAAuditIntegrityError("private PMA audit write failed") from exc
+
+
 def install_transport_audit(agent, archive: Path) -> None:
     """Observe the original two calls without changing its exception policy."""
     original = agent._memory_llm.call
@@ -22,17 +37,18 @@ def install_transport_audit(agent, archive: Path) -> None:
         phase = "bank_management" if tools else "context_decision"
         started = time.time()
         status = "complete"
+        append_private_audit(archive / "memory_payload.jsonl", {
+            "phase": phase, "prompt": prompt, "system": system,
+            "tools": tools, "started_epoch": started})
         try:
             return await original(prompt=prompt, system=system, tools=tools)
         except BaseException as exc:
             status = type(exc).__name__
             raise
         finally:
-            with (archive / "memory_transport.jsonl").open("a", encoding="utf-8") as stream:
-                stream.write(json.dumps({"phase": phase, "status": status,
-                                         "started_epoch": started, "ended_epoch": time.time()},
-                                        sort_keys=True) + "\n")
-                stream.flush()
+            append_private_audit(archive / "memory_transport.jsonl", {
+                "phase": phase, "status": status,
+                "started_epoch": started, "ended_epoch": time.time()})
 
     agent._memory_llm.call = audited_call
 

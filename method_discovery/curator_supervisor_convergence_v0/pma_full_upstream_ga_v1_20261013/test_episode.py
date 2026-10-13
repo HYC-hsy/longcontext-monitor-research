@@ -237,6 +237,29 @@ class EpisodeTests(unittest.TestCase):
                 self.assertEqual(reference._pending_injection, agents["ga"]._pending_injection)
                 self.assertEqual(len(captured["ga"]), 2)
 
+    def test_private_phase_audit_failure_is_not_upstream_silence(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            requests, responses = root / "shared" / "requests", root / "shared" / "responses"
+            requests.mkdir(parents=True)
+            responses.mkdir()
+            agent = construct_upstream(root / "agent")
+            async def fake_call(*, prompt, system, tools=None):
+                return LLMResponse(content="<no_intervention/>", tool_calls=[])
+            agent._memory_llm.call = fake_call
+            episode = PMAEpisode(agent, run_id="r", task_id="t", archive=root / "private")
+            worker_main.install_transport_audit(agent, episode.archive)
+            (requests / "first.json").write_text(json.dumps({
+                "schema": "pma-ga-events-v1", "kind": "task_start",
+                "event_id": "first", "sequence": 1, "run_id": "r", "task_id": "t",
+                "initial_user_content": "public"}), encoding="utf-8")
+            dispatcher = EventDispatcher(episode, requests, responses)
+            with patch.object(worker_main, "append_private_audit",
+                              side_effect=worker_main.PMAAuditIntegrityError("denied")):
+                with self.assertRaises(worker_main.PMAAuditIntegrityError):
+                    asyncio.run(dispatcher.serve_once())
+            self.assertFalse((responses / "first.json").exists())
+
     def test_file_event_bridge_keeps_private_bank_outside_shared_spool(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
