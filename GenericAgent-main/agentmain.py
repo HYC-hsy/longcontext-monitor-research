@@ -436,6 +436,23 @@ class GenericAgent:
                                     (os.path.basename(self.task_dir) if self.task_dir else 'interactive'))
                 gen = wrap_generator(gen, identity, JsonlEventSink(event_path) if event_path else None)
             manual_inbox = None
+            pma_finalization = {'status': 'not_enabled'}
+            def finalize_upstream_pma(terminal):
+                nonlocal pma_finalization
+                upstream_pma = getattr(self, 'pma_upstream_bridge', None)
+                if upstream_pma is None:
+                    return
+                # Harbor's ROUND END watcher may terminate this process as soon
+                # as done is published.  Save before that sentinel is emitted.
+                try:
+                    result = upstream_pma.task_end(terminal or {'result': 'ABORTED_OR_UNKNOWN'})
+                    pma_finalization = {'status': 'saved' if result.get('status') == 'saved'
+                                        else 'unknown'}
+                except Exception as pma_error:
+                    pma_finalization = {'status': 'failed', 'error_type': type(pma_error).__name__}
+                    print(f"Upstream PMA task_end failed: {type(pma_error).__name__}")
+                finally:
+                    self.pma_upstream_bridge = None
             try:
                 full_resp = ""; last_pos = 0; curr_turn = 0; turn_resps = []
                 manual_root = os.environ.get('GA_MANUAL_COMPLETION_DIR')
@@ -464,23 +481,21 @@ class GenericAgent:
                 if self.inc_out and last_pos < len(full_resp):
                     display_queue.put({'next': full_resp[last_pos:], 'source': source,
                                     'turn': curr_turn, 'outputs': turn_resps[-2:]})
+                finalize_upstream_pma(task_terminal)
                 display_queue.put({'done': full_resp, 'source': source, 'turn': curr_turn,
-                                   'outputs': turn_resps.copy(), 'task_terminal': task_terminal})
+                                   'outputs': turn_resps.copy(), 'task_terminal': task_terminal,
+                                   'pma_finalization': pma_finalization})
                 self.history = handler.history_info
             except Exception as e:
                 print(f"Backend Error: {format_error(e)}")
                 task_terminal = {'result': 'EXCEPTION'}
+                finalize_upstream_pma(task_terminal)
                 display_queue.put({'done': full_resp + f'\n```\n{format_error(e)}\n```', 'source': source,
                                    'turn': curr_turn, 'outputs': turn_resps.copy(),
-                                   'task_terminal': task_terminal})
+                                   'task_terminal': task_terminal,
+                                   'pma_finalization': pma_finalization})
             finally:
-                upstream_pma = getattr(self, 'pma_upstream_bridge', None)
-                if upstream_pma is not None:
-                    try:
-                        upstream_pma.task_end(task_terminal or {'result': 'ABORTED_OR_UNKNOWN'})
-                    except Exception as pma_error:
-                        print(f"Upstream PMA task_end failed: {type(pma_error).__name__}")
-                    self.pma_upstream_bridge = None
+                finalize_upstream_pma(task_terminal)
                 if manual_inbox is not None:
                     manual_inbox.close()
                 if self.stop_sig: print('User aborted the task.')

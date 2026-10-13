@@ -72,6 +72,7 @@ class PMAEpisode:
         self.archive.mkdir(parents=True, exist_ok=False)
         self.started = False
         self.ended = False
+        self.finalization_attempted = False
         self.last_attempt = 0
         self.last_completed_attempt = 0
         self.last_sequence = 0
@@ -199,13 +200,30 @@ class PMAEpisode:
                 "trigger_reason": reason, "step_count": step}
 
     def _task_end(self, event: dict[str, Any]) -> dict[str, Any]:
-        if not self.started or self.ended:
+        if not self.started or self.ended or self.finalization_attempted:
             raise ValueError("task_end out of order")
+        return self._save_final_state(event.get("terminal"), event)
+
+    def _save_final_state(self, terminal: Any, event: dict[str, Any]) -> dict[str, Any]:
+        """No-inference finalization; partial bank files never certify success."""
+        self.finalization_attempted = True
         try:
             self.agent.save_memory(str(self.archive / "memory.json"))
+            if not all((self.archive / name).is_file() for name in
+                       ("memory.json", "trajectory_memory.json")):
+                raise RuntimeError("upstream did not save both memory artifacts")
         except Exception as exc:
-            self._record(event, {"status": "save_failed", "error_type": type(exc).__name__})
+            self._record(event, {"status": "save_failed", "error_type": type(exc).__name__,
+                                 "terminal": terminal})
             raise
         self.ended = True
-        return {"status": "saved", "terminal": event.get("terminal"),
+        return {"status": "saved", "terminal": terminal,
                 "actor_attempts": self.last_attempt}
+
+    def finalize_without_event(self, reason: str) -> dict[str, Any]:
+        """Bounded host shutdown after ordinary Task event channel is unavailable."""
+        if self.finalization_attempted or not self.started:
+            return {"status": "not_saved", "reason": reason}
+        result = self._save_final_state({"result": "TASK_TERMINAL_UNKNOWN"},
+                                        {"kind": "host_finalize", "reason": reason})
+        return {**result, "status": "saved_without_task_end", "reason": reason}

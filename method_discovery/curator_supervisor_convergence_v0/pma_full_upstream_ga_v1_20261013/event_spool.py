@@ -81,11 +81,13 @@ class EventClient:
 class EventDispatcher:
     """Trusted-host single-worker dispatcher with private PMA episode state."""
 
-    def __init__(self, episode: PMAEpisode, request_dir: Path, response_dir: Path):
+    def __init__(self, episode: PMAEpisode, request_dir: Path, response_dir: Path,
+                 *, deadline_epoch: float | None = None):
         self.episode = episode
         self.requests = Path(request_dir).resolve(strict=True)
         self.responses = Path(response_dir).resolve(strict=True)
         self._processed = set()
+        self.deadline_epoch = deadline_epoch
         if self.requests == self.responses or not self.requests.is_dir() or not self.responses.is_dir():
             raise SpoolError("invalid host event spool")
         shared_parent = self.requests.parent if self.requests.parent == self.responses.parent else None
@@ -98,6 +100,8 @@ class EventDispatcher:
     async def serve_once(self) -> int:
         count = 0
         for path in sorted(self.requests.glob("*.json")):
+            if self.deadline_epoch is not None and time.time() >= self.deadline_epoch:
+                break
             if path.name in self._processed:
                 continue
             if path.is_symlink() or not path.is_file():
@@ -117,6 +121,14 @@ class EventDispatcher:
             except Exception as exc:
                 # Do not expose the bank, prompts, raw errors or credentials to GA.
                 response = {"status": "error", "error_type": type(exc).__name__}
+            if self.deadline_epoch is not None and time.time() >= self.deadline_epoch:
+                with (self.episode.archive / "late_results.jsonl").open(
+                        "a", encoding="utf-8") as stream:
+                    stream.write(json.dumps({"event_id": request["event_id"],
+                                             "status": "discarded_after_deadline",
+                                             "remote_execution": "unknown"}) + "\n")
+                self._processed.add(path.name)
+                break
             response.update(run_id=self.episode.run_id, task_id=self.episode.task_id,
                             event_id=request["event_id"])
             _atomic_json(self.responses / path.name, response)

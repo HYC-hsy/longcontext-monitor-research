@@ -98,6 +98,36 @@ class EpisodeTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "actor is disabled"):
                 asyncio.run(agent._llm.call("must fail"))
 
+    def test_second_save_failure_never_marks_clean_end(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            agent = construct_upstream(root / "agent")
+            agent._trigger.should_trigger = lambda step_count: (False, "fixture")
+            episode = PMAEpisode(agent, run_id="r", task_id="t", archive=root / "private")
+            original_save = agent.save_memory
+
+            def fail_after_bank(path):
+                agent._memory.save_to_file(Path(path))
+                raise OSError("trajectory write failed")
+
+            agent.save_memory = fail_after_bank
+
+            async def run():
+                await episode.handle({"kind": "task_start", "sequence": 1,
+                                      "event_id": "a", "run_id": "r", "task_id": "t",
+                                      "initial_user_content": "public"})
+                with self.assertRaises(OSError):
+                    await episode.handle({"kind": "task_end", "sequence": 2,
+                                          "event_id": "b", "run_id": "r", "task_id": "t",
+                                          "terminal": {"result": "CURRENT_TASK_DONE"}})
+
+            asyncio.run(run())
+            self.assertFalse(episode.ended)
+            self.assertTrue(episode.finalization_attempted)
+            self.assertFalse((root / "private" / "trajectory_memory.json").exists())
+            self.assertIn("save_failed", (root / "private" / "events.jsonl").read_text())
+            agent.save_memory = original_save
+
     def test_file_event_bridge_keeps_private_bank_outside_shared_spool(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

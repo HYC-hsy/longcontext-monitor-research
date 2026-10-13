@@ -4,12 +4,37 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 from pathlib import Path
 import signal
+import time
 
 from episode import PMAEpisode, construct_upstream
 from event_spool import EventDispatcher
+
+
+def install_transport_audit(agent, archive: Path) -> None:
+    """Observe the original two calls without changing its exception policy."""
+    original = agent._memory_llm.call
+
+    async def audited_call(*, prompt, system, tools=None):
+        phase = "bank_management" if tools else "context_decision"
+        started = time.time()
+        status = "complete"
+        try:
+            return await original(prompt=prompt, system=system, tools=tools)
+        except BaseException as exc:
+            status = type(exc).__name__
+            raise
+        finally:
+            with (archive / "memory_transport.jsonl").open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({"phase": phase, "status": status,
+                                         "started_epoch": started, "ended_epoch": time.time()},
+                                        sort_keys=True) + "\n")
+                stream.flush()
+
+    agent._memory_llm.call = audited_call
 
 
 async def serve(args: argparse.Namespace) -> None:
@@ -29,7 +54,9 @@ async def serve(args: argparse.Namespace) -> None:
                                memory_api_key=os.environ.get("PMA_MEMORY_API_KEY"))
     episode = PMAEpisode(agent, run_id=args.run_id, task_id=args.task_id,
                          archive=private / "archive")
-    dispatcher = EventDispatcher(episode, requests, responses)
+    install_transport_audit(agent, episode.archive)
+    dispatcher = EventDispatcher(episode, requests, responses,
+                                 deadline_epoch=args.deadline_epoch)
     stopped = asyncio.Event()
     for name in ("SIGTERM", "SIGINT"):
         signum = getattr(signal, name, None)
@@ -38,12 +65,45 @@ async def serve(args: argparse.Namespace) -> None:
                 asyncio.get_running_loop().add_signal_handler(signum, stopped.set)
             except (NotImplementedError, RuntimeError):
                 pass
-    while not stopped.is_set() and not episode.ended:
-        await dispatcher.serve_once()
-        await asyncio.sleep(0.05)
-    # A fault or cancellation must not masquerade as normal task_end.
-    if not episode.ended:
-        (private / "worker_stopped_without_task_end").touch()
+    reason = "task_end"
+    active = None
+    try:
+        while not episode.ended:
+            if stopped.is_set() or (private / "stop.request").exists():
+                reason = "host_stop"
+                break
+            if time.time() >= args.deadline_epoch:
+                reason = "deadline"
+                break
+            active = asyncio.create_task(dispatcher.serve_once())
+            while not active.done():
+                await asyncio.wait({active}, timeout=0.05)
+                if (stopped.is_set() or (private / "stop.request").exists()
+                        or time.time() >= args.deadline_epoch):
+                    reason = "stopped_or_deadline_in_flight_unknown"
+                    active.cancel()
+                    break
+            if reason != "task_end":
+                break
+            await active
+            active = None
+            await asyncio.sleep(0.05)
+    except BaseException as exc:
+        reason = f"worker_error:{type(exc).__name__}"
+        raise
+    finally:
+        if not episode.ended:
+            outcome = {"reason": reason, "task_end_received": False,
+                       "remote_execution": "unknown" if active is not None else "not_in_flight"}
+            try:
+                outcome["local_save"] = episode.finalize_without_event(reason)
+            except Exception as exc:
+                outcome["local_save"] = {"status": "failed", "error_type": type(exc).__name__}
+            (private / "worker_stopped_without_task_end.json").write_text(
+                json.dumps(outcome, sort_keys=True), encoding="utf-8")
+        (private / "worker_exit.json").write_text(json.dumps({
+            "task_end_saved": episode.ended and reason == "task_end",
+            "reason": reason, "ended_epoch": time.time()}, sort_keys=True), encoding="utf-8")
 
 
 def main() -> None:
@@ -53,6 +113,7 @@ def main() -> None:
     parser.add_argument("--private-root", required=True)
     parser.add_argument("--requests", required=True)
     parser.add_argument("--responses", required=True)
+    parser.add_argument("--deadline-epoch", type=float, required=True)
     asyncio.run(serve(parser.parse_args()))
 
 
