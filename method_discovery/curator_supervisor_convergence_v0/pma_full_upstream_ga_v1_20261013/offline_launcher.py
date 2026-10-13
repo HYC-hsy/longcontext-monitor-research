@@ -51,6 +51,22 @@ def capture_mounts(root: Path, *, include_stopped: bool = False) -> list[dict]:
     return found
 
 
+def clean_owned_containers(root: Path) -> list[str]:
+    """Remove only Compose resources whose config path is this fresh run."""
+    errors = []
+    for row in capture_mounts(root, include_stopped=True):
+        removed = subprocess.run(["docker", "rm", "-f", row["id"]],
+                                 capture_output=True, text=True, timeout=30)
+        if removed.returncode:
+            errors.append(f"remove_failed:{row['id']}")
+            continue
+        checked = subprocess.run(["docker", "inspect", row["id"]],
+                                 capture_output=True, text=True, timeout=30)
+        if checked.returncode == 0 or "no such object" not in checked.stderr.lower():
+            errors.append(f"removal_unconfirmed:{row['id']}")
+    return errors
+
+
 def prepare(args) -> dict:
     if args.task not in TASKS or args.condition not in {"A", "B"}:
         raise ValueError("unsupported PMA fixture arm")
@@ -152,7 +168,7 @@ def run_offline(args) -> dict:
                                "pma_full_upstream_ga_v1_20261013.harbor_adapter:HarborGenericAgent"),
                    "--model", "claude-opus-4-8", "--mounts", json.dumps(mounts),
                    "--extra-docker-compose", str(root / "bundle" / "isolation.compose.json"),
-                   "--n-concurrent", "1", "--max-retries", "0", "--yes", "--delete",
+                   "--n-concurrent", "1", "--max-retries", "0", "--yes",
                    "--disable-verification", "--agent-timeout-multiplier",
                    format(args.timeout_sec / 900, ".15g")]
         kwargs = {"llm_no": 0, "run_id": args.run_id, "task_id": args.task,
@@ -203,6 +219,11 @@ def run_offline(args) -> dict:
                 if harbor.poll() is None:
                     harbor.kill()
                     harbor.wait(timeout=10)
+        complete_mounts = capture_mounts(root, include_stopped=True)
+        if len(complete_mounts) > len(mounts):
+            mounts = complete_mounts
+            (root / "archive" / "actual_container_mounts.json").write_text(
+                json.dumps(mounts, indent=2), encoding="utf-8")
     finally:
         if worker is not None:
             if worker.poll() is None:
@@ -219,6 +240,7 @@ def run_offline(args) -> dict:
     actual_mounts = json.loads(mount_file.read_text(encoding="utf-8")) if mount_file.is_file() else []
     exposed_private = any(str(root / "host_private") in str(row.get("mounts"))
                           for row in actual_mounts)
+    cleanup_errors = clean_owned_containers(root)
     remaining_containers = capture_mounts(root, include_stopped=True)
     worker_receipt = (json.loads(worker_exit.read_text(encoding="utf-8"))
                       if worker_exit.is_file() else None)
@@ -229,7 +251,8 @@ def run_offline(args) -> dict:
         {m["destination"]: m["rw"] for m in main[0]["mounts"]}.get(
             "/run/pma-bridge/responses") is False)
     integration_ok = bool(result is not None and result.returncode == 0 and
-        not exposed_private and not remaining_containers and len(main) == 1 and spool_ok and
+        not exposed_private and not remaining_containers and not cleanup_errors and
+        len(main) == 1 and spool_ok and
         (args.condition == "A" or (worker.returncode == 0 and worker_receipt is not None
          and worker_receipt.get("task_end_saved") is True)))
     status = {**record, "harbor_return_code": None if result is None else result.returncode,
@@ -237,6 +260,7 @@ def run_offline(args) -> dict:
               "worker_private_mounted": exposed_private if actual_mounts else "unknown",
               "actual_container_count": len(actual_mounts),
               "remaining_owned_containers": [row["id"] for row in remaining_containers],
+              "cleanup_errors": cleanup_errors,
               "spool_mounts_verified": spool_ok, "integration_ok": integration_ok,
               "worker_exit_receipt": worker_receipt}
     (root / "archive" / "offline_result.json").write_text(

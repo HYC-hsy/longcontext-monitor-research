@@ -14,7 +14,7 @@ STAGE = Path(__file__).resolve().parent
 REPO = STAGE.parents[2]
 EVIDENCE = STAGE / "offline_evidence_r2"
 RUNS = {
-    "db_A": Path("E:/pma-ga-offline-db-a-20261013"),
+    "db_A": Path("E:/pma-ga-offline-db-a-20261013-r2"),
     "db_B": Path("E:/pma-ga-offline-db-b-20261013-r6"),
     "code_B": Path("E:/pma-ga-offline-code-b-20261013-r2"),
     "code_A": Path("E:/pma-ga-offline-code-a-20261013"),
@@ -130,6 +130,9 @@ def finish_packet() -> None:
         sections.append("===== " + name + " =====\n" +
                         (STAGE / name).read_text(encoding="utf-8"))
     sections.append("===== FULL DIFF FROM ccb841ea =====\n" + diff.decode("utf-8", "replace"))
+    for path in files:
+        sections.append("===== " + path.relative_to(STAGE).as_posix() + " =====\n" +
+                        path.read_text(encoding="utf-8", errors="replace"))
     (STAGE / "AUDIT_PACKET_R2.txt").write_text("\n\n".join(sections), encoding="utf-8")
 
 
