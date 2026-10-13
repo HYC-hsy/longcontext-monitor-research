@@ -1,0 +1,39 @@
+{
+  "schema": "pma-ga-live-manifest-v1",
+  "execution_authorized": false,
+  "implementation_commit": "0bf8d350abb142f1be8725cb7a46eeafcdc2b1d2",
+  "upstream_pma_commit": "89e5c0d6aadfe531a1aee42fd290d48be89973dd",
+  "official_task_commit": "2fd12b88aafdd04a52c298e3940bcb189f9766d6",
+  "arms": [
+    {"order": 1, "task": "db-wal-recovery", "condition": "A"},
+    {"order": 2, "task": "db-wal-recovery", "condition": "B"},
+    {"order": 3, "task": "fix-code-vulnerability", "condition": "B"},
+    {"order": 4, "task": "fix-code-vulnerability", "condition": "A"}
+  ],
+  "assets": {
+    "db-wal-recovery": {
+      "image": "alexgshaw/db-wal-recovery:20251031",
+      "image_id": "sha256:0e33ea5ec823975d1bd6c3778395c9f94251dd88f571146057bff6adb7e4594e",
+      "repo_digest": "alexgshaw/db-wal-recovery@sha256:0e33ea5ec823975d1bd6c3778395c9f94251dd88f571146057bff6adb7e4594e",
+      "platform": "linux/amd64",
+      "public_task_tree_sha256": "d7f27be00f9614e1fefd812857890d6ff483093eacf5f9e59cea7de9376298f3",
+      "native_tests_tree_sha256": "50015f99e269ffc1e0a527ba0fb62c86a9cab1b8ac7e8716e8527996049d362b",
+      "native_test_sh_sha256": "f0f51e70096c0d8aaefd000b89882eed4c839d7985396f9c2b6518a0448f07d6"
+    },
+    "fix-code-vulnerability": {
+      "image": "alexgshaw/fix-code-vulnerability:20251031",
+      "image_id": "sha256:cac325252991f823713b2d0441502972901dd782bd67f66c03d9b1e410dac5c0",
+      "repo_digest": "alexgshaw/fix-code-vulnerability@sha256:cac325252991f823713b2d0441502972901dd782bd67f66c03d9b1e410dac5c0",
+      "platform": "linux/amd64",
+      "public_task_tree_sha256": "7b4f44b3ce1a356fc758ca6e155930d9f9b479413ee8a050613869d154272d1a",
+      "native_tests_tree_sha256": "8de52cf0a11387e332b99faeccaedbca1ab01371074c4ca79d7bdb8afdfa313f",
+      "native_test_sh_sha256": "994df97148f6683433c3ff3dc2811b7a2d1479df21036e40db2f33aa9eb62912"
+    }
+  },
+  "task_profile_sha256": "ed09a811b654b83097bee77942704eae2539d67291bf55aa34476692081ff02e",
+  "pma_profile_sha256": "cc5f784b069034f44bc4527d15acd70191b1f7fc5810556c087b7b35e0ae00f1",
+  "task": {"model": "claude-opus-4-8", "max_tokens": 64000, "temperature": 1, "thinking": "adaptive", "max_turns": 300, "native_max_retries": 4},
+  "pma": {"model": "anthropic/claude-opus-4-8", "transport": "original LiteLLM with pinned Anthropic messages profile", "temperature": 1, "thinking": "adaptive", "reasoning_effort": "high", "max_tokens": 8192, "request_timeout_seconds": 300, "original_litellm_attempts_per_phase_max": 3, "trigger_interval": 1, "trigger_on_first_step": true, "window": 8, "actor": "disabled"},
+  "limits": {"agent_wall_seconds": 14400, "verifier_seconds": 900, "harbor_whole_trial_retries": 0, "pma_cancel_grace_seconds": 10, "outer_cleanup_allowance_seconds": 600},
+  "interpretation": "Development pilot of complete upstream PMA mechanism plus GA with an existing Opus 4.8 route; not a strict Opus 4.6 paper replication. Equal wall-clock ceilings do not imply equal active Task time or computation."
+}
