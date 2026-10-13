@@ -2,10 +2,15 @@
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import time
 import unittest
+from types import SimpleNamespace
+
+# Offline tests must not let LiteLLM fetch its optional price metadata.
+os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
 
 from harbor.llms.base import LLMResponse
 from memory_agent.utils.visualize import visualize_memory, visualize_memory_trajectory
@@ -115,6 +120,69 @@ class EpisodeTests(unittest.TestCase):
             receipt = json.loads(next(responses.iterdir()).read_text(encoding="utf-8"))
             self.assertEqual(receipt["status"], "ok")
             self.assertNotIn("memory_stats", receipt["result"])
+
+    def test_unmodified_upstream_actor_loop_reference_first_two_steps(self):
+        """Reference runs upstream _run_agent_loop, not the GA event adapter."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            agent = construct_upstream(root / "reference")
+            memory_requests = []
+
+            async def fake_memory_call(*, prompt, system, tools=None):
+                memory_requests.append((bool(tools), prompt))
+                if tools:
+                    return LLMResponse(content="", tool_calls=[])
+                if len(memory_requests) == 2:
+                    return LLMResponse(content="<context_for_action>Remember X</context_for_action>")
+                return LLMResponse(content="<no_intervention/>")
+
+            agent._memory_llm.call = fake_memory_call
+            agent._context = SimpleNamespace()
+            agent._max_episodes = 2
+            agent._enable_summarize = False
+            agent._session = SimpleNamespace(is_session_alive=lambda: asyncio.sleep(0, result=True))
+            agent._setup_episode_logging = lambda *a: None
+            agent._record_asciinema_marker = lambda *a: None
+            agent._record_step_full = lambda *a, **k: None
+            agent._record_step = lambda *a, **k: None
+            agent._dump_trajectory = lambda: None
+            seen_actor_prompts = []
+
+            class FakeChat:
+                total_input_tokens = 0
+                total_output_tokens = 0
+                total_cache_tokens = 0
+                total_cost = 0
+
+                async def chat(self, prompt, logging_path=None, **kwargs):
+                    seen_actor_prompts.append(prompt)
+                    return LLMResponse(content="actor")
+
+            actor_calls = 0
+
+            async def fake_actor_interaction(chat, prompt, *args):
+                nonlocal actor_calls
+                await chat.chat(prompt)
+                actor_calls += 1
+                if actor_calls == 1:
+                    return (["tool A", "tool B"], False, "", None, None,
+                            LLMResponse(content="actor"))
+                return ([], False, "ERROR: parse", None, None,
+                        LLMResponse(content="bad actor format"))
+
+            agent._handle_llm_interaction = fake_actor_interaction
+            agent._execute_commands = lambda commands, session: asyncio.sleep(
+                0, result=(False, "two public results"))
+            asyncio.run(agent._run_agent_loop("Original public GA input", FakeChat()))
+            self.assertEqual(actor_calls, 2)
+            self.assertIn("Remember X", seen_actor_prompts[0])
+            self.assertEqual(seen_actor_prompts[1], "two public results")
+            self.assertEqual([entry["step"] for entry in agent._accumulated_observations],
+                             [1, 2])
+            self.assertEqual(agent._accumulated_observations[1]["commands"],
+                             ["tool A", "tool B"])
+            self.assertEqual(len(memory_requests), 4)
+            self.assertEqual(agent._llm.calls, 0)
 
 
 if __name__ == "__main__":

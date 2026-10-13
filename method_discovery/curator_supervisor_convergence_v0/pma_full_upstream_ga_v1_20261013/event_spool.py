@@ -88,7 +88,11 @@ class EventDispatcher:
         self._processed = set()
         if self.requests == self.responses or not self.requests.is_dir() or not self.responses.is_dir():
             raise SpoolError("invalid host event spool")
-        if self.episode.archive.is_relative_to(self.requests) or self.episode.archive.is_relative_to(self.responses):
+        shared_parent = self.requests.parent if self.requests.parent == self.responses.parent else None
+        if (self.episode.archive.is_relative_to(self.requests)
+                or self.episode.archive.is_relative_to(self.responses)
+                or (shared_parent is not None
+                    and self.episode.archive.is_relative_to(shared_parent))):
             raise SpoolError("private PMA archive must not be inside shared spool")
 
     async def serve_once(self) -> int:
