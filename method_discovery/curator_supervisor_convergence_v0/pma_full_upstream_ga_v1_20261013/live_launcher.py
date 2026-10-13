@@ -122,6 +122,7 @@ def run_live(args) -> dict:
                 str(STAGE / 'vendor' / 'pma_89e5c0d' / 'external' / 'harbor' / 'src')))
             worker_env['PMA_MEMORY_PROFILE_FILE'] = str(memory_profile_path)
             worker_env['PMA_MEMORY_PROFILE_SHA256'] = manifest['pma_profile_sha256']
+            worker_env['LITELLM_LOCAL_MODEL_COST_MAP'] = 'True'
             worker_env.pop('PMA_MEMORY_API_BASE', None)
             worker_env.pop('PMA_MEMORY_API_KEY', None)
             worker = subprocess.Popen([
