@@ -1,0 +1,7 @@
+# Fixed source and role separation
+
+- PMA source: `yifannnwu/proactive-memory-agent` at `89e5c0d6aadfe531a1aee42fd290d48be89973dd`, Apache-2.0. `vendor/pma_89e5c0d` was extracted from `git archive HEAD` of that exact checkout. This is an unmodified complete checkout (minus Git metadata), including `LICENSE`, `configs`, `src/memory_agent`, `external/harbor`, upstream examples and templates. The examples are host-side source provenance, never a GA/PMA task input.
+- Official task source: `harbor-framework/terminal-bench-2` at `2fd12b88aafdd04a52c298e3940bcb189f9766d6`, Apache-2.0. Only `db-wal-recovery` and `fix-code-vulnerability` were selected. Public role copies contain exact `instruction.md`, `task.toml`, and `environment` files. Evaluator role copies contain exact `tests` files locally but MUST NOT be mounted in an online agent environment or included in a public audit push. Official `solution` trees are neither copied nor used.
+- The PMA editable wheel alone does not contain `external/harbor`; both editable distributions were loaded from the fixed source tree in a dedicated Python 3.12 environment. This environment is separate from GA/evaluator Harbor. Dependency resolution is a present-day offline preparation identity, not a reconstruction of the author's historical lock.
+
+These assets are not a claim that either image or the Harbor task launch is ready. The runtime Docker image identity and online input boundary require independent validation.
