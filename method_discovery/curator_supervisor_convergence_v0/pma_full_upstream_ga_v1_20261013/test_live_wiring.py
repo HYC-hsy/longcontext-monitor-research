@@ -92,9 +92,52 @@ class LiveWiringTests(unittest.TestCase):
                                                   hooks.terminal_identity_valid(terminal), False))
         self.assertFalse(hooks.legal_terminal(metadata, good, True, True))
         hooks.spec['condition'] = 'A'
-        task_only = {key: good[key] for key in ('run_id', 'task_id', 'result')}
+        task_only = {**good, 'pma_finalization': {'status': 'not_enabled'}}
         self.assertTrue(hooks.terminal_identity_valid(task_only))
         self.assertTrue(hooks.legal_terminal(metadata, task_only, True, False))
+        for terminal in ({key: task_only[key] for key in ('run_id', 'task_id', 'result')},
+                         {**task_only, 'run_id': 'other'},
+                         {**task_only, 'task_id': 'other'},
+                         {**task_only, 'pma_finalization': {'status': 'saved'}},
+                         {**task_only, 'pma_finalization': {'status': 'unknown'}},
+                         {**task_only, 'unexpected': True}):
+            self.assertFalse(hooks.terminal_identity_valid(terminal))
+        hooks.spec['condition'] = 'B'
+        for terminal in ({**good, 'run_id': 'other'},
+                         {**good, 'task_id': 'other'},
+                         {**good, 'pma_finalization': {'status': 'not_enabled'}},
+                         {**good, 'pma_finalization': {'status': 'failed'}},
+                         {**good, 'unexpected': True}):
+            self.assertFalse(hooks.terminal_identity_valid(terminal))
+
+    def test_archived_terminals_rejudged_without_changing_original_freeze(self):
+        archive = Path(__file__).resolve().parent / 'live_batch_retry_20261014' / 'raw' / 'arms'
+        metadata = {'round_end_seen': True, 'wrapper_return_code': 0,
+                    'archive_status': 'finished'}
+        for arm, condition in (('db_a', 'A'), ('db_b', 'B'),
+                               ('code_b', 'B'), ('code_a', 'A')):
+            root = archive / arm
+            terminal_files = list((root / 'jobs').rglob('task_terminal.json'))
+            self.assertEqual(len(terminal_files), 1)
+            terminal = json.loads(terminal_files[0].read_text(encoding='utf-8'))
+            frozen = json.loads((root / 'archive' / 'agent_end_frozen.json')
+                                .read_text(encoding='utf-8'))
+            clearance = json.loads((root / 'control' / 'sidecar_stopped.json')
+                                   .read_text(encoding='utf-8'))
+            self.assertEqual(clearance, {'run_id': terminal['run_id'], 'clean': True})
+            hooks = object.__new__(pma_harbor_hooks.PMATrialHooks)
+            hooks.spec = {'condition': condition, 'run_id': terminal['run_id'],
+                          'task_id': terminal['task_id']}
+            self.assertTrue(hooks.terminal_identity_valid(terminal))
+            self.assertTrue(hooks.legal_terminal(metadata, terminal, True, False))
+            if condition == 'A':
+                self.assertIsNone(frozen['task_terminal'])
+                self.assertFalse((root / 'host_private' / 'worker_exit.json').exists())
+            else:
+                receipt = json.loads((root / 'host_private' / 'worker_exit.json')
+                                     .read_text(encoding='utf-8'))
+                self.assertEqual(receipt['reason'], 'task_end')
+                self.assertIs(receipt['task_end_saved'], True)
 
     def test_real_branch_uses_harbor_hook_not_offline_gateway(self):
         with TemporaryDirectory() as directory:

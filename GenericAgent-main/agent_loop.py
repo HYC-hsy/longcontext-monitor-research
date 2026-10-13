@@ -1,7 +1,7 @@
 import inspect, json, re, os
 from dataclasses import dataclass
 from typing import Any, Optional
-from research_runtime import CompletionProposal, decide_completion, emit as _research_emit, telemetry_enabled as _telemetry_enabled, consume_provider_call as _consume_provider_call
+from research_runtime import CompletionProposal, decide_completion, emit as _research_emit, telemetry_enabled as _telemetry_enabled, consume_provider_call as _consume_provider_call, register_pending_pma_reminder as _register_pending_pma_reminder, sha256_json as _sha256_json
 from experiment_conditions import condition_initial_task
 from llmcore import ProviderResponseCancelled
 try: from plugins.hooks import trigger as _hook
@@ -115,6 +115,18 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             if reminder:
                 from pma_upstream_bridge import append_reminder
                 messages[-1] = append_reminder(messages[-1], reminder)
+                if (_telemetry_enabled() and
+                        os.environ.get('GA_PMA_CAPTURE_TASK_REQUESTS') == '1'):
+                    event = _research_emit('pma_reminder_appended', {
+                        'actor_attempt': turn,
+                        'pma_event_id': pma_upstream.last_event_id,
+                        'reminder_sha256': _sha256_json(reminder),
+                        'input_sent': False,
+                    })
+                    if event:
+                        _register_pending_pma_reminder(
+                            event, actor_attempt=turn,
+                            pma_event_id=pma_upstream.last_event_id)
         _hook('llm_before', locals())
         response_gen = client.chat(messages=messages, tools=tools_schema)
         try:

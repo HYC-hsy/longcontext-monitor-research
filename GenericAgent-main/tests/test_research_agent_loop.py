@@ -427,3 +427,68 @@ def test_intervention_provider_and_action_are_explicitly_linked(monkeypatch):
     assert action["payload"]["provider_request_event_id"] == request["event_id"]
     assert action["llm_call_id"] == request["llm_call_id"]
     assert action["parent_event_id"] == request["event_id"]
+
+
+def test_pma_reminder_actual_send_boundary_captures_redacted_body(monkeypatch):
+    import pma_upstream_bridge
+    sent = []
+
+    class FakePMA:
+        last_event_id = "pma-before-actor-1"
+        @classmethod
+        def from_environment(cls, initial_content, *, turn_offset):
+            assert initial_content == "public task" and turn_offset == 0
+            return cls()
+        def before_actor_call(self, attempt):
+            assert attempt == 1
+            return "PUBLIC REMINDER"
+        def actor_step(self, *args, **kwargs):
+            return None
+
+    class HttpResponse:
+        status_code = 200
+        headers = {}
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+
+    def fake_post(url, **kwargs):
+        sent.append((url, kwargs))
+        return HttpResponse()
+
+    class ProviderClient(Client):
+        def chat(self, messages, tools):
+            session = SimpleNamespace(max_retries=0, stream=False, connect_timeout=1,
+                                      read_timeout=1, proxies=None, verify=True,
+                                      api_key="sk-supersecret0123456789")
+            def parser(_response):
+                if False: yield None
+                return [{"type": "text", "text": "done"}]
+            yield from llmcore._stream_with_retry(
+                session, "https://private.example.test/v1/messages", {},
+                {"model": "mock", "messages": messages,
+                 "metadata": {"authorization": "Bearer sensitive-token"}}, parser)
+            return self.response
+
+    monkeypatch.setenv("GA_PMA_UPSTREAM_ENABLED", "1")
+    monkeypatch.setenv("GA_PMA_CAPTURE_TASK_REQUESTS", "1")
+    monkeypatch.setattr(pma_upstream_bridge, "UpstreamPMAClient", FakePMA)
+    monkeypatch.setattr(llmcore.requests, "post", fake_post)
+    events = []
+    with research_context({"run_id": "run-pma", "task_id": "task-pma"}, events.append):
+        exhaust(agent_runner_loop(ProviderClient(Response()), "system", "public task",
+                                  Handler(), [], max_turns=1, verbose=False))
+    assert len(sent) == 1
+    appended = next(e for e in events if e["event_type"] == "pma_reminder_appended")
+    ready = next(e for e in events if e["event_type"] == "provider_request_ready")
+    attempt = next(e for e in events if e["event_type"] == "provider_request_attempt")
+    assert ready["payload"]["pma_reminder_event_id"] == appended["event_id"]
+    assert ready["payload"]["pma_event_id"] == "pma-before-actor-1"
+    assert ready["payload"]["actor_attempt"] == 1
+    assert ready["llm_call_id"] == attempt["llm_call_id"]
+    assert ready["run_id"] == "run-pma" and ready["task_id"] == "task-pma"
+    body = ready["payload"]["content"]
+    assert body["messages"][-1]["content"].endswith("PUBLIC REMINDER")
+    assert body["metadata"]["authorization"] == "[REDACTED]"
+    assert ready["payload"]["provider_url"] == "[REDACTED]"
+    assert "private.example.test" not in json.dumps(ready)
+    assert "sensitive-token" not in json.dumps(ready)

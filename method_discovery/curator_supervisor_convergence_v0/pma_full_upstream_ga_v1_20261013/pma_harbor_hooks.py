@@ -64,17 +64,16 @@ def verify_live_spec(spec: dict) -> None:
 
 class PMATrialHooks(PilotTrialHooks):
     def terminal_identity_valid(self, terminal):
-        expected = {'run_id', 'task_id', 'result'}
-        if self.spec['condition'] == 'B':
-            expected.add('pma_finalization')
-        return (isinstance(terminal, dict) and set(terminal) == expected and
+        condition = self.spec.get('condition')
+        pma_status = {'A': 'not_enabled', 'B': 'saved'}.get(condition)
+        return (pma_status is not None and isinstance(terminal, dict) and
+                set(terminal) == {'run_id', 'task_id', 'result', 'pma_finalization'} and
                 terminal.get('run_id') == self.spec['run_id'] and
-                terminal.get('task_id') == self.spec['task_id'])
+                terminal.get('task_id') == self.spec['task_id'] and
+                terminal.get('pma_finalization') == {'status': pma_status})
 
     def legal_terminal(self, metadata, terminal, terminal_identity_valid, incomplete):
-        if self.spec['condition'] == 'B' and (
-                not terminal_identity_valid or
-                terminal.get('pma_finalization') != {'status': 'saved'}):
+        if not terminal_identity_valid:
             return False
         return super().legal_terminal(metadata, terminal, terminal_identity_valid, incomplete)
 

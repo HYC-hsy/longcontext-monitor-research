@@ -16,6 +16,7 @@ FORWARD = (
     "GA_PMA_UPSTREAM_REQUESTS",
     "GA_PMA_UPSTREAM_RESPONSES",
     "GA_PMA_UPSTREAM_DEADLINE_EPOCH",
+    "GA_PMA_CAPTURE_TASK_REQUESTS",
 )
 
 actual = hashlib.sha256(Path(original.__file__).read_bytes()).hexdigest()

@@ -1,6 +1,6 @@
-import os, json, re, time, requests, sys, threading, urllib3, base64, importlib, uuid, pathlib
+import os, json, re, time, requests, sys, threading, urllib3, base64, importlib, uuid, pathlib, hashlib
 from datetime import datetime
-from research_runtime import emit as _research_emit, new_id as _research_id, payload_summary as _payload_summary, sha256_json as _sha256_json, telemetry_enabled as _telemetry_enabled, consume_pending_intervention as _consume_pending_intervention, register_provider_call as _register_provider_call, current_provider_call as _current_provider_call
+from research_runtime import emit as _research_emit, new_id as _research_id, payload_summary as _payload_summary, sha256_json as _sha256_json, telemetry_enabled as _telemetry_enabled, consume_pending_intervention as _consume_pending_intervention, consume_pending_pma_reminder as _consume_pending_pma_reminder, register_provider_call as _register_provider_call, current_provider_call as _current_provider_call
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 _RESP_CACHE_KEY = str(uuid.uuid4()); _RESP_CODEX_KEY = str(uuid.uuid4())
 _ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -455,18 +455,26 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
     llm_call_id = _research_id('llm') if observing else None
     if observing:
         intervention_link = _consume_pending_intervention()
-        capture = bool(getattr(sess, 'research_capture_payload', False))
-        request_info = _payload_summary(payload, capture_content=capture)
+        reminder_link = _consume_pending_pma_reminder()
+        pma_capture = (os.environ.get('GA_PMA_UPSTREAM_ENABLED') == '1' and
+                       os.environ.get('GA_PMA_CAPTURE_TASK_REQUESTS') == '1')
+        capture = bool(getattr(sess, 'research_capture_payload', False)) or pma_capture
+        secrets = (str(getattr(sess, 'api_key', '') or ''), url.split('?', 1)[0]) if pma_capture else ()
+        request_info = _payload_summary(payload, capture_content=capture, secrets=secrets)
         call_type = str(getattr(sess, 'research_call_type', 'task_agent'))
-        request_info.update({'provider_url': url.split('?', 1)[0], 'max_retries': sess.max_retries,
+        request_info.update({'provider_url': '[REDACTED]' if pma_capture else url.split('?', 1)[0],
+                             'provider_url_sha256': hashlib.sha256(url.split('?', 1)[0].encode()).hexdigest() if pma_capture else None,
+                             'max_retries': sess.max_retries,
                              'call_type': call_type})
         if intervention_link: request_info.update(intervention_link)
+        if reminder_link: request_info.update(reminder_link)
         request_event = _research_emit('provider_request_ready', request_info, llm_call_id=llm_call_id)
         _register_provider_call({
             'llm_call_id': llm_call_id,
             'provider_request_event_id': request_event['event_id'] if request_event else None,
             'call_type': call_type,
             **(intervention_link or {}),
+            **(reminder_link or {}),
         })
     def _delay(resp, attempt):
         try: ra = float((resp.headers or {}).get("retry-after"))

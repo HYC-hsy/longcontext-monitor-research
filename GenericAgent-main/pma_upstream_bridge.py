@@ -91,6 +91,7 @@ class UpstreamPMAClient:
             raise PMABridgeError('PMA receipt identity mismatch')
         if receipt.get('status') != 'ok' or not isinstance(receipt.get('result'), dict):
             raise PMABridgeError('PMA worker failed; see host-private audit')
+        self.last_event_id = event_id
         return receipt['result']
 
     def before_actor_call(self, attempt):

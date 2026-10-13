@@ -12,6 +12,7 @@ import datetime
 import hashlib
 import json
 import os
+import re
 import threading
 import time
 import uuid
@@ -28,6 +29,9 @@ _sink: contextvars.ContextVar[Optional[Callable[[dict[str, Any]], None]]] = (
 )
 _pending_intervention: contextvars.ContextVar[Optional[dict[str, Any]]] = contextvars.ContextVar(
     "ga_pending_intervention", default=None
+)
+_pending_pma_reminder: contextvars.ContextVar[Optional[dict[str, Any]]] = contextvars.ContextVar(
+    "ga_pending_pma_reminder", default=None
 )
 _last_provider_call: contextvars.ContextVar[Optional[dict[str, Any]]] = contextvars.ContextVar(
     "ga_last_provider_call", default=None
@@ -56,6 +60,22 @@ def register_pending_intervention(event: Mapping[str, Any], occurrence_id: str) 
 def consume_pending_intervention() -> Optional[dict[str, Any]]:
     value = _pending_intervention.get()
     _pending_intervention.set(None)
+    return dict(value) if value else None
+
+
+def register_pending_pma_reminder(event: Mapping[str, Any], *, actor_attempt: int,
+                                  pma_event_id: str) -> None:
+    """Link an appended reminder to one *actual* provider send, not PMA return."""
+    _pending_pma_reminder.set({
+        "pma_reminder_event_id": event["event_id"],
+        "pma_event_id": pma_event_id,
+        "actor_attempt": actor_attempt,
+    })
+
+
+def consume_pending_pma_reminder() -> Optional[dict[str, Any]]:
+    value = _pending_pma_reminder.get()
+    _pending_pma_reminder.set(None)
     return dict(value) if value else None
 
 
@@ -106,7 +126,24 @@ def sha256_json(value: Any) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def payload_summary(payload: Mapping[str, Any], capture_content: bool = False) -> dict[str, Any]:
+def _redact_payload(value: Any, secrets: tuple[str, ...]) -> Any:
+    if isinstance(value, dict):
+        return {key: "[REDACTED]" if str(key).lower() in (
+            "api_key", "authorization", "token", "password", "secret") else
+            _redact_payload(item, secrets) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_payload(item, secrets) for item in value]
+    if isinstance(value, str):
+        for secret in secrets:
+            if secret:
+                value = value.replace(secret, "[REDACTED]")
+        return re.sub(r"(?i)\bBearer\s+[^\s]+|\bsk-[A-Za-z0-9_-]{12,}",
+                      "[REDACTED]", value)
+    return value
+
+
+def payload_summary(payload: Mapping[str, Any], capture_content: bool = False,
+                    *, secrets: tuple[str, ...] = ()) -> dict[str, Any]:
     """Describe a final provider payload without recording secrets by default."""
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
     result = {
@@ -120,7 +157,8 @@ def payload_summary(payload: Mapping[str, Any], capture_content: bool = False) -
         "tool_count": len(payload.get("tools", [])) if isinstance(payload.get("tools"), list) else 0,
     }
     if capture_content:
-        result["content"] = payload
+        result["content"] = _redact_payload(payload, secrets)
+        result["content_redacted"] = True
     return result
 
 
@@ -192,12 +230,14 @@ def research_context(
     context_token = _context.set(dict(identity or {}))
     sink_token = _sink.set(sink)
     intervention_token = _pending_intervention.set(None)
+    reminder_token = _pending_pma_reminder.set(None)
     provider_token = _last_provider_call.set(None)
     try:
         yield
     finally:
         _last_provider_call.reset(provider_token)
         _pending_intervention.reset(intervention_token)
+        _pending_pma_reminder.reset(reminder_token)
         _sink.reset(sink_token)
         _context.reset(context_token)
 

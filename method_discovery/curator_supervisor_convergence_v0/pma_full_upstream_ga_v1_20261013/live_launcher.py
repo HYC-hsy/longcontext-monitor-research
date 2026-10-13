@@ -178,6 +178,7 @@ def run_live(args) -> dict:
         env.update(PMA_HARBOR_SPEC=str(spec_path), PYTHONUTF8='1', PYTHONIOENCODING='utf-8',
                    GA_RUN_ISOLATION='no-network-unix-inference-v1',
                    GA_PMA_UPSTREAM_ENABLED='1' if args.condition == 'B' else '0',
+                   GA_PMA_CAPTURE_TASK_REQUESTS='1' if args.condition == 'B' else '0',
                    GA_PMA_ENABLED='0', GA_MONITOR_ENABLED='0', GA_M0_MONITOR_ENABLED='0')
         if args.condition == 'B':
             env.update(GA_PMA_UPSTREAM_REQUESTS='/run/pma-bridge/requests',
