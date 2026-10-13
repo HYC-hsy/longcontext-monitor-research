@@ -1,0 +1,97 @@
+{
+  "schema": "pma-upstream-ga-four-arm-prepared-v2",
+  "execution_authorized": false,
+  "status": "offline_target_fake_integrated_live_not_authorized",
+  "ga_task_owner": "GenericAgent is the sole submitted implementation writer",
+  "comparison": {
+    "A": "GA Task only; Monitor, old PMA and upstream PMA off",
+    "B": "same GA Task plus unmodified upstream MemoryEnabledTerminus2 on a host worker; Terminus2 actor disabled",
+    "causal_scope": "system-level PMA auxiliary effect, not isolated memory or trigger ablation"
+  },
+  "source": {
+    "upstream_pma_commit": "89e5c0d6aadfe531a1aee42fd290d48be89973dd",
+    "upstream_pma_license": "Apache-2.0",
+    "terminal_bench_commit": "2fd12b88aafdd04a52c298e3940bcb189f9766d6"
+  },
+  "order": [
+    {"order": 1, "task": "db-wal-recovery", "condition": "A"},
+    {"order": 2, "task": "db-wal-recovery", "condition": "B"},
+    {"order": 3, "task": "fix-code-vulnerability", "condition": "B"},
+    {"order": 4, "task": "fix-code-vulnerability", "condition": "A"}
+  ],
+  "assets": {
+    "db-wal-recovery": {
+      "tag": "alexgshaw/db-wal-recovery:20251031",
+      "image_id": "sha256:0e33ea5ec823975d1bd6c3778395c9f94251dd88f571146057bff6adb7e4594e",
+      "repo_digest": "alexgshaw/db-wal-recovery@sha256:0e33ea5ec823975d1bd6c3778395c9f94251dd88f571146057bff6adb7e4594e",
+      "public_task_tree_sha256_in_offline_fixture": "d7f27be00f9614e1fefd812857890d6ff483093eacf5f9e59cea7de9376298f3",
+      "official_agent_timeout_sec": 900,
+      "official_verifier_timeout_sec": 900
+    },
+    "fix-code-vulnerability": {
+      "tag": "alexgshaw/fix-code-vulnerability:20251031",
+      "image_id": "sha256:cac325252991f823713b2d0441502972901dd782bd67f66c03d9b1e410dac5c0",
+      "repo_digest": "alexgshaw/fix-code-vulnerability@sha256:cac325252991f823713b2d0441502972901dd782bd67f66c03d9b1e410dac5c0",
+      "public_task_tree_sha256_in_offline_fixture": "7b4f44b3ce1a356fc758ca6e155930d9f9b479413ee8a050613869d154272d1a",
+      "official_agent_timeout_sec": 900,
+      "official_verifier_timeout_sec": 900
+    }
+  },
+  "task_profile_public": {
+    "profile": "native_claude_cc_vibe_opus48",
+    "model": "claude-opus-4-8",
+    "max_tokens": 64000,
+    "temperature": 1,
+    "thinking_type": "adaptive",
+    "timeout_sec": 60,
+    "read_timeout_sec": 300,
+    "native_max_retries": 4,
+    "source_private_profile_sha256": "ed09a811b654b83097bee77942704eae2539d67291bf55aa34476692081ff02e"
+  },
+  "upstream_memory_public": {
+    "model": "openrouter/anthropic/claude-opus-4.6",
+    "temperature": 0.3,
+    "trigger_interval": 1,
+    "trigger_on_first_step": true,
+    "window": 8,
+    "reset_status": true,
+    "reset_knowledge": false,
+    "reset_procedural": false,
+    "injection": "user_turn",
+    "structured_tools": true,
+    "keep_thinking": false,
+    "actor": "DisabledActorLLM; no actual actor inference"
+  },
+  "future_budget_proposal_not_authorized": {
+    "ga_task_turns": 300,
+    "same_agent_wall_clock_sec_each_arm": 3600,
+    "basis": "official agent limit 900 sec; proposed common multiplier 4 to include original PMA wait within the same wall clock, not equal active Task time",
+    "pma_event_wait": "remaining shared wall-clock deadline; no fixed 20-sec diagnostic timeout",
+    "worker_shutdown_grace_sec": 10,
+    "harbor_whole_trial_max_retries": 0,
+    "native_verifier_timeout_sec": 900,
+    "unapproved_cost": "unknown"
+  },
+  "offline_fixture": {
+    "execution_authorized": false,
+    "fake_task_gateway": true,
+    "fake_pma_transport": true,
+    "fixture_agent_timeout_sec": 180,
+    "fixture_task_turns": 2,
+    "target_image_runs": "both A and B on both images via fresh offline run roots; native verifier disabled"
+  },
+  "online_boundary": {
+    "task_main_network": "none in offline fixture",
+    "pma_worker_private_root_mounted_into_task": false,
+    "requests_mount": "/run/pma-bridge/requests:rw",
+    "responses_mount": "/run/pma-bridge/responses:ro",
+    "tests_and_solution_in_public_package": "empty directories only",
+    "model_visible_upstream_vendor_or_audit": false
+  },
+  "live_start_requirements": [
+    "new exact run IDs and empty roots bound to a separate explicit authorization",
+    "freeze current code, profile, endpoint compatibility and actual whole-trial deadline",
+    "evaluate only each arm's own frozen artifact with the official native verifier after writer and worker stop",
+    "do not infer authorization from this draft or from the offline launcher"
+  ]
+}

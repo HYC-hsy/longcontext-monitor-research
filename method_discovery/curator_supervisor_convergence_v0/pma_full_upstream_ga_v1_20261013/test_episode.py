@@ -194,6 +194,49 @@ class EpisodeTests(unittest.TestCase):
                 self.assertEqual(rows[0 if failed_phase == "bank_management" else 1]
                                  ["status"], "RuntimeError")
 
+    def test_original_and_ga_initial_phase_failure_matrix(self):
+        """Original loop is the reference; no adapter method drives it."""
+        for failed_phase in (None, "bank_management", "context_decision"):
+            with self.subTest(failed_phase=failed_phase), TemporaryDirectory() as directory:
+                root = Path(directory)
+                captured = {}
+                agents = {}
+                for arm in ("reference", "ga"):
+                    agent = construct_upstream(root / arm)
+                    agents[arm] = agent
+                    captured[arm] = []
+
+                    async def scripted(*, prompt, system, tools=None, arm=arm):
+                        phase = "bank_management" if tools else "context_decision"
+                        captured[arm].append((phase, prompt, system))
+                        if phase == failed_phase:
+                            raise RuntimeError("same scripted phase failure")
+                        if tools:
+                            return LLMResponse(content="", tool_calls=[])
+                        return LLMResponse(content="<no_intervention/>")
+
+                    agent._memory_llm.call = scripted
+                reference = agents["reference"]
+                reference._context = SimpleNamespace()
+                reference._max_episodes = 0
+                reference._enable_summarize = False
+                reference._session = SimpleNamespace(is_session_alive=lambda: asyncio.sleep(0, result=True))
+                class UnusedFakeChat:
+                    async def chat(self, *args, **kwargs):
+                        raise AssertionError("zero-episode reference must not call actor")
+
+                asyncio.run(reference._run_agent_loop("Identical initial Task", UnusedFakeChat()))
+                episode = PMAEpisode(agents["ga"], run_id="r", task_id="t",
+                                     archive=root / "private")
+                asyncio.run(episode.handle({"kind": "task_start", "sequence": 1,
+                                            "event_id": "start", "run_id": "r",
+                                            "task_id": "t",
+                                            "initial_user_content": "Identical initial Task"}))
+                self.assertEqual(captured["reference"], captured["ga"])
+                self.assertEqual(reference._memory.status, agents["ga"]._memory.status)
+                self.assertEqual(reference._pending_injection, agents["ga"]._pending_injection)
+                self.assertEqual(len(captured["ga"]), 2)
+
     def test_file_event_bridge_keeps_private_bank_outside_shared_spool(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -338,7 +381,8 @@ class EpisodeTests(unittest.TestCase):
                 requests[arm] = []
 
                 async def memory_call(*, prompt, system, tools=None, arm=arm):
-                    requests[arm].append((prompt, system, bool(tools)))
+                    requests[arm].append((prompt, system,
+                        json.dumps(tools, sort_keys=True, default=str) if tools is not None else None))
                     if tools:
                         return LLMResponse(content="", tool_calls=[])
                     return LLMResponse(content="<context_for_action>Keep the public clue.</context_for_action>")
@@ -403,6 +447,7 @@ class EpisodeTests(unittest.TestCase):
                              ga._accumulated_observations)
             self.assertEqual(reference._pending_injection, ga._pending_injection)
             self.assertEqual(len(requests["ga"]), 4)
+            self.assertIsNotNone(requests["ga"][0][2])
             self.assertEqual(actor_attempts, 2)
             self.assertIn(public, requests["ga"][2][0])
             self.assertIn("RESULT_BETA", requests["ga"][3][0])
