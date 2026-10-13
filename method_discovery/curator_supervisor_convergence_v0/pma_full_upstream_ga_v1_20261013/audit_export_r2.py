@@ -122,9 +122,18 @@ def finish_packet() -> None:
         "FOUR_RUN_MANIFEST_PREPARED.json", "REPORT_R2.md", "TEST_RESULTS_R2.txt")]
     files += [REPO / "GenericAgent-main" / name for name in (
         "agentmain.py", "agent_loop.py", "pma_upstream_bridge.py")]
-    hashes = {path.relative_to(REPO).as_posix(): {
-        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "bytes": path.stat().st_size}
-        for path in files}
+    hashes = {}
+    for path in files:
+        relative = path.relative_to(REPO).as_posix()
+        raw = path.read_bytes()
+        entry = {"sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}
+        if path.suffix == ".py" or path.name in (
+                "REPORT_R2.md", "FOUR_RUN_MANIFEST_PREPARED.json"):
+            blob = subprocess.run(["git", "show", "HEAD:" + relative], cwd=REPO,
+                                  capture_output=True, check=True).stdout
+            entry["git_blob_sha256"] = hashlib.sha256(blob).hexdigest()
+            entry["git_blob_bytes"] = len(blob)
+        hashes[relative] = entry
     (STAGE / "FILE_HASHES_R2.json").write_text(json.dumps(hashes, indent=2), encoding="utf-8")
     diff = subprocess.run(["git", "diff", "ccb841ea1bb738246493dff8802e70eb45fa7bb3",
                            "HEAD", "--", "GenericAgent-main/agentmain.py",
