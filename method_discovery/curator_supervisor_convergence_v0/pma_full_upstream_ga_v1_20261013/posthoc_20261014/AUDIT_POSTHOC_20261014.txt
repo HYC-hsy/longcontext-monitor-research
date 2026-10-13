@@ -1,0 +1,125 @@
+RECONSTRUCTED POSTHOC ARTIFACT EVALUATION — 2026-10-14
+
+Scope and original identity
+Repository branch: crs-v0-20261007. Starting archive commit:
+7715a80f53b21f23245ef4e846500cacb391d4fb.
+Original live batch: live_batch_retry_20261014. Its files, frozen statuses,
+reward files and logs were read only, never overwritten or reclassified.
+No Task, PMA, provider, training or scoring-model request was made in this
+posthoc round. Native evaluator starts: 1 of at most 4.
+
+Original batch facts (MECHANICAL_SUMMARY.json):
+DB A: legal_agent_end=false, native score unavailable; terminal file says
+CURRENT_TASK_DONE and pma_finalization.status=not_enabled. Frozen tar SHA256
+3a6796614f3852190a2de3fb2866e43ee3b04ef398e3427e97dfe4f045e68cde.
+DB B: original legal_agent_end=true, recorded reward=0, original evaluator
+logs show infrastructure failure; frozen tar SHA256
+9e0f0eb4d1a1e925385cd6ceef2688a542cdf6e222933ddc7303b3d7c78da88b.
+Code B: same original infrastructure-failure distinction and recorded reward=0;
+frozen tar SHA256 ae7b2326db6f3bc316836a2dca210c7e91f67ca24624e3b95ca7ae2352ff9530.
+Code A: legal_agent_end=false, native score unavailable; frozen tar SHA256
+9331ee3f62180cb3eaf20d9a8834a60ddce634d8c3848a87d688252a5b13fa3b.
+Original reward=0 files remain original facts, not valid newly interpreted scores.
+
+Gate repair and read-only rejudgment
+pma_harbor_hooks.PMATrialHooks.terminal_identity_valid now requires exactly
+run_id/task_id/result/pma_finalization. A requires status=not_enabled and no
+worker, B requires status=saved and retains separate worker/sidecar clearance.
+Unknown/missing/mismatched fields fail. The archived four terminal JSONs pass
+the corrected identity check, while old A agent_end_frozen.json remains null
+and legal_agent_end=false. The repair does not retroactively rewrite completion.
+See test_live_wiring.py and its seven-test output below. CURRENT_TASK_DONE is
+programmatic normal termination, not task correctness.
+
+Input and environment verification
+INPUT_IDENTITIES.json contains four tar byte hashes/sizes, safe tar member
+manifests (no traversal, links or special files), writer/sidecar stop checks,
+official evaluator tree identities and actual Docker image IDs/RepoDigests.
+The registered official task images were used. RepoDigest and image ID remain
+separate fields. Preflight used disposable, empty official-image containers
+without any candidate artifact. DB apt/curl/uvx/pytest/CTRF and code pip
+pytest/CTRF command availability succeeded; full stdout/stderr and exit codes
+are in preflight/*. The preflight did not run a native evaluator or model.
+No host DNS/firewall/VPN or source task was altered.
+
+Actual evaluation attempt and mandatory stop
+Execution order was DB A, DB B, code B, code A. DB A alone was started.
+The exact registered tar was restored into an empty volume-nocopy /app in a
+disposable official-image container. Docker copy-back manifest matched the
+frozen tar member bytes, modes and paths before evaluation. The frozen source
+tar was not changed. The native command was docker exec -w /app
+pma_posthoc_20261014_db_a bash /tests/test.sh (900-second limit).
+Actual native exit: 2 after approximately 0.17 second; no CTRF test report
+and no new reward file. The complete stderr in db_a/native_evaluator.stderr
+shows Bash CRLF errors beginning at line 2, invalid apt operation, missing
+curl, and final syntax error. The mounted evaluator test.sh is byte-identical
+to the fixed recorded local evaluator asset; this is evaluation environment /
+script invocation failure before tests, not candidate failure or reward=0.
+The disposable container and volume were removed and positively verified
+absent. DB A pre- and post-evaluation snapshots, commands, timestamps,
+stdout/stderr and cleanup checks are under db_a/. The result table records
+reward=null, interpretability=infrastructure_or_incomplete.
+
+Per the prespecified shared-infrastructure stopping rule, DB B, code B and
+code A were NOT started. None has a posthoc score; no artifact was repaired,
+supplemented, or selected from another checkpoint. In particular DB A only
+contains main.db; the empty /app restore did not resurrect original-image WAL
+or recovered.json. No evaluator was retried after it started. The one-use
+driver printed a structured stop table but returned process exit 0; that shell
+exit is not an evaluation success. RESULT_TABLE.json is authoritative.
+
+Interpretation boundary
+All prospective results are reconstructed posthoc artifact evaluations, not
+original live results. The restored /app tar excludes some original system,
+Python-package and environment modifications. Even a completed score would
+describe this precise reconstruction, not a full live-process recovery.
+No statistical or general method conclusion is made here.
+
+Future Task send-boundary evidence (not retroactive)
+The original four research_events.jsonl files contain provider_request_ready
+counts DB A 24, DB B 16, code B 47, code A 27, each hash_only and with zero
+complete request bodies. Existing stdout, PMA spool and event traces can show
+reminder return or local actions but are not a trustworthy complete final
+wire-request copy. Therefore old PMA reminder delivery to a specific Task
+model request remains UNCONFIRMED; it was not reconstructed via a model call.
+The new default-off PMA capture records a redacted final payload at the actual
+provider send boundary with run/task, actor_attempt, PMA event and provider
+logical call/attempt IDs. A fake transport test proves the payload includes an
+appended reminder and that endpoint/key-like strings are redacted. A capture
+still does not prove server receipt when transport outcome is unknown. Original
+raw private traces require separate handling; only this scrubbed package is
+intended for Git.
+
+Actual regression commands and results
+1. E:/LongContext/bench_runtime/m4/harbor-env/Scripts/python.exe -m unittest
+   -v method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.test_live_wiring
+   exit 0; 7 tests OK, including archived terminal read-only rejudgment.
+2. PYTHONPATH=E:/longcontext-cqs-v0-20261005/GenericAgent-main
+   py -3.13 -m pytest -q GenericAgent-main/tests/test_research_agent_loop.py
+   exit 0; 18 passed in 2.53 s, including real _stream_with_retry fake send.
+3. Same PYTHONPATH, py -3.13 -m pytest -q
+   GenericAgent-main/tests/test_research_agent_loop.py
+   GenericAgent-main/tests/test_research_runtime.py
+   exit 1 at collection: local Python 3.13 lacks jsonschema. No assertion ran
+   in that combined invocation. The affected agent_loop suite was then run
+   alone as item 2; the unrelated runtime suite is not claimed as passing.
+4. Initial narrower fake-send selection: 2 passed, 16 deselected (exit 0).
+5. Artifact preflight driver mode preflight: exit 0; dependency_preflight_complete.
+6. Artifact driver mode evaluate: process exit 0 but structured stop after DB A;
+   this is not counted as success. Full native command/output and stop reason
+   are under db_a/ and RESULT_TABLE.json.
+
+Remaining issue
+The fixed evaluator asset on Windows has CRLF line endings incompatible with
+direct Bash execution in the chosen reconstruction. This round does not
+normalize it or launch another invocation because DB A's single allowed native
+evaluator attempt has already begun. A new decision is required for any later
+evaluation attempt. The other three frozen artifacts remain unassessed here.
+
+Audit source locations
+Original: live_batch_retry_20261014/{MECHANICAL_SUMMARY.json,raw/arms/*}.
+New: posthoc_20261014/{INPUT_IDENTITIES.json,PREFLIGHT_RESULT.json,
+RESULT_TABLE.json,preflight/,identity/,db_a/,FILE_HASHES.json}.
+Implementation/test diff is the Git history of this delivery's code commit;
+the evidence commit adds this packet and the original generated logs. No
+unrelated __pycache__ or active authorization is included.
