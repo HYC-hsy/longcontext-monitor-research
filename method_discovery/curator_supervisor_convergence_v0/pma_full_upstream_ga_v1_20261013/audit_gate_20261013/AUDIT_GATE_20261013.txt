@@ -1,0 +1,106 @@
+PMA -> GA FINAL WIRING: ZERO-MODEL GATE AUDIT (2026-10-13)
+
+Status: BLOCKED BEFORE REAL COMPATIBILITY. This is an engineering record, not
+an A/B result. No authorization file or four-arm run binding was created.
+Real Task, PMA/provider, native evaluator, training and scoring-model calls: 0.
+Real compatibility Task logical requests: 0; real PMA phase requests: 0.
+Formal arms started: 0/4; DB A, DB B, code B, code A all unstarted.
+
+Start HEAD: 41602831f156b55e2df066166d4d613925dfd845.
+Implementation commits: 93437fcb5c9b35adfc65d411b29d0c070ddc9dd6,
+b8836bc177edd8e994cc1c26b73ba7ea1974d359,
+b5df0615d7fd5e873f38defd812ab307c5b8c8dc,
+0b50561f755532213d9877c39863ea9110459b38.
+PMA vendor fixed source and official task assets were not modified by these
+commits. The shared PilotTrialHooks change extracts the existing terminal
+identity/legal-completion predicates for the PMA-specific saved-state gate;
+ordinary predicate behavior remains unchanged (45 original tests passed).
+
+Implemented in this stage:
+- The existing GA event bridge now refuses a subsequent before_actor_call
+  while the previous actor_step remains unresolved; task_end remains separate.
+- The offline launcher retains primary failures, stops the worker/owned Docker
+  containers, and records a terminal status even after Harbor exceptions.
+- Two official target-image zero-model fixtures exercised a Task request,
+  code_run result, original PMA two-phase fake memory update, reminder in the
+  next actually constructed Task request, Task end, worker save, and cleanup.
+- The guarded live launcher selects the original Harbor runtime and evaluator
+  hooks. It requires a separate exact four-arm manifest, authorization hash,
+  code HEAD, unique run binding, frozen image/profile/public input identities,
+  and checks worker save separately from Task completion. A pending manifest
+  has a different schema and is rejected. Actual live Harbor execution has
+  NOT been certified or invoked.
+- Native-evaluator release requires a stopped/frozen product, legal Task
+  terminal and (for B) saved PMA terminal state. Harbor return code is not
+  treated as a native reward.
+
+Exact pinned target image inspections (local Docker):
+DB tag alexgshaw/db-wal-recovery:20251031;
+  image ID sha256:0e33ea5ec823975d1bd6c3778395c9f94251dd88f571146057bff6adb7e4594e;
+  RepoDigest alexgshaw/db-wal-recovery@sha256:0e33ea5ec823975d1bd6c3778395c9f94251dd88f571146057bff6adb7e4594e;
+  linux/amd64.
+Code tag alexgshaw/fix-code-vulnerability:20251031;
+  image ID sha256:cac325252991f823713b2d0441502972901dd782bd67f66c03d9b1e410dac5c0;
+  RepoDigest alexgshaw/fix-code-vulnerability@sha256:cac325252991f823713b2d0441502972901dd782bd67f66c03d9b1e410dac5c0;
+  linux/amd64. Image ID and RepoDigest are recorded as distinct Docker fields.
+Prepared source/test/profile hashes and proposed budgets are in
+FOUR_RUN_MANIFEST_PENDING_20261013.json. It is not a live manifest or approval.
+
+Actual zero-model fixtures:
+1. E:/pma-ga-multiturn-db-20261013 used the wrong bench-root adapter;
+   byte gate observed d5d4... instead of frozen 8a4513..., Harbor rc=1,
+   zero target containers, cleanup confirmed. Its complete stdout/stderr,
+   command and status are copied under fake_db_failed_adapter_identity_archive.
+   This failed fixture was not promoted to a formal arm.
+2. E:/pma-ga-multiturn-db-20261013-r2 used the byte-pinned adapter;
+   Harbor rc=0, worker rc=0, 2 fake Task requests, 4 fake PMA phases,
+   1 nonempty memory update, actual second Task request contains both the
+   public tool-result marker and reminder, worker task_end_saved=true,
+   owned containers remaining=0, cleanup_confirmed=true.
+3. E:/pma-ga-multiturn-code-20261013: same measured chain and outcomes on
+   the code-task official image. These are fake transport and fake memory
+   responses, not real PMA endpoint compatibility or task performance.
+The exact captured fake requests/SSE, memory payload/transport, accepted/event
+records, commands, mounts, status and worker audits are under fake_* directories.
+Private Task profile bytes and credentials were not copied.
+
+Tests and actual results:
+- PMA venv: python -m unittest -v
+  method_discovery.curator_supervisor_convergence_v0.
+  pma_full_upstream_ga_v1_20261013.test_live_wiring
+  => 4 passed, exit 0; full stdout/stderr in test_live_wiring.*.log.
+- PMA venv from PMA stage cwd: python -m unittest -q test_episode
+  => 12 passed, exit 0; intentional fake phase-error tracebacks are retained
+  in test_episode.stderr.log; they are exercised failure semantics, not an
+  unexpected test crash.
+- D:/python/envs/ga_bench/python.exe -m pytest -q
+  .../test_task_terminal_gate.py
+  => 45 passed, exit 0; full output in test_task_terminal_gate.*.log.
+- A first attempt at running test_episode by fully qualified module path
+  failed at import (its historical test requires stage cwd). Retried once
+  from its intended cwd as above; no assertion was removed.
+- A first attempt with PMA venv for test_task_terminal_gate failed because
+  that venv lacks pytest. The existing ga_bench environment ran it as above.
+
+Blocking evidence:
+PMA_MEMORY_API_KEY, OPENROUTER_API_KEY and ANTHROPIC_API_KEY were absent in the
+host process environment (presence check only; no values printed). The B live
+entry now rejects an absent PMA memory credential before preparation or
+network activity. It would be unauthorized to repurpose the separate GA Task
+profile credential or silently change PMA's model/provider. Thus the one
+permitted real Opus 4.6 compatibility round was not attempted, and the four
+formal arms were not started. The live native-evaluator barrier has no actual
+trial result yet. Task model profile contents/endpoint were not published.
+
+Scientific/operational limits:
+The fixed full upstream PMA import and fake two-phase operation were exercised,
+but real Opus 4.6 request acceptance, actual parameter retention, usage and
+model identity remain unverified. Fake Harbor tests used official images but
+disabled native evaluation. No reward exists and no missing score is zero.
+The pending four-arm order and 14400/900-second limits are not an active batch.
+No accepted event was replayed and no historical run was resumed. The ignored
+user __pycache__ directories were left untouched.
+
+FILE_HASHES.json inventories every copied raw fixture/test file by relative
+path, byte length and SHA-256. This packet is an audit subset of the two
+zero-model fixtures, not a whole-machine snapshot or a real experiment trace.
