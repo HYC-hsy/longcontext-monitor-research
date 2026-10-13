@@ -158,7 +158,7 @@ def run_offline(args) -> dict:
             env["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
             env["PYTHONPATH"] = os.pathsep.join((str(STAGE),
                 str(STAGE / "vendor" / "pma_89e5c0d" / "src"),
-                str(STAGE / "vendor" / "pma_89e5c0d" / "external" / "harbor")))
+                str(STAGE / "vendor" / "pma_89e5c0d" / "external" / "harbor" / "src")))
             command = [str(Path(args.worker_python).resolve(strict=True)),
                        str(STAGE / "worker_main.py"), "--run-id", args.run_id,
                        "--task-id", args.task, "--private-root", str(root / "host_private"),

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import inspect
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,8 @@ from types import SimpleNamespace
 
 from episode import PMAEpisode, construct_upstream
 from event_spool import EventDispatcher
+from memory_agent.memory_enabled_agent import MemoryEnabledTerminus2
+from harbor.agents.terminus_2.terminus_2 import Terminus2
 
 
 class PMAAuditIntegrityError(BaseException):
@@ -56,6 +59,12 @@ def install_transport_audit(agent, archive: Path) -> None:
 
 
 async def serve(args: argparse.Namespace) -> None:
+    vendor = Path(__file__).resolve().parent / "vendor" / "pma_89e5c0d"
+    sources = (Path(inspect.getfile(MemoryEnabledTerminus2)).resolve(),
+               Path(inspect.getfile(Terminus2)).resolve())
+    if (not sources[0].is_relative_to(vendor / "src") or
+            not sources[1].is_relative_to(vendor / "external" / "harbor" / "src")):
+        raise RuntimeError("PMA worker did not load both pinned upstream sources")
     private = Path(args.private_root).resolve(strict=False)
     requests = Path(args.requests).resolve(strict=True)
     responses = Path(args.responses).resolve(strict=True)
