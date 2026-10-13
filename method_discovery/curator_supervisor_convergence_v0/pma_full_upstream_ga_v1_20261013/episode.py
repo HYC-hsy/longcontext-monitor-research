@@ -178,10 +178,19 @@ class PMAEpisode:
         observation = event.get("observation")
         if not isinstance(observation, str):
             raise ValueError("complete public observation required")
+        # GA has no Terminus2 plan/analysis envelope.  Its complete public
+        # response is the upstream analysis input; hidden thinking is never read.
+        analysis = event.get("analysis")
+        if analysis is None:
+            analysis = event.get("response")
+        if not isinstance(analysis, str):
+            raise ValueError("complete public actor response required")
+        plan = event.get("plan")
+        if plan is not None and not isinstance(plan, str):
+            raise ValueError("plan must be text or absent")
         step = attempt + 1
         self.agent._accumulate_step(step=step, observation=observation,
-                                    analysis=event.get("analysis"),
-                                    plan=event.get("plan"), commands=commands)
+                                    analysis=analysis, plan=plan, commands=commands)
         triggered, reason = self.agent._trigger.should_trigger(step_count=step)
         if triggered:
             await self.agent._trigger_memory_agent(step_count=step)
@@ -192,7 +201,11 @@ class PMAEpisode:
     def _task_end(self, event: dict[str, Any]) -> dict[str, Any]:
         if not self.started or self.ended:
             raise ValueError("task_end out of order")
+        try:
+            self.agent.save_memory(str(self.archive / "memory.json"))
+        except Exception as exc:
+            self._record(event, {"status": "save_failed", "error_type": type(exc).__name__})
+            raise
         self.ended = True
-        self.agent.save_memory(str(self.archive / "memory.json"))
         return {"status": "saved", "terminal": event.get("terminal"),
                 "actor_attempts": self.last_attempt}

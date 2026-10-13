@@ -58,6 +58,7 @@ class EpisodeTests(unittest.TestCase):
                 self.assertEqual(before["delivery"], "returned_not_confirmed_in_ga_request")
                 observed = await episode.handle(event(
                     "actor_step", 3, actor_attempt=1, step_status="normal",
+                    response="PUBLIC_DIAGNOSTIC: inspect both files",
                     commands=["tool A", "tool B"], observation="two public results"))
                 self.assertEqual(observed["step_count"], 2)
                 self.assertEqual((await episode.handle(event(
@@ -78,6 +79,11 @@ class EpisodeTests(unittest.TestCase):
             self.assertEqual(agent._accumulated_observations[1]["commands"], ["tool A", "tool B"])
             self.assertEqual(agent._accumulated_observations[1]["step"], 2)
             self.assertIn("two public results", calls[2]["prompt"])
+            for call in calls[2:4]:
+                self.assertIn("PUBLIC_DIAGNOSTIC: inspect both files", call["prompt"])
+                self.assertIn("tool A", call["prompt"])
+                self.assertIn("tool B", call["prompt"])
+                self.assertIn("two public results", call["prompt"])
             self.assertEqual(agent._llm.calls, 0)
             self.assertIsInstance(agent._llm, DisabledActorLLM)
             self.assertTrue((root / "private" / "memory.json").is_file())
