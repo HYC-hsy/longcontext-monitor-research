@@ -1,6 +1,6 @@
 PMA FULL-UPSTREAM GA OFFLINE PREPARATION -- DESENSITIZED AUDIT PACKET
 Status: OFFLINE_BLOCKED; execution_authorized=false.
-Fixed upstream and full original source reside in the committed vendor tree; this packet contains all research-authored code and key evidence.
+The full original source remains in the committed vendor tree. This TXT includes all research-authored adapter files, configuration, raw test outputs, failures and per-file hashes.
 
 ========== REPORT.md ==========
 # Complete-upstream PMA to GA: offline preparation audit (2026-10-13)
@@ -10,13 +10,15 @@ Status: **OFFLINE_BLOCKED; no live run authorized or started.** This is a partia
 ## Baseline and changes
 
 - Initial HEAD/branch: `e65b5fb7f8f2ecc93963acc128a8d58c47949551`, `crs-v0-20261007`. Only pre-existing untracked `GenericAgent-main/monitor_agent_core/**/__pycache__` appeared; it was neither staged nor cleaned.
-- Ordered local commits before this report: `3d2e2c7d7d3e761591c426956d733b415fdc129e` (verbatim fixed source and public task assets), `466837870077d0f61212ab8ec529af596376addd` (episode and spool), `c1bfd339b27b148c83dc65b65d570070157feabf` (host worker and upstream reference fixture). No benchmark Task, verifier, prompt or historical archive was edited.
+- Ordered implementation commits before this report: `3d2e2c7d7d3e761591c426956d733b415fdc129e` (verbatim fixed source and public task assets), `466837870077d0f61212ab8ec529af596376addd` (episode and spool), `c1bfd339b27b148c83dc65b65d570070157feabf` (host worker and upstream reference fixture), `1e8fa6682a5502912fb144d89e6f347ce1e25540` (default-off GA event bridge), `d0feca54116dea752e5cf9eaad52bf632550291e` (pinned Harbor forwarding overlay). The GA bridge commit makes a necessary default-off change in `GenericAgent-main/agent_loop.py` and `agentmain.py`; production modification count is therefore not zero. No benchmark Task, verifier, prompt or historical archive was edited.
 - `vendor/pma_89e5c0d` contains all 213 tracked files from the fixed upstream tree `65e60a2c82eafffa04dad535e11d0972cda936df`; per-file SHA-256 comparison with the source checkout yielded `mismatches=0`. `LICENSE`, `configs`, `src/memory_agent`, `external/harbor` and templates load from that tree, rather than the old partial `pma_baseline` package.
 - Upstream PMA/Harbor versions in a separate Python 3.12.9 environment: `memory-agent==0.1.0`, `harbor==0.1.42`, both editable from the fixed tree. Selected resolved transitive versions are in `RESOLVED_DEPENDENCIES.txt`; the author's historical dependency lock is unknown. No optional Harbor execution backend was installed.
 
 ## Call chain that is implemented and tested
 
-`construct_upstream` invokes the unmodified `MemoryEnabledTerminus2` constructor with a complete `BaseLLM` subclass that throws on actor calls. The original memory `LiteLLM`, `MemoryAgent.process`, bank, trigger and user-turn renderer remain active. `PMAEpisode` translates four public GA event shapes into the original reset/accumulation/trigger/pending/save calls. The short `EventClient`/`EventDispatcher` file protocol preserves run/task/event identity, a serial sequence and an accepted request; it never retries an unknown accepted event. The host-private bank/log root is outside the shared request/response spool. `worker_main` supplies one ongoing asyncio loop. This is a host worker and protocol primitive, **not yet an installed GA/Harbor runtime bridge**.
+`construct_upstream` invokes the unmodified `MemoryEnabledTerminus2` constructor with a complete `BaseLLM` subclass that throws on actor calls. The original memory `LiteLLM`, `MemoryAgent.process`, bank, trigger and user-turn renderer remain active. `PMAEpisode` translates four public GA event shapes into the original reset/accumulation/trigger/pending/save calls. The short `EventClient`/`EventDispatcher` file protocol preserves run/task/event identity, a serial sequence and an accepted request; it never retries an unknown accepted event. The host-private bank/log root is outside the shared request/response spool. `worker_main` supplies one ongoing asyncio loop.
+
+The default-off `GA_PMA_UPSTREAM_ENABLED` branch in the real GA `agent_runner_loop` now sends public `task_start`, `before_actor_call` and `actor_step` events. It retains the original GA Task system/tools/provider loop and injects returned reminders into the current user-turn envelope; the outer `agentmain` finally sends `task_end` on normal or exceptional exit. `harbor_adapter.py` pins the existing Harbor adapter SHA-256 `8a4513c6b28befe747d581d22e94cd2715f20234c63115e0ea424a56d033c3a0` and adds only four forwarded environment names when explicitly selected. This is **not yet an installed end-to-end Harbor launcher or mount certification**.
 
 The independent reference test calls the unmodified upstream `_run_agent_loop` with scripted actor/session I/O and an original memory object. It verifies the first ordinary multi-tool step and following parse-error step against the event adapter. The test does not cover the full requested matrix (completion, budget last turn, both phase failures, etc.). Fake memory responses run through the actual original two-phase `MemoryAgent.process` and parser; only external `LiteLLM.call` is replaced. The production DisabledActorLLM call count is zero.
 
@@ -24,11 +26,12 @@ The independent reference test calls the unmodified upstream `_run_agent_loop` w
 
 1. `git -C <fixed PMA checkout> rev-parse HEAD` → `89e5c0d6aadfe531a1aee42fd290d48be89973dd`; official task checkout → `2fd12b88aafdd04a52c298e3940bcb189f9766d6`.
 2. Tracked source SHA-256 loop: `tracked_files=213 mismatches=0`.
-3. Python: `C:\Users\hsy\AppData\Local\Temp\pma-ga-py312\Scripts\python.exe -m unittest -v test_episode` in this directory → exit 0, four tests `ok`, final saved run `Ran 4 tests in 0.141s`, `OK`; full output is in `TEST_RESULTS.txt`. An earlier run had an incidental LiteLLM *model cost-map metadata* fetch attempt that timed out; it was not a model/provider inference. Tests now set `LITELLM_LOCAL_MODEL_COST_MAP=True` before importing LiteLLM. The final four-test run had no provider request or metadata warning. This is not a general network-isolation certification.
-4. `python -m py_compile episode.py event_spool.py worker_main.py test_episode.py` and `import worker_main` → exit 0, `worker_import_ok`.
-5. Original `visualize_memory` and `visualize_memory_trajectory` were called on fake-generated bank/trajectory inside the passing test; both returned HTML paths. This does not certify a real-run rendering pipeline.
-6. `docker info --format '{{.ServerVersion}}'` → `29.6.1` after starting the local Desktop Engine. `docker image inspect` for both official task tags → no such image; `ubuntu:24.04` and `python:3.11-slim` are also absent. `docker manifest inspect` for both official tags failed because Docker registry v2 could not be reached. Exact fixed-Dockerfile `docker build --network none --pull=false` attempts for each task exited 1 before any build step: Docker Hub OAuth token fetch failed on `auth.docker.io`. No image was registered as usable. These failures are asset/network limitations, not candidate performance results.
-7. `docker ps --format '{{.ID}} {{.Image}} {{.Names}}'` returned no running container during the audit. No official solution or native verifier was executed.
+3. Python: `C:\Users\hsy\AppData\Local\Temp\pma-ga-py312\Scripts\python.exe -m unittest -v test_episode` in this directory → exit 0, five tests `ok`; the new fifth test passes an actual GA client event through the host dispatcher. An earlier run had an incidental LiteLLM *model cost-map metadata* fetch attempt that timed out; it was not a model/provider inference. Tests now set `LITELLM_LOCAL_MODEL_COST_MAP=True` before importing LiteLLM. The final run had no provider request or metadata warning. This is not a general network-isolation certification.
+4. `py -3.13 -m pytest -q tests/test_pma_upstream_ga_bridge.py tests/test_research_agent_loop.py` in `GenericAgent-main` → exit 0, `20 passed in 2.50s`; new branch and default-off route are covered with fake client responses. Import of the pinned Harbor overlay in the existing Harbor Python environment → exit 0, `generic-agent-harbor-pma-upstream` and `True` for all four new forwarded names. This proves import/tuple wiring, not a Harbor trial.
+5. `python -m py_compile episode.py event_spool.py worker_main.py test_episode.py` and `import worker_main` → exit 0, `worker_import_ok`. The GA files also passed `py -3.13 -m py_compile`.
+6. Original `visualize_memory` and `visualize_memory_trajectory` were called on fake-generated bank/trajectory inside the passing test; both returned HTML paths. This does not certify a real-run rendering pipeline.
+7. `docker info --format '{{.ServerVersion}}'` → `29.6.1` after starting the local Desktop Engine. `docker image inspect` for both official task tags → no such image; `ubuntu:24.04` and `python:3.11-slim` are also absent. `docker manifest inspect` for both official tags failed because Docker registry v2 could not be reached. Exact fixed-Dockerfile `docker build --network none --pull=false` attempts for each task exited 1 before any build step: Docker Hub OAuth token fetch failed on `auth.docker.io`. No image was registered as usable. These failures are asset/network limitations, not candidate performance results.
+8. `docker ps --format '{{.ID}} {{.Image}} {{.Names}}'` returned no running container during the audit. No official solution or native verifier was executed.
 
 ## Assets and information boundary
 
@@ -36,19 +39,18 @@ The independent reference test calls the unmodified upstream `_run_agent_loop` w
 
 ## Implementation gaps blocking a four-run launch
 
-- The new event client is not yet invoked from real GA `agent_loop`, and no default-off, mutually exclusive upstream PMA option is forwarded through the real Harbor adapter. No actual GA request with a returned reminder has been captured. Task-only A no-worker behavior and condition parity are therefore untested.
-- No trusted run launcher mounts separate GA request/response paths and host-private bank, starts/stops the worker with the Harbor task, or proves per-event delivery/actual GA request uptake. The current host worker is not a general service and should not be launched against a live task as-is.
+- The GA branch and byte-pinned Harbor forwarding overlay have now been implemented and tested in isolation, but a trusted run launcher has not yet selected the new Harbor agent, set exact run-bound environment/deadline values, mounted separate GA request/response paths, or started/stopped the host worker with a real task. No actual Harbor-generated GA request with a returned reminder has been captured. Task-only A no-worker behavior in the actual Harbor route and condition parity are untested.
 - Both exact task images are missing; their frozen Dockerfiles could not resolve base images. Thus no official-image Docker zero-model end-to-end, task initial tree identity, or verifier-entry/cleanup barrier was validated.
-- Full independent original-loop reference cases, event error paths, cancellation/cleanup, duplicate-after-crash behavior, multi-tool GA actor attempt mapping, actual GA initial envelope, model payload/parameter preservation, and PMA LiteLLM endpoint compatibility remain unverified.
+- Full independent original-loop reference cases, event error paths, cancellation/cleanup, duplicate-after-crash behavior, actual Harbor GA initial envelope, model payload/parameter preservation, and PMA LiteLLM endpoint compatibility remain unverified. The current GA branch maps one complete multi-tool batch to one actor attempt in a fake-client test, but not yet in an official task container.
 - The existing GA profile is `native_claude_cc_vibe_opus48` in the prior Fyne/Kitex manifest, but its exact use for these Terminal-Bench tasks, Task turn cap, Harbor whole-trial limit, PMA wait bound, and memory model endpoint response identity have not been frozen. In particular the original Terminus2 actor/parser/50-turn settings were not applied to GA.
-- The host worker currently records PMA event status but has not installed a transport-boundary phase-failure audit of LiteLLM retries/usage. It cannot yet distinguish all upstream silent error returns from normal no-reminder outcomes in the deployed path.
+- The host worker currently records PMA event status but has not installed a transport-boundary phase-failure audit of LiteLLM retries/usage. It cannot yet distinguish all upstream silent error returns from normal no-reminder outcomes in the deployed path. Cross-process deadline and abnormal task-end cleanup behavior require integration certification.
 
 `FOUR_RUN_MANIFEST_DRAFT.json` is deliberately `execution_authorized=false` and `offline_blocked`. It is not a runnable authorization. Completing the listed bridge/mount/asset work and offline tests is required before proposing a real four-run manifest. Real PMA Opus 4.6 compatibility remains a separate future endpoint check; this stage did not call it.
 
 ## Calls and evaluation
 
 - Real GA Task, Supervisor/Monitor, PMA model/provider API, native evaluator, training and scoring model: **0** each.
-- Scripted PMA-memory fake response calls in the final four tests: 10; scripted upstream fake actor calls: 2; `DisabledActorLLM.call`: 0 except the explicit refusal test, which raised before any inference.
+- Scripted PMA-memory fake response calls in the five upstream-adapter tests: 12; scripted upstream fake actor calls: 2; `DisabledActorLLM.call`: 0 except the explicit refusal test, which raised before any inference. GA fake client calls are counted separately in its pytest output.
 - No method-effect, GA task success, scorer result or complete upstream reproduction claim is made. Future scoring must use each official native verifier on its own frozen final artifact; missing scores cannot become zero.
 
 The old Fyne/Kitex experiments and this draft are not controls for one another. This report belongs to engineering preparation only.
@@ -73,9 +75,10 @@ These assets are not a claim that either image or the Harbor task launch is read
 | `_get_memory_system_prompt` with `user_turn` | `before_actor_call` consumes one original pending reminder and returns it to the bridge | Original renderer tested; actual GA next-request attachment not connected. |
 | `save_memory`, `visualize_memory`, `visualize_memory_trajectory` | `task_end` saves bank/trajectory; tests call both original renderers | Offline fixture passed; no live worker cleanup proof. |
 | Host file transport identity/accepted receipt concept from `analysis_spool.py` and `pilot_analysis_bridge.py` | `EventClient` / `EventDispatcher` / `worker_main` form a separate four-event protocol | Unit file bridge passed, but real Docker mounts and Harbor lifecycle not wired or certified. |
-| Existing GA `agent_runner_loop` and Harbor `M4GenericAgent` | No modification in this delivery | Required default-off switch, T/S mutual exclusion, event production and actual run entry remain blocked work; never claim integrated. |
+| Existing GA `agent_runner_loop` and `agentmain.run` | Default-off `GA_PMA_UPSTREAM_ENABLED` branch sends public events and task_end via `pma_upstream_bridge.py` | Fake GA tool loop and default-off regression passed; actual task container not run. |
+| Existing Harbor `M4GenericAgent` | `harbor_adapter.py` pins its original byte SHA and extends only four environment names in an explicitly selected research module | Import/forward tuple check passed. No run launcher or real Harbor task trial selected this module yet. |
 
-The vendor Harbor is loaded only by the host PMA worker. Its actor/task runner is not deployed. Existing GA Task model, system, tools, retry and completion semantics have not been changed in the research repository.
+The vendor Harbor is loaded only by the host PMA worker. Its actor/task runner is not deployed. The additive GA branch leaves the existing Task model, system, tools, retry and completion semantics unchanged when off; live equivalence of A/B initial requests remains untested.
 
 ========== FOUR_RUN_MANIFEST_DRAFT.json ==========
 {
@@ -134,6 +137,7 @@ The vendor Harbor is loaded only by the host PMA worker. Its actor/task runner i
   },
   "task_config": {
     "profile_from_existing_ga": "not_yet_bound_to_this_four_run_harness",
+    "upstream_pma_switch": "GA_PMA_UPSTREAM_ENABLED, default off; research Harbor overlay import tested, not trial-tested",
     "terminus_actor_model": "disabled; not GA model identity",
     "terminus_actor_parser_or_50_turns_applied_to_ga": false
   },
@@ -148,7 +152,7 @@ The vendor Harbor is loaded only by the host PMA worker. Its actor/task runner i
   "model_visible_exclusions": ["tests", "solution", "upstream examples", "private PMA bank and raw log", "credentials", "other run outputs", "research audit"],
   "launch_blockers": [
     "target Docker images unavailable locally and registry query timed out",
-    "new GA/Harbor runtime switch, event mount and host worker launch not connected or container-tested",
+    "GA switch and Harbor forwarding overlay unit-tested, but event mounts, run launcher, host worker lifecycle and real task container round trip not connected or certified",
     "full independent upstream reference matrix and real fake-provider Docker round trip not completed",
     "actual GA Task profile, four-run deadlines, verifier barrier and launch cleanup not frozen",
     "real Opus 4.6 endpoint compatibility unverified; no probe authorized"
@@ -235,15 +239,28 @@ zipp==4.1.1
 COMMAND: $py = Join-Path $env:TEMP 'pma-ga-py312/Scripts/python.exe'; $env:PYTHONPATH='E:\longcontext-cqs-v0-20261005\method_discovery\curator_supervisor_convergence_v0\pma_full_upstream_ga_v1_20261013'; & $py -m unittest -v test_episode; "EXIT_CODE=$LASTEXITCODE"
 
 test_actor_never_usable (test_episode.EpisodeTests.test_actor_never_usable) ... ok
+test_actual_ga_client_event_matches_host_dispatcher (test_episode.EpisodeTests.test_actual_ga_client_event_matches_host_dispatcher) ... ok
 test_file_event_bridge_keeps_private_bank_outside_shared_spool (test_episode.EpisodeTests.test_file_event_bridge_keeps_private_bank_outside_shared_spool) ... ok
 test_original_lifecycle_and_duplicate_suppression (test_episode.EpisodeTests.test_original_lifecycle_and_duplicate_suppression) ... ok
 test_unmodified_upstream_actor_loop_reference_first_two_steps (test_episode.EpisodeTests.test_unmodified_upstream_actor_loop_reference_first_two_steps)
 Reference runs upstream _run_agent_loop, not the GA event adapter. ... ok
 
 ----------------------------------------------------------------------
-Ran 4 tests in 0.141s
+Ran 5 tests in 0.197s
 
 OK
+EXIT_CODE=0
+
+COMMAND: py -3.13 -m pytest -q tests/test_pma_upstream_ga_bridge.py tests/test_research_agent_loop.py
+WORKDIR: E:\longcontext-cqs-v0-20261005\GenericAgent-main
+....................                                                     [100%]
+20 passed in 2.50s
+EXIT_CODE=0
+
+COMMAND: E:\LongContext\bench_runtime\m4\harbor-env\Scripts\python.exe -c "from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.harbor_adapter import HarborGenericAgent, original, FORWARD; print(HarborGenericAgent.name()); print(all(x in original.FORWARDED_ENV_VARS for x in FORWARD))"
+PYTHONPATH: E:\longcontext-cqs-v0-20261005;E:\LongContext\long_context_bench
+generic-agent-harbor-pma-upstream
+True
 EXIT_CODE=0
 
 ========== DOCKER_FAILURES.txt ==========
@@ -304,596 +321,35 @@ ERROR: failed to build: failed to solve: failed to fetch oauth token: Post "http
 
 A failed registry authentication cannot establish that these images are unavailable remotely, only that this host could not acquire their bases in this attempt.
 
-========== episode.py ==========
-"""Pilot-only event adapter around the unmodified upstream PMA object.
-
-This module never starts Terminus2's actor loop.  Its actor backend is a
-deliberately unusable BaseLLM; only the upstream memory LiteLLM may infer.
-"""
-
-from __future__ import annotations
-
-import asyncio
-import hashlib
-import json
-from pathlib import Path
-from typing import Any
-
-from harbor.llms.base import BaseLLM, LLMResponse
-from memory_agent.memory_enabled_agent import MemoryEnabledTerminus2
-
-
-class DisabledActorLLM(BaseLLM):
-    calls = 0
-
-    async def call(self, prompt: str, **kwargs: Any) -> LLMResponse:
-        self.calls += 1
-        raise RuntimeError("Terminus2 actor is disabled; GA owns the task")
-
-    def get_model_context_limit(self) -> int:
-        return 200_000  # Inert metadata; the actor is never queried.
-
-    def get_model_output_limit(self) -> int | None:
-        return None
-
-
-def stable_initial_text(content: str | list[dict[str, Any]]) -> str:
-    """Preserve GA's actual pre-reminder user envelope deterministically."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return json.dumps(content, ensure_ascii=False, sort_keys=True,
-                          separators=(",", ":"))
-    raise TypeError("unsupported initial GA user content")
-
-
-def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
-                       memory_api_key: str | None = None) -> MemoryEnabledTerminus2:
-    actor = DisabledActorLLM()
-    agent = MemoryEnabledTerminus2(
-        logs_dir=logs_dir, model_name="disabled-actor-not-ga-task-model",
-        llm=actor, parser_name="xml", record_terminal_session=False,
-        memory_model_name="openrouter/anthropic/claude-opus-4.6",
-        memory_api_base=memory_api_base, memory_api_key=memory_api_key,
-        memory_temperature=0.3, memory_max_thinking_tokens=None,
-        memory_keep_thinking=False, memory_use_structured_tools=True,
-        trigger_interval=1, trigger_on_first_step=True,
-        sliding_window_size=8, reset_status_on_episode=True,
-        reset_knowledge_on_episode=False, reset_procedural_on_episode=False,
-        injection_method="user_turn",
-    )
-    if agent._llm is not actor:
-        raise RuntimeError("upstream actor backend was not disabled")
-    return agent
-
-
-class PMAEpisode:
-    """One task, one original object, one serial asyncio loop, no actor run."""
-
-    def __init__(self, agent: MemoryEnabledTerminus2, *, run_id: str,
-                 task_id: str, archive: Path):
-        self.agent = agent
-        self.run_id = run_id
-        self.task_id = task_id
-        self.archive = archive
-        self.archive.mkdir(parents=True, exist_ok=False)
-        self.started = False
-        self.ended = False
-        self.last_attempt = 0
-        self.last_completed_attempt = 0
-        self.last_sequence = 0
-        self._responses: dict[str, tuple[str, dict[str, Any]]] = {}
-        self._lock = asyncio.Lock()
-
-    def _record(self, event: dict[str, Any], result: dict[str, Any]) -> None:
-        line = json.dumps({"event": event, "result": result},
-                          ensure_ascii=False, sort_keys=True)
-        with (self.archive / "events.jsonl").open("a", encoding="utf-8") as stream:
-            stream.write(line + "\n")
-            stream.flush()
-
-    async def handle(self, event: dict[str, Any]) -> dict[str, Any]:
-        async with self._lock:
-            if not isinstance(event, dict):
-                raise ValueError("event must be an object")
-            if (event.get("run_id"), event.get("task_id")) != (self.run_id, self.task_id):
-                raise ValueError("event identity mismatch")
-            event_id = event.get("event_id")
-            sequence = event.get("sequence")
-            if not isinstance(event_id, str) or not event_id or type(sequence) is not int:
-                raise ValueError("event ID and integer sequence required")
-            digest = hashlib.sha256(json.dumps(event, sort_keys=True,
-                                               ensure_ascii=False).encode()).hexdigest()
-            if event_id in self._responses:
-                old_digest, old_result = self._responses[event_id]
-                if old_digest != digest:
-                    raise ValueError("event ID reused with different content")
-                return old_result
-            if sequence != self.last_sequence + 1:
-                raise ValueError("event sequence gap or replay with unknown receipt")
-            accepted_path = self.archive / "accepted.jsonl"
-            with accepted_path.open("a", encoding="utf-8") as stream:
-                stream.write(json.dumps({"event_id": event_id, "sequence": sequence,
-                                         "sha256": digest}, sort_keys=True) + "\n")
-                stream.flush()
-            kind = event.get("kind")
-            if kind == "task_start":
-                result = await self._task_start(event)
-            elif kind == "before_actor_call":
-                result = self._before_actor_call(event)
-            elif kind == "actor_step":
-                result = await self._actor_step(event)
-            elif kind == "task_end":
-                result = self._task_end(event)
-            else:
-                raise ValueError("unknown PMA event kind")
-            self._record(event, result)
-            self.last_sequence = sequence
-            self._responses[event_id] = (digest, result)
-            return result
-
-    async def _task_start(self, event: dict[str, Any]) -> dict[str, Any]:
-        if self.started or self.ended:
-            raise ValueError("task_start is only valid once")
-        raw = event.get("initial_user_content")
-        text = stable_initial_text(raw)
-        self.agent._memory_step_in_episode = 0
-        self.agent._trigger.reset()
-        self.agent._accumulated_observations.clear()
-        self.agent._pending_injection = None
-        self.agent._injection_used = False
-        self.agent._task_description = text
-        if self.agent._reset_status_on_episode:
-            self.agent._memory.update_status("")
-        if self.agent._reset_knowledge_on_episode:
-            self.agent._memory.knowledge.clear()
-        if self.agent._reset_procedural_on_episode:
-            self.agent._memory.procedural.clear()
-        self.agent._accumulate_step(step=1, observation=text)
-        triggered, reason = self.agent._trigger.should_trigger(step_count=1)
-        self.started = True
-        if triggered:
-            await self.agent._trigger_memory_agent(step_count=1)
-        return {"status": "started", "triggered": triggered, "trigger_reason": reason,
-                "initial_envelope_sha256": hashlib.sha256(
-                    json.dumps(raw, ensure_ascii=False, sort_keys=True).encode()).hexdigest()}
-
-    def _before_actor_call(self, event: dict[str, Any]) -> dict[str, Any]:
-        attempt = event.get("actor_attempt")
-        if not self.started or self.ended or type(attempt) is not int or attempt != self.last_attempt + 1:
-            raise ValueError("non-monotonic actor attempt")
-        self.agent._memory_step_in_episode = attempt
-        self.last_attempt = attempt
-        reminder = self.agent._get_memory_system_prompt()
-        return {"status": "reminder" if reminder else "silent", "reminder": reminder,
-                "actor_attempt": attempt, "delivery": "returned_not_confirmed_in_ga_request"}
-
-    async def _actor_step(self, event: dict[str, Any]) -> dict[str, Any]:
-        attempt = event.get("actor_attempt")
-        if (not self.started or self.ended or attempt != self.last_attempt
-                or attempt <= self.last_completed_attempt):
-            raise ValueError("actor step does not match active attempt")
-        status = event.get("step_status")
-        if status in {"parse_error", "provider_cancelled", "completed"}:
-            self.last_completed_attempt = attempt
-            return {"status": "skipped", "reason": status, "actor_attempt": attempt}
-        if status != "normal":
-            raise ValueError("unknown actor step status")
-        commands = event.get("commands", [])
-        if not isinstance(commands, list) or not all(isinstance(c, str) for c in commands):
-            raise ValueError("commands must be a list of original tool descriptions")
-        observation = event.get("observation")
-        if not isinstance(observation, str):
-            raise ValueError("complete public observation required")
-        step = attempt + 1
-        self.agent._accumulate_step(step=step, observation=observation,
-                                    analysis=event.get("analysis"),
-                                    plan=event.get("plan"), commands=commands)
-        triggered, reason = self.agent._trigger.should_trigger(step_count=step)
-        if triggered:
-            await self.agent._trigger_memory_agent(step_count=step)
-        self.last_completed_attempt = attempt
-        return {"status": "observed", "triggered": triggered,
-                "trigger_reason": reason, "step_count": step}
-
-    def _task_end(self, event: dict[str, Any]) -> dict[str, Any]:
-        if not self.started or self.ended:
-            raise ValueError("task_end out of order")
-        self.ended = True
-        self.agent.save_memory(str(self.archive / "memory.json"))
-        return {"status": "saved", "terminal": event.get("terminal"),
-                "actor_attempts": self.last_attempt,
-                "memory_stats": self.agent.get_memory_stats()}
-
-========== event_spool.py ==========
-"""Small single-run file transport; host bank and raw logs are never in spool.
-
-The caller supplies pre-created mount roots.  This module does not create a
-Docker container, select a host path for one, or retry an accepted event.
-"""
-
-from __future__ import annotations
-
-import json
-import os
-from pathlib import Path
-import tempfile
-import time
-import uuid
-
-from episode import PMAEpisode
-
-
-class SpoolError(RuntimeError):
-    pass
-
-
-def _atomic_json(path: Path, value: dict) -> None:
-    descriptor, pending = tempfile.mkstemp(prefix=".pending-", dir=path.parent)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            json.dump(value, stream, ensure_ascii=False, sort_keys=True)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(pending, path)
-    finally:
-        if os.path.exists(pending):
-            os.unlink(pending)
-
-
-class EventClient:
-    """GA-side request/receipt client; timeout means delivery is unknown."""
-
-    def __init__(self, request_dir: Path, response_dir: Path, run_id: str,
-                 task_id: str, *, deadline_monotonic: float):
-        self.requests = Path(request_dir).resolve(strict=True)
-        self.responses = Path(response_dir).resolve(strict=True)
-        self.run_id = run_id
-        self.task_id = task_id
-        self.deadline = deadline_monotonic
-        self.sequence = 0
-        if not self.requests.is_dir() or not self.responses.is_dir():
-            raise SpoolError("PMA event spool unavailable")
-
-    def exchange(self, kind: str, **fields):
-        if time.monotonic() >= self.deadline:
-            raise SpoolError("PMA event deadline expired before send")
-        self.sequence += 1
-        event_id = uuid.uuid4().hex
-        request = {"schema": "pma-ga-events-v1", "kind": kind,
-                   "run_id": self.run_id, "task_id": self.task_id,
-                   "sequence": self.sequence, "event_id": event_id, **fields}
-        target = self.requests / (event_id + ".json")
-        _atomic_json(target, request)
-        receipt = self.responses / target.name
-        while True:
-            if receipt.is_file():
-                try:
-                    value = json.loads(receipt.read_text(encoding="utf-8"))
-                except (OSError, ValueError) as exc:
-                    raise SpoolError("PMA receipt unreadable") from exc
-                if (value.get("run_id"), value.get("task_id"), value.get("event_id")) != (
-                        self.run_id, self.task_id, event_id):
-                    raise SpoolError("PMA receipt identity mismatch")
-                if value.get("status") != "ok":
-                    raise SpoolError("PMA host event failed; see host-private event log")
-                result = value.get("result")
-                if not isinstance(result, dict):
-                    raise SpoolError("PMA result is not an object")
-                return result
-            if time.monotonic() >= self.deadline:
-                raise SpoolError("PMA receipt unknown; accepted event will not be replayed")
-            time.sleep(0.02)
-
-
-class EventDispatcher:
-    """Trusted-host single-worker dispatcher with private PMA episode state."""
-
-    def __init__(self, episode: PMAEpisode, request_dir: Path, response_dir: Path):
-        self.episode = episode
-        self.requests = Path(request_dir).resolve(strict=True)
-        self.responses = Path(response_dir).resolve(strict=True)
-        self._processed = set()
-        if self.requests == self.responses or not self.requests.is_dir() or not self.responses.is_dir():
-            raise SpoolError("invalid host event spool")
-        shared_parent = self.requests.parent if self.requests.parent == self.responses.parent else None
-        if (self.episode.archive.is_relative_to(self.requests)
-                or self.episode.archive.is_relative_to(self.responses)
-                or (shared_parent is not None
-                    and self.episode.archive.is_relative_to(shared_parent))):
-            raise SpoolError("private PMA archive must not be inside shared spool")
-
-    async def serve_once(self) -> int:
-        count = 0
-        for path in sorted(self.requests.glob("*.json")):
-            if path.name in self._processed:
-                continue
-            if path.is_symlink() or not path.is_file():
-                raise SpoolError("event request path is not a regular file")
-            try:
-                request = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError) as exc:
-                raise SpoolError("event request unreadable") from exc
-            if (not isinstance(request, dict) or request.get("schema") != "pma-ga-events-v1"
-                    or path.stem != request.get("event_id")
-                    or (request.get("run_id"), request.get("task_id")) != (
-                        self.episode.run_id, self.episode.task_id)):
-                raise SpoolError("event identity mismatch")
-            try:
-                result = await self.episode.handle(request)
-                response = {"status": "ok", "result": result}
-            except Exception as exc:
-                # Do not expose the bank, prompts, raw errors or credentials to GA.
-                response = {"status": "error", "error_type": type(exc).__name__}
-            response.update(run_id=self.episode.run_id, task_id=self.episode.task_id,
-                            event_id=request["event_id"])
-            _atomic_json(self.responses / path.name, response)
-            self._processed.add(path.name)
-            count += 1
-        return count
-
-========== worker_main.py ==========
-"""Host-side one-task PMA worker; never installed inside the GA container."""
-
-from __future__ import annotations
-
-import argparse
-import asyncio
-import os
-from pathlib import Path
-import signal
-
-from episode import PMAEpisode, construct_upstream
-from event_spool import EventDispatcher
-
-
-async def serve(args: argparse.Namespace) -> None:
-    private = Path(args.private_root).resolve(strict=False)
-    requests = Path(args.requests).resolve(strict=True)
-    responses = Path(args.responses).resolve(strict=True)
-    shared_parent = requests.parent if requests.parent == responses.parent else None
-    if (private.exists() or private.is_relative_to(requests)
-            or private.is_relative_to(responses)
-            or (shared_parent is not None and private.is_relative_to(shared_parent))):
-        raise RuntimeError("PMA private root must be fresh and outside shared spool")
-    if requests == responses or requests.is_symlink() or responses.is_symlink():
-        raise RuntimeError("PMA spool identity invalid")
-    private.mkdir(parents=True)
-    agent = construct_upstream(private / "upstream_agent",
-                               memory_api_base=os.environ.get("PMA_MEMORY_API_BASE"),
-                               memory_api_key=os.environ.get("PMA_MEMORY_API_KEY"))
-    episode = PMAEpisode(agent, run_id=args.run_id, task_id=args.task_id,
-                         archive=private / "archive")
-    dispatcher = EventDispatcher(episode, requests, responses)
-    stopped = asyncio.Event()
-    for name in ("SIGTERM", "SIGINT"):
-        signum = getattr(signal, name, None)
-        if signum is not None:
-            try:
-                asyncio.get_running_loop().add_signal_handler(signum, stopped.set)
-            except (NotImplementedError, RuntimeError):
-                pass
-    while not stopped.is_set() and not episode.ended:
-        await dispatcher.serve_once()
-        await asyncio.sleep(0.05)
-    # A fault or cancellation must not masquerade as normal task_end.
-    if not episode.ended:
-        (private / "worker_stopped_without_task_end").touch()
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--run-id", required=True)
-    parser.add_argument("--task-id", required=True)
-    parser.add_argument("--private-root", required=True)
-    parser.add_argument("--requests", required=True)
-    parser.add_argument("--responses", required=True)
-    asyncio.run(serve(parser.parse_args()))
-
-
-if __name__ == "__main__":
-    main()
-
-========== test_episode.py ==========
-"""Offline tests: real upstream object and MemoryAgent, scripted LiteLLM I/O."""
-
-import asyncio
-import json
-import os
-from pathlib import Path
-from tempfile import TemporaryDirectory
-import time
-import unittest
-from types import SimpleNamespace
-
-# Offline tests must not let LiteLLM fetch its optional price metadata.
-os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
-
-from harbor.llms.base import LLMResponse
-from memory_agent.utils.visualize import visualize_memory, visualize_memory_trajectory
-
-from episode import DisabledActorLLM, PMAEpisode, construct_upstream
-from event_spool import EventClient, EventDispatcher
-
-
-class EpisodeTests(unittest.TestCase):
-    def test_original_lifecycle_and_duplicate_suppression(self):
-        with TemporaryDirectory() as directory:
-            root = Path(directory)
-            agent = construct_upstream(root / "agent")
-            calls = []
-
-            async def fake_memory_call(*, prompt, system, tools=None):
-                calls.append({"prompt": prompt, "system": system,
-                              "tools": bool(tools)})
-                if tools:
-                    return LLMResponse(content="", tool_calls=[])
-                if len(calls) == 2:
-                    return LLMResponse(content="<context_for_action>Remember X</context_for_action>")
-                return LLMResponse(content="<no_intervention/>")
-
-            agent._memory_llm.call = fake_memory_call
-            episode = PMAEpisode(agent, run_id="r", task_id="t", archive=root / "private")
-
-            def event(kind, sequence, **fields):
-                return {"kind": kind, "sequence": sequence,
-                        "event_id": f"e{sequence}", "run_id": "r", "task_id": "t", **fields}
-
-            async def run():
-                start = event("task_start", 1, initial_user_content="Original public GA input")
-                self.assertTrue((await episode.handle(start))["triggered"])
-                self.assertEqual(await episode.handle(start), await episode.handle(start))
-                before = await episode.handle(event("before_actor_call", 2, actor_attempt=1))
-                self.assertIn("Remember X", before["reminder"])
-                self.assertEqual(before["delivery"], "returned_not_confirmed_in_ga_request")
-                observed = await episode.handle(event(
-                    "actor_step", 3, actor_attempt=1, step_status="normal",
-                    commands=["tool A", "tool B"], observation="two public results"))
-                self.assertEqual(observed["step_count"], 2)
-                self.assertEqual((await episode.handle(event(
-                    "before_actor_call", 4, actor_attempt=2)))["status"], "silent")
-                skipped = await episode.handle(event(
-                    "actor_step", 5, actor_attempt=2, step_status="parse_error"))
-                self.assertEqual(skipped["status"], "skipped")
-                self.assertEqual((await episode.handle(event(
-                    "before_actor_call", 6, actor_attempt=3)))["actor_attempt"], 3)
-                await episode.handle(event("actor_step", 7, actor_attempt=3,
-                                           step_status="completed"))
-                self.assertEqual((await episode.handle(event(
-                    "task_end", 8, terminal="CURRENT_TASK_DONE")))["status"], "saved")
-
-            asyncio.run(run())
-            self.assertEqual(len(calls), 4)  # Two real PMA phases at each trigger.
-            self.assertEqual([x["tools"] for x in calls], [True, False, True, False])
-            self.assertEqual(agent._accumulated_observations[1]["commands"], ["tool A", "tool B"])
-            self.assertEqual(agent._accumulated_observations[1]["step"], 2)
-            self.assertIn("two public results", calls[2]["prompt"])
-            self.assertEqual(agent._llm.calls, 0)
-            self.assertIsInstance(agent._llm, DisabledActorLLM)
-            self.assertTrue((root / "private" / "memory.json").is_file())
-            self.assertTrue((root / "private" / "trajectory_memory.json").is_file())
-            self.assertIsNotNone(visualize_memory(root / "private" / "memory.json"))
-            self.assertIsNotNone(visualize_memory_trajectory(
-                root / "private" / "trajectory_memory.json"))
-
-    def test_actor_never_usable(self):
-        with TemporaryDirectory() as directory:
-            agent = construct_upstream(Path(directory))
-            with self.assertRaisesRegex(RuntimeError, "actor is disabled"):
-                asyncio.run(agent._llm.call("must fail"))
-
-    def test_file_event_bridge_keeps_private_bank_outside_shared_spool(self):
-        with TemporaryDirectory() as directory:
-            root = Path(directory)
-            requests, responses = root / "shared" / "requests", root / "shared" / "responses"
-            requests.mkdir(parents=True)
-            responses.mkdir()
-            agent = construct_upstream(root / "agent")
-            calls = []
-
-            async def fake_memory_call(*, prompt, system, tools=None):
-                calls.append(bool(tools))
-                return LLMResponse(content="<no_intervention/>", tool_calls=[])
-
-            agent._memory_llm.call = fake_memory_call
-            episode = PMAEpisode(agent, run_id="r", task_id="t", archive=root / "host_private")
-            dispatcher = EventDispatcher(episode, requests, responses)
-            client = EventClient(requests, responses, "r", "t",
-                                 deadline_monotonic=time.monotonic() + 5)
-
-            async def run():
-                pending = asyncio.create_task(asyncio.to_thread(
-                    client.exchange, "task_start", initial_user_content="GA public input"))
-                while not pending.done():
-                    await dispatcher.serve_once()
-                    await asyncio.sleep(.01)
-                self.assertEqual((await pending)["status"], "started")
-                self.assertEqual(await dispatcher.serve_once(), 0)
-
-            asyncio.run(run())
-            self.assertEqual(calls, [True, False])
-            self.assertFalse((root / "shared" / "host_private").exists())
-            self.assertFalse(any("memory" in p.name for p in requests.iterdir()))
-            receipt = json.loads(next(responses.iterdir()).read_text(encoding="utf-8"))
-            self.assertEqual(receipt["status"], "ok")
-            self.assertNotIn("memory_stats", receipt["result"])
-
-    def test_unmodified_upstream_actor_loop_reference_first_two_steps(self):
-        """Reference runs upstream _run_agent_loop, not the GA event adapter."""
-        with TemporaryDirectory() as directory:
-            root = Path(directory)
-            agent = construct_upstream(root / "reference")
-            memory_requests = []
-
-            async def fake_memory_call(*, prompt, system, tools=None):
-                memory_requests.append((bool(tools), prompt))
-                if tools:
-                    return LLMResponse(content="", tool_calls=[])
-                if len(memory_requests) == 2:
-                    return LLMResponse(content="<context_for_action>Remember X</context_for_action>")
-                return LLMResponse(content="<no_intervention/>")
-
-            agent._memory_llm.call = fake_memory_call
-            agent._context = SimpleNamespace()
-            agent._max_episodes = 2
-            agent._enable_summarize = False
-            agent._session = SimpleNamespace(is_session_alive=lambda: asyncio.sleep(0, result=True))
-            agent._setup_episode_logging = lambda *a: None
-            agent._record_asciinema_marker = lambda *a: None
-            agent._record_step_full = lambda *a, **k: None
-            agent._record_step = lambda *a, **k: None
-            agent._dump_trajectory = lambda: None
-            seen_actor_prompts = []
-
-            class FakeChat:
-                total_input_tokens = 0
-                total_output_tokens = 0
-                total_cache_tokens = 0
-                total_cost = 0
-
-                async def chat(self, prompt, logging_path=None, **kwargs):
-                    seen_actor_prompts.append(prompt)
-                    return LLMResponse(content="actor")
-
-            actor_calls = 0
-
-            async def fake_actor_interaction(chat, prompt, *args):
-                nonlocal actor_calls
-                await chat.chat(prompt)
-                actor_calls += 1
-                if actor_calls == 1:
-                    return (["tool A", "tool B"], False, "", None, None,
-                            LLMResponse(content="actor"))
-                return ([], False, "ERROR: parse", None, None,
-                        LLMResponse(content="bad actor format"))
-
-            agent._handle_llm_interaction = fake_actor_interaction
-            agent._execute_commands = lambda commands, session: asyncio.sleep(
-                0, result=(False, "two public results"))
-            asyncio.run(agent._run_agent_loop("Original public GA input", FakeChat()))
-            self.assertEqual(actor_calls, 2)
-            self.assertIn("Remember X", seen_actor_prompts[0])
-            self.assertEqual(seen_actor_prompts[1], "two public results")
-            self.assertEqual([entry["step"] for entry in agent._accumulated_observations],
-                             [1, 2])
-            self.assertEqual(agent._accumulated_observations[1]["commands"],
-                             ["tool A", "tool B"])
-            self.assertEqual(len(memory_requests), 4)
-            self.assertEqual(agent._llm.calls, 0)
-
-
-if __name__ == "__main__":
-    unittest.main()
-
 ========== FILE_HASHES.json ==========
 {
   "algorithm": "SHA-256",
-  "note": "Each listed file is hashed independently. AUDIT_PACKET.txt and this file are intentionally excluded to avoid self-reference; their final hashes are reported at handoff.",
+  "note": "Working-tree byte SHA-256 and size; committed upstream Git blob equality was verified separately. AUDIT_PACKET.txt and this file are excluded to avoid self-reference.",
   "files": [
     {
+      "path": "GenericAgent-main/agent_loop.py",
+      "sha256": "b9cf70b3b676dbe7cd8a696144de4dff3897bd186826e80394d56a434f1704c2",
+      "bytes": 18150
+    },
+    {
+      "path": "GenericAgent-main/agentmain.py",
+      "sha256": "5da49b3be5da54dfa6021edcaecda634345c5e4cbb7c1a30e0e0ce0721da783c",
+      "bytes": 37848
+    },
+    {
+      "path": "GenericAgent-main/pma_upstream_bridge.py",
+      "sha256": "8490d4c13d4ef4c041b3dd598617192ee1ec78b86ea5fa2c02c693fd2b17a00b",
+      "bytes": 4718
+    },
+    {
+      "path": "GenericAgent-main/tests/test_pma_upstream_ga_bridge.py",
+      "sha256": "aa056158f7fb2a70a29b6911d8845a8a9c3a595a0e1996219f140e8657b04f75",
+      "bytes": 3953
+    },
+    {
       "path": "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/ADAPTATION_TABLE.md",
-      "sha256": "579cc382df5ee5420fca1cbacd2df41aef4b5a54002b6c51ffcee4cbeef5a436",
-      "bytes": 2195
+      "sha256": "4d95f52e9bb55b9ac5bd50a0c5bded9bf1a7bbd56550f81c89ac3487d51826d0",
+      "bytes": 2544
     },
     {
       "path": "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/assets/public/db-wal-recovery/environment/Dockerfile",
@@ -942,8 +398,8 @@ if __name__ == "__main__":
     },
     {
       "path": "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/episode.py",
-      "sha256": "603ea9096c08d0d2c0999bc49d5afede1b8f012b2c74353ab7f15783ad89505f",
-      "bytes": 9482
+      "sha256": "662492725d652442cd7f2e7e4fac32c0dc7609e46cce755376a5ecdd20c8a299",
+      "bytes": 9419
     },
     {
       "path": "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/event_spool.py",
@@ -952,13 +408,18 @@ if __name__ == "__main__":
     },
     {
       "path": "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/FOUR_RUN_MANIFEST_DRAFT.json",
-      "sha256": "3e2f6c72fe318cdfdf285ad720c2320da68866beb51c748a3a46cc98e39141e5",
-      "bytes": 3568
+      "sha256": "2b4d1792d9164c6f47bebfe0ff260d17a6bab4c7d9a0aad61ba38e452af3b4df",
+      "bytes": 3762
+    },
+    {
+      "path": "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/harbor_adapter.py",
+      "sha256": "3bc87489e8b77ea91f84feb25db9e77d5e14226b18c6d8558f85583e6c2105dd",
+      "bytes": 1191
     },
     {
       "path": "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/REPORT.md",
-      "sha256": "92091b85e04f1d808eab4a34c14d876c5853c4004a971c121616848f9edd1ba6",
-      "bytes": 8493
+      "sha256": "e9b4fef0c37d10492eabd36c3459147ef76d38da67a4eeed29fd4f3284b7dfd2",
+      "bytes": 10044
     },
     {
       "path": "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/RESOLVED_DEPENDENCIES.txt",
@@ -972,13 +433,13 @@ if __name__ == "__main__":
     },
     {
       "path": "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_episode.py",
-      "sha256": "1892187e8a38d3ac3ed3e33e833a095b5a5f97b90fb8c7bf8d78ba0d218a1102",
-      "bytes": 9527
+      "sha256": "5720a14de63d6d260f4b53663738364bb8be150c98b7f394726abbc68a39959c",
+      "bytes": 11333
     },
     {
       "path": "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/TEST_RESULTS.txt",
-      "sha256": "9363434b4e3507713d5c18802d5cee014c107d58c77e0a06144a22b1852e3165",
-      "bytes": 981
+      "sha256": "7ef99ee5558931ddeb72c9d277c95f71d4a8f8add700981bc04b1e5f79d81787",
+      "bytes": 1843
     },
     {
       "path": "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/vendor/pma_89e5c0d/.gitignore",
@@ -2053,3 +1514,975 @@ if __name__ == "__main__":
   ]
 }
 
+========== episode.py ==========
+"""Pilot-only event adapter around the unmodified upstream PMA object.
+
+This module never starts Terminus2's actor loop.  Its actor backend is a
+deliberately unusable BaseLLM; only the upstream memory LiteLLM may infer.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+from pathlib import Path
+from typing import Any
+
+from harbor.llms.base import BaseLLM, LLMResponse
+from memory_agent.memory_enabled_agent import MemoryEnabledTerminus2
+
+
+class DisabledActorLLM(BaseLLM):
+    calls = 0
+
+    async def call(self, prompt: str, **kwargs: Any) -> LLMResponse:
+        self.calls += 1
+        raise RuntimeError("Terminus2 actor is disabled; GA owns the task")
+
+    def get_model_context_limit(self) -> int:
+        return 200_000  # Inert metadata; the actor is never queried.
+
+    def get_model_output_limit(self) -> int | None:
+        return None
+
+
+def stable_initial_text(content: str | list[dict[str, Any]]) -> str:
+    """Preserve GA's actual pre-reminder user envelope deterministically."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return json.dumps(content, ensure_ascii=False, sort_keys=True,
+                          separators=(",", ":"))
+    raise TypeError("unsupported initial GA user content")
+
+
+def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
+                       memory_api_key: str | None = None) -> MemoryEnabledTerminus2:
+    actor = DisabledActorLLM()
+    agent = MemoryEnabledTerminus2(
+        logs_dir=logs_dir, model_name="disabled-actor-not-ga-task-model",
+        llm=actor, parser_name="xml", record_terminal_session=False,
+        memory_model_name="openrouter/anthropic/claude-opus-4.6",
+        memory_api_base=memory_api_base, memory_api_key=memory_api_key,
+        memory_temperature=0.3, memory_max_thinking_tokens=None,
+        memory_keep_thinking=False, memory_use_structured_tools=True,
+        trigger_interval=1, trigger_on_first_step=True,
+        sliding_window_size=8, reset_status_on_episode=True,
+        reset_knowledge_on_episode=False, reset_procedural_on_episode=False,
+        injection_method="user_turn",
+    )
+    if agent._llm is not actor:
+        raise RuntimeError("upstream actor backend was not disabled")
+    return agent
+
+
+class PMAEpisode:
+    """One task, one original object, one serial asyncio loop, no actor run."""
+
+    def __init__(self, agent: MemoryEnabledTerminus2, *, run_id: str,
+                 task_id: str, archive: Path):
+        self.agent = agent
+        self.run_id = run_id
+        self.task_id = task_id
+        self.archive = archive
+        self.archive.mkdir(parents=True, exist_ok=False)
+        self.started = False
+        self.ended = False
+        self.last_attempt = 0
+        self.last_completed_attempt = 0
+        self.last_sequence = 0
+        self._responses: dict[str, tuple[str, dict[str, Any]]] = {}
+        self._lock = asyncio.Lock()
+
+    def _record(self, event: dict[str, Any], result: dict[str, Any]) -> None:
+        line = json.dumps({"event": event, "result": result},
+                          ensure_ascii=False, sort_keys=True)
+        with (self.archive / "events.jsonl").open("a", encoding="utf-8") as stream:
+            stream.write(line + "\n")
+            stream.flush()
+
+    async def handle(self, event: dict[str, Any]) -> dict[str, Any]:
+        async with self._lock:
+            if not isinstance(event, dict):
+                raise ValueError("event must be an object")
+            if (event.get("run_id"), event.get("task_id")) != (self.run_id, self.task_id):
+                raise ValueError("event identity mismatch")
+            event_id = event.get("event_id")
+            sequence = event.get("sequence")
+            if not isinstance(event_id, str) or not event_id or type(sequence) is not int:
+                raise ValueError("event ID and integer sequence required")
+            digest = hashlib.sha256(json.dumps(event, sort_keys=True,
+                                               ensure_ascii=False).encode()).hexdigest()
+            if event_id in self._responses:
+                old_digest, old_result = self._responses[event_id]
+                if old_digest != digest:
+                    raise ValueError("event ID reused with different content")
+                return old_result
+            if sequence != self.last_sequence + 1:
+                raise ValueError("event sequence gap or replay with unknown receipt")
+            accepted_path = self.archive / "accepted.jsonl"
+            with accepted_path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({"event_id": event_id, "sequence": sequence,
+                                         "sha256": digest}, sort_keys=True) + "\n")
+                stream.flush()
+            kind = event.get("kind")
+            if kind == "task_start":
+                result = await self._task_start(event)
+            elif kind == "before_actor_call":
+                result = self._before_actor_call(event)
+            elif kind == "actor_step":
+                result = await self._actor_step(event)
+            elif kind == "task_end":
+                result = self._task_end(event)
+            else:
+                raise ValueError("unknown PMA event kind")
+            self._record(event, result)
+            self.last_sequence = sequence
+            self._responses[event_id] = (digest, result)
+            return result
+
+    async def _task_start(self, event: dict[str, Any]) -> dict[str, Any]:
+        if self.started or self.ended:
+            raise ValueError("task_start is only valid once")
+        raw = event.get("initial_user_content")
+        text = stable_initial_text(raw)
+        self.agent._memory_step_in_episode = 0
+        self.agent._trigger.reset()
+        self.agent._accumulated_observations.clear()
+        self.agent._pending_injection = None
+        self.agent._injection_used = False
+        self.agent._task_description = text
+        if self.agent._reset_status_on_episode:
+            self.agent._memory.update_status("")
+        if self.agent._reset_knowledge_on_episode:
+            self.agent._memory.knowledge.clear()
+        if self.agent._reset_procedural_on_episode:
+            self.agent._memory.procedural.clear()
+        self.agent._accumulate_step(step=1, observation=text)
+        triggered, reason = self.agent._trigger.should_trigger(step_count=1)
+        self.started = True
+        if triggered:
+            await self.agent._trigger_memory_agent(step_count=1)
+        return {"status": "started", "triggered": triggered, "trigger_reason": reason,
+                "initial_envelope_sha256": hashlib.sha256(
+                    json.dumps(raw, ensure_ascii=False, sort_keys=True).encode()).hexdigest()}
+
+    def _before_actor_call(self, event: dict[str, Any]) -> dict[str, Any]:
+        attempt = event.get("actor_attempt")
+        if not self.started or self.ended or type(attempt) is not int or attempt != self.last_attempt + 1:
+            raise ValueError("non-monotonic actor attempt")
+        self.agent._memory_step_in_episode = attempt
+        self.last_attempt = attempt
+        reminder = self.agent._get_memory_system_prompt()
+        return {"status": "reminder" if reminder else "silent", "reminder": reminder,
+                "actor_attempt": attempt, "delivery": "returned_not_confirmed_in_ga_request"}
+
+    async def _actor_step(self, event: dict[str, Any]) -> dict[str, Any]:
+        attempt = event.get("actor_attempt")
+        if (not self.started or self.ended or attempt != self.last_attempt
+                or attempt <= self.last_completed_attempt):
+            raise ValueError("actor step does not match active attempt")
+        status = event.get("step_status")
+        if status in {"parse_error", "provider_cancelled", "completed"}:
+            self.last_completed_attempt = attempt
+            return {"status": "skipped", "reason": status, "actor_attempt": attempt}
+        if status != "normal":
+            raise ValueError("unknown actor step status")
+        commands = event.get("commands", [])
+        if not isinstance(commands, list) or not all(isinstance(c, str) for c in commands):
+            raise ValueError("commands must be a list of original tool descriptions")
+        observation = event.get("observation")
+        if not isinstance(observation, str):
+            raise ValueError("complete public observation required")
+        step = attempt + 1
+        self.agent._accumulate_step(step=step, observation=observation,
+                                    analysis=event.get("analysis"),
+                                    plan=event.get("plan"), commands=commands)
+        triggered, reason = self.agent._trigger.should_trigger(step_count=step)
+        if triggered:
+            await self.agent._trigger_memory_agent(step_count=step)
+        self.last_completed_attempt = attempt
+        return {"status": "observed", "triggered": triggered,
+                "trigger_reason": reason, "step_count": step}
+
+    def _task_end(self, event: dict[str, Any]) -> dict[str, Any]:
+        if not self.started or self.ended:
+            raise ValueError("task_end out of order")
+        self.ended = True
+        self.agent.save_memory(str(self.archive / "memory.json"))
+        return {"status": "saved", "terminal": event.get("terminal"),
+                "actor_attempts": self.last_attempt}
+
+========== event_spool.py ==========
+"""Small single-run file transport; host bank and raw logs are never in spool.
+
+The caller supplies pre-created mount roots.  This module does not create a
+Docker container, select a host path for one, or retry an accepted event.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import tempfile
+import time
+import uuid
+
+from episode import PMAEpisode
+
+
+class SpoolError(RuntimeError):
+    pass
+
+
+def _atomic_json(path: Path, value: dict) -> None:
+    descriptor, pending = tempfile.mkstemp(prefix=".pending-", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(value, stream, ensure_ascii=False, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(pending, path)
+    finally:
+        if os.path.exists(pending):
+            os.unlink(pending)
+
+
+class EventClient:
+    """GA-side request/receipt client; timeout means delivery is unknown."""
+
+    def __init__(self, request_dir: Path, response_dir: Path, run_id: str,
+                 task_id: str, *, deadline_monotonic: float):
+        self.requests = Path(request_dir).resolve(strict=True)
+        self.responses = Path(response_dir).resolve(strict=True)
+        self.run_id = run_id
+        self.task_id = task_id
+        self.deadline = deadline_monotonic
+        self.sequence = 0
+        if not self.requests.is_dir() or not self.responses.is_dir():
+            raise SpoolError("PMA event spool unavailable")
+
+    def exchange(self, kind: str, **fields):
+        if time.monotonic() >= self.deadline:
+            raise SpoolError("PMA event deadline expired before send")
+        self.sequence += 1
+        event_id = uuid.uuid4().hex
+        request = {"schema": "pma-ga-events-v1", "kind": kind,
+                   "run_id": self.run_id, "task_id": self.task_id,
+                   "sequence": self.sequence, "event_id": event_id, **fields}
+        target = self.requests / (event_id + ".json")
+        _atomic_json(target, request)
+        receipt = self.responses / target.name
+        while True:
+            if receipt.is_file():
+                try:
+                    value = json.loads(receipt.read_text(encoding="utf-8"))
+                except (OSError, ValueError) as exc:
+                    raise SpoolError("PMA receipt unreadable") from exc
+                if (value.get("run_id"), value.get("task_id"), value.get("event_id")) != (
+                        self.run_id, self.task_id, event_id):
+                    raise SpoolError("PMA receipt identity mismatch")
+                if value.get("status") != "ok":
+                    raise SpoolError("PMA host event failed; see host-private event log")
+                result = value.get("result")
+                if not isinstance(result, dict):
+                    raise SpoolError("PMA result is not an object")
+                return result
+            if time.monotonic() >= self.deadline:
+                raise SpoolError("PMA receipt unknown; accepted event will not be replayed")
+            time.sleep(0.02)
+
+
+class EventDispatcher:
+    """Trusted-host single-worker dispatcher with private PMA episode state."""
+
+    def __init__(self, episode: PMAEpisode, request_dir: Path, response_dir: Path):
+        self.episode = episode
+        self.requests = Path(request_dir).resolve(strict=True)
+        self.responses = Path(response_dir).resolve(strict=True)
+        self._processed = set()
+        if self.requests == self.responses or not self.requests.is_dir() or not self.responses.is_dir():
+            raise SpoolError("invalid host event spool")
+        shared_parent = self.requests.parent if self.requests.parent == self.responses.parent else None
+        if (self.episode.archive.is_relative_to(self.requests)
+                or self.episode.archive.is_relative_to(self.responses)
+                or (shared_parent is not None
+                    and self.episode.archive.is_relative_to(shared_parent))):
+            raise SpoolError("private PMA archive must not be inside shared spool")
+
+    async def serve_once(self) -> int:
+        count = 0
+        for path in sorted(self.requests.glob("*.json")):
+            if path.name in self._processed:
+                continue
+            if path.is_symlink() or not path.is_file():
+                raise SpoolError("event request path is not a regular file")
+            try:
+                request = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise SpoolError("event request unreadable") from exc
+            if (not isinstance(request, dict) or request.get("schema") != "pma-ga-events-v1"
+                    or path.stem != request.get("event_id")
+                    or (request.get("run_id"), request.get("task_id")) != (
+                        self.episode.run_id, self.episode.task_id)):
+                raise SpoolError("event identity mismatch")
+            try:
+                result = await self.episode.handle(request)
+                response = {"status": "ok", "result": result}
+            except Exception as exc:
+                # Do not expose the bank, prompts, raw errors or credentials to GA.
+                response = {"status": "error", "error_type": type(exc).__name__}
+            response.update(run_id=self.episode.run_id, task_id=self.episode.task_id,
+                            event_id=request["event_id"])
+            _atomic_json(self.responses / path.name, response)
+            self._processed.add(path.name)
+            count += 1
+        return count
+
+========== worker_main.py ==========
+"""Host-side one-task PMA worker; never installed inside the GA container."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import os
+from pathlib import Path
+import signal
+
+from episode import PMAEpisode, construct_upstream
+from event_spool import EventDispatcher
+
+
+async def serve(args: argparse.Namespace) -> None:
+    private = Path(args.private_root).resolve(strict=False)
+    requests = Path(args.requests).resolve(strict=True)
+    responses = Path(args.responses).resolve(strict=True)
+    shared_parent = requests.parent if requests.parent == responses.parent else None
+    if (private.exists() or private.is_relative_to(requests)
+            or private.is_relative_to(responses)
+            or (shared_parent is not None and private.is_relative_to(shared_parent))):
+        raise RuntimeError("PMA private root must be fresh and outside shared spool")
+    if requests == responses or requests.is_symlink() or responses.is_symlink():
+        raise RuntimeError("PMA spool identity invalid")
+    private.mkdir(parents=True)
+    agent = construct_upstream(private / "upstream_agent",
+                               memory_api_base=os.environ.get("PMA_MEMORY_API_BASE"),
+                               memory_api_key=os.environ.get("PMA_MEMORY_API_KEY"))
+    episode = PMAEpisode(agent, run_id=args.run_id, task_id=args.task_id,
+                         archive=private / "archive")
+    dispatcher = EventDispatcher(episode, requests, responses)
+    stopped = asyncio.Event()
+    for name in ("SIGTERM", "SIGINT"):
+        signum = getattr(signal, name, None)
+        if signum is not None:
+            try:
+                asyncio.get_running_loop().add_signal_handler(signum, stopped.set)
+            except (NotImplementedError, RuntimeError):
+                pass
+    while not stopped.is_set() and not episode.ended:
+        await dispatcher.serve_once()
+        await asyncio.sleep(0.05)
+    # A fault or cancellation must not masquerade as normal task_end.
+    if not episode.ended:
+        (private / "worker_stopped_without_task_end").touch()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--task-id", required=True)
+    parser.add_argument("--private-root", required=True)
+    parser.add_argument("--requests", required=True)
+    parser.add_argument("--responses", required=True)
+    asyncio.run(serve(parser.parse_args()))
+
+
+if __name__ == "__main__":
+    main()
+
+========== harbor_adapter.py ==========
+"""Pilot-only forwarding overlay for a byte-pinned existing Harbor GA adapter.
+
+Loaded only by an explicitly selected research --agent path.  The ordinary
+adapter, A condition and other experiments do not import this module.
+"""
+
+import hashlib
+from pathlib import Path
+
+from adapters import harbor_ga_agent as original
+
+
+EXPECTED_ADAPTER_SHA256 = "8a4513c6b28befe747d581d22e94cd2715f20234c63115e0ea424a56d033c3a0"
+FORWARD = (
+    "GA_PMA_UPSTREAM_ENABLED",
+    "GA_PMA_UPSTREAM_REQUESTS",
+    "GA_PMA_UPSTREAM_RESPONSES",
+    "GA_PMA_UPSTREAM_DEADLINE_EPOCH",
+)
+
+actual = hashlib.sha256(Path(original.__file__).read_bytes()).hexdigest()
+if actual != EXPECTED_ADAPTER_SHA256:
+    raise RuntimeError("PMA Harbor base adapter byte identity mismatch")
+if any(name in original.FORWARDED_ENV_VARS for name in FORWARD):
+    raise RuntimeError("PMA Harbor forwarding unexpectedly already present")
+original.FORWARDED_ENV_VARS = original.FORWARDED_ENV_VARS + FORWARD
+
+
+class HarborGenericAgent(original.HarborGenericAgent):
+    """Same original run/setup implementation, with only four extra env names."""
+
+    @staticmethod
+    def name() -> str:
+        return "generic-agent-harbor-pma-upstream"
+
+========== test_episode.py ==========
+"""Offline tests: real upstream object and MemoryAgent, scripted LiteLLM I/O."""
+
+import asyncio
+import json
+import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import time
+import unittest
+from types import SimpleNamespace
+import sys
+
+# Offline tests must not let LiteLLM fetch its optional price metadata.
+os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "GenericAgent-main"))
+
+from harbor.llms.base import LLMResponse
+from memory_agent.utils.visualize import visualize_memory, visualize_memory_trajectory
+
+from episode import DisabledActorLLM, PMAEpisode, construct_upstream
+from event_spool import EventClient, EventDispatcher
+from pma_upstream_bridge import UpstreamPMAClient
+
+
+class EpisodeTests(unittest.TestCase):
+    def test_original_lifecycle_and_duplicate_suppression(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            agent = construct_upstream(root / "agent")
+            self.assertEqual(agent._memory_llm._model_name,
+                             "openrouter/anthropic/claude-opus-4.6")
+            self.assertEqual(agent._memory_llm._temperature, 0.3)
+            self.assertTrue(agent._memory_agent.use_structured_tools)
+            calls = []
+
+            async def fake_memory_call(*, prompt, system, tools=None):
+                calls.append({"prompt": prompt, "system": system,
+                              "tools": bool(tools)})
+                if tools:
+                    return LLMResponse(content="", tool_calls=[])
+                if len(calls) == 2:
+                    return LLMResponse(content="<context_for_action>Remember X</context_for_action>")
+                return LLMResponse(content="<no_intervention/>")
+
+            agent._memory_llm.call = fake_memory_call
+            episode = PMAEpisode(agent, run_id="r", task_id="t", archive=root / "private")
+
+            def event(kind, sequence, **fields):
+                return {"kind": kind, "sequence": sequence,
+                        "event_id": f"e{sequence}", "run_id": "r", "task_id": "t", **fields}
+
+            async def run():
+                start = event("task_start", 1, initial_user_content="Original public GA input")
+                self.assertTrue((await episode.handle(start))["triggered"])
+                self.assertEqual(await episode.handle(start), await episode.handle(start))
+                before = await episode.handle(event("before_actor_call", 2, actor_attempt=1))
+                self.assertIn("Remember X", before["reminder"])
+                self.assertEqual(before["delivery"], "returned_not_confirmed_in_ga_request")
+                observed = await episode.handle(event(
+                    "actor_step", 3, actor_attempt=1, step_status="normal",
+                    commands=["tool A", "tool B"], observation="two public results"))
+                self.assertEqual(observed["step_count"], 2)
+                self.assertEqual((await episode.handle(event(
+                    "before_actor_call", 4, actor_attempt=2)))["status"], "silent")
+                skipped = await episode.handle(event(
+                    "actor_step", 5, actor_attempt=2, step_status="parse_error"))
+                self.assertEqual(skipped["status"], "skipped")
+                self.assertEqual((await episode.handle(event(
+                    "before_actor_call", 6, actor_attempt=3)))["actor_attempt"], 3)
+                await episode.handle(event("actor_step", 7, actor_attempt=3,
+                                           step_status="completed"))
+                self.assertEqual((await episode.handle(event(
+                    "task_end", 8, terminal="CURRENT_TASK_DONE")))["status"], "saved")
+
+            asyncio.run(run())
+            self.assertEqual(len(calls), 4)  # Two real PMA phases at each trigger.
+            self.assertEqual([x["tools"] for x in calls], [True, False, True, False])
+            self.assertEqual(agent._accumulated_observations[1]["commands"], ["tool A", "tool B"])
+            self.assertEqual(agent._accumulated_observations[1]["step"], 2)
+            self.assertIn("two public results", calls[2]["prompt"])
+            self.assertEqual(agent._llm.calls, 0)
+            self.assertIsInstance(agent._llm, DisabledActorLLM)
+            self.assertTrue((root / "private" / "memory.json").is_file())
+            self.assertTrue((root / "private" / "trajectory_memory.json").is_file())
+            self.assertIsNotNone(visualize_memory(root / "private" / "memory.json"))
+            self.assertIsNotNone(visualize_memory_trajectory(
+                root / "private" / "trajectory_memory.json"))
+
+    def test_actor_never_usable(self):
+        with TemporaryDirectory() as directory:
+            agent = construct_upstream(Path(directory))
+            with self.assertRaisesRegex(RuntimeError, "actor is disabled"):
+                asyncio.run(agent._llm.call("must fail"))
+
+    def test_file_event_bridge_keeps_private_bank_outside_shared_spool(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            requests, responses = root / "shared" / "requests", root / "shared" / "responses"
+            requests.mkdir(parents=True)
+            responses.mkdir()
+            agent = construct_upstream(root / "agent")
+            calls = []
+
+            async def fake_memory_call(*, prompt, system, tools=None):
+                calls.append(bool(tools))
+                return LLMResponse(content="<no_intervention/>", tool_calls=[])
+
+            agent._memory_llm.call = fake_memory_call
+            episode = PMAEpisode(agent, run_id="r", task_id="t", archive=root / "host_private")
+            dispatcher = EventDispatcher(episode, requests, responses)
+            client = EventClient(requests, responses, "r", "t",
+                                 deadline_monotonic=time.monotonic() + 5)
+
+            async def run():
+                pending = asyncio.create_task(asyncio.to_thread(
+                    client.exchange, "task_start", initial_user_content="GA public input"))
+                while not pending.done():
+                    await dispatcher.serve_once()
+                    await asyncio.sleep(.01)
+                self.assertEqual((await pending)["status"], "started")
+                self.assertEqual(await dispatcher.serve_once(), 0)
+
+            asyncio.run(run())
+            self.assertEqual(calls, [True, False])
+            self.assertFalse((root / "shared" / "host_private").exists())
+            self.assertFalse(any("memory" in p.name for p in requests.iterdir()))
+            receipt = json.loads(next(responses.iterdir()).read_text(encoding="utf-8"))
+            self.assertEqual(receipt["status"], "ok")
+            self.assertNotIn("memory_stats", receipt["result"])
+
+    def test_actual_ga_client_event_matches_host_dispatcher(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            requests, responses = root / "shared" / "requests", root / "shared" / "responses"
+            requests.mkdir(parents=True)
+            responses.mkdir()
+            agent = construct_upstream(root / "agent")
+
+            async def fake_memory_call(*, prompt, system, tools=None):
+                return LLMResponse(content="<no_intervention/>", tool_calls=[])
+
+            agent._memory_llm.call = fake_memory_call
+            episode = PMAEpisode(agent, run_id="r", task_id="t", archive=root / "private")
+            dispatcher = EventDispatcher(episode, requests, responses)
+            ga_client = UpstreamPMAClient(run_id="r", task_id="t", requests=requests,
+                                          responses=responses, deadline=time.time() + 5)
+
+            async def run():
+                pending = asyncio.create_task(asyncio.to_thread(
+                    ga_client.exchange, 'task_start', initial_user_content='GA input'))
+                while not pending.done():
+                    await dispatcher.serve_once()
+                    await asyncio.sleep(.01)
+                self.assertEqual((await pending)['status'], 'started')
+                self.assertEqual(episode.last_sequence, 1)
+
+            asyncio.run(run())
+
+    def test_unmodified_upstream_actor_loop_reference_first_two_steps(self):
+        """Reference runs upstream _run_agent_loop, not the GA event adapter."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            agent = construct_upstream(root / "reference")
+            memory_requests = []
+
+            async def fake_memory_call(*, prompt, system, tools=None):
+                memory_requests.append((bool(tools), prompt))
+                if tools:
+                    return LLMResponse(content="", tool_calls=[])
+                if len(memory_requests) == 2:
+                    return LLMResponse(content="<context_for_action>Remember X</context_for_action>")
+                return LLMResponse(content="<no_intervention/>")
+
+            agent._memory_llm.call = fake_memory_call
+            agent._context = SimpleNamespace()
+            agent._max_episodes = 2
+            agent._enable_summarize = False
+            agent._session = SimpleNamespace(is_session_alive=lambda: asyncio.sleep(0, result=True))
+            agent._setup_episode_logging = lambda *a: None
+            agent._record_asciinema_marker = lambda *a: None
+            agent._record_step_full = lambda *a, **k: None
+            agent._record_step = lambda *a, **k: None
+            agent._dump_trajectory = lambda: None
+            seen_actor_prompts = []
+
+            class FakeChat:
+                total_input_tokens = 0
+                total_output_tokens = 0
+                total_cache_tokens = 0
+                total_cost = 0
+
+                async def chat(self, prompt, logging_path=None, **kwargs):
+                    seen_actor_prompts.append(prompt)
+                    return LLMResponse(content="actor")
+
+            actor_calls = 0
+
+            async def fake_actor_interaction(chat, prompt, *args):
+                nonlocal actor_calls
+                await chat.chat(prompt)
+                actor_calls += 1
+                if actor_calls == 1:
+                    return (["tool A", "tool B"], False, "", None, None,
+                            LLMResponse(content="actor"))
+                return ([], False, "ERROR: parse", None, None,
+                        LLMResponse(content="bad actor format"))
+
+            agent._handle_llm_interaction = fake_actor_interaction
+            agent._execute_commands = lambda commands, session: asyncio.sleep(
+                0, result=(False, "two public results"))
+            asyncio.run(agent._run_agent_loop("Original public GA input", FakeChat()))
+            self.assertEqual(actor_calls, 2)
+            self.assertIn("Remember X", seen_actor_prompts[0])
+            self.assertEqual(seen_actor_prompts[1], "two public results")
+            self.assertEqual([entry["step"] for entry in agent._accumulated_observations],
+                             [1, 2])
+            self.assertEqual(agent._accumulated_observations[1]["commands"],
+                             ["tool A", "tool B"])
+            self.assertEqual(len(memory_requests), 4)
+            self.assertEqual(agent._llm.calls, 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+========== GA_BRIDGE_DIFF.patch ==========
+diff --git a/GenericAgent-main/agent_loop.py b/GenericAgent-main/agent_loop.py
+index ed5f8ace..4e3d8502 100644
+--- a/GenericAgent-main/agent_loop.py
++++ b/GenericAgent-main/agent_loop.py
+@@ -58,6 +58,16 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
+     exit_reason = {}; response = None
+     _hook('agent_before', locals())
+     pma = None
++    pma_upstream = None
++    if os.environ.get('GA_PMA_UPSTREAM_ENABLED') == '1':
++        if (os.environ.get('GA_PMA_ENABLED') == '1' or
++                os.environ.get('GA_MONITOR_ENABLED') == '1' or
++                os.environ.get('GA_M0_MONITOR_ENABLED') == '1'):
++            raise ValueError('Complete upstream PMA cannot be combined with old PMA or Monitor')
++        from pma_upstream_bridge import UpstreamPMAClient
++        pma_upstream = UpstreamPMAClient.from_environment(
++            initial_content, turn_offset=turn_offset)
++        handler.parent.pma_upstream_bridge = pma_upstream
+     if os.environ.get('GA_PMA_ENABLED') == '1':
+         from pma_baseline.runtime import from_environment
+         pma = from_environment(initial_content)
+@@ -100,6 +110,11 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
+                 # Upstream user_turn appends to the current input, not a new turn.
+                 from pma_baseline.runtime import append_reminder
+                 messages[-1] = append_reminder(messages[-1], reminder)
++        if pma_upstream is not None:
++            reminder = pma_upstream.before_actor_call(turn)
++            if reminder:
++                from pma_upstream_bridge import append_reminder
++                messages[-1] = append_reminder(messages[-1], reminder)
+         _hook('llm_before', locals())
+         response_gen = client.chat(messages=messages, tools=tools_schema)
+         try:
+@@ -114,6 +129,8 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
+             try: response_gen.close()
+             except Exception: pass
+             yield "\n[Task Agent response interrupted for monitor correction.]\n"
++            if pma_upstream is not None:
++                pma_upstream.actor_step(turn, status='provider_cancelled')
+             messages = [{
+                 "role": "user",
+                 "content": "The previous response was interrupted before it became an accepted action.",
+@@ -233,7 +250,13 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
+                 tool_results.append({'tool_use_id': tid, 'content': datastr})
+             next_prompts.add(outcome.next_prompt)
+         if len(next_prompts) == 0 or exit_reason:
+-            if len(handler._done_hooks) == 0 or exit_reason.get('result', '') == 'EXITED': break
++            if len(handler._done_hooks) == 0 or exit_reason.get('result', '') == 'EXITED':
++                if pma_upstream is not None:
++                    pma_upstream.actor_step(
++                        turn, status='completed', response=response.content or '',
++                        commands=[json.dumps(call, ensure_ascii=False, default=json_default)
++                                  for call in tool_calls])
++                break
+             next_prompts.add(handler._done_hooks.pop(0))
+         next_prompt = handler.turn_end_callback(response, tool_calls, tool_results, turn, '\n'.join(next_prompts), exit_reason)
+         _hook('turn_after', locals())
+@@ -242,6 +265,17 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
+                         [json.dumps(call, ensure_ascii=False, default=json_default) for call in tool_calls],
+                         json.dumps({'content': next_prompt, 'tool_results': tool_results},
+                                    ensure_ascii=False, default=json_default))
++        if pma_upstream is not None:
++            step_status = ('provider_cancelled' if provider_error_response else
++                           'parse_error' if any(call['tool_name'] == 'bad_json'
++                                                for call in tool_calls) else 'normal')
++            pma_upstream.actor_step(
++                turn, status=step_status, response=response.content or '',
++                commands=[json.dumps(call, ensure_ascii=False, default=json_default)
++                          for call in tool_calls],
++                observation=json.dumps({'content': next_prompt, 'tool_results': tool_results},
++                                       ensure_ascii=False, default=json_default),
++                request_event_id=(provider_link or {}).get('provider_request_event_id'))
+         messages = [{"role": "user", "content": next_prompt, "tool_results": tool_results}]   # just new message, history is kept in *Session
+     if exit_reason: handler.turn_end_callback(response, tool_calls, tool_results, turn, '', exit_reason)
+     final_outcome = exit_reason or {'result': 'MAX_TURNS_EXCEEDED'}
+diff --git a/GenericAgent-main/agentmain.py b/GenericAgent-main/agentmain.py
+index 04c74fc3..9ae78a97 100644
+--- a/GenericAgent-main/agentmain.py
++++ b/GenericAgent-main/agentmain.py
+@@ -469,10 +469,18 @@ class GenericAgent:
+                 self.history = handler.history_info
+             except Exception as e:
+                 print(f"Backend Error: {format_error(e)}")
++                task_terminal = {'result': 'EXCEPTION'}
+                 display_queue.put({'done': full_resp + f'\n```\n{format_error(e)}\n```', 'source': source,
+                                    'turn': curr_turn, 'outputs': turn_resps.copy(),
+-                                   'task_terminal': {'result': 'EXCEPTION'}})
++                                   'task_terminal': task_terminal})
+             finally:
++                upstream_pma = getattr(self, 'pma_upstream_bridge', None)
++                if upstream_pma is not None:
++                    try:
++                        upstream_pma.task_end(task_terminal or {'result': 'ABORTED_OR_UNKNOWN'})
++                    except Exception as pma_error:
++                        print(f"Upstream PMA task_end failed: {type(pma_error).__name__}")
++                    self.pma_upstream_bridge = None
+                 if manual_inbox is not None:
+                     manual_inbox.close()
+                 if self.stop_sig: print('User aborted the task.')
+diff --git a/GenericAgent-main/pma_upstream_bridge.py b/GenericAgent-main/pma_upstream_bridge.py
+new file mode 100644
+index 00000000..f454ba07
+--- /dev/null
++++ b/GenericAgent-main/pma_upstream_bridge.py
+@@ -0,0 +1,107 @@
++"""Default-off GA-side client for the host PMA event protocol.
++
++Only public Task events cross this path.  PMA source, bank, logs and keys stay
++in the host worker.  A timed-out accepted event is never replayed.
++"""
++
++from __future__ import annotations
++
++import json
++import os
++from pathlib import Path
++import tempfile
++import time
++import uuid
++
++
++class PMABridgeError(RuntimeError):
++    pass
++
++
++def append_reminder(message, reminder):
++    if message.get('role') != 'user':
++        raise PMABridgeError('PMA reminder requires current GA user input')
++    content = message.get('content', '')
++    if isinstance(content, str):
++        content += '\n\n' + reminder
++    elif isinstance(content, list):
++        content = [*content, {'type': 'text', 'text': '\n\n' + reminder}]
++    else:
++        raise PMABridgeError('unsupported GA input envelope')
++    return {**message, 'content': content}
++
++
++class UpstreamPMAClient:
++    def __init__(self, *, run_id, task_id, requests, responses, deadline):
++        self.run_id, self.task_id = run_id, task_id
++        self.requests = Path(requests).resolve(strict=True)
++        self.responses = Path(responses).resolve(strict=True)
++        self.deadline = float(deadline)
++        self.sequence = 0
++        if not self.requests.is_dir() or not self.responses.is_dir():
++            raise PMABridgeError('PMA spool unavailable')
++
++    @classmethod
++    def from_environment(cls, initial_content, *, turn_offset=0):
++        if turn_offset != 0:
++            raise PMABridgeError('upstream PMA supports fresh Task episodes only')
++        required = ('GA_BENCH_RUN_ID', 'GA_BENCH_TASK_ID',
++                    'GA_PMA_UPSTREAM_REQUESTS', 'GA_PMA_UPSTREAM_RESPONSES',
++                    'GA_PMA_UPSTREAM_DEADLINE_EPOCH')
++        if any(not os.environ.get(name) for name in required):
++            raise PMABridgeError('PMA run identity or spool configuration absent')
++        client = cls(run_id=os.environ['GA_BENCH_RUN_ID'],
++                     task_id=os.environ['GA_BENCH_TASK_ID'],
++                     requests=os.environ['GA_PMA_UPSTREAM_REQUESTS'],
++                     responses=os.environ['GA_PMA_UPSTREAM_RESPONSES'],
++                     deadline=os.environ['GA_PMA_UPSTREAM_DEADLINE_EPOCH'])
++        client.exchange('task_start', initial_user_content=initial_content)
++        return client
++
++    def exchange(self, kind, **fields):
++        if time.time() >= self.deadline:
++            raise PMABridgeError('PMA shared deadline expired')
++        self.sequence += 1
++        event_id = uuid.uuid4().hex
++        payload = {'schema': 'pma-ga-events-v1', 'run_id': self.run_id,
++                   'task_id': self.task_id, 'event_id': event_id,
++                   'sequence': self.sequence, 'kind': kind, **fields}
++        request = self.requests / (event_id + '.json')
++        fd, pending = tempfile.mkstemp(prefix='.pending-', dir=self.requests)
++        try:
++            with os.fdopen(fd, 'w', encoding='utf-8') as stream:
++                json.dump(payload, stream, ensure_ascii=False, sort_keys=True)
++                stream.flush()
++                os.fsync(stream.fileno())
++            os.replace(pending, request)
++        finally:
++            if os.path.exists(pending):
++                os.unlink(pending)
++        response = self.responses / request.name
++        while not response.is_file():
++            if time.time() >= self.deadline:
++                raise PMABridgeError('PMA result unknown; do not replay accepted event')
++            time.sleep(.02)
++        try:
++            receipt = json.loads(response.read_text(encoding='utf-8'))
++        except (OSError, ValueError) as exc:
++            raise PMABridgeError('PMA receipt unreadable') from exc
++        if (receipt.get('run_id'), receipt.get('task_id'), receipt.get('event_id')) != (
++                self.run_id, self.task_id, event_id):
++            raise PMABridgeError('PMA receipt identity mismatch')
++        if receipt.get('status') != 'ok' or not isinstance(receipt.get('result'), dict):
++            raise PMABridgeError('PMA worker failed; see host-private audit')
++        return receipt['result']
++
++    def before_actor_call(self, attempt):
++        return self.exchange('before_actor_call', actor_attempt=attempt).get('reminder')
++
++    def actor_step(self, attempt, *, status, response='', commands=(), observation='',
++                   request_event_id=None):
++        return self.exchange('actor_step', actor_attempt=attempt, step_status=status,
++                             response=response, commands=list(commands),
++                             observation=observation,
++                             request_event_id=request_event_id)
++
++    def task_end(self, terminal):
++        return self.exchange('task_end', terminal=terminal)
+diff --git a/GenericAgent-main/tests/test_pma_upstream_ga_bridge.py b/GenericAgent-main/tests/test_pma_upstream_ga_bridge.py
+new file mode 100644
+index 00000000..8de8a1af
+--- /dev/null
++++ b/GenericAgent-main/tests/test_pma_upstream_ga_bridge.py
+@@ -0,0 +1,102 @@
++"""Zero-model GA loop contract for the default-off upstream PMA bridge."""
++
++import json
++from types import SimpleNamespace
++
++from agent_loop import BaseHandler, StepOutcome, agent_runner_loop, exhaust
++from pma_upstream_bridge import UpstreamPMAClient
++
++
++class FakeBridge:
++    def __init__(self):
++        self.calls = []
++
++    def before_actor_call(self, attempt):
++        self.calls.append(('before', attempt))
++        return '<memory_context>fixture reminder</memory_context>' if attempt == 1 else None
++
++    def actor_step(self, attempt, **fields):
++        self.calls.append(('step', attempt, fields))
++
++
++class FakeClient:
++    last_tools = ''
++
++    def __init__(self, responses):
++        self.responses = iter(responses)
++        self.requests = []
++
++    def chat(self, messages, tools):
++        self.requests.append(([dict(message) for message in messages], tools))
++        if False:
++            yield None
++        return next(self.responses)
++
++
++class Handler(BaseHandler):
++    def __init__(self):
++        self.parent = SimpleNamespace(task_dir=None)
++        self._done_hooks = []
++
++    def do_probe(self, args, response):
++        if False:
++            yield None
++        return StepOutcome({'probe': 'public result'}, next_prompt='continue after probe')
++
++    def do_no_tool(self, args, response):
++        if False:
++            yield None
++        return StepOutcome(response, next_prompt=None)
++
++    def turn_end_callback(self, response, tool_calls, tool_results, turn, next_prompt, exit_reason):
++        return next_prompt
++
++
++def response(content, tool_calls=()):
++    return SimpleNamespace(content=content, tool_calls=list(tool_calls), thinking='')
++
++
++def test_default_off_keeps_task_loop_without_pma(monkeypatch):
++    monkeypatch.delenv('GA_PMA_UPSTREAM_ENABLED', raising=False)
++    client = FakeClient([response('done')])
++    handler = Handler()
++    outcome = exhaust(agent_runner_loop(client, 'system', 'public task', handler, [],
++                                        max_turns=2, verbose=False))
++    assert outcome['result'] == 'CURRENT_TASK_DONE'
++    assert not hasattr(handler.parent, 'pma_upstream_bridge')
++    assert client.requests[0][0][1]['content'] == 'public task'
++
++
++def test_two_ga_attempts_use_one_pma_pending_reminder(monkeypatch):
++    bridge = FakeBridge()
++    monkeypatch.setenv('GA_PMA_UPSTREAM_ENABLED', '1')
++    monkeypatch.setattr(UpstreamPMAClient, 'from_environment',
++                        classmethod(lambda cls, content, turn_offset=0: bridge))
++    tool = SimpleNamespace(id='tool-1', function=SimpleNamespace(
++        name='probe', arguments=json.dumps({'value': 1})))
++    client = FakeClient([response('tool choice', [tool]), response('done')])
++    handler = Handler()
++    result = exhaust(agent_runner_loop(client, 'system', 'public task', handler, [],
++                                       max_turns=2, verbose=False))
++    assert result['result'] == 'CURRENT_TASK_DONE'
++    assert handler.parent.pma_upstream_bridge is bridge
++    assert '<memory_context>fixture reminder</memory_context>' in client.requests[0][0][1]['content']
++    assert 'fixture reminder' not in client.requests[1][0][0]['content']
++    assert [item[0] for item in bridge.calls] == ['before', 'step', 'before', 'step']
++    assert bridge.calls[1][2]['status'] == 'normal'
++    assert bridge.calls[1][2]['commands'][0].find('probe') >= 0
++    assert bridge.calls[3][2]['status'] == 'completed'
++
++
++def test_incompatible_monitor_fails_before_pma_or_provider(monkeypatch):
++    monkeypatch.setenv('GA_PMA_UPSTREAM_ENABLED', '1')
++    monkeypatch.setenv('GA_MONITOR_ENABLED', '1')
++    client = FakeClient([response('never')])
++    try:
++        exhaust(agent_runner_loop(client, 'system', 'public task', Handler(), [],
++                                  max_turns=1, verbose=False))
++    except ValueError as exc:
++        assert 'cannot be combined' in str(exc)
++    else:
++        raise AssertionError('incompatible condition was accepted')
++    assert client.requests == []

@@ -27,6 +27,10 @@ class EpisodeTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             agent = construct_upstream(root / "agent")
+            self.assertEqual(agent._memory_llm._model_name,
+                             "openrouter/anthropic/claude-opus-4.6")
+            self.assertEqual(agent._memory_llm._temperature, 0.3)
+            self.assertTrue(agent._memory_agent.use_structured_tools)
             calls = []
 
             async def fake_memory_call(*, prompt, system, tools=None):

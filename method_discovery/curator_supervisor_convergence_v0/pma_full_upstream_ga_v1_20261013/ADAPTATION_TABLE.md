@@ -8,6 +8,7 @@
 | `_get_memory_system_prompt` with `user_turn` | `before_actor_call` consumes one original pending reminder and returns it to the bridge | Original renderer tested; actual GA next-request attachment not connected. |
 | `save_memory`, `visualize_memory`, `visualize_memory_trajectory` | `task_end` saves bank/trajectory; tests call both original renderers | Offline fixture passed; no live worker cleanup proof. |
 | Host file transport identity/accepted receipt concept from `analysis_spool.py` and `pilot_analysis_bridge.py` | `EventClient` / `EventDispatcher` / `worker_main` form a separate four-event protocol | Unit file bridge passed, but real Docker mounts and Harbor lifecycle not wired or certified. |
-| Existing GA `agent_runner_loop` and Harbor `M4GenericAgent` | No modification in this delivery | Required default-off switch, T/S mutual exclusion, event production and actual run entry remain blocked work; never claim integrated. |
+| Existing GA `agent_runner_loop` and `agentmain.run` | Default-off `GA_PMA_UPSTREAM_ENABLED` branch sends public events and task_end via `pma_upstream_bridge.py` | Fake GA tool loop and default-off regression passed; actual task container not run. |
+| Existing Harbor `M4GenericAgent` | `harbor_adapter.py` pins its original byte SHA and extends only four environment names in an explicitly selected research module | Import/forward tuple check passed. No run launcher or real Harbor task trial selected this module yet. |
 
-The vendor Harbor is loaded only by the host PMA worker. Its actor/task runner is not deployed. Existing GA Task model, system, tools, retry and completion semantics have not been changed in the research repository.
+The vendor Harbor is loaded only by the host PMA worker. Its actor/task runner is not deployed. The additive GA branch leaves the existing Task model, system, tools, retry and completion semantics unchanged when off; live equivalence of A/B initial requests remains untested.
