@@ -25,7 +25,8 @@ class LiveWiringTests(unittest.TestCase):
             root = Path(directory)
             manifest = root / 'manifest.json'
             auth = root / 'auth.json'
-            manifest_hash = write_json(manifest, {'execution_authorized': False})
+            manifest_hash = write_json(manifest, {'schema': 'pma-ga-live-manifest-v1',
+                                                  'execution_authorized': False})
             write_json(auth, {'execution_authorized': True,
                               'manifest_sha256': manifest_hash})
             args = SimpleNamespace(manifest=str(manifest), authorization=str(auth),
@@ -47,7 +48,8 @@ class LiveWiringTests(unittest.TestCase):
                              run_root=str(root / f'fresh-{arm["order"]}')) for arm in arms]
             manifest = root / 'manifest.json'
             auth = root / 'auth.json'
-            manifest_hash = write_json(manifest, {'execution_authorized': False, 'arms': arms})
+            manifest_hash = write_json(manifest, {'schema': 'pma-ga-live-manifest-v1',
+                                                 'execution_authorized': False, 'arms': arms})
             auth_value = dict(execution_authorized=True, manifest_sha256=manifest_hash,
                               audited_code_commit='fixed-head', approved_arms=arms,
                               run_bindings=bindings)
@@ -102,7 +104,8 @@ class LiveWiringTests(unittest.TestCase):
             profile.write_text('fixture', encoding='utf-8')
             manifest = base / 'manifest.json'
             auth = base / 'auth.json'
-            manifest_hash = write_json(manifest, {'execution_authorized': False,
+            manifest_hash = write_json(manifest, {'schema': 'pma-ga-live-manifest-v1',
+                'execution_authorized': False,
                 'assets': {'db-wal-recovery': {'public_task_tree_sha256': 'public'}} ,
                 'task_profile_sha256': hashlib.sha256(profile.read_bytes()).hexdigest()})
             write_json(auth, {'execution_authorized': True,

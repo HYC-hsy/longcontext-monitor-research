@@ -67,7 +67,8 @@ def run_live(args) -> dict:
     authorization_path = Path(args.authorization).resolve(strict=True)
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
     authorized = json.loads(authorization_path.read_text(encoding='utf-8'))
-    if (manifest.get('execution_authorized') is not False or
+    if (manifest.get('schema') != 'pma-ga-live-manifest-v1' or
+            manifest.get('execution_authorized') is not False or
             authorized.get('execution_authorized') is not True or
             authorized.get('manifest_sha256') != _sha(manifest_path)):
         raise RuntimeError('PMA authorization absent or changed')

@@ -29,7 +29,8 @@ def verify_live_spec(spec: dict) -> None:
     granted = json.loads(authorization.read_text(encoding='utf-8'))
     arms = frozen.get('arms')
     bindings = granted.get('run_bindings')
-    if (frozen.get('execution_authorized') is not False or
+    if (frozen.get('schema') != 'pma-ga-live-manifest-v1' or
+            frozen.get('execution_authorized') is not False or
             granted.get('execution_authorized') is not True or
             granted.get('manifest_sha256') != spec['manifest_sha256'] or
             not isinstance(arms, list) or len(arms) != 4 or
