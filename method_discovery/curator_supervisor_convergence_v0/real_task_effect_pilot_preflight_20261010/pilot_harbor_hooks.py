@@ -59,6 +59,19 @@ class PilotTrialHooks:
             raise RuntimeError('Pilot main Docker inspect failed')
         return container, json.loads(result.stdout)[0]
 
+    def terminal_identity_valid(self, terminal):
+        return (isinstance(terminal, dict) and
+                terminal.get('run_id') == self.spec['run_id'] and
+                terminal.get('task_id') == self.spec['task_id'] and
+                set(terminal) == {'run_id', 'task_id', 'result'})
+
+    def legal_terminal(self, metadata, terminal, terminal_identity_valid, incomplete):
+        return (metadata.get('round_end_seen') is True and
+                metadata.get('wrapper_return_code') == 0 and
+                metadata.get('archive_status') == 'finished' and
+                terminal_identity_valid and terminal['result'] == 'CURRENT_TASK_DONE' and
+                not incomplete)
+
     async def agent_start(self, _event):
         if getattr(self.trial.agent, 'run_id', None) != self.spec['run_id']:
             raise RuntimeError('Pilot agent/run identity mismatch')
@@ -113,16 +126,10 @@ class PilotTrialHooks:
             terminal = json.loads(terminal_read.stdout) if terminal_read.return_code == 0 else None
         except (TypeError, ValueError):
             terminal = None
-        terminal_identity_valid = (isinstance(terminal, dict) and
-                                   terminal.get('run_id') == self.spec['run_id'] and
-                                   terminal.get('task_id') == self.spec['task_id'] and
-                                   set(terminal) == {'run_id', 'task_id', 'result'})
+        terminal_identity_valid = self.terminal_identity_valid(terminal)
         incomplete = self.archive.parent / 'monitor' / 'completion_incomplete.json'
-        legal_agent_end = (metadata.get('round_end_seen') is True and
-                           metadata.get('wrapper_return_code') == 0 and
-                           metadata.get('archive_status') == 'finished' and
-                           terminal_identity_valid and terminal['result'] == 'CURRENT_TASK_DONE' and
-                           not incomplete.exists())
+        legal_agent_end = self.legal_terminal(metadata, terminal,
+                                              terminal_identity_valid, incomplete.exists())
         _atomic(self.control / 'agent_end_pending.json',
                 {'run_id': self.spec['run_id'], 'container_id': self.container_id})
         deadline = time.monotonic() + 120

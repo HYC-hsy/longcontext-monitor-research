@@ -67,11 +67,9 @@ def clean_owned_containers(root: Path) -> list[str]:
     return errors
 
 
-def prepare(args) -> dict:
+def _prepare_common(args, *, fake_gateway: bool) -> dict:
     if args.task not in TASKS or args.condition not in {"A", "B"}:
         raise ValueError("unsupported PMA fixture arm")
-    if args.execution_authorized:
-        raise ValueError("offline launcher cannot authorize model execution")
     root = Path(args.run_root).resolve(strict=False)
     root.mkdir(parents=True, exist_ok=False)
     (root / "control").mkdir()
@@ -91,16 +89,24 @@ def prepare(args) -> dict:
     runtime = Path(args.runtime_root).resolve(strict=True)
     source, compose = build_bundle(root / "bundle", ga_stage, runtime,
                                    args.python_home, args.task_profile, None, 15340)
-    _offline_gateway(root, runtime, args.python_home)
-    if getattr(args, "multiturn_fixture", False):
+    if fake_gateway:
+        _offline_gateway(root, runtime, args.python_home)
+    if fake_gateway and getattr(args, "multiturn_fixture", False):
         fake_compose = json.loads(compose.read_text(encoding="utf-8"))
         fake_compose["services"]["model-gateway"]["environment"] = {
             "PMA_MULTITURN_FIXTURE": "1"}
         compose.write_text(json.dumps(fake_compose, indent=2), encoding="utf-8")
-    manifest = json.loads((STAGE / "FOUR_RUN_MANIFEST_DRAFT.json").read_text(encoding="utf-8"))
+    manifest_path = (STAGE / "FOUR_RUN_MANIFEST_DRAFT.json" if fake_gateway
+                     else Path(args.manifest).resolve(strict=True))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest["execution_authorized"] is not False:
         raise RuntimeError("PMA draft unexpectedly authorized")
     identity = image_identity(TASKS[args.task])
+    if not fake_gateway:
+        approved = manifest['assets'][args.task]
+        if (identity['image_id'] != approved['image_id'] or
+                approved['repo_digest'] not in identity['repo_digests']):
+            raise RuntimeError('PMA target image differs from frozen live manifest')
     for name in ("requests", "responses"):
         (root / "control" / "spool" / name).mkdir(parents=True, exist_ok=False)
     config = json.loads(compose.read_text(encoding="utf-8"))
@@ -113,7 +119,8 @@ def prepare(args) -> dict:
              "target": "/run/pma-bridge/responses", "read_only": True},
         ]
     compose.write_text(json.dumps(config, indent=2), encoding="utf-8")
-    record = {"schema": "pma-ga-offline-harbor-v1", "execution_authorized": False,
+    record = {"schema": ("pma-ga-offline-harbor-v1" if fake_gateway else
+                          "pma-ga-live-prepared-v1"), "execution_authorized": False,
               "run_id": args.run_id, "task": args.task, "condition": args.condition,
               "image": TASKS[args.task], **identity,
               "public_task_tree_sha256": digest_tree(task),
@@ -121,10 +128,16 @@ def prepare(args) -> dict:
               "source_profile_file_sha256": hashlib.sha256(
                   Path(args.task_profile_file).read_bytes()).hexdigest(),
               "worker_private_mounted": "not_yet_inspected", "network_mode": "none_requested",
-              "native_evaluator_calls": 0, "fake_provider_only": True}
+              "native_evaluator_calls": 0, "fake_provider_only": fake_gateway}
     (root / "archive" / "prepared.json").write_text(
         json.dumps(record, indent=2), encoding="utf-8")
     return record
+
+
+def prepare(args) -> dict:
+    if args.execution_authorized:
+        raise ValueError("offline launcher cannot authorize model execution")
+    return _prepare_common(args, fake_gateway=True)
 
 
 def run_offline(args) -> dict:
