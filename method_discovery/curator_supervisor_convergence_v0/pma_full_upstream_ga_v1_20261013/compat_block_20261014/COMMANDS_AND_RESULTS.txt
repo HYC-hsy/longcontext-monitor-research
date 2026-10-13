@@ -1,0 +1,56 @@
+Executed on Windows PowerShell; commands are shown without the temporary
+PYTHONPATH assignments that selected the committed repository and pinned
+vendor PMA/Harbor src paths. LITELLM_LOCAL_MODEL_COST_MAP=True for fake tests.
+No Task or PMA benchmark prompt was sent during the synthetic check.
+
+1. Frozen clean checkout:
+git worktree add --detach E:/pma-ga-clean-gate-50fea8a6 50fea8a6cc2aacb57b4726e811889267f43c31de
+git -C E:/pma-ga-clean-gate-50fea8a6 switch --detach e0c7719b1d557dd403a231a415a9092191186509
+git -C E:/pma-ga-clean-gate-50fea8a6 switch --detach b7bcf118d915c5ba63dd4d4e4ae74f23bd00e954
+All exited 0. No untracked Python from the original working tree was copied.
+
+2. Clean entry help:
+E:/LongContext/bench_runtime/m4/harbor-env/Scripts/python.exe -m method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.pma_harbor_cli --help
+Exit 0. Original output identified the Typer Harbor CLI, including jobs,
+trial, adapter and other commands. A first attempt piped through
+Select-Object -First 5 returned pipeline exit 1 after printing the help
+prefix; the subsequent complete command above exited 0.
+
+3. Targeted unit regression (actual modified functions and PMA constructor):
+E:/LongContext/bench_runtime/m4/harbor-env/Scripts/python.exe -m unittest method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.test_live_wiring method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.test_episode.EpisodeTests.test_existing_opus48_profile_uses_upstream_litellm_boundary method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.test_episode.EpisodeTests.test_original_lifecycle_and_duplicate_suppression
+Exit 0; Ran 8 tests in 0.137s; OK. Stderr contained two non-fatal
+LiteLLM warnings that botocore is absent for unused Bedrock/SageMaker streams.
+
+4. Clean checkout native-serializer/fake-LiteLLM synthetic harness regression:
+E:/LongContext/bench_runtime/m4/harbor-env/Scripts/python.exe -m unittest method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.test_synthetic_compat
+Exit 0; Ran 2 tests in 3.991s; OK. The actual GA fake stream also printed
+[Output] tokens=2 stop_reason=end_turn and [Cache] input=1 creation=0 read=0.
+
+5. Real Harbor-path clean-checkout negative identity fixture:
+E:/LongContext/bench_runtime/m4/harbor-env/Scripts/python.exe -m method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.test_live_harbor_fixture --run-id pma-clean-hook-e0c7719b --run-root E:/pma-clean-hook-e0c7719b --ga-source E:/pma-ga-clean-gate-50fea8a6/GenericAgent-main --runtime-root E:/LongContext/bench_runtime/m2/linux --task-profile-file E:/LongContext/GenericAgent-main/mykey.py --worker-python E:/LongContext/bench_runtime/m4/harbor-env/Scripts/python.exe --harbor-python E:/LongContext/bench_runtime/m4/harbor-env/Scripts/python.exe --bench-root E:/pma-ga-clean-gate-50fea8a6/long_context_bench
+Exit 1. Full stdout/stderr and exact subprocess argv are in
+fake_failed_adapter_archive. Failure is the deliberate adapter byte mismatch.
+Structured result: failure=null, harbor_return_code=1,
+agent_start_identity=false, remaining_containers=0, cleanup_errors=[],
+fixture_authorization_removed=true.
+
+6. Real Harbor-path clean-checkout positive fixture, same command except:
+--run-id pma-clean-hook-e0c7719b-r2
+--run-root E:/pma-clean-hook-e0c7719b-r2
+--bench-root E:/LongContext/long_context_bench
+Exit 0. Full stdout/stderr, exact subprocess argv, fake provider requests/SSE,
+writer stop/freeze and fake evaluator release are in fake_success_archive;
+worker accepted/events/memory raw records are in fake_success_worker_audit.
+Structured result: failure=null, harbor_return_code=0, worker_return_code=0,
+agent_start_identity=true, frozen_product=true,
+verification_released=true, remaining_containers=0, cleanup_errors=[],
+fixture_authorization_removed=true.
+
+7. Exactly one real synthetic compatibility process:
+E:/LongContext/bench_runtime/m4/harbor-env/Scripts/python.exe -m method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.synthetic_compat --run-root E:/pma-ga-live-batch-20261014/compatibility --task-profile-file E:/LongContext/GenericAgent-main/mykey.py --pma-profile-file E:/LongContext/monitor_config/models.local.json --audited-code-commit 44bcb5ca220a0fa9635cfe02f97a8e2a43671dd4 --execute-once
+Exit 1. Stdout terminal JSON:
+{"task": null, "pma": {"logical_phases": 2, "actual_attempts": 2, "complete": true, "model_requested": "claude-opus-4-8", "reminder_selected": false}, "failures": [{"component": "task", "type": "RuntimeError", "message": "Task compatibility returned a provider error"}]}
+Stderr contained non-fatal LiteLLM botocore warnings and provider-list
+informational lines. Exact synthetic Task request/status and complete PMA
+request/response records are in compatibility/. Task response HTTP status 403.
+No formal four-arm controller was run after this failed gate.
