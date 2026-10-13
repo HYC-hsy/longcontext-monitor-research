@@ -52,11 +52,24 @@ async def serve(args: argparse.Namespace) -> None:
     agent = construct_upstream(private / "upstream_agent",
                                memory_api_base=os.environ.get("PMA_MEMORY_API_BASE"),
                                memory_api_key=os.environ.get("PMA_MEMORY_API_KEY"))
+    if args.fake_memory:
+        from harbor.llms.base import LLMResponse
+
+        async def offline_memory(*, prompt, system, tools=None):
+            if tools:
+                return LLMResponse(content="", tool_calls=[])
+            return LLMResponse(content="<context_for_action>Offline PMA reminder.</context_for_action>")
+
+        agent._memory_llm.call = offline_memory
     episode = PMAEpisode(agent, run_id=args.run_id, task_id=args.task_id,
                          archive=private / "archive")
     install_transport_audit(agent, episode.archive)
     dispatcher = EventDispatcher(episode, requests, responses,
                                  deadline_epoch=args.deadline_epoch)
+    (private / "worker_ready.json").write_text(json.dumps({
+        "run_id": args.run_id, "task_id": args.task_id,
+        "deadline_epoch": args.deadline_epoch, "fake_memory": args.fake_memory},
+        sort_keys=True), encoding="utf-8")
     stopped = asyncio.Event()
     for name in ("SIGTERM", "SIGINT"):
         signum = getattr(signal, name, None)
@@ -114,6 +127,7 @@ def main() -> None:
     parser.add_argument("--requests", required=True)
     parser.add_argument("--responses", required=True)
     parser.add_argument("--deadline-epoch", type=float, required=True)
+    parser.add_argument("--fake-memory", action="store_true")
     asyncio.run(serve(parser.parse_args()))
 
 

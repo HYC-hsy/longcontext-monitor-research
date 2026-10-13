@@ -445,7 +445,11 @@ class GenericAgent:
                 # Harbor's ROUND END watcher may terminate this process as soon
                 # as done is published.  Save before that sentinel is emitted.
                 try:
-                    result = upstream_pma.task_end(terminal or {'result': 'ABORTED_OR_UNKNOWN'})
+                    # The Task outcome may contain tool-specific Python data.
+                    # PMA only needs the original terminal reason, not that data.
+                    reason = (terminal.get('result') if isinstance(terminal, dict)
+                              else 'ABORTED_OR_UNKNOWN')
+                    result = upstream_pma.task_end({'result': reason})
                     pma_finalization = {'status': 'saved' if result.get('status') == 'saved'
                                         else 'unknown'}
                 except Exception as pma_error:
@@ -573,6 +577,7 @@ if __name__ == '__main__':
                     'run_id': os.environ['GA_BENCH_RUN_ID'],
                     'task_id': os.environ.get('GA_BENCH_TASK_ID'),
                     'result': terminal.get('result') if isinstance(terminal, dict) else None,
+                    'pma_finalization': item.get('pma_finalization', {'status': 'not_enabled'}),
                 }
                 terminal_path = '/logs/agent/task_terminal.json'
                 with open(terminal_path + '.pending', 'x', encoding='utf-8') as f:

@@ -9,6 +9,7 @@ import time
 import unittest
 from types import SimpleNamespace
 import sys
+from unittest.mock import patch
 
 # Offline tests must not let LiteLLM fetch its optional price metadata.
 os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
@@ -20,6 +21,7 @@ from memory_agent.utils.visualize import visualize_memory, visualize_memory_traj
 from episode import DisabledActorLLM, PMAEpisode, construct_upstream
 from event_spool import EventClient, EventDispatcher
 from pma_upstream_bridge import UpstreamPMAClient
+import worker_main
 
 
 class EpisodeTests(unittest.TestCase):
@@ -127,6 +129,70 @@ class EpisodeTests(unittest.TestCase):
             self.assertFalse((root / "private" / "trajectory_memory.json").exists())
             self.assertIn("save_failed", (root / "private" / "events.jsonl").read_text())
             agent.save_memory = original_save
+
+    def test_worker_deadline_cancels_inflight_without_late_receipt(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            requests, responses = root / "shared" / "requests", root / "shared" / "responses"
+            requests.mkdir(parents=True)
+            responses.mkdir()
+            request = {"schema": "pma-ga-events-v1", "kind": "task_start",
+                       "sequence": 1, "event_id": "first", "run_id": "r",
+                       "task_id": "t", "initial_user_content": "public"}
+            (requests / "first.json").write_text(json.dumps(request), encoding="utf-8")
+            agent = construct_upstream(root / "agent")
+
+            async def slow_memory(*, prompt, system, tools=None):
+                await asyncio.sleep(5)
+                return LLMResponse(content="<no_intervention/>", tool_calls=[])
+
+            agent._memory_llm.call = slow_memory
+            args = SimpleNamespace(private_root=str(root / "private"),
+                                   requests=str(requests), responses=str(responses),
+                                   run_id="r", task_id="t", fake_memory=False,
+                                   deadline_epoch=time.time() + .25)
+            with patch.object(worker_main, "construct_upstream", return_value=agent):
+                asyncio.run(worker_main.serve(args))
+            self.assertFalse((responses / "first.json").exists())
+            exit_record = json.loads((root / "private" / "worker_exit.json").read_text())
+            self.assertFalse(exit_record["task_end_saved"])
+            self.assertEqual(exit_record["reason"], "stopped_or_deadline_in_flight_unknown")
+            self.assertTrue((root / "private" / "archive" / "memory.json").is_file())
+
+    def test_original_phase_errors_are_audited_without_changing_silence(self):
+        for failed_phase in ("bank_management", "context_decision"):
+            with self.subTest(failed_phase=failed_phase), TemporaryDirectory() as directory:
+                root = Path(directory)
+                agent = construct_upstream(root / "agent")
+
+                async def fake_call(*, prompt, system, tools=None):
+                    phase = "bank_management" if tools else "context_decision"
+                    if phase == failed_phase:
+                        raise RuntimeError("scripted upstream failure")
+                    if tools:
+                        return LLMResponse(content="", tool_calls=[])
+                    return LLMResponse(content="<no_intervention/>")
+
+                agent._memory_llm.call = fake_call
+                episode = PMAEpisode(agent, run_id="r", task_id="t", archive=root / "private")
+                worker_main.install_transport_audit(agent, episode.archive)
+
+                async def run():
+                    await episode.handle({"kind": "task_start", "sequence": 1,
+                                          "event_id": "start", "run_id": "r", "task_id": "t",
+                                          "initial_user_content": "public"})
+                    return await episode.handle({"kind": "before_actor_call",
+                                                 "sequence": 2, "event_id": "before",
+                                                 "run_id": "r", "task_id": "t",
+                                                 "actor_attempt": 1})
+
+                self.assertEqual(asyncio.run(run())["status"], "silent")
+                rows = [json.loads(line) for line in (episode.archive /
+                        "memory_transport.jsonl").read_text().splitlines()]
+                self.assertEqual([row["phase"] for row in rows],
+                                 ["bank_management", "context_decision"])
+                self.assertEqual(rows[0 if failed_phase == "bank_management" else 1]
+                                 ["status"], "RuntimeError")
 
     def test_file_event_bridge_keeps_private_bank_outside_shared_spool(self):
         with TemporaryDirectory() as directory:
@@ -254,6 +320,92 @@ class EpisodeTests(unittest.TestCase):
                              ["tool A", "tool B"])
             self.assertEqual(len(memory_requests), 4)
             self.assertEqual(agent._llm.calls, 0)
+
+    def test_independent_upstream_and_ga_event_prompts_match(self):
+        """Run original actor loop separately from the GA event scheduling."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            public = "PUBLIC_ANALYSIS: both files affect the transaction"
+            commands = ["tool alpha --read", "tool beta --read"]
+            observation = json.dumps({"content": "RESULT_ALPHA and RESULT_BETA",
+                                      "tool_results": ["RESULT_ALPHA", "RESULT_BETA"]},
+                                     ensure_ascii=False)
+            requests = {}
+            agents = {}
+            for arm in ("original", "ga"):
+                agent = construct_upstream(root / arm)
+                agents[arm] = agent
+                requests[arm] = []
+
+                async def memory_call(*, prompt, system, tools=None, arm=arm):
+                    requests[arm].append((prompt, system, bool(tools)))
+                    if tools:
+                        return LLMResponse(content="", tool_calls=[])
+                    return LLMResponse(content="<context_for_action>Keep the public clue.</context_for_action>")
+
+                agent._memory_llm.call = memory_call
+
+            reference = agents["original"]
+            reference._context = SimpleNamespace()
+            reference._max_episodes = 2
+            reference._enable_summarize = False
+            reference._session = SimpleNamespace(is_session_alive=lambda: asyncio.sleep(0, result=True))
+            reference._setup_episode_logging = lambda *a: None
+            reference._record_asciinema_marker = lambda *a: None
+            reference._record_step_full = lambda *a, **k: None
+            reference._dump_trajectory = lambda: None
+
+            class FakeChat:
+                total_input_tokens = total_output_tokens = total_cache_tokens = total_cost = 0
+
+                async def chat(self, prompt, **kwargs):
+                    return LLMResponse(content=public)
+
+            actor_attempts = 0
+
+            async def reference_actor(chat, prompt, *args):
+                nonlocal actor_attempts
+                await chat.chat(prompt)
+                actor_attempts += 1
+                if actor_attempts == 2:
+                    return ([], False, "ERROR: bad actor envelope", None, None,
+                            LLMResponse(content="bad actor envelope"))
+                return (commands, False, "", public, None, LLMResponse(content=public))
+
+            reference._handle_llm_interaction = reference_actor
+            reference._execute_commands = lambda cmds, session: asyncio.sleep(
+                0, result=(False, observation))
+            asyncio.run(reference._run_agent_loop("Same public GA task", FakeChat()))
+
+            ga = agents["ga"]
+            episode = PMAEpisode(ga, run_id="r", task_id="t", archive=root / "private")
+
+            async def ga_events():
+                def event(kind, sequence, **fields):
+                    return {"kind": kind, "event_id": f"e{sequence}", "sequence": sequence,
+                            "run_id": "r", "task_id": "t", **fields}
+
+                await episode.handle(event("task_start", 1,
+                                           initial_user_content="Same public GA task"))
+                first = await episode.handle(event("before_actor_call", 2, actor_attempt=1))
+                self.assertIn("Keep the public clue.", first["reminder"])
+                await episode.handle(event("actor_step", 3, actor_attempt=1,
+                                           step_status="normal", response=public,
+                                           commands=commands, observation=observation))
+                await episode.handle(event("before_actor_call", 4, actor_attempt=2))
+                await episode.handle(event("actor_step", 5, actor_attempt=2,
+                                           step_status="parse_error",
+                                           response="bad actor envelope"))
+
+            asyncio.run(ga_events())
+            self.assertEqual(requests["original"], requests["ga"])
+            self.assertEqual(reference._accumulated_observations,
+                             ga._accumulated_observations)
+            self.assertEqual(reference._pending_injection, ga._pending_injection)
+            self.assertEqual(len(requests["ga"]), 4)
+            self.assertEqual(actor_attempts, 2)
+            self.assertIn(public, requests["ga"][2][0])
+            self.assertIn("RESULT_BETA", requests["ga"][3][0])
 
 
 if __name__ == "__main__":

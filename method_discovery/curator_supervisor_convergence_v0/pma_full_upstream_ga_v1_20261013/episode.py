@@ -122,6 +122,8 @@ class PMAEpisode:
             else:
                 raise ValueError("unknown PMA event kind")
             self._record(event, result)
+            if kind == "task_end" and result.get("status") == "saved":
+                self.ended = True
             self.last_sequence = sequence
             self._responses[event_id] = (digest, result)
             return result
@@ -216,7 +218,6 @@ class PMAEpisode:
             self._record(event, {"status": "save_failed", "error_type": type(exc).__name__,
                                  "terminal": terminal})
             raise
-        self.ended = True
         return {"status": "saved", "terminal": terminal,
                 "actor_attempts": self.last_attempt}
 
@@ -226,4 +227,5 @@ class PMAEpisode:
             return {"status": "not_saved", "reason": reason}
         result = self._save_final_state({"result": "TASK_TERMINAL_UNKNOWN"},
                                         {"kind": "host_finalize", "reason": reason})
+        self.ended = True
         return {**result, "status": "saved_without_task_end", "reason": reason}
