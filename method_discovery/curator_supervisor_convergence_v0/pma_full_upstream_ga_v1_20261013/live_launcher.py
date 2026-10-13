@@ -72,8 +72,13 @@ def run_live(args) -> dict:
             authorized.get('execution_authorized') is not True or
             authorized.get('manifest_sha256') != _sha(manifest_path)):
         raise RuntimeError('PMA authorization absent or changed')
-    if args.condition == 'B' and not os.environ.get('PMA_MEMORY_API_KEY'):
-        raise RuntimeError('PMA memory credential is not configured')
+    memory_profile_path = None
+    if args.condition == 'B':
+        if not args.pma_profile_file:
+            raise RuntimeError('PMA Opus 4.8 profile is required for B')
+        memory_profile_path = Path(args.pma_profile_file).resolve(strict=True)
+        if _sha(memory_profile_path) != manifest.get('pma_profile_sha256'):
+            raise RuntimeError('PMA memory profile differs from frozen identity')
     if Path(args.run_root).exists():
         raise FileExistsError(args.run_root)
     args.execution_authorized = False
@@ -114,7 +119,11 @@ def run_live(args) -> dict:
             worker_env = dict(os.environ)
             worker_env['PYTHONPATH'] = os.pathsep.join((str(STAGE),
                 str(STAGE / 'vendor' / 'pma_89e5c0d' / 'src'),
-                str(STAGE / 'vendor' / 'pma_89e5c0d' / 'external' / 'harbor')))
+                str(STAGE / 'vendor' / 'pma_89e5c0d' / 'external' / 'harbor' / 'src')))
+            worker_env['PMA_MEMORY_PROFILE_FILE'] = str(memory_profile_path)
+            worker_env['PMA_MEMORY_PROFILE_SHA256'] = manifest['pma_profile_sha256']
+            worker_env.pop('PMA_MEMORY_API_BASE', None)
+            worker_env.pop('PMA_MEMORY_API_KEY', None)
             worker = subprocess.Popen([
                 str(Path(args.worker_python).resolve(strict=True)), str(STAGE / 'worker_main.py'),
                 '--run-id', args.run_id, '--task-id', args.task,
@@ -240,6 +249,16 @@ def run_live(args) -> dict:
     return status
 
 
+def live_status_success(status: dict) -> bool:
+    return (status.get('primary_failure') is None and
+            status.get('harbor_return_code') == 0 and
+            status.get('cleanup_confirmed') is True and
+            status.get('frozen_product') is True and
+            status.get('evaluation_released') is True and
+            (status.get('condition') != 'B' or
+             status.get('worker_return_code') == 0))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     for name in ('manifest', 'authorization', 'run-id', 'run-root', 'ga-source',
@@ -250,9 +269,13 @@ def main() -> None:
     parser.add_argument('--task', choices=TASKS, required=True)
     parser.add_argument('--condition', choices=('A', 'B'), required=True)
     parser.add_argument('--task-profile', default='native_claude_cc_vibe_opus48')
+    parser.add_argument('--pma-profile-file')
     parser.add_argument('--python-home', default='cpython-3.12.12-linux-x86_64-gnu')
     args = parser.parse_args()
-    print(json.dumps(run_live(args), indent=2))
+    status = run_live(args)
+    print(json.dumps(status, indent=2))
+    if not live_status_success(status):
+        raise SystemExit(1)
 
 
 if __name__ == '__main__':

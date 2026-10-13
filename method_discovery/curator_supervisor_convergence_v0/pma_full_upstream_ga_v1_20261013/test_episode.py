@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "GenericAgent-main"))
 
 from harbor.llms.base import LLMResponse
+from harbor.llms.lite_llm import LiteLLM
 from memory_agent.utils.visualize import visualize_memory, visualize_memory_trajectory
 
 from episode import DisabledActorLLM, PMAEpisode, construct_upstream
@@ -27,6 +28,29 @@ import offline_launcher
 
 
 class EpisodeTests(unittest.TestCase):
+    def test_existing_opus48_profile_uses_upstream_litellm_boundary(self):
+        profile = dict(provider="anthropic", api_mode="messages",
+                       model="claude-opus-4-8", thinking_type="adaptive",
+                       reasoning_effort="high", temperature=1, max_tokens=8192,
+                       read_timeout=300, apibase="https://offline.invalid/v1",
+                       apikey="offline-only")
+        seen = []
+
+        async def fake_call(self, prompt, **kwargs):
+            seen.append(dict(prompt=prompt, **kwargs))
+            return LLMResponse(content="<no_intervention/>")
+
+        with TemporaryDirectory() as directory, patch.object(LiteLLM, "call", fake_call):
+            agent = construct_upstream(Path(directory) / "agent", memory_profile=profile)
+            self.assertEqual(agent._memory_llm._model_name, "anthropic/claude-opus-4-8")
+            self.assertEqual(agent._memory_llm._temperature, 1)
+            self.assertEqual(agent._memory_llm._reasoning_effort, "high")
+            asyncio.run(agent._memory_llm.call(prompt="public", system="upstream"))
+        self.assertEqual(seen[0]["max_tokens"], 8192)
+        self.assertEqual(seen[0]["thinking"], {"type": "adaptive"})
+        self.assertEqual(seen[0]["timeout"], 300)
+        self.assertEqual(DisabledActorLLM.calls, 0)
+
     def test_launcher_docker_inspect_failure_keeps_terminal_and_cleanup(self):
         with TemporaryDirectory() as directory:
             root = Path(directory) / "fresh_run"

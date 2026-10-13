@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -66,9 +67,18 @@ async def serve(args: argparse.Namespace) -> None:
     if requests == responses or requests.is_symlink() or responses.is_symlink():
         raise RuntimeError("PMA spool identity invalid")
     private.mkdir(parents=True)
+    profile = None
+    profile_path = os.environ.get("PMA_MEMORY_PROFILE_FILE")
+    if profile_path:
+        raw_profile = Path(profile_path).resolve(strict=True).read_bytes()
+        expected_hash = os.environ.get("PMA_MEMORY_PROFILE_SHA256")
+        if not expected_hash or hashlib.sha256(raw_profile).hexdigest() != expected_hash:
+            raise RuntimeError("PMA memory profile identity mismatch")
+        profile = json.loads(raw_profile)["claude_monitor_opus48"]
     agent = construct_upstream(private / "upstream_agent",
                                memory_api_base=os.environ.get("PMA_MEMORY_API_BASE"),
-                               memory_api_key=os.environ.get("PMA_MEMORY_API_KEY"))
+                               memory_api_key=os.environ.get("PMA_MEMORY_API_KEY"),
+                               memory_profile=profile)
     if args.fake_memory:
         from harbor.llms.base import LLMResponse
 

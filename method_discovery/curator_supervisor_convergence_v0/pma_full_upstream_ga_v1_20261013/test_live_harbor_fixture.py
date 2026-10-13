@@ -70,7 +70,7 @@ def run(args):
     worker_env['LITELLM_LOCAL_MODEL_COST_MAP'] = 'True'
     worker_env['PYTHONPATH'] = os.pathsep.join((str(STAGE),
         str(STAGE / 'vendor/pma_89e5c0d/src'),
-        str(STAGE / 'vendor/pma_89e5c0d/external/harbor')))
+        str(STAGE / 'vendor/pma_89e5c0d/external/harbor/src')))
     worker_out = (root / 'archive/worker.stdout.log').open('wb')
     worker_err = (root / 'archive/worker.stderr.log').open('wb')
     worker = harbor = None

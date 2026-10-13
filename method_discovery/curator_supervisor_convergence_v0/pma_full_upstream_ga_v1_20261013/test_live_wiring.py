@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from . import live_launcher, pma_harbor_hooks
+from . import batch_controller, live_launcher, pma_harbor_hooks
 
 
 def write_json(path: Path, value: dict) -> str:
@@ -20,7 +20,7 @@ def write_json(path: Path, value: dict) -> str:
 
 
 class LiveWiringTests(unittest.TestCase):
-    def test_missing_pma_credential_rejects_b_before_preparation(self):
+    def test_missing_pma_profile_rejects_b_before_preparation(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             manifest = root / 'manifest.json'
@@ -30,10 +30,10 @@ class LiveWiringTests(unittest.TestCase):
             write_json(auth, {'execution_authorized': True,
                               'manifest_sha256': manifest_hash})
             args = SimpleNamespace(manifest=str(manifest), authorization=str(auth),
-                                   condition='B', run_root=str(root / 'uncreated'))
-            with (patch.dict(os.environ, {'PMA_MEMORY_API_KEY': ''}),
-                  patch.object(live_launcher, '_prepare_common') as prepare):
-                with self.assertRaisesRegex(RuntimeError, 'credential'):
+                                   condition='B', run_root=str(root / 'uncreated'),
+                                   pma_profile_file=None)
+            with patch.object(live_launcher, '_prepare_common') as prepare:
+                with self.assertRaisesRegex(RuntimeError, 'profile'):
                     live_launcher.run_live(args)
                 prepare.assert_not_called()
             self.assertFalse((root / 'uncreated').exists())
@@ -117,6 +117,7 @@ class LiveWiringTests(unittest.TestCase):
                 runtime_root=str(base), worker_python=str(profile), harbor_python=str(profile),
                 bench_root=str(base), python_home='python',
                 task_profile='native_claude_cc_vibe_opus48')
+            args.pma_profile_file = None
             prepared = {'image_id': 'fixed-image', 'public_task_tree_sha256': 'public',
                         'ga_bundle_tree_sha256': 'source'}
             seen = []
@@ -145,6 +146,38 @@ class LiveWiringTests(unittest.TestCase):
             self.assertIn('--enable-verification', seen[0])
             self.assertNotIn('--disable-verification', seen[0])
             self.assertFalse(result['evaluation_released'])
+
+    def test_structured_exit_does_not_confuse_zero_reward_with_failure(self):
+        base = dict(primary_failure=None, harbor_return_code=0,
+                    cleanup_confirmed=True, frozen_product=True,
+                    evaluation_released=True, condition='A', native_reward=0)
+        self.assertTrue(live_launcher.live_status_success(base))
+        for change in (dict(harbor_return_code=1), dict(cleanup_confirmed=False),
+                       dict(primary_failure={'type': 'RuntimeError'}),
+                       dict(evaluation_released=False)):
+            self.assertFalse(live_launcher.live_status_success({**base, **change}))
+        self.assertFalse(live_launcher.live_status_success({**base, 'condition': 'B',
+                                                            'worker_return_code': 1}))
+
+    def test_serial_disposition_requires_identity_and_cleanup(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / 'archive'
+            archive.mkdir()
+            status = dict(primary_failure=None, harbor_return_code=1,
+                          cleanup_confirmed=True, remaining_containers=[],
+                          cleanup_errors=[], frozen_product=False,
+                          evaluation_released=False, condition='A')
+            self.assertEqual(batch_controller.disposition(status, root),
+                             'stop_batch_identity_unconfirmed')
+            (archive / 'agent_start_identity.json').write_text('{}', encoding='utf-8')
+            self.assertEqual(batch_controller.disposition(status, root),
+                             'arm_failed_isolated')
+            self.assertEqual(batch_controller.disposition({**status,
+                'cleanup_confirmed': False}, root), 'stop_batch_cleanup_or_status_unknown')
+            self.assertEqual(batch_controller.disposition({**status,
+                'primary_failure': {'type': 'RuntimeError'}}, root),
+                'stop_batch_shared_runtime_unknown')
 
 
 if __name__ == '__main__':

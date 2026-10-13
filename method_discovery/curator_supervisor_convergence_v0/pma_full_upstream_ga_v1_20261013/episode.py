@@ -42,14 +42,27 @@ def stable_initial_text(content: str | list[dict[str, Any]]) -> str:
 
 
 def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
-                       memory_api_key: str | None = None) -> MemoryEnabledTerminus2:
+                       memory_api_key: str | None = None,
+                       memory_profile: dict[str, Any] | None = None) -> MemoryEnabledTerminus2:
+    if memory_profile is not None:
+        if (memory_profile.get("provider"), memory_profile.get("api_mode"),
+                memory_profile.get("model"), memory_profile.get("thinking_type")) != (
+                "anthropic", "messages", "claude-opus-4-8", "adaptive"):
+            raise ValueError("PMA memory profile is not the frozen Opus 4.8 route")
+        if not memory_profile.get("apibase") or not memory_profile.get("apikey"):
+            raise ValueError("PMA memory profile lacks transport configuration")
     actor = DisabledActorLLM()
     agent = MemoryEnabledTerminus2(
         logs_dir=logs_dir, model_name="disabled-actor-not-ga-task-model",
         llm=actor, parser_name="xml", record_terminal_session=False,
-        memory_model_name="openrouter/anthropic/claude-opus-4.6",
-        memory_api_base=memory_api_base, memory_api_key=memory_api_key,
-        memory_temperature=0.3, memory_max_thinking_tokens=None,
+        memory_model_name=("anthropic/claude-opus-4-8" if memory_profile is not None
+                           else "openrouter/anthropic/claude-opus-4.6"),
+        memory_api_base=(memory_profile["apibase"] if memory_profile is not None
+                         else memory_api_base),
+        memory_api_key=(memory_profile["apikey"] if memory_profile is not None
+                        else memory_api_key),
+        memory_temperature=(memory_profile["temperature"] if memory_profile is not None
+                            else 0.3), memory_max_thinking_tokens=None,
         memory_keep_thinking=False, memory_use_structured_tools=True,
         trigger_interval=1, trigger_on_first_step=True,
         sliding_window_size=8, reset_status_on_episode=True,
@@ -58,6 +71,22 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
     )
     if agent._llm is not actor:
         raise RuntimeError("upstream actor backend was not disabled")
+    if memory_profile is not None:
+        # Transport-only adaptation. The upstream memory prompts, bank, trigger,
+        # two-phase process, and LiteLLM retry decorator remain unchanged.
+        memory_llm = agent._memory_llm
+        memory_llm._reasoning_effort = memory_profile["reasoning_effort"]
+        original_call = memory_llm.call
+
+        async def profiled_call(*, prompt, system, tools=None):
+            return await original_call(
+                prompt=prompt, system=system, tools=tools,
+                max_tokens=memory_profile["max_tokens"],
+                thinking={"type": "adaptive"},
+                timeout=memory_profile["read_timeout"],
+            )
+
+        memory_llm.call = profiled_call
     return agent
 
 
