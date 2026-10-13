@@ -8,15 +8,18 @@ from tempfile import TemporaryDirectory
 import time
 import unittest
 from types import SimpleNamespace
+import sys
 
 # Offline tests must not let LiteLLM fetch its optional price metadata.
 os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "GenericAgent-main"))
 
 from harbor.llms.base import LLMResponse
 from memory_agent.utils.visualize import visualize_memory, visualize_memory_trajectory
 
 from episode import DisabledActorLLM, PMAEpisode, construct_upstream
 from event_spool import EventClient, EventDispatcher
+from pma_upstream_bridge import UpstreamPMAClient
 
 
 class EpisodeTests(unittest.TestCase):
@@ -120,6 +123,34 @@ class EpisodeTests(unittest.TestCase):
             receipt = json.loads(next(responses.iterdir()).read_text(encoding="utf-8"))
             self.assertEqual(receipt["status"], "ok")
             self.assertNotIn("memory_stats", receipt["result"])
+
+    def test_actual_ga_client_event_matches_host_dispatcher(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            requests, responses = root / "shared" / "requests", root / "shared" / "responses"
+            requests.mkdir(parents=True)
+            responses.mkdir()
+            agent = construct_upstream(root / "agent")
+
+            async def fake_memory_call(*, prompt, system, tools=None):
+                return LLMResponse(content="<no_intervention/>", tool_calls=[])
+
+            agent._memory_llm.call = fake_memory_call
+            episode = PMAEpisode(agent, run_id="r", task_id="t", archive=root / "private")
+            dispatcher = EventDispatcher(episode, requests, responses)
+            ga_client = UpstreamPMAClient(run_id="r", task_id="t", requests=requests,
+                                          responses=responses, deadline=time.time() + 5)
+
+            async def run():
+                pending = asyncio.create_task(asyncio.to_thread(
+                    ga_client.exchange, 'task_start', initial_user_content='GA input'))
+                while not pending.done():
+                    await dispatcher.serve_once()
+                    await asyncio.sleep(.01)
+                self.assertEqual((await pending)['status'], 'started')
+                self.assertEqual(episode.last_sequence, 1)
+
+            asyncio.run(run())
 
     def test_unmodified_upstream_actor_loop_reference_first_two_steps(self):
         """Reference runs upstream _run_agent_loop, not the GA event adapter."""

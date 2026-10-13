@@ -195,5 +195,4 @@ class PMAEpisode:
         self.ended = True
         self.agent.save_memory(str(self.archive / "memory.json"))
         return {"status": "saved", "terminal": event.get("terminal"),
-                "actor_attempts": self.last_attempt,
-                "memory_stats": self.agent.get_memory_stats()}
+                "actor_attempts": self.last_attempt}

@@ -58,6 +58,16 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
     exit_reason = {}; response = None
     _hook('agent_before', locals())
     pma = None
+    pma_upstream = None
+    if os.environ.get('GA_PMA_UPSTREAM_ENABLED') == '1':
+        if (os.environ.get('GA_PMA_ENABLED') == '1' or
+                os.environ.get('GA_MONITOR_ENABLED') == '1' or
+                os.environ.get('GA_M0_MONITOR_ENABLED') == '1'):
+            raise ValueError('Complete upstream PMA cannot be combined with old PMA or Monitor')
+        from pma_upstream_bridge import UpstreamPMAClient
+        pma_upstream = UpstreamPMAClient.from_environment(
+            initial_content, turn_offset=turn_offset)
+        handler.parent.pma_upstream_bridge = pma_upstream
     if os.environ.get('GA_PMA_ENABLED') == '1':
         from pma_baseline.runtime import from_environment
         pma = from_environment(initial_content)
@@ -100,6 +110,11 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
                 # Upstream user_turn appends to the current input, not a new turn.
                 from pma_baseline.runtime import append_reminder
                 messages[-1] = append_reminder(messages[-1], reminder)
+        if pma_upstream is not None:
+            reminder = pma_upstream.before_actor_call(turn)
+            if reminder:
+                from pma_upstream_bridge import append_reminder
+                messages[-1] = append_reminder(messages[-1], reminder)
         _hook('llm_before', locals())
         response_gen = client.chat(messages=messages, tools=tools_schema)
         try:
@@ -114,6 +129,8 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             try: response_gen.close()
             except Exception: pass
             yield "\n[Task Agent response interrupted for monitor correction.]\n"
+            if pma_upstream is not None:
+                pma_upstream.actor_step(turn, status='provider_cancelled')
             messages = [{
                 "role": "user",
                 "content": "The previous response was interrupted before it became an accepted action.",
@@ -233,7 +250,13 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
                 tool_results.append({'tool_use_id': tid, 'content': datastr})
             next_prompts.add(outcome.next_prompt)
         if len(next_prompts) == 0 or exit_reason:
-            if len(handler._done_hooks) == 0 or exit_reason.get('result', '') == 'EXITED': break
+            if len(handler._done_hooks) == 0 or exit_reason.get('result', '') == 'EXITED':
+                if pma_upstream is not None:
+                    pma_upstream.actor_step(
+                        turn, status='completed', response=response.content or '',
+                        commands=[json.dumps(call, ensure_ascii=False, default=json_default)
+                                  for call in tool_calls])
+                break
             next_prompts.add(handler._done_hooks.pop(0))
         next_prompt = handler.turn_end_callback(response, tool_calls, tool_results, turn, '\n'.join(next_prompts), exit_reason)
         _hook('turn_after', locals())
@@ -242,6 +265,17 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
                         [json.dumps(call, ensure_ascii=False, default=json_default) for call in tool_calls],
                         json.dumps({'content': next_prompt, 'tool_results': tool_results},
                                    ensure_ascii=False, default=json_default))
+        if pma_upstream is not None:
+            step_status = ('provider_cancelled' if provider_error_response else
+                           'parse_error' if any(call['tool_name'] == 'bad_json'
+                                                for call in tool_calls) else 'normal')
+            pma_upstream.actor_step(
+                turn, status=step_status, response=response.content or '',
+                commands=[json.dumps(call, ensure_ascii=False, default=json_default)
+                          for call in tool_calls],
+                observation=json.dumps({'content': next_prompt, 'tool_results': tool_results},
+                                       ensure_ascii=False, default=json_default),
+                request_event_id=(provider_link or {}).get('provider_request_event_id'))
         messages = [{"role": "user", "content": next_prompt, "tool_results": tool_results}]   # just new message, history is kept in *Session
     if exit_reason: handler.turn_end_callback(response, tool_calls, tool_results, turn, '', exit_reason)
     final_outcome = exit_reason or {'result': 'MAX_TURNS_EXCEEDED'}

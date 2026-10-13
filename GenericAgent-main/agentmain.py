@@ -469,10 +469,18 @@ class GenericAgent:
                 self.history = handler.history_info
             except Exception as e:
                 print(f"Backend Error: {format_error(e)}")
+                task_terminal = {'result': 'EXCEPTION'}
                 display_queue.put({'done': full_resp + f'\n```\n{format_error(e)}\n```', 'source': source,
                                    'turn': curr_turn, 'outputs': turn_resps.copy(),
-                                   'task_terminal': {'result': 'EXCEPTION'}})
+                                   'task_terminal': task_terminal})
             finally:
+                upstream_pma = getattr(self, 'pma_upstream_bridge', None)
+                if upstream_pma is not None:
+                    try:
+                        upstream_pma.task_end(task_terminal or {'result': 'ABORTED_OR_UNKNOWN'})
+                    except Exception as pma_error:
+                        print(f"Upstream PMA task_end failed: {type(pma_error).__name__}")
+                    self.pma_upstream_bridge = None
                 if manual_inbox is not None:
                     manual_inbox.close()
                 if self.stop_sig: print('User aborted the task.')
