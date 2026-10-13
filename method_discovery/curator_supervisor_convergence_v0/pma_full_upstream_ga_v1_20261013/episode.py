@@ -159,7 +159,9 @@ class PMAEpisode:
 
     def _before_actor_call(self, event: dict[str, Any]) -> dict[str, Any]:
         attempt = event.get("actor_attempt")
-        if not self.started or self.ended or type(attempt) is not int or attempt != self.last_attempt + 1:
+        if (not self.started or self.ended or type(attempt) is not int
+                or attempt != self.last_attempt + 1
+                or self.last_attempt != self.last_completed_attempt):
             raise ValueError("non-monotonic actor attempt")
         self.agent._memory_step_in_episode = attempt
         self.last_attempt = attempt

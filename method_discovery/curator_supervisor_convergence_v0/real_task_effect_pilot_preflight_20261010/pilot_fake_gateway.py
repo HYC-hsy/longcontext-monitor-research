@@ -28,6 +28,11 @@ class State:
             sequence = self.sequence
             if route != 'monitor':
                 self.task_responses += 1
+                if os.environ.get('PMA_MULTITURN_FIXTURE') == '1' and self.task_responses == 1:
+                    return sequence, 'code_run', 'Inspecting the public workspace.', {
+                        'script': "printf 'PMA_OFFLINE_TOOL_OK\\n'",
+                        'type': 'bash', 'timeout': 60,
+                    }
                 return sequence, None, ('<summary>Offline fixture.</summary> '
                                         'Offline Task completion.'), {}
             if not self.reference_written:
@@ -93,7 +98,7 @@ def _sse(sequence, name, text, args):
                         'index': 0, 'content_block': {'type': 'text', 'text': ''}}))
         response.append(event('content_block_delta', {'type': 'content_block_delta',
                         'index': 0, 'delta': {'type': 'text_delta',
-                        'text': 'Offline fixture narrative.'}}))
+                        'text': text or 'Offline fixture narrative.'}}))
         response.append(event('content_block_stop', {'type': 'content_block_stop', 'index': 0}))
         response.append(event('content_block_start', {'type': 'content_block_start',
                         'index': 1, 'content_block': {'type': 'tool_use',

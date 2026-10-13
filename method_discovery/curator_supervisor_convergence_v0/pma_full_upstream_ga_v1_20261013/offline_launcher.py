@@ -92,6 +92,11 @@ def prepare(args) -> dict:
     source, compose = build_bundle(root / "bundle", ga_stage, runtime,
                                    args.python_home, args.task_profile, None, 15340)
     _offline_gateway(root, runtime, args.python_home)
+    if getattr(args, "multiturn_fixture", False):
+        fake_compose = json.loads(compose.read_text(encoding="utf-8"))
+        fake_compose["services"]["model-gateway"]["environment"] = {
+            "PMA_MULTITURN_FIXTURE": "1"}
+        compose.write_text(json.dumps(fake_compose, indent=2), encoding="utf-8")
     manifest = json.loads((STAGE / "FOUR_RUN_MANIFEST_DRAFT.json").read_text(encoding="utf-8"))
     if manifest["execution_authorized"] is not False:
         raise RuntimeError("PMA draft unexpectedly authorized")
@@ -127,8 +132,11 @@ def run_offline(args) -> dict:
     root = Path(args.run_root).resolve(strict=True)
     deadline = time.time() + args.timeout_sec
     worker = None
+    harbor = None
     worker_stdout = worker_stderr = None
     result = None
+    primary_failure = None
+    cleanup_errors = []
     try:
         if args.condition == "B":
             worker_stdout = (root / "archive" / "worker.stdout.log").open("wb")
@@ -144,6 +152,8 @@ def run_offline(args) -> dict:
                        "--requests", str(root / "control" / "spool" / "requests"),
                        "--responses", str(root / "control" / "spool" / "responses"),
                        "--deadline-epoch", str(deadline), "--fake-memory"]
+            if getattr(args, "multiturn_fixture", False):
+                command.append("--fake-memory-update")
             worker = subprocess.Popen(command, cwd=STAGE, env=env,
                                       stdout=worker_stdout, stderr=worker_stderr)
             ready = root / "host_private" / "worker_ready.json"
@@ -203,10 +213,9 @@ def run_offline(args) -> dict:
             harbor = subprocess.Popen(command, cwd=repo, env=env, stdout=out, stderr=err)
             mounts = []
             try:
-                until = time.time() + args.timeout_sec + 120
                 while harbor.poll() is None:
-                    if time.time() >= until:
-                        raise subprocess.TimeoutExpired(command, args.timeout_sec + 120)
+                    if time.time() >= deadline:
+                        raise subprocess.TimeoutExpired(command, args.timeout_sec)
                     current_mounts = capture_mounts(root)
                     if len(current_mounts) > len(mounts):
                         mounts = current_mounts
@@ -217,40 +226,66 @@ def run_offline(args) -> dict:
                 result = harbor
             finally:
                 if harbor.poll() is None:
-                    harbor.kill()
-                    harbor.wait(timeout=10)
+                    try:
+                        harbor.kill()
+                        harbor.wait(timeout=10)
+                    except BaseException as exc:
+                        cleanup_errors.append(f"harbor_stop_unknown:{type(exc).__name__}:{exc}")
         complete_mounts = capture_mounts(root, include_stopped=True)
         if len(complete_mounts) > len(mounts):
             mounts = complete_mounts
             (root / "archive" / "actual_container_mounts.json").write_text(
                 json.dumps(mounts, indent=2), encoding="utf-8")
+    except BaseException as exc:
+        primary_failure = {"type": type(exc).__name__, "message": str(exc)}
     finally:
         if worker is not None:
             if worker.poll() is None:
-                (root / "host_private" / "stop.request").touch()
                 try:
+                    (root / "host_private" / "stop.request").touch()
                     worker.wait(timeout=10)
                 except subprocess.TimeoutExpired:
-                    worker.kill()
-                    worker.wait(timeout=5)
-            worker_stdout.close()
-            worker_stderr.close()
+                    try:
+                        worker.kill()
+                        worker.wait(timeout=5)
+                    except BaseException as exc:
+                        cleanup_errors.append(f"worker_stop_unknown:{type(exc).__name__}:{exc}")
+                except BaseException as exc:
+                    cleanup_errors.append(f"worker_stop_unknown:{type(exc).__name__}:{exc}")
+            if worker.poll() is None:
+                cleanup_errors.append("worker_still_running")
+            if worker_stdout is not None:
+                worker_stdout.close()
+            if worker_stderr is not None:
+                worker_stderr.close()
     worker_exit = root / "host_private" / "worker_exit.json"
     mount_file = root / "archive" / "actual_container_mounts.json"
-    actual_mounts = json.loads(mount_file.read_text(encoding="utf-8")) if mount_file.is_file() else []
+    try:
+        actual_mounts = json.loads(mount_file.read_text(encoding="utf-8")) if mount_file.is_file() else []
+    except BaseException as exc:
+        cleanup_errors.append(f"mount_record_unreadable:{type(exc).__name__}:{exc}")
+        actual_mounts = []
     exposed_private = any(str(root / "host_private") in str(row.get("mounts"))
                           for row in actual_mounts)
-    cleanup_errors = clean_owned_containers(root)
-    remaining_containers = capture_mounts(root, include_stopped=True)
-    worker_receipt = (json.loads(worker_exit.read_text(encoding="utf-8"))
-                      if worker_exit.is_file() else None)
+    try:
+        cleanup_errors.extend(clean_owned_containers(root))
+        remaining_containers = capture_mounts(root, include_stopped=True)
+    except BaseException as exc:
+        cleanup_errors.append(f"container_cleanup_unknown:{type(exc).__name__}:{exc}")
+        remaining_containers = None
+    try:
+        worker_receipt = (json.loads(worker_exit.read_text(encoding="utf-8"))
+                          if worker_exit.is_file() else None)
+    except BaseException as exc:
+        cleanup_errors.append(f"worker_receipt_unreadable:{type(exc).__name__}:{exc}")
+        worker_receipt = None
     main = [row for row in actual_mounts if row["image_id"] == record["image_id"]]
     spool_ok = args.condition == "A" or (len(main) == 1 and
         {m["destination"]: m["rw"] for m in main[0]["mounts"]}.get(
             "/run/pma-bridge/requests") is True and
         {m["destination"]: m["rw"] for m in main[0]["mounts"]}.get(
             "/run/pma-bridge/responses") is False)
-    integration_ok = bool(result is not None and result.returncode == 0 and
+    integration_ok = bool(primary_failure is None and result is not None and result.returncode == 0 and
         not exposed_private and not remaining_containers and not cleanup_errors and
         len(main) == 1 and spool_ok and
         (args.condition == "A" or (worker.returncode == 0 and worker_receipt is not None
@@ -259,8 +294,12 @@ def run_offline(args) -> dict:
               "worker_return_code": None if worker is None else worker.returncode,
               "worker_private_mounted": exposed_private if actual_mounts else "unknown",
               "actual_container_count": len(actual_mounts),
-              "remaining_owned_containers": [row["id"] for row in remaining_containers],
+              "remaining_owned_containers": (None if remaining_containers is None else
+                                             [row["id"] for row in remaining_containers]),
               "cleanup_errors": cleanup_errors,
+              "primary_failure": primary_failure,
+              "cleanup_confirmed": remaining_containers == [] and not cleanup_errors
+              and (worker is None or worker.poll() is not None),
               "spool_mounts_verified": spool_ok, "integration_ok": integration_ok,
               "worker_exit_receipt": worker_receipt}
     (root / "archive" / "offline_result.json").write_text(
@@ -284,6 +323,7 @@ def main() -> None:
     parser.add_argument("--bench-root", required=True)
     parser.add_argument("--timeout-sec", type=int, default=180)
     parser.add_argument("--execution-authorized", action="store_true")
+    parser.add_argument("--multiturn-fixture", action="store_true")
     args = parser.parse_args()
     result = run_offline(args)
     print(json.dumps(result, indent=2))

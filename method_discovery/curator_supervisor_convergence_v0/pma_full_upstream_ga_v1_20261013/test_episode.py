@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 # Offline tests must not let LiteLLM fetch its optional price metadata.
 os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "GenericAgent-main"))
 
 from harbor.llms.base import LLMResponse
@@ -22,9 +23,43 @@ from episode import DisabledActorLLM, PMAEpisode, construct_upstream
 from event_spool import EventClient, EventDispatcher
 from pma_upstream_bridge import UpstreamPMAClient
 import worker_main
+import offline_launcher
 
 
 class EpisodeTests(unittest.TestCase):
+    def test_launcher_docker_inspect_failure_keeps_terminal_and_cleanup(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory) / "fresh_run"
+            for name in ("archive", "bundle/source", "public_task", "control"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            (root / "bundle/isolation.compose.json").write_text("{}", encoding="utf-8")
+            class FakeHarbor:
+                returncode = None
+                def poll(self):
+                    return self.returncode
+                def kill(self):
+                    self.returncode = -9
+                def wait(self, timeout):
+                    return self.returncode
+            fake = FakeHarbor()
+            args = SimpleNamespace(run_root=str(root), condition="A", timeout_sec=5,
+                runtime_root=directory, harbor_exe=sys.executable,
+                bench_root=directory, run_id="fixture", task="db-wal-recovery",
+                python_home="python", task_profile="fixture")
+            with (patch.object(offline_launcher, "prepare", return_value={
+                    "image_id": "fixture-image", "ga_bundle_tree_sha256": "fixture-tree"}),
+                  patch.object(offline_launcher, "_offline_gateway"),
+                  patch.object(offline_launcher.subprocess, "Popen", return_value=fake),
+                  patch.object(offline_launcher, "capture_mounts",
+                               side_effect=[RuntimeError("Docker inspect failed"), []]),
+                  patch.object(offline_launcher, "clean_owned_containers", return_value=[])):
+                result = offline_launcher.run_offline(args)
+            self.assertEqual(result["primary_failure"]["type"], "RuntimeError")
+            self.assertTrue(result["cleanup_confirmed"])
+            self.assertFalse(result["integration_ok"])
+            self.assertEqual(json.loads((root / "archive/offline_result.json").read_text())
+                             ["primary_failure"]["message"], "Docker inspect failed")
+
     def test_original_lifecycle_and_duplicate_suppression(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -58,6 +93,8 @@ class EpisodeTests(unittest.TestCase):
                 before = await episode.handle(event("before_actor_call", 2, actor_attempt=1))
                 self.assertIn("Remember X", before["reminder"])
                 self.assertEqual(before["delivery"], "returned_not_confirmed_in_ga_request")
+                with self.assertRaisesRegex(ValueError, "non-monotonic actor attempt"):
+                    await episode.handle(event("before_actor_call", 3, actor_attempt=2))
                 observed = await episode.handle(event(
                     "actor_step", 3, actor_attempt=1, step_status="normal",
                     response="PUBLIC_DIAGNOSTIC: inspect both files",

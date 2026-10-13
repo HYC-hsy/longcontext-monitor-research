@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import signal
 import time
+from types import SimpleNamespace
 
 from episode import PMAEpisode, construct_upstream
 from event_spool import EventDispatcher
@@ -73,7 +74,14 @@ async def serve(args: argparse.Namespace) -> None:
 
         async def offline_memory(*, prompt, system, tools=None):
             if tools:
+                if getattr(args, "fake_memory_update", False) and "PMA_OFFLINE_TOOL_OK" in prompt:
+                    call = SimpleNamespace(function=SimpleNamespace(
+                        name="memory_save_knowledge", arguments={
+                            "content": "Public tool returned PMA_OFFLINE_TOOL_OK"}))
+                    return LLMResponse(content="", tool_calls=[call])
                 return LLMResponse(content="", tool_calls=[])
+            if getattr(args, "fake_memory_update", False) and "PMA_OFFLINE_TOOL_OK" not in prompt:
+                return LLMResponse(content="<no_intervention/>")
             return LLMResponse(content="<context_for_action>Offline PMA reminder.</context_for_action>")
 
         agent._memory_llm.call = offline_memory
@@ -144,6 +152,7 @@ def main() -> None:
     parser.add_argument("--responses", required=True)
     parser.add_argument("--deadline-epoch", type=float, required=True)
     parser.add_argument("--fake-memory", action="store_true")
+    parser.add_argument("--fake-memory-update", action="store_true")
     asyncio.run(serve(parser.parse_args()))
 
 
