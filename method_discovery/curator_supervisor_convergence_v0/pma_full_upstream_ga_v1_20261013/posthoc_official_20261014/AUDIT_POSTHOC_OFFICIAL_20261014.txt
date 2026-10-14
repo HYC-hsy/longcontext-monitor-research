@@ -1,0 +1,111 @@
+OFFICIAL-BLOB RECONSTRUCTED POSTHOC ARTIFACT EVALUATION
+Date: 2026-10-14. Baseline archive: b1fe2a5a252fb3d5f7c426ffdcee14f5283069fb.
+
+Scope
+No Task, PMA, provider, training or scoring-model calls; no original Agent
+resumption. Native evaluator calls: exactly four, one per frozen product.
+Original live_batch_retry_20261014 and first posthoc_20261014 remain unchanged.
+These are new reconstructed posthoc artifact evaluations, not original online
+scores or a complete restoration of the live process/environment.
+
+Official byte provenance amendment
+Fixed source: harbor-framework/terminal-bench-2 Git commit
+2fd12b88aafdd04a52c298e3940bcb189f9766d6. A shallow object fetch
+verified FETCH_HEAD, then export_official_evaluator.py enumerated ls-tree and
+read each blob by git cat-file into binary write_bytes. No Windows text-worktree
+copy, encoding redirect, test rewrite, removed --ctrf or global dos2unix.
+Complete four-file list, Git blob IDs, modes, bytes, SHA256, CR/LF and BOM
+counts are in PROVENANCE_AMENDMENT.json. In particular:
+DB test.sh: 4770437ea96c3cc84684b4f99d55fb148fcac09f9ea1e8ef49de487716e6c334
+Code test.sh: f1611da693cb4cfc5e8482698c6a1858a5c67220ae9db89b50aed66584e9b17f
+Both have zero CRLF and no BOM. The previous manifest's test.sh identities
+describe newline-converted Windows bytes; they are retained, not overwritten.
+New tests are a separate namespace and mounted read-only.
+
+Authorization and mechanical preflight
+AUTHORIZATION_SCOPE.json binds the four tar hashes/order and caps each new
+evaluator start at one. The new output root is runs_v2; prior outputs were not
+deleted to bypass one-use protection. The official images were checked against
+the frozen RepoDigest, image configuration ID and linux/amd64 platform.
+In each task image, a disposable container used --user 0, --network bridge,
+--cpus 1, --memory 2048m, an empty volume-nocopy /app, the new /tests read-only
+bind, a writable /logs/verifier bind, workdir /app and a sleep main process.
+No candidate artifact was mounted during either preflight. Docker inspect,
+in-container find/sha256sum of every /tests file, bash -n, Python AST parse
+without import or test collection, and actual dependency commands were checked.
+DB checked apt-get/curl, the fixed uv 0.9.5 install, environment loading,
+uvx Python 3.13/pytest 8.4.1/pytest-json-ctrf 0.3.5 and --ctrf availability.
+Code checked the actual pip executable and `pip install`, python -m pytest,
+plugin/--ctrf and writable logs, not merely python -m pip. Both preflights
+passed and their resources were positively removed. Full commands, timings,
+stdout, stderr and exit codes: runs_v2/preflight/* and runs_v2/identity_preflight/.
+
+Precise candidate restoration and execution
+For each arm, the original writers_stopped/sidecar_clean proof, tar bytes and
+SHA256 were checked against its original archive. A fresh volume-nocopy /app
+was proven empty before `docker cp - CONTAINER:/app` from the exact frozen tar.
+The immediate /app copy-back manifest was compared with the frozen tar's
+files, modes and content hashes. No missing WAL or recovered.json was restored
+from the base image. The two code arms also verified bottle imports from
+/app/bottle.py. In the actual candidate container immediately before each
+native invocation, image/mount identity, all /tests filenames and every file
+hash, and bash -n were checked again. The native command was exactly
+`docker exec -w /app CONTAINER bash /tests/test.sh`, 900-second timeout.
+The original /app tar remains read-only; pre_eval_app.tar and post_eval_app.tar
+record the separate disposable evaluation copies. Original system packages,
+environment variables and non-/app state are not fully restored by an /app
+artifact reconstruction. Same-task A/B used the same pinned image, official
+test blobs, resource/network/user/mount setup and script dependencies; all
+actual installation output is preserved rather than inferred equal from tags.
+
+New results, kept separate from the original batch
+DB A: frozen tar 3a6796614f3852190a2de3fb2866e43ee3b04ef398e3427e97dfe4f045e68cde;
+native script exit 0, CTRF 7 collected/executed, 0 passed, 7 failed;
+new reconstructed reward 0. The missing recovered.json and related behavior
+were allowed to fail normally, not repaired or supplemented.
+DB B: frozen tar 9e0f0eb4d1a1e925385cd6ceef2688a542cdf6e222933ddc7303b3d7c78da88b;
+native script exit 0, CTRF 7 collected/executed, 5 passed, 2 failed;
+new reconstructed reward 0. The failed tests are recovered_data_completeness
+and wal_was_decrypted; full output and assertions are retained.
+Code B: frozen tar ae7b2326db6f3bc316836a2dca210c7e91f67ca24624e3b95ca7ae2352ff9530;
+native script exit 0, original repo CTRF 367/367 passed, extra CTRF 6/6
+passed; new reconstructed reward 1.
+Code A: frozen tar 9331ee3f62180cb3eaf20d9a8834a60ddce634d8c3848a87d688252a5b13fa3b;
+native script exit 0, original repo CTRF 367/367 passed, extra CTRF 6/6
+passed; new reconstructed reward 1.
+All four are classification=candidate_result under the mechanical complete
+test-report rule. Native script exit 0 alone was not treated as correctness.
+Full per-test CTRF, native stdout/stderr, installer logs, reward files,
+attempt times, container IDs, snapshots and cleanup records reside under
+runs_v2/{db_a,db_b,code_b,code_a}/. RESULT_TABLE.json is the compact index.
+Every owned candidate/preflight container and volume was removed and verified
+absent; no remaining named posthoc resources were found.
+
+Original-vs-new distinction
+Original DB A and code A remain completion-gate-denied / not evaluated in the
+online batch. Original DB B and code B retain their historical reward=0 files
+with evaluator infrastructure failure logs. The first posthoc round remains
+DB A script-byte failure and three not started. This new round does not
+overwrite, retroactively correct, or substitute for any of those records.
+CURRENT_TASK_DONE does not imply task correctness. These exposed development
+cases do not support a statistical or general causal PMA conclusion.
+
+Code, commands and hashes
+Full code diff is in the delivery Git commit: export_official_evaluator.py,
+posthoc_official_eval.py and posthoc_official_file_index.py plus byte-preserving
+.gitattributes scope. Export command:
+`py -3.13 -m method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.export_official_evaluator --source-git E:/pma-posthoc-official-source-20261014`
+Preflight command:
+`py -3.13 -m method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.posthoc_official_eval preflight` (exit 0)
+Evaluation command:
+`py -3.13 -m method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.posthoc_official_eval evaluate` (exit 0)
+Each native nested command and its exact start/end/exit/output is separately
+recorded in the corresponding arm directory. FILE_HASHES.json indexes every
+new staged/output file other than itself, with byte size and SHA256; independent
+readback was checked. No private credential or model endpoint is in this pack.
+
+Limitations retained
+Old PMA reminder return cannot be upgraded to confirmed Task delivery; the
+original Task provider_request_ready records were hash-only. New evaluator
+output did not regenerate missing historical request bodies. Assessment of
+method effect is reserved for independent audit.
