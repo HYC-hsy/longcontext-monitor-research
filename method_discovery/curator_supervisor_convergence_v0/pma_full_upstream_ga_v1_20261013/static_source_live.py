@@ -11,10 +11,9 @@ import subprocess
 import time
 from typing import Any, Callable
 
-import litellm
-
 from static_source_screen import HERE, MANIFEST, MANIFEST_V2, ordered_slots, projected_events, sha256, verify_public_projection
 from episode import PMAEpisode, construct_upstream
+import litellm
 
 
 def append_json(path: Path, row: dict) -> None:
