@@ -87,7 +87,8 @@ async def serve(args: argparse.Namespace) -> None:
     agent = construct_upstream(private / "upstream_agent",
                                memory_api_base=os.environ.get("PMA_MEMORY_API_BASE"),
                                memory_api_key=os.environ.get("PMA_MEMORY_API_KEY"),
-                               memory_profile=profile)
+                               memory_profile=profile,
+                               research_candidate=args.research_candidate)
     if args.fake_memory:
         from harbor.llms.base import LLMResponse
 
@@ -111,7 +112,8 @@ async def serve(args: argparse.Namespace) -> None:
                                  deadline_epoch=args.deadline_epoch)
     (private / "worker_ready.json").write_text(json.dumps({
         "run_id": args.run_id, "task_id": args.task_id,
-        "deadline_epoch": args.deadline_epoch, "fake_memory": args.fake_memory},
+        "deadline_epoch": args.deadline_epoch, "fake_memory": args.fake_memory,
+        "research_candidate": args.research_candidate},
         sort_keys=True), encoding="utf-8")
     stopped = asyncio.Event()
     for name in ("SIGTERM", "SIGINT"):
@@ -173,6 +175,7 @@ def main() -> None:
     parser.add_argument("--deadline-epoch", type=float, required=True)
     parser.add_argument("--fake-memory", action="store_true")
     parser.add_argument("--fake-memory-update", action="store_true")
+    parser.add_argument("--research-candidate", choices=("U", "S", "R"), default="U")
     asyncio.run(serve(parser.parse_args()))
 
 

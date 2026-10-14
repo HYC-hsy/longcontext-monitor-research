@@ -43,7 +43,10 @@ def stable_initial_text(content: str | list[dict[str, Any]]) -> str:
 
 def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
                        memory_api_key: str | None = None,
-                       memory_profile: dict[str, Any] | None = None) -> MemoryEnabledTerminus2:
+                       memory_profile: dict[str, Any] | None = None,
+                       research_candidate: str = "U") -> MemoryEnabledTerminus2:
+    if research_candidate not in {"U", "S", "R"}:
+        raise ValueError("unknown research candidate")
     if memory_profile is not None:
         if (memory_profile.get("provider"), memory_profile.get("api_mode"),
                 memory_profile.get("model"), memory_profile.get("thinking_type")) != (
@@ -71,6 +74,17 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
     )
     if agent._llm is not actor:
         raise RuntimeError("upstream actor backend was not disabled")
+    if research_candidate != "U":
+        # Preserve the original trigger, process, two provider calls, BM25 and
+        # reminder consumption. Only the bank and prompt/tool adapters differ.
+        from source_agent import SourceMemoryAgent
+        from source_memory import SourceMemory
+        bank = SourceMemory()
+        agent._memory = bank
+        agent._memory_agent = SourceMemoryAgent(
+            variant=research_candidate, llm=agent._memory_llm, memory=bank,
+            keep_thinking=False, use_structured_tools=True)
+        agent._research_candidate = research_candidate
     if memory_profile is not None:
         # Transport-only adaptation. The upstream memory prompts, bank, trigger,
         # two-phase process, and LiteLLM retry decorator remain unchanged.
@@ -154,6 +168,18 @@ class PMAEpisode:
             else:
                 raise ValueError("unknown PMA event kind")
             self._record(event, result)
+            candidate_agent = self.agent._memory_agent
+            if hasattr(candidate_agent, "last_delivery_status"):
+                with (self.archive / "candidate_audit.jsonl").open("a", encoding="utf-8") as stream:
+                    stream.write(json.dumps({
+                        "event_id": event_id, "kind": kind,
+                        "candidate": candidate_agent.variant,
+                        "phase2_status": candidate_agent.last_delivery_status,
+                        "reminder_memory_refs": candidate_agent.last_reminder_refs,
+                        "coordination": candidate_agent.coordination,
+                    }, ensure_ascii=False, sort_keys=True) + "\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
             if kind == "task_end" and result.get("status") == "saved":
                 self.ended = True
             self.last_sequence = sequence
@@ -171,6 +197,9 @@ class PMAEpisode:
         self.agent._pending_injection = None
         self.agent._injection_used = False
         self.agent._task_description = text
+        if hasattr(self.agent._memory, "register_source"):
+            self.agent._memory.register_source(event["event_id"], "task_instruction",
+                                               text, event["sequence"])
         if self.agent._reset_status_on_episode:
             self.agent._memory.update_status("")
         if self.agent._reset_knowledge_on_episode:
@@ -194,6 +223,11 @@ class PMAEpisode:
             raise ValueError("non-monotonic actor attempt")
         self.agent._memory_step_in_episode = attempt
         self.last_attempt = attempt
+        candidate_agent = self.agent._memory_agent
+        if hasattr(candidate_agent, "pending_refs_valid") and self.agent._pending_injection:
+            if not candidate_agent.pending_refs_valid():
+                self.agent._pending_injection = None
+                candidate_agent.last_delivery_status = "invalid_reference_no_delivery"
         reminder = self.agent._get_memory_system_prompt()
         return {"status": "reminder" if reminder else "silent", "reminder": reminder,
                 "actor_attempt": attempt, "delivery": "returned_not_confirmed_in_ga_request"}
@@ -226,8 +260,26 @@ class PMAEpisode:
         if plan is not None and not isinstance(plan, str):
             raise ValueError("plan must be text or absent")
         step = attempt + 1
+        if hasattr(self.agent._memory, "register_source"):
+            bank = self.agent._memory
+            bank.register_source(event["event_id"] + ":response", "agent_report",
+                                 analysis, event["sequence"])
+            bank.register_source(event["event_id"] + ":observation", "tool_observation",
+                                 observation, event["sequence"])
+            # Only handles actually present in the upstream task+window context
+            # can be cited for a new assertion in this trigger.
+            recent = self.agent._accumulated_observations[1:][
+                -(self.agent._sliding_window_size - 1):]
+            previous = [item.get("_source_event_id") for item in recent]
+            bank.current_source_ids = [
+                source_id for source_id in bank.sources
+                if source_id == next(iter(bank.sources))
+                or any(source_id.startswith(str(event_id) + ":") for event_id in previous)
+                or source_id.startswith(event["event_id"] + ":")]
         self.agent._accumulate_step(step=step, observation=observation,
                                     analysis=analysis, plan=plan, commands=commands)
+        if hasattr(self.agent._memory, "register_source"):
+            self.agent._accumulated_observations[-1]["_source_event_id"] = event["event_id"]
         triggered, reason = self.agent._trigger.should_trigger(step_count=step)
         if triggered:
             await self.agent._trigger_memory_agent(step_count=step)
