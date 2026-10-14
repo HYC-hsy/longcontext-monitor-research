@@ -22,6 +22,9 @@ from .six_task_plan import ORDER
 
 STAGE = Path(__file__).resolve().parent
 SOURCE_FILES = (
+    'long_context_bench/adapters/harbor_ga_agent.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'archive_six_task_native_base.py',
     'long_context_bench/scripts/isolated_run_bundle.py',
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'batch_controller.py',
@@ -40,6 +43,8 @@ SOURCE_FILES = (
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'pma_harbor_hooks.py',
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'worker_main.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'six_task_assets.py',
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'six_task_plan.py',
@@ -54,6 +59,11 @@ EVIDENCE_FILES = (
     'fixtures/09/archive/fixture_result.json',
     'fixtures/10/archive/fixture_result.json',
     'fixtures/11/archive/fixture_result.json',
+    'fixtures/13/archive/fixture_result.json',
+    'fixtures/16/archive/fixture_result.json',
+    'controller_entry/batch.json',
+    'controller_entry/run-1/archive/live_result.json',
+    'controller_entry/run-1/archive/agent_start_identity.json',
 )
 
 def _sha(path: Path) -> str:
@@ -108,7 +118,7 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
         separators=(',', ':')).encode('utf-8')).hexdigest()
     certification = None
     if evidence is not None:
-        if evidence != STAGE / 'six_task_native_base_20261014':
+        if evidence != STAGE / 'six_task_native_base_20261014_v3':
             raise RuntimeError('unexpected native-base evidence namespace')
         checkout = STAGE.parents[2]
         certification = {

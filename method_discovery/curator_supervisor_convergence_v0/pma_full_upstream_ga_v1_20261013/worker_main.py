@@ -158,6 +158,7 @@ async def serve(args: argparse.Namespace) -> None:
             (private / "worker_stopped_without_task_end.json").write_text(
                 json.dumps(outcome, sort_keys=True), encoding="utf-8")
         (private / "worker_exit.json").write_text(json.dumps({
+            "run_id": args.run_id, "task_id": args.task_id,
             "task_end_saved": episode.ended and reason == "task_end",
             "reason": reason, "ended_epoch": time.time()}, sort_keys=True), encoding="utf-8")
 

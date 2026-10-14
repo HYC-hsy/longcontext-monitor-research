@@ -225,7 +225,9 @@ class NativeSharedTrialHooks(PMATrialHooks):
                 raise RuntimeError('native PMA sidecar clearance unavailable')
             await asyncio.sleep(.05)
         clearance = json.loads(cleared.read_text(encoding='utf-8'))
-        if clearance != {'run_id': self.spec['run_id'], 'clean': True}:
+        if (clearance.get('run_id') != self.spec['run_id'] or
+                clearance.get('clean') is not True or
+                clearance.get('stopped') is not True):
             raise RuntimeError('native PMA sidecar not stopped')
         if await self._main_id() != self.container_id:
             raise RuntimeError('native main container replaced before verification')
@@ -235,12 +237,31 @@ class NativeSharedTrialHooks(PMATrialHooks):
             ['stop', 'model-gateway'])
         top = await asyncio.to_thread(subprocess.run, ['docker', 'top', self.container_id],
                                       text=True, capture_output=True, timeout=30)
+        first_top = top.stdout
+        if top.returncode == 0 and 'agentmain.py' in top.stdout.lower():
+            # Harbor cancellation can stop the host exec while its container
+            # child survives. Target only GA's process, then prove quiescence.
+            stopped = await asyncio.to_thread(subprocess.run,
+                ['docker', 'exec', self.container_id, 'sh', '-c',
+                 "pkill -TERM -f 'agentmain[.]py'; rc=$?; test $rc -eq 0 -o $rc -eq 1"],
+                text=True, capture_output=True, timeout=30)
+            if stopped.returncode:
+                raise RuntimeError('native GA process stop failed')
+            await asyncio.sleep(2)
+            top = await asyncio.to_thread(subprocess.run,
+                ['docker', 'top', self.container_id], text=True,
+                capture_output=True, timeout=30)
+        _atomic(self.archive / 'writer_termination_check.json', {
+            'run_id': self.spec['run_id'], 'before': first_top,
+            'after': top.stdout, 'docker_top_return_code': top.returncode})
         if top.returncode or 'agentmain.py' in top.stdout.lower() or (
                 _docker_top_pids(top.stdout) - self.baseline_pids):
             raise RuntimeError('native Task writer termination unconfirmed')
         _atomic(self.archive / 'agent_end_native.json', {
             'run_id': self.spec['run_id'], 'container_id': self.container_id,
             'sidecar_clean': True, 'gateway_stopped': True,
+            'pma_finalization': clearance.get('pma_finalization'),
+            'pma_worker_return_code': clearance.get('worker_return_code'),
             'writers_stopped': True, 'docker_top': top.stdout,
             'baseline_pids': sorted(self.baseline_pids),
             'agent_result_metadata': str(getattr(self.trial.result, 'agent_result', None)),

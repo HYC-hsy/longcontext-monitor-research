@@ -12,7 +12,8 @@ from pathlib import Path
 import subprocess
 import time
 
-from .live_launcher import _worker_clearance, _native_trial_result, _owned_volume_clearance
+from .live_launcher import (_worker_clearance, _advance_worker_stop,
+                            _native_trial_result, _owned_volume_clearance)
 from .offline_launcher import _prepare_common, capture_mounts, clean_owned_containers
 from .offline_launcher import STAGE
 from long_context_bench.scripts.isolated_run_bundle import digest_tree
@@ -156,8 +157,11 @@ def run(args):
                       expected_model='claude-opus-4-8',
                       python_home=args.python_home,
                       ga_source_sha256=record['ga_bundle_tree_sha256'],
-                      timeout_sec=225, max_turns=2,
-                      llm_config_name=args.task_profile,
+                      timeout_sec=225,
+                      max_turns=(0 if getattr(args, 'synthetic_process_nonzero', False) else 2),
+                      llm_config_name=('missing-fixture-profile' if
+                          getattr(args, 'synthetic_process_nonzero', False) else
+                          args.task_profile),
                       condition_id='pma-neutral')
         for key, value in kwargs.items():
             command += ['--ak', f'{key}={value}']
@@ -187,6 +191,7 @@ def run(args):
             harbor = subprocess.Popen(command, cwd=repo, env=env,
                                       stdout=out, stderr=err)
             writer_injected = False
+            pending_at = stop_at = None
             while harbor.poll() is None:
                 identity_file = root / 'archive/agent_start_identity.json'
                 if (getattr(args, 'synthetic_residual_writer', False) and
@@ -199,6 +204,8 @@ def run(args):
                     if injected.returncode:
                         raise RuntimeError('synthetic writer injection failed')
                     writer_injected = True
+                pending_at, stop_at = _advance_worker_stop(
+                    root, worker, deadline, pending_at, stop_at)
                 _worker_clearance(root, worker, args.run_id)
                 if time.time() >= deadline:
                     raise RuntimeError('fake fixture deadline')
@@ -260,6 +267,7 @@ def main():
     parser.add_argument('--tamper-tests', action='store_true')
     parser.add_argument('--synthetic-missing-report', action='store_true')
     parser.add_argument('--synthetic-agent-timeout', action='store_true')
+    parser.add_argument('--synthetic-process-nonzero', action='store_true')
     parser.add_argument('--synthetic-residual-writer', action='store_true')
     parser.add_argument('--harbor-source-root')
     args = parser.parse_args()

@@ -9,7 +9,8 @@ from pathlib import Path
 import shutil
 
 
-FIXTURES = ('02', '03', '04', '08', '09', '10', '11')
+FIXTURES = ('01', '02', '03', '04', '07', '08', '09', '10', '11',
+            '12', '13', '14', '15', '16')
 DENY = (b'sk-ant-', b'authorization: bearer ', b'"apikey":',
         b'"api_key":', b'"headers": {"authorization"')
 
@@ -25,11 +26,18 @@ def _copy(source: Path, destination: Path, inventory: list[dict]) -> None:
     digest = hashlib.sha256(raw).hexdigest()
     if hashlib.sha256(destination.read_bytes()).hexdigest() != digest:
         raise RuntimeError('fixture evidence readback mismatch')
-    inventory.append({'path': destination.as_posix(), 'bytes': len(raw),
-                      'sha256': digest, 'source': source.as_posix()})
+    source_run = next(parent for parent in source.parents
+                      if parent.name.startswith(('pma-native-shared-fixture-',
+                                                 'pma-v2-controller-')))
+    checkout = Path(__file__).resolve().parents[3]
+    inventory.append({'path': destination.relative_to(checkout).as_posix(),
+                      'bytes': len(raw), 'sha256': digest,
+                      'source_fixture': source_run.name,
+                      'source_relative': source.relative_to(source_run).as_posix()})
 
 
-def archive(source_parent: Path, target: Path) -> dict:
+def archive(source_parent: Path, target: Path,
+            controller_root: Path | None = None) -> dict:
     if target.exists():
         raise FileExistsError(target)
     target.mkdir(parents=True)
@@ -51,6 +59,16 @@ def archive(source_parent: Path, target: Path) -> dict:
             _copy(source, target / 'fixtures' / number / 'trial_result.json', inventory)
         for source in (run / 'jobs').rglob('reward.txt'):
             _copy(source, target / 'fixtures' / number / 'reward.txt', inventory)
+    if controller_root is not None:
+        sources = [controller_root / name for name in
+                   ('batch.json', 'controller.stdout.txt', 'controller.stderr.txt',
+                    'run-1/control/sidecar_stopped.json')]
+        sources += list((controller_root / 'run-1/archive').rglob('*'))
+        sources += list((controller_root / 'run-1/jobs').rglob('result.json'))
+        for source in sources:
+            if source.is_file():
+                _copy(source, target / 'controller_entry' /
+                      source.relative_to(controller_root), inventory)
     inventory.sort(key=lambda row: row['path'])
     result = {'schema': 'pma-ga-native-base-evidence-v1',
               'fixture_runs': list(FIXTURES), 'files': inventory}
@@ -65,9 +83,12 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--source-parent', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--controller-root', type=Path)
     args = parser.parse_args()
     print(json.dumps(archive(args.source_parent.resolve(strict=True),
-                             args.output.resolve(strict=False))))
+                             args.output.resolve(strict=False),
+                             args.controller_root.resolve(strict=True)
+                             if args.controller_root else None)))
 
 
 if __name__ == '__main__':

@@ -28,7 +28,10 @@ def _sha(path: Path) -> str:
 def _stage_verifier(root: Path, task: str, manifest: dict,
                     official_source_git: Path) -> dict:
     target = root / 'public_task' / 'tests'
-    if manifest.get('official_evaluator_commit') != OFFICIAL_COMMIT:
+    commits = [manifest.get(name) for name in
+               ('official_source_git_commit', 'official_evaluator_commit')
+               if name in manifest]
+    if not commits or any(commit != OFFICIAL_COMMIT for commit in commits):
         raise RuntimeError('PMA manifest does not identify fixed official evaluator blobs')
     expected = manifest['assets'][task]
     source = official_source_git.resolve(strict=True)
@@ -58,7 +61,7 @@ def _require_evaluation_state_contract(manifest: dict) -> None:
                 set(cert.get('evidence_files', {})) != set(EVIDENCE_FILES)):
             raise RuntimeError('six-task SHARED evidence/identity not frozen')
         checkout = STAGE.parents[2]
-        evidence = STAGE / 'six_task_native_base_20261014'
+        evidence = STAGE / 'six_task_native_base_20261014_v3'
         for name in SOURCE_FILES:
             if _sha(checkout / name) != cert['source_files'][name]:
                 raise RuntimeError('six-task SHARED source bytes changed')
@@ -79,10 +82,17 @@ def _require_evaluation_state_contract(manifest: dict) -> None:
         if (compared.get('only_metadata_differs') is not True or
                 compared.get('b_second_request_reminder_visible') is not True):
             raise RuntimeError('six-task A/B fake request identity not established')
+        controller = json.loads((evidence / 'controller_entry/batch.json').read_text(
+            encoding='utf-8'))
+        if (len(controller.get('arms', [])) != 1 or
+                len(controller.get('not_started', [])) != 23 or
+                controller['arms'][0]['order'] != 1 or
+                controller['arms'][0].get('status', {}).get('cleanup_confirmed') is not True):
+            raise RuntimeError('six-task controller-to-Harbor fixture incomplete')
         test_log = (evidence / 'unittest.stderr.txt').read_text(encoding='utf-16')
         match = re.search(r'Ran (\d+) tests', test_log)
-        if (match is None or int(match.group(1)) < 15 or
-                not test_log.rstrip().endswith('OK')):
+        if (match is None or int(match.group(1)) < 19 or
+                re.search(r'\bOK(?: \(skipped=\d+\))?\s*$', test_log) is None):
             raise RuntimeError('six-task offline test record incomplete')
         def fixture(number: str) -> dict:
             return json.loads((evidence / 'fixtures' / number / 'archive' /
@@ -95,7 +105,13 @@ def _require_evaluation_state_contract(manifest: dict) -> None:
                     'exception_type') != 'AgentTimeoutError' or
                 not fixture('10').get('native_reports_checked', {}).get(
                     'all_reports_executed') or
-                fixture('11').get('frozen_product')):
+                fixture('11').get('frozen_product') or
+                fixture('13').get('native_result', {}).get('exception_info', {}).get(
+                    'exception_type') != 'AgentTimeoutError' or
+                not fixture('13').get('verification_released') or
+                fixture('16').get('native_result', {}).get('exception_info', {}).get(
+                    'exception_type') != 'NonZeroAgentExitCodeError' or
+                not fixture('16').get('verification_released')):
             raise RuntimeError('six-task native lifecycle fixture outcomes changed')
         return
     raise RuntimeError('PMA live evaluation state/environment transition is not '
@@ -107,7 +123,8 @@ def _worker_clearance(root: Path, worker: subprocess.Popen | None, run_id: str) 
     if target.exists():
         return json.loads(target.read_text(encoding='utf-8'))
     if worker is None:
-        clearance = {'run_id': run_id, 'clean': True}
+        clearance = {'run_id': run_id, 'clean': True, 'stopped': True,
+                     'pma_finalization': 'not_enabled'}
     elif worker.poll() is None:
         return None
     else:
@@ -116,12 +133,43 @@ def _worker_clearance(root: Path, worker: subprocess.Popen | None, run_id: str) 
             exit_value = json.loads(receipt.read_text(encoding='utf-8'))
         except (OSError, ValueError):
             exit_value = None
-        clearance = {'run_id': run_id, 'clean': bool(
-            worker.returncode == 0 and isinstance(exit_value, dict) and
-            exit_value.get('task_end_saved') is True and
-            exit_value.get('reason') == 'task_end')}
+        identity_valid = (not isinstance(exit_value, dict) or
+                          exit_value.get('run_id', run_id) == run_id)
+        stopped_receipt = root / 'host_private/worker_stopped_without_task_end.json'
+        try:
+            stopped_value = json.loads(stopped_receipt.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            stopped_value = None
+        finalization = (dict(exit_value) if isinstance(exit_value, dict) else
+                        {'status': 'unknown_no_exit_receipt'})
+        if isinstance(stopped_value, dict):
+            finalization['local_save'] = stopped_value.get('local_save')
+            finalization['remote_execution'] = stopped_value.get('remote_execution')
+            finalization['stop_reason_detail'] = stopped_value.get('reason')
+        # A dead worker cannot issue another response. Saving memory is a
+        # separate outcome, not the definition of writer quiescence.
+        clearance = {'run_id': run_id, 'clean': identity_valid, 'stopped': True,
+                     'worker_pid': worker.pid, 'worker_return_code': worker.returncode,
+                     'pma_finalization': finalization}
     target.write_text(json.dumps(clearance, sort_keys=True), encoding='utf-8')
     return clearance
+
+
+def _advance_worker_stop(root: Path, worker: subprocess.Popen | None,
+                         deadline: float, pending_at: float | None,
+                         stop_at: float | None) -> tuple[float | None, float | None]:
+    if (root / 'control/agent_end_pending.json').is_file() and pending_at is None:
+        pending_at = time.monotonic()
+    if worker is None or worker.poll() is not None:
+        return pending_at, stop_at
+    if (time.time() >= deadline or
+            (pending_at is not None and time.monotonic() - pending_at >= 2)):
+        if stop_at is None:
+            (root / 'host_private/stop.request').touch()
+            stop_at = time.monotonic()
+        elif time.monotonic() - stop_at >= 10:
+            worker.kill()
+    return pending_at, stop_at
 
 
 def _native_trial_result(root: Path) -> dict:
@@ -182,6 +230,10 @@ def run_live(args) -> dict:
             authorized.get('execution_authorized') is not True or
             authorized.get('manifest_sha256') != _sha(manifest_path)):
         raise RuntimeError('PMA authorization absent or changed')
+    fixture = bool(getattr(args, 'zero_model_fixture', False))
+    if fixture != (manifest.get('zero_model_fixture_only') is True and
+                   authorized.get('zero_model_fixture_only') is True):
+        raise RuntimeError('zero-model fixture identity does not match both records')
     memory_profile_path = None
     if args.condition == 'B':
         if not args.pma_profile_file:
@@ -194,6 +246,20 @@ def run_live(args) -> dict:
     args.execution_authorized = False
     prepared = _prepare_common(args, fake_gateway=False)
     root = Path(args.run_root).resolve(strict=True)
+    if fixture:
+        from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.pilot_offline_harbor import _offline_gateway
+        compose_path = root / 'bundle/isolation.compose.json'
+        compose = json.loads(compose_path.read_text(encoding='utf-8'))
+        main_network = compose['services']['main'].pop('network_mode', None)
+        compose['services']['main']['network_mode'] = 'none'
+        compose_path.write_text(json.dumps(compose), encoding='utf-8')
+        _offline_gateway(root, Path(args.runtime_root), args.python_home)
+        compose = json.loads(compose_path.read_text(encoding='utf-8'))
+        if main_network is None:
+            compose['services']['main'].pop('network_mode')
+        else:
+            compose['services']['main']['network_mode'] = main_network
+        compose_path.write_text(json.dumps(compose), encoding='utf-8')
     if prepared['public_task_tree_sha256'] != manifest['assets'][args.task]['public_task_tree_sha256']:
         raise RuntimeError('PMA public task package differs from frozen identity')
     order = args.order
@@ -235,6 +301,7 @@ def run_live(args) -> dict:
     cleanup_errors = []
     result = None
     stop_requested_at = None
+    pending_end_at = None
     try:
         if args.condition == 'B':
             for name in ('worker.stdout.log', 'worker.stderr.log'):
@@ -254,7 +321,9 @@ def run_live(args) -> dict:
                 '--private-root', str(root / 'host_private'),
                 '--requests', str(root / 'control' / 'spool' / 'requests'),
                 '--responses', str(root / 'control' / 'spool' / 'responses'),
-                '--deadline-epoch', str(deadline)], cwd=STAGE, env=worker_env,
+                '--deadline-epoch', str(deadline),
+                *(['--fake-memory', '--fake-memory-update'] if fixture else [])],
+                cwd=STAGE, env=worker_env,
                 stdout=worker_logs[0], stderr=worker_logs[1])
             ready = root / 'host_private' / 'worker_ready.json'
             ready_limit = min(deadline, time.time() + 20)
@@ -284,7 +353,8 @@ def run_live(args) -> dict:
                         'pma_full_upstream_ga_v1_20261013.harbor_adapter:HarborGenericAgent'),
             '--model', 'claude-opus-4-8', '--mounts', json.dumps(mounts),
             '--extra-docker-compose', str(root / 'bundle/isolation.compose.json'),
-            '--n-concurrent', '1', '--max-retries', '0', '--yes', '--enable-verification',
+            '--n-concurrent', '1', '--max-retries', '0', '--yes',
+            '--disable-verification' if fixture else '--enable-verification',
             '--agent-timeout-multiplier', str(14400 /
                 manifest['assets'][args.task]['native_agent_seconds'])
                 if manifest['schema'] == 'pma-ga-live-manifest-v2' else '16',
@@ -296,7 +366,8 @@ def run_live(args) -> dict:
         kwargs = {'llm_no': 0, 'run_id': args.run_id, 'task_id': args.task,
                   'expected_model': 'claude-opus-4-8', 'python_home': args.python_home,
                   'ga_source_sha256': prepared['ga_bundle_tree_sha256'],
-                  'timeout_sec': 14400, 'max_turns': 300,
+                  'timeout_sec': 180 if fixture else 14400,
+                  'max_turns': 2 if fixture else 300,
                   'llm_config_name': args.task_profile, 'condition_id': 'pma-neutral'}
         for key, value in kwargs.items():
             command += ['--ak', f'{key}={value}']
@@ -340,12 +411,8 @@ def run_live(args) -> dict:
             outer_deadline = deadline + manifest['assets'][args.task].get(
                 'native_verifier_seconds', 900) + 600
             while harbor.poll() is None:
-                if worker is not None and worker.poll() is None and time.time() >= deadline:
-                    if stop_requested_at is None:
-                        (root / 'host_private/stop.request').touch()
-                        stop_requested_at = time.monotonic()
-                    elif time.monotonic() - stop_requested_at >= 10:
-                        worker.kill()
+                pending_end_at, stop_requested_at = _advance_worker_stop(
+                    root, worker, deadline, pending_end_at, stop_requested_at)
                 _worker_clearance(root, worker, args.run_id)
                 if time.time() >= outer_deadline:
                     raise subprocess.TimeoutExpired(command, 14400 +
@@ -402,14 +469,20 @@ def run_live(args) -> dict:
                     encoding='utf-8'))
             except (OSError, ValueError):
                 reports = None
+        clearance = (_worker_clearance(root, worker, args.run_id)
+                     if worker is None or worker.poll() is not None else None)
         status = {'schema': manifest['schema'], 'run_id': args.run_id,
                   'task': args.task, 'condition': args.condition,
                   'harbor_return_code': result, 'primary_failure': first_error,
                   'worker_return_code': None if worker is None else worker.poll(),
+                  'pma_finalization': clearance.get('pma_finalization')
+                      if isinstance(clearance, dict) else None,
+                  'sidecar_clearance': clearance,
                   'remaining_containers': None if remaining is None else [m['id'] for m in remaining],
                   'cleanup_errors': cleanup_errors,
                   'cleanup_confirmed': remaining == [] and not cleanup_errors and
                   (not native_shared or volumes.get('status') == 'clean') and
+                  isinstance(clearance, dict) and clearance.get('clean') is True and
                   (worker is None or worker.poll() is not None) and
                   (harbor is None or harbor.poll() is not None),
                   'frozen_product': frozen.is_file(), 'evaluation_released': release.is_file(),
@@ -461,6 +534,7 @@ def main() -> None:
     parser.add_argument('--task-profile', default='native_claude_cc_vibe_opus48')
     parser.add_argument('--pma-profile-file')
     parser.add_argument('--harbor-source-root')
+    parser.add_argument('--zero-model-fixture', action='store_true')
     parser.add_argument('--python-home', default='cpython-3.12.12-linux-x86_64-gnu')
     args = parser.parse_args()
     status = run_live(args)

@@ -45,3 +45,18 @@ class HarborGenericAgent(original.HarborGenericAgent):
         if __import__("os").environ.get("GA_RUN_ISOLATION") == "networked-host-keyed-v1":
             python_bin, _ = original._runtime_paths(self.python_home)
             await start_networked_transport(environment, python_bin, original.CONTAINER_GA)
+
+    async def run(self, instruction, environment, context) -> None:
+        try:
+            await super().run(instruction, environment, context)
+        except RuntimeError as exc:
+            metadata = getattr(context, 'metadata', None)
+            if (str(exc).startswith('GenericAgent did not complete one task turn:') and
+                    isinstance(metadata, dict) and
+                    metadata.get('run_id') == self.run_id and
+                    metadata.get('archive_status') == 'failed' and
+                    isinstance(metadata.get('wrapper_return_code'), int) and
+                    metadata['wrapper_return_code'] != 0):
+                from harbor.agents.installed.base import NonZeroAgentExitCodeError
+                raise NonZeroAgentExitCodeError(str(exc)) from exc
+            raise

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
@@ -20,6 +22,83 @@ from .export_official_evaluator import export_task
 
 
 class SixTaskNativeBaseTests(unittest.TestCase):
+    def test_worker_stop_is_separate_from_memory_save_status(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'control').mkdir()
+            private = root / 'host_private'
+            private.mkdir()
+            (private / 'worker_exit.json').write_text(json.dumps({
+                'run_id': 'fixture', 'task_end_saved': False,
+                'reason': 'host_stop'}), encoding='utf-8')
+            (private / 'worker_stopped_without_task_end.json').write_text(json.dumps({
+                'reason': 'host_stop', 'remote_execution': 'unknown',
+                'local_save': {'status': 'failed', 'error_type': 'OSError'}}),
+                encoding='utf-8')
+            worker = SimpleNamespace(pid=123, returncode=0, poll=lambda: 0)
+            clearance = live_launcher._worker_clearance(root, worker, 'fixture')
+            self.assertTrue(clearance['clean'])
+            self.assertFalse(clearance['pma_finalization']['task_end_saved'])
+            self.assertEqual(clearance['pma_finalization']['local_save']['status'], 'failed')
+
+    def test_batch_to_real_launcher_and_harbor_uses_fake_send_only(self):
+        if os.environ.get('PMA_ZERO_MODEL_INTEGRATION') != '1':
+            self.skipTest('explicit zero-model Docker integration not requested')
+        stage = Path(__file__).parent
+        source_manifest = json.loads((stage / 'six_task_discovery_20261014' /
+            'PMA_GA_6TASK_NATIVE_BASE_DRAFT_V2R6.json').read_text(encoding='utf-8'))
+        harbor_python = Path(os.environ['PMA_HARBOR_PYTHON']).resolve(strict=True)
+        root = Path(os.environ['PMA_ZERO_MODEL_EVIDENCE_ROOT']).resolve(strict=False)
+        if root.exists():
+            self.fail('zero-model integration output root already exists')
+        root.mkdir(parents=True)
+        try:
+            manifest = root / 'manifest.json'
+            auth = root / 'authorization.json'
+            source_manifest['zero_model_fixture_only'] = True
+            manifest.write_text(json.dumps(source_manifest), encoding='utf-8')
+            manifest_hash = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            head = subprocess.run(['git', 'rev-parse', 'HEAD'],
+                cwd=stage.parents[2], capture_output=True, text=True,
+                check=True).stdout.strip()
+            bindings = [dict(row, batch_id='zero-model-fixture',
+                config_sha256=source_manifest['config_sha256'],
+                run_id=f'zero-model-native-{row["order"]}',
+                run_root=str(root / f'run-{row["order"]}'))
+                for row in source_manifest['planned_order']]
+            auth.write_text(json.dumps({'execution_authorized': True,
+                'zero_model_fixture_only': True, 'manifest_sha256': manifest_hash,
+                'audited_code_commit': head, 'approved_arms': source_manifest['planned_order'],
+                'run_bindings': bindings, 'batch_id': 'zero-model-fixture',
+                'config_sha256': source_manifest['config_sha256']}), encoding='utf-8')
+            command = [str(harbor_python), '-m',
+                'method_discovery.curator_supervisor_convergence_v0.'
+                'pma_full_upstream_ga_v1_20261013.batch_controller',
+                '--zero-model-fixture', '--manifest', str(manifest),
+                '--authorization', str(auth), '--batch-result', str(root / 'batch.json'),
+                '--ga-source', os.environ['PMA_GA_SOURCE'],
+                '--runtime-root', os.environ['PMA_RUNTIME_ROOT'],
+                '--task-profile-file', os.environ['PMA_TASK_PROFILE'],
+                '--worker-python', str(harbor_python), '--harbor-python', str(harbor_python),
+                '--bench-root', os.environ['PMA_BENCH_ROOT'],
+                '--official-source-git', os.environ['PMA_OFFICIAL_GIT'],
+                '--harbor-source-root', os.environ['PMA_HARBOR_SOURCE']]
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=300)
+            (root / 'controller.stdout.txt').write_text(completed.stdout, encoding='utf-8')
+            (root / 'controller.stderr.txt').write_text(completed.stderr, encoding='utf-8')
+            self.assertEqual(completed.returncode, 1, completed.stderr)
+            batch = json.loads((root / 'batch.json').read_text(encoding='utf-8'))
+            self.assertEqual(len(batch['arms']), 1)
+            self.assertEqual(len(batch['not_started']), 23)
+            first = root / 'run-1'
+            self.assertTrue((first / 'archive/agent_start_identity.json').is_file())
+            self.assertTrue((first / 'archive/fake_provider_requests').is_dir())
+            self.assertFalse((first / 'archive/native_test_execution.json').exists())
+            self.assertFalse((first / 'archive/verification_released.json').exists())
+            self.assertEqual(batch['arms'][0]['status']['cleanup_confirmed'], True)
+        finally:
+            # The raw evidence is deliberately retained for the audit bundle.
+            pass
     def test_exact_24_slot_binding_and_duplicate_rejection(self):
         arms = [dict(order=o, task=t, repeat=r, condition=c) for o, t, r, c in ORDER]
         manifest = {'schema': 'pma-ga-live-manifest-v2',
@@ -75,7 +154,7 @@ class SixTaskNativeBaseTests(unittest.TestCase):
 
     def test_prepared_evidence_gate_binds_actual_source_and_raw_records(self):
         manifest_path = (Path(__file__).parent / 'six_task_discovery_20261014' /
-                         'PMA_GA_6TASK_NATIVE_BASE_DRAFT_V2.json')
+                         'PMA_GA_6TASK_NATIVE_BASE_DRAFT_V2R6.json')
         if not manifest_path.exists():
             self.skipTest('generated evidence-bound draft not present')
         manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
@@ -85,6 +164,27 @@ class SixTaskNativeBaseTests(unittest.TestCase):
         changed['native_shared_certification']['source_files'][name] = '0' * 64
         with self.assertRaises(RuntimeError):
             live_launcher._require_evaluation_state_contract(changed)
+
+    def test_v2_launcher_stages_fixed_git_source_and_rejects_disagreement(self):
+        source = os.environ.get('PMA_OFFICIAL_GIT')
+        if not source:
+            self.skipTest('fixed official Git source unavailable')
+        manifest_path = (Path(__file__).parent / 'six_task_discovery_20261014' /
+                         'PMA_GA_6TASK_NATIVE_BASE_DRAFT_V2R6.json')
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'public_task/tests').mkdir(parents=True)
+            identity = live_launcher._stage_verifier(
+                root, 'db-wal-recovery', manifest, Path(source))
+            self.assertEqual(identity['native_test_sh_sha256'],
+                             manifest['assets']['db-wal-recovery']['native_test_sh_sha256'])
+        for bad in ({**manifest, 'official_source_git_commit': '0' * 40},
+                    {**manifest, 'official_evaluator_commit': '0' * 40}):
+            with self.subTest(bad=bad.get('official_evaluator_commit')):
+                with TemporaryDirectory() as directory, self.assertRaises(RuntimeError):
+                    live_launcher._stage_verifier(Path(directory), 'db-wal-recovery',
+                                                  bad, Path(source))
         changed = copy.deepcopy(manifest)
         changed['native_shared_certification']['evidence_files']['image_checks.json'] = '0' * 64
         with self.assertRaises(RuntimeError):

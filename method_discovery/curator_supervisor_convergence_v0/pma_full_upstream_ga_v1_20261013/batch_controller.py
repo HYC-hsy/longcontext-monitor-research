@@ -49,6 +49,10 @@ def run_batch(args: argparse.Namespace) -> dict:
     authorization_path = Path(args.authorization).resolve(strict=True)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     granted = json.loads(authorization_path.read_text(encoding="utf-8"))
+    fixture = bool(getattr(args, 'zero_model_fixture', False))
+    if fixture != (manifest.get('zero_model_fixture_only') is True and
+                   granted.get('zero_model_fixture_only') is True):
+        raise RuntimeError('zero-model batch fixture identity mismatch')
     six_task = manifest.get("schema") == "pma-ga-live-manifest-v2"
     if six_task:
         bindings = validate_plan(manifest, granted)
@@ -101,6 +105,8 @@ def run_batch(args: argparse.Namespace) -> dict:
             "--run-root", binding["run_root"]]
         if six_task:
             command += ["--repeat", str(binding["repeat"])]
+        if fixture:
+            command += ['--zero-model-fixture']
         completed = subprocess.run(command, check=False)
         result_path = root / "archive" / "live_result.json"
         try:
@@ -130,6 +136,7 @@ def main() -> None:
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--pma-profile-file")
     parser.add_argument("--harbor-source-root")
+    parser.add_argument('--zero-model-fixture', action='store_true')
     parser.add_argument("--python-home", default="cpython-3.12.12-linux-x86_64-gnu")
     record = run_batch(parser.parse_args())
     print(json.dumps({"completed_or_attempted": len(record["arms"]),
