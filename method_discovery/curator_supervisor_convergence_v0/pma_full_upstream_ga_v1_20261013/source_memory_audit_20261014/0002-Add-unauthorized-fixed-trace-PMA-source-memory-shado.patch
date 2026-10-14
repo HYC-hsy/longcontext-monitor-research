@@ -1,0 +1,261 @@
+From f8e176a6f5208c0bc2817f7e227389011f5dc0a7 Mon Sep 17 00:00:00 2001
+From: HYC-hsy <3510069313@qq.com>
+Date: Wed, 14 Oct 2026 20:52:48 +0800
+Subject: [PATCH 2/3] Add unauthorized fixed-trace PMA source-memory shadow
+ entry
+
+---
+ .../static_source_screen.py                   | 166 ++++++++++++++++++
+ .../test_static_source_screen.py              |  67 +++++++
+ 2 files changed, 233 insertions(+)
+ create mode 100644 method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/static_source_screen.py
+ create mode 100644 method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_static_source_screen.py
+
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/static_source_screen.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/static_source_screen.py
+new file mode 100644
+index 00000000..537f3a8e
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/static_source_screen.py
+@@ -0,0 +1,166 @@
++"""Unauthorized-by-default, fixed-public-trace U/S/R shadow entry.
++
++The fake mode calls the pinned upstream PMA through PMAEpisode. It never runs GA,
++an evaluator, or a provider transport. This is not a historical PMA restoration.
++"""
++import argparse
++import asyncio
++import hashlib
++import json
++import os
++from pathlib import Path
++import re
++import sys
++from types import SimpleNamespace
++
++HERE = Path(__file__).resolve().parent
++VENDOR = HERE / "vendor" / "pma_89e5c0d"
++sys.path.insert(0, str(VENDOR / "src"))
++sys.path.insert(0, str(VENDOR / "external" / "harbor" / "src"))
++os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
++from harbor.llms.base import LLMResponse
++
++from episode import PMAEpisode, construct_upstream
++
++
++MANIFEST = HERE / "SOURCE_MEMORY_STATIC_SCREEN_DRAFT.json"
++FIELDS = {
++    "task_start": ("initial_user_content",),
++    "before_actor_call": ("actor_attempt",),
++    "actor_step": ("actor_attempt", "step_status", "response", "commands", "observation"),
++}
++
++
++def sha256(path: Path) -> str:
++    return hashlib.sha256(path.read_bytes()).hexdigest().upper()
++
++
++def projected_events(case: dict, run_id: str) -> list[dict]:
++    source = HERE / case["event_file"]
++    if sha256(source) != case["event_file_sha256"]:
++        raise ValueError("fixed public event archive identity mismatch")
++    public = HERE / case["public_event_file"]
++    if sha256(public) != case["public_event_file_sha256"]:
++        raise ValueError("fixed public Task event identity mismatch")
++    events = []
++    for line in source.read_text(encoding="utf-8").splitlines():
++        original = json.loads(line)["event"]
++        if original["sequence"] > case["inclusive_event_sequence"]:
++            break
++        kind = original["kind"]
++        if kind not in FIELDS:
++            raise ValueError("unexpected event before frozen cutoff")
++        event = {key: original[key] for key in FIELDS[kind] if key in original}
++        event.update(kind=kind, task_id=case["task"], run_id=run_id,
++                     event_id=f"shadow-{original['sequence']}-{original['event_id']}",
++                     sequence=original["sequence"])
++        events.append(event)
++    if not events or events[-1]["sequence"] != case["inclusive_event_sequence"]:
++        raise ValueError("cutoff sequence missing")
++    if [e["sequence"] for e in events] != list(range(1, len(events) + 1)):
++        raise ValueError("event sequence not contiguous")
++    return events
++
++
++class FakePublicTransport:
++    """Responses use only actual prompt/tool schema; unexpected sends fail closed."""
++
++    def __init__(self, path: Path, *, expected: int):
++        self.path = path
++        self.expected = expected
++        self.calls = 0
++        self.saved_once = False
++
++    async def __call__(self, *, prompt, system, tools=None):
++        self.calls += 1
++        if self.calls > self.expected:
++            raise AssertionError("unscripted request; no real transport fallback")
++        response = LLMResponse(content="<no_intervention/>")
++        if tools is not None:
++            response = LLMResponse(content="", tool_calls=[])
++            names = {item["function"]["name"] for item in tools}
++            if "memory_save_knowledge" in names and not self.saved_once:
++                match = re.search(r"## Visible public source handles \(quote exact text above\)\n(\[.*\])", prompt)
++                description = re.search(
++                    r"\[Task Description\]\n(.+?)(?:\n\n\[Recent Trajectory|\n\n## Your Task)",
++                    prompt, re.S)
++                if match and description:
++                    handles = json.loads(match.group(1))
++                    task_source = next((h for h in handles if h["role"] == "task_instruction"), None)
++                    quote = description.group(1)[:24]
++                    if task_source and quote and description.group(1).count(quote) == 1:
++                        function = SimpleNamespace(name="memory_save_knowledge", arguments={
++                            "content": "Review the original public task scope",
++                            "statement_type": "task_requirement",
++                            "source_refs": [{"event_id": task_source["event_id"],
++                                             "role": "task_instruction", "quote": quote}]})
++                        response = LLMResponse(content="", tool_calls=[SimpleNamespace(function=function)])
++                        self.saved_once = True
++        elif self.saved_once:
++            match = re.search(r"\[([A-Za-z0-9_-]+) v(\d+)\]", prompt)
++            if match:
++                response = LLMResponse(content=(
++                    "<context_for_action>Consider the original public task scope.</context_for_action>"
++                    f'<memory_refs>[{{"id":"{match.group(1)}","version":{match.group(2)}}}]</memory_refs>'))
++        row = {"logical_call": self.calls, "system": system, "prompt": prompt,
++               "tools": tools, "response_content": response.content,
++               "response_tool_calls": [vars(call.function) for call in (response.tool_calls or [])]}
++        with self.path.open("a", encoding="utf-8") as stream:
++            stream.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
++            stream.flush()
++            os.fsync(stream.fileno())
++        return response
++
++
++async def run_fake(manifest: dict, output: Path) -> list[dict]:
++    output.mkdir(parents=True, exist_ok=False)
++    results = []
++    for case in manifest["cases"]:
++        for variant in manifest["conditions"]:
++            run_id = f"shadow-{case['task']}-{variant.lower()}"
++            slot = output / run_id
++            slot.mkdir()
++            events = projected_events(case, run_id)
++            expected = (case["estimated_phase1_calls_per_condition"]
++                        + case["estimated_phase2_calls_per_condition"])
++            agent = construct_upstream(slot / "upstream", research_candidate=variant)
++            fake = FakePublicTransport(slot / "requests.jsonl", expected=expected)
++            agent._memory_llm.call = fake
++            episode = PMAEpisode(agent, run_id=run_id, task_id=case["task"],
++                                 archive=slot / "episode")
++            for event in events:
++                await episode.handle(event)
++            if fake.calls != expected:
++                raise AssertionError(f"logical call count {fake.calls} != {expected}")
++            agent.save_memory(str(slot / "memory.json"))
++            row = {"run_id": run_id, "task": case["task"], "variant": variant,
++                   "events": len(events), "logical_phase_calls": fake.calls,
++                   "provider_attempts": 0, "task_calls": 0, "native_evaluator_calls": 0,
++                   "task_completed": False, "input_sent": False,
++                   "event_sha256": case["event_file_sha256"],
++                   "request_sha256": sha256(fake.path)}
++            (slot / "result.json").write_text(json.dumps(row, indent=2), encoding="utf-8")
++            results.append(row)
++    (output / "summary.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
++    return results
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--manifest", type=Path, default=MANIFEST)
++    parser.add_argument("--output", type=Path, required=True)
++    parser.add_argument("--mode", choices=("fake", "live"), default="fake")
++    args = parser.parse_args()
++    manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
++    if manifest.get("execution_authorized") is not False:
++        raise ValueError("this static draft must remain unauthorized")
++    if args.mode != "fake":
++        raise PermissionError("real static provider dispatch requires a later authorization and entry")
++    rows = asyncio.run(run_fake(manifest, args.output))
++    print(json.dumps({"slots": len(rows), "logical_phase_calls": sum(r["logical_phase_calls"] for r in rows),
++                      "real_provider_attempts": 0}, sort_keys=True))
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_static_source_screen.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_static_source_screen.py
+new file mode 100644
+index 00000000..00974a4d
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_static_source_screen.py
+@@ -0,0 +1,67 @@
++"""End-to-end fixed-trace shadow entry checks; all provider calls intercepted."""
++import asyncio
++import json
++from pathlib import Path
++import subprocess
++import sys
++from tempfile import TemporaryDirectory
++import unittest
++
++from static_source_screen import HERE, MANIFEST, projected_events, run_fake
++
++
++class StaticScreenTests(unittest.TestCase):
++    def test_six_independent_slots_exact_calls_and_public_projection(self):
++        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
++        self.assertIs(manifest["execution_authorized"], False)
++        self.assertEqual(manifest["conditions"], ["U", "S", "R"])
++        with TemporaryDirectory() as directory:
++            root = Path(directory) / "shadow"
++            rows = asyncio.run(run_fake(manifest, root))
++            self.assertEqual(len(rows), 6)
++            self.assertEqual(sum(row["logical_phase_calls"] for row in rows), 210)
++            self.assertEqual([row["logical_phase_calls"] for row in rows], [28] * 3 + [42] * 3)
++            self.assertEqual(len({row["run_id"] for row in rows}), 6)
++            for row in rows:
++                self.assertEqual(row["provider_attempts"], 0)
++                self.assertFalse(row["input_sent"])
++                self.assertFalse(row["task_completed"])
++                slot = root / row["run_id"]
++                bank = json.loads((slot / "memory.json").read_text(encoding="utf-8"))
++                self.assertEqual(len(bank["knowledge"]), 0 if row["variant"] == "U" else 1)
++                self.assertFalse((slot / "episode" / "task_end.json").exists())
++                events = [json.loads(line)["event"] for line in
++                          (slot / "episode" / "events.jsonl").read_text(encoding="utf-8").splitlines()]
++                self.assertTrue(all("result" not in event and "thinking" not in event
++                                    and "old_memory_bank" not in event for event in events))
++                self.assertTrue(all(event["run_id"] == row["run_id"] for event in events))
++                requests = [json.loads(line) for line in
++                            (slot / "requests.jsonl").read_text(encoding="utf-8").splitlines()]
++                self.assertEqual(len(requests), row["logical_phase_calls"])
++                if row["variant"] != "U":
++                    self.assertIn("bound_evidence", requests[1]["prompt"])
++                    self.assertIn("<memory_refs>", requests[1]["response_content"])
++                    self.assertTrue(any(json.loads(line)["result"]["status"] == "reminder"
++                        for line in (slot / "episode" / "events.jsonl").read_text(encoding="utf-8").splitlines()))
++
++    def test_live_mode_rejected_before_any_provider_request(self):
++        with TemporaryDirectory() as directory:
++            output = Path(directory) / "must_not_exist"
++            result = subprocess.run([sys.executable, str(HERE / "static_source_screen.py"),
++                "--mode", "live", "--output", str(output)], capture_output=True, text=True)
++            self.assertNotEqual(result.returncode, 0)
++            self.assertIn("requires a later authorization", result.stderr)
++            self.assertFalse(output.exists())
++
++    def test_cutoff_identity_and_source_hashes(self):
++        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
++        for case in manifest["cases"]:
++            events = projected_events(case, "new-run")
++            self.assertEqual(len(events), case["inclusive_event_sequence"])
++            self.assertEqual(events[0]["kind"], "task_start")
++            self.assertTrue(any(e["kind"] == "actor_step" for e in events))
++            self.assertNotIn("result", events[0])
++
++
++if __name__ == "__main__":
++    unittest.main()
+-- 
+2.49.0.windows.1
+
