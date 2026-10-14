@@ -1,0 +1,158 @@
+SOURCE MEMORY S/R LIMITED REPAIR — ZERO-MODEL ENGINEERING AUDIT
+2026-10-14. Status: IMPLEMENTED_READY_FOR_BRAIN_AUDIT, not authorized for real static or live use.
+
+1. Scope and identities
+Repository: HYC-hsy/longcontext-monitor-research, branch crs-v0-20261007.
+Baseline: 0643e5c53514d05d46bdbc3f99d00efd398e2f24.
+Code/evidence-tool commits, in order: 6ec653b8, f8e176a6, 382ae419,
+3f96c4bb, 595f617c (full SHAs in Git log); the archive commit follows.
+Fixed upstream PMA: 89e5c0d6aadfe531a1aee42fd290d48be89973dd.
+Vendor, GA Task, native evaluator, and unrelated __pycache__ are unchanged.
+Static manifest SOURCE_MEMORY_STATIC_SCREEN_DRAFT.json remains execution_authorized=false;
+SHA-256 1D70811A315EC9B17DAB99EB0D1A7DC5D450A1770800ACC552D083BCEF9CC5CD.
+REUSE_MAP_SOURCE_MEMORY.json records exact upstream functions and local adaptations.
+
+2. Actual changes and responsibility
+source_memory.py: active entries now persist latest unreviewed/retain/unresolved/revised
+coordination separately from original content/version, with reason, evidence refs and
+coordination revision. Revised content and evidence are validated before active-list
+switch; inherited excerpts must be named by index in the old entry's own bound refs,
+while new excerpts must come from the currently visible source set. Validation on
+load, save, process and send requires one-to-one active IDs/metadata, legal category,
+type and positive version, nonempty valid exact source refs, legal coordination and
+no active retired ID. ID generation checks active and retired IDs, including fallback
+after repeated upstream collisions. BM25 search uses original upstream code and active
+lists; historical versions are not reindexed.
+source_agent.py: phase-1 and phase-2 bank rendering now contains each bound exact
+excerpt and role, plus latest coordination status/reason/evidence. It counts rendered
+excerpt characters by phase. A pending selected reminder binds complete entry and
+metadata identity, so changed coordination invalidates old selection. Original
+MemoryAgent.process and prompt builders still execute; original phase-2 discretion
+and free synthesis remain. No extra model stage, repair call or semantic verifier.
+static_source_screen.py: new fixed-event, fake-only research entry directly calls
+construct_upstream/PMAEpisode and replaces the actual PMA call boundary. It projects
+allowlisted public event fields from the frozen archive; historical result, bank,
+reminder and evaluation fields are not passed to PMA. Each slot has a fresh bank,
+episode, requests and output. `--mode live` raises before creation or any send.
+capture_source_samples.py: produces complete U-original and R-unresolved actual
+fake-boundary requests for audit, not expected-text templates.
+test_source_candidate.py and test_static_source_screen.py: targeted zero-model checks.
+Full code diff is supplied as numbered Git format-patch files in this directory;
+those patches contain the complete added and deleted lines, not just a diff command.
+
+3. Actual request examples (full structures in REQUEST_SAMPLES.json)
+U original phase-1: 457 prompt characters, original bank and public observation,
+without candidate coordination or excerpt formatting.
+R phase-2 after first-stage unresolved: 930 prompt characters, includes
+  [memory-id v1] Audit trace is preserved
+  bound_evidence=[{"event_id":"public-task","role":"task_instruction",
+                   "excerpt":"AUDIT-TRACE"}]
+  coordination={"decision":"unresolved","reason":"Current trace was not checked",
+                "evidence":[{"event_id":"public-task","role":"task_instruction",
+                             "excerpt":"AUDIT-TRACE"}]}
+Next R phase-1: 986 prompt characters and the same unresolved reason/excerpt.
+These are actual serialized requests intercepted at the original PMA transport
+boundary; the exact memory ID is random and preserved in REQUEST_SAMPLES.json.
+SHA-256 of REQUEST_SAMPLES.json:
+1F6C461CEC9FF96216519869EF03855D1A462F0FD5DB81BF5AEBF9B56865DEFF.
+The window regression executes ten public actor steps. Its final actual phase-1
+request excludes the old step-1 full reply `Public reply NORTHSTAR-BOUND` from the
+eight-step trajectory while retaining only the bound `NORTHSTAR-BOUND` excerpt in
+the memory bank. The original Task instruction intentionally remains separately
+visible, per upstream behavior. The test also rejects a new citation to an old,
+unbound/noncurrent `PRIVATE-UNBOUND` source.
+
+4. Frozen static screen / actual commands and output
+Run from pma_full_upstream_ga_v1_20261013 using the installed pinned PMA Python:
+  E:\LongContext\bench_runtime\pma_native_venv\Scripts\python.exe -m unittest test_source_candidate test_static_source_screen -v
+Final exit 0; stdout/stderr exactly:
+test_default_u_is_original_classes_and_schema ... ok
+test_load_and_presend_reject_invalid_bank ... ok
+test_r_reconcile_and_no_old_version_resurrection ... ok
+test_r_unresolved_retain_and_retraction_require_current_source ... ok
+test_revision_dispatch_failure_is_atomic_and_collision_safe ... ok
+test_s_r_valid_reminder_is_returned_not_delivered ... ok
+test_s_two_phase_free_reminder_and_invalid_ref_silence ... ok
+test_source_validation_save_reload_and_active_bm25 ... ok
+test_unresolved_is_in_phase2_future_phase1_and_reload ... ok
+test_visible_boundary_report_and_mixed_invalid_refs ... ok
+test_window_old_bound_excerpt_and_no_unbound_citation ... ok
+test_cutoff_identity_and_source_hashes ... ok
+test_live_mode_rejected_before_any_provider_request ... ok
+test_six_independent_slots_exact_calls_and_public_projection ... ok
+----------------------------------------------------------------------
+Ran 14 tests in 6.526s
+OK
+
+  E:\LongContext\bench_runtime\pma_native_venv\Scripts\python.exe static_source_screen.py --mode fake --output source_screen_fake_final_20261014
+Exit 0, stdout: {"logical_phase_calls": 210, "real_provider_attempts": 0, "slots": 6}
+stderr empty. Ordered slots: heap U/S/R, code U/S/R. Heap each 28 logical
+phase calls, code each 42, total 210; these are not provider attempts. U banks
+end empty in the scripted fixture, S/R each retain one scripted public-scope
+memory. This tests wiring, not whether a real PMA makes correct decisions.
+  E:\LongContext\bench_runtime\pma_native_venv\Scripts\python.exe capture_source_samples.py source_screen_request_examples_20261014
+Exit 0, stdout: {"actual_fake_requests": 6, "real_provider_attempts": 0,
+"samples": ["U_original_phase1", "R_unresolved_phase2", "R_unresolved_future_phase1"]}
+stderr empty. Generated SHADOW_RAW.tar.gz contains the six complete request,
+episode and final-bank trees plus REQUEST_SAMPLES.json. HASHES.txt binds each
+generated file by repository-relative name and SHA-256. Original historical
+inputs are not copied or modified by the runner.
+
+Input cutoffs: heap archive arm 07 sequence 27, file SHA-256
+BFCC0A93E6359F70CCE12E36E0E42CB2A84444EEDDCBD88C6336CB58E2BFC9F9;
+its public Task event file SHA-256
+8BA1E3C596C63307F2E9CB2B791C01BFD8363501C26F1E8F31DD5C0A439135FD.
+Code archive arm 03 sequence 41, file SHA-256
+06BCB70EB8C3BEE59E2F793CB1C7BFEF060E51E341D685666B1DB437486CEEBD;
+its public event file SHA-256
+14F4A4A162EC3FFCB4F003069CF1F59ABEDC953DA20F8F704C784565C10FEB05.
+All four identities were checked before each fake replay. No Task, evaluator,
+or native completion marker is produced.
+
+Unauthorized check:
+  E:\LongContext\bench_runtime\pma_native_venv\Scripts\python.exe static_source_screen.py --mode live --output should_not_exist_live
+Exit 1, PermissionError: real static provider dispatch requires a later
+authorization and entry. Output directory absent; no request.
+
+5. Failed attempts retained
+First expanded 9-test run exit 1: dispatch-atomic test erroneously called the
+private `_reconcile` (which raises) instead of the real tool dispatch; the
+window test incorrectly expected the original Task instruction to disappear.
+Corrected both tests to cover actual dispatch and an old Task reply. Second
+9-test run exit 1: registered unbound fixture was automatically current; the
+test now removes it from current source IDs to model a noncurrent source.
+Third 9-test run exit 0. First 14-test run exit 1: first PMA step lacks a
+`[Recent Trajectory]` header, so the fake saved no memory; corrected fake
+prompt parser to accept the original first-step layout. Final 14-test run exit
+0. These were fixture/expectation errors, not hidden model calls or old tests
+edited away. Earlier console trace output is preserved in the development
+transcript; it was not independently persisted as a complete raw log, which
+is an evidence limitation. The exact failure causes and commands are repeated
+here. A separate attempt to run the pre-existing `test_episode` module from
+this directory exited 1 before tests: offline_launcher.py performs a relative
+`.six_task_assets` import while test_episode imports offline_launcher as a
+top-level module (ImportError: attempted relative import with no known parent
+package). No production code or old assertion was altered for this unrelated
+test-entry failure; its tests are not counted as passed.
+
+6. Deliberate limits and interpretation
+The static screen is a new fixed-trajectory shadow comparison on two exposed
+development cases, not a replay of the historical PMA internal state and not
+counterfactual Task success. Prior Task actions may have been influenced by
+historical PMA. Returned reminder is not a GA request delivery. U/S/R differ
+in method prompt, bank formatting and S/R citation rules; this is not an
+atomic transaction ablation. Valid source only proves that an excerpt was
+visible, not that it supports a conclusion. An unresolved memory can still be
+misused by free-form phase-2 synthesis. Equivalent old errors elsewhere and
+derived conclusions are not automatically cascaded. BM25 is upstream, not a
+semantic validator. Evidence character accounting excludes tokenizer-specific
+cost; provider usage/inner attempts are unknown in future real runs. Here
+all intercepted fake sends are counted, real Task/PMA/provider/evaluator,
+training and scoring calls are 0. Actual future endpoint compatibility and
+semantic quality remain unverified.
+
+Human readout (research-only, never mounted to PMA): wrong belief formation,
+correction after counterevidence, old error resurfacing in final reminder,
+correct reminder preservation, deliberate silence, format rejection and
+additional cost. Brain audit decides whether to authorize any later static
+run. This implementation does not start one.
