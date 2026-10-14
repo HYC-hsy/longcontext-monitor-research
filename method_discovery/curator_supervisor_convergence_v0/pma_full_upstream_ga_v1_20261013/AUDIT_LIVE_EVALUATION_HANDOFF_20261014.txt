@@ -1,0 +1,136 @@
+PMA/GA future live-evaluation handoff: zero-model engineering audit
+Date: 2026-10-14. Status: OFFLINE_BLOCKED; no live batch authorized or started.
+
+Scope and identity
+- Start HEAD: 1a23cbdc8f846008ebffb4d86f5f1d2e582cf4de; branch crs-v0-20261007.
+- Code commits: c065678f9db23daad913ef7c730a28afcb0f0194 and
+  2797478e3eb2f34f20ccf5c19edf62a63d4b0c4d.
+- Exact complete source diff: git show --format=fuller --binary c065678f9db23daad913ef7c730a28afcb0f0194;
+  git show --format=fuller --binary 2797478e3eb2f34f20ccf5c19edf62a63d4b0c4d.
+- Official evaluator source is harbor-framework/terminal-bench-2 commit
+  2fd12b88aafdd04a52c298e3940bcb189f9766d6. Existing posthoc results
+  and all prior live archives were not edited.
+- Installed Harbor is 0.20.0, imported from
+  E:/LongContext/bench_runtime/m4/harbor-src/src/harbor/__init__.py;
+  its source Git HEAD is 459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc.
+- Correct external GA Harbor adapter is
+  E:/LongContext/long_context_bench/adapters/harbor_ga_agent.py, worktree
+  SHA-256 8a4513c6b28befe747d581d22e94cd2715f20234c63115e0ea424a56d033c3a0.
+
+Implemented
+1. live_launcher._stage_verifier now calls the existing fixed Git-blob
+   exporter. It requires FOUR_RUN_MANIFEST_OFFICIAL_EVALUATOR_V2_DRAFT.json,
+   checks all four blob IDs, modes, sizes and hashes before binary export,
+   then checks staged tree and test.sh. The old CRLF manifest remains intact
+   and cannot satisfy this path. The new manifest is execution_authorized=false.
+2. inspect_reports now validates the official external test bytes, exact
+   external test identities, unique test IDs, summary/status agreement,
+   complete start/stop, no unexpected skip and a frozen original-suite ID
+   baseline (which may be extended by legitimate new tests). The separate
+   classify_native_result checks script exit, timeout, cleanup and reward
+   consistency with the unchanged official test.sh rule. Infra/incomplete
+   findings do not become normal reward 0. Original script exit, pytest
+   statuses and reward are separate fields. This is mechanical classification,
+   not a new scorer. No past result was relabeled in its original archive.
+3. The authorized live path now stops before worker/Harbor/model launch:
+   _require_evaluation_state_contract rejects the as-yet unproven transition.
+   evaluation_readiness is a read-only short check with exit 2 while blocked.
+   It must not be mistaken for completed evaluation integration.
+
+Actual tests and outputs (no real Task/PMA/provider/native evaluator)
+- PMA_OFFICIAL_SOURCE_GIT=E:/pma-posthoc-official-source-20261014
+  python -m pytest -q .../test_live_evaluator_delivery.py
+  Exit 0: 12 passed in 1.54s. An unrelated Windows pytest atexit temp-path
+  PermissionError appeared after its successful exit; preserved as test
+  environment noise, not silently called a clean process exit.
+- py -3.12 -m ...evaluation_readiness --source-git
+  E:/pma-posthoc-official-source-20261014 --harbor-python
+  E:/LongContext/bench_runtime/m4/harbor-env/Scripts/python.exe --bench-root
+  E:/LongContext/long_context_bench
+  Expected nonzero blocked status. Both image IDs and official blob lists
+  matched; both tasks resolve to shared_default verifier mode. Blockers:
+  shared Task isolation; unproven full-layer/mount transfer; no actual
+  live-container /tests readback or synthetic Harbor evaluation transition.
+- From a clean Git archive of c065678f, not this working tree, the fixed
+  exporter read the two task trees from upstream Git objects and matched
+  every member of the new manifest: DB=true, code=true. A Windows text
+  checkout is not the evaluator byte source. No global Git config changed.
+- Docker 29.6.1; actual linux/amd64 image IDs match the new manifest.
+  Zero-model docker run with the two fixed images, Task-like network:none,
+  cap-drop ALL and no-new-privileges, mounted the fixed /tests read-only.
+  In-container SHA-256 readback: DB test.sh 4770437ea96c3cc84684b4f99d55fb148fcac09f9ea1e8ef49de487716e6c334,
+  DB test_outputs.py 88dc5c2a3abba75bca0e0f9136223ae5bb585d5984b8d9eba51a7829c1d2ba49;
+  code test.sh f1611da693cb4cfc5e8482698c6a1858a5c67220ae9db89b50aed66584e9b17f,
+  code test_outputs.py c006a5de95b69bd78055aa26cc055734dbd50718ede25d331f767bfee4ef7f26.
+  Both docker commands exited 0. This is a mount-byte probe, not the live
+  Harbor upload path or a native evaluator call.
+- Existing fake Harbor fixture, attempt 1, used the WRONG bench-root
+  (the research worktree); it exited 1 before AGENT_START because its adapter
+  byte SHA-256 was d5d4fa6f... rather than frozen 8a4513c6.... Raw stderr:
+  E:/pma-eval-handoff-fixture-20261014-021/archive/harbor.stderr.log,
+  SHA-256 08744e710d8b66583351113a52799dda5325cc8d2f5e4da3b2891c016fa3bcf6.
+  This was an invocation error, not a production adapter mutation.
+- Same existing fake fixture with correct --bench-root
+  E:/LongContext/long_context_bench, run_id pma-eval-handoff-fixture-022:
+  exit 0; Harbor 0; worker 0; agent_start_identity=true; frozen_product=true;
+  verification_released=true; remaining_containers=0; cleanup_errors=[];
+  disposable fixture authorization removed=true. Two fake Task requests
+  (0001/0002 JSON+SSE) were captured; no real endpoint or official test.sh.
+  Frozen /app tar SHA-256 dd945eb12e0778bd6f44405d88163743edd2d80153c8fd2fea3fecaa21753edf.
+  Raw fixture_result.json is outside the repo at
+  E:/pma-eval-handoff-fixture-20261014-022/archive/fixture_result.json,
+  SHA-256 65976a5e8a3d434964252e3046ee40e3de8acac8cf8bb646501624519431b102;
+  stderr SHA-256 c8884524854cf5fc5550dbd50627d5dbdf16440ac8010a08bc5fa42bf79020f4.
+  The fixture uses a synthetic fake verifier and does NOT certify native
+  dependency installation or full-state migration.
+- Applying the new inspector to unchanged prior valid reconstructed reports
+  yields DB A/B native_assertion_failure, code A/B native_pass. The code-suite
+  ID baseline in this regression was taken from an existing candidate report,
+  not independently frozen from a pristine image; do not treat it as live
+  original-suite identity certification. No old evaluation was rerun.
+
+Blocking state-transition evidence
+- Both public task.toml files omit verifier.environment_mode, so actual
+  installed Harbor resolves SHARED. The isolated_run_bundle compose fixes
+  main to network_mode:none, cap_drop ALL, no-new-privileges. Official DB
+  test.sh invokes apt/curl/uv; code test.sh invokes pip. Root exec alone does
+  not establish that those commands can install dependencies there.
+- Installed Harbor trial.py: shared verifier uses the same agent environment.
+  Separate verifier creates a new environment and uploads declared artifacts;
+  it does not inherit the agent container writable layer or all task mounts.
+  The existing posthoc base-image+/app restore is expressly not a valid
+  future online state transition. The archived actual Task main mounts also
+  include writable /logs and PMA request spool; state must be enumerated and
+  purpose-bound rather than assuming /app is the whole trial.
+- No phase transition was implemented or certified that both preserves the
+  stopped Task's full relevant filesystem/configuration state AND gives the
+  official scripts a usable isolated dependency environment without exposing
+  tests/credentials to Task. Therefore actual Harbor /tests readback after
+  upload, synthetic /app+layer+task-mount evaluation, known-pass/fail native
+  scoring, dependency preflight in the final verifier environment, and
+  post-evaluation no-writer proof are UNVERIFIED. The live gate remains shut.
+- Minimal next implementation decision: retain the stopped original container
+  and explicitly snapshot its writable layer plus every declared relevant
+  writable mount with identity/hashes, create a separate verifier environment
+  from that exact state under the installed Harbor native verifier path,
+  verify /tests bytes inside it immediately before test.sh, and run a
+  zero-model synthetic pass/fail fixture covering /app, another writable
+  layer path and a task mount. No privileged container, host firewall/VPN
+  change or base-image+/app shortcut is authorized by this audit.
+
+Reuse/revalidation rule
+- Reuse fixed blob exporter, native Harbor verifier, current stop/freeze
+  hooks and existing posthoc report parser. Recheck if official source commit,
+  test blob set, Docker image ID, installed Harbor source, Task/GA adapter,
+  compose isolation, Task mounts, verifier dependencies, or state-transition
+  code changes. A method prompt-only change with unchanged infrastructure
+  does not require rebuilding this environment; it still needs its own run
+  authorization and model-visible input review.
+- Future delivery evidence must link request_ready to an actual
+  request_attempt/response. The old PMA reminder-delivery gap is not repaired
+  or backfilled here.
+
+Measured current-round calls: real Task=0, PMA=0, provider=0, training=0,
+scoring-model=0, formal native benchmark evaluator=0. Fake Harbor gateway:
+two complete requests in the successful B fixture. The first fixture failed
+before AGENT_START. Historical results remain separate.
