@@ -45,7 +45,7 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
                        memory_api_key: str | None = None,
                        memory_profile: dict[str, Any] | None = None,
                        research_candidate: str = "U") -> MemoryEnabledTerminus2:
-    if research_candidate not in {"U", "S", "R"}:
+    if research_candidate not in {"U", "S", "R", "S2", "R2"}:
         raise ValueError("unknown research candidate")
     if memory_profile is not None:
         if (memory_profile.get("provider"), memory_profile.get("api_mode"),
@@ -78,10 +78,13 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
         # Preserve the original trigger, process, two provider calls, BM25 and
         # reminder consumption. Only the bank and prompt/tool adapters differ.
         from source_agent import SourceMemoryAgent
+        from source_agent_v2 import SourceMemoryAgentV2
         from source_memory import SourceMemory
-        bank = SourceMemory()
+        from source_memory_v2 import SourceMemoryV2
+        bank = SourceMemoryV2() if research_candidate in {"S2", "R2"} else SourceMemory()
         agent._memory = bank
-        agent._memory_agent = SourceMemoryAgent(
+        candidate_class = SourceMemoryAgentV2 if research_candidate in {"S2", "R2"} else SourceMemoryAgent
+        agent._memory_agent = candidate_class(
             variant=research_candidate, llm=agent._memory_llm, memory=bank,
             keep_thinking=False, use_structured_tools=True)
         agent._research_candidate = research_candidate
@@ -181,6 +184,8 @@ class PMAEpisode:
                             for ref in candidate_agent.last_reminder_refs
                             if ref["id"] in self.agent._memory.metadata],
                         "coordination": candidate_agent.coordination,
+                        "transaction": getattr(candidate_agent, "last_transaction", None),
+                        "collateral_aborts": getattr(candidate_agent, "collateral_aborts", None),
                     }, ensure_ascii=False, sort_keys=True) + "\n")
                     stream.flush()
                     os.fsync(stream.fileno())
@@ -201,7 +206,10 @@ class PMAEpisode:
         self.agent._pending_injection = None
         self.agent._injection_used = False
         self.agent._task_description = text
-        if hasattr(self.agent._memory, "register_source"):
+        if hasattr(self.agent._memory, "register_leaf"):
+            self.agent._memory.register_leaf(event["event_id"], "task_instruction",
+                text, event["sequence"], "initial_user_content", event["source_record_sha256"])
+        elif hasattr(self.agent._memory, "register_source"):
             self.agent._memory.register_source(event["event_id"], "task_instruction",
                                                text, event["sequence"])
         if self.agent._reset_status_on_episode:
@@ -270,10 +278,44 @@ class PMAEpisode:
         step = attempt + 1
         if hasattr(self.agent._memory, "register_source"):
             bank = self.agent._memory
-            bank.register_source(event["event_id"] + ":response", "agent_report",
-                                 analysis, event["sequence"])
-            bank.register_source(event["event_id"] + ":observation", "tool_observation",
-                                 observation, event["sequence"])
+            if hasattr(bank, "register_leaf"):
+                raw_sha = event["source_record_sha256"]
+                bank.register_leaf(event["event_id"], "agent_report", analysis,
+                                   event["sequence"], "response", raw_sha)
+                parsed = json.loads(observation)
+                if not isinstance(parsed, dict) or set(parsed) != {"content", "tool_results"}:
+                    raise ValueError("unknown GA observation envelope")
+                bank.register_leaf(event["event_id"], "agent_report", parsed["content"],
+                                   event["sequence"], "observation/content", raw_sha)
+                if not isinstance(parsed["tool_results"], list):
+                    raise ValueError("invalid GA tool results")
+                for index, result in enumerate(parsed["tool_results"]):
+                    if not isinstance(result, dict) or set(result) != {"tool_use_id", "content"}:
+                        raise ValueError("unknown GA tool result envelope")
+                    content = result["content"]
+                    if not isinstance(content, str):
+                        raise ValueError("unknown GA tool result content type")
+                    base_path = f"observation/tool_results/{index}/content"
+                    bank.register_leaf(event["event_id"], "tool_observation", content,
+                                       event["sequence"], base_path, raw_sha)
+                    # Decode only the GA tool-result envelope's documented text
+                    # fields, once. Other JSON-looking strings are not guessed.
+                    if content.startswith("{"):
+                        try:
+                            tool_payload = json.loads(content)
+                        except json.JSONDecodeError:
+                            tool_payload = None
+                        if isinstance(tool_payload, dict) and "status" in tool_payload:
+                            for field in ("stdout", "stderr", "msg", "output"):
+                                value = tool_payload.get(field)
+                                if isinstance(value, str) and value:
+                                    bank.register_leaf(event["event_id"], "tool_observation",
+                                        value, event["sequence"], base_path + "/" + field, raw_sha)
+            else:
+                bank.register_source(event["event_id"] + ":response", "agent_report",
+                                     analysis, event["sequence"])
+                bank.register_source(event["event_id"] + ":observation", "tool_observation",
+                                     observation, event["sequence"])
             # Only handles actually present in the upstream task+window context
             # can be cited for a new assertion in this trigger.
             recent = self.agent._accumulated_observations[1:][
