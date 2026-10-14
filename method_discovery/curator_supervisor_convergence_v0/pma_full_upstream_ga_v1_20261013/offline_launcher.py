@@ -13,11 +13,16 @@ import time
 
 from long_context_bench.scripts.isolated_run_bundle import build_bundle, digest_tree
 from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.pilot_offline_harbor import _offline_gateway
+from .six_task_assets import materialize_public
 
 
 TASKS = {
     "db-wal-recovery": "alexgshaw/db-wal-recovery:20251031",
     "fix-code-vulnerability": "alexgshaw/fix-code-vulnerability:20251031",
+    "cobol-modernization": "alexgshaw/cobol-modernization:20251031",
+    "custom-memory-heap-crash": "alexgshaw/custom-memory-heap-crash:20251031",
+    "multi-source-data-merger": "alexgshaw/multi-source-data-merger:20251031",
+    "large-scale-text-editing": "alexgshaw/large-scale-text-editing:20251031",
 }
 STAGE = Path(__file__).resolve().parent
 
@@ -26,7 +31,8 @@ def image_identity(tag: str) -> dict:
     result = subprocess.run(["docker", "image", "inspect", tag], capture_output=True,
                             text=True, timeout=30, check=True)
     row = json.loads(result.stdout)[0]
-    return {"image_id": row["Id"], "repo_digests": row.get("RepoDigests") or []}
+    return {"image_id": row["Id"], "repo_digests": row.get("RepoDigests") or [],
+            "platform": f"{row['Os']}/{row['Architecture']}"}
 
 
 def capture_mounts(root: Path, *, include_stopped: bool = False) -> list[dict]:
@@ -46,7 +52,8 @@ def capture_mounts(root: Path, *, include_stopped: bool = False) -> list[dict]:
                       "image_id": row["Image"],
                       "network_mode": row.get("HostConfig", {}).get("NetworkMode"),
                       "mounts": [{"source": m.get("Source"), "destination": m.get("Destination"),
-                                  "rw": m.get("RW"), "type": m.get("Type")}
+                                  "rw": m.get("RW"), "type": m.get("Type"),
+                                  "name": m.get("Name")}
                                  for m in row.get("Mounts", [])]})
     return found
 
@@ -74,8 +81,15 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
     root.mkdir(parents=True, exist_ok=False)
     (root / "control").mkdir()
     (root / "archive").mkdir()
+    manifest_path = (STAGE / "FOUR_RUN_MANIFEST_DRAFT.json" if fake_gateway
+                     else Path(args.manifest).resolve(strict=True))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     task = root / "public_task"
-    shutil.copytree(STAGE / "assets" / "public" / args.task, task)
+    if not fake_gateway and manifest.get("schema") == "pma-ga-live-manifest-v2":
+        materialize_public(Path(args.official_source_git).resolve(strict=True),
+                           args.task, task, manifest["assets"][args.task]["public_members"])
+    else:
+        shutil.copytree(STAGE / "assets" / "public" / args.task, task)
     (task / "tests").mkdir(exist_ok=True)
     (task / "solution").mkdir(exist_ok=True)
     # Task only receives the public task package. The fixed PMA source and
@@ -88,7 +102,10 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
     shutil.copy2(Path(args.task_profile_file).resolve(strict=True), ga_stage / "mykey.py")
     runtime = Path(args.runtime_root).resolve(strict=True)
     source, compose = build_bundle(root / "bundle", ga_stage, runtime,
-                                   args.python_home, args.task_profile, None, 15340)
+                                   args.python_home, args.task_profile, None, 15340,
+                                   task_network_policy=("official" if not fake_gateway and
+                                       manifest.get("schema") == "pma-ga-live-manifest-v2"
+                                       else "isolated"))
     if fake_gateway:
         _offline_gateway(root, runtime, args.python_home)
     if fake_gateway and getattr(args, "multiturn_fixture", False):
@@ -96,9 +113,6 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
         fake_compose["services"]["model-gateway"]["environment"] = {
             "PMA_MULTITURN_FIXTURE": "1"}
         compose.write_text(json.dumps(fake_compose, indent=2), encoding="utf-8")
-    manifest_path = (STAGE / "FOUR_RUN_MANIFEST_DRAFT.json" if fake_gateway
-                     else Path(args.manifest).resolve(strict=True))
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest["execution_authorized"] is not False:
         raise RuntimeError("PMA draft unexpectedly authorized")
     identity = image_identity(TASKS[args.task])
@@ -127,7 +141,10 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
               "ga_bundle_tree_sha256": digest_tree(source),
               "source_profile_file_sha256": hashlib.sha256(
                   Path(args.task_profile_file).read_bytes()).hexdigest(),
-              "worker_private_mounted": "not_yet_inspected", "network_mode": "none_requested",
+              "worker_private_mounted": "not_yet_inspected",
+              "network_mode": ("official_requested" if not fake_gateway and
+                  manifest.get("schema") == "pma-ga-live-manifest-v2"
+                  else "none_requested"),
               "native_evaluator_calls": 0, "fake_provider_only": fake_gateway}
     (root / "archive" / "prepared.json").write_text(
         json.dumps(record, indent=2), encoding="utf-8")

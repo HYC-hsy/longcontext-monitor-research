@@ -1,4 +1,4 @@
-"""One-use binary export of the two fixed official evaluator trees."""
+"""Binary export of evaluator trees at the fixed official Git commit."""
 
 from __future__ import annotations
 
@@ -19,6 +19,11 @@ EXPECTED_EXTERNAL_SH = {
     "fix-code-vulnerability": "c006a5de95b69bd78055aa26cc055734dbd50718ede25d331f767bfee4ef7f26",
 }
 STAGE = Path(__file__).resolve().parent / "posthoc_official_20261014"
+SIX_TASKS = frozenset({
+    "db-wal-recovery", "fix-code-vulnerability", "cobol-modernization",
+    "custom-memory-heap-crash", "multi-source-data-merger",
+    "large-scale-text-editing",
+})
 
 
 def git(source: Path, *args: str) -> bytes:
@@ -28,7 +33,7 @@ def git(source: Path, *args: str) -> bytes:
 
 def official_members(source: Path, task: str) -> list[dict]:
     """Read the fixed upstream Git blobs, never a newline-converted worktree."""
-    if task not in EXPECTED_SH:
+    if task not in SIX_TASKS:
         raise ValueError("unknown fixed evaluator task")
     if git(source, "cat-file", "-t", COMMIT).strip() != b"commit":
         raise RuntimeError("fixed official source commit unavailable")
@@ -46,15 +51,19 @@ def official_members(source: Path, task: str) -> list[dict]:
         selected.append({"path": name, "mode": mode, "git_blob": blob,
                          "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
                          "raw": raw})
-    if {item["path"] for item in selected} != {
+    paths = {item["path"] for item in selected}
+    if prefix + "test.sh" not in paths or len(paths) != len(selected):
+        raise RuntimeError("official evaluator has no unique test.sh")
+    if task in EXPECTED_SH and paths != {
             prefix + "test.sh", prefix + "test_outputs.py"}:
-        raise RuntimeError("official evaluator file set differs from fixed source")
+        raise RuntimeError("legacy official evaluator file set differs")
     script = next(item for item in selected if item["path"] == prefix + "test.sh")
-    if script["sha256"] != EXPECTED_SH[task]:
+    if task in EXPECTED_SH and script["sha256"] != EXPECTED_SH[task]:
         raise RuntimeError("official test.sh bytes differ from fixed source")
-    external = next(item for item in selected if item["path"] == prefix + "test_outputs.py")
-    if external["sha256"] != EXPECTED_EXTERNAL_SH[task]:
-        raise RuntimeError("official external tests differ from fixed source")
+    if task in EXPECTED_EXTERNAL_SH:
+        external = next(item for item in selected if item["path"] == prefix + "test_outputs.py")
+        if external["sha256"] != EXPECTED_EXTERNAL_SH[task]:
+            raise RuntimeError("official external tests differ from fixed source")
     return selected
 
 
@@ -64,7 +73,11 @@ def export_task(source: Path, task: str, target: Path) -> list[dict]:
         raise RuntimeError("official evaluator target must be an empty directory")
     members = official_members(source, task)
     for item in members:
-        destination = target / Path(item["path"]).name
+        relative = Path(item["path"]).relative_to(Path(task) / "tests")
+        if not relative.parts or ".." in relative.parts:
+            raise RuntimeError("unsafe official evaluator path")
+        destination = target / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(item["raw"])
         if destination.read_bytes() != item["raw"]:
             raise RuntimeError("official evaluator binary readback mismatch")

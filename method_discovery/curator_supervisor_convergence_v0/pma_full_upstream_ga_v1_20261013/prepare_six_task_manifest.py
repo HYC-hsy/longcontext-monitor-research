@@ -1,0 +1,167 @@
+"""Generate an unarmed six-task draft from fixed Git blobs and local images.
+
+This is a host-only preparation command. It never creates an authorization,
+imports a model client, starts Harbor, or executes an official verifier.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import runpy
+from tempfile import TemporaryDirectory
+
+from long_context_bench.scripts.isolated_run_bundle import digest_tree
+
+from .export_official_evaluator import export_task
+from .offline_launcher import image_identity
+from .six_task_assets import descriptor, materialize_public
+from .six_task_plan import ORDER
+
+STAGE = Path(__file__).resolve().parent
+SOURCE_FILES = (
+    'long_context_bench/scripts/isolated_run_bundle.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'batch_controller.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'export_official_evaluator.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'harbor_adapter.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'live_launcher.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'native_shared_verifier.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'networked_transport_setup.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'offline_launcher.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'pma_harbor_hooks.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'six_task_assets.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'six_task_plan.py',
+)
+EVIDENCE_FILES = (
+    'FILE_HASHES.json', 'image_checks.json', 'request_comparison.json',
+    'unittest.stderr.txt',
+    'fixtures/02/archive/fixture_result.json',
+    'fixtures/03/archive/fixture_result.json',
+    'fixtures/04/archive/fixture_result.json',
+    'fixtures/08/archive/fixture_result.json',
+    'fixtures/09/archive/fixture_result.json',
+    'fixtures/10/archive/fixture_result.json',
+    'fixtures/11/archive/fixture_result.json',
+)
+
+def _sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def prepare(source: Path, task_profile: Path, pma_profile: Path,
+            evidence: Path | None = None) -> dict:
+    task_settings = runpy.run_path(str(task_profile))[
+        'native_claude_cc_vibe_opus48']
+    pma_settings = json.loads(pma_profile.read_text(encoding='utf-8'))[
+        'claude_monitor_opus48']
+    if (task_settings.get('model') != 'claude-opus-4-8' or
+            pma_settings.get('model') != 'claude-opus-4-8'):
+        raise RuntimeError('frozen Task/PMA models are not Opus 4.8')
+    tasks = tuple(dict.fromkeys(row[1] for row in ORDER))
+    assets = {}
+    for task in tasks:
+        desc = descriptor(source, task)
+        with TemporaryDirectory(prefix='pma-public-check-') as temporary:
+            base = Path(temporary)
+            public = base / 'public'
+            materialize_public(source, task, public, desc['public_members'])
+            (public / 'tests').mkdir(exist_ok=True)
+            (public / 'solution').mkdir(exist_ok=True)
+            public_hash = digest_tree(public)
+            tests = base / 'tests'
+            tests.mkdir()
+            export_task(source, task, tests)
+            tests_hash = digest_tree(tests)
+            test_sh_hash = _sha(tests / 'test.sh')
+        image = image_identity(desc['image_tag'])
+        if len(image['repo_digests']) != 1:
+            raise RuntimeError(f'{task}: expected one exact local RepoDigest')
+        assets[task] = {**desc, 'image_id': image['image_id'],
+                        'repo_digest': image['repo_digests'][0],
+                        'platform': image['platform'],
+                        'public_task_tree_sha256': public_hash,
+                        'official_evaluator_members': desc['evaluator_members'],
+                        'native_tests_tree_sha256': tests_hash,
+                        'native_test_sh_sha256': test_sh_hash,
+                        'agent_timeout_multiplier': 14400 / desc['native_agent_seconds'],
+                        'verifier_timeout_multiplier': 1}
+    method = {'conditions': {'A': 'GA_only', 'B': 'GA_plus_fixed_upstream_PMA'},
+              'task_turns_max': 300, 'agent_wall_seconds': 14400,
+              'harbor_whole_trial_retries': 0,
+              'task_profile_name': 'native_claude_cc_vibe_opus48',
+              'pma_profile_name': 'claude_monitor_opus48',
+              'network': 'official_task_network_with_host_credential_gateway',
+              'evaluation': 'native_Harbor_SHARED_pending_lifecycle_certification'}
+    config_hash = hashlib.sha256(json.dumps(method, sort_keys=True,
+        separators=(',', ':')).encode('utf-8')).hexdigest()
+    certification = None
+    if evidence is not None:
+        if evidence != STAGE / 'six_task_native_base_20261014':
+            raise RuntimeError('unexpected native-base evidence namespace')
+        checkout = STAGE.parents[2]
+        certification = {
+            'source_files': {name: _sha(checkout / name) for name in SOURCE_FILES},
+            'evidence_files': {name: _sha(evidence / name) for name in EVIDENCE_FILES},
+            'harbor_commit': '459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc'}
+    return {'schema': 'pma-ga-live-manifest-v2',
+            'status': ('prepared_not_executed' if certification else
+                       'prepared_assets_lifecycle_blocked'),
+            'execution_authorized': False,
+            'official_source_git_commit': '2fd12b88aafdd04a52c298e3940bcb189f9766d6',
+            'pma_vendor_commit': '89e5c0d6aadfe531a1aee42fd290d48be89973dd',
+            'task_profile_sha256': _sha(task_profile),
+            'pma_profile_sha256': _sha(pma_profile),
+            'profile_identity_status': 'private_bytes_hashed_not_exported',
+            'resolved_models_public': {
+                'task': {key: task_settings.get(key) for key in
+                         ('model', 'max_tokens', 'temperature', 'max_retries')},
+                'pma': {key: pma_settings.get(key) for key in
+                        ('model', 'max_tokens', 'temperature', 'max_retries',
+                         'provider', 'api_mode', 'thinking_type', 'reasoning_effort',
+                         'connect_timeout', 'read_timeout')}},
+            'config': method, 'config_sha256': config_hash,
+            'native_shared_certification': certification,
+            'assets': assets,
+            'planned_order': [dict(order=o, task=t, repeat=r, condition=c)
+                              for o, t, r, c in ORDER],
+            'technical_replacements_before_first_model_request_only':
+                ['headless-terminal', 'cancel-async-tasks']}
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--official-source-git', type=Path, required=True)
+    parser.add_argument('--task-profile-file', type=Path, required=True)
+    parser.add_argument('--pma-profile-file', type=Path, required=True)
+    parser.add_argument('--evidence-dir', type=Path)
+    parser.add_argument('--output', type=Path, required=True)
+    args = parser.parse_args()
+    if args.output.exists():
+        raise FileExistsError(args.output)
+    manifest = prepare(args.official_source_git.resolve(strict=True),
+                       args.task_profile_file.resolve(strict=True),
+                       args.pma_profile_file.resolve(strict=True),
+                       args.evidence_dir.resolve(strict=True) if args.evidence_dir else None)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(manifest, indent=2, ensure_ascii=False),
+                           encoding='utf-8')
+    print(json.dumps({'output': str(args.output), 'tasks': len(manifest['assets']),
+                      'slots': len(manifest['planned_order']),
+                      'execution_authorized': False,
+                      'sha256': _sha(args.output)}))
+
+
+if __name__ == '__main__':
+    main()
