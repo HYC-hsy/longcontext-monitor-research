@@ -176,6 +176,10 @@ class PMAEpisode:
                         "candidate": candidate_agent.variant,
                         "phase2_status": candidate_agent.last_delivery_status,
                         "reminder_memory_refs": candidate_agent.last_reminder_refs,
+                        "reminder_source_refs": [
+                            self.agent._memory.metadata[ref["id"]]["source_refs"]
+                            for ref in candidate_agent.last_reminder_refs
+                            if ref["id"] in self.agent._memory.metadata],
                         "coordination": candidate_agent.coordination,
                     }, ensure_ascii=False, sort_keys=True) + "\n")
                     stream.flush()

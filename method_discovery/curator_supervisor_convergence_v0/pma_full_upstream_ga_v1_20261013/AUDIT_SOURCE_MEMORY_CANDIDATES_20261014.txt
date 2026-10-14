@@ -16,6 +16,7 @@ COMMITS AND COMPLETE DIFF
 4f7de4ff Add opt-in sourced PMA memory candidates (447 added, 3 removed lines).
 5cda2156 Test sourced PMA paths and freeze shadow screen draft (335 added).
 96bb13b5 Preserve worker default and verify pre-delivery source identity.
+Final tiny follow-up: bind reminder source refs directly in private audit.
 Complete authoritative patch: git diff 3947b72af7c0fbf1a4e982d4f9ed38020e0f63f0 HEAD
 Changed only episode.py, worker_main.py, source_agent.py, source_memory.py,
 test_source_candidate.py, REUSE_MAP_SOURCE_MEMORY.json and
@@ -31,7 +32,8 @@ _trigger.should_trigger, _trigger_memory_agent -> inherited
 MemoryAgent.process -> actual memory LiteLLM.call transport boundary ->
 phase-1 tool ops -> original _build_phase2_prompt -> phase-2 decision ->
 original _get_memory_system_prompt in before_actor_call.
-The candidate only adds private candidate_audit.jsonl metadata. The GA-visible
+The candidate only adds private candidate_audit.jsonl metadata (memory IDs,
+versions, underlying source refs and phase outcome). The GA-visible
 PMA event response still contains only the original reminder/status fields.
 
 U -> S exact method difference: original PHASE1_SYSTEM and PHASE2_SYSTEM are
@@ -119,7 +121,7 @@ test_source_validation_save_reload_and_active_bm25 ... ok
 test_visible_boundary_report_and_mixed_invalid_refs ... ok
 
 ----------------------------------------------------------------------
-Ran 6 tests in 0.097s
+Ran 6 tests in 0.101s
 
 OK
 

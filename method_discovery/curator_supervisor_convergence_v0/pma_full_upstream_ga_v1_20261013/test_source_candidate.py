@@ -127,6 +127,11 @@ class SourceCandidateTests(unittest.TestCase):
         self.assertIn("e3:observation", fake.requests[2]["prompt"])
         self.assertNotIn("PRIVATE_NOT_PUBLIC", fake.requests[2]["prompt"])
         self.assertEqual(fake.outputs, [])
+        audit_rows = [json.loads(line) for line in
+                      (root / "archive" / "candidate_audit.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(audit_rows[-1]["reminder_memory_refs"],
+                         [{"id": memory_id, "version": 1}])
+        self.assertEqual(audit_rows[-1]["reminder_source_refs"][0][0]["event_id"], "e1")
         agent.memory.sources["e1"]["text"] = "tampered after selection"
         later = {"event_id": "e4", "sequence": 4, "run_id": "run", "task_id": "task",
                  "kind": "before_actor_call", "actor_attempt": 2}
