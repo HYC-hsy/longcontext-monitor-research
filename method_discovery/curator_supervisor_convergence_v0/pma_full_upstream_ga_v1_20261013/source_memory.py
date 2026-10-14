@@ -127,6 +127,8 @@ class SourceMemory(UniversalMemory):
             raise ValueError("retired version is active")
         for entry, category in active:
             meta = self.metadata[entry.id]
+            if not isinstance(entry.content, str) or not entry.content.strip():
+                raise ValueError("active memory content must be nonempty text")
             if not isinstance(meta, dict) or meta.get("category") != category:
                 raise ValueError("invalid memory category")
             if type(meta.get("version")) is not int or meta["version"] < 1:

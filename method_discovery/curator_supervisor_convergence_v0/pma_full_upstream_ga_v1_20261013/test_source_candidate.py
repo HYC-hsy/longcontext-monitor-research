@@ -356,6 +356,27 @@ class SourceCandidateTests(unittest.TestCase):
             f'<memory_refs>[{{"id":"{memory_id}","version":1}}]</memory_refs>'))
         self.assertEqual(agent._memory_agent.last_delivery_status, "invalid_reference_no_delivery")
 
+    def test_active_content_and_changed_coordination_invalidate_pending(self):
+        agent, _, _ = self.make("R", [])
+        bank = agent.memory
+        bank.register_source("s", "task_instruction", "Retain public evidence", 1)
+        raw = [{"event_id": "s", "role": "task_instruction", "quote": "public evidence"}]
+        memory_id = bank.save_sourced("knowledge", "Keep evidence", "task_requirement", raw)
+        valid = bank.to_dict()
+        for bad in (None, 12, [], {}, "", "   "):
+            altered = json.loads(json.dumps(valid))
+            altered["knowledge"][0]["content"] = bad
+            with self.subTest(content=bad), self.assertRaises(ValueError):
+                SourceMemory.from_dict(altered)
+        selected = agent._memory_agent._parse_phase2_response(
+            '<context_for_action>Review evidence.</context_for_action>'
+            f'<memory_refs>[{{"id":"{memory_id}","version":1}}]</memory_refs>')
+        self.assertEqual(selected, "Review evidence.")
+        self.assertTrue(agent._memory_agent.pending_refs_valid())
+        bank.coordinate(memory_id, "unresolved", "Current state is unverified",
+                        bank.resolve_refs(raw, "inference"))
+        self.assertFalse(agent._memory_agent.pending_refs_valid())
+
 
 if __name__ == "__main__":
     unittest.main()
