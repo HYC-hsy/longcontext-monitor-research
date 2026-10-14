@@ -1,0 +1,62 @@
+{
+  "schema": "PMA_GA_6TASK_DISCOVERY_DRAFT_V1",
+  "status": "preparation_only_unverified",
+  "execution_authorized": false,
+  "source": {
+    "terminal_bench_repository": "https://github.com/harbor-framework/terminal-bench-2",
+    "terminal_bench_commit": "2fd12b88aafdd04a52c298e3940bcb189f9766d6",
+    "pma_repository": "https://github.com/yifannnwu/proactive-memory-agent",
+    "pma_commit": "89e5c0d6aadfe531a1aee42fd290d48be89973dd",
+    "ga_profile": "native_claude_cc_vibe_opus48",
+    "pma_profile": "claude_monitor_opus48",
+    "historically_resolved_ga_model": "claude-opus-4-8",
+    "historically_resolved_pma_model": "anthropic/claude-opus-4-8",
+    "current_private_profile_identity": "must_recheck_before_authorization"
+  },
+  "conditions": {
+    "A": "GA only; no PMA or Monitor worker",
+    "B": "same GA plus complete fixed-upstream PMA in a fresh host worker; Terminus2 actor disabled"
+  },
+  "tasks": [
+    {"id":"db-wal-recovery","cohort":"exposed_development","official_tree_git_oid":"2072a10f19356e3cbb522ec00eba9a15f1a2a1e3","task_toml_git_oid":"bdbadbffa6793c6f78ca0d5867e81432411c3a23","image_tag":"alexgshaw/db-wal-recovery:20251031","local_image_id":"sha256:0e33ea5ec823975d1bd6c3778395c9f94251dd88f571146057bff6adb7e4594e","local_repo_digest":"alexgshaw/db-wal-recovery@sha256:0e33ea5ec823975d1bd6c3778395c9f94251dd88f571146057bff6adb7e4594e","local_platform":"linux/amd64","native_agent_seconds":900,"planned_verifier_seconds":900,"image_status":"locally_inspected"},
+    {"id":"fix-code-vulnerability","cohort":"exposed_development","official_tree_git_oid":"9d0967e66487fa2beeb9c40f48802427f43a267a","task_toml_git_oid":"eb534985ae04d5b390c53533efc48d77026293a9","image_tag":"alexgshaw/fix-code-vulnerability:20251031","local_image_id":"sha256:cac325252991f823713b2d0441502972901dd782bd67f66c03d9b1e410dac5c0","local_repo_digest":"alexgshaw/fix-code-vulnerability@sha256:cac325252991f823713b2d0441502972901dd782bd67f66c03d9b1e410dac5c0","local_platform":"linux/amd64","native_agent_seconds":900,"planned_verifier_seconds":900,"image_status":"locally_inspected"},
+    {"id":"cobol-modernization","cohort":"new_candidate","official_tree_git_oid":"01470166d7d757379f3158ba7c3011e8df5ca96a","task_toml_git_oid":"77299dbeaa9f499312cc30a59fcde49988efd6d7","image_tag":"alexgshaw/cobol-modernization:20251031","local_image_id":null,"local_repo_digest":null,"local_platform":null,"native_agent_seconds":900,"planned_verifier_seconds":900,"image_status":"not_local_unverified"},
+    {"id":"custom-memory-heap-crash","cohort":"new_candidate","official_tree_git_oid":"256228d99e7625dd1fded79beade531e41c47a4b","task_toml_git_oid":"340c070a35b11e710ef4c38d1849ecb045d89902","image_tag":"alexgshaw/custom-memory-heap-crash:20251031","local_image_id":null,"local_repo_digest":null,"local_platform":null,"native_agent_seconds":1800,"planned_verifier_seconds":1800,"image_status":"not_local_unverified"},
+    {"id":"multi-source-data-merger","cohort":"new_candidate","official_tree_git_oid":"c367ccf88eb5368c4b92d64e23fb1b8f4c97e48f","task_toml_git_oid":"734afa323ded79684ccf5bcee48025e916fcc1b9","image_tag":"alexgshaw/multi-source-data-merger:20251031","local_image_id":null,"local_repo_digest":null,"local_platform":null,"native_agent_seconds":900,"planned_verifier_seconds":900,"image_status":"not_local_unverified"},
+    {"id":"large-scale-text-editing","cohort":"new_candidate","official_tree_git_oid":"c2f519a7011d73ba8a775265081405a4d1cdb98b","task_toml_git_oid":"ffdb5d6ec9d9ab1adba7f05bc27d5097a673f494","image_tag":"alexgshaw/large-scale-text-editing:20251031","local_image_id":null,"local_repo_digest":null,"local_platform":null,"native_agent_seconds":1200,"planned_verifier_seconds":1200,"image_status":"not_local_unverified"}
+  ],
+  "technical_replacements_before_first_model_request_only": [
+    {"id":"headless-terminal","official_tree_git_oid":"6976f78b85397d716e5e27a003adb5df659a0dbc","image_tag":"alexgshaw/headless-terminal:20251031","image_status":"not_local_unverified"},
+    {"id":"cancel-async-tasks","official_tree_git_oid":"bef6464536e5cd0c22105e5e8d377ad0fbcb38d5","image_tag":"alexgshaw/cancel-async-tasks:20251031","image_status":"not_local_unverified"}
+  ],
+  "official_task_environment": {"cpus":1,"memory_mb":2048,"storage_mb":10240,"gpus":0,"allow_internet":true},
+  "proposed_runtime": {"task_turns_max":300,"agent_wall_seconds_per_arm":14400,"harbor_whole_trial_retries":0,"runtime_network_policy":"currently_isolated_no_network; per-task_feasibility_unverified","evaluation_handoff":"blocked_by_unverified_full_task_state_transition"},
+  "planned_order": [
+    {"order":1,"task":"db-wal-recovery","repeat":1,"condition":"A"},
+    {"order":2,"task":"db-wal-recovery","repeat":1,"condition":"B"},
+    {"order":3,"task":"fix-code-vulnerability","repeat":1,"condition":"B"},
+    {"order":4,"task":"fix-code-vulnerability","repeat":1,"condition":"A"},
+    {"order":5,"task":"cobol-modernization","repeat":1,"condition":"A"},
+    {"order":6,"task":"cobol-modernization","repeat":1,"condition":"B"},
+    {"order":7,"task":"custom-memory-heap-crash","repeat":1,"condition":"B"},
+    {"order":8,"task":"custom-memory-heap-crash","repeat":1,"condition":"A"},
+    {"order":9,"task":"multi-source-data-merger","repeat":1,"condition":"A"},
+    {"order":10,"task":"multi-source-data-merger","repeat":1,"condition":"B"},
+    {"order":11,"task":"large-scale-text-editing","repeat":1,"condition":"B"},
+    {"order":12,"task":"large-scale-text-editing","repeat":1,"condition":"A"},
+    {"order":13,"task":"large-scale-text-editing","repeat":2,"condition":"A"},
+    {"order":14,"task":"large-scale-text-editing","repeat":2,"condition":"B"},
+    {"order":15,"task":"multi-source-data-merger","repeat":2,"condition":"B"},
+    {"order":16,"task":"multi-source-data-merger","repeat":2,"condition":"A"},
+    {"order":17,"task":"custom-memory-heap-crash","repeat":2,"condition":"A"},
+    {"order":18,"task":"custom-memory-heap-crash","repeat":2,"condition":"B"},
+    {"order":19,"task":"cobol-modernization","repeat":2,"condition":"B"},
+    {"order":20,"task":"cobol-modernization","repeat":2,"condition":"A"},
+    {"order":21,"task":"fix-code-vulnerability","repeat":2,"condition":"A"},
+    {"order":22,"task":"fix-code-vulnerability","repeat":2,"condition":"B"},
+    {"order":23,"task":"db-wal-recovery","repeat":2,"condition":"B"},
+    {"order":24,"task":"db-wal-recovery","repeat":2,"condition":"A"}
+  ],
+  "theoretical_ceiling": {"agent_seconds":345600,"agent_hours":96,"verifier_seconds":26400,"verifier_hours_minutes":"7h20m","excludes_preparation_and_cleanup":true},
+  "interpretation": "Paired development pilot only; no fixed server random seed, no statistical significance claim, no old-arm reuse; full official environment reproduction is not claimed."
+}
