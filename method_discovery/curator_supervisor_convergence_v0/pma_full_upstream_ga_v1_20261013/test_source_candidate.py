@@ -7,6 +7,7 @@ import sys
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 VENDOR = HERE / "vendor" / "pma_89e5c0d"
@@ -212,6 +213,148 @@ class SourceCandidateTests(unittest.TestCase):
             agent._memory_agent._reconcile({"memory_id": memory_id,
                 "decision": "retract", "reason": "", "evidence_refs": refs})
         self.assertIsNotNone(bank.get(memory_id))
+
+    def test_unresolved_is_in_phase2_future_phase1_and_reload(self):
+        agent, fake, root = self.make("R", [])
+        bank = agent.memory
+        bank.register_source("task", "task_instruction", "Preserve a precise audit trail.", 1)
+        refs = [{"event_id": "task", "role": "task_instruction", "quote": "precise audit trail"}]
+        memory_id = bank.save_sourced("knowledge", "Audit trail is preserved", "task_requirement", refs)
+        fake.outputs.extend([LLMResponse(content="", tool_calls=[call("memory_reconcile",
+            memory_id=memory_id, decision="unresolved", reason="Need to inspect the current trail",
+            evidence_refs=refs)]), LLMResponse(content="<no_intervention/>")])
+        asyncio.run(agent._memory_agent.process("Current public observation", step_count=2))
+        self.assertIn('"decision": "unresolved"', fake.requests[1]["prompt"])
+        self.assertIn("Need to inspect the current trail", fake.requests[1]["prompt"])
+        self.assertIn("precise audit trail", fake.requests[1]["prompt"])
+        self.assertEqual(bank.metadata[memory_id]["coordination"]["decision"], "unresolved")
+        path = root / "bank.json"
+        bank.save_to_file(path)
+        loaded = SourceMemory.load_from_file(path)
+        agent._memory = loaded
+        agent._memory_agent.memory = loaded
+        fake.outputs.extend([LLMResponse(content="", tool_calls=[]),
+                             LLMResponse(content="<no_intervention/>")])
+        asyncio.run(agent._memory_agent.process("Later observation", step_count=3))
+        self.assertIn('"decision": "unresolved"', fake.requests[2]["prompt"])
+        self.assertIn("Need to inspect the current trail", fake.requests[2]["prompt"])
+
+    def test_window_old_bound_excerpt_and_no_unbound_citation(self):
+        agent, fake, root = self.make("S", [])
+        episode = PMAEpisode(agent, run_id="window", task_id="t", archive=root / "archive")
+        task = "Preserve uncommon token NORTHSTAR-BOUND while repairing."
+        fake.outputs.extend([LLMResponse(content="", tool_calls=[]),
+                             LLMResponse(content="<no_intervention/>")])
+        asyncio.run(episode.handle({"kind": "task_start", "event_id": "s1", "sequence": 1,
+                                    "run_id": "window", "task_id": "t", "initial_user_content": task}))
+        for attempt in range(1, 11):
+            seq = attempt * 2
+            asyncio.run(episode.handle({"kind": "before_actor_call", "event_id": f"b{attempt}",
+                "sequence": seq, "run_id": "window", "task_id": "t", "actor_attempt": attempt}))
+            first = [call("memory_save_knowledge", content="Retain the uncommon token",
+                statement_type="agent_report", source_refs=[{"event_id": "a1:response",
+                    "role": "agent_report", "quote": "NORTHSTAR-BOUND"}])] if attempt == 1 else []
+            fake.outputs.extend([LLMResponse(content="", tool_calls=first),
+                                 LLMResponse(content="<no_intervention/>")])
+            asyncio.run(episode.handle({"kind": "actor_step", "event_id": f"a{attempt}",
+                "sequence": seq + 1, "run_id": "window", "task_id": "t", "actor_attempt": attempt,
+                "step_status": "normal", "response": (
+                    "Public reply NORTHSTAR-BOUND" if attempt == 1 else f"Public reply {attempt}"),
+                "observation": f"Observed tool result {attempt}", "commands": ["true"]}))
+        prompt = fake.requests[-2]["prompt"]
+        self.assertIn('"excerpt": "NORTHSTAR-BOUND"', prompt)
+        self.assertNotIn("Public reply NORTHSTAR-BOUND", prompt)
+        self.assertGreater(agent._memory_agent.evidence_chars_by_phase["phase1"], 0)
+        bank = agent.memory
+        bank.register_source("unbound", "tool_observation", "PRIVATE-UNBOUND", 99)
+        bank.current_source_ids.remove("unbound")
+        with self.assertRaises(ValueError):
+            bank.revise(bank.knowledge[0].id, "new", "inference",
+                [{"event_id": "unbound", "role": "tool_observation", "quote": "PRIVATE-UNBOUND"}],
+                "reason", bank.metadata[bank.knowledge[0].id]["source_refs"], [0])
+
+    def test_revision_dispatch_failure_is_atomic_and_collision_safe(self):
+        agent, _, _ = self.make("R", [])
+        bank = agent.memory
+        bank.register_source("task", "task_instruction", "Keep ORIGINAL-BOUND", 1)
+        refs = [{"event_id": "task", "role": "task_instruction", "quote": "ORIGINAL-BOUND"}]
+        old = bank.save_sourced("procedural", "old procedure", "task_requirement", refs)
+        before = json.dumps(bank.to_dict(), sort_keys=True)
+        before_search = [e.id for e in bank.search_procedural("procedure")]
+        for bad in (42, [], {}, "", "  "):
+            result = agent._memory_agent._execute_tool_calls(SimpleNamespace(tool_calls=[call(
+                "memory_reconcile", memory_id=old, decision="revise",
+                reason="new source", evidence_refs=refs, content=bad,
+                statement_type="task_requirement", source_refs=[],
+                inherit_source_ref_indices=[0])], content=""))[0]
+            self.assertFalse(result.success)
+            self.assertEqual(json.dumps(bank.to_dict(), sort_keys=True), before)
+            self.assertEqual([e.id for e in bank.search_procedural("procedure")], before_search)
+        from memory_agent.memory.universal_memory import UniversalMemory
+        with patch.object(UniversalMemory, "_generate_id", return_value=old):
+            result = agent._memory_agent._execute_tool_calls(SimpleNamespace(tool_calls=[call(
+                "memory_reconcile", memory_id=old, decision="revise",
+                reason="updated", evidence_refs=refs, content="new procedure",
+                statement_type="task_requirement", source_refs=[],
+                inherit_source_ref_indices=[0])], content=""))[0]
+        self.assertTrue(result.success)
+        self.assertNotEqual(result.memory_id, old)
+        self.assertIsNone(bank.get(old))
+        self.assertEqual(bank.search_procedural("procedure")[0].id, result.memory_id)
+
+    def test_s_r_valid_reminder_is_returned_not_delivered(self):
+        for variant in ("S", "R"):
+            with self.subTest(variant=variant):
+                agent, fake, root = self.make(variant, [])
+                episode = PMAEpisode(agent, run_id="r", task_id="t", archive=root / "archive")
+                fake.outputs.extend([LLMResponse(content="", tool_calls=[call(
+                    "memory_save_knowledge", content="Keep public scope", statement_type="task_requirement",
+                    source_refs=[{"event_id": "s1", "role": "task_instruction", "quote": "public scope"}])]),
+                    LLMResponse(content="<no_intervention/>")])
+                asyncio.run(episode.handle({"kind": "task_start", "event_id": "s1", "sequence": 1,
+                    "run_id": "r", "task_id": "t", "initial_user_content": "Keep public scope"}))
+                memory_id = agent.memory.knowledge[0].id
+                fake.outputs.extend([LLMResponse(content="", tool_calls=[]), LLMResponse(content=(
+                    "<context_for_action>Remember the public scope.</context_for_action>"
+                    f'<memory_refs>[{{"id":"{memory_id}","version":1}}]</memory_refs>'))])
+                asyncio.run(episode.handle({"kind": "before_actor_call", "event_id": "b1",
+                    "sequence": 2, "run_id": "r", "task_id": "t", "actor_attempt": 1}))
+                asyncio.run(episode.handle({"kind": "actor_step", "event_id": "a1",
+                    "sequence": 3, "run_id": "r", "task_id": "t", "actor_attempt": 1,
+                    "step_status": "normal", "response": "Inspecting public information",
+                    "observation": "Visible result", "commands": ["read"]}))
+                receipt = asyncio.run(episode.handle({"kind": "before_actor_call", "event_id": "b2",
+                    "sequence": 4, "run_id": "r", "task_id": "t", "actor_attempt": 2}))
+                self.assertEqual(receipt["status"], "reminder")
+                self.assertIn("Remember the public scope", receipt["reminder"])
+                self.assertEqual(receipt["delivery"], "returned_not_confirmed_in_ga_request")
+                self.assertIn('"excerpt": "public scope"', fake.requests[2]["prompt"])
+                self.assertEqual(len(fake.requests), 4)
+
+    def test_load_and_presend_reject_invalid_bank(self):
+        agent, _, root = self.make("S", [])
+        bank = agent.memory
+        bank.register_source("s", "task_instruction", "Keep public scope", 1)
+        memory_id = bank.save_sourced("knowledge", "scope", "task_requirement",
+            [{"event_id": "s", "role": "task_instruction", "quote": "public scope"}])
+        good = bank.to_dict()
+        for mutation in ("missing_meta", "empty_refs", "bad_version", "retired_active"):
+            data = json.loads(json.dumps(good))
+            if mutation == "missing_meta":
+                del data["metadata"][memory_id]
+            elif mutation == "empty_refs":
+                data["metadata"][memory_id]["source_refs"] = []
+            elif mutation == "bad_version":
+                data["metadata"][memory_id]["version"] = 0
+            else:
+                data["history"].append({"action": "retract", "id": memory_id})
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                SourceMemory.from_dict(data)
+        bank.metadata[memory_id]["source_refs"] = []
+        self.assertIsNone(agent._memory_agent._parse_phase2_response(
+            '<context_for_action>Bad</context_for_action>'
+            f'<memory_refs>[{{"id":"{memory_id}","version":1}}]</memory_refs>'))
+        self.assertEqual(agent._memory_agent.last_delivery_status, "invalid_reference_no_delivery")
 
 
 if __name__ == "__main__":

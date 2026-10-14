@@ -8,7 +8,7 @@
       "license": "Apache-2.0; vendor/pma_89e5c0d/LICENSE retained",
       "file": "src/memory_agent/memory/memory_agent.py",
       "functions": ["MemoryAgent.process", "_build_phase2_prompt", "_extract_tool_call", "_parse_tool_calls_from_text", "_execute_tool_calls", "_format_memory_bank"],
-      "reuse": "original process directly called via SourceMemoryAgent.process/super; selected formatting, phase1 tool dispatch and phase2 parsing inherited/overridden in separate adapter; original phase2 prompt function called",
+      "reuse": "original process directly called via SourceMemoryAgent.process/super; selected formatting, phase1 tool dispatch and phase2 parsing inherited/overridden in separate adapter; original phase1/phase2 prompt functions called; bound snippets and persistent coordination rendered in both stages",
       "reason": "Add provenance, R coordination and cited free-form reminder while retaining two-phase ordering and original no-op decision. No replacement provider/retry loop."
     },
     {
@@ -17,7 +17,7 @@
       "license": "Apache-2.0; vendor/pma_89e5c0d/LICENSE retained",
       "file": "src/memory_agent/memory/universal_memory.py",
       "functions": ["UniversalMemory.save_knowledge", "save_procedural", "delete", "get", "search_knowledge", "search_procedural", "to_dict", "from_dict"],
-      "reuse": "inherited adaptation in research-side SourceMemory; active lists and upstream serialization base retained, additional metadata/history/source registry separated",
+      "reuse": "inherited adaptation in research-side SourceMemory; active lists and upstream serialization base retained, additional metadata/history/source registry separated; active-bank load/send validation and collision-safe IDs added",
       "reason": "Upstream MemoryEntry.from_dict drops unknown fields; an external metadata map and explicit load validation preserve provenance and version."
     },
     {
@@ -46,6 +46,15 @@
       "functions": ["construct_upstream", "PMAEpisode.handle", "install_transport_audit"],
       "reuse": "original research event identity and two-call audit path retained; explicit default-U candidate factory and source registration added",
       "reason": "Avoid global monkey patch and keep U unchanged."
+    },
+    {
+      "source": "HYC-hsy/longcontext-monitor-research",
+      "commit": "0643e5c53514d05d46bdbc3f99d00efd398e2f24",
+      "license": "local project code; no third-party code copied",
+      "file": "pma_full_upstream_ga_v1_20261013/static_source_screen.py",
+      "functions": ["construct_upstream", "PMAEpisode.handle", "SourceMemoryAgent.process"],
+      "reuse": "new fixed-public-event shadow orchestration; directly calls pinned upstream PMA through existing episode adapter and intercepts its real call boundary with a deterministic fake",
+      "reason": "Existing live runner is an authorized GA/Harbor task lifecycle, not an unauthorized static replay entry. This entry explicitly refuses live mode and cannot submit Task control or evaluator results."
     },
     {
       "source": "getzep/graphiti",

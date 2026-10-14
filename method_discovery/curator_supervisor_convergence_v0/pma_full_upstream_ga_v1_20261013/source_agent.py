@@ -27,6 +27,9 @@ retain, revise, retract, or unresolved using memory_reconcile. Cite current
 public evidence and give a short reason, not hidden reasoning. Newer or
 different information does not automatically contradict old information.
 Do not silently turn unresolved into a verified fact.
+For revision, new source_refs must cite the current visible text. To retain
+an old entry's already bound excerpt, explicitly list its zero-based index
+in inherit_source_ref_indices; no other old source can be inherited.
 """
 REMINDER_RULES = """
 Keep the original selective-attention decision: synthesize freely or stay silent.
@@ -59,6 +62,7 @@ def _tools(variant: str) -> list[dict]:
                 "content": {"type": "string"},
                 "statement_type": {"type": "string", "enum": sorted(SourceMemory.TYPES)},
                 "source_refs": {"type": "array", "items": {"type": "object"}},
+                "inherit_source_ref_indices": {"type": "array", "items": {"type": "integer"}},
             }, "required": ["memory_id", "decision", "reason", "evidence_refs"]},
         }})
     return tools
@@ -74,24 +78,39 @@ class SourceMemoryAgent(MemoryAgent):
         self.variant = variant
         self.last_delivery_status = "not_run"
         self.last_reminder_refs: list[dict] = []
+        self.last_reminder_identities: list[tuple] = []
+        self.evidence_chars_by_phase: dict[str, int] = {}
+        self._current_evidence_chars = 0
         self.coordination: list[dict] = []
 
     async def process(self, observation: str, step_count: int = 0):
+        self.memory.validate_bank()
         self.last_delivery_status = "phase2_error_or_not_completed"
         self.last_reminder_refs = []
+        self.last_reminder_identities = []
+        self.evidence_chars_by_phase = {}
         return await super().process(observation=observation, step_count=step_count)
+
+    def _memory_identity(self, memory_id: str) -> tuple:
+        meta = self.memory.metadata[memory_id]
+        entry = self.memory.get(memory_id)
+        if entry is None:
+            raise ValueError("inactive memory")
+        return (memory_id, meta["version"], meta["coordination"]["revision"],
+                json.dumps(meta, ensure_ascii=False, sort_keys=True), entry.content)
 
     def pending_refs_valid(self) -> bool:
         if self.last_delivery_status != "selected_validated_not_delivered":
             return False
-        for ref in self.last_reminder_refs:
-            meta = self.memory.metadata.get(ref["id"])
-            if self.memory.get(ref["id"]) is None or meta is None or meta["version"] != ref["version"]:
-                return False
-            for source_ref in meta["source_refs"]:
-                if not self.memory.source_ref_valid(source_ref):
+        try:
+            self.memory.validate_bank()
+            for ref, identity in zip(self.last_reminder_refs, self.last_reminder_identities,
+                                     strict=True):
+                if self._memory_identity(ref["id"]) != identity:
                     return False
-        return True
+            return bool(self.last_reminder_refs)
+        except (ValueError, KeyError, TypeError):
+            return False
 
     def get_tools_schema(self) -> list[dict]:
         return _tools(self.variant)
@@ -110,19 +129,38 @@ class SourceMemoryAgent(MemoryAgent):
     def _format_memory_list(self, entries):
         if not entries:
             return "(empty)"
-        return "\n".join(
-            f"[{e.id} v{self.memory.metadata[e.id]['version']}] {e.content} "
-            f"[type={self.memory.metadata[e.id]['statement_type']}; "
-            f"sources={json.dumps(self.memory.metadata[e.id]['source_refs'], ensure_ascii=False)}]"
-            for e in entries)
+        rows = []
+        for entry in entries:
+            meta = self.memory.metadata[entry.id]
+            sources = [{"event_id": ref["event_id"], "role": ref["role"],
+                        "excerpt": self.memory.excerpt(ref)} for ref in meta["source_refs"]]
+            state = meta["coordination"]
+            state_evidence = [{"event_id": ref["event_id"], "role": ref["role"],
+                               "excerpt": self.memory.excerpt(ref)}
+                              for ref in state["evidence_refs"]]
+            self._current_evidence_chars += sum(len(r["excerpt"]) for r in sources + state_evidence)
+            rows.append(
+                f"[{entry.id} v{meta['version']}] {entry.content} "
+                f"[type={meta['statement_type']}; bound_evidence="
+                f"{json.dumps(sources, ensure_ascii=False)}; "
+                f"coordination={json.dumps({'decision': state['decision'], 'reason': state['reason'], 'evidence': state_evidence}, ensure_ascii=False)}]")
+        return "\n".join(rows)
 
     def _build_phase1_prompt(self, observation: str, step_count: int) -> str:
+        self._current_evidence_chars = 0
         prompt = super()._build_phase1_prompt(observation, step_count)
+        self.evidence_chars_by_phase["phase1"] = self._current_evidence_chars
         handles = [{k: source[k] for k in ("event_id", "role", "order", "sha256")}
                    for event_id in self.memory.current_source_ids
                    if (source := self.memory.sources.get(event_id))]
         return prompt + "\n## Visible public source handles (quote exact text above)\n" + json.dumps(
             handles, ensure_ascii=False, sort_keys=True)
+
+    def _build_phase2_prompt(self, observation: str, step_count: int) -> str:
+        self._current_evidence_chars = 0
+        prompt = super()._build_phase2_prompt(observation, step_count)
+        self.evidence_chars_by_phase["phase2"] = self._current_evidence_chars
+        return prompt
 
     def _execute_tool_calls(self, response) -> list[MemoryOperation]:
         calls = getattr(response, "tool_calls", None) or []
@@ -162,14 +200,14 @@ class SourceMemoryAgent(MemoryAgent):
         evidence = self.memory.resolve_refs(args.get("evidence_refs"), "inference")
         if decision == "revise":
             new_id = self.memory.revise(memory_id, args.get("content"),
-                args.get("statement_type"), args.get("source_refs"), reason, evidence)
+                args.get("statement_type"), args.get("source_refs"), reason, evidence,
+                args.get("inherit_source_ref_indices"))
         elif decision == "retract":
             if not self.memory.retract(memory_id, reason, evidence):
                 raise ValueError("unknown memory to retract")
             new_id = None
         else:
-            if self.memory.get(memory_id) is None:
-                raise ValueError("unknown active memory")
+            self.memory.coordinate(memory_id, decision, reason, evidence)
             new_id = None
         self.coordination.append({"memory_id": memory_id, "decision": decision,
                                   "reason": reason, "evidence": evidence, "new_id": new_id})
@@ -177,6 +215,7 @@ class SourceMemoryAgent(MemoryAgent):
 
     def _parse_phase2_response(self, raw: str) -> str | None:
         self.last_reminder_refs = []
+        self.last_reminder_identities = []
         text = self._strip_thinking(raw)
         if re.fullmatch(r"\s*<no_intervention\s*/>\s*", text):
             self.last_delivery_status = "deliberate_silence"
@@ -188,6 +227,7 @@ class SourceMemoryAgent(MemoryAgent):
             self.last_delivery_status = "format_rejected"
             return None
         try:
+            self.memory.validate_bank()
             refs = json.loads(body.group(2))
             if not isinstance(refs, list) or not refs:
                 raise ValueError("nonempty memory refs required")
@@ -202,6 +242,7 @@ class SourceMemoryAgent(MemoryAgent):
                     if not self.memory.source_ref_valid(source_ref):
                         raise ValueError("invalid memory source")
             self.last_reminder_refs = refs
+            self.last_reminder_identities = [self._memory_identity(ref["id"]) for ref in refs]
             self.last_delivery_status = "selected_validated_not_delivered"
             return body.group(1).strip()
         except (ValueError, KeyError, TypeError):
