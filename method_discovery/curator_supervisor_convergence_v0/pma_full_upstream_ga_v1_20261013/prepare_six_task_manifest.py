@@ -11,6 +11,7 @@ import hashlib
 import json
 from pathlib import Path
 import runpy
+import subprocess
 from tempfile import TemporaryDirectory
 
 from long_context_bench.scripts.isolated_run_bundle import digest_tree
@@ -70,6 +71,16 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _committed_source_sha(checkout: Path, name: str) -> str:
+    unchanged = subprocess.run(['git', 'diff', '--quiet', 'HEAD', '--', name],
+                               cwd=checkout, check=False)
+    if unchanged.returncode:
+        raise RuntimeError(f'pilot source differs from HEAD: {name}')
+    blob = subprocess.run(['git', 'show', f'HEAD:{name}'], cwd=checkout,
+                          capture_output=True, check=True).stdout
+    return hashlib.sha256(blob).hexdigest()
+
+
 def prepare(source: Path, task_profile: Path, pma_profile: Path,
             evidence: Path | None = None) -> dict:
     task_settings = runpy.run_path(str(task_profile))[
@@ -122,7 +133,9 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
             raise RuntimeError('unexpected native-base evidence namespace')
         checkout = STAGE.parents[2]
         certification = {
-            'source_files': {name: _sha(checkout / name) for name in SOURCE_FILES},
+            'source_files': {name: _committed_source_sha(checkout, name)
+                             for name in SOURCE_FILES},
+            'source_identity_kind': 'HEAD_Git_blob_bytes_SHA256_with_clean_worktree',
             'evidence_files': {name: _sha(evidence / name) for name in EVIDENCE_FILES},
             'harbor_commit': '459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc'}
     return {'schema': 'pma-ga-live-manifest-v2',

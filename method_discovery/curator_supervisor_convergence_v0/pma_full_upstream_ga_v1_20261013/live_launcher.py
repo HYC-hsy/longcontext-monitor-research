@@ -18,7 +18,8 @@ from .offline_launcher import (STAGE, TASKS, _prepare_common,
 from .pma_harbor_hooks import verify_live_spec
 from .export_official_evaluator import (COMMIT as OFFICIAL_COMMIT,
                                          export_task, official_members)
-from .prepare_six_task_manifest import SOURCE_FILES, EVIDENCE_FILES
+from .prepare_six_task_manifest import (SOURCE_FILES, EVIDENCE_FILES,
+                                        _committed_source_sha)
 
 
 def _sha(path: Path) -> str:
@@ -63,7 +64,7 @@ def _require_evaluation_state_contract(manifest: dict) -> None:
         checkout = STAGE.parents[2]
         evidence = STAGE / 'six_task_native_base_20261014_v3'
         for name in SOURCE_FILES:
-            if _sha(checkout / name) != cert['source_files'][name]:
+            if _committed_source_sha(checkout, name) != cert['source_files'][name]:
                 raise RuntimeError('six-task SHARED source bytes changed')
         for name in EVIDENCE_FILES:
             if _sha(evidence / name) != cert['evidence_files'][name]:
