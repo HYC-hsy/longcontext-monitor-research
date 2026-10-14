@@ -35,6 +35,67 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest().upper()
 
 
+def verify_public_projection(case: dict) -> dict:
+    """Match PMA's recorded GA projection to actual public provider history."""
+    source = HERE / case["event_file"]
+    public = HERE / case["public_event_file"]
+    if sha256(source) != case["event_file_sha256"] or sha256(public) != case["public_event_file_sha256"]:
+        raise ValueError("frozen public input hash mismatch")
+    records = [json.loads(line) for line in source.read_text(encoding="utf-8").splitlines()]
+    records = [row for row in records if row["event"]["sequence"] <= case["inclusive_event_sequence"]]
+    episode = [row["event"] for row in records]
+    old_reminders = {row["event"]["actor_attempt"]: row["result"].get("reminder")
+                     for row in records if row["event"]["kind"] == "before_actor_call"}
+    ready = [row for line in public.read_text(encoding="utf-8").splitlines()
+             if (row := json.loads(line))["event_type"] == "provider_request_ready"]
+    steps = [e for e in episode if e["kind"] == "actor_step"]
+    if len(ready) != len(steps) + 1 or not episode or episode[0]["kind"] != "task_start":
+        raise ValueError("public request/episode count mismatch")
+    first = ready[0]["payload"]["content"]["messages"][0]["content"][0]["text"]
+    if episode[0]["initial_user_content"] != first:
+        raise ValueError("public initial Task input differs from PMA projection")
+    mapping = [{"sequence": 1, "field": "initial_user_content", "request_event_id": ready[0]["event_id"],
+                "sha256": hashlib.sha256(first.encode()).hexdigest()}]
+    for index, step in enumerate(steps):
+        prior, following = ready[index:index + 2]
+        if step.get("request_event_id") != prior["event_id"]:
+            raise ValueError(f"actor step {step['sequence']} request identity mismatch")
+        messages = following["payload"]["content"]["messages"]
+        assistant, user = messages[-2:]
+        if assistant["role"] != "assistant" or user["role"] != "user":
+            raise ValueError("latest public interaction roles differ")
+        response = "\n".join(block["text"] for block in assistant["content"] if block["type"] == "text")
+        if step["response"] != response:
+            raise ValueError(f"actor step {step['sequence']} response differs")
+        commands = [json.loads(item) for item in step["commands"]]
+        uses = [block for block in assistant["content"] if block["type"] == "tool_use"]
+        if len(commands) != len(uses):
+            raise ValueError(f"actor step {step['sequence']} tool count differs")
+        for command, use in zip(commands, uses, strict=True):
+            args = {k: v for k, v in command["args"].items() if k not in {"_index", "_tool_num"}}
+            if (command["id"], command["tool_name"], args) != (use["id"], use["name"], use["input"]):
+                raise ValueError(f"actor step {step['sequence']} tool command differs")
+        observation = json.loads(step["observation"])
+        results = [block for block in user["content"] if block["type"] == "tool_result"]
+        text = "".join(block["text"] for block in user["content"] if block["type"] == "text")
+        appended = old_reminders.get(step["actor_attempt"] + 1)
+        expected_text = observation["content"] + ("\n\n" + appended if appended else "")
+        if observation["tool_results"] != [
+                {"tool_use_id": result["tool_use_id"], "content": result["content"]}
+                for result in results] or expected_text != text:
+            raise ValueError(f"actor step {step['sequence']} tool result/observation differs")
+        if bool(appended) != bool(following["payload"].get("pma_reminder_event_id")):
+            raise ValueError("historical PMA append identity differs")
+        mapping.append({"sequence": step["sequence"], "actor_attempt": step["actor_attempt"],
+                        "request_event_id": prior["event_id"], "following_request_event_id": following["event_id"],
+                        "response_sha256": hashlib.sha256(response.encode()).hexdigest(),
+                        "commands": len(commands), "tool_results": len(results),
+                        "historical_reminder_suffix": bool(appended),
+                        "observation_sha256": hashlib.sha256(step["observation"].encode()).hexdigest()})
+    return {"task": case["task"], "source_sha256": sha256(source),
+            "public_sha256": sha256(public), "mapping": mapping, "unexplained_differences": []}
+
+
 def projected_events(case: dict, run_id: str) -> list[dict]:
     source = HERE / case["event_file"]
     if sha256(source) != case["event_file_sha256"]:
@@ -116,10 +177,12 @@ async def run_fake(manifest: dict, output: Path) -> list[dict]:
     output.mkdir(parents=True, exist_ok=False)
     results = []
     for case in manifest["cases"]:
+        mapping = verify_public_projection(case)
         for variant in manifest["conditions"]:
             run_id = f"shadow-{case['task']}-{variant.lower()}"
             slot = output / run_id
             slot.mkdir()
+            (slot / "public_mapping.json").write_text(json.dumps(mapping, indent=2), encoding="utf-8")
             events = projected_events(case, run_id)
             expected = (case["estimated_phase1_calls_per_condition"]
                         + case["estimated_phase2_calls_per_condition"])
@@ -150,12 +213,20 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path, default=MANIFEST)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--mode", choices=("fake", "live"), default="fake")
+    parser.add_argument("--authorization", type=Path)
+    parser.add_argument("--profile", type=Path)
     args = parser.parse_args()
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+    if args.mode == "live":
+        if args.authorization is None or args.profile is None:
+            raise PermissionError("real static provider dispatch requires a later authorization and entry; private profile absent")
+        from static_source_live import run_authorized
+        rows = asyncio.run(run_authorized(args.manifest, args.authorization, args.profile,
+                                          args.output))
+        print(json.dumps({"slots_finished": len(rows), "results": [r["status"] for r in rows]}))
+        return 0 if len(rows) == 6 and all(r["status"] == "static_prefix_complete" for r in rows) else 1
     if manifest.get("execution_authorized") is not False:
-        raise ValueError("this static draft must remain unauthorized")
-    if args.mode != "fake":
-        raise PermissionError("real static provider dispatch requires a later authorization and entry")
+        raise ValueError("fake static draft must remain unauthorized")
     rows = asyncio.run(run_fake(manifest, args.output))
     print(json.dumps({"slots": len(rows), "logical_phase_calls": sum(r["logical_phase_calls"] for r in rows),
                       "real_provider_attempts": 0}, sort_keys=True))
