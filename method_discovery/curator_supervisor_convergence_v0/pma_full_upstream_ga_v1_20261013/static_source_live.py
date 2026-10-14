@@ -13,8 +13,8 @@ from typing import Any, Callable
 
 import litellm
 
+from static_source_screen import HERE, MANIFEST, MANIFEST_V2, ordered_slots, projected_events, sha256, verify_public_projection
 from episode import PMAEpisode, construct_upstream
-from static_source_screen import HERE, MANIFEST, projected_events, sha256, verify_public_projection
 
 
 def append_json(path: Path, row: dict) -> None:
@@ -64,15 +64,17 @@ def code_commit() -> str:
 def authorize(manifest_path: Path, auth_path: Path, output: Path, profile_path: Path) -> tuple[dict, dict]:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     auth = json.loads(auth_path.read_text(encoding="utf-8"))
-    frozen = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    if (manifest.get("schema") != "pma-source-memory-static-live-batch-v1" or
+    is_v2 = manifest.get("schema") == "pma-source-memory-static-live-batch-v2"
+    frozen = json.loads((MANIFEST_V2 if is_v2 else MANIFEST).read_text(encoding="utf-8"))
+    if (manifest.get("schema") not in {"pma-source-memory-static-live-batch-v1",
+                                      "pma-source-memory-static-live-batch-v2"} or
             manifest.get("conditions") != frozen["conditions"] or
             manifest.get("cases") != frozen["cases"] or
-            manifest.get("input_policy") != frozen["input_policy"]):
+            manifest.get("input_policy") != frozen["input_policy"] or
+            (is_v2 and manifest.get("planned_order") != frozen["planned_order"])):
         raise PermissionError("static candidate or public-input identity mismatch")
     bindings = manifest.get("run_bindings")
-    expected = [(case["task"], variant) for case in manifest["cases"]
-                for variant in manifest["conditions"]]
+    expected = [(task, variant) for task, variant in ordered_slots(manifest)]
     if (manifest.get("execution_authorized") is not False or
             not isinstance(bindings, list) or len(bindings) != 6 or
             [(b.get("task"), b.get("variant")) for b in bindings] != expected or
@@ -91,7 +93,8 @@ def authorize(manifest_path: Path, auth_path: Path, output: Path, profile_path: 
         raise PermissionError("duplicate run identity")
     for binding in bindings:
         path = (output / binding["run_id"]).resolve()
-        if not path.is_relative_to(output.resolve()) or path.exists():
+        if (not path.is_relative_to(output.resolve()) or path.exists() or
+                (is_v2 and binding.get("run_root") != str(path))):
             raise PermissionError("run root exists or escapes batch")
     # Identity and public projection checks are pre-send gates, not observations.
     for case in manifest["cases"]:
@@ -109,9 +112,10 @@ async def run_authorized(manifest_path: Path, auth_path: Path, profile_path: Pat
         "profile": safe_profile, "bindings": manifest["run_bindings"]}, indent=2), encoding="utf-8")
     results = []
     try:
-        for case in manifest["cases"]:
-            mapping = verify_public_projection(case)
-            for variant in manifest["conditions"]:
+        cases = {case["task"]: case for case in manifest["cases"]}
+        for task, variant in ordered_slots(manifest):
+                case = cases[task]
+                mapping = verify_public_projection(case)
                 binding = manifest["run_bindings"][len(results)]
                 slot = output / binding["run_id"]
                 slot.mkdir()
@@ -124,57 +128,93 @@ async def run_authorized(manifest_path: Path, auth_path: Path, profile_path: Pat
                 logical = 0
                 lower = 0
                 failures = []
+                capture_error = None
                 original = agent._memory_llm.call
                 original_lower = litellm.acompletion
 
                 async def observed_lower(**kwargs):
-                    nonlocal lower
+                    nonlocal lower, capture_error
+                    if capture_error is not None:
+                        raise RuntimeError("provider capture integrity already failed")
                     lower += 1
                     number = lower
-                    append_json(slot / "provider_attempts.jsonl", {
-                        "attempt": number, "started_epoch": time.time(),
-                        "model": kwargs.get("model"), "max_tokens": kwargs.get("max_tokens"),
-                        "temperature": kwargs.get("temperature"),
-                        "thinking": kwargs.get("thinking"),
-                        "reasoning_effort": kwargs.get("reasoning_effort")})
+                    try:
+                        append_json(slot / "provider_attempts.jsonl", {
+                            "attempt": number, "started_epoch": time.time(),
+                            "model": kwargs.get("model"), "max_tokens": kwargs.get("max_tokens"),
+                            "temperature": kwargs.get("temperature"),
+                            "thinking": kwargs.get("thinking"),
+                            "reasoning_effort": kwargs.get("reasoning_effort"),
+                            "timeout": kwargs.get("timeout"),
+                            "messages": public_value(kwargs.get("messages")),
+                            "tools": public_value(kwargs.get("tools"))})
+                    except Exception as exc:
+                        capture_error = exc
+                        raise
                     try:
                         response = await original_lower(**kwargs)
-                        append_json(slot / "provider_attempts.jsonl", {
-                            "attempt": number, "outcome": "returned", "ended_epoch": time.time(),
-                            "usage": public_value(response.get("usage"))})
+                        try:
+                            append_json(slot / "provider_attempts.jsonl", {
+                                "attempt": number, "outcome": "returned", "ended_epoch": time.time(),
+                                "returned_model": response.get("model"),
+                                "choices": public_value(response.get("choices")),
+                                "usage": public_value(response.get("usage"))})
+                        except Exception as exc:
+                            # The provider may have executed. Do not raise here:
+                            # upstream LiteLLM would retry the accepted request.
+                            capture_error = exc
                         return response
                     except BaseException as exc:
-                        append_json(slot / "provider_attempts.jsonl", {
-                            "attempt": number, "outcome": "exception", "error_type": type(exc).__name__,
-                            "server_execution": "unknown", "ended_epoch": time.time()})
+                        try:
+                            append_json(slot / "provider_attempts.jsonl", {
+                                "attempt": number, "outcome": "exception", "error_type": type(exc).__name__,
+                                "server_execution": "unknown", "ended_epoch": time.time()})
+                        except Exception as capture_exc:
+                            capture_error = capture_exc
                         raise
 
                 async def audited_call(*, prompt, system, tools=None):
-                    nonlocal logical
+                    nonlocal logical, capture_error
+                    if capture_error is not None:
+                        raise RuntimeError("capture integrity failed; no subsequent model send") from capture_error
                     logical += 1
                     number = logical
                     phase = "phase1" if tools is not None else "phase2"
-                    append_json(slot / "requests.jsonl", {"logical_call": number,
-                        "phase": phase, "started_epoch": time.time(), "system": system,
-                        "prompt": prompt, "tools": tools})
+                    try:
+                        append_json(slot / "requests.jsonl", {"logical_call": number,
+                            "phase": phase, "started_epoch": time.time(), "system": system,
+                            "prompt": prompt, "tools": tools})
+                    except Exception as exc:
+                        capture_error = exc
+                        raise
                     try:
                         response = await original(prompt=prompt, system=system, tools=tools)
-                        append_json(slot / "responses.jsonl", {"logical_call": number,
-                            "phase": phase, "ended_epoch": time.time(), "status": "returned",
-                            "content": response.content, "tool_calls": public_value(response.tool_calls),
-                            "usage": public_value(response.usage)})
+                        if capture_error is not None:
+                            raise RuntimeError("provider response capture failed") from capture_error
+                        try:
+                            append_json(slot / "responses.jsonl", {"logical_call": number,
+                                "phase": phase, "ended_epoch": time.time(), "status": "returned",
+                                "content": response.content, "tool_calls": public_value(response.tool_calls),
+                                "usage": public_value(response.usage)})
+                        except Exception as exc:
+                            capture_error = exc
+                            raise
                         return response
                     except BaseException as exc:
                         failures.append({"logical_call": number, "phase": phase,
                                          "error_type": type(exc).__name__})
-                        append_json(slot / "responses.jsonl", {"logical_call": number,
-                            "phase": phase, "ended_epoch": time.time(), "status": "exception",
-                            "error_type": type(exc).__name__, "server_execution": "unknown"})
+                        try:
+                            append_json(slot / "responses.jsonl", {"logical_call": number,
+                                "phase": phase, "ended_epoch": time.time(), "status": "exception",
+                                "error_type": type(exc).__name__, "server_execution": "unknown"})
+                        except Exception as capture_exc:
+                            capture_error = capture_exc
                         raise
 
                 agent._memory_llm.call = audited_call
                 episode = PMAEpisode(agent, run_id=binding["run_id"], task_id=case["task"],
                                      archive=slot / "episode")
+                slot_started = time.time()
                 status = "static_prefix_complete"
                 error_type = None
                 litellm.acompletion = observed_lower
@@ -182,12 +222,19 @@ async def run_authorized(manifest_path: Path, auth_path: Path, profile_path: Pat
                     for event in events:
                         before = len(failures)
                         await episode.handle(event)
+                        fatal = getattr(agent._memory_agent, "_fatal_error", None)
+                        if fatal is not None:
+                            raise RuntimeError("candidate host integrity failure") from fatal
+                        if capture_error is not None:
+                            raise RuntimeError("static provider capture integrity failed") from capture_error
                         append_json(slot / "bank_states.jsonl", {"sequence": event["sequence"],
                             "memory": agent.memory.to_dict(),
                             "reminder_status": getattr(agent._memory_agent, "last_delivery_status", "upstream")})
                         if len(failures) != before:
                             raise RuntimeError("upstream caught a provider phase failure; stop batch")
                     agent.save_memory(str(slot / "memory.json"))
+                    if not (slot / "memory.json").is_file() or not (slot / "trajectory_memory.json").is_file():
+                        raise RuntimeError("upstream bank or trajectory was not persisted")
                 except BaseException as exc:
                     status = "stopped_failure"
                     error_type = type(exc).__name__
@@ -202,6 +249,10 @@ async def run_authorized(manifest_path: Path, auth_path: Path, profile_path: Pat
                        "error_type": error_type, "logical_phase_calls": logical,
                        "observable_litellm_calls": lower,
                        "inner_network_attempts": "unknown", "phase_failures": failures,
+                       "started_epoch": slot_started, "ended_epoch": time.time(),
+                       "persisted_artifacts": {name: sha256(slot / name)
+                           for name in ("memory.json", "trajectory_memory.json",
+                                        "failure_memory.json") if (slot / name).is_file()},
                        "task_calls": 0, "native_evaluator_calls": 0,
                        "input_sent_to_task": False, "task_completed": False}
                 (slot / "result.json").write_text(json.dumps(row, indent=2), encoding="utf-8")

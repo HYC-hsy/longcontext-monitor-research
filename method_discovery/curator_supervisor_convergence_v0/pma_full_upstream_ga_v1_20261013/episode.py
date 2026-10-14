@@ -184,7 +184,8 @@ class PMAEpisode:
                             for ref in candidate_agent.last_reminder_refs
                             if ref["id"] in self.agent._memory.metadata],
                         "coordination": candidate_agent.coordination,
-                        "transaction": getattr(candidate_agent, "last_transaction", None),
+                        "transaction": (getattr(candidate_agent, "last_transaction", None)
+                                        if result.get("triggered") else None),
                         "collateral_aborts": getattr(candidate_agent, "collateral_aborts", None),
                     }, ensure_ascii=False, sort_keys=True) + "\n")
                     stream.flush()

@@ -24,11 +24,28 @@ from episode import PMAEpisode, construct_upstream
 
 
 MANIFEST = HERE / "SOURCE_MEMORY_STATIC_SCREEN_DRAFT.json"
+MANIFEST_V2 = HERE / "SOURCE_MEMORY_STATIC_SCREEN_V2_DRAFT.json"
 FIELDS = {
     "task_start": ("initial_user_content",),
     "before_actor_call": ("actor_attempt",),
     "actor_step": ("actor_attempt", "step_status", "response", "commands", "observation"),
 }
+
+
+def ordered_slots(manifest: dict) -> list[tuple[str, str]]:
+    cases = {case["task"] for case in manifest["cases"]}
+    if "planned_order" not in manifest:
+        return [(case["task"], variant) for case in manifest["cases"]
+                for variant in manifest["conditions"]]
+    plan = manifest["planned_order"]
+    if (not isinstance(plan, list) or len(plan) != 6 or
+            [row.get("order") for row in plan] != list(range(1, 7))):
+        raise ValueError("invalid six-slot order")
+    slots = [(row["task"], row["variant"]) for row in plan]
+    if len(set(slots)) != 6 or set(slots) != {(task, variant) for task in cases
+                                               for variant in manifest["conditions"]}:
+        raise ValueError("six-slot identity mismatch")
+    return slots
 
 
 def sha256(path: Path) -> str:
@@ -104,8 +121,8 @@ def projected_events(case: dict, run_id: str) -> list[dict]:
     if sha256(public) != case["public_event_file_sha256"]:
         raise ValueError("fixed public Task event identity mismatch")
     events = []
-    for line in source.read_text(encoding="utf-8").splitlines():
-        original = json.loads(line)["event"]
+    for raw_line in source.read_bytes().splitlines(keepends=True):
+        original = json.loads(raw_line)["event"]
         if original["sequence"] > case["inclusive_event_sequence"]:
             break
         kind = original["kind"]
@@ -114,7 +131,8 @@ def projected_events(case: dict, run_id: str) -> list[dict]:
         event = {key: original[key] for key in FIELDS[kind] if key in original}
         event.update(kind=kind, task_id=case["task"], run_id=run_id,
                      event_id=f"shadow-{original['sequence']}-{original['event_id']}",
-                     sequence=original["sequence"])
+                     sequence=original["sequence"],
+                     source_record_sha256=hashlib.sha256(raw_line).hexdigest())
         events.append(event)
     if not events or events[-1]["sequence"] != case["inclusive_event_sequence"]:
         raise ValueError("cutoff sequence missing")
@@ -145,7 +163,19 @@ class FakePublicTransport:
                 description = re.search(
                     r"\[Task Description\]\n(.+?)(?:\n\n\[Recent Trajectory|\n\n## Your Task)",
                     prompt, re.S)
-                if match and description:
+                numbered = re.search(r"## Numbered visible public source leaves\n(\[.*\])\n## Previous", prompt)
+                if numbered:
+                    leaves = json.loads(numbered.group(1))
+                    task_source = next((leaf for leaf in leaves if leaf["role"] == "task_instruction"), None)
+                    if task_source and task_source["numbered_lines"]:
+                        function = SimpleNamespace(name="memory_save_knowledge", arguments={
+                            "content": "Review the original public task scope",
+                            "statement_type": "task_requirement",
+                            "source_refs": [{"source_handle": task_source["source_handle"],
+                                             "start_line": 1, "end_line": 1}]})
+                        response = LLMResponse(content="", tool_calls=[SimpleNamespace(function=function)])
+                        self.saved_once = True
+                elif match and description:
                     handles = json.loads(match.group(1))
                     task_source = next((h for h in handles if h["role"] == "task_instruction"), None)
                     quote = description.group(1)[:24]
@@ -176,9 +206,10 @@ class FakePublicTransport:
 async def run_fake(manifest: dict, output: Path) -> list[dict]:
     output.mkdir(parents=True, exist_ok=False)
     results = []
-    for case in manifest["cases"]:
-        mapping = verify_public_projection(case)
-        for variant in manifest["conditions"]:
+    cases = {case["task"]: case for case in manifest["cases"]}
+    for task, variant in ordered_slots(manifest):
+            case = cases[task]
+            mapping = verify_public_projection(case)
             run_id = f"shadow-{case['task']}-{variant.lower()}"
             slot = output / run_id
             slot.mkdir()
@@ -193,6 +224,9 @@ async def run_fake(manifest: dict, output: Path) -> list[dict]:
                                  archive=slot / "episode")
             for event in events:
                 await episode.handle(event)
+                fatal = getattr(agent._memory_agent, "_fatal_error", None)
+                if fatal is not None:
+                    raise RuntimeError("candidate host integrity failure") from fatal
             if fake.calls != expected:
                 raise AssertionError(f"logical call count {fake.calls} != {expected}")
             agent.save_memory(str(slot / "memory.json"))

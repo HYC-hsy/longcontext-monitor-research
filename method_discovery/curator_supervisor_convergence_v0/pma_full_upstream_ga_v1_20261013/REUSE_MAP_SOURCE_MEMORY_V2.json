@@ -1,0 +1,75 @@
+{
+  "schema": "reuse-map-source-memory-v2",
+  "baseline": "ab2945cf3ba5bda51bcc22ab969ef53c1d48dc1d",
+  "unchanged_upstream_pma": "89e5c0d6aadfe531a1aee42fd290d48be89973dd",
+  "modules": [
+    {
+      "source": "yifannnwu/proactive-memory-agent",
+      "commit": "89e5c0d6aadfe531a1aee42fd290d48be89973dd",
+      "license": "Apache-2.0, complete vendor/pma_89e5c0d/LICENSE retained",
+      "file": "src/memory_agent/memory/memory_agent.py",
+      "functions": ["MemoryAgent.process", "_build_phase1_prompt", "_build_phase2_prompt", "_extract_tool_call", "_parse_tool_calls_from_text", "MemoryOperation"],
+      "classification": "direct call plus research subclass adaptation",
+      "local_call_chain": "PMAEpisode._task_start/_actor_step -> original MemoryEnabledTerminus2._trigger_memory_agent -> SourceMemoryAgentV2.process -> super().process -> original phase calls and local tool dispatch",
+      "adaptation": "S2/R2 replace only prompt/schema/operation dispatch and retain exactly the existing two model phases. Operation receipts are injected into the existing Phase 2 and next Phase 1; upstream comment about tool feedback is not an implemented feedback loop."
+    },
+    {
+      "source": "yifannnwu/proactive-memory-agent",
+      "commit": "89e5c0d6aadfe531a1aee42fd290d48be89973dd",
+      "license": "Apache-2.0, complete vendor license retained",
+      "file": "src/memory_agent/memory/universal_memory.py",
+      "functions": ["UniversalMemory.save_knowledge", "save_procedural", "get", "delete", "search_knowledge", "search_procedural", "to_dict", "from_dict"],
+      "classification": "inherited adaptation",
+      "local_call_chain": "SourceMemoryV2 -> SourceMemory -> UniversalMemory; copy.deepcopy for Phase 1 staging; validated in-memory switch; original active lists and BM25 invalidation",
+      "adaptation": "The source registry and version/history are research-side; no upstream file changed and no distributed transaction guarantee is claimed."
+    },
+    {
+      "source": "yifannnwu/proactive-memory-agent",
+      "commit": "89e5c0d6aadfe531a1aee42fd290d48be89973dd",
+      "license": "Apache-2.0, complete vendor license retained",
+      "file": "external/harbor/src/harbor/llms/lite_llm.py",
+      "functions": ["LiteLLM.call"],
+      "classification": "direct call",
+      "local_call_chain": "SourceMemoryAgentV2._call_llm_phase1/_phase2 -> existing profiled_call -> upstream LiteLLM.call -> litellm.acompletion",
+      "adaptation": "No replacement model loop or retry policy; effective stop_after_attempt(3) is distinct from profile.max_retries=8."
+    },
+    {
+      "source": "pydantic/pydantic",
+      "reference_commit": "bd2d0dd0137dfa1a8fdff2529b9dfb1547980150",
+      "installed_version": "2.12.5",
+      "license": "MIT",
+      "file": "pydantic/main.py",
+      "functions": ["BaseModel.model_validate", "BaseModel.model_json_schema", "BaseModel.model_dump"],
+      "classification": "installed dependency directly called, not vendored/copied",
+      "local_call_chain": "source_protocol_v2.MODELS -> tool_schema and SourceMemoryAgentV2._execute_tool_calls",
+      "adaptation": "One strict model drives transmitted nested JSON schema and local argument validation; extra keys and coercion are rejected."
+    },
+    {
+      "source": "stefankoegl/python-json-pointer",
+      "commit": "86b82bf7a0b342e1c7b3aaf4c437dce264740579",
+      "license": "BSD-3-Clause",
+      "file": "jsonpointer.py",
+      "functions": ["JsonPointer.from_parts", "JsonPointer.resolve_pointer"],
+      "classification": "inspected but not adopted",
+      "reason": "The fixed GA event adapter has only known fields (initial_user_content, response, observation/content, tool_results/i/content and documented text fields); explicit field-path dispatch avoids another dependency. No arbitrary JSON-like string is recursively decoded."
+    },
+    {
+      "source": "stefankoegl/python-json-patch",
+      "commit": "7e00b23e7793ab6d0bfead6af61393b7327102e8",
+      "license": "BSD-3-Clause",
+      "file": "jsonpatch.py",
+      "functions": ["JsonPatch.apply(in_place=False)"],
+      "classification": "copy-then-commit idea only; no code copied or package installed",
+      "reason": "Existing SourceMemory serialization, validation, revision and index invalidation operate directly on a staged copy without translating operations to JSON Patch."
+    },
+    {
+      "source": "getzep/graphiti",
+      "commit": "8d8a12a22452cbef9335792afb73b8cbfe6a79fa",
+      "license": "Apache-2.0",
+      "file": "graphiti_core/prompts/dedupe_edges.py; graphiti_core/utils/maintenance/edge_operations.py; tests/utils/maintenance/test_edge_dedup_scenarios.py",
+      "functions": ["resolve_edge", "_same_pair_edges", "_dedupe_extracted_edge", "resolve_edge_contradictions"],
+      "classification": "design reference only, not enabled or copied",
+      "reason": "Future contradiction/duplicate comparison may be adapted separately; no semantic graph, time-is-truth rule, or invalid-source-to-all-episodes fallback is introduced here."
+    }
+  ]
+}

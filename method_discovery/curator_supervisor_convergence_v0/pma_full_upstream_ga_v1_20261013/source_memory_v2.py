@@ -8,6 +8,17 @@ from source_protocol_v2 import SourceLines
 
 
 class SourceMemoryV2(SourceMemory):
+    @staticmethod
+    def _line_spans(text: str) -> list[tuple[int, int, str]]:
+        """One-based displayed lines map to Python text offsets, not raw-byte offsets."""
+        rows = []
+        offset = 0
+        for part in text.splitlines(keepends=True):
+            visible = part.rstrip("\r\n\v\f\x1c\x1d\x1e\x85\u2028\u2029")
+            rows.append((offset, offset + len(visible), visible))
+            offset += len(part)
+        return rows
+
     def register_leaf(self, event_id: str, role: str, text: str, order: int,
                       field_path: str, raw_sha256: str) -> str | None:
         if not isinstance(text, str) or not text:
@@ -38,10 +49,10 @@ class SourceMemoryV2(SourceMemory):
             source = self.sources[source_id]
             if "handle" not in source:
                 raise ValueError("unversioned source in v2 bank")
-            lines = source["text"].splitlines()
+            lines = self._line_spans(source["text"])
             rows.append({"source_handle": source["handle"], "role": source["role"],
                          "field_path": source["field_path"], "order": source["order"],
-                         "numbered_lines": [f"{n}: {line}" for n, line in enumerate(lines, 1)]})
+                         "numbered_lines": [f"{n}: {line[2]}" for n, line in enumerate(lines, 1)]})
         return rows
 
     def resolve_refs(self, refs: object, statement_type: str) -> list[dict]:
@@ -54,13 +65,14 @@ class SourceMemoryV2(SourceMemory):
             selection = SourceLines.model_validate(item)
             source = visible.get(selection.source_handle)
             if source is None:
-                raise ValueError("unknown or window-invisible source handle")
-            spans = source["text"].splitlines(keepends=True)
+                if any(row.get("handle") == selection.source_handle for row in self.sources.values()):
+                    raise ValueError("window-invisible source handle")
+                raise ValueError("unknown source handle")
+            spans = self._line_spans(source["text"])
             if selection.end_line < selection.start_line or selection.end_line > len(spans):
                 raise ValueError("source line range outside visible leaf")
-            start = sum(len(line) for line in spans[:selection.start_line - 1])
-            end = (sum(len(line) for line in spans[:selection.end_line - 1])
-                   + len(spans[selection.end_line - 1].rstrip("\r\n")))
+            start = spans[selection.start_line - 1][0]
+            end = spans[selection.end_line - 1][1]
             excerpt = source["text"][start:end]
             if not excerpt:
                 raise ValueError("empty source line selection")
@@ -80,12 +92,12 @@ class SourceMemoryV2(SourceMemory):
             return False
         source = self.sources[ref["event_id"]]
         start_line, end_line = ref.get("start_line"), ref.get("end_line")
-        spans = source["text"].splitlines(keepends=True)
+        spans = self._line_spans(source["text"])
         if (type(start_line) is not int or type(end_line) is not int or
                 not 1 <= start_line <= end_line <= len(spans)):
             return False
-        start = sum(len(line) for line in spans[:start_line - 1])
-        end = sum(len(line) for line in spans[:end_line - 1]) + len(spans[end_line - 1].rstrip("\r\n"))
+        start = spans[start_line - 1][0]
+        end = spans[end_line - 1][1]
         return (source.get("handle") == ref.get("source_handle") and
                 source.get("raw_sha256") == ref.get("raw_sha256") and
                 source.get("field_path") == ref.get("field_path") and

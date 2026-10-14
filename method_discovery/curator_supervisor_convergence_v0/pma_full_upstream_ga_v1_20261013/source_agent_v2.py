@@ -6,6 +6,7 @@ import json
 import uuid
 
 from memory_agent.memory.memory_agent import BANK_TOOLS, MemoryOperation
+from pydantic import ValidationError
 
 from source_agent import RECONCILE_RULES, REMINDER_RULES, SourceMemoryAgent
 from source_memory_v2 import SourceMemoryV2
@@ -39,6 +40,14 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
         self.last_transaction: dict = {}
         self._phase_step = 0
         self.collateral_aborts = 0
+        self._fatal_error: Exception | None = None
+
+    async def process(self, observation: str, step_count: int = 0):
+        self._fatal_error = None
+        result = await super().process(observation, step_count)
+        if self._fatal_error is not None:
+            raise self._fatal_error
+        return result
 
     def get_tools_schema(self) -> list[dict]:
         descriptions = {tool["function"]["name"]: tool["function"]["description"]
@@ -57,6 +66,8 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
                                    tools=self.get_tools_schema())
 
     async def _call_llm_phase2(self, user_prompt: str):
+        if self._fatal_error is not None:
+            raise self._fatal_error
         from memory_agent.memory.memory_agent import PHASE2_SYSTEM
         return await self.llm.call(prompt=user_prompt,
                                    system=PHASE2_SYSTEM + REMINDER_RULES + RECEIPT_RULES)
@@ -98,6 +109,8 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
 
     @staticmethod
     def _error_code(exc: BaseException) -> str:
+        if isinstance(exc, ValidationError):
+            return "argument_shape"
         message = str(exc)
         if "window-invisible" in message:
             return "window_invisible"
@@ -118,8 +131,12 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
             calls = [type("Call", (), {"function": type("Function", (), {
                 "name": name, "arguments": args})()})()
                      for name, args in self._parse_tool_calls_from_text(raw)]
+            if "<tool_call>" in raw and not calls:
+                calls = [type("Call", (), {"function": type("Function", (), {
+                    "name": "unparsed_text_tool_call", "arguments": {}})()})()]
         txn = f"p1-{self._phase_step}-{uuid.uuid4().hex[:12]}"
         original = self.memory
+        before_bank = original.to_dict()
         working = copy.deepcopy(original)
         coordination_length = len(self.coordination)
         receipts: list[dict] = []
@@ -136,10 +153,15 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
                 self.memory = working
                 memory_id, status = self._dispatch_one(name, args)
                 row.update(status=status, memory_id=memory_id)
-            except Exception as exc:
+            except (ValueError, TypeError, ValidationError) as exc:
                 failed = True
                 row.update(error_code=self._error_code(exc), error_type=type(exc).__name__,
                            error=str(exc))
+            except Exception as exc:
+                failed = True
+                self._fatal_error = exc
+                row.update(status="integrity_error", error_code="host_integrity",
+                           error_type=type(exc).__name__, error=str(exc))
             finally:
                 self.memory = original
             receipts.append(row)
@@ -148,6 +170,7 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
                 working.validate_bank()
             except Exception as exc:
                 failed = True
+                self._fatal_error = exc
                 receipts.append({"transaction_id": txn, "call_index": len(calls) + 1,
                                  "tool_name": "validate_bank", "status": "rejected",
                                  "error_code": "bank_integrity", "error": str(exc)})
@@ -160,16 +183,26 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
             del self.coordination[coordination_length:]
         else:
             original.__dict__.update(working.__dict__)
-        version = __import__("hashlib").sha256(json.dumps(original.to_dict(),
+        after_bank = original.to_dict()
+        version = __import__("hashlib").sha256(json.dumps(after_bank,
             ensure_ascii=False, sort_keys=True).encode()).hexdigest()
         for row in receipts:
             row["commit_version"] = version
         self.last_receipts = receipts
         self.last_transaction = {"transaction_id": txn, "committed": not failed,
-                                 "commit_version": version, "receipts": copy.deepcopy(receipts)}
+                                 "commit_version": version, "receipts": copy.deepcopy(receipts),
+                                 "before_bank": self._bank_view(before_bank),
+                                 "after_bank": self._bank_view(after_bank)}
         return [MemoryOperation(action=row["tool_name"] or "unknown", memory_id=row.get("memory_id"),
                                 success=row["status"] in {"committed", "no_change"},
                                 error=row.get("error_code")) for row in receipts]
 
     def get_tools_schema_names(self) -> set[str]:
         return {tool["function"]["name"] for tool in self.get_tools_schema()}
+
+    @staticmethod
+    def _bank_view(state: dict) -> dict:
+        # Full source registry is persisted separately in bank_states.jsonl;
+        # transaction records retain the complete active bank and history.
+        return {key: copy.deepcopy(value) for key, value in state.items()
+                if key != "sources"}
