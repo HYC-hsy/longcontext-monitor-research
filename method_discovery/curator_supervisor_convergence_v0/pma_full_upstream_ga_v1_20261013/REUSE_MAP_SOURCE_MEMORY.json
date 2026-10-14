@@ -1,0 +1,78 @@
+{
+  "schema": "reuse-map-source-memory-v1",
+  "upstream_pma_commit": "89e5c0d6aadfe531a1aee42fd290d48be89973dd",
+  "modules": [
+    {
+      "source": "yifannnwu/proactive-memory-agent",
+      "commit": "89e5c0d6aadfe531a1aee42fd290d48be89973dd",
+      "license": "Apache-2.0; vendor/pma_89e5c0d/LICENSE retained",
+      "file": "src/memory_agent/memory/memory_agent.py",
+      "functions": ["MemoryAgent.process", "_build_phase2_prompt", "_extract_tool_call", "_parse_tool_calls_from_text", "_execute_tool_calls", "_format_memory_bank"],
+      "reuse": "original process directly called via SourceMemoryAgent.process/super; selected formatting, phase1 tool dispatch and phase2 parsing inherited/overridden in separate adapter; original phase2 prompt function called",
+      "reason": "Add provenance, R coordination and cited free-form reminder while retaining two-phase ordering and original no-op decision. No replacement provider/retry loop."
+    },
+    {
+      "source": "yifannnwu/proactive-memory-agent",
+      "commit": "89e5c0d6aadfe531a1aee42fd290d48be89973dd",
+      "license": "Apache-2.0; vendor/pma_89e5c0d/LICENSE retained",
+      "file": "src/memory_agent/memory/universal_memory.py",
+      "functions": ["UniversalMemory.save_knowledge", "save_procedural", "delete", "get", "search_knowledge", "search_procedural", "to_dict", "from_dict"],
+      "reuse": "inherited adaptation in research-side SourceMemory; active lists and upstream serialization base retained, additional metadata/history/source registry separated",
+      "reason": "Upstream MemoryEntry.from_dict drops unknown fields; an external metadata map and explicit load validation preserve provenance and version."
+    },
+    {
+      "source": "yifannnwu/proactive-memory-agent",
+      "commit": "89e5c0d6aadfe531a1aee42fd290d48be89973dd",
+      "license": "Apache-2.0; vendor/pma_89e5c0d/LICENSE retained",
+      "file": "src/memory_agent/memory/bm25_search.py",
+      "functions": ["BM25Index.__init__", "BM25Index.search"],
+      "reuse": "original unchanged through inherited UniversalMemory.search_knowledge/search_procedural",
+      "reason": "Inactive versions reside outside active lists; upstream index invalidation is called on revision/retraction."
+    },
+    {
+      "source": "yifannnwu/proactive-memory-agent",
+      "commit": "89e5c0d6aadfe531a1aee42fd290d48be89973dd",
+      "license": "Apache-2.0; vendor/pma_89e5c0d/LICENSE retained",
+      "file": "src/memory_agent/memory_enabled_agent.py",
+      "functions": ["_accumulate_step", "_get_memory_agent_context", "_format_step_entry", "_trigger_memory_agent", "_get_memory_system_prompt", "save_memory"],
+      "reuse": "original object and functions directly called by PMAEpisode; candidate replaces only its memory and memory-agent members after normal constructor",
+      "reason": "Keep published event window, trigger and pending reminder lifecycle without running Terminus2 actor loop."
+    },
+    {
+      "source": "HYC-hsy/longcontext-monitor-research",
+      "commit": "1272f883aea9e8ffb61fa78f7c610537f2b10f64",
+      "license": "local project code; no root LICENSE file found in this checkout",
+      "file": "pma_full_upstream_ga_v1_20261013/episode.py, worker_main.py",
+      "functions": ["construct_upstream", "PMAEpisode.handle", "install_transport_audit"],
+      "reuse": "original research event identity and two-call audit path retained; explicit default-U candidate factory and source registration added",
+      "reason": "Avoid global monkey patch and keep U unchanged."
+    },
+    {
+      "source": "getzep/graphiti",
+      "commit": "8d8a12a22452cbef9335792afb73b8cbfe6a79fa",
+      "license": "Apache-2.0; source headers verified",
+      "file": "graphiti_core/edges.py, graphiti_core/prompts/dedupe_edges.py, graphiti_core/utils/maintenance/edge_operations.py",
+      "functions": ["EntityEdge.episodes/valid_at/invalid_at", "resolve_edge", "_apply_temporal_invalidation", "resolve_edge_contradictions"],
+      "reuse": "idea only; no code or prompt copied",
+      "reason": "Source linkage and careful contradiction semantics; Graphiti temporal validity does not prove an old diagnosis was always wrong."
+    },
+    {
+      "source": "apache/incubator-kie",
+      "commit": "a0899a7d1c235929c811742cb78ed2e86cd9d2e3",
+      "license": "Apache-2.0; source headers verified",
+      "file": "drools-tms/src/main/java/org/drools/tms/LogicalDependency.java, TruthMaintenanceSystemImpl.java",
+      "functions": ["LogicalDependency.getJustifier", "TruthMaintenanceSystemImpl.addLogicalDependency"],
+      "reuse": "idea only; no code copied or runtime installed",
+      "reason": "Explicit support relation motivates provenance; this candidate has no general dependency graph or TMS cascade guarantee."
+    },
+    {
+      "source": "IJCAI 1977 Proceedings paper 035",
+      "commit": "immutable proceedings PDF",
+      "license": "citation only; no text/code copied",
+      "file": "https://www.ijcai.org/Proceedings/77-1/Papers/035.pdf",
+      "functions": [],
+      "reuse": "theoretical background only",
+      "reason": "No claimed implementation inheritance."
+    }
+  ]
+}

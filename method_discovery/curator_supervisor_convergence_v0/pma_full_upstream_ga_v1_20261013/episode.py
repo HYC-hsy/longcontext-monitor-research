@@ -254,6 +254,10 @@ class PMAEpisode:
         analysis = event.get("analysis")
         if analysis is None:
             analysis = event.get("response")
+        if hasattr(self.agent._memory, "register_source"):
+            # Candidate provenance accepts only GA's explicitly public body;
+            # an auxiliary analysis field cannot be treated as visible text.
+            analysis = event.get("response")
         if not isinstance(analysis, str):
             raise ValueError("complete public actor response required")
         plan = event.get("plan")

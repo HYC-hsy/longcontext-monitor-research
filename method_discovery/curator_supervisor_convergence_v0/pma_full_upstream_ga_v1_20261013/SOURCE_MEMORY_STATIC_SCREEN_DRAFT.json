@@ -1,0 +1,46 @@
+{
+  "schema": "pma-source-memory-shadow-screen-v1",
+  "execution_authorized": false,
+  "status": "prepared_not_executed",
+  "conditions": ["U", "S", "R"],
+  "runs_per_case_per_condition": 1,
+  "candidate_entry": "episode.construct_upstream(research_candidate=U|S|R) with PMAEpisode and a fresh bank",
+  "input_policy": {
+    "only_public_event_fields": ["initial_user_content", "response", "commands", "observation", "step_status"],
+    "excluded": ["old_memory_bank", "old_memory_operations", "old_reminder_result", "hidden_thinking", "future_events", "native_evaluation", "research_interpretation"],
+    "historical_influence": "The fixed Task trajectory was already affected by the old PMA. Any prior reminder appearing in a public Task response remains an agent_report, not an independently verified tool fact.",
+    "interpretation": "Shadow evaluation of memory and reminder decisions on a fixed exposed trajectory; not a counterfactual Task success experiment."
+  },
+  "cases": [
+    {
+      "task": "custom-memory-heap-crash",
+      "exposure": "exposed_development_case",
+      "archive_arm": "07",
+      "event_file": "six_task_live_batch_20261014_r1/raw/arms/07/host_private/archive/events.jsonl",
+      "event_file_sha256": "BFCC0A93E6359F70CCE12E36E0E42CB2A84444EEDDCBD88C6336CB58E2BFC9F9",
+      "public_event_file": "six_task_live_batch_20261014_r1/raw/arms/07/jobs/pma6-r1-20261014-07/public_task__WrAXj3u/agent/research_events.jsonl",
+      "public_event_file_sha256": "8BA1E3C596C63307F2E9CB2B791C01BFD8363501C26F1E8F31DD5C0A439135FD",
+      "inclusive_event_sequence": 27,
+      "event_order": "ascending original sequence; task_start once, each normal actor_step once; before_actor_call only as actor numbering, without replaying old reminder",
+      "estimated_phase1_calls_per_condition": 14,
+      "estimated_phase2_calls_per_condition": 14,
+      "coverage_intent_research_only": "inspect mistaken belief formation, later counterevidence, and revision without inserting a known answer"
+    },
+    {
+      "task": "fix-code-vulnerability",
+      "exposure": "exposed_development_case",
+      "archive_arm": "03",
+      "event_file": "six_task_live_batch_20261014_r1/raw/arms/03/host_private/archive/events.jsonl",
+      "event_file_sha256": "06BCB70EB8C3BEE59E2F793CB1C7BFEF060E51E341D685666B1DB437486CEEBD",
+      "public_event_file": "six_task_live_batch_20261014_r1/raw/arms/03/jobs/pma6-r1-20261014-03/public_task__rKn83bd/agent/research_events.jsonl",
+      "public_event_file_sha256": "14F4A4A162EC3FFCB4F003069CF1F59ABEDC953DA20F8F704C784565C10FEB05",
+      "inclusive_event_sequence": 41,
+      "event_order": "ascending original sequence; task_start once, each normal actor_step once; before_actor_call only as actor numbering, without replaying old reminder",
+      "estimated_phase1_calls_per_condition": 21,
+      "estimated_phase2_calls_per_condition": 21,
+      "coverage_intent_research_only": "inspect whether valuable public task information remains retrievable and usable in a later reminder"
+    }
+  ],
+  "human_readout_only": ["source authenticity", "semantic support", "persistent error after counterevidence", "old error resurfacing in final reminder", "useful reminder retention", "deliberate silence", "format rejection", "usage", "elapsed time"],
+  "separate_optional_challenge": "Any manually initialized wrong bank must receive a separately named manifest and report; not part of these natural empty-bank tracks."
+}
