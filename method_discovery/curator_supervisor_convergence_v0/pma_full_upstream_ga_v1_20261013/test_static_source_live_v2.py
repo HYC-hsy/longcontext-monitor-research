@@ -141,3 +141,65 @@ class V2EntryTests(unittest.TestCase):
             self.assertEqual(rows[0]["status"], "stopped_failure")
             self.assertFalse(auth.exists())
             self.assertFalse((output / "new-v2-2").exists())
+
+    def test_terminal_phase1_failure_blocks_phase2_and_later_slots(self):
+        for target_order, variant in ((1, "U"), (2, "S2"), (3, "R2")):
+            with self.subTest(variant=variant), TemporaryDirectory() as directory:
+                manifest, auth, profile, output = self.fixture(Path(directory))
+                sent = []
+
+                def fake(current_variant, slot):
+                    order = int(slot.name.rsplit("-", 1)[1])
+                    if order != target_order:
+                        return FakePublicTransport(slot / "fake_wire.jsonl",
+                                                   expected=28)
+
+                    async def terminal(*, prompt, system, tools=None):
+                        sent.append({"variant": current_variant,
+                                     "phase": "phase1" if tools is not None else "phase2"})
+                        raise RuntimeError("final logical transport failure")
+                    return terminal
+
+                async def forbidden(**_kwargs):
+                    raise AssertionError("network fallback forbidden")
+
+                with patch("litellm.acompletion", forbidden):
+                    rows = asyncio.run(run_authorized(manifest, auth, profile, output,
+                                                      fake_transport_factory=fake))
+                self.assertEqual(sent, [{"variant": variant, "phase": "phase1"}])
+                self.assertEqual(len(rows), target_order)
+                failed = rows[-1]
+                self.assertEqual(failed["status"], "stopped_failure")
+                self.assertEqual(failed["logical_phase_calls"], 1)
+                self.assertEqual(failed["observable_litellm_calls"], 0)
+                self.assertGreaterEqual(failed["blocked_phase_calls"], 1)
+                self.assertFalse((output / f"new-v2-{target_order + 1}").exists())
+                self.assertFalse(auth.exists())
+                if variant != "U":
+                    audit = (output / f"new-v2-{target_order}" / "episode" /
+                             "candidate_audit.jsonl").read_text(encoding="utf-8")
+                    self.assertIn("phase1_request_failed", audit)
+                    self.assertNotIn('"status": "committed"', audit)
+
+    def test_lower_retry_success_proceeds_to_phase2_without_extra_logical_call(self):
+        with TemporaryDirectory() as directory:
+            manifest, auth, profile, output = self.fixture(Path(directory))
+            sends = []
+
+            async def scripted_lower(**kwargs):
+                sends.append("phase1" if kwargs.get("tools") else "phase2")
+                if len(sends) == 1:
+                    raise RuntimeError("transient lower failure")
+                return litellm.ModelResponse(model="claude-opus-4-8", choices=[{
+                    "message": {"content": "" if kwargs.get("tools") else "<no_intervention/>",
+                                "tool_calls": []}, "finish_reason": "stop"}],
+                    usage={"prompt_tokens": 1, "completion_tokens": 1})
+
+            with patch("litellm.acompletion", scripted_lower):
+                rows = asyncio.run(run_authorized(manifest, auth, profile, output))
+            self.assertEqual(len(rows), 6)
+            self.assertEqual(rows[0]["status"], "static_prefix_complete")
+            self.assertEqual(rows[0]["logical_phase_calls"], 28)
+            self.assertEqual(rows[0]["observable_litellm_calls"], 29)
+            self.assertEqual(sends[:3], ["phase1", "phase1", "phase2"])
+            self.assertEqual(rows[0]["blocked_phase_calls"], 0)

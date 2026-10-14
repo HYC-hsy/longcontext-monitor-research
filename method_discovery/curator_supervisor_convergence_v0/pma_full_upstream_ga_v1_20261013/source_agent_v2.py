@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import uuid
 
 from memory_agent.memory.memory_agent import BANK_TOOLS, MemoryOperation
@@ -41,8 +42,16 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
         self._phase_step = 0
         self.collateral_aborts = 0
         self._fatal_error: Exception | None = None
+        self._previous_receipts: list[dict] = []
+        self._previous_transaction: dict = {}
+        self.blocked_phase2_attempts = 0
 
     async def process(self, observation: str, step_count: int = 0):
+        self._previous_receipts = copy.deepcopy(self.last_receipts)
+        self._previous_transaction = copy.deepcopy(self.last_transaction)
+        self.last_receipts = []
+        self.last_transaction = {"status": "phase1_not_executed", "committed": False,
+                                 "receipts": []}
         self._fatal_error = None
         result = await super().process(observation, step_count)
         if self._fatal_error is not None:
@@ -62,11 +71,20 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
         if self.variant == "R2":
             system += RECONCILE_RULES.replace("{event_id, role, quote}",
                                              "{source_handle, start_line, end_line}")
-        return await self.llm.call(prompt=user_prompt, system=system,
-                                   tools=self.get_tools_schema())
+        try:
+            return await self.llm.call(prompt=user_prompt, system=system,
+                                       tools=self.get_tools_schema())
+        except Exception as exc:
+            self.last_transaction = {"status": "phase1_request_failed",
+                                     "committed": False, "receipts": [],
+                                     "error_type": type(exc).__name__}
+            self._fatal_error = exc
+            raise
 
     async def _call_llm_phase2(self, user_prompt: str):
         if self._fatal_error is not None:
+            self.blocked_phase2_attempts += 1
+            self.last_transaction["phase2_blocked"] = "phase1_request_failed_or_host_integrity"
             raise self._fatal_error
         from memory_agent.memory.memory_agent import PHASE2_SYSTEM
         return await self.llm.call(prompt=user_prompt,
@@ -82,12 +100,14 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
         return (prompt + "\n## Numbered visible public source leaves\n" +
                 json.dumps(lines, ensure_ascii=False) +
                 "\n## Previous phase-1 execution receipts\n" +
-                json.dumps(self.last_receipts, ensure_ascii=False))
+                json.dumps({"transaction": self._previous_transaction,
+                            "receipts": self._previous_receipts}, ensure_ascii=False))
 
     def _build_phase2_prompt(self, observation: str, step_count: int) -> str:
         prompt = super()._build_phase2_prompt(observation, step_count)
-        return prompt + "\n## This phase-1 execution receipts\n" + json.dumps(
-            self.last_receipts, ensure_ascii=False)
+        return prompt + "\n## This phase-1 execution result\n" + json.dumps(
+            {"transaction": self.last_transaction, "receipts": self.last_receipts},
+            ensure_ascii=False)
 
     def _dispatch_one(self, name: str, args: dict) -> tuple[str | None, str]:
         if name in {"memory_save_knowledge", "memory_save_procedural"}:
@@ -128,12 +148,23 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
         calls = getattr(response, "tool_calls", None) or []
         if not calls:
             raw = self._strip_thinking(getattr(response, "content", None) or "")
-            calls = [type("Call", (), {"function": type("Function", (), {
-                "name": name, "arguments": args})()})()
-                     for name, args in self._parse_tool_calls_from_text(raw)]
-            if "<tool_call>" in raw and not calls:
-                calls = [type("Call", (), {"function": type("Function", (), {
-                    "name": "unparsed_text_tool_call", "arguments": {}})()})()]
+            if re.search(r"<\s*/?\s*tool_call\b|<\s*function\s*=|<\s*parameter\s*=",
+                         raw, re.IGNORECASE):
+                txn = f"p1-{self._phase_step}-{uuid.uuid4().hex[:12]}"
+                receipt = {"transaction_id": txn, "call_index": 1,
+                           "tool_name": "text_tool_call", "status": "rejected",
+                           "error_code": "text_tool_call_forbidden", "memory_id": None}
+                version = __import__("hashlib").sha256(json.dumps(
+                    self.memory.to_dict(), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+                receipt["commit_version"] = version
+                self.last_receipts = [receipt]
+                self.last_transaction = {"transaction_id": txn, "status": "format_rejected",
+                    "committed": False, "commit_version": version,
+                    "receipts": copy.deepcopy(self.last_receipts),
+                    "before_bank": self._bank_view(self.memory.to_dict()),
+                    "after_bank": self._bank_view(self.memory.to_dict())}
+                return [MemoryOperation(action="text_tool_call", success=False,
+                                        error="text_tool_call_forbidden")]
         txn = f"p1-{self._phase_step}-{uuid.uuid4().hex[:12]}"
         original = self.memory
         before_bank = original.to_dict()
@@ -176,7 +207,7 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
                                  "error_code": "bank_integrity", "error": str(exc)})
         if failed:
             for row in receipts:
-                if row["status"] == "committed":
+                if row["status"] in {"committed", "no_change"}:
                     row["status"] = "transaction_aborted"
                     row["error_code"] = "transaction_abort"
                     self.collateral_aborts += 1
@@ -189,7 +220,11 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
         for row in receipts:
             row["commit_version"] = version
         self.last_receipts = receipts
-        self.last_transaction = {"transaction_id": txn, "committed": not failed,
+        changed = before_bank != after_bank
+        self.last_transaction = {"transaction_id": txn,
+                                 "status": ("transaction_aborted" if failed else
+                                            "committed" if changed else "no_change"),
+                                 "committed": not failed,
                                  "commit_version": version, "receipts": copy.deepcopy(receipts),
                                  "before_bank": self._bank_view(before_bank),
                                  "after_bank": self._bank_view(after_bank)}

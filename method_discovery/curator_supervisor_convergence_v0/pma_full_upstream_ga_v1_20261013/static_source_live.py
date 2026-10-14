@@ -128,6 +128,8 @@ async def run_authorized(manifest_path: Path, auth_path: Path, profile_path: Pat
                 lower = 0
                 failures = []
                 capture_error = None
+                terminal_failure = None
+                blocked_phase_calls = 0
                 original = agent._memory_llm.call
                 original_lower = litellm.acompletion
 
@@ -173,12 +175,19 @@ async def run_authorized(manifest_path: Path, auth_path: Path, profile_path: Pat
                         raise
 
                 async def audited_call(*, prompt, system, tools=None):
-                    nonlocal logical, capture_error
+                    nonlocal logical, capture_error, terminal_failure, blocked_phase_calls
+                    phase = "phase1" if tools is not None else "phase2"
+                    if terminal_failure is not None:
+                        blocked_phase_calls += 1
+                        append_json(slot / "blocked_requests.jsonl", {
+                            "phase": phase, "epoch": time.time(), "sent": False,
+                            "reason": "prior_logical_request_terminal_failure",
+                            "prior_error_type": type(terminal_failure).__name__})
+                        raise RuntimeError("prior logical provider request failed; no further send") from terminal_failure
                     if capture_error is not None:
                         raise RuntimeError("capture integrity failed; no subsequent model send") from capture_error
                     logical += 1
                     number = logical
-                    phase = "phase1" if tools is not None else "phase2"
                     try:
                         append_json(slot / "requests.jsonl", {"logical_call": number,
                             "phase": phase, "started_epoch": time.time(), "system": system,
@@ -200,6 +209,7 @@ async def run_authorized(manifest_path: Path, auth_path: Path, profile_path: Pat
                             raise
                         return response
                     except BaseException as exc:
+                        terminal_failure = exc
                         failures.append({"logical_call": number, "phase": phase,
                                          "error_type": type(exc).__name__})
                         try:
@@ -247,6 +257,8 @@ async def run_authorized(manifest_path: Path, auth_path: Path, profile_path: Pat
                        "task": case["task"], "variant": variant, "status": status,
                        "error_type": error_type, "logical_phase_calls": logical,
                        "observable_litellm_calls": lower,
+                       "blocked_phase_calls": (blocked_phase_calls + getattr(
+                           agent._memory_agent, "blocked_phase2_attempts", 0)),
                        "inner_network_attempts": "unknown", "phase_failures": failures,
                        "started_epoch": slot_started, "ended_epoch": time.time(),
                        "persisted_artifacts": {name: sha256(slot / name)

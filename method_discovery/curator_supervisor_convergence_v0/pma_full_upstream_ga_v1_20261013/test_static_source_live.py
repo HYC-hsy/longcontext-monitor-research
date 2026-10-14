@@ -103,7 +103,12 @@ class StaticLiveGateTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["status"], "stopped_failure")
             self.assertEqual(rows[0]["error_type"], "RuntimeError")
-            self.assertEqual(len(rows[0]["phase_failures"]), 2)
+            # The old expectation counted a second provider failure in Phase 2.
+            # A terminal Phase-1 failure now locks the send boundary instead.
+            self.assertEqual(len(rows[0]["phase_failures"]), 1)
+            self.assertEqual(rows[0]["logical_phase_calls"], 1)
+            self.assertEqual(rows[0]["blocked_phase_calls"], 1)
+            self.assertEqual(rows[0]["phase_failures"][0]["phase"], "phase1")
             self.assertFalse(auth.exists())
             self.assertFalse((output / "isolated-2").exists())
 

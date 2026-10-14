@@ -135,6 +135,69 @@ class V2Tests(unittest.TestCase):
         self.assertEqual(agent._memory_agent.last_receipts, [])
         self.assertTrue(agent._memory_agent.last_transaction["committed"])
 
+    def test_text_tool_fallback_is_rejected_whole_in_both_orders(self):
+        good = "<tool_call><function=memory_update_status><parameter=content>B</parameter></function></tool_call>"
+        bad = "<tool_call><function=memory_delete><parameter=memory_id>missing</parameter>"
+        for variant in ("S2", "R2"):
+            for text in (good + bad, bad + good, bad, good):
+                with self.subTest(variant=variant, text=text):
+                    agent, fake, _ = self.make(variant, [
+                        LLMResponse(content=text, tool_calls=[]),
+                        LLMResponse(content="<no_intervention/>")])
+                    bank = agent.memory
+                    bank.update_status("A")
+                    before = bank.to_dict()
+                    result = asyncio.run(agent._memory_agent.process("task", 1))
+                    self.assertEqual(bank.to_dict(), before)
+                    self.assertEqual(len(fake.requests), 2)
+                    self.assertFalse(result.operations[0].success)
+                    self.assertEqual(agent._memory_agent.last_transaction["status"],
+                                     "format_rejected")
+                    self.assertEqual(agent._memory_agent.last_receipts[0]["error_code"],
+                                     "text_tool_call_forbidden")
+        agent, _, _ = self.make("S2", [
+            LLMResponse(content="ordinary prose", tool_calls=[]),
+            LLMResponse(content="<no_intervention/>")])
+        result = asyncio.run(agent._memory_agent.process("task", 1))
+        self.assertEqual(result.operations, [])
+        self.assertEqual(agent._memory_agent.last_transaction["status"], "no_change")
+
+    def test_rollback_relabels_stage_local_no_change_and_feedback(self):
+        agent, fake, _ = self.make("S2", [
+            LLMResponse(content="", tool_calls=[
+                call("memory_update_status", content="B"),
+                call("memory_update_status", content="B"),
+                call("memory_delete", memory_id="absent")]),
+            LLMResponse(content="<no_intervention/>"),
+            LLMResponse(content="", tool_calls=[]),
+            LLMResponse(content="<no_intervention/>")])
+        agent.memory.update_status("A")
+        result = asyncio.run(agent._memory_agent.process("task", 1))
+        self.assertEqual(agent.memory.status, "A")
+        self.assertEqual([r["status"] for r in agent._memory_agent.last_receipts],
+                         ["transaction_aborted", "transaction_aborted", "rejected"])
+        self.assertEqual([op.success for op in result.operations], [False, False, False])
+        self.assertEqual(agent._memory_agent.collateral_aborts, 2)
+        self.assertIn('"status": "transaction_aborted"', fake.requests[1]["prompt"])
+        self.assertIn('"status": "rejected"', fake.requests[1]["prompt"])
+        asyncio.run(agent._memory_agent.process("task", 2))
+        self.assertIn('"status": "transaction_aborted"', fake.requests[2]["prompt"])
+        self.assertEqual(agent._memory_agent.last_transaction["status"], "no_change")
+
+    def test_phase1_transport_failure_does_not_reuse_prior_receipts(self):
+        agent, fake, _ = self.make("S2", [
+            LLMResponse(content="", tool_calls=[call("memory_update_status", content="B")]),
+            LLMResponse(content="<no_intervention/>")])
+        asyncio.run(agent._memory_agent.process("task", 1))
+        self.assertEqual(agent._memory_agent.last_transaction["status"], "committed")
+        with self.assertRaises(AssertionError):
+            asyncio.run(agent._memory_agent.process("task", 2))
+        self.assertEqual(len(fake.requests), 3)
+        self.assertEqual(agent._memory_agent.last_receipts, [])
+        self.assertEqual(agent._memory_agent.last_transaction["status"],
+                         "phase1_request_failed")
+        self.assertIn('"status": "committed"', fake.requests[2]["prompt"])
+
     def test_successful_delete_and_procedural_index_invalidation(self):
         agent, fake, _ = self.make("S2", [])
         bank = agent.memory
