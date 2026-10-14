@@ -1,0 +1,669 @@
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/SOURCE_MEMORY_STATIC_LIVE_BATCH_20261014.json b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/SOURCE_MEMORY_STATIC_LIVE_BATCH_20261014.json
+new file mode 100644
+index 00000000..26dad10c
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/SOURCE_MEMORY_STATIC_LIVE_BATCH_20261014.json
+@@ -0,0 +1,52 @@
++{
++  "schema": "pma-source-memory-static-live-batch-v1",
++  "execution_authorized": false,
++  "conditions": ["U", "S", "R"],
++  "input_policy": {
++    "only_public_event_fields": ["initial_user_content", "response", "commands", "observation", "step_status"],
++    "excluded": ["old_memory_bank", "old_memory_operations", "old_reminder_result", "hidden_thinking", "future_events", "native_evaluation", "research_interpretation"],
++    "historical_influence": "The fixed Task trajectory was already affected by the old PMA. Any prior reminder appearing in a public Task response remains an agent_report, not an independently verified tool fact.",
++    "interpretation": "Shadow evaluation of memory and reminder decisions on a fixed exposed trajectory; not a counterfactual Task success experiment."
++  },
++  "cases": [
++    {
++      "task": "custom-memory-heap-crash",
++      "exposure": "exposed_development_case",
++      "archive_arm": "07",
++      "event_file": "six_task_live_batch_20261014_r1/raw/arms/07/host_private/archive/events.jsonl",
++      "event_file_sha256": "BFCC0A93E6359F70CCE12E36E0E42CB2A84444EEDDCBD88C6336CB58E2BFC9F9",
++      "public_event_file": "six_task_live_batch_20261014_r1/raw/arms/07/jobs/pma6-r1-20261014-07/public_task__WrAXj3u/agent/research_events.jsonl",
++      "public_event_file_sha256": "8BA1E3C596C63307F2E9CB2B791C01BFD8363501C26F1E8F31DD5C0A439135FD",
++      "inclusive_event_sequence": 27,
++      "event_order": "ascending original sequence; task_start once, each normal actor_step once; before_actor_call only as actor numbering, without replaying old reminder",
++      "estimated_phase1_calls_per_condition": 14,
++      "estimated_phase2_calls_per_condition": 14,
++      "coverage_intent_research_only": "inspect mistaken belief formation, later counterevidence, and revision without inserting a known answer"
++    },
++    {
++      "task": "fix-code-vulnerability",
++      "exposure": "exposed_development_case",
++      "archive_arm": "03",
++      "event_file": "six_task_live_batch_20261014_r1/raw/arms/03/host_private/archive/events.jsonl",
++      "event_file_sha256": "06BCB70EB8C3BEE59E2F793CB1C7BFEF060E51E341D685666B1DB437486CEEBD",
++      "public_event_file": "six_task_live_batch_20261014_r1/raw/arms/03/jobs/pma6-r1-20261014-03/public_task__rKn83bd/agent/research_events.jsonl",
++      "public_event_file_sha256": "14F4A4A162EC3FFCB4F003069CF1F59ABEDC953DA20F8F704C784565C10FEB05",
++      "inclusive_event_sequence": 41,
++      "event_order": "ascending original sequence; task_start once, each normal actor_step once; before_actor_call only as actor numbering, without replaying old reminder",
++      "estimated_phase1_calls_per_condition": 21,
++      "estimated_phase2_calls_per_condition": 21,
++      "coverage_intent_research_only": "inspect whether valuable public task information remains retrievable and usable in a later reminder"
++    }
++  ],
++  "run_bindings": [
++    {"order": 1, "task": "custom-memory-heap-crash", "variant": "U", "run_id": "source-static-20261014-01"},
++    {"order": 2, "task": "custom-memory-heap-crash", "variant": "S", "run_id": "source-static-20261014-02"},
++    {"order": 3, "task": "custom-memory-heap-crash", "variant": "R", "run_id": "source-static-20261014-03"},
++    {"order": 4, "task": "fix-code-vulnerability", "variant": "U", "run_id": "source-static-20261014-04"},
++    {"order": 5, "task": "fix-code-vulnerability", "variant": "S", "run_id": "source-static-20261014-05"},
++    {"order": 6, "task": "fix-code-vulnerability", "variant": "R", "run_id": "source-static-20261014-06"}
++  ],
++  "logical_phase_calls_expected_if_all_events_complete": 210,
++  "provider_attempts_not_equated_to_logical_calls": true,
++  "result_semantics": "static_prefix_only_no_task_delivery_no_evaluator"
++}
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory.py
+index 54aa37df..1e2be274 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory.py
+@@ -127,6 +127,8 @@ class SourceMemory(UniversalMemory):
+             raise ValueError("retired version is active")
+         for entry, category in active:
+             meta = self.metadata[entry.id]
++            if not isinstance(entry.content, str) or not entry.content.strip():
++                raise ValueError("active memory content must be nonempty text")
+             if not isinstance(meta, dict) or meta.get("category") != category:
+                 raise ValueError("invalid memory category")
+             if type(meta.get("version")) is not int or meta["version"] < 1:
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory_static_live_preflight_20261014/source_static_tests.txt b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory_static_live_preflight_20261014/source_static_tests.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..db66ccbfe6ac6702fffaf7afeae60927f7a714de
+GIT binary patch
+literal 13900
+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
+
+literal 0
+HcmV?d00001
+
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory_static_live_preflight_20261014/source_static_tests_exit.txt b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory_static_live_preflight_20261014/source_static_tests_exit.txt
+new file mode 100644
+index 00000000..500e57c8
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory_static_live_preflight_20261014/source_static_tests_exit.txt
+@@ -0,0 +1 @@
++exit_code=0
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory_static_live_preflight_20261014/test_episode.txt b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory_static_live_preflight_20261014/test_episode.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..a11d560932e4593434e1121d1ad068520eecf8ab
+GIT binary patch
+literal 18096
+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
+af9#YG`^q*HsoqxEZQbK}jz{iC|NB1@4RLY+
+
+literal 0
+HcmV?d00001
+
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory_static_live_preflight_20261014/test_episode_exit.txt b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory_static_live_preflight_20261014/test_episode_exit.txt
+new file mode 100644
+index 00000000..500e57c8
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory_static_live_preflight_20261014/test_episode_exit.txt
+@@ -0,0 +1 @@
++exit_code=0
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/static_source_live.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/static_source_live.py
+new file mode 100644
+index 00000000..2f5d7e87
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/static_source_live.py
+@@ -0,0 +1,218 @@
++"""Single-use host-only static PMA screen, reusing the upstream PMA call path."""
++from __future__ import annotations
++
++import asyncio
++from dataclasses import asdict, is_dataclass
++import hashlib
++import json
++import os
++from pathlib import Path
++import subprocess
++import time
++from typing import Any, Callable
++
++import litellm
++
++from episode import PMAEpisode, construct_upstream
++from static_source_screen import HERE, MANIFEST, projected_events, sha256, verify_public_projection
++
++
++def append_json(path: Path, row: dict) -> None:
++    with path.open("a", encoding="utf-8") as stream:
++        stream.write(json.dumps(row, ensure_ascii=False, default=str, sort_keys=True) + "\n")
++        stream.flush()
++        os.fsync(stream.fileno())
++
++
++def public_value(value: Any) -> Any:
++    if value is None or isinstance(value, (str, int, float, bool)):
++        return value
++    if is_dataclass(value):
++        return public_value(asdict(value))
++    if isinstance(value, dict):
++        return {str(k): public_value(v) for k, v in value.items()}
++    if isinstance(value, (list, tuple)):
++        return [public_value(v) for v in value]
++    if hasattr(value, "model_dump"):
++        return public_value(value.model_dump())
++    if hasattr(value, "__dict__"):
++        return public_value(vars(value))
++    return str(value)
++
++
++def profile_identity(path: Path) -> tuple[dict, dict]:
++    source = json.loads(path.read_text(encoding="utf-8"))
++    profile = source["claude_monitor_opus48"]
++    if (profile.get("provider"), profile.get("api_mode"), profile.get("model"),
++            profile.get("thinking_type")) != ("anthropic", "messages", "claude-opus-4-8", "adaptive"):
++        raise ValueError("frozen PMA model profile mismatch")
++    if not profile.get("apikey") or not profile.get("apibase"):
++        raise ValueError("private model transport absent")
++    safe = {key: profile.get(key) for key in (
++        "provider", "api_mode", "model", "thinking_type", "reasoning_effort",
++        "temperature", "max_tokens", "timeout", "read_timeout", "max_retries")}
++    safe.update(profile_file_sha256=sha256(path), private_transport_present=True,
++                effective_upstream_retry_attempts=3)
++    return profile, safe
++
++
++def code_commit() -> str:
++    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=HERE,
++                          capture_output=True, text=True, check=True).stdout.strip()
++
++
++def authorize(manifest_path: Path, auth_path: Path, output: Path, profile_path: Path) -> tuple[dict, dict]:
++    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
++    auth = json.loads(auth_path.read_text(encoding="utf-8"))
++    frozen = json.loads(MANIFEST.read_text(encoding="utf-8"))
++    if (manifest.get("schema") != "pma-source-memory-static-live-batch-v1" or
++            manifest.get("conditions") != frozen["conditions"] or
++            manifest.get("cases") != frozen["cases"] or
++            manifest.get("input_policy") != frozen["input_policy"]):
++        raise PermissionError("static candidate or public-input identity mismatch")
++    bindings = manifest.get("run_bindings")
++    expected = [(case["task"], variant) for case in manifest["cases"]
++                for variant in manifest["conditions"]]
++    if (manifest.get("execution_authorized") is not False or
++            not isinstance(bindings, list) or len(bindings) != 6 or
++            [(b.get("task"), b.get("variant")) for b in bindings] != expected or
++            [b.get("order") for b in bindings] != list(range(1, 7)) or
++            len({b.get("run_id") for b in bindings}) != 6):
++        raise PermissionError("frozen six-slot manifest invalid")
++    if (auth.get("execution_authorized") is not True or
++            auth.get("manifest_sha256") != sha256(manifest_path) or
++            auth.get("code_commit") != code_commit() or
++            auth.get("profile_sha256") != sha256(profile_path) or
++            auth.get("run_bindings") != bindings or
++            auth.get("output_root") != str(output.resolve()) or
++            output.exists()):
++        raise PermissionError("single-use static authorization/identity mismatch")
++    if len({b.get("run_id") for b in bindings}) != len(bindings):
++        raise PermissionError("duplicate run identity")
++    for binding in bindings:
++        path = (output / binding["run_id"]).resolve()
++        if not path.is_relative_to(output.resolve()) or path.exists():
++            raise PermissionError("run root exists or escapes batch")
++    # Identity and public projection checks are pre-send gates, not observations.
++    for case in manifest["cases"]:
++        verify_public_projection(case)
++    return manifest, auth
++
++
++async def run_authorized(manifest_path: Path, auth_path: Path, profile_path: Path,
++                         output: Path, *, fake_transport_factory: Callable | None = None) -> list[dict]:
++    manifest, auth = authorize(manifest_path, auth_path, output, profile_path)
++    profile, safe_profile = profile_identity(profile_path)
++    output.mkdir(parents=True, exist_ok=False)
++    (output / "authorization_consumed.json").write_text(json.dumps({
++        "manifest_sha256": sha256(manifest_path), "code_commit": code_commit(),
++        "profile": safe_profile, "bindings": manifest["run_bindings"]}, indent=2), encoding="utf-8")
++    results = []
++    try:
++        for case in manifest["cases"]:
++            mapping = verify_public_projection(case)
++            for variant in manifest["conditions"]:
++                binding = manifest["run_bindings"][len(results)]
++                slot = output / binding["run_id"]
++                slot.mkdir()
++                (slot / "public_mapping.json").write_text(json.dumps(mapping, indent=2), encoding="utf-8")
++                events = projected_events(case, binding["run_id"])
++                agent = construct_upstream(slot / "upstream", memory_profile=profile,
++                                           research_candidate=variant)
++                if fake_transport_factory is not None:
++                    agent._memory_llm.call = fake_transport_factory(variant, slot)
++                logical = 0
++                lower = 0
++                failures = []
++                original = agent._memory_llm.call
++                original_lower = litellm.acompletion
++
++                async def observed_lower(**kwargs):
++                    nonlocal lower
++                    lower += 1
++                    number = lower
++                    append_json(slot / "provider_attempts.jsonl", {
++                        "attempt": number, "started_epoch": time.time(),
++                        "model": kwargs.get("model"), "max_tokens": kwargs.get("max_tokens"),
++                        "temperature": kwargs.get("temperature"),
++                        "thinking": kwargs.get("thinking"),
++                        "reasoning_effort": kwargs.get("reasoning_effort")})
++                    try:
++                        response = await original_lower(**kwargs)
++                        append_json(slot / "provider_attempts.jsonl", {
++                            "attempt": number, "outcome": "returned", "ended_epoch": time.time(),
++                            "usage": public_value(response.get("usage"))})
++                        return response
++                    except BaseException as exc:
++                        append_json(slot / "provider_attempts.jsonl", {
++                            "attempt": number, "outcome": "exception", "error_type": type(exc).__name__,
++                            "server_execution": "unknown", "ended_epoch": time.time()})
++                        raise
++
++                async def audited_call(*, prompt, system, tools=None):
++                    nonlocal logical
++                    logical += 1
++                    number = logical
++                    phase = "phase1" if tools is not None else "phase2"
++                    append_json(slot / "requests.jsonl", {"logical_call": number,
++                        "phase": phase, "started_epoch": time.time(), "system": system,
++                        "prompt": prompt, "tools": tools})
++                    try:
++                        response = await original(prompt=prompt, system=system, tools=tools)
++                        append_json(slot / "responses.jsonl", {"logical_call": number,
++                            "phase": phase, "ended_epoch": time.time(), "status": "returned",
++                            "content": response.content, "tool_calls": public_value(response.tool_calls),
++                            "usage": public_value(response.usage)})
++                        return response
++                    except BaseException as exc:
++                        failures.append({"logical_call": number, "phase": phase,
++                                         "error_type": type(exc).__name__})
++                        append_json(slot / "responses.jsonl", {"logical_call": number,
++                            "phase": phase, "ended_epoch": time.time(), "status": "exception",
++                            "error_type": type(exc).__name__, "server_execution": "unknown"})
++                        raise
++
++                agent._memory_llm.call = audited_call
++                episode = PMAEpisode(agent, run_id=binding["run_id"], task_id=case["task"],
++                                     archive=slot / "episode")
++                status = "static_prefix_complete"
++                error_type = None
++                litellm.acompletion = observed_lower
++                try:
++                    for event in events:
++                        before = len(failures)
++                        await episode.handle(event)
++                        append_json(slot / "bank_states.jsonl", {"sequence": event["sequence"],
++                            "memory": agent.memory.to_dict(),
++                            "reminder_status": getattr(agent._memory_agent, "last_delivery_status", "upstream")})
++                        if len(failures) != before:
++                            raise RuntimeError("upstream caught a provider phase failure; stop batch")
++                    agent.save_memory(str(slot / "memory.json"))
++                except BaseException as exc:
++                    status = "stopped_failure"
++                    error_type = type(exc).__name__
++                    try:
++                        agent.save_memory(str(slot / "failure_memory.json"))
++                    except Exception:
++                        pass
++                finally:
++                    litellm.acompletion = original_lower
++                row = {"order": binding["order"], "run_id": binding["run_id"],
++                       "task": case["task"], "variant": variant, "status": status,
++                       "error_type": error_type, "logical_phase_calls": logical,
++                       "observable_litellm_calls": lower,
++                       "inner_network_attempts": "unknown", "phase_failures": failures,
++                       "task_calls": 0, "native_evaluator_calls": 0,
++                       "input_sent_to_task": False, "task_completed": False}
++                (slot / "result.json").write_text(json.dumps(row, indent=2), encoding="utf-8")
++                results.append(row)
++                (output / "summary.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
++                print(json.dumps({"order": binding["order"], "status": status,
++                                  "logical_phase_calls": logical,
++                                  "observable_litellm_calls": lower}), flush=True)
++                if status != "static_prefix_complete":
++                    return results
++    finally:
++        # This batch authorization never confers authority on a second invocation.
++        auth_path.unlink(missing_ok=True)
++    return results
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/static_source_screen.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/static_source_screen.py
+index 537f3a8e..51062e2f 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/static_source_screen.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/static_source_screen.py
+@@ -35,6 +35,67 @@ def sha256(path: Path) -> str:
+     return hashlib.sha256(path.read_bytes()).hexdigest().upper()
+ 
+ 
++def verify_public_projection(case: dict) -> dict:
++    """Match PMA's recorded GA projection to actual public provider history."""
++    source = HERE / case["event_file"]
++    public = HERE / case["public_event_file"]
++    if sha256(source) != case["event_file_sha256"] or sha256(public) != case["public_event_file_sha256"]:
++        raise ValueError("frozen public input hash mismatch")
++    records = [json.loads(line) for line in source.read_text(encoding="utf-8").splitlines()]
++    records = [row for row in records if row["event"]["sequence"] <= case["inclusive_event_sequence"]]
++    episode = [row["event"] for row in records]
++    old_reminders = {row["event"]["actor_attempt"]: row["result"].get("reminder")
++                     for row in records if row["event"]["kind"] == "before_actor_call"}
++    ready = [row for line in public.read_text(encoding="utf-8").splitlines()
++             if (row := json.loads(line))["event_type"] == "provider_request_ready"]
++    steps = [e for e in episode if e["kind"] == "actor_step"]
++    if len(ready) != len(steps) + 1 or not episode or episode[0]["kind"] != "task_start":
++        raise ValueError("public request/episode count mismatch")
++    first = ready[0]["payload"]["content"]["messages"][0]["content"][0]["text"]
++    if episode[0]["initial_user_content"] != first:
++        raise ValueError("public initial Task input differs from PMA projection")
++    mapping = [{"sequence": 1, "field": "initial_user_content", "request_event_id": ready[0]["event_id"],
++                "sha256": hashlib.sha256(first.encode()).hexdigest()}]
++    for index, step in enumerate(steps):
++        prior, following = ready[index:index + 2]
++        if step.get("request_event_id") != prior["event_id"]:
++            raise ValueError(f"actor step {step['sequence']} request identity mismatch")
++        messages = following["payload"]["content"]["messages"]
++        assistant, user = messages[-2:]
++        if assistant["role"] != "assistant" or user["role"] != "user":
++            raise ValueError("latest public interaction roles differ")
++        response = "\n".join(block["text"] for block in assistant["content"] if block["type"] == "text")
++        if step["response"] != response:
++            raise ValueError(f"actor step {step['sequence']} response differs")
++        commands = [json.loads(item) for item in step["commands"]]
++        uses = [block for block in assistant["content"] if block["type"] == "tool_use"]
++        if len(commands) != len(uses):
++            raise ValueError(f"actor step {step['sequence']} tool count differs")
++        for command, use in zip(commands, uses, strict=True):
++            args = {k: v for k, v in command["args"].items() if k not in {"_index", "_tool_num"}}
++            if (command["id"], command["tool_name"], args) != (use["id"], use["name"], use["input"]):
++                raise ValueError(f"actor step {step['sequence']} tool command differs")
++        observation = json.loads(step["observation"])
++        results = [block for block in user["content"] if block["type"] == "tool_result"]
++        text = "".join(block["text"] for block in user["content"] if block["type"] == "text")
++        appended = old_reminders.get(step["actor_attempt"] + 1)
++        expected_text = observation["content"] + ("\n\n" + appended if appended else "")
++        if observation["tool_results"] != [
++                {"tool_use_id": result["tool_use_id"], "content": result["content"]}
++                for result in results] or expected_text != text:
++            raise ValueError(f"actor step {step['sequence']} tool result/observation differs")
++        if bool(appended) != bool(following["payload"].get("pma_reminder_event_id")):
++            raise ValueError("historical PMA append identity differs")
++        mapping.append({"sequence": step["sequence"], "actor_attempt": step["actor_attempt"],
++                        "request_event_id": prior["event_id"], "following_request_event_id": following["event_id"],
++                        "response_sha256": hashlib.sha256(response.encode()).hexdigest(),
++                        "commands": len(commands), "tool_results": len(results),
++                        "historical_reminder_suffix": bool(appended),
++                        "observation_sha256": hashlib.sha256(step["observation"].encode()).hexdigest()})
++    return {"task": case["task"], "source_sha256": sha256(source),
++            "public_sha256": sha256(public), "mapping": mapping, "unexplained_differences": []}
++
++
+ def projected_events(case: dict, run_id: str) -> list[dict]:
+     source = HERE / case["event_file"]
+     if sha256(source) != case["event_file_sha256"]:
+@@ -116,10 +177,12 @@ async def run_fake(manifest: dict, output: Path) -> list[dict]:
+     output.mkdir(parents=True, exist_ok=False)
+     results = []
+     for case in manifest["cases"]:
++        mapping = verify_public_projection(case)
+         for variant in manifest["conditions"]:
+             run_id = f"shadow-{case['task']}-{variant.lower()}"
+             slot = output / run_id
+             slot.mkdir()
++            (slot / "public_mapping.json").write_text(json.dumps(mapping, indent=2), encoding="utf-8")
+             events = projected_events(case, run_id)
+             expected = (case["estimated_phase1_calls_per_condition"]
+                         + case["estimated_phase2_calls_per_condition"])
+@@ -150,12 +213,20 @@ def main() -> int:
+     parser.add_argument("--manifest", type=Path, default=MANIFEST)
+     parser.add_argument("--output", type=Path, required=True)
+     parser.add_argument("--mode", choices=("fake", "live"), default="fake")
++    parser.add_argument("--authorization", type=Path)
++    parser.add_argument("--profile", type=Path)
+     args = parser.parse_args()
+     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
++    if args.mode == "live":
++        if args.authorization is None or args.profile is None:
++            raise PermissionError("real static provider dispatch requires a later authorization and entry; private profile absent")
++        from static_source_live import run_authorized
++        rows = asyncio.run(run_authorized(args.manifest, args.authorization, args.profile,
++                                          args.output))
++        print(json.dumps({"slots_finished": len(rows), "results": [r["status"] for r in rows]}))
++        return 0 if len(rows) == 6 and all(r["status"] == "static_prefix_complete" for r in rows) else 1
+     if manifest.get("execution_authorized") is not False:
+-        raise ValueError("this static draft must remain unauthorized")
+-    if args.mode != "fake":
+-        raise PermissionError("real static provider dispatch requires a later authorization and entry")
++        raise ValueError("fake static draft must remain unauthorized")
+     rows = asyncio.run(run_fake(manifest, args.output))
+     print(json.dumps({"slots": len(rows), "logical_phase_calls": sum(r["logical_phase_calls"] for r in rows),
+                       "real_provider_attempts": 0}, sort_keys=True))
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_source_candidate.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_source_candidate.py
+index 5fba63b6..37ab3e1a 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_source_candidate.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_source_candidate.py
+@@ -356,6 +356,27 @@ class SourceCandidateTests(unittest.TestCase):
+             f'<memory_refs>[{{"id":"{memory_id}","version":1}}]</memory_refs>'))
+         self.assertEqual(agent._memory_agent.last_delivery_status, "invalid_reference_no_delivery")
+ 
++    def test_active_content_and_changed_coordination_invalidate_pending(self):
++        agent, _, _ = self.make("R", [])
++        bank = agent.memory
++        bank.register_source("s", "task_instruction", "Retain public evidence", 1)
++        raw = [{"event_id": "s", "role": "task_instruction", "quote": "public evidence"}]
++        memory_id = bank.save_sourced("knowledge", "Keep evidence", "task_requirement", raw)
++        valid = bank.to_dict()
++        for bad in (None, 12, [], {}, "", "   "):
++            altered = json.loads(json.dumps(valid))
++            altered["knowledge"][0]["content"] = bad
++            with self.subTest(content=bad), self.assertRaises(ValueError):
++                SourceMemory.from_dict(altered)
++        selected = agent._memory_agent._parse_phase2_response(
++            '<context_for_action>Review evidence.</context_for_action>'
++            f'<memory_refs>[{{"id":"{memory_id}","version":1}}]</memory_refs>')
++        self.assertEqual(selected, "Review evidence.")
++        self.assertTrue(agent._memory_agent.pending_refs_valid())
++        bank.coordinate(memory_id, "unresolved", "Current state is unverified",
++                        bank.resolve_refs(raw, "inference"))
++        self.assertFalse(agent._memory_agent.pending_refs_valid())
++
+ 
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_static_source_live.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_static_source_live.py
+new file mode 100644
+index 00000000..80649006
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_static_source_live.py
+@@ -0,0 +1,112 @@
++"""No-network tests of the authorized static branch, not the default fake branch."""
++import asyncio
++import hashlib
++import json
++from pathlib import Path
++from tempfile import TemporaryDirectory
++import unittest
++
++from static_source_screen import FakePublicTransport, MANIFEST, verify_public_projection
++from static_source_live import authorize, code_commit, run_authorized
++
++
++def digest(path):
++    return hashlib.sha256(path.read_bytes()).hexdigest().upper()
++
++
++class StaticLiveGateTests(unittest.TestCase):
++    def fixtures(self, root):
++        base = json.loads(MANIFEST.read_text(encoding="utf-8"))
++        base["schema"] = "pma-source-memory-static-live-batch-v1"
++        base["run_bindings"] = [{"order": n, "task": case["task"], "variant": variant,
++                                 "run_id": f"isolated-{n}"}
++            for n, (case, variant) in enumerate(((case, variant) for case in base["cases"]
++                                                   for variant in base["conditions"]), 1)]
++        manifest = root / "manifest.json"
++        manifest.write_text(json.dumps(base), encoding="utf-8")
++        profile = root / "private-profile.json"
++        profile.write_text(json.dumps({"claude_monitor_opus48": {
++            "provider": "anthropic", "api_mode": "messages", "model": "claude-opus-4-8",
++            "thinking_type": "adaptive", "reasoning_effort": "high", "temperature": 1,
++            "max_tokens": 8192, "read_timeout": 300, "timeout": 30,
++            "max_retries": 8, "apibase": "https://offline.invalid", "apikey": "SENTINEL_DO_NOT_SEND"}}),
++            encoding="utf-8")
++        output = root / "six-slots"
++        auth = root / "authorization.json"
++        auth.write_text(json.dumps({"execution_authorized": True,
++            "manifest_sha256": digest(manifest), "code_commit": code_commit(),
++            "profile_sha256": digest(profile), "run_bindings": base["run_bindings"],
++            "output_root": str(output.resolve())}), encoding="utf-8")
++        return manifest, auth, profile, output
++
++    def test_public_projection_matches_both_real_recordings(self):
++        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
++        for case in manifest["cases"]:
++            mapping = verify_public_projection(case)
++            self.assertEqual(len(mapping["mapping"]),
++                             case["estimated_phase1_calls_per_condition"])
++            self.assertEqual(mapping["unexplained_differences"], [])
++            self.assertEqual(sum(item.get("commands", 0) for item in mapping["mapping"]),
++                             sum(item.get("tool_results", 0) for item in mapping["mapping"]))
++
++    def test_actual_authorized_path_with_injected_fake_and_private_profile(self):
++        with TemporaryDirectory() as directory:
++            manifest, auth, profile, output = self.fixtures(Path(directory))
++            counts = []
++
++            def fake(variant, slot):
++                expected = 28 if len(counts) < 3 else 42
++                transport = FakePublicTransport(slot / "injected_fake.jsonl", expected=expected)
++                counts.append(transport)
++                return transport
++
++            rows = asyncio.run(run_authorized(manifest, auth, profile, output,
++                                              fake_transport_factory=fake))
++            self.assertEqual(len(rows), 6)
++            self.assertTrue(all(r["status"] == "static_prefix_complete" for r in rows))
++            self.assertEqual(sum(r["logical_phase_calls"] for r in rows), 210)
++            self.assertEqual(sum(r["observable_litellm_calls"] for r in rows), 0)
++            self.assertEqual(sum(t.calls for t in counts), 210)
++            self.assertFalse(auth.exists())
++            self.assertNotIn("SENTINEL_DO_NOT_SEND", (output / "authorization_consumed.json").read_text())
++            for row in rows:
++                slot = output / row["run_id"]
++                self.assertEqual(len((slot / "requests.jsonl").read_text(encoding="utf-8").splitlines()),
++                                 row["logical_phase_calls"])
++                self.assertEqual(len((slot / "responses.jsonl").read_text(encoding="utf-8").splitlines()),
++                                 row["logical_phase_calls"])
++                self.assertEqual(len((slot / "bank_states.jsonl").read_text(encoding="utf-8").splitlines()),
++                                 27 if row["task"] == "custom-memory-heap-crash" else 41)
++                self.assertNotIn("SENTINEL_DO_NOT_SEND", (slot / "requests.jsonl").read_text(encoding="utf-8"))
++
++    def test_missing_or_wrong_authorization_rejected_without_output(self):
++        with TemporaryDirectory() as directory:
++            manifest, auth, profile, output = self.fixtures(Path(directory))
++            auth.unlink()
++            with self.assertRaises(FileNotFoundError):
++                authorize(manifest, auth, output, profile)
++            self.assertFalse(output.exists())
++            auth.write_text(json.dumps({"execution_authorized": True}), encoding="utf-8")
++            with self.assertRaises(PermissionError):
++                authorize(manifest, auth, output, profile)
++            self.assertFalse(output.exists())
++
++    def test_caught_transport_failure_stops_batch_and_removes_authorization(self):
++        with TemporaryDirectory() as directory:
++            manifest, auth, profile, output = self.fixtures(Path(directory))
++
++            async def fail(*, prompt, system, tools=None):
++                raise RuntimeError("scripted transport failure")
++
++            rows = asyncio.run(run_authorized(manifest, auth, profile, output,
++                                              fake_transport_factory=lambda _variant, _slot: fail))
++            self.assertEqual(len(rows), 1)
++            self.assertEqual(rows[0]["status"], "stopped_failure")
++            self.assertEqual(rows[0]["error_type"], "RuntimeError")
++            self.assertEqual(len(rows[0]["phase_failures"]), 2)
++            self.assertFalse(auth.exists())
++            self.assertFalse((output / "isolated-2").exists())
++
++
++if __name__ == "__main__":
++    unittest.main()
