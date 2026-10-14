@@ -53,11 +53,14 @@ def digest_tree(root):
 
 
 def build_bundle(root, source, runtime, python_home, task_config, monitor_config,
-                 collector_port, monitor_profile_path=None):
+                 collector_port, monitor_profile_path=None,
+                 task_network_policy='isolated'):
     """No Docker/API calls. Output includes a private gateway credential file."""
     root, source, runtime = Path(root), Path(source), Path(runtime)
     if monitor_config is None and monitor_profile_path is not None:
         raise ValueError('Task-only bundle cannot load a Monitor profile')
+    if task_network_policy not in {'isolated', 'official'}:
+        raise ValueError('Unsupported Task network policy')
     root.mkdir(parents=True, exist_ok=False)
     copied = root / 'source'
     copied.mkdir()
@@ -158,11 +161,21 @@ def build_bundle(root, source, runtime, python_home, task_config, monitor_config
         },
         'volumes': {'model-channel': {}},
     }
+    if task_network_policy == 'official':
+        # The Task retains the fixed credential-free Unix inference channel,
+        # but its ordinary Docker network/capabilities are no longer replaced
+        # by the research no-network/cap-drop overlay.
+        main = compose['services']['main']
+        for key in ('network_mode', 'cap_drop', 'security_opt'):
+            main.pop(key)
     compose_path = root / 'isolation.compose.json'
     compose_path.write_text(json.dumps(compose, indent=2), encoding='utf-8')
-    evidence = {'profile': PROFILE, 'snapshot_sha256': digest_tree(copied),
+    evidence = {'profile': PROFILE if task_network_policy == 'isolated' else
+                'networked-host-keyed-v1', 'snapshot_sha256': digest_tree(copied),
                 'source_mount': str(copied), 'model_names': list(gateway['models']),
-                'secrets_in_evidence': False, 'task_network_mode': 'none',
+                'secrets_in_evidence': False,
+                'task_network_mode': 'none' if task_network_policy == 'isolated'
+                else 'official_default',
                 'gateway_transport_sha256': hashlib.sha256(transport.read_bytes()).hexdigest()}
     (root / 'isolation_identity.json').write_text(json.dumps(evidence, indent=2), encoding='utf-8')
     return copied, compose_path
