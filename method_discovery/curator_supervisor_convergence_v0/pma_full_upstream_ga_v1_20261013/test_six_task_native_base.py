@@ -46,7 +46,7 @@ class SixTaskNativeBaseTests(unittest.TestCase):
             self.skipTest('explicit zero-model Docker integration not requested')
         stage = Path(__file__).parent
         source_manifest = json.loads((stage / 'six_task_discovery_20261014' /
-            'PMA_GA_6TASK_NATIVE_BASE_DRAFT_V2R6.json').read_text(encoding='utf-8'))
+            'PMA_GA_6TASK_NATIVE_BASE_DRAFT_V2R7.json').read_text(encoding='utf-8'))
         harbor_python = Path(os.environ['PMA_HARBOR_PYTHON']).resolve(strict=True)
         root = Path(os.environ['PMA_ZERO_MODEL_EVIDENCE_ROOT']).resolve(strict=False)
         if root.exists():
@@ -154,7 +154,7 @@ class SixTaskNativeBaseTests(unittest.TestCase):
 
     def test_prepared_evidence_gate_binds_actual_source_and_raw_records(self):
         manifest_path = (Path(__file__).parent / 'six_task_discovery_20261014' /
-                         'PMA_GA_6TASK_NATIVE_BASE_DRAFT_V2R6.json')
+                         'PMA_GA_6TASK_NATIVE_BASE_DRAFT_V2R7.json')
         if not manifest_path.exists():
             self.skipTest('generated evidence-bound draft not present')
         manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
@@ -170,7 +170,7 @@ class SixTaskNativeBaseTests(unittest.TestCase):
         if not source:
             self.skipTest('fixed official Git source unavailable')
         manifest_path = (Path(__file__).parent / 'six_task_discovery_20261014' /
-                         'PMA_GA_6TASK_NATIVE_BASE_DRAFT_V2R6.json')
+                         'PMA_GA_6TASK_NATIVE_BASE_DRAFT_V2R7.json')
         manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
         with TemporaryDirectory() as directory:
             root = Path(directory)
