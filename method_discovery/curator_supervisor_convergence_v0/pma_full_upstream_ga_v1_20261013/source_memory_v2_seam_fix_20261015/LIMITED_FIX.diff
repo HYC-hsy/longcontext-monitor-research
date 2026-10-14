@@ -1,0 +1,440 @@
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/generate_source_v2_seam_samples.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/generate_source_v2_seam_samples.py
+new file mode 100644
+index 00000000..a9e87d67
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/generate_source_v2_seam_samples.py
+@@ -0,0 +1,98 @@
++"""Offline-only audit samples from the actual v2 process and host send guard."""
++from __future__ import annotations
++
++import asyncio
++import json
++from pathlib import Path
++import shutil
++from tempfile import TemporaryDirectory
++from unittest.mock import patch
++
++from harbor.llms.base import LLMResponse
++from episode import construct_upstream
++from static_source_live import run_authorized
++from test_source_candidate_v2 import Script, call
++from test_static_source_live_v2 import V2EntryTests
++
++
++def write(path: Path, value: object) -> None:
++    path.write_text(json.dumps(value, ensure_ascii=False, indent=2, default=str),
++                    encoding="utf-8")
++
++
++def generate(output: Path) -> None:
++    output.mkdir(parents=True, exist_ok=False)
++    with TemporaryDirectory() as temporary:
++        root = Path(temporary)
++        agent = construct_upstream(root / "source", research_candidate="S2")
++        fake = Script([
++            LLMResponse(content="", tool_calls=[
++                call("memory_update_status", content="B"),
++                call("memory_update_status", content="B"),
++                call("memory_delete", memory_id="absent")]),
++            LLMResponse(content="<no_intervention/>"),
++        ])
++        agent._memory_llm.call = fake
++        agent.memory.update_status("A")
++        result = asyncio.run(agent._memory_agent.process("public task", 1))
++        write(output / "transaction_rollback.json", {
++            "phase1_request": fake.requests[0], "phase2_request": fake.requests[1],
++            "transaction": agent._memory_agent.last_transaction,
++            "operations": [vars(operation) for operation in result.operations],
++            "final_status": agent.memory.status,
++            "collateral_aborts": agent._memory_agent.collateral_aborts,
++        })
++
++        agent = construct_upstream(root / "failure", research_candidate="S2")
++        fake = Script([
++            LLMResponse(content="", tool_calls=[call("memory_update_status", content="B")]),
++            LLMResponse(content="<no_intervention/>"),
++        ])
++        agent._memory_llm.call = fake
++        asyncio.run(agent._memory_agent.process("public task", 1))
++        try:
++            asyncio.run(agent._memory_agent.process("public task", 2))
++        except AssertionError:
++            pass
++        write(output / "later_phase1_failure.json", {
++            "requests": fake.requests,
++            "current_transaction": agent._memory_agent.last_transaction,
++            "current_receipts": agent._memory_agent.last_receipts,
++            "phase2_sent_for_second_process": len(fake.requests) > 3,
++        })
++
++        fixture = V2EntryTests()
++        host_root = root / "host"
++        host_root.mkdir()
++        manifest, authorization, profile, run_root = fixture.fixture(host_root)
++        attempts = []
++
++        async def failing_call(*, prompt, system, tools=None):
++            attempts.append("phase1" if tools is not None else "phase2")
++            raise RuntimeError("scripted final transport failure")
++
++        async def forbidden_wire(**_kwargs):
++            raise AssertionError("real provider boundary was not intercepted")
++
++        with patch("litellm.acompletion", forbidden_wire):
++            rows = asyncio.run(run_authorized(
++                manifest, authorization, profile, run_root,
++                fake_transport_factory=lambda _variant, _slot: failing_call))
++        slot = run_root / rows[0]["run_id"]
++        for name in ("requests.jsonl", "responses.jsonl", "blocked_requests.jsonl",
++                     "result.json"):
++            shutil.copyfile(slot / name, output / ("host_" + name))
++        write(output / "host_counts.json", {
++            "actual_fake_calls": attempts, "slots_started": len(rows),
++            "authorization_removed": not authorization.exists(),
++            "next_slot_absent": not (run_root / "new-v2-2").exists(),
++            "real_provider_calls": 0,
++        })
++
++
++if __name__ == "__main__":
++    import argparse
++    parser = argparse.ArgumentParser()
++    parser.add_argument("output", type=Path)
++    args = parser.parse_args()
++    generate(args.output)
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_agent_v2.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_agent_v2.py
+index 2ee4e8ee..11ae0bd3 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_agent_v2.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_agent_v2.py
+@@ -3,6 +3,7 @@ from __future__ import annotations
+ 
+ import copy
+ import json
++import re
+ import uuid
+ 
+ from memory_agent.memory.memory_agent import BANK_TOOLS, MemoryOperation
+@@ -41,8 +42,16 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
+         self._phase_step = 0
+         self.collateral_aborts = 0
+         self._fatal_error: Exception | None = None
++        self._previous_receipts: list[dict] = []
++        self._previous_transaction: dict = {}
++        self.blocked_phase2_attempts = 0
+ 
+     async def process(self, observation: str, step_count: int = 0):
++        self._previous_receipts = copy.deepcopy(self.last_receipts)
++        self._previous_transaction = copy.deepcopy(self.last_transaction)
++        self.last_receipts = []
++        self.last_transaction = {"status": "phase1_not_executed", "committed": False,
++                                 "receipts": []}
+         self._fatal_error = None
+         result = await super().process(observation, step_count)
+         if self._fatal_error is not None:
+@@ -62,11 +71,20 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
+         if self.variant == "R2":
+             system += RECONCILE_RULES.replace("{event_id, role, quote}",
+                                              "{source_handle, start_line, end_line}")
+-        return await self.llm.call(prompt=user_prompt, system=system,
+-                                   tools=self.get_tools_schema())
++        try:
++            return await self.llm.call(prompt=user_prompt, system=system,
++                                       tools=self.get_tools_schema())
++        except Exception as exc:
++            self.last_transaction = {"status": "phase1_request_failed",
++                                     "committed": False, "receipts": [],
++                                     "error_type": type(exc).__name__}
++            self._fatal_error = exc
++            raise
+ 
+     async def _call_llm_phase2(self, user_prompt: str):
+         if self._fatal_error is not None:
++            self.blocked_phase2_attempts += 1
++            self.last_transaction["phase2_blocked"] = "phase1_request_failed_or_host_integrity"
+             raise self._fatal_error
+         from memory_agent.memory.memory_agent import PHASE2_SYSTEM
+         return await self.llm.call(prompt=user_prompt,
+@@ -82,12 +100,14 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
+         return (prompt + "\n## Numbered visible public source leaves\n" +
+                 json.dumps(lines, ensure_ascii=False) +
+                 "\n## Previous phase-1 execution receipts\n" +
+-                json.dumps(self.last_receipts, ensure_ascii=False))
++                json.dumps({"transaction": self._previous_transaction,
++                            "receipts": self._previous_receipts}, ensure_ascii=False))
+ 
+     def _build_phase2_prompt(self, observation: str, step_count: int) -> str:
+         prompt = super()._build_phase2_prompt(observation, step_count)
+-        return prompt + "\n## This phase-1 execution receipts\n" + json.dumps(
+-            self.last_receipts, ensure_ascii=False)
++        return prompt + "\n## This phase-1 execution result\n" + json.dumps(
++            {"transaction": self.last_transaction, "receipts": self.last_receipts},
++            ensure_ascii=False)
+ 
+     def _dispatch_one(self, name: str, args: dict) -> tuple[str | None, str]:
+         if name in {"memory_save_knowledge", "memory_save_procedural"}:
+@@ -128,12 +148,23 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
+         calls = getattr(response, "tool_calls", None) or []
+         if not calls:
+             raw = self._strip_thinking(getattr(response, "content", None) or "")
+-            calls = [type("Call", (), {"function": type("Function", (), {
+-                "name": name, "arguments": args})()})()
+-                     for name, args in self._parse_tool_calls_from_text(raw)]
+-            if "<tool_call>" in raw and not calls:
+-                calls = [type("Call", (), {"function": type("Function", (), {
+-                    "name": "unparsed_text_tool_call", "arguments": {}})()})()]
++            if re.search(r"<\s*/?\s*tool_call\b|<\s*function\s*=|<\s*parameter\s*=",
++                         raw, re.IGNORECASE):
++                txn = f"p1-{self._phase_step}-{uuid.uuid4().hex[:12]}"
++                receipt = {"transaction_id": txn, "call_index": 1,
++                           "tool_name": "text_tool_call", "status": "rejected",
++                           "error_code": "text_tool_call_forbidden", "memory_id": None}
++                version = __import__("hashlib").sha256(json.dumps(
++                    self.memory.to_dict(), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
++                receipt["commit_version"] = version
++                self.last_receipts = [receipt]
++                self.last_transaction = {"transaction_id": txn, "status": "format_rejected",
++                    "committed": False, "commit_version": version,
++                    "receipts": copy.deepcopy(self.last_receipts),
++                    "before_bank": self._bank_view(self.memory.to_dict()),
++                    "after_bank": self._bank_view(self.memory.to_dict())}
++                return [MemoryOperation(action="text_tool_call", success=False,
++                                        error="text_tool_call_forbidden")]
+         txn = f"p1-{self._phase_step}-{uuid.uuid4().hex[:12]}"
+         original = self.memory
+         before_bank = original.to_dict()
+@@ -176,7 +207,7 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
+                                  "error_code": "bank_integrity", "error": str(exc)})
+         if failed:
+             for row in receipts:
+-                if row["status"] == "committed":
++                if row["status"] in {"committed", "no_change"}:
+                     row["status"] = "transaction_aborted"
+                     row["error_code"] = "transaction_abort"
+                     self.collateral_aborts += 1
+@@ -189,7 +220,11 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
+         for row in receipts:
+             row["commit_version"] = version
+         self.last_receipts = receipts
+-        self.last_transaction = {"transaction_id": txn, "committed": not failed,
++        changed = before_bank != after_bank
++        self.last_transaction = {"transaction_id": txn,
++                                 "status": ("transaction_aborted" if failed else
++                                            "committed" if changed else "no_change"),
++                                 "committed": not failed,
+                                  "commit_version": version, "receipts": copy.deepcopy(receipts),
+                                  "before_bank": self._bank_view(before_bank),
+                                  "after_bank": self._bank_view(after_bank)}
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/static_source_live.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/static_source_live.py
+index 76b1b1dc..bcb2a267 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/static_source_live.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/static_source_live.py
+@@ -128,6 +128,8 @@ async def run_authorized(manifest_path: Path, auth_path: Path, profile_path: Pat
+                 lower = 0
+                 failures = []
+                 capture_error = None
++                terminal_failure = None
++                blocked_phase_calls = 0
+                 original = agent._memory_llm.call
+                 original_lower = litellm.acompletion
+ 
+@@ -173,12 +175,19 @@ async def run_authorized(manifest_path: Path, auth_path: Path, profile_path: Pat
+                         raise
+ 
+                 async def audited_call(*, prompt, system, tools=None):
+-                    nonlocal logical, capture_error
++                    nonlocal logical, capture_error, terminal_failure, blocked_phase_calls
++                    phase = "phase1" if tools is not None else "phase2"
++                    if terminal_failure is not None:
++                        blocked_phase_calls += 1
++                        append_json(slot / "blocked_requests.jsonl", {
++                            "phase": phase, "epoch": time.time(), "sent": False,
++                            "reason": "prior_logical_request_terminal_failure",
++                            "prior_error_type": type(terminal_failure).__name__})
++                        raise RuntimeError("prior logical provider request failed; no further send") from terminal_failure
+                     if capture_error is not None:
+                         raise RuntimeError("capture integrity failed; no subsequent model send") from capture_error
+                     logical += 1
+                     number = logical
+-                    phase = "phase1" if tools is not None else "phase2"
+                     try:
+                         append_json(slot / "requests.jsonl", {"logical_call": number,
+                             "phase": phase, "started_epoch": time.time(), "system": system,
+@@ -200,6 +209,7 @@ async def run_authorized(manifest_path: Path, auth_path: Path, profile_path: Pat
+                             raise
+                         return response
+                     except BaseException as exc:
++                        terminal_failure = exc
+                         failures.append({"logical_call": number, "phase": phase,
+                                          "error_type": type(exc).__name__})
+                         try:
+@@ -247,6 +257,8 @@ async def run_authorized(manifest_path: Path, auth_path: Path, profile_path: Pat
+                        "task": case["task"], "variant": variant, "status": status,
+                        "error_type": error_type, "logical_phase_calls": logical,
+                        "observable_litellm_calls": lower,
++                       "blocked_phase_calls": (blocked_phase_calls + getattr(
++                           agent._memory_agent, "blocked_phase2_attempts", 0)),
+                        "inner_network_attempts": "unknown", "phase_failures": failures,
+                        "started_epoch": slot_started, "ended_epoch": time.time(),
+                        "persisted_artifacts": {name: sha256(slot / name)
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_source_candidate_v2.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_source_candidate_v2.py
+index 0e2fce28..9bc61a17 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_source_candidate_v2.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_source_candidate_v2.py
+@@ -135,6 +135,69 @@ class V2Tests(unittest.TestCase):
+         self.assertEqual(agent._memory_agent.last_receipts, [])
+         self.assertTrue(agent._memory_agent.last_transaction["committed"])
+ 
++    def test_text_tool_fallback_is_rejected_whole_in_both_orders(self):
++        good = "<tool_call><function=memory_update_status><parameter=content>B</parameter></function></tool_call>"
++        bad = "<tool_call><function=memory_delete><parameter=memory_id>missing</parameter>"
++        for variant in ("S2", "R2"):
++            for text in (good + bad, bad + good, bad, good):
++                with self.subTest(variant=variant, text=text):
++                    agent, fake, _ = self.make(variant, [
++                        LLMResponse(content=text, tool_calls=[]),
++                        LLMResponse(content="<no_intervention/>")])
++                    bank = agent.memory
++                    bank.update_status("A")
++                    before = bank.to_dict()
++                    result = asyncio.run(agent._memory_agent.process("task", 1))
++                    self.assertEqual(bank.to_dict(), before)
++                    self.assertEqual(len(fake.requests), 2)
++                    self.assertFalse(result.operations[0].success)
++                    self.assertEqual(agent._memory_agent.last_transaction["status"],
++                                     "format_rejected")
++                    self.assertEqual(agent._memory_agent.last_receipts[0]["error_code"],
++                                     "text_tool_call_forbidden")
++        agent, _, _ = self.make("S2", [
++            LLMResponse(content="ordinary prose", tool_calls=[]),
++            LLMResponse(content="<no_intervention/>")])
++        result = asyncio.run(agent._memory_agent.process("task", 1))
++        self.assertEqual(result.operations, [])
++        self.assertEqual(agent._memory_agent.last_transaction["status"], "no_change")
++
++    def test_rollback_relabels_stage_local_no_change_and_feedback(self):
++        agent, fake, _ = self.make("S2", [
++            LLMResponse(content="", tool_calls=[
++                call("memory_update_status", content="B"),
++                call("memory_update_status", content="B"),
++                call("memory_delete", memory_id="absent")]),
++            LLMResponse(content="<no_intervention/>"),
++            LLMResponse(content="", tool_calls=[]),
++            LLMResponse(content="<no_intervention/>")])
++        agent.memory.update_status("A")
++        result = asyncio.run(agent._memory_agent.process("task", 1))
++        self.assertEqual(agent.memory.status, "A")
++        self.assertEqual([r["status"] for r in agent._memory_agent.last_receipts],
++                         ["transaction_aborted", "transaction_aborted", "rejected"])
++        self.assertEqual([op.success for op in result.operations], [False, False, False])
++        self.assertEqual(agent._memory_agent.collateral_aborts, 2)
++        self.assertIn('"status": "transaction_aborted"', fake.requests[1]["prompt"])
++        self.assertIn('"status": "rejected"', fake.requests[1]["prompt"])
++        asyncio.run(agent._memory_agent.process("task", 2))
++        self.assertIn('"status": "transaction_aborted"', fake.requests[2]["prompt"])
++        self.assertEqual(agent._memory_agent.last_transaction["status"], "no_change")
++
++    def test_phase1_transport_failure_does_not_reuse_prior_receipts(self):
++        agent, fake, _ = self.make("S2", [
++            LLMResponse(content="", tool_calls=[call("memory_update_status", content="B")]),
++            LLMResponse(content="<no_intervention/>")])
++        asyncio.run(agent._memory_agent.process("task", 1))
++        self.assertEqual(agent._memory_agent.last_transaction["status"], "committed")
++        with self.assertRaises(AssertionError):
++            asyncio.run(agent._memory_agent.process("task", 2))
++        self.assertEqual(len(fake.requests), 3)
++        self.assertEqual(agent._memory_agent.last_receipts, [])
++        self.assertEqual(agent._memory_agent.last_transaction["status"],
++                         "phase1_request_failed")
++        self.assertIn('"status": "committed"', fake.requests[2]["prompt"])
++
+     def test_successful_delete_and_procedural_index_invalidation(self):
+         agent, fake, _ = self.make("S2", [])
+         bank = agent.memory
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_static_source_live.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_static_source_live.py
+index 80649006..c6c84a26 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_static_source_live.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_static_source_live.py
+@@ -103,7 +103,12 @@ class StaticLiveGateTests(unittest.TestCase):
+             self.assertEqual(len(rows), 1)
+             self.assertEqual(rows[0]["status"], "stopped_failure")
+             self.assertEqual(rows[0]["error_type"], "RuntimeError")
+-            self.assertEqual(len(rows[0]["phase_failures"]), 2)
++            # The old expectation counted a second provider failure in Phase 2.
++            # A terminal Phase-1 failure now locks the send boundary instead.
++            self.assertEqual(len(rows[0]["phase_failures"]), 1)
++            self.assertEqual(rows[0]["logical_phase_calls"], 1)
++            self.assertEqual(rows[0]["blocked_phase_calls"], 1)
++            self.assertEqual(rows[0]["phase_failures"][0]["phase"], "phase1")
+             self.assertFalse(auth.exists())
+             self.assertFalse((output / "isolated-2").exists())
+ 
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_static_source_live_v2.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_static_source_live_v2.py
+index 79a82a4e..cd29da78 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_static_source_live_v2.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_static_source_live_v2.py
+@@ -141,3 +141,65 @@ class V2EntryTests(unittest.TestCase):
+             self.assertEqual(rows[0]["status"], "stopped_failure")
+             self.assertFalse(auth.exists())
+             self.assertFalse((output / "new-v2-2").exists())
++
++    def test_terminal_phase1_failure_blocks_phase2_and_later_slots(self):
++        for target_order, variant in ((1, "U"), (2, "S2"), (3, "R2")):
++            with self.subTest(variant=variant), TemporaryDirectory() as directory:
++                manifest, auth, profile, output = self.fixture(Path(directory))
++                sent = []
++
++                def fake(current_variant, slot):
++                    order = int(slot.name.rsplit("-", 1)[1])
++                    if order != target_order:
++                        return FakePublicTransport(slot / "fake_wire.jsonl",
++                                                   expected=28)
++
++                    async def terminal(*, prompt, system, tools=None):
++                        sent.append({"variant": current_variant,
++                                     "phase": "phase1" if tools is not None else "phase2"})
++                        raise RuntimeError("final logical transport failure")
++                    return terminal
++
++                async def forbidden(**_kwargs):
++                    raise AssertionError("network fallback forbidden")
++
++                with patch("litellm.acompletion", forbidden):
++                    rows = asyncio.run(run_authorized(manifest, auth, profile, output,
++                                                      fake_transport_factory=fake))
++                self.assertEqual(sent, [{"variant": variant, "phase": "phase1"}])
++                self.assertEqual(len(rows), target_order)
++                failed = rows[-1]
++                self.assertEqual(failed["status"], "stopped_failure")
++                self.assertEqual(failed["logical_phase_calls"], 1)
++                self.assertEqual(failed["observable_litellm_calls"], 0)
++                self.assertGreaterEqual(failed["blocked_phase_calls"], 1)
++                self.assertFalse((output / f"new-v2-{target_order + 1}").exists())
++                self.assertFalse(auth.exists())
++                if variant != "U":
++                    audit = (output / f"new-v2-{target_order}" / "episode" /
++                             "candidate_audit.jsonl").read_text(encoding="utf-8")
++                    self.assertIn("phase1_request_failed", audit)
++                    self.assertNotIn('"status": "committed"', audit)
++
++    def test_lower_retry_success_proceeds_to_phase2_without_extra_logical_call(self):
++        with TemporaryDirectory() as directory:
++            manifest, auth, profile, output = self.fixture(Path(directory))
++            sends = []
++
++            async def scripted_lower(**kwargs):
++                sends.append("phase1" if kwargs.get("tools") else "phase2")
++                if len(sends) == 1:
++                    raise RuntimeError("transient lower failure")
++                return litellm.ModelResponse(model="claude-opus-4-8", choices=[{
++                    "message": {"content": "" if kwargs.get("tools") else "<no_intervention/>",
++                                "tool_calls": []}, "finish_reason": "stop"}],
++                    usage={"prompt_tokens": 1, "completion_tokens": 1})
++
++            with patch("litellm.acompletion", scripted_lower):
++                rows = asyncio.run(run_authorized(manifest, auth, profile, output))
++            self.assertEqual(len(rows), 6)
++            self.assertEqual(rows[0]["status"], "static_prefix_complete")
++            self.assertEqual(rows[0]["logical_phase_calls"], 28)
++            self.assertEqual(rows[0]["observable_litellm_calls"], 29)
++            self.assertEqual(sends[:3], ["phase1", "phase1", "phase2"])
++            self.assertEqual(rows[0]["blocked_phase_calls"], 0)

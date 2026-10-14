@@ -1,0 +1,266 @@
+{
+  "phase1_request": {
+    "prompt": "## Step 1\n\n## Current Memory Bank\n<memory_bank>\n<status>A</status>\n<knowledge>\n(empty)\n</knowledge>\n<procedural>\n(empty)\n</procedural>\n</memory_bank>\n\n## Context (Task Description + Recent Trajectory)\npublic task\n\n## Your Task\nAnalyze the trajectory and update the memory bank. Save important facts, record experiences, delete outdated entries. Be selective — only save what would be lost as the agent's context scrolls.\n\n## Numbered visible public source leaves\n[]\n## Previous phase-1 execution receipts\n{\"transaction\": {}, \"receipts\": []}",
+    "system": "You are a Memory Bank Manager. Your job is to maintain a lean, accurate knowledge bank.\n\n## Your Tools\n- memory_save_knowledge: Save important FACTS (task requirements, env details, API constraints, file paths)\n- memory_save_procedural: Record EXPERIENCES (failed approaches, error patterns, successful fixes)\n- memory_update_status: Track progress internally (not shown to action agent)\n- memory_delete: Remove outdated/incorrect entries\n\n## Guidelines\n1. **Be selective**: Only save information that would be LOST if the action agent's context window scrolls past it\n2. **Prioritize task requirements**: API signatures, output formats, specific constraints from the task description\n3. **Record failures**: What was tried, why it failed, what the error was — so it's not repeated\n4. **Keep it lean**: Delete entries that are superseded by newer information\n5. **Don't save obvious things**: Terminal output the agent just saw, general knowledge about tools\n\n## What to save at Step 1 (task description):\n- Specific API requirements (function signatures, argument orders, input types)\n- Required output files and formats\n- Constraints that are easy to forget mid-task\n- Key domain-specific details\n\n## What to save at later steps:\n- Environment discoveries (package versions, tool availability)\n- Error patterns and fixes\n- Approach changes and why\n- Performance or score tracking\n\nUse only the numbered, visible public source leaves below. For each citation choose\n{source_handle, start_line, end_line}, with inclusive 1-based line numbers. The host\nbinds exact bytes, role and event; do not repeat a quote or invent an event ID.\nWorking-memory summaries and Task responses are agent_report, not tool observations.\nAn old excerpt may be inherited only through the cited entry's explicit index.\n\nPhase-1 memory operations are one transaction. A rejected operation aborts every\noperation in that phase, including otherwise valid saves/deletes. Receipts report\nexecution, not task facts. Use the receipts to correct the next bank action without\nassuming an aborted or rejected operation changed memory.\n",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "memory_save_knowledge",
+          "description": "Save an important fact to the knowledge bank. Use for: task requirements, environment facts, file paths, API details, key constraints from the task description.",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "content": {
+                "minLength": 1,
+                "title": "Content",
+                "type": "string"
+              },
+              "statement_type": {
+                "enum": [
+                  "task_requirement",
+                  "tool_observation",
+                  "agent_report",
+                  "inference"
+                ],
+                "title": "Statement Type",
+                "type": "string"
+              },
+              "source_refs": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "source_handle": {
+                      "minLength": 1,
+                      "title": "Source Handle",
+                      "type": "string"
+                    },
+                    "start_line": {
+                      "minimum": 1,
+                      "title": "Start Line",
+                      "type": "integer"
+                    },
+                    "end_line": {
+                      "minimum": 1,
+                      "title": "End Line",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "source_handle",
+                    "start_line",
+                    "end_line"
+                  ],
+                  "title": "SourceLines",
+                  "type": "object"
+                },
+                "minItems": 1,
+                "title": "Source Refs",
+                "type": "array"
+              }
+            },
+            "required": [
+              "content",
+              "statement_type",
+              "source_refs"
+            ],
+            "title": "SaveArgs",
+            "type": "object"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "memory_save_procedural",
+          "description": "Record a debugging experience, failed approach, or solution. Use for: error patterns, things that didn't work and why, successful fixes, performance observations.",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "content": {
+                "minLength": 1,
+                "title": "Content",
+                "type": "string"
+              },
+              "statement_type": {
+                "enum": [
+                  "task_requirement",
+                  "tool_observation",
+                  "agent_report",
+                  "inference"
+                ],
+                "title": "Statement Type",
+                "type": "string"
+              },
+              "source_refs": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "source_handle": {
+                      "minLength": 1,
+                      "title": "Source Handle",
+                      "type": "string"
+                    },
+                    "start_line": {
+                      "minimum": 1,
+                      "title": "Start Line",
+                      "type": "integer"
+                    },
+                    "end_line": {
+                      "minimum": 1,
+                      "title": "End Line",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "source_handle",
+                    "start_line",
+                    "end_line"
+                  ],
+                  "title": "SourceLines",
+                  "type": "object"
+                },
+                "minItems": 1,
+                "title": "Source Refs",
+                "type": "array"
+              }
+            },
+            "required": [
+              "content",
+              "statement_type",
+              "source_refs"
+            ],
+            "title": "SaveArgs",
+            "type": "object"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "memory_update_status",
+          "description": "Update your internal tracking of task progress. This is for YOUR reference only, not shown to the action agent.",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "content": {
+                "title": "Content",
+                "type": "string"
+              }
+            },
+            "required": [
+              "content"
+            ],
+            "title": "StatusArgs",
+            "type": "object"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "memory_delete",
+          "description": "Delete an outdated or incorrect memory entry by its ID.",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "memory_id": {
+                "minLength": 1,
+                "title": "Memory Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "memory_id"
+            ],
+            "title": "DeleteArgs",
+            "type": "object"
+          }
+        }
+      }
+    ]
+  },
+  "phase2_request": {
+    "prompt": "## Step 1\n\n## Memory Bank (just updated)\n<memory_bank>\n<status>A</status>\n<knowledge>\n(empty)\n</knowledge>\n<procedural>\n(empty)\n</procedural>\n</memory_bank>\n\n## Context (Task Description + Recent Trajectory)\npublic task\n\n## Your Task\nReview the memory bank and the agent's recent trajectory. Decide:\n- Is the agent missing or forgetting something important from the memory bank?\n- Is the agent heading toward a pattern that matches a recorded failure?\n\nIf yes, write a <context_for_action> note with the relevant context.\nIf no, write <no_intervention/>.\n\n## This phase-1 execution result\n{\"transaction\": {\"transaction_id\": \"p1-1-993c7d108a9d\", \"status\": \"transaction_aborted\", \"committed\": false, \"commit_version\": \"7e59774756a1f92be6db94c3f24414898458c2d0640ec0d68025329792d387ec\", \"receipts\": [{\"transaction_id\": \"p1-1-993c7d108a9d\", \"call_index\": 1, \"tool_name\": \"memory_update_status\", \"status\": \"transaction_aborted\", \"error_code\": \"transaction_abort\", \"memory_id\": null, \"commit_version\": \"7e59774756a1f92be6db94c3f24414898458c2d0640ec0d68025329792d387ec\"}, {\"transaction_id\": \"p1-1-993c7d108a9d\", \"call_index\": 2, \"tool_name\": \"memory_update_status\", \"status\": \"transaction_aborted\", \"error_code\": \"transaction_abort\", \"memory_id\": null, \"commit_version\": \"7e59774756a1f92be6db94c3f24414898458c2d0640ec0d68025329792d387ec\"}, {\"transaction_id\": \"p1-1-993c7d108a9d\", \"call_index\": 3, \"tool_name\": \"memory_delete\", \"status\": \"rejected\", \"error_code\": \"version_stale\", \"memory_id\": null, \"error_type\": \"ValueError\", \"error\": \"memory ID not active\", \"commit_version\": \"7e59774756a1f92be6db94c3f24414898458c2d0640ec0d68025329792d387ec\"}], \"before_bank\": {\"status\": \"A\", \"knowledge\": [], \"procedural\": [], \"source_memory_schema\": 1, \"metadata\": {}, \"history\": []}, \"after_bank\": {\"status\": \"A\", \"knowledge\": [], \"procedural\": [], \"source_memory_schema\": 1, \"metadata\": {}, \"history\": []}}, \"receipts\": [{\"transaction_id\": \"p1-1-993c7d108a9d\", \"call_index\": 1, \"tool_name\": \"memory_update_status\", \"status\": \"transaction_aborted\", \"error_code\": \"transaction_abort\", \"memory_id\": null, \"commit_version\": \"7e59774756a1f92be6db94c3f24414898458c2d0640ec0d68025329792d387ec\"}, {\"transaction_id\": \"p1-1-993c7d108a9d\", \"call_index\": 2, \"tool_name\": \"memory_update_status\", \"status\": \"transaction_aborted\", \"error_code\": \"transaction_abort\", \"memory_id\": null, \"commit_version\": \"7e59774756a1f92be6db94c3f24414898458c2d0640ec0d68025329792d387ec\"}, {\"transaction_id\": \"p1-1-993c7d108a9d\", \"call_index\": 3, \"tool_name\": \"memory_delete\", \"status\": \"rejected\", \"error_code\": \"version_stale\", \"memory_id\": null, \"error_type\": \"ValueError\", \"error\": \"memory ID not active\", \"commit_version\": \"7e59774756a1f92be6db94c3f24414898458c2d0640ec0d68025329792d387ec\"}]}",
+    "system": "You are a Selective Attention module for an Action Agent working on a coding task.\n\nYour role is like selective attention — when the agent's working memory (context window) has scrolled past important information, you can restore that context. But you also know when things are fine and the agent doesn't need help.\n\n## PROCESS:\n1. Review the memory bank contents\n2. Review the agent's recent trajectory (what it's doing now)\n3. DECIDE: Does the agent need a context reminder right now?\n\n## WHEN TO INTERVENE (output <context_for_action>):\n- The agent has forgotten a key requirement or constraint stored in memory\n- The agent is about to repeat a recorded failure pattern\n- The agent's current approach contradicts a specific fact in the memory bank\n- A format requirement, API detail, or constraint from the task seems forgotten\n\n## WHEN NOT TO INTERVENE (output <no_intervention/>):\n- The agent's actions are consistent with memory bank contents\n- You're not confident that a specific fact is being forgotten\n- The information you'd provide is already visible in the recent trajectory\n- You'd only be restating what the agent already knows\n\n## OUTPUT FORMAT:\nIf intervention needed, write:\n<context_for_action>\nYour synthesized context note here. You can:\n- Highlight requirements that seem forgotten\n- Note relevant past experiences from memory\n- Connect dots between memory entries and current behavior\n- Flag patterns that match recorded failures\nWrite as helpful observations, not commands.\n</context_for_action>\n\nIf no intervention needed, write:\n<no_intervention/>\n\n## GUIDELINES:\n- Your DEFAULT is <no_intervention/> — only intervene when you see a real gap\n- When you do intervene, be thoughtful: synthesize, don't just dump memory entries\n- Frame as observations: \"The task requires X\" not \"You MUST do X\"\n- Don't include information already visible in the recent trajectory\n- Be calibrated: don't pass things you're not sure about\n- You CAN connect dots and highlight patterns — not limited to verbatim copies from bank\n- The action agent is a strong model — help it remember, don't try to control it\n\nKeep the original selective-attention decision: synthesize freely or stay silent.\nFor a reminder, use <context_for_action>free synthesized note</context_for_action>\nfollowed by <memory_refs>[{\"id\":\"active ID\",\"version\":1}]</memory_refs>.\nCite active memories actually relied on. Distinguish new inferences as\ninferences; citations do not prove the synthesized claim. Silence remains\n<no_intervention/>. Invalid citations cause no delivery, not a repair call.\n\nPhase-1 memory operations are one transaction. A rejected operation aborts every\noperation in that phase, including otherwise valid saves/deletes. Receipts report\nexecution, not task facts. Use the receipts to correct the next bank action without\nassuming an aborted or rejected operation changed memory.\n",
+    "tools": null
+  },
+  "transaction": {
+    "transaction_id": "p1-1-993c7d108a9d",
+    "status": "transaction_aborted",
+    "committed": false,
+    "commit_version": "7e59774756a1f92be6db94c3f24414898458c2d0640ec0d68025329792d387ec",
+    "receipts": [
+      {
+        "transaction_id": "p1-1-993c7d108a9d",
+        "call_index": 1,
+        "tool_name": "memory_update_status",
+        "status": "transaction_aborted",
+        "error_code": "transaction_abort",
+        "memory_id": null,
+        "commit_version": "7e59774756a1f92be6db94c3f24414898458c2d0640ec0d68025329792d387ec"
+      },
+      {
+        "transaction_id": "p1-1-993c7d108a9d",
+        "call_index": 2,
+        "tool_name": "memory_update_status",
+        "status": "transaction_aborted",
+        "error_code": "transaction_abort",
+        "memory_id": null,
+        "commit_version": "7e59774756a1f92be6db94c3f24414898458c2d0640ec0d68025329792d387ec"
+      },
+      {
+        "transaction_id": "p1-1-993c7d108a9d",
+        "call_index": 3,
+        "tool_name": "memory_delete",
+        "status": "rejected",
+        "error_code": "version_stale",
+        "memory_id": null,
+        "error_type": "ValueError",
+        "error": "memory ID not active",
+        "commit_version": "7e59774756a1f92be6db94c3f24414898458c2d0640ec0d68025329792d387ec"
+      }
+    ],
+    "before_bank": {
+      "status": "A",
+      "knowledge": [],
+      "procedural": [],
+      "source_memory_schema": 1,
+      "metadata": {},
+      "history": []
+    },
+    "after_bank": {
+      "status": "A",
+      "knowledge": [],
+      "procedural": [],
+      "source_memory_schema": 1,
+      "metadata": {},
+      "history": []
+    }
+  },
+  "operations": [
+    {
+      "action": "memory_update_status",
+      "memory_id": null,
+      "content": null,
+      "success": false,
+      "error": "transaction_abort"
+    },
+    {
+      "action": "memory_update_status",
+      "memory_id": null,
+      "content": null,
+      "success": false,
+      "error": "transaction_abort"
+    },
+    {
+      "action": "memory_delete",
+      "memory_id": null,
+      "content": null,
+      "success": false,
+      "error": "version_stale"
+    }
+  ],
+  "final_status": "A",
+  "collateral_aborts": 2
+}
