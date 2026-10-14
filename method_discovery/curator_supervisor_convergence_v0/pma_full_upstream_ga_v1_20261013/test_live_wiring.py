@@ -158,7 +158,7 @@ class LiveWiringTests(unittest.TestCase):
                 task='db-wal-recovery', condition='A', run_root=str(root), run_id='new-run',
                 order=1, task_profile_file=str(profile), ga_source=str(base),
                 runtime_root=str(base), worker_python=str(profile), harbor_python=str(profile),
-                bench_root=str(base), python_home='python',
+                bench_root=str(base), official_source_git=str(base), python_home='python',
                 task_profile='native_claude_cc_vibe_opus48')
             args.pma_profile_file = None
             prepared = {'image_id': 'fixed-image', 'public_task_tree_sha256': 'public',
@@ -179,6 +179,7 @@ class LiveWiringTests(unittest.TestCase):
             with (patch.object(live_launcher, '_prepare_common', side_effect=prepare),
                   patch.object(live_launcher, 'verify_live_spec'),
                   patch.object(live_launcher, '_stage_verifier', return_value={}),
+                  patch.object(live_launcher, '_require_evaluation_state_contract'),
                   patch.object(live_launcher.subprocess, 'Popen', side_effect=start),
                   patch.object(live_launcher, 'clean_owned_containers', return_value=[]),
                   patch.object(live_launcher, 'capture_mounts', return_value=[])):
