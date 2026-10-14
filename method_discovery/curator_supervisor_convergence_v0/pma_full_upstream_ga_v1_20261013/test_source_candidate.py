@@ -127,6 +127,12 @@ class SourceCandidateTests(unittest.TestCase):
         self.assertIn("e3:observation", fake.requests[2]["prompt"])
         self.assertNotIn("PRIVATE_NOT_PUBLIC", fake.requests[2]["prompt"])
         self.assertEqual(fake.outputs, [])
+        agent.memory.sources["e1"]["text"] = "tampered after selection"
+        later = {"event_id": "e4", "sequence": 4, "run_id": "run", "task_id": "task",
+                 "kind": "before_actor_call", "actor_attempt": 2}
+        self.assertEqual(asyncio.run(episode.handle(later))["status"], "silent")
+        self.assertEqual(agent._memory_agent.last_delivery_status, "invalid_reference_no_delivery")
+        self.assertEqual(len(fake.requests), 4)
         text = agent._memory_agent._parse_phase2_response(
             '<context_for_action>Wrong</context_for_action>'
             '<memory_refs>[{"id":"absent","version":1}]</memory_refs>')
