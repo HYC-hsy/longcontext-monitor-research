@@ -8,6 +8,7 @@ AUDIT = ROOT / "source_memory_audit_20261014"
 TARGETS = [ROOT / "source_screen_fake_final_20261014",
            ROOT / "source_screen_request_examples_20261014",
            AUDIT / "SHADOW_RAW.tar.gz", AUDIT / "AUDIT.txt",
+           AUDIT / "FINAL_TEST_OUTPUT.txt",
            ROOT / "SOURCE_MEMORY_STATIC_SCREEN_DRAFT.json",
            ROOT / "source_memory.py", ROOT / "source_agent.py",
            *sorted(AUDIT.glob("*.patch"))]
