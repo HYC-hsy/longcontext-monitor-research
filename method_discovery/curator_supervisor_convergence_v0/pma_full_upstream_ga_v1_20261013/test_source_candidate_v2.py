@@ -47,6 +47,112 @@ class V2Tests(unittest.TestCase):
         agent._memory_llm.call = fake
         return agent, fake, Path(tmp.name)
 
+    @staticmethod
+    def receipt_view(prompt, heading):
+        return json.loads(prompt.split(heading, 1)[1].strip())
+
+    def test_archived_old_content_is_not_projected_in_s2_r2_receipts(self):
+        marker = "ARCHIVED_ONLY_REVOKED_CONTENT_6C81"
+        inherited = "BOUND_INHERITABLE_SOURCE_7D32"
+        for variant in ("S2", "R2"):
+            with self.subTest(variant=variant):
+                agent, fake, _ = self.make(variant, [])
+                bank = agent.memory
+                old_handle = bank.register_leaf("old", "task_instruction", inherited, 1,
+                                                "initial_user_content", "1" * 64)
+                old_id = bank.save_sourced("knowledge", marker, "task_requirement", [
+                    {"source_handle": old_handle, "start_line": 1, "end_line": 1}])
+                for number in range(2, 12):
+                    bank.register_leaf(f"recent-{number}", "agent_report", f"recent {number}",
+                                       number, "response", "2" * 64)
+                bank.current_source_ids = ["recent-11:response"]
+                self.assertNotIn(marker, json.dumps(bank.visible_lines()))
+                current_handle = bank.sources["recent-11:response"]["handle"]
+                if variant == "S2":
+                    change = call("memory_delete", memory_id=old_id)
+                else:
+                    change = call("memory_reconcile", memory_id=old_id, decision="revise",
+                                  reason="current report changes the claim",
+                                  evidence_refs=[{"source_handle": current_handle,
+                                                  "start_line": 1, "end_line": 1}],
+                                  content="new active content", statement_type="agent_report",
+                                  source_refs=[{"source_handle": current_handle,
+                                                "start_line": 1, "end_line": 1}],
+                                  inherit_source_ref_indices=[0])
+                fake.replies.extend([LLMResponse(content="", tool_calls=[change]),
+                                     LLMResponse(content="<no_intervention/>"),
+                                     LLMResponse(content="", tool_calls=[]),
+                                     LLMResponse(content="<no_intervention/>")])
+                asyncio.run(agent._memory_agent.process("current report", 12))
+                archived = agent._memory_agent.last_transaction
+                self.assertIn(marker, json.dumps(archived["after_bank"]["history"],
+                                                 ensure_ascii=False))
+                self.assertNotIn(marker, json.dumps([entry.content for entry in bank.knowledge]))
+                phase2 = fake.requests[1]["prompt"]
+                self.assertNotIn(marker, phase2)
+                self.assertEqual(phase2.count('"call_index"'), 1)
+                current_view = self.receipt_view(phase2, "## This phase-1 execution result\n")
+                self.assertEqual(current_view["transaction"]["status"], "committed")
+                self.assertEqual(len(current_view["receipts"]), 1)
+                self.assertEqual(set(current_view["transaction"]) &
+                                 {"before_bank", "after_bank", "history", "metadata", "receipts"}, set())
+                if variant == "R2":
+                    self.assertIn("new active content", phase2)
+                    self.assertIn(inherited, phase2)  # Explicitly inherited bound excerpt.
+                asyncio.run(agent._memory_agent.process("another current report", 13))
+                for request, heading in ((fake.requests[2], "## Previous phase-1 execution receipts\n"),
+                                         (fake.requests[3], "## This phase-1 execution result\n")):
+                    view = self.receipt_view(request["prompt"], heading)
+                    self.assertNotIn(marker, json.dumps(view, ensure_ascii=False))
+                    self.assertNotIn(marker, request["prompt"])
+
+    def test_receipt_projection_states_and_no_raw_exception(self):
+        for variant in ("S2", "R2"):
+            with self.subTest(variant=variant):
+                agent, fake, _ = self.make(variant, [
+                    LLMResponse(content="", tool_calls=[
+                        call("memory_update_status", content="B"),
+                        call("memory_delete", memory_id="missing")]),
+                    LLMResponse(content="<no_intervention/>"),
+                    LLMResponse(content="<tool_call", tool_calls=[]),
+                    LLMResponse(content="<no_intervention/>")])
+                asyncio.run(agent._memory_agent.process("task", 1))
+                rollback = self.receipt_view(fake.requests[1]["prompt"],
+                                             "## This phase-1 execution result\n")
+                self.assertEqual(rollback["transaction"]["status"], "transaction_aborted")
+                self.assertEqual([r["status"] for r in rollback["receipts"]],
+                                 ["transaction_aborted", "rejected"])
+                self.assertEqual(rollback["receipts"][1]["error_code"], "version_stale")
+                self.assertNotIn("error", rollback["receipts"][1])
+                self.assertEqual(fake.requests[1]["prompt"].count('"call_index"'), 2)
+                asyncio.run(agent._memory_agent.process("task", 2))
+                rejected = self.receipt_view(fake.requests[3]["prompt"],
+                                             "## This phase-1 execution result\n")
+                self.assertEqual(rejected["transaction"]["status"], "format_rejected")
+                self.assertEqual(rejected["receipts"][0]["error_code"],
+                                 "text_tool_call_forbidden")
+                with self.assertRaises(AssertionError):
+                    asyncio.run(agent._memory_agent.process("task", 3))
+                failure = agent._memory_agent._model_transaction_view(
+                    agent._memory_agent.last_transaction, agent._memory_agent.last_receipts)
+                self.assertEqual(failure["transaction"]["status"], "phase1_request_failed")
+                self.assertEqual(failure["receipts"], [])
+                self.assertEqual(len(fake.requests), 5)  # Failed phase 1; no phase 2 send.
+
+    def test_raw_error_and_bank_fields_never_cross_projection(self):
+        marker = "ARCHIVED_EXCEPTION_ONLY_4321"
+        transaction = {"transaction_id": "txn", "status": "transaction_aborted",
+                       "committed": False, "commit_version": "v", "before_bank": {"history": marker},
+                       "after_bank": {"metadata": marker}, "receipts": [{"error": marker}]}
+        receipts = [{"call_index": 1, "tool_name": "memory_delete", "status": "rejected",
+                     "error_code": "version_stale", "error": marker, "error_type": marker,
+                     "memory_id": "missing", "commit_version": "v"}]
+        agent, _, _ = self.make("S2", [])
+        view = agent._memory_agent._model_transaction_view(transaction, receipts)
+        self.assertNotIn(marker, json.dumps(view))
+        self.assertEqual(view["receipts"][0]["reason"], "memory ID or version is not active")
+        self.assertNotIn("receipts", view["transaction"])
+
     def test_real_process_schema_transaction_receipts_and_next_phase(self):
         refs = [{"source_handle": "placeholder", "start_line": 1, "end_line": 1}]
         agent, fake, _ = self.make("S2", [])

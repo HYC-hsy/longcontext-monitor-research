@@ -1,0 +1,40 @@
+S2/R2 MODEL-VISIBLE RECEIPT PROJECTION — OFFLINE DELIVERY
+Date: 2026-10-15
+Baseline code: aca2b15929e20f9c946e9b968f8b82a7ab2600a6
+Baseline archive/starting HEAD: e5b3bd589083d2a2b74dfc46ad89ba2bec59fa50
+Scope: SourceMemoryAgentV2 only. U, old S/R, vendor PMA, GA, task, evaluator, profiles, and existing archives unchanged.
+
+Implementation
+- SourceMemoryAgentV2._model_transaction_view constructs a literal field whitelist for the two existing receipt sections. Transaction: transaction_id, status, committed, commit_version, phase2_blocked, error_type (when present). Each operation: call_index, tool_name, status, memory_id, commit_version, error_code, and a fixed short reason for an error. Unknown error codes map to a generic rejection. Raw exception strings are not projected.
+- Receipts appear once, outside the transaction summary. before_bank, after_bank, metadata, history, source registry, raw error and embedded transaction receipts remain in the original last_transaction/archive, not in the prompt projection.
+- No change to bank mutation, transaction rollback, phase sequencing, source visibility, model calls, or retries.
+
+Evidence from real process with fake transport
+- samples/S2_request_1.txt: old active memory is legitimately visible before deletion. samples/S2_request_2.txt: the deletion succeeded and its projected receipt contains only the allowed identity/status fields; the old claim is absent. samples/S2_request_3.txt and S2_request_4.txt: next no-op phase-1/phase-2 requests likewise omit the old claim. samples/S2_raw_transaction.json retains it in after_bank.history and before_bank.
+- R2_request_1.txt to R2_request_4.txt follow the corresponding revision. The old claim is absent from phase-2 and next requests. The new active claim and explicitly inherited BOUND_SOURCE_SNIPPET remain visible, as authorized by the existing source-binding rule. R2_raw_transaction.json retains the superseded claim in archival history.
+- The unique synthetic old claim is outside current visible source leaves. It is not in the post-change active memory or the inherited source excerpt. Assertions inspect the actual prompt, its receipt section, active memory, and archival history separately. This is not a blanket word filter on legitimate context.
+- The S2/R2 rollback and format-rejection prompts show transaction_aborted/rejected and format_rejected with per-operation statuses and fixed reasons. A final phase-1 transport failure is archived as phase1_request_failed, with no phase-2 provider send; the unsent model projection is tested separately, not represented as a sent request.
+
+Commands and results
+Python: E:/LongContext/bench_runtime/pma_native_venv/Scripts/python.exe
+PYTHONPATH: repository root; GenericAgent-main; this research directory; vendor/pma_89e5c0d/src; vendor/pma_89e5c0d/external/harbor/src.
+1) python -m unittest -v test_source_candidate test_source_candidate_v2 test_static_source_screen test_static_source_live test_static_source_live_v2 test_archive_source_v2_batch
+   Final exit 0, 47 tests, raw output affected_tests_final_raw.txt. Earlier post-edit run: exit 0, 46 tests, affected_tests_raw.txt.
+2) python -c "import importlib,sys,unittest; sys.modules['offline_launcher']=importlib.import_module('method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.offline_launcher'); unittest.main(module='test_episode',verbosity=2)"
+   Exit 0, 13 tests, raw output test_episode_raw.txt.
+3) python generate_receipt_projection_samples.py source_memory_v2_receipt_projection_20261015/samples
+   Exit 0, output samples_command_raw.txt and samples/.
+4) git diff --cached --check: exit 0. Full limited implementation/test diff: LIMITED_DIFF.patch.
+Initial local test attempt failed before execution due to a new test typo (mismatched bracket); corrected before the 46- and 47-test runs. See early_test_failure.txt. No old test assertion was removed.
+
+Boundaries and counts
+- All test transports are scripted/fake or explicit offline interceptions. Real Task, PMA/provider, native evaluator, training, scoring-model calls: 0. The standalone samples contain 8 fake request captures, four for S2 and four for R2. This is not a real provider compatibility or semantic-quality result.
+- Both active manifests remain execution_authorized=false. No activity authorization created or restored. Six slots not started.
+- The old claim is intentionally visible in the first prompt while it is still active; removal applies after the delete/revise has committed. Legal recent context and explicitly inherited source excerpts remain visible.
+- This whitelist prevents archival history from leaking through these receipt sections; it does not judge whether a free-form new reminder is semantically correct or change other permitted PMA context.
+
+Files
+- LIMITED_DIFF.patch: exact source/test/sample-generator diff.
+- affected_tests_raw.txt, affected_tests_final_raw.txt, test_episode_raw.txt, samples_command_raw.txt, early_test_failure.txt: complete local command outputs/incident.
+- samples/: directly readable actual constructed prompt and raw archival transaction pairs.
+- FILE_HASHES.json: repository-relative SHA-256 index of the prepared worktree bytes, excluding itself; these are not mislabeled as Git blob hashes. The final commit SHA is reported separately after push/fetch.

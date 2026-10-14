@@ -28,6 +28,19 @@ execution, not task facts. Use the receipts to correct the next bank action with
 assuming an aborted or rejected operation changed memory.
 """
 
+_RECEIPT_REASONS = {
+    "argument_shape": "arguments do not match the required tool schema",
+    "unknown_source": "source handle or reference is unknown",
+    "window_invisible": "source is not visible in the current window",
+    "invalid_range": "source line range is invalid",
+    "version_stale": "memory ID or version is not active",
+    "unknown_tool": "tool name is not supported",
+    "bank_integrity": "bank validation failed",
+    "transaction_abort": "operation was rolled back with the transaction",
+    "text_tool_call_forbidden": "text tool calls are not executable",
+    "host_integrity": "host integrity check failed",
+}
+
 
 class SourceMemoryAgentV2(SourceMemoryAgent):
     def __init__(self, *, variant: str, **kwargs):
@@ -65,6 +78,26 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
             descriptions["memory_reconcile"] = "Coordinate an active memory with current evidence."
         return [tool_schema(name, description) for name, description in descriptions.items()]
 
+    @staticmethod
+    def _model_transaction_view(transaction: dict, receipts: list[dict]) -> dict:
+        """Project execution feedback, never bank snapshots or raw exceptions, to a request."""
+        summary = {key: transaction[key] for key in
+                   ("transaction_id", "status", "committed", "commit_version",
+                    "phase2_blocked", "error_type") if key in transaction}
+        visible_receipts = []
+        for receipt in receipts:
+            row = {key: receipt[key] for key in
+                   ("call_index", "tool_name", "status", "memory_id", "commit_version")
+                   if key in receipt}
+            code = receipt.get("error_code")
+            if code is not None:
+                # Raw exception text can contain memory/source contents. The fixed
+                # explanation is sufficient to correct a tool argument next time.
+                row["error_code"] = code if code in _RECEIPT_REASONS else "operation_rejected"
+                row["reason"] = _RECEIPT_REASONS.get(code, "operation was rejected")
+            visible_receipts.append(row)
+        return {"transaction": summary, "receipts": visible_receipts}
+
     async def _call_llm_phase1(self, user_prompt: str):
         from memory_agent.memory.memory_agent import PHASE1_SYSTEM
         system = PHASE1_SYSTEM + SOURCE_LINES_RULES + RECEIPT_RULES
@@ -100,13 +133,13 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
         return (prompt + "\n## Numbered visible public source leaves\n" +
                 json.dumps(lines, ensure_ascii=False) +
                 "\n## Previous phase-1 execution receipts\n" +
-                json.dumps({"transaction": self._previous_transaction,
-                            "receipts": self._previous_receipts}, ensure_ascii=False))
+                json.dumps(self._model_transaction_view(self._previous_transaction,
+                                                        self._previous_receipts), ensure_ascii=False))
 
     def _build_phase2_prompt(self, observation: str, step_count: int) -> str:
         prompt = super()._build_phase2_prompt(observation, step_count)
         return prompt + "\n## This phase-1 execution result\n" + json.dumps(
-            {"transaction": self.last_transaction, "receipts": self.last_receipts},
+            self._model_transaction_view(self.last_transaction, self.last_receipts),
             ensure_ascii=False)
 
     def _dispatch_one(self, name: str, args: dict) -> tuple[str | None, str]:
