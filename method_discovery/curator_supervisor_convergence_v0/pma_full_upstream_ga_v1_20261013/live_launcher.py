@@ -7,7 +7,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import time
 
@@ -16,28 +15,45 @@ from long_context_bench.scripts.isolated_run_bundle import digest_tree
 from .offline_launcher import (STAGE, TASKS, _prepare_common,
                                capture_mounts, clean_owned_containers)
 from .pma_harbor_hooks import verify_live_spec
+from .export_official_evaluator import (COMMIT as OFFICIAL_COMMIT,
+                                         export_task, official_members)
 
 
 def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _stage_verifier(root: Path, task: str, manifest: dict) -> dict:
-    source = STAGE / 'assets' / 'evaluator' / task / 'tests'
+def _stage_verifier(root: Path, task: str, manifest: dict,
+                    official_source_git: Path) -> dict:
     target = root / 'public_task' / 'tests'
-    if not source.is_dir() or not target.is_dir() or any(source.rglob('*.lnk')):
-        raise RuntimeError('PMA fixed native evaluator is unavailable')
-    if any(path.is_symlink() for path in source.rglob('*')) or list(target.iterdir()):
-        raise RuntimeError('PMA evaluator contains redirected files or target is not empty')
+    if manifest.get('official_evaluator_commit') != OFFICIAL_COMMIT:
+        raise RuntimeError('PMA manifest does not identify fixed official evaluator blobs')
     expected = manifest['assets'][task]
-    identity = {'native_tests_tree_sha256': digest_tree(source),
-                'native_test_sh_sha256': _sha(source / 'test.sh')}
+    source = official_source_git.resolve(strict=True)
+    members = [{k: v for k, v in item.items() if k != 'raw'}
+               for item in official_members(source, task)]
+    if members != expected.get('official_evaluator_members'):
+        raise RuntimeError('PMA official evaluator members differ from frozen manifest')
+    export_task(source, task, target)
+    identity = {'native_tests_tree_sha256': digest_tree(target),
+                'native_test_sh_sha256': _sha(target / 'test.sh')}
     if any(identity[key] != expected[key] for key in identity):
         raise RuntimeError('PMA native evaluator differs from frozen source')
-    shutil.copytree(source, target, dirs_exist_ok=True)
     if digest_tree(target) != identity['native_tests_tree_sha256']:
         raise RuntimeError('PMA staged evaluator bytes changed')
     return identity
+
+
+def _require_evaluation_state_contract(manifest: dict) -> None:
+    """Do not enter live inference until the full-state verifier path is proven.
+
+    Current Harbor's shared verifier inherits the Task's network:none and
+    dropped capabilities; its separate verifier does not inherit the Task's
+    writable layer or task mounts. Neither is a valid live evaluator path for
+    the fixed official scripts without a certified phase transition.
+    """
+    raise RuntimeError('PMA live evaluation state/environment transition is not '
+                       'certified; no Task/provider request may start')
 
 
 def _worker_clearance(root: Path, worker: subprocess.Popen | None, run_id: str) -> dict | None:
@@ -101,8 +117,10 @@ def run_live(args) -> dict:
     verify_live_spec(spec)
     if _sha(Path(args.task_profile_file)) != manifest['task_profile_sha256']:
         raise RuntimeError('PMA Task profile differs from frozen identity')
-    staged = _stage_verifier(root, args.task, manifest)
+    staged = _stage_verifier(root, args.task, manifest,
+                             Path(args.official_source_git))
     spec.update(staged)
+    _require_evaluation_state_contract(manifest)
     spec_path = root / 'control' / 'harbor_spec.json'
     spec_path.write_text(json.dumps(spec, indent=2), encoding='utf-8')
     deadline = time.time() + 14400
@@ -265,7 +283,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     for name in ('manifest', 'authorization', 'run-id', 'run-root', 'ga-source',
                  'runtime-root', 'task-profile-file', 'worker-python', 'harbor-python',
-                 'bench-root'):
+                 'bench-root', 'official-source-git'):
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--order', type=int, required=True)
     parser.add_argument('--task', choices=TASKS, required=True)

@@ -14,12 +14,61 @@ EXPECTED_SH = {
     "db-wal-recovery": "4770437ea96c3cc84684b4f99d55fb148fcac09f9ea1e8ef49de487716e6c334",
     "fix-code-vulnerability": "f1611da693cb4cfc5e8482698c6a1858a5c67220ae9db89b50aed66584e9b17f",
 }
+EXPECTED_EXTERNAL_SH = {
+    "db-wal-recovery": "88dc5c2a3abba75bca0e0f9136223ae5bb585d5984b8d9eba51a7829c1d2ba49",
+    "fix-code-vulnerability": "c006a5de95b69bd78055aa26cc055734dbd50718ede25d331f767bfee4ef7f26",
+}
 STAGE = Path(__file__).resolve().parent / "posthoc_official_20261014"
 
 
 def git(source: Path, *args: str) -> bytes:
     return subprocess.run(["git", "-C", str(source), *args], check=True,
                           capture_output=True).stdout
+
+
+def official_members(source: Path, task: str) -> list[dict]:
+    """Read the fixed upstream Git blobs, never a newline-converted worktree."""
+    if task not in EXPECTED_SH:
+        raise ValueError("unknown fixed evaluator task")
+    if git(source, "cat-file", "-t", COMMIT).strip() != b"commit":
+        raise RuntimeError("fixed official source commit unavailable")
+    selected = []
+    prefix = f"{task}/tests/"
+    for row in git(source, "ls-tree", "-r", "-z", COMMIT, prefix).split(b"\0"):
+        if not row:
+            continue
+        identity, filename = row.split(b"\t", 1)
+        mode, kind, blob = identity.decode("ascii").split()
+        name = filename.decode("utf-8")
+        if not name.startswith(prefix) or kind != "blob" or mode not in ("100644", "100755"):
+            raise RuntimeError("unexpected official evaluator member")
+        raw = git(source, "cat-file", "blob", blob)
+        selected.append({"path": name, "mode": mode, "git_blob": blob,
+                         "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
+                         "raw": raw})
+    if {item["path"] for item in selected} != {
+            prefix + "test.sh", prefix + "test_outputs.py"}:
+        raise RuntimeError("official evaluator file set differs from fixed source")
+    script = next(item for item in selected if item["path"] == prefix + "test.sh")
+    if script["sha256"] != EXPECTED_SH[task]:
+        raise RuntimeError("official test.sh bytes differ from fixed source")
+    external = next(item for item in selected if item["path"] == prefix + "test_outputs.py")
+    if external["sha256"] != EXPECTED_EXTERNAL_SH[task]:
+        raise RuntimeError("official external tests differ from fixed source")
+    return selected
+
+
+def export_task(source: Path, task: str, target: Path) -> list[dict]:
+    """Export one task into an existing empty tests directory with readback."""
+    if not target.is_dir() or any(target.iterdir()):
+        raise RuntimeError("official evaluator target must be an empty directory")
+    members = official_members(source, task)
+    for item in members:
+        destination = target / Path(item["path"]).name
+        destination.write_bytes(item["raw"])
+        if destination.read_bytes() != item["raw"]:
+            raise RuntimeError("official evaluator binary readback mismatch")
+    return [{k: v for k, v in item.items() if k != "raw"} for item in members]
 
 
 def main() -> None:
@@ -31,39 +80,19 @@ def main() -> None:
         raise RuntimeError("official source commit mismatch")
     if STAGE.exists():
         raise FileExistsError(STAGE)
-    listing = git(source, "ls-tree", "-r", "-z", COMMIT).split(b"\0")
-    selected = []
-    for row in listing:
-        if not row:
-            continue
-        identity, filename = row.split(b"\t", 1)
-        mode, kind, blob = identity.decode("ascii").split()
-        name = filename.decode("utf-8")
-        if not any(name.startswith(task + "/tests/") for task in EXPECTED_SH):
-            continue
-        if kind != "blob" or mode not in ("100644", "100755"):
-            raise RuntimeError(f"unexpected official evaluator member: {name}")
-        raw = git(source, "cat-file", "blob", blob)
-        selected.append((name, mode, blob, raw))
-    expected_names = {f"{task}/tests/{name}" for task in EXPECTED_SH
-                      for name in ("test.sh", "test_outputs.py")}
-    if {item[0] for item in selected} != expected_names:
-        raise RuntimeError("official evaluator file set differs from expected source")
-    for name, _, _, raw in selected:
-        task = name.split("/", 1)[0]
-        if name.endswith("/test.sh") and hashlib.sha256(raw).hexdigest() != EXPECTED_SH[task]:
-            raise RuntimeError(f"official test.sh hash mismatch: {task}")
+    selected = [item for task in EXPECTED_SH for item in official_members(source, task)]
     STAGE.mkdir()
     members = []
-    for name, mode, blob, raw in selected:
-        destination = STAGE / name
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(raw)
-        if destination.read_bytes() != raw:
-            raise RuntimeError(f"official blob export readback mismatch: {name}")
-        members.append({"path": name, "git_blob": blob, "mode": mode,
-                        "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
-                        "crlf": raw.count(b"\r\n"), "bare_lf": raw.count(b"\n") - raw.count(b"\r\n"),
+    for task in EXPECTED_SH:
+        target = STAGE / task / "tests"
+        target.mkdir(parents=True)
+        export_task(source, task, target)
+    for item in selected:
+        raw = item["raw"]
+        members.append({"path": item["path"], "git_blob": item["git_blob"],
+                        "mode": item["mode"], "bytes": item["bytes"],
+                        "sha256": item["sha256"], "crlf": raw.count(b"\r\n"),
+                        "bare_lf": raw.count(b"\n") - raw.count(b"\r\n"),
                         "bare_cr": raw.count(b"\r") - raw.count(b"\r\n"),
                         "utf8_bom": raw.startswith(b"\xef\xbb\xbf")})
     provenance = {"source": "https://github.com/harbor-framework/terminal-bench-2",

@@ -153,7 +153,35 @@ def preflight() -> None:
     store(POSTHOC / "PREFLIGHT_RESULT.json", marker)
 
 
-def inspect_reports(task: str, logs: Path) -> tuple[bool, dict]:
+def inspect_reports(task: str, logs: Path, *, official_tests: Path | None = None,
+                    required_original_ids: set[str] | None = None) -> tuple[bool, dict]:
+    """Inspect native CTRF without equating a reward file with executed tests.
+
+    The original-repository baseline is an identity set, not a fixed count:
+    task-added tests are permitted, but disappearance of a baseline test is not.
+    """
+    import ast
+    from .export_official_evaluator import EXPECTED_EXTERNAL_SH, EXPECTED_SH
+
+    if task not in EXPECTED_SH:
+        return False, {"unknown_task": task}
+    official_tests = official_tests or (STAGE / "posthoc_official_20261014" /
+                                        task / "tests")
+    script = official_tests / "test.sh"
+    external = official_tests / "test_outputs.py"
+    if (not script.is_file() or not external.is_file() or
+            hashlib.sha256(script.read_bytes()).hexdigest() != EXPECTED_SH[task] or
+            hashlib.sha256(external.read_bytes()).hexdigest() != EXPECTED_EXTERNAL_SH[task]):
+        return False, {"official_evaluator_identity": "missing_or_changed"}
+    try:
+        module = ast.parse(external.read_bytes())
+        expected_external = {"test_outputs.py::" + node.name for node in module.body
+                             if isinstance(node, ast.FunctionDef) and
+                             node.name.startswith("test_")}
+    except (OSError, SyntaxError, ValueError) as exc:
+        return False, {"official_external_tests_unreadable": type(exc).__name__}
+    if not expected_external:
+        return False, {"official_external_tests": "none"}
     names = (["ctrf.json"] if task == "db-wal-recovery" else
              ["original-repo-ctrf.json", "ctrf.json"])
     summaries = {}
@@ -165,17 +193,72 @@ def inspect_reports(task: str, logs: Path) -> tuple[bool, dict]:
             report = json.loads(path.read_text(encoding="utf-8"))
             results = report["results"]
             tests = results["tests"]
-            count = int(results["summary"]["tests"])
+            summary = results["summary"]
+            count = int(summary["tests"])
             if count < 1 or len(tests) < 1 or count != len(tests):
                 return False, {"incomplete_report": name, "declared": count,
                                "observed": len(tests)}
             statuses = [item.get("status") for item in tests]
             if any(status not in ("passed", "failed", "skipped") for status in statuses):
                 return False, {"unknown_test_status": name, "statuses": statuses}
-            summaries[name] = {"tests": count, "statuses": statuses}
+            ids = [item.get("name") for item in tests]
+            if any(not isinstance(value, str) or not value for value in ids) or len(set(ids)) != len(ids):
+                return False, {"duplicate_or_missing_test_identity": name}
+            counts = {status: statuses.count(status) for status in ("passed", "failed", "skipped")}
+            if (any(int(summary[key]) != value for key, value in counts.items()) or
+                    int(summary.get("pending", 0)) != 0 or int(summary.get("other", 0)) != 0 or
+                    not isinstance(summary.get("start"), (int, float)) or
+                    not isinstance(summary.get("stop"), (int, float)) or
+                    summary["stop"] < summary["start"]):
+                return False, {"summary_result_mismatch": name, "counts": counts,
+                               "summary": summary}
+            if counts["skipped"]:
+                return False, {"unexpected_skips": name,
+                               "ids": [item["name"] for item in tests if item["status"] == "skipped"]}
+            if name == "ctrf.json":
+                observed_external = set(ids)
+                if observed_external != expected_external:
+                    return False, {"external_test_identity_mismatch": name,
+                                   "missing": sorted(expected_external - observed_external),
+                                   "unexpected": sorted(observed_external - expected_external)}
+            elif required_original_ids is None:
+                return False, {"original_suite_baseline_unfrozen": name}
+            elif not required_original_ids.issubset(set(ids)):
+                return False, {"original_test_identity_missing": name,
+                               "missing": sorted(required_original_ids - set(ids))}
+            summaries[name] = {"tests": count, "counts": counts,
+                               "ids": ids, "summary": summary}
         except (OSError, ValueError, KeyError, TypeError) as exc:
             return False, {"invalid_report": name, "error": type(exc).__name__}
     return True, summaries
+
+
+def classify_native_result(task: str, logs: Path, *, official_tests: Path,
+                           required_original_ids: set[str] | None,
+                           native_exit: int | None, timed_out: bool,
+                           cleanup_confirmed: bool) -> dict:
+    """Keep script exit, test result, reward and infrastructure separate."""
+    complete, details = inspect_reports(task, logs, official_tests=official_tests,
+                                        required_original_ids=required_original_ids)
+    reward_file = logs / "reward.txt"
+    reward = reward_file.read_text(encoding="utf-8").strip() if reward_file.is_file() else None
+    status = {"report_complete": complete, "report_details": details,
+              "native_exit": native_exit, "timed_out": timed_out,
+              "cleanup_confirmed": cleanup_confirmed, "reward_raw": reward,
+              "classification": "evaluation_infrastructure_or_incomplete"}
+    if not complete or timed_out or native_exit != 0 or not cleanup_confirmed:
+        return status
+    if reward not in ("0", "1"):
+        status["reason"] = "missing_or_invalid_reward"
+        return status
+    expected = "1" if all(
+        report["counts"]["failed"] == 0 for report in details.values()) else "0"
+    if reward != expected:
+        status["reason"] = "reward_disagrees_with_official_script_rule"
+        status["expected_reward"] = expected
+        return status
+    status["classification"] = "native_pass" if expected == "1" else "native_assertion_failure"
+    return status
 
 
 def evaluate_one(arm: str, identity: dict) -> dict:
