@@ -1,0 +1,587 @@
+From 6ec653b86aa92b7129dedfe3e5ad7ad6935e51a9 Mon Sep 17 00:00:00 2001
+From: HYC-hsy <3510069313@qq.com>
+Date: Wed, 14 Oct 2026 20:52:39 +0800
+Subject: [PATCH 1/3] Persist and validate source-memory coordination and bound
+ evidence
+
+---
+ .../REUSE_MAP_SOURCE_MEMORY.json              |  13 +-
+ .../source_agent.py                           |  71 +++++++--
+ .../source_memory.py                          | 134 ++++++++++++++--
+ .../test_source_candidate.py                  | 143 ++++++++++++++++++
+ 4 files changed, 329 insertions(+), 32 deletions(-)
+
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/REUSE_MAP_SOURCE_MEMORY.json b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/REUSE_MAP_SOURCE_MEMORY.json
+index 8add4264..66323dee 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/REUSE_MAP_SOURCE_MEMORY.json
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/REUSE_MAP_SOURCE_MEMORY.json
+@@ -8,7 +8,7 @@
+       "license": "Apache-2.0; vendor/pma_89e5c0d/LICENSE retained",
+       "file": "src/memory_agent/memory/memory_agent.py",
+       "functions": ["MemoryAgent.process", "_build_phase2_prompt", "_extract_tool_call", "_parse_tool_calls_from_text", "_execute_tool_calls", "_format_memory_bank"],
+-      "reuse": "original process directly called via SourceMemoryAgent.process/super; selected formatting, phase1 tool dispatch and phase2 parsing inherited/overridden in separate adapter; original phase2 prompt function called",
++      "reuse": "original process directly called via SourceMemoryAgent.process/super; selected formatting, phase1 tool dispatch and phase2 parsing inherited/overridden in separate adapter; original phase1/phase2 prompt functions called; bound snippets and persistent coordination rendered in both stages",
+       "reason": "Add provenance, R coordination and cited free-form reminder while retaining two-phase ordering and original no-op decision. No replacement provider/retry loop."
+     },
+     {
+@@ -17,7 +17,7 @@
+       "license": "Apache-2.0; vendor/pma_89e5c0d/LICENSE retained",
+       "file": "src/memory_agent/memory/universal_memory.py",
+       "functions": ["UniversalMemory.save_knowledge", "save_procedural", "delete", "get", "search_knowledge", "search_procedural", "to_dict", "from_dict"],
+-      "reuse": "inherited adaptation in research-side SourceMemory; active lists and upstream serialization base retained, additional metadata/history/source registry separated",
++      "reuse": "inherited adaptation in research-side SourceMemory; active lists and upstream serialization base retained, additional metadata/history/source registry separated; active-bank load/send validation and collision-safe IDs added",
+       "reason": "Upstream MemoryEntry.from_dict drops unknown fields; an external metadata map and explicit load validation preserve provenance and version."
+     },
+     {
+@@ -47,6 +47,15 @@
+       "reuse": "original research event identity and two-call audit path retained; explicit default-U candidate factory and source registration added",
+       "reason": "Avoid global monkey patch and keep U unchanged."
+     },
++    {
++      "source": "HYC-hsy/longcontext-monitor-research",
++      "commit": "0643e5c53514d05d46bdbc3f99d00efd398e2f24",
++      "license": "local project code; no third-party code copied",
++      "file": "pma_full_upstream_ga_v1_20261013/static_source_screen.py",
++      "functions": ["construct_upstream", "PMAEpisode.handle", "SourceMemoryAgent.process"],
++      "reuse": "new fixed-public-event shadow orchestration; directly calls pinned upstream PMA through existing episode adapter and intercepts its real call boundary with a deterministic fake",
++      "reason": "Existing live runner is an authorized GA/Harbor task lifecycle, not an unauthorized static replay entry. This entry explicitly refuses live mode and cannot submit Task control or evaluator results."
++    },
+     {
+       "source": "getzep/graphiti",
+       "commit": "8d8a12a22452cbef9335792afb73b8cbfe6a79fa",
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_agent.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_agent.py
+index 09dbbb4f..cb8f682c 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_agent.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_agent.py
+@@ -27,6 +27,9 @@ retain, revise, retract, or unresolved using memory_reconcile. Cite current
+ public evidence and give a short reason, not hidden reasoning. Newer or
+ different information does not automatically contradict old information.
+ Do not silently turn unresolved into a verified fact.
++For revision, new source_refs must cite the current visible text. To retain
++an old entry's already bound excerpt, explicitly list its zero-based index
++in inherit_source_ref_indices; no other old source can be inherited.
+ """
+ REMINDER_RULES = """
+ Keep the original selective-attention decision: synthesize freely or stay silent.
+@@ -59,6 +62,7 @@ def _tools(variant: str) -> list[dict]:
+                 "content": {"type": "string"},
+                 "statement_type": {"type": "string", "enum": sorted(SourceMemory.TYPES)},
+                 "source_refs": {"type": "array", "items": {"type": "object"}},
++                "inherit_source_ref_indices": {"type": "array", "items": {"type": "integer"}},
+             }, "required": ["memory_id", "decision", "reason", "evidence_refs"]},
+         }})
+     return tools
+@@ -74,24 +78,39 @@ class SourceMemoryAgent(MemoryAgent):
+         self.variant = variant
+         self.last_delivery_status = "not_run"
+         self.last_reminder_refs: list[dict] = []
++        self.last_reminder_identities: list[tuple] = []
++        self.evidence_chars_by_phase: dict[str, int] = {}
++        self._current_evidence_chars = 0
+         self.coordination: list[dict] = []
+ 
+     async def process(self, observation: str, step_count: int = 0):
++        self.memory.validate_bank()
+         self.last_delivery_status = "phase2_error_or_not_completed"
+         self.last_reminder_refs = []
++        self.last_reminder_identities = []
++        self.evidence_chars_by_phase = {}
+         return await super().process(observation=observation, step_count=step_count)
+ 
++    def _memory_identity(self, memory_id: str) -> tuple:
++        meta = self.memory.metadata[memory_id]
++        entry = self.memory.get(memory_id)
++        if entry is None:
++            raise ValueError("inactive memory")
++        return (memory_id, meta["version"], meta["coordination"]["revision"],
++                json.dumps(meta, ensure_ascii=False, sort_keys=True), entry.content)
++
+     def pending_refs_valid(self) -> bool:
+         if self.last_delivery_status != "selected_validated_not_delivered":
+             return False
+-        for ref in self.last_reminder_refs:
+-            meta = self.memory.metadata.get(ref["id"])
+-            if self.memory.get(ref["id"]) is None or meta is None or meta["version"] != ref["version"]:
+-                return False
+-            for source_ref in meta["source_refs"]:
+-                if not self.memory.source_ref_valid(source_ref):
++        try:
++            self.memory.validate_bank()
++            for ref, identity in zip(self.last_reminder_refs, self.last_reminder_identities,
++                                     strict=True):
++                if self._memory_identity(ref["id"]) != identity:
+                     return False
+-        return True
++            return bool(self.last_reminder_refs)
++        except (ValueError, KeyError, TypeError):
++            return False
+ 
+     def get_tools_schema(self) -> list[dict]:
+         return _tools(self.variant)
+@@ -110,20 +129,39 @@ class SourceMemoryAgent(MemoryAgent):
+     def _format_memory_list(self, entries):
+         if not entries:
+             return "(empty)"
+-        return "\n".join(
+-            f"[{e.id} v{self.memory.metadata[e.id]['version']}] {e.content} "
+-            f"[type={self.memory.metadata[e.id]['statement_type']}; "
+-            f"sources={json.dumps(self.memory.metadata[e.id]['source_refs'], ensure_ascii=False)}]"
+-            for e in entries)
++        rows = []
++        for entry in entries:
++            meta = self.memory.metadata[entry.id]
++            sources = [{"event_id": ref["event_id"], "role": ref["role"],
++                        "excerpt": self.memory.excerpt(ref)} for ref in meta["source_refs"]]
++            state = meta["coordination"]
++            state_evidence = [{"event_id": ref["event_id"], "role": ref["role"],
++                               "excerpt": self.memory.excerpt(ref)}
++                              for ref in state["evidence_refs"]]
++            self._current_evidence_chars += sum(len(r["excerpt"]) for r in sources + state_evidence)
++            rows.append(
++                f"[{entry.id} v{meta['version']}] {entry.content} "
++                f"[type={meta['statement_type']}; bound_evidence="
++                f"{json.dumps(sources, ensure_ascii=False)}; "
++                f"coordination={json.dumps({'decision': state['decision'], 'reason': state['reason'], 'evidence': state_evidence}, ensure_ascii=False)}]")
++        return "\n".join(rows)
+ 
+     def _build_phase1_prompt(self, observation: str, step_count: int) -> str:
++        self._current_evidence_chars = 0
+         prompt = super()._build_phase1_prompt(observation, step_count)
++        self.evidence_chars_by_phase["phase1"] = self._current_evidence_chars
+         handles = [{k: source[k] for k in ("event_id", "role", "order", "sha256")}
+                    for event_id in self.memory.current_source_ids
+                    if (source := self.memory.sources.get(event_id))]
+         return prompt + "\n## Visible public source handles (quote exact text above)\n" + json.dumps(
+             handles, ensure_ascii=False, sort_keys=True)
+ 
++    def _build_phase2_prompt(self, observation: str, step_count: int) -> str:
++        self._current_evidence_chars = 0
++        prompt = super()._build_phase2_prompt(observation, step_count)
++        self.evidence_chars_by_phase["phase2"] = self._current_evidence_chars
++        return prompt
++
+     def _execute_tool_calls(self, response) -> list[MemoryOperation]:
+         calls = getattr(response, "tool_calls", None) or []
+         if not calls:
+@@ -162,14 +200,14 @@ class SourceMemoryAgent(MemoryAgent):
+         evidence = self.memory.resolve_refs(args.get("evidence_refs"), "inference")
+         if decision == "revise":
+             new_id = self.memory.revise(memory_id, args.get("content"),
+-                args.get("statement_type"), args.get("source_refs"), reason, evidence)
++                args.get("statement_type"), args.get("source_refs"), reason, evidence,
++                args.get("inherit_source_ref_indices"))
+         elif decision == "retract":
+             if not self.memory.retract(memory_id, reason, evidence):
+                 raise ValueError("unknown memory to retract")
+             new_id = None
+         else:
+-            if self.memory.get(memory_id) is None:
+-                raise ValueError("unknown active memory")
++            self.memory.coordinate(memory_id, decision, reason, evidence)
+             new_id = None
+         self.coordination.append({"memory_id": memory_id, "decision": decision,
+                                   "reason": reason, "evidence": evidence, "new_id": new_id})
+@@ -177,6 +215,7 @@ class SourceMemoryAgent(MemoryAgent):
+ 
+     def _parse_phase2_response(self, raw: str) -> str | None:
+         self.last_reminder_refs = []
++        self.last_reminder_identities = []
+         text = self._strip_thinking(raw)
+         if re.fullmatch(r"\s*<no_intervention\s*/>\s*", text):
+             self.last_delivery_status = "deliberate_silence"
+@@ -188,6 +227,7 @@ class SourceMemoryAgent(MemoryAgent):
+             self.last_delivery_status = "format_rejected"
+             return None
+         try:
++            self.memory.validate_bank()
+             refs = json.loads(body.group(2))
+             if not isinstance(refs, list) or not refs:
+                 raise ValueError("nonempty memory refs required")
+@@ -202,6 +242,7 @@ class SourceMemoryAgent(MemoryAgent):
+                     if not self.memory.source_ref_valid(source_ref):
+                         raise ValueError("invalid memory source")
+             self.last_reminder_refs = refs
++            self.last_reminder_identities = [self._memory_identity(ref["id"]) for ref in refs]
+             self.last_delivery_status = "selected_validated_not_delivered"
+             return body.group(1).strip()
+         except (ValueError, KeyError, TypeError):
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory.py
+index 52cbe157..54aa37df 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory.py
+@@ -9,6 +9,7 @@ import hashlib
+ import json
+ import os
+ import tempfile
++import uuid
+ from pathlib import Path
+ 
+ from memory_agent.memory.universal_memory import MemoryEntry, UniversalMemory
+@@ -16,6 +17,7 @@ from memory_agent.memory.universal_memory import MemoryEntry, UniversalMemory
+ 
+ class SourceMemory(UniversalMemory):
+     TYPES = {"task_requirement", "tool_observation", "agent_report", "inference"}
++    COORDINATION = {"unreviewed", "retain", "unresolved", "revised"}
+ 
+     def __init__(self):
+         super().__init__()
+@@ -24,6 +26,21 @@ class SourceMemory(UniversalMemory):
+         self.history: list[dict] = []
+         self.current_source_ids: list[str] = []
+ 
++    def _used_ids(self) -> set[str]:
++        return (set(self.metadata) | {e.id for e in self.knowledge + self.procedural}
++                | {h["id"] for h in self.history if isinstance(h, dict) and "id" in h})
++
++    def _generate_id(self) -> str:
++        used = self._used_ids()
++        for _ in range(32):
++            candidate = super()._generate_id()
++            if candidate not in used:
++                return candidate
++        while True:
++            candidate = uuid.uuid4().hex[:16]
++            if candidate not in used:
++                return candidate
++
+     def register_source(self, event_id: str, role: str, text: str, order: int) -> None:
+         if role not in {"task_instruction", "tool_observation", "agent_report", "tool_command"}:
+             raise ValueError("invalid public source role")
+@@ -67,6 +84,8 @@ class SourceMemory(UniversalMemory):
+         return resolved
+ 
+     def source_ref_valid(self, ref: dict) -> bool:
++        if not isinstance(ref, dict):
++            return False
+         source = self.sources.get(ref.get("event_id"))
+         if source is None or source["role"] != ref.get("role"):
+             return False
+@@ -79,17 +98,85 @@ class SourceMemory(UniversalMemory):
+             return False
+         return hashlib.sha256(source["text"][start:end].encode()).hexdigest() == ref.get("snippet_sha256")
+ 
++    def excerpt(self, ref: dict) -> str:
++        if not self.source_ref_valid(ref):
++            raise ValueError("invalid bound source excerpt")
++        source = self.sources[ref["event_id"]]
++        return source["text"][ref["start"]:ref["end"]]
++
++    def _check_roles(self, refs: list[dict], statement_type: str) -> None:
++        if statement_type not in self.TYPES or not refs:
++            raise ValueError("invalid statement type or empty sources")
++        roles = {ref["role"] for ref in refs}
++        required = {"task_requirement": "task_instruction",
++                    "tool_observation": "tool_observation",
++                    "agent_report": "agent_report"}.get(statement_type)
++        if required and required not in roles:
++            raise ValueError(f"{statement_type} requires {required} source")
++
++    def validate_bank(self) -> None:
++        active = [(e, category) for category, entries in
++                  (("knowledge", self.knowledge), ("procedural", self.procedural))
++                  for e in entries]
++        ids = [e.id for e, _ in active]
++        if len(ids) != len(set(ids)) or set(ids) != set(self.metadata):
++            raise ValueError("active IDs or metadata do not match uniquely")
++        retired = {h.get("id") for h in self.history if isinstance(h, dict)
++                   and h.get("action") in {"revise", "retract", "upstream_delete"}}
++        if retired.intersection(ids):
++            raise ValueError("retired version is active")
++        for entry, category in active:
++            meta = self.metadata[entry.id]
++            if not isinstance(meta, dict) or meta.get("category") != category:
++                raise ValueError("invalid memory category")
++            if type(meta.get("version")) is not int or meta["version"] < 1:
++                raise ValueError("invalid memory version")
++            refs = meta.get("source_refs")
++            if not isinstance(refs, list) or not refs or not all(self.source_ref_valid(r) for r in refs):
++                raise ValueError("invalid or empty bound source refs")
++            self._check_roles(refs, meta.get("statement_type"))
++            state = meta.get("coordination")
++            if (not isinstance(state, dict) or state.get("decision") not in self.COORDINATION
++                    or type(state.get("revision")) is not int or state["revision"] < 0
++                    or not isinstance(state.get("reason"), str)
++                    or not isinstance(state.get("evidence_refs"), list)
++                    or not all(self.source_ref_valid(r) for r in state["evidence_refs"])):
++                raise ValueError("invalid coordination state")
++            if state["decision"] != "unreviewed" and (not state["reason"] or not state["evidence_refs"]):
++                raise ValueError("coordination lacks current reason/evidence")
++
++    @staticmethod
++    def _unreviewed() -> dict:
++        return {"decision": "unreviewed", "revision": 0, "reason": "", "evidence_refs": []}
++
+     def save_sourced(self, category: str, content: str, statement_type: str,
+                      source_refs: object) -> str:
+-        if category not in {"knowledge", "procedural"} or not isinstance(content, str) or not content:
++        if category not in {"knowledge", "procedural"} or not isinstance(content, str) or not content.strip():
+             raise ValueError("invalid sourced memory")
+         refs = self.resolve_refs(source_refs, statement_type)
+         memory_id = (super().save_knowledge(content) if category == "knowledge"
+                      else super().save_procedural(content))
+         self.metadata[memory_id] = {"version": 1, "category": category,
+-                                    "statement_type": statement_type, "source_refs": refs}
++                                    "statement_type": statement_type, "source_refs": refs,
++                                    "coordination": self._unreviewed()}
+         return memory_id
+ 
++    def coordinate(self, memory_id: str, decision: str, reason: str,
++                   evidence: list[dict]) -> None:
++        if decision not in {"retain", "unresolved"} or self.get(memory_id) is None:
++            raise ValueError("invalid coordination target")
++        if not isinstance(reason, str) or not reason or not evidence or not all(
++                self.source_ref_valid(r) for r in evidence):
++            raise ValueError("invalid coordination evidence")
++        meta = self.metadata[memory_id]
++        previous = meta["coordination"]
++        current = {"decision": decision, "reason": reason,
++                   "evidence_refs": evidence, "revision": previous["revision"] + 1}
++        self.history.append({"action": "coordinate", "id": memory_id,
++                             "version": meta["version"], "previous": previous,
++                             "current": current})
++        meta["coordination"] = current
++
+     def retract(self, memory_id: str, reason: str, evidence: list[dict]) -> bool:
+         entry = self.get(memory_id)
+         if entry is None:
+@@ -104,26 +191,47 @@ class SourceMemory(UniversalMemory):
+         return True
+ 
+     def revise(self, memory_id: str, content: str, statement_type: str,
+-               source_refs: object, reason: str, evidence: list[dict]) -> str:
++               source_refs: object, reason: str, evidence: list[dict],
++               inherit_indices: object = None) -> str:
+         old = self.get(memory_id)
+-        if old is None or not content or not reason or not evidence:
++        if (old is None or not isinstance(content, str) or not content.strip()
++                or not isinstance(reason, str) or not reason or not evidence):
+             raise ValueError("revision requires active entry, replacement and evidence")
+-        refs = self.resolve_refs(source_refs, statement_type)
+         meta = self.metadata[memory_id]
++        if not all(self.source_ref_valid(r) for r in evidence):
++            raise ValueError("invalid revision evidence")
++        indices = [] if inherit_indices is None else inherit_indices
++        if (not isinstance(indices, list) or any(type(i) is not int or i < 0
++                or i >= len(meta["source_refs"]) for i in indices)
++                or len(set(indices)) != len(indices)):
++            raise ValueError("invalid inherited source indices")
++        inherited = [meta["source_refs"][i] for i in indices]
++        if not all(self.source_ref_valid(r) for r in inherited):
++            raise ValueError("invalid inherited source")
++        if source_refs is None:
++            source_refs = []
++        if not isinstance(source_refs, list):
++            raise ValueError("revision source refs must be a list")
++        new_refs = (self.resolve_refs(source_refs, "inference") if source_refs else [])
++        refs = inherited + new_refs
++        self._check_roles(refs, statement_type)
+         category = meta["category"]
+         entries = self.knowledge if category == "knowledge" else self.procedural
+         index = next(i for i, e in enumerate(entries) if e.id == memory_id)
+         new_id = self._generate_id()
+-        while new_id == memory_id or new_id in self.metadata:
+-            new_id = self._generate_id()
+         replacement = MemoryEntry(id=new_id, content=content)
+         new_meta = {"version": meta["version"] + 1, "category": category,
+                     "statement_type": statement_type, "source_refs": refs,
+-                    "supersedes": memory_id}
++                    "supersedes": memory_id,
++                    "source_inheritance": {"from": memory_id, "indices": indices,
++                                           "new_refs": new_refs},
++                    "coordination": {"decision": "revised", "revision": 1,
++                                     "reason": reason, "evidence_refs": evidence}}
+         # Validate everything before changing the active list. No I/O in this switch.
+         self.history.append({"action": "revise", "id": memory_id,
+                              "entry": old.to_dict(), "meta": meta,
+-                             "reason": reason, "evidence": evidence, "replaced_by": new_id})
++                             "reason": reason, "evidence": evidence, "replaced_by": new_id,
++                             "inherited_refs": inherited, "new_refs": new_refs})
+         entries[index] = replacement
+         del self.metadata[memory_id]
+         self.metadata[new_id] = new_meta
+@@ -140,6 +248,7 @@ class SourceMemory(UniversalMemory):
+         return super().delete(memory_id)
+ 
+     def to_dict(self) -> dict:
++        self.validate_bank()
+         base = super().to_dict()
+         base.update({"source_memory_schema": 1, "sources": self.sources,
+                      "metadata": self.metadata, "history": self.history})
+@@ -157,12 +266,7 @@ class SourceMemory(UniversalMemory):
+         memory.sources = data["sources"]
+         memory.metadata = data["metadata"]
+         memory.history = data["history"]
+-        if set(memory.metadata) != {e.id for e in memory.knowledge + memory.procedural}:
+-            raise ValueError("active source metadata mismatch")
+-        for meta in memory.metadata.values():
+-            for ref in meta["source_refs"]:
+-                if not memory.source_ref_valid(ref):
+-                    raise ValueError("source identity or excerpt mismatch on load")
++        memory.validate_bank()
+         return memory
+ 
+     def save_to_file(self, path: Path | str) -> None:
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_source_candidate.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_source_candidate.py
+index fc5f5513..5fba63b6 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_source_candidate.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_source_candidate.py
+@@ -7,6 +7,7 @@ import sys
+ from tempfile import TemporaryDirectory
+ from types import SimpleNamespace
+ import unittest
++from unittest.mock import patch
+ 
+ HERE = Path(__file__).resolve().parent
+ VENDOR = HERE / "vendor" / "pma_89e5c0d"
+@@ -213,6 +214,148 @@ class SourceCandidateTests(unittest.TestCase):
+                 "decision": "retract", "reason": "", "evidence_refs": refs})
+         self.assertIsNotNone(bank.get(memory_id))
+ 
++    def test_unresolved_is_in_phase2_future_phase1_and_reload(self):
++        agent, fake, root = self.make("R", [])
++        bank = agent.memory
++        bank.register_source("task", "task_instruction", "Preserve a precise audit trail.", 1)
++        refs = [{"event_id": "task", "role": "task_instruction", "quote": "precise audit trail"}]
++        memory_id = bank.save_sourced("knowledge", "Audit trail is preserved", "task_requirement", refs)
++        fake.outputs.extend([LLMResponse(content="", tool_calls=[call("memory_reconcile",
++            memory_id=memory_id, decision="unresolved", reason="Need to inspect the current trail",
++            evidence_refs=refs)]), LLMResponse(content="<no_intervention/>")])
++        asyncio.run(agent._memory_agent.process("Current public observation", step_count=2))
++        self.assertIn('"decision": "unresolved"', fake.requests[1]["prompt"])
++        self.assertIn("Need to inspect the current trail", fake.requests[1]["prompt"])
++        self.assertIn("precise audit trail", fake.requests[1]["prompt"])
++        self.assertEqual(bank.metadata[memory_id]["coordination"]["decision"], "unresolved")
++        path = root / "bank.json"
++        bank.save_to_file(path)
++        loaded = SourceMemory.load_from_file(path)
++        agent._memory = loaded
++        agent._memory_agent.memory = loaded
++        fake.outputs.extend([LLMResponse(content="", tool_calls=[]),
++                             LLMResponse(content="<no_intervention/>")])
++        asyncio.run(agent._memory_agent.process("Later observation", step_count=3))
++        self.assertIn('"decision": "unresolved"', fake.requests[2]["prompt"])
++        self.assertIn("Need to inspect the current trail", fake.requests[2]["prompt"])
++
++    def test_window_old_bound_excerpt_and_no_unbound_citation(self):
++        agent, fake, root = self.make("S", [])
++        episode = PMAEpisode(agent, run_id="window", task_id="t", archive=root / "archive")
++        task = "Preserve uncommon token NORTHSTAR-BOUND while repairing."
++        fake.outputs.extend([LLMResponse(content="", tool_calls=[]),
++                             LLMResponse(content="<no_intervention/>")])
++        asyncio.run(episode.handle({"kind": "task_start", "event_id": "s1", "sequence": 1,
++                                    "run_id": "window", "task_id": "t", "initial_user_content": task}))
++        for attempt in range(1, 11):
++            seq = attempt * 2
++            asyncio.run(episode.handle({"kind": "before_actor_call", "event_id": f"b{attempt}",
++                "sequence": seq, "run_id": "window", "task_id": "t", "actor_attempt": attempt}))
++            first = [call("memory_save_knowledge", content="Retain the uncommon token",
++                statement_type="agent_report", source_refs=[{"event_id": "a1:response",
++                    "role": "agent_report", "quote": "NORTHSTAR-BOUND"}])] if attempt == 1 else []
++            fake.outputs.extend([LLMResponse(content="", tool_calls=first),
++                                 LLMResponse(content="<no_intervention/>")])
++            asyncio.run(episode.handle({"kind": "actor_step", "event_id": f"a{attempt}",
++                "sequence": seq + 1, "run_id": "window", "task_id": "t", "actor_attempt": attempt,
++                "step_status": "normal", "response": (
++                    "Public reply NORTHSTAR-BOUND" if attempt == 1 else f"Public reply {attempt}"),
++                "observation": f"Observed tool result {attempt}", "commands": ["true"]}))
++        prompt = fake.requests[-2]["prompt"]
++        self.assertIn('"excerpt": "NORTHSTAR-BOUND"', prompt)
++        self.assertNotIn("Public reply NORTHSTAR-BOUND", prompt)
++        self.assertGreater(agent._memory_agent.evidence_chars_by_phase["phase1"], 0)
++        bank = agent.memory
++        bank.register_source("unbound", "tool_observation", "PRIVATE-UNBOUND", 99)
++        bank.current_source_ids.remove("unbound")
++        with self.assertRaises(ValueError):
++            bank.revise(bank.knowledge[0].id, "new", "inference",
++                [{"event_id": "unbound", "role": "tool_observation", "quote": "PRIVATE-UNBOUND"}],
++                "reason", bank.metadata[bank.knowledge[0].id]["source_refs"], [0])
++
++    def test_revision_dispatch_failure_is_atomic_and_collision_safe(self):
++        agent, _, _ = self.make("R", [])
++        bank = agent.memory
++        bank.register_source("task", "task_instruction", "Keep ORIGINAL-BOUND", 1)
++        refs = [{"event_id": "task", "role": "task_instruction", "quote": "ORIGINAL-BOUND"}]
++        old = bank.save_sourced("procedural", "old procedure", "task_requirement", refs)
++        before = json.dumps(bank.to_dict(), sort_keys=True)
++        before_search = [e.id for e in bank.search_procedural("procedure")]
++        for bad in (42, [], {}, "", "  "):
++            result = agent._memory_agent._execute_tool_calls(SimpleNamespace(tool_calls=[call(
++                "memory_reconcile", memory_id=old, decision="revise",
++                reason="new source", evidence_refs=refs, content=bad,
++                statement_type="task_requirement", source_refs=[],
++                inherit_source_ref_indices=[0])], content=""))[0]
++            self.assertFalse(result.success)
++            self.assertEqual(json.dumps(bank.to_dict(), sort_keys=True), before)
++            self.assertEqual([e.id for e in bank.search_procedural("procedure")], before_search)
++        from memory_agent.memory.universal_memory import UniversalMemory
++        with patch.object(UniversalMemory, "_generate_id", return_value=old):
++            result = agent._memory_agent._execute_tool_calls(SimpleNamespace(tool_calls=[call(
++                "memory_reconcile", memory_id=old, decision="revise",
++                reason="updated", evidence_refs=refs, content="new procedure",
++                statement_type="task_requirement", source_refs=[],
++                inherit_source_ref_indices=[0])], content=""))[0]
++        self.assertTrue(result.success)
++        self.assertNotEqual(result.memory_id, old)
++        self.assertIsNone(bank.get(old))
++        self.assertEqual(bank.search_procedural("procedure")[0].id, result.memory_id)
++
++    def test_s_r_valid_reminder_is_returned_not_delivered(self):
++        for variant in ("S", "R"):
++            with self.subTest(variant=variant):
++                agent, fake, root = self.make(variant, [])
++                episode = PMAEpisode(agent, run_id="r", task_id="t", archive=root / "archive")
++                fake.outputs.extend([LLMResponse(content="", tool_calls=[call(
++                    "memory_save_knowledge", content="Keep public scope", statement_type="task_requirement",
++                    source_refs=[{"event_id": "s1", "role": "task_instruction", "quote": "public scope"}])]),
++                    LLMResponse(content="<no_intervention/>")])
++                asyncio.run(episode.handle({"kind": "task_start", "event_id": "s1", "sequence": 1,
++                    "run_id": "r", "task_id": "t", "initial_user_content": "Keep public scope"}))
++                memory_id = agent.memory.knowledge[0].id
++                fake.outputs.extend([LLMResponse(content="", tool_calls=[]), LLMResponse(content=(
++                    "<context_for_action>Remember the public scope.</context_for_action>"
++                    f'<memory_refs>[{{"id":"{memory_id}","version":1}}]</memory_refs>'))])
++                asyncio.run(episode.handle({"kind": "before_actor_call", "event_id": "b1",
++                    "sequence": 2, "run_id": "r", "task_id": "t", "actor_attempt": 1}))
++                asyncio.run(episode.handle({"kind": "actor_step", "event_id": "a1",
++                    "sequence": 3, "run_id": "r", "task_id": "t", "actor_attempt": 1,
++                    "step_status": "normal", "response": "Inspecting public information",
++                    "observation": "Visible result", "commands": ["read"]}))
++                receipt = asyncio.run(episode.handle({"kind": "before_actor_call", "event_id": "b2",
++                    "sequence": 4, "run_id": "r", "task_id": "t", "actor_attempt": 2}))
++                self.assertEqual(receipt["status"], "reminder")
++                self.assertIn("Remember the public scope", receipt["reminder"])
++                self.assertEqual(receipt["delivery"], "returned_not_confirmed_in_ga_request")
++                self.assertIn('"excerpt": "public scope"', fake.requests[2]["prompt"])
++                self.assertEqual(len(fake.requests), 4)
++
++    def test_load_and_presend_reject_invalid_bank(self):
++        agent, _, root = self.make("S", [])
++        bank = agent.memory
++        bank.register_source("s", "task_instruction", "Keep public scope", 1)
++        memory_id = bank.save_sourced("knowledge", "scope", "task_requirement",
++            [{"event_id": "s", "role": "task_instruction", "quote": "public scope"}])
++        good = bank.to_dict()
++        for mutation in ("missing_meta", "empty_refs", "bad_version", "retired_active"):
++            data = json.loads(json.dumps(good))
++            if mutation == "missing_meta":
++                del data["metadata"][memory_id]
++            elif mutation == "empty_refs":
++                data["metadata"][memory_id]["source_refs"] = []
++            elif mutation == "bad_version":
++                data["metadata"][memory_id]["version"] = 0
++            else:
++                data["history"].append({"action": "retract", "id": memory_id})
++            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
++                SourceMemory.from_dict(data)
++        bank.metadata[memory_id]["source_refs"] = []
++        self.assertIsNone(agent._memory_agent._parse_phase2_response(
++            '<context_for_action>Bad</context_for_action>'
++            f'<memory_refs>[{{"id":"{memory_id}","version":1}}]</memory_refs>'))
++        self.assertEqual(agent._memory_agent.last_delivery_status, "invalid_reference_no_delivery")
++
+ 
+ if __name__ == "__main__":
+     unittest.main()
+-- 
+2.49.0.windows.1
+
