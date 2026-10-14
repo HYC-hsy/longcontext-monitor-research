@@ -3,11 +3,13 @@
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.live_launcher import (
     _require_evaluation_state_contract, _stage_verifier)
+from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013 import live_launcher
 from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.posthoc_artifact_eval import (
     classify_native_result, inspect_reports)
 
@@ -51,6 +53,42 @@ def test_stage_uses_fixed_git_blobs(tmp_path, source_git, task):
 def test_new_live_evaluation_cannot_silently_use_old_shared_path():
     with pytest.raises(RuntimeError, match="not certified"):
         _require_evaluation_state_contract(json.loads(MANIFEST.read_text()))
+
+
+def test_actual_live_entry_refuses_before_worker_or_harbor(tmp_path, monkeypatch):
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    import hashlib
+    auth = tmp_path / "authorization.json"
+    auth.write_text(json.dumps({"execution_authorized": True,
+        "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        "audited_code_commit": "test-only"}), encoding="utf-8")
+    root = tmp_path / "new-run"
+    def prepare(args, *, fake_gateway):
+        assert fake_gateway is False
+        root.mkdir()
+        (root / "public_task/tests").mkdir(parents=True)
+        return {"public_task_tree_sha256": manifest["assets"][args.task][
+            "public_task_tree_sha256"], "image_id": manifest["assets"][args.task]["image_id"]}
+    monkeypatch.setattr(live_launcher, "_prepare_common", prepare)
+    monkeypatch.setattr(live_launcher, "verify_live_spec", lambda spec: None)
+    monkeypatch.setattr(live_launcher, "_stage_verifier", lambda *args: {
+        "native_tests_tree_sha256": "test-only", "native_test_sh_sha256": "test-only"})
+    monkeypatch.setattr(live_launcher.subprocess, "Popen", lambda *a, **kw:
+                        pytest.fail("worker or Harbor must not start"))
+    args = SimpleNamespace(manifest=str(manifest_path), authorization=str(auth),
+        condition="A", run_root=str(root), task="db-wal-recovery", order=1,
+        run_id="zero-model-only", task_profile_file=str(tmp_path / "profile"),
+        official_source_git=str(tmp_path))
+    (tmp_path / "profile").write_bytes(b"test-only")
+    manifest["task_profile_sha256"] = hashlib.sha256(b"test-only").hexdigest()
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    auth.write_text(json.dumps({"execution_authorized": True,
+        "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        "audited_code_commit": "test-only"}), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="not certified"):
+        live_launcher.run_live(args)
 
 
 def test_original_posthoc_reports_remain_mechanical_inputs():
