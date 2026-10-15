@@ -1,0 +1,36 @@
+PMA static plan v3 — offline engineering audit, 2026-10-15
+
+Baseline: f127f8dea4420d3888005332832c9b9121fc9865
+Implementation commit: e6dfbb24ba1a0c2ff4612428ac0e5c2d0d8a8b59
+Branch: crs-v0-20261007
+Scope: static selection/freeze/authorization validation/fake execution/archive only. U/S2/R2 methods, fixed public asset registry, vendor PMA, GA, and native evaluator were not changed.
+Real Task/PMA/provider/native evaluator/training/scoring-model calls: 0. Test-only fake host authorization lived in TemporaryDirectory and was consumed; no active authorization was created for a real batch. All five example plans have execution_authorized=false.
+
+What changed
+- A selection-only v3 plan lists ordered registered case IDs, U/S2/R2 variants, and one-based occurrences. The fixed V2 asset registry supplies paths, hashes and cutoffs; plans cannot override them. Selected plans need not include either other task or any condition not listed.
+- The existing fake screen, freeze, host runner and archive use one plan_slots validator. V3 freeze only creates an unauthorized manifest. A separate future one-use authorization must bind exact manifest bytes, code, profile, assets, batch, all run bindings and output root. Existing V1/V2 parsing and six-slot constraints remain.
+- Repeat slots receive unique run IDs and roots; fake and host paths run through the same PMAEpisode/upstream PMA call chain. A final logical transport failure stops later sends and later slots. Archive states are complete, started_incomplete, or not_started; missing observed counts remain unknown. New archives use raw_trajectories.zip. An optional comparison baseline replaces the misleading fixed diff baseline.
+
+Test command (repository root; pinned pma_native_venv Python and fixed vendor PYTHONPATH):
+python -m unittest method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.test_static_config_v3 method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.test_static_source_live_v2 method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.test_archive_source_v2_batch method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.test_static_source_screen method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.test_static_source_live -q
+Final exit: 0; Ran 18 tests in 35.973s; OK. Full stdout and stderr, including scripted failure traces and LiteLLM offline.invalid warnings, are TEST_STDOUT.txt and TEST_STDERR.txt. Those injected failures are retained, not reported as unexpected green paths.
+
+Five plans through the same fake CLI and same frozen-host runner with the actual LiteLLM send boundary patched to fail on any unhandled call:
+single_r2: 1 code/R2 slot, 42 logical fake stages, provider attempts 0.
+subset_heap: heap/U then heap/S2, 28+28 stages, attempts 0.
+repeat_r2: code/R2 occurrences 1 and 2, 42+42 stages, separate run IDs, roots and memory files.
+original_six: 28+28+28+42+42+42=210 stages, legacy order preserved.
+reordered: code/R2 then heap/U, 42+28 stages in that exact order.
+For the same case/variant, first request system, prompt and tools were compared without normalizing prompt text or tool schema; equality held across single/six/repeat plans. The host fake's observed LiteLLM calls were 0. A scripted first-slot final failure produced one stopped_failure row and no second slot directory or send. Removing the summary while leaving request evidence yielded started_incomplete, not not_started, in the archive.
+
+Reject gates exercised: empty/unknown/duplicate occurrence/unsupported plan fields, changed source cutoff or hash, code/registry drift, frozen slot edits, nonexistent authorization, profile mismatch, unsafe run IDs and existing output root. Original accepted-response capture failure, final Phase 1 failure/no Phase 2, and internal retry accounting remain covered by the retained regression tests.
+
+Documented CLI smoke (see static_plan_v3_examples/RUNNING.md): fake single exit 0, one summary, 42 fake stages and 0 provider attempts; prepare exit 0, one frozen slot, execution_authorized=false, no output root and no authorization file. The preparation SHA was A0D4027F734746DF42871799B8EA8C065998401238A3991AFC515D48FFEAD322. Fake single request stream Windows working-tree SHA-256 A2B2C9DA28D2F99313D0811ED97ED77BA6C00C1FB319B6D518D60B3D5165E3E9; uploaded Git blob SHA-256 34E0E149F9DCE5FF987A40FFF1F6C607EB4FC564D4337DE5C313F34119694B2B. The complete 42-line fake request stream is FAKE_SINGLE_REQUESTS.jsonl; associated result/summary are adjacent.
+
+Readable first-request excerpt from that actual fake stream: system starts "You are a Memory Bank Manager. Your job is to maintain a lean, accurate knowledge bank." Prompt starts "## Step 1\n\n## Current Memory Bank\n<memory_bank>\n<status>(no status)</status>" and then presents the Task Description and recent public trajectory. The five actual tool names are memory_save_knowledge, memory_save_procedural, memory_update_status, memory_delete, memory_reconcile. System length 3299 characters; prompt length 8799 characters; the complete unnormalized text and schema are in line 1 of FAKE_SINGLE_REQUESTS.jsonl.
+
+Evidence layout: COMPLETE_DIFF.txt is the entire implementation commit diff, not a command placeholder. TEST_STDOUT.txt and TEST_STDERR.txt are unabridged final combined-test output. FAKE_SINGLE_REQUESTS.jsonl, FAKE_SINGLE_RESULT.json and FAKE_SINGLE_SUMMARY.json preserve readable fake requests and result. FAKE_SINGLE_ORIGINAL_BYTES.zip additionally contains the exact pre-Git Windows output bytes, including the full fake slot directory, so the request_sha256 in the result can be reproduced. FILE_HASHES.tsv indexes uploaded Git blob bytes; its own hash is reported in the final handoff. The separate RUNNING.md and five plan JSON files are Git-tracked alongside the implementation. Git blob bytes, rather than Windows working-tree read_bytes, define the source commit identity; Windows checkout line-ending conversion explains different working-tree evidence hashes.
+
+Limitations: These are offline public-prefix shadow tests. They do not establish real provider acceptance, model behavior, Task delivery, native reward or method quality. Inner provider attempts are not measured in a fake run. Case registration remains intentionally fixed and requires separate audited asset work before adding a new task. No paused six-slot real experiment was resumed.
+
+Incident log: an initial read-only PowerShell rg command used Unix brace syntax and failed before any file/task operation; the corrected command succeeded. A first attempt to capture native unittest output with Start-Transcript recorded only the shell, not Python output; the final test was rerun with native stdout/stderr redirected to TEST_STDOUT.txt and TEST_STDERR.txt, exit 0. No source or test assertion was modified to conceal these attempts.
