@@ -1,0 +1,74 @@
+MECHANICAL EVENT INDEX — fix-code-vulnerability / R2 / occurrence 1
+Run ID: source-v2-413c2b181e2c-01-r2
+Run code: 9d0ab5e116c77f29ec80d9357b145991e3ebf2a2
+Nature: fixed public-prefix shadow run, inclusive sequence 41. No Task delivery or native evaluation.
+
+READING THE RAW RECORDS
+Let D = raw/source-v2-413c2b181e2c-01-r2/. JSONL physical lines are 1-based.
+For every odd public event sequence N=1,3,...,41, the Phase 1 logical call is N and Phase 2 is N+1. The exact outbound payloads are D/requests.jsonl lines N and N+1; complete returned responses are D/responses.jsonl at the same lines; complete low-level captured request/return pairs are D/provider_attempts.jsonl lines 2N-1,2N and 2(N+1)-1,2(N+1). Public event, transaction with before/after bank and all receipts, coordination and reminder exit are D/episode/candidate_audit.jsonl line N. D/bank_states.jsonl line N holds the bank after that public event. D/public_mapping.json and D/episode/events.jsonl preserve the authorized source projection. D/memory.json is the final bank; D/trajectory_memory.json preserves per-step prompts, operations and memory snapshots. There are 41 public events and 21 trigger events; even event audit rows repeat prior status and MUST NOT be counted as another transaction or reminder.
+
+COUNTS AND EXIT
+Runner terminal status: static_prefix_complete. 42 logical phase calls; 42 observable LiteLLM calls with 42 captured starts and 42 returned outcomes. Observable request model anthropic/claude-opus-4-8; returned model claude-opus-4-8 in all 42 captured returns. Captured usage sums: prompt_tokens=1,191,137, completion_tokens=16,340 (as returned; inner attempt counts and any omitted billing fields remain unknown). Wall time from summary epochs: 476.004 seconds. No Task Agent or native evaluator call; no reminder delivered to Task.
+Distinct Phase 1 transactions: 14 committed, 7 transaction_aborted; 7 directly rejected operations, 30 other operations marked transaction_aborted as collateral. These are per-transaction receipts, not the cumulative collateral_aborts field in every audit row.
+Phase 2 over 21 triggers: selected_validated_not_delivered=8; deliberate_silence=2; format_rejected=11. A selected reminder is NOT a Task delivery. Several format_rejected responses contain <no_intervention/> followed by explanation; these are not counted as a delivered suggestion or deliberate_silence. Exact Phase 2 body and refs are in D/responses.jsonl, D/episode/candidate_audit.jsonl and D/trajectory_memory.json.
+
+EVERY DIRECT REJECTION AND FOLLOW-UP FEEDBACK
+Each quoted args JSON below is the model's original structured-tool argument string, not a corrected replay. In each row the receipt has status=rejected, error_code=role_mismatch, argument_path=source_refs, required_role=agent_report, actual_roles=[tool_observation], with a fixed short hint. See D/episode/candidate_audit.jsonl line N for exact full receipt and transaction. The same safe error code and fields occur in the actual Phase 2 request D/requests.jsonl line N+1 and next Phase 1 request line N+2, except event 41 has no subsequent Phase 1. This is presence in requests only, not proof of causal model uptake.
+
+event 23 / Phase 1 logical call 23 / call_index 7 / memory_save_procedural / tx p1-12-cf0448638d86 / rollback with 6 collateral operations:
+{"content": "Fixed CWE-93 CRLF injection in _hval function by adding validation that raises ValueError when \\r or \\n characters detected in header values. This fix protects add_header() and set_cookie() methods. However, static_file() download parameter at lines 2803-2804 still needs CRLF validation as it directly constructs Content-Disposition header without going through _hval().", "source_refs": [{"end_line": 1, "source_handle": "s6f3cb8ecafc7", "start_line": 1}], "statement_type": "agent_report"}
+Feedback request lines: Phase 2=24; next Phase 1=25. Same-stage revise proposals for FqwdJqLJ, TUAdzB7L, C6a45yG2 and eZHqzkxs did not commit.
+
+event 25 / Phase 1 logical call 25 / call_index 2 / memory_save_procedural / tx p1-13-ab48088a0639 / rollback with 1 collateral operation:
+{"content": "Fix attempt 1 for CWE-93 failed: Added ValueError raise in _hval() for CRLF characters, but test_prevent_control_characters_in_headers failed (366/367 tests passed). The failing test likely expects specific error handling or behavior that differs from raising ValueError directly in _hval().", "source_refs": [{"end_line": 100, "source_handle": "sc9e440b6c8ef", "start_line": 99}], "statement_type": "agent_report"}
+Feedback request lines: Phase 2=26; next Phase 1=27.
+
+event 27 / Phase 1 logical call 27 / call_index 2 / memory_save_procedural / tx p1-14-31be787692bb / rollback with 3 collateral operations:
+{"content": "Initial _hval() fix incomplete: Fixed _hval() to raise ValueError on CRLF in header values, but test failure shows HeaderDict.append(key, value) passes CRLF-containing string as the KEY (first argument), not the value. The test at line 745 calls func(value, \"test-value\") where 'value' contains CRLF and is used as the header KEY. Need to also validate header keys in _hkey() function (lines 1560-1562) to reject control characters.", "source_refs": [{"end_line": 27, "source_handle": "se6ceb9425dcb", "start_line": 16}], "statement_type": "agent_report"}
+Feedback request lines: Phase 2=28; next Phase 1=29. Same-stage revisions for FqwdJqLJ and RxFioFBk did not commit.
+
+event 35 / Phase 1 logical call 35 / call_index 2 / memory_save_procedural / tx p1-18-30d1bd0f8fb5 / rollback with 3 collateral operations:
+{"content": "Test failure revealed that control character validation must be applied to BOTH header keys AND values. Initial fix only validated _hval (values), but test_prevent_control_characters_in_headers at lines 735-755 expects ValueError for \\r, \\n, \\r\\n, and \\0 in both positions. Fixed by adding validation to both _hkey() and _hval() functions.", "source_refs": [{"end_line": 14, "source_handle": "s9ebfad587afe", "start_line": 13}, {"end_line": 12, "source_handle": "sc1135f2ae70f", "start_line": 3}], "statement_type": "agent_report"}
+Feedback request lines: Phase 2=36; next Phase 1=37. Same-stage revisions for RxFioFBk and FqwdJqLJ did not commit. Phase 2 exit=format_rejected; inspect response line 36 for <no_intervention/> plus extra explanatory text, not an accepted silence.
+
+event 37 / Phase 1 logical call 37 / call_index 2 / memory_save_procedural / tx p1-19-d9eb0772707d / rollback with 3 collateral operations:
+{"content": "Fix approach for CWE-93 CRLF injection: Initially fixed only _hval() function but test still failed. Root cause was that BOTH _hkey() (header keys) and _hval() (header values) needed validation. Test at line 735-755 validates control characters (\\r, \\n, \\0) in both positions. Final fix: Added control character validation to both functions raising ValueError with descriptive message. This satisfied requirement #5 to raise correct error type.", "source_refs": [{"end_line": 23, "source_handle": "s9ebfad587afe", "start_line": 3}], "statement_type": "agent_report"}
+Feedback request lines: Phase 2=38; next Phase 1=39. Same-stage revisions for FqwdJqLJ and RxFioFBk did not commit. Phase 2 exit=deliberate_silence, exact response <no_intervention/>.
+
+event 39 / Phase 1 logical call 39 / call_index 4 / memory_save_procedural / tx p1-20-69fb5b0da1b9 / rollback with 7 collateral operations:
+{"content": "Successful fix for CWE-93 CRLF injection: Initial fix only added validation to _hval() for \\r and \\n, but test failure revealed need to validate BOTH _hkey() and _hval() for ALL control characters (\\r, \\n, \\0). Test test_prevent_control_characters_in_headers (lines 735-755) validates both header keys and values with all control character variants. Complete fix requires checking all three characters in both helper functions.", "source_refs": [{"end_line": 23, "source_handle": "s9ebfad587afe", "start_line": 3}], "statement_type": "agent_report"}
+Feedback request lines: Phase 2=40; next Phase 1=41. Same-stage revisions for FqwdJqLJ, RxFioFBk, eZHqzkxs, TUAdzB7L and C6a45yG2 did not commit. Phase 2 exit=format_rejected; response line 40 contains <no_intervention/> plus explanation, not accepted silence.
+
+event 41 / Phase 1 logical call 41 / call_index 4 / memory_save_procedural / tx p1-21-e043c7da7fb6 / rollback with 7 collateral operations:
+{"content": "Successfully fixed CWE-93 CRLF injection by adding control character validation to both _hkey() and _hval() functions. Key learnings: (1) Test failure revealed need to validate BOTH header keys AND values, not just values. (2) Must check for all control characters: \\r, \\n, AND \\0 (null byte). (3) Raise ValueError (not generic exception) per requirement. Final implementation validates all three control characters in both functions, passing all 367 tests.", "source_refs": [{"end_line": 11, "source_handle": "s6831a0d65c3c", "start_line": 9}, {"end_line": 20, "source_handle": "s215a324098a0", "start_line": 20}], "statement_type": "agent_report"}
+Feedback request line: Phase 2=42; no next Phase 1 in this authorized prefix. Same-stage revisions for FqwdJqLJ, RxFioFBk and eZHqzkxs did not commit. Phase 2 exit=format_rejected; see exact body in response line 42.
+
+TRANSACTIONS AND REMINDER EXITS BY TRIGGER EVENT
+event | Phase 1 transaction | operations | direct rejected | collateral aborted | Phase 2 exit
+01 committed 7 0 0 format_rejected
+03 committed 8 0 0 format_rejected
+05 committed 3 0 0 format_rejected
+07 committed 3 0 0 format_rejected
+09 committed 5 0 0 selected_validated_not_delivered
+11 committed 7 0 0 format_rejected
+13 committed 5 0 0 format_rejected
+15 committed 1 0 0 format_rejected
+17 committed 1 0 0 format_rejected
+19 committed 1 0 0 deliberate_silence
+21 committed 16 0 0 selected_validated_not_delivered
+23 transaction_aborted 7 1 6 selected_validated_not_delivered
+25 transaction_aborted 2 1 1 selected_validated_not_delivered
+27 transaction_aborted 4 1 3 selected_validated_not_delivered
+29 committed 1 0 0 selected_validated_not_delivered
+31 committed 1 0 0 selected_validated_not_delivered
+33 committed 1 0 0 selected_validated_not_delivered
+35 transaction_aborted 4 1 3 format_rejected
+37 transaction_aborted 4 1 3 deliberate_silence
+39 transaction_aborted 8 1 7 format_rejected
+41 transaction_aborted 8 1 7 format_rejected
+
+LATE-EVENT MATERIAL AND FINAL MEMORY
+The complete stages for events 35, 37, 39 and 41 are D/requests.jsonl and D/responses.jsonl lines 35-42, D/provider_attempts.jsonl lines 69-84, D/episode/candidate_audit.jsonl lines 35,37,39,41, D/bank_states.jsonl lines 35,37,39,41, and the corresponding D/trajectory_memory.json steps. No new _hkey/_hval revision from the aborted stages is present in the final active bank. Final D/memory.json contains 14 active knowledge entries, 0 active procedural entries and 30 historical versions; the status text is separately preserved and is not a verified Task completion claim. Notable active IDs from this run: FqwdJqLJ (_hval), RxFioFBk (_hkey), TUAdzB7L (add_header), C6a45yG2 (set_cookie), eZHqzkxs (CWE-93 inference). These IDs are this run's identities; no old run ID was reused. Source snippets and precise source roles/hashes are in D/memory.json metadata and D/bank_states.jsonl, including the original _hkey/_hval code and later CR/LF/NUL test outputs. Model statements about passing tests remain agent reports or inferences unless individually verified by the recorded public tool evidence; this index does not judge their semantic support.
+
+HISTORICAL REFERENCE AND LIMIT
+Earlier single-slot archive 657aa0eefe0652a9b6ce8be7eae899ca076fde79 ran code 502936c739c22ba7beda55c5e35f3622e9434c44 and reported 15 committed transactions, 6 rollbacks, 8 direct rejections and 65 collateral aborts. It is descriptive history, not a matched causal comparison. Valid structural references in this run do not prove a claim true, and later repeated actions do not prove that feedback caused self-correction.
