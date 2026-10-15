@@ -1,0 +1,1757 @@
+ORIGINAL PMA ARCHIVED-INPUT DIAGNOSTIC — MECHANICAL AUDIT
+data commit: 3947b72af7c0fbf1a4e982d4f9ed38020e0f63f0
+run code commit: 67b3dfd5119d68d0342df2273aff996318edb247
+batch ID: pma-original-44-5ef4e2586ecd
+profile SHA-256: cc5f784b069034f44bc4527d15acd70191b1f7fc5810556c087b7b35e0ae00f1
+observed units: 40/40; completed: 40
+logical calls observed: 44
+observable LiteLLM calls: 44
+deeper provider attempts: unknown unless transport records expose them
+Task/native evaluator/training/scoring-model calls: 0 (research entry has none)
+These are archived-input replays, not exact historical model sampling or Task effects.
+Condition mapping is separate from the numbered raw-material index.
+Human review fields: double_destruction_asserted_as_certain_cause, task_direction_rejected_for_second_destructor, uncertainty_or_appropriate_silence, phase1_recognizes_nullptr_guard, phase1_deletes_or_revises_old_diagnosis_and_advice, proposed_operations_executed, executed_update_visible_in_phase2, task_scope_and_valgrind_retained, premature_sufficient_validation_claim, unsupported_new_constraint_or_conclusion, format_failure, tool_execution_failure, semantic_error
+RESULTS:
+[
+  {
+    "block": 1,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043367.2454863,
+    "logical_calls": 1,
+    "mode": "phase1_only",
+    "observable_lower_calls": 1,
+    "operations": [
+      {
+        "action": "save_knowledge",
+        "content": "File structure: main.cpp (195 lines), user.cpp (13 lines with empty stubs for user_init/user_main/user_cleanup), user.h",
+        "error": null,
+        "memory_id": "3YPsWqdp",
+        "success": true
+      },
+      {
+        "action": "save_knowledge",
+        "content": "main.cpp implements CustomHeapManager (10MB bump allocator) with global operator new/delete overrides. When g_custom_heap is set, all allocations go through custom heap; when nullptr, uses malloc/free",
+        "error": null,
+        "memory_id": "CykDapzg",
+        "success": true
+      },
+      {
+        "action": "save_knowledge",
+        "content": "Critical issue found: CustomHeapManager::deallocate() does nothing (bump allocator never frees). Objects allocated via custom heap but deallocated after g_custom_heap=nullptr would call std::free on custom heap memory, causing crash",
+        "error": null,
+        "memory_id": "XafSmrvu",
+        "success": true
+      },
+      {
+        "action": "save_knowledge",
+        "content": "Program flow: Application::init() creates g_custom_heap (line 148-149), Application::run() uses STL containers/streams that may allocate, Application::~Application() calls shutdown() which destroys g_custom_heap and sets it to nullptr (line 175-179)",
+        "error": null,
+        "memory_id": "f8uxojaN",
+        "success": true
+      },
+      {
+        "action": "save_knowledge",
+        "content": "estimatePi() function (lines 124-139) uses std::mt19937 and std::uniform_real_distribution which may allocate memory. If allocated via custom heap but deallocated after shutdown, would cause mismatch",
+        "error": null,
+        "memory_id": "KJukeF7q",
+        "success": true
+      },
+      {
+        "action": "update_status",
+        "content": "Step 2: Read source files. Identified likely root cause - allocation/deallocation mismatch. Objects allocated via custom heap when g_custom_heap is active, but may be deallocated after shutdown() sets g_custom_heap=nullptr, causing std::free() on custom heap memory. Need to compile and test to confirm, then fix in user.cpp",
+        "error": null,
+        "memory_id": null,
+        "success": true
+      }
+    ],
+    "status": "completed",
+    "unit": "F",
+    "unit_id": "unit-01"
+  },
+  {
+    "block": 1,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043387.3306448,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": "The memory bank contains a critical finding that seems to be overlooked in your current approach:\n\n**Identified root cause** (from earlier investigation): The CustomHeapManager destructor is called **twice**:\n1. Explicitly at line 177 in `shutdown()`\n2. Again at line 186 in `~Application()` which calls `shutdown()`\n\nThis double-destruction causes a double-free on the `heap_memory` pointer. The crash manifests only in release mode due to optimization differences.\n\n**The fix strategy**: Since you can only modify user.cpp, you need to prevent the double-destruction by adding guard logic or intervening in the lifecycle to prevent the second destructor call from executing on already-freed memory.\n\nYour current approach (initializing stdlib features in user_init() to ensure static objects use regular malloc) addresses a different hypothesis about static libstdc++ objects, but doesn't address the double-destruction pattern that was already identified as the root cause.",
+    "status": "completed",
+    "unit": "A0",
+    "unit_id": "unit-02"
+  },
+  {
+    "block": 1,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043436.0557992,
+    "logical_calls": 2,
+    "mode": "original_process",
+    "observable_lower_calls": 2,
+    "operations": [
+      {
+        "action": "delete",
+        "content": null,
+        "error": null,
+        "memory_id": "gVCrchbo",
+        "success": true
+      },
+      {
+        "action": "delete",
+        "content": null,
+        "error": null,
+        "memory_id": "AVprP8Lx",
+        "success": true
+      },
+      {
+        "action": "save_knowledge",
+        "content": "Actual shutdown flow in main.cpp: shutdown() (lines 174-183) has null-check guard (line 175). Sets g_custom_heap=nullptr after destruction (line 178), preventing double-free. Application destructor (line 185-187) calls shutdown() once. Main flow: main() -> Application() -> init() -> run() -> ~Application() -> shutdown() -> explicit destructor call (line 177) + free (line 179).",
+        "error": null,
+        "memory_id": "KYTcGqWY",
+        "success": true
+      },
+      {
+        "action": "save_procedural",
+        "content": "Step 10: Re-examined main.cpp lines 170-195. Previous theory of double-destruction was incorrect - shutdown() has proper guard (if g_custom_heap) and sets pointer to nullptr after first destruction. The crash is NOT from double-free but from something else, likely static libstdc++ object destruction order as hypothesized in Step 9.",
+        "error": null,
+        "memory_id": "nDvHtz8M",
+        "success": true
+      },
+      {
+        "action": "update_status",
+        "content": "Step 10: Verified shutdown mechanism has proper guards against double-destruction. Previous double-free theory was incorrect. Real issue is likely static C++ standard library objects allocated via custom heap being destroyed after heap cleanup. Next: implement fix in user.cpp by triggering stdlib initialization in user_init() before custom heap activation.",
+        "error": null,
+        "memory_id": null,
+        "success": true
+      }
+    ],
+    "parsed_reminder": "The memory bank status indicates the double-destruction theory has been **ruled out** - shutdown() has proper guards (null-check at line 175, sets pointer to nullptr at line 178). The re-examination in Step 10 confirmed this.\n\nThe actual issue identified: Static C++ standard library objects are being allocated from the custom heap (after it's activated at line 149) but then destroyed during program teardown **after** the custom heap has been cleaned up. This causes a crash when those static destructors try to free memory that wasn't allocated via regular malloc.\n\nThe fix approach: In user_init() (which is called at line 146, **before** the custom heap is set up at line 149), trigger initialization of stdlib features so their static objects use regular malloc instead of the custom heap. This ensures proper cleanup order.\n\nNext action should be implementing this fix in /app/user.cpp, not re-investigating the shutdown mechanism.",
+    "phase2_prompt_sha256": "ce8ffd4a17fd1160bb7493fac0080294fe525fcc25a10934425ad67cd2fed3f2",
+    "status": "completed",
+    "unit": "P",
+    "unit_id": "unit-03"
+  },
+  {
+    "block": 1,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043447.2556155,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": "The crash fix is working (release binary now exits with code 0), but the task requires Valgrind verification for memory leak compliance. The memory bank notes this is still pending: \"Still need to verify with Valgrind for memory leak compliance.\"\n\nRun `valgrind --leak-check=full ./release` to confirm there are no memory leaks, as required by the original task constraints.",
+    "status": "completed",
+    "unit": "H0",
+    "unit_id": "unit-04"
+  },
+  {
+    "block": 1,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043475.295518,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": null,
+    "status": "completed",
+    "unit": "A2",
+    "unit_id": "unit-05"
+  },
+  {
+    "block": 1,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043491.7038236,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": "The memory bank's Step 10 status concludes that the nullptr guard at line 175 SHOULD prevent double-free, and the crash is likely from a DIFFERENT source: \"static libstdc++ objects being destroyed after custom heap cleanup as originally suspected.\"\n\nStep 9 developed a fix strategy: Use user_init() (called at line 146 before g_custom_heap setup) to initialize stdlib features, ensuring static objects use regular malloc instead of the custom heap. This prevents static libstdc++ objects from being allocated from the custom heap and then freed after the heap is destroyed.\n\nThe shutdown/destructor pattern investigation was already completed - the nullptr guard makes it safe. The focus should be on implementing the user_init() fix to trigger stdlib initialization before the custom heap activates.",
+    "status": "completed",
+    "unit": "P1",
+    "unit_id": "unit-06"
+  },
+  {
+    "block": 1,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043509.5722163,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": "The memory bank identifies a different root cause than your current understanding:\n\n**Actual root cause (from memory bank):**\nThe CustomHeapManager destructor is called **twice**:\n1. Explicitly at line 177 in shutdown()\n2. Again at line 186 in ~Application() which calls shutdown()\n\nThis double-destruction causes a double-free of the heap_memory pointer. The crash manifests in release mode due to optimization differences.\n\n**Required fix strategy:**\nSince main.cpp cannot be modified, the fix must prevent the second destructor call from executing on already-freed memory. This requires adding guard logic or intervening in the lifecycle from user.cpp.\n\nYour current approach of initializing stdlib features early in user_init() addresses a different problem (static object allocation timing) and won't prevent the double-destruction issue.",
+    "status": "completed",
+    "unit": "A1",
+    "unit_id": "unit-07"
+  },
+  {
+    "block": 1,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043523.393822,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": "The release binary now runs without crashing (exit 0) - great progress! However, the task explicitly requires \"no memory leaks detected by Valgrind.\"\n\nThe memory bank status notes: \"Still need to verify with Valgrind for memory leak compliance.\"\n\nYou should run Valgrind on the fixed release binary to confirm:\n1. No memory leaks (not just \"still reachable\")\n2. Clean exit under Valgrind instrumentation\n\nRun: `valgrind --leak-check=full ./release`\n\nThis is the final verification step before the task is complete.",
+    "status": "completed",
+    "unit": "H1",
+    "unit_id": "unit-08"
+  },
+  {
+    "block": 1,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043541.2244925,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": null,
+    "status": "completed",
+    "unit": "A3",
+    "unit_id": "unit-09"
+  },
+  {
+    "block": 1,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043584.2340174,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": "The memory bank's most recent assessment (Step 10 status) has already ruled out the double-destruction theory you were investigating: the nullptr guard at line 175 (`if (g_custom_heap)`) combined with setting `g_custom_heap = nullptr` at line 178 prevents the second shutdown() call from executing the destructor/free logic again.\n\nThe memory bank points you back to the original hypothesis: \"static libstdc++ objects being destroyed after custom heap cleanup.\" This aligns with your Step 9 fix strategy: use user_init() (called at line 146, before g_custom_heap is set up at line 149) to initialize stdlib features early, ensuring their static objects use regular malloc rather than the custom heap.\n\nThe crash pattern supports this: it happens during shutdown after the custom heap is destroyed, only in release mode (which has a different libstdc++ with different static initialization patterns), and Valgrind doesn't catch it (because Valgrind's instrumentation changes timing and allocation patterns).\n\nYou have the fix strategy already identified. Time to implement it in user.cpp.",
+    "status": "completed",
+    "unit": "P0",
+    "unit_id": "unit-10"
+  },
+  {
+    "block": 2,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043602.077906,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": "The memory bank indicates the root cause has already been identified: **double-destruction bug** in main.cpp. The CustomHeapManager destructor is called twice:\n1. Explicitly at line 177 in shutdown()\n2. Again at line 186 in ~Application() destructor which calls shutdown()\n\nThis causes a double-free of the heap_memory pointer. The crash only manifests in release mode due to optimization differences.\n\nThe recorded fix strategy was to prevent this double-destruction from user.cpp since main.cpp cannot be modified - either through guard logic or lifecycle intervention to prevent the second destructor call from executing on already-freed memory.\n\nYour current plan to initialize stdlib features in user_init() addresses a different theory (static objects from custom heap) but doesn't address the identified double-destruction issue. Consider whether the double-destruction explanation better fits the observed behavior (crash after completion, only in release mode).",
+    "status": "completed",
+    "unit": "A1",
+    "unit_id": "unit-11"
+  },
+  {
+    "block": 2,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043641.3017342,
+    "logical_calls": 1,
+    "mode": "phase1_only",
+    "observable_lower_calls": 1,
+    "operations": [
+      {
+        "action": "save_knowledge",
+        "content": "File structure: main.cpp has CustomHeapManager (bump allocator, 10MB heap), global new/delete operators overridden, Application class with init()/run()/shutdown() lifecycle, Monte Carlo π estimation. user.cpp has empty user_init(), user_cleanup(), user_main() functions.",
+        "error": null,
+        "memory_id": "fdAEPBkG",
+        "success": true
+      },
+      {
+        "action": "save_knowledge",
+        "content": "Critical code pattern: Application destructor calls shutdown() which destroys g_custom_heap and sets it to nullptr. Global delete operator checks g_custom_heap - if null, calls std::free(), else calls custom deallocate(). Custom deallocate() does nothing (bump allocator).",
+        "error": null,
+        "memory_id": "FcQjdJ6k",
+        "success": true
+      },
+      {
+        "action": "save_knowledge",
+        "content": "Suspected bug: Objects allocated via custom heap during Application lifetime may have destructors that run AFTER shutdown() sets g_custom_heap=nullptr. These destructors would then call std::free() on memory from the custom heap buffer (not malloc'd), causing crash. Likely triggered by optimizer in release mode.",
+        "error": null,
+        "memory_id": "m2kJsGnz",
+        "success": true
+      },
+      {
+        "action": "update_status",
+        "content": "Step 2: Read source files. Identified CustomHeapManager pattern and likely object lifetime issue. Next: compile and run both modes to reproduce crash, then fix in user.cpp.",
+        "error": null,
+        "memory_id": null,
+        "success": true
+      }
+    ],
+    "status": "completed",
+    "unit": "F",
+    "unit_id": "unit-12"
+  },
+  {
+    "block": 2,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043656.6547432,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": "The release binary now runs without crashing (exit 0) - great progress! However, the task explicitly requires \"There must be no memory leaks detected by Valgrind.\"\n\nYou haven't yet run Valgrind on the newly compiled release binary to verify memory leak compliance. In Step 6, the old code showed \"73,728 bytes in 1 blocks still reachable\" under Valgrind. You need to verify that the fix doesn't introduce any memory leaks and meets the Valgrind requirement.\n\nRun: `valgrind --leak-check=full ./release` to confirm the solution is complete.",
+    "status": "completed",
+    "unit": "H1",
+    "unit_id": "unit-13"
+  },
+  {
+    "block": 2,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043670.1836019,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": null,
+    "status": "completed",
+    "unit": "A3",
+    "unit_id": "unit-14"
+  },
+  {
+    "block": 2,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043693.9731371,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": "The memory bank's latest analysis (Step 10 status) concluded that the nullptr guard at line 175 should prevent the double-free from actually executing. When ~Application() calls shutdown() at line 186, g_custom_heap will already be nullptr (set at line 178 during the first shutdown call), so the if-guard prevents re-entry.\n\nThe memory bank suggests the actual crash source is \"possibly static libstdc++ objects being destroyed after custom heap cleanup\" - which aligns with your Step 9 hypothesis about initializing stdlib features in user_init() before the custom heap activates.\n\nThe fix strategy from Step 9 appears sound: use user_init() (called at line 146, before g_custom_heap setup at line 149) to force initialization of static libstdc++ objects using normal malloc, preventing them from being allocated from the custom heap and later freed after heap destruction.",
+    "status": "completed",
+    "unit": "P0",
+    "unit_id": "unit-15"
+  },
+  {
+    "block": 2,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043736.1372895,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": null,
+    "status": "completed",
+    "unit": "A0",
+    "unit_id": "unit-16"
+  },
+  {
+    "block": 2,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043801.4981003,
+    "logical_calls": 2,
+    "mode": "original_process",
+    "observable_lower_calls": 2,
+    "operations": [
+      {
+        "action": "delete",
+        "content": null,
+        "error": null,
+        "memory_id": "gVCrchbo",
+        "success": true
+      },
+      {
+        "action": "delete",
+        "content": null,
+        "error": null,
+        "memory_id": "AVprP8Lx",
+        "success": true
+      },
+      {
+        "action": "save_procedural",
+        "content": "Step 7-9: Initially suspected double-destruction bug (destructor called twice), but re-examination shows shutdown() is only called once from ~Application(). The nullptr check at line 175 (if (g_custom_heap)) would prevent double-destruction even if shutdown() were called multiple times. This theory was ruled out.",
+        "error": null,
+        "memory_id": "m7RrqdRg",
+        "success": true
+      },
+      {
+        "action": "save_knowledge",
+        "content": "Shutdown sequence in main.cpp: main() returns → ~Application() destructor (line 185) → shutdown() (line 186) → custom heap destroyed (line 177-179) → static destructors run. The custom heap is destroyed BEFORE static destructors execute, which can cause crashes if static libstdc++ objects were allocated from the custom heap.",
+        "error": null,
+        "memory_id": "eTSy9tKv",
+        "success": true
+      },
+      {
+        "action": "update_status",
+        "content": "Step 10: Agent re-examined shutdown logic (lines 174-188) to verify bug pattern. Confirmed shutdown() is only called once from ~Application(). Current theory: static libstdc++ objects allocated from custom heap (after line 149) are destroyed after heap cleanup, causing crash in release mode. Next: implement fix in user_init() to ensure stdlib initialization happens before custom heap activation.",
+        "error": null,
+        "memory_id": null,
+        "success": true
+      }
+    ],
+    "parsed_reminder": "The memory bank shows the double-destruction theory was already ruled out in steps 7-9. The current theory is different: static libstdc++ objects get allocated from the custom heap (after g_custom_heap is set at line 149), but are destroyed during static destruction AFTER the custom heap is cleaned up (lines 177-179), causing a crash when their destructors try to free memory that no longer belongs to a valid heap.\n\nThe shutdown sequence is: main() returns → ~Application() → shutdown() → heap destroyed → then static destructors run.\n\nThe fix strategy from the memory bank: use user_init() (which is called at line 146, BEFORE g_custom_heap is set) to initialize stdlib features early, ensuring any static libstdc++ objects use regular malloc rather than the custom heap. This prevents them from trying to deallocate from the custom heap during static destruction.\n\nYou're ready to implement the fix in user.cpp, not re-verify the shutdown logic.",
+    "phase2_prompt_sha256": "6f7ca5b302b50d4ece8183225ba617f4536a4c977c48d893866488cea2e05ab4",
+    "status": "completed",
+    "unit": "P",
+    "unit_id": "unit-17"
+  },
+  {
+    "block": 2,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043825.4036,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": null,
+    "status": "completed",
+    "unit": "A2",
+    "unit_id": "unit-18"
+  },
+  {
+    "block": 2,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043848.376312,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": null,
+    "status": "completed",
+    "unit": "H0",
+    "unit_id": "unit-19"
+  },
+  {
+    "block": 2,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043880.8735645,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": null,
+    "status": "completed",
+    "unit": "P1",
+    "unit_id": "unit-20"
+  },
+  {
+    "block": 3,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043893.8510823,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": "The release binary now runs without crashing (exit 0) - that's excellent progress. However, the task has an explicit requirement: \"There must be no memory leaks detected by Valgrind.\"\n\nThe memory bank notes this validation is still needed: \"Still need to verify with Valgrind for memory leak compliance.\"\n\nYou should run Valgrind with --leak-check=full on the release binary to confirm there are no memory leaks before considering the task complete.",
+    "status": "completed",
+    "unit": "H0",
+    "unit_id": "unit-21"
+  },
+  {
+    "block": 3,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043915.0658977,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": null,
+    "status": "completed",
+    "unit": "A2",
+    "unit_id": "unit-22"
+  },
+  {
+    "block": 3,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043941.1675127,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": null,
+    "status": "completed",
+    "unit": "P1",
+    "unit_id": "unit-23"
+  },
+  {
+    "block": 3,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792043984.7284944,
+    "logical_calls": 1,
+    "mode": "phase1_only",
+    "observable_lower_calls": 1,
+    "operations": [
+      {
+        "action": "update_status",
+        "content": "Step 2 complete: Read source files. main.cpp has custom heap manager with global operator overrides. user.cpp has only empty stub functions. Key hypothesis: object lifetime vs custom heap lifetime issue. Next: compile and run to confirm crash, then debug.",
+        "error": null,
+        "memory_id": null,
+        "success": true
+      },
+      {
+        "action": "save_knowledge",
+        "content": "user.cpp current state: Contains only empty stub functions user_init(), user_cleanup(), and user_main() - essentially minimal implementation",
+        "error": null,
+        "memory_id": "2mtyvrzu",
+        "success": true
+      },
+      {
+        "action": "save_knowledge",
+        "content": "main.cpp architecture: Uses CustomHeapManager (bump allocator) with global operator new/delete overrides. Custom heap created in init(), destroyed in shutdown(). shutdown() called from Application destructor which also calls user_cleanup() after heap destruction.",
+        "error": null,
+        "memory_id": "UQjnaR76",
+        "success": true
+      },
+      {
+        "action": "save_knowledge",
+        "content": "CustomHeapManager deallocate() does nothing (lines 61-67 of main.cpp) - it's a bump allocator that only frees entire heap on destruction. Individual objects aren't freed from the custom heap.",
+        "error": null,
+        "memory_id": "gsQ4puof",
+        "success": true
+      },
+      {
+        "action": "save_procedural",
+        "content": "Hypothesis for release crash: Object lifetime issue. Standard library objects allocated during run() might outlive custom heap destruction in shutdown(). When operator delete is called after g_custom_heap is nullptr, it tries std::free() on memory from custom heap buffer, causing crash. Optimizer behavior differs between DEBUG (-O0) and RELEASE (-O2) affecting object lifetimes.",
+        "error": null,
+        "memory_id": "nbNLyUaR",
+        "success": true
+      }
+    ],
+    "status": "completed",
+    "unit": "F",
+    "unit_id": "unit-24"
+  },
+  {
+    "block": 3,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792044011.3162694,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": "The memory bank indicates the root cause is a **double-destruction bug**: CustomHeapManager's destructor is called twice - once explicitly at line 177 in shutdown(), and again at line 186 when ~Application() calls shutdown(). This causes a double-free of heap_memory.\n\nYour current hypothesis about static libstdc++ objects is a different issue. The actual problem is that when the Application object goes out of scope in main(), ~Application() runs and calls shutdown() a second time, attempting to free already-freed memory.\n\nThe fix must prevent the second destructor call from executing on already-freed memory. Since you can only modify user.cpp, you need to intervene in the lifecycle to prevent double-destruction - not initialize stdlib features early.",
+    "status": "completed",
+    "unit": "A0",
+    "unit_id": "unit-25"
+  },
+  {
+    "block": 3,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792044026.087604,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": "The release binary now runs successfully without crashing (exit 0), which is great progress. However, the task explicitly requires \"no memory leaks detected by Valgrind\" and the memory bank notes that Valgrind verification is still needed.\n\nThe fix added stdlib initialization code in user_init() that allocates various objects (random_device, mt19937, vectors, strings, etc.). You should now run Valgrind with --leak-check=full on the release binary to verify:\n1. No memory leaks are introduced by the fix\n2. The \"still reachable\" bytes from earlier (73,728 bytes) are acceptable or improved\n3. The fix satisfies the complete task requirements\n\nEarlier Valgrind run (Step 6) showed no crash but had reachable memory. Need to confirm the current state meets all requirements.",
+    "status": "completed",
+    "unit": "H1",
+    "unit_id": "unit-26"
+  },
+  {
+    "block": 3,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792044086.281632,
+    "logical_calls": 2,
+    "mode": "original_process",
+    "observable_lower_calls": 2,
+    "operations": [
+      {
+        "action": "update_status",
+        "content": "Step 10: Agent re-examining shutdown logic (lines 174-188) to verify root cause. Code shows shutdown() has guard `if (g_custom_heap)` and sets g_custom_heap=nullptr after destructor call, which should prevent double-destruction. Discrepancy between memory bank theory (double-destruction) and code evidence (guarded single destruction). Agent appears to be reconsidering the actual bug pattern.",
+        "error": null,
+        "memory_id": null,
+        "success": true
+      },
+      {
+        "action": "save_knowledge",
+        "content": "Shutdown logic pattern: shutdown() at line 174 checks `if (g_custom_heap)` before destruction. Line 177 calls destructor explicitly, line 178 sets g_custom_heap=nullptr, line 179 frees memory. Line 182 calls user_cleanup(). The ~Application() destructor (line 185) calls shutdown(). No explicit shutdown() call in main() - only via destructor.",
+        "error": null,
+        "memory_id": "SKXUNNQz",
+        "success": true
+      },
+      {
+        "action": "save_procedural",
+        "content": "Step 10: Re-examined shutdown code after noticing discrepancy. The nullptr guard at line 175 and assignment at line 178 should prevent any double-destruction scenario. This contradicts earlier memory bank entries about double-destruction being the root cause. Need to reconsider whether the issue is actually about static stdlib objects being allocated from custom heap and destroyed after heap cleanup.",
+        "error": null,
+        "memory_id": "NNS4vEW6",
+        "success": true
+      }
+    ],
+    "parsed_reminder": null,
+    "phase2_prompt_sha256": "47f4d4ad68c6b8e4e36923ef06166604de44e9e6491e598b09821fbe4fc66f90",
+    "status": "completed",
+    "unit": "P",
+    "unit_id": "unit-27"
+  },
+  {
+    "block": 3,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792044116.0296931,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": null,
+    "status": "completed",
+    "unit": "A3",
+    "unit_id": "unit-28"
+  },
+  {
+    "block": 3,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792044139.40963,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": null,
+    "status": "completed",
+    "unit": "P0",
+    "unit_id": "unit-29"
+  },
+  {
+    "block": 3,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792044156.6463628,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": "The memory bank indicates the root cause has already been identified differently than your current understanding:\n\n**Actual root cause (from memory bank):** The CustomHeapManager destructor is called TWICE:\n1. First at line 177 in shutdown() - explicitly calls `g_custom_heap->~CustomHeapManager()`\n2. Second at line 186 in ~Application() - calls shutdown() again\n\nThis double-destruction causes a double-free of the heap_memory pointer, which manifests as SIGSEGV in release mode.\n\n**Required fix strategy:** Since you can only modify user.cpp, you need to prevent the second destructor call from executing on already-freed memory. The fix must add guard logic or intervene in the lifecycle to prevent double-destruction.\n\nYour current plan (initializing stdlib features in user_init() to allocate static objects before custom heap) addresses a different problem and won't fix the double-destruction issue.",
+    "status": "completed",
+    "unit": "A1",
+    "unit_id": "unit-30"
+  },
+  {
+    "block": 4,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792044179.902507,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": null,
+    "status": "completed",
+    "unit": "P0",
+    "unit_id": "unit-31"
+  },
+  {
+    "block": 4,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792044195.1928992,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": "The release binary now runs successfully (exit 0), which is great progress. However, the memory bank notes that Valgrind verification is still pending.\n\nThe task requires: \"There must be no memory leaks detected by Valgrind.\"\n\nBefore considering the task complete, you should run `valgrind --leak-check=full ./release` to verify:\n1. No memory leaks are detected\n2. The fix doesn't introduce any new memory issues\n\nIn Step 6, Valgrind showed \"73,728 bytes in 1 blocks\" still reachable. Need to confirm this remains acceptable (reachable but not leaked) with the new user_init() implementation.",
+    "status": "completed",
+    "unit": "H1",
+    "unit_id": "unit-32"
+  },
+  {
+    "block": 4,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792044212.7678256,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": null,
+    "status": "completed",
+    "unit": "A3",
+    "unit_id": "unit-33"
+  },
+  {
+    "block": 4,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792044278.9084244,
+    "logical_calls": 2,
+    "mode": "original_process",
+    "observable_lower_calls": 2,
+    "operations": [
+      {
+        "action": "delete",
+        "content": null,
+        "error": null,
+        "memory_id": "AVprP8Lx",
+        "success": true
+      },
+      {
+        "action": "delete",
+        "content": null,
+        "error": null,
+        "memory_id": "gVCrchbo",
+        "success": true
+      },
+      {
+        "action": "delete",
+        "content": null,
+        "error": null,
+        "memory_id": "WJx6uUYm",
+        "success": true
+      },
+      {
+        "action": "save_knowledge",
+        "content": "Actual shutdown sequence: main() creates Application on stack, calls init()/run(), then returns. Stack unwinding triggers ~Application() (line 186) which calls shutdown() (line 174). shutdown() explicitly calls CustomHeapManager destructor (line 177), sets g_custom_heap=nullptr (line 178), then frees heap_memory (line 179). This happens ONCE, not twice.",
+        "error": null,
+        "memory_id": "csHvGg5X",
+        "success": true
+      },
+      {
+        "action": "save_knowledge",
+        "content": "Correct root cause: Static objects from libstdc++ (in release version) get allocated using custom heap after g_custom_heap is set at line 149. When program exits, heap_memory is freed at line 179, but static destructors run AFTER main() returns, trying to access/free memory from the already-freed custom heap, causing SIGSEGV in release mode.",
+        "error": null,
+        "memory_id": "3dQc45RA",
+        "success": true
+      },
+      {
+        "action": "update_status",
+        "content": "Step 10: Corrected root cause understanding. No double-destruction bug exists. Real issue: static libstdc++ objects allocated from custom heap, destroyed after heap freed. Ready to implement fix: trigger stdlib initialization in user_init() (before line 149) to ensure static objects use regular malloc instead of custom heap.",
+        "error": null,
+        "memory_id": null,
+        "success": true
+      }
+    ],
+    "parsed_reminder": "The memory bank status explicitly states: \"No double-destruction bug exists.\" The investigation phase is complete.\n\nThe confirmed root cause (from knowledge entry [3dQc45RA]): Static objects from libstdc++ (release version) get allocated using the custom heap after g_custom_heap is set at line 149. When the program exits, heap_memory is freed at line 179, but static destructors run AFTER main() returns, trying to access/free memory from the already-freed custom heap.\n\nThe shutdown sequence happens once, not twice (confirmed in [csHvGg5X]).\n\nThe fix is ready to implement: Trigger stdlib initialization in user_init() (which is called at line 146, before g_custom_heap setup at line 149). This ensures static objects use regular malloc instead of the custom heap.\n\nNo further investigation of main.cpp is needed. Time to modify /app/user.cpp to implement the fix.",
+    "phase2_prompt_sha256": "18e04ec663c222135075f1b3179fc71eb81410f5ccd8e445878fc84393077238",
+    "status": "completed",
+    "unit": "P",
+    "unit_id": "unit-34"
+  },
+  {
+    "block": 4,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792044299.2201695,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": "The memory bank records a different root cause than your current analysis. Previously identified: The crash is caused by a double-destruction bug in main.cpp - the CustomHeapManager destructor is called twice:\n1. Explicitly at line 177 in shutdown() \n2. Again at line 186 when ~Application() calls shutdown()\n\nThis causes a double-free of the heap_memory pointer. The crash manifests only in release mode due to optimization differences in how the double-free is handled.\n\nYour fix strategy should focus on preventing the double-destruction from user.cpp, not on initializing stdlib features early. Since you cannot modify main.cpp, you need to find a way to intervene in the lifecycle from user.cpp to prevent the second destructor call from operating on already-freed memory.\n\nThe static libstdc++ object theory is a different hypothesis - the memory bank points to the simpler double-destruction pattern as the root cause.",
+    "status": "completed",
+    "unit": "A1",
+    "unit_id": "unit-35"
+  },
+  {
+    "block": 4,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792044319.6320965,
+    "logical_calls": 1,
+    "mode": "phase1_only",
+    "observable_lower_calls": 1,
+    "operations": [
+      {
+        "action": "save_knowledge",
+        "content": "main.cpp implements CustomHeapManager class that allocates a 10MB buffer and provides custom allocate/deallocate methods. Global operator new/new[]/delete/delete[] are overridden to use g_custom_heap when it's active.",
+        "error": null,
+        "memory_id": "URFFjgZS",
+        "success": true
+      },
+      {
+        "action": "save_knowledge",
+        "content": "Application lifecycle: init() calls user_init() then creates g_custom_heap, run() calls user_main() then does Monte Carlo π estimation, shutdown() destroys g_custom_heap and calls user_cleanup(). Note: ~Application() destructor also calls shutdown().",
+        "error": null,
+        "memory_id": "BgQsmUoa",
+        "success": true
+      },
+      {
+        "action": "save_knowledge",
+        "content": "user.cpp currently contains three empty functions: user_init(), user_cleanup(), and user_main(). Any fix must be implemented in these functions.",
+        "error": null,
+        "memory_id": "P2QUS42y",
+        "success": true
+      },
+      {
+        "action": "save_knowledge",
+        "content": "CustomHeapManager::deallocate() does nothing except check if ptr and heap_memory are valid - it's a simple bump allocator that doesn't actually free memory, only allocates linearly.",
+        "error": null,
+        "memory_id": "kDaoNRxX",
+        "success": true
+      },
+      {
+        "action": "save_knowledge",
+        "content": "Critical: g_custom_heap is created at line 149 in Application::init() using placement new on malloc'd memory. It's destroyed in shutdown() by manually calling destructor then freeing the memory.",
+        "error": null,
+        "memory_id": "ZoFdvMn7",
+        "success": true
+      },
+      {
+        "action": "update_status",
+        "content": "Step 2 complete: Read source files. Identified custom heap manager with overridden new/delete operators. user.cpp functions are empty. Next: compile and reproduce the crash to understand the failure mode.",
+        "error": null,
+        "memory_id": null,
+        "success": true
+      }
+    ],
+    "status": "completed",
+    "unit": "F",
+    "unit_id": "unit-36"
+  },
+  {
+    "block": 4,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792044342.672073,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": null,
+    "status": "completed",
+    "unit": "P1",
+    "unit_id": "unit-37"
+  },
+  {
+    "block": 4,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792044359.7164397,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": "The memory bank shows the root cause has already been identified: **double-destruction bug** in main.cpp. The CustomHeapManager destructor is called twice - once explicitly at line 177 in shutdown(), and again at line 186 when ~Application() calls shutdown(). This causes a double-free of the heap_memory pointer.\n\nYour current approach in Step 9 focuses on \"static libstdc++ objects allocated from custom heap\" and initializing stdlib features early. However, this doesn't address the actual problem: the destructor being called twice on the same object.\n\nSince main.cpp cannot be modified, the fix must be implemented in user.cpp to prevent the double-destruction. The memory bank suggests: \"Need to add guard logic or intervene in the lifecycle to prevent the second destructor call from executing on already-freed memory.\"\n\nConsider how user_init(), user_cleanup(), or other hooks in user.cpp could intercept or guard against the double-destruction pattern.",
+    "status": "completed",
+    "unit": "A0",
+    "unit_id": "unit-38"
+  },
+  {
+    "block": 4,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792044392.2741597,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": null,
+    "status": "completed",
+    "unit": "A2",
+    "unit_id": "unit-39"
+  },
+  {
+    "block": 4,
+    "deeper_network_attempts": "unknown",
+    "ended_epoch": 1792044405.0479817,
+    "logical_calls": 1,
+    "mode": "phase2_only",
+    "observable_lower_calls": 1,
+    "parsed_reminder": "The release binary now runs without crashing (exit 0), which is great progress. However, the original task explicitly requires: \"There must be no memory leaks detected by Valgrind.\"\n\nThe memory bank notes that Valgrind verification for memory leak compliance is still pending. While the crash is fixed, you should run `valgrind --leak-check=full ./release` to confirm the solution meets the no-memory-leaks requirement before considering the task complete.",
+    "status": "completed",
+    "unit": "H0",
+    "unit_id": "unit-40"
+  }
+]
+VARIANT DIFFS:
+[A0]
+(unchanged)
+[A1]
+--- archived_request
++++ A1
+@@ -1,6 +1,6 @@
+ ## Step 9
+ 
+-## Memory Bank (just updated)
++## Prior recorded memory
+ <memory_bank>
+ <status>Step 9: Agent identified potential root cause - static libstdc++ objects being allocated from custom heap after line 149 but destroyed after heap cleanup. Testing fix strategy: initialize stdlib features in user_init() (line 146) before custom heap is set up, ensuring static objects use regular malloc instead of custom allocator.</status>
+ <knowledge>
+
+[A2]
+--- archived_request
++++ A2
+@@ -13,16 +13,16 @@
+ [iv8ByPVJ] Problem: Program crashes in RELEASE mode but works in DEBUG mode
+ [ncDQuy3H] File structure at /app/: main.cpp (195 lines), user.cpp (13 lines), user.h. User code is minimal - empty implementations of user_init(), user_cleanup(), and user_main().
+ [gRNci2PL] main.cpp implements custom heap manager with global operator new/delete overrides. Global pointer g_custom_heap controls whether custom allocator is used. CustomHeapManager allocates 10MB heap upfront, uses bump-pointer allocation (heap_offset), deallocate() is a no-op.
+-[fJCxMuJa] Application lifecycle: init() calls user_init() then creates CustomHeapManager via placement new into malloc'd memory. run() calls user_main() then runs Monte Carlo π estimation. shutdown() explicitly calls CustomHeapManager destructor then frees memory. Destructor also called in ~Application().
+-[AVprP8Lx] Critical bug pattern: CustomHeapManager destructor called twice - once in shutdown() (line 177) and again in ~Application() (line 186 calls shutdown()). This is double-free on heap_memory pointer.
++[fJCxMuJa] Application lifecycle: init() calls user_init() then creates CustomHeapManager via placement new into malloc'd memory. run() calls user_main() then runs Monte Carlo π estimation. shutdown() explicitly calls CustomHeapManager destructor then frees memory. Prior unverified interpretation: Destructor also called in ~Application().
++[AVprP8Lx] Past proposed, unverified explanation: Critical bug pattern: CustomHeapManager destructor called twice - once in shutdown() (line 177) and again in ~Application() (line 186 calls shutdown()). This is double-free on heap_memory pointer.
+ [bx4AQqkg] Custom operator new/delete (lines 72-118): Checks g_custom_heap pointer to decide between custom allocator or malloc/free. Four operators defined: new, new[], delete, delete[].
+-[gVCrchbo] Root cause identified: Double-destruction bug in main.cpp. CustomHeapManager destructor is called twice: (1) explicitly at line 177 in shutdown(), and (2) again at line 186 in ~Application() which calls shutdown(). This causes double-free of heap_memory pointer. The crash only manifests in release mode due to optimization differences.
+-[WJx6uUYm] Fix strategy: Must prevent double-destruction in user.cpp since main.cpp cannot be modified. Need to add guard logic or intervene in the lifecycle to prevent the second destructor call from executing on already-freed memory.
++[gVCrchbo] Past proposed, unverified explanation: Root cause identified: Double-destruction bug in main.cpp. CustomHeapManager destructor is called twice: (1) explicitly at line 177 in shutdown(), and (2) again at line 186 in ~Application() which calls shutdown(). This causes double-free of heap_memory pointer. The crash only manifests in release mode due to optimization differences.
++[WJx6uUYm] Past proposed, unverified explanation: Fix strategy: Must prevent double-destruction in user.cpp since main.cpp cannot be modified. Need to add guard logic or intervene in the lifecycle to prevent the second destructor call from executing on already-freed memory.
+ </knowledge>
+ <procedural>
+ [A28WQYxc] Step 4: Both debug and release builds compiled successfully with their respective commands and library paths. No compilation errors encountered.
+ [NpP7GMC6] Step 5: Confirmed crash behavior - debug version runs successfully (exit 0), release version crashes with exit code -11 (SIGSEGV) after completing all computation. Crash occurs during shutdown/cleanup phase, not during execution. Output is identical until program termination.
+-[nw82tXtG] Valgrind does not detect the SIGSEGV crash when running the release binary - exits with code 0 and shows 73,728 bytes still reachable but no memory leaks. Direct execution of release binary crashes with exit code -11 (SIGSEGV). This timing/optimization difference suggests the double-free is handled differently under Valgrind's instrumentation vs native execution.
++[nw82tXtG] Valgrind does not detect the SIGSEGV crash when running the release binary - exits with code 0 and shows 73,728 bytes still reachable but no memory leaks. Direct execution of release binary crashes with exit code -11 (SIGSEGV). Prior unverified interpretation: This timing/optimization difference suggests the double-free is handled differently under Valgrind's instrumentation vs native execution.
+ </procedural>
+ </memory_bank>
+ 
+
+[A3]
+--- archived_request
++++ A3
+@@ -13,16 +13,13 @@
+ [iv8ByPVJ] Problem: Program crashes in RELEASE mode but works in DEBUG mode
+ [ncDQuy3H] File structure at /app/: main.cpp (195 lines), user.cpp (13 lines), user.h. User code is minimal - empty implementations of user_init(), user_cleanup(), and user_main().
+ [gRNci2PL] main.cpp implements custom heap manager with global operator new/delete overrides. Global pointer g_custom_heap controls whether custom allocator is used. CustomHeapManager allocates 10MB heap upfront, uses bump-pointer allocation (heap_offset), deallocate() is a no-op.
+-[fJCxMuJa] Application lifecycle: init() calls user_init() then creates CustomHeapManager via placement new into malloc'd memory. run() calls user_main() then runs Monte Carlo π estimation. shutdown() explicitly calls CustomHeapManager destructor then frees memory. Destructor also called in ~Application().
+-[AVprP8Lx] Critical bug pattern: CustomHeapManager destructor called twice - once in shutdown() (line 177) and again in ~Application() (line 186 calls shutdown()). This is double-free on heap_memory pointer.
++[fJCxMuJa] Application lifecycle: init() calls user_init() then creates CustomHeapManager via placement new into malloc'd memory. run() calls user_main() then runs Monte Carlo π estimation. shutdown() explicitly calls CustomHeapManager destructor then frees memory.
+ [bx4AQqkg] Custom operator new/delete (lines 72-118): Checks g_custom_heap pointer to decide between custom allocator or malloc/free. Four operators defined: new, new[], delete, delete[].
+-[gVCrchbo] Root cause identified: Double-destruction bug in main.cpp. CustomHeapManager destructor is called twice: (1) explicitly at line 177 in shutdown(), and (2) again at line 186 in ~Application() which calls shutdown(). This causes double-free of heap_memory pointer. The crash only manifests in release mode due to optimization differences.
+-[WJx6uUYm] Fix strategy: Must prevent double-destruction in user.cpp since main.cpp cannot be modified. Need to add guard logic or intervene in the lifecycle to prevent the second destructor call from executing on already-freed memory.
+ </knowledge>
+ <procedural>
+ [A28WQYxc] Step 4: Both debug and release builds compiled successfully with their respective commands and library paths. No compilation errors encountered.
+ [NpP7GMC6] Step 5: Confirmed crash behavior - debug version runs successfully (exit 0), release version crashes with exit code -11 (SIGSEGV) after completing all computation. Crash occurs during shutdown/cleanup phase, not during execution. Output is identical until program termination.
+-[nw82tXtG] Valgrind does not detect the SIGSEGV crash when running the release binary - exits with code 0 and shows 73,728 bytes still reachable but no memory leaks. Direct execution of release binary crashes with exit code -11 (SIGSEGV). This timing/optimization difference suggests the double-free is handled differently under Valgrind's instrumentation vs native execution.
++[nw82tXtG] Valgrind does not detect the SIGSEGV crash when running the release binary - exits with code 0 and shows 73,728 bytes still reachable but no memory leaks. Direct execution of release binary crashes with exit code -11 (SIGSEGV).
+ </procedural>
+ </memory_bank>
+ 
+
+[F]
+(unchanged)
+[H0]
+(unchanged)
+[H1]
+--- archived_request
++++ H1
+@@ -1,6 +1,6 @@
+ ## Step 12
+ 
+-## Memory Bank (just updated)
++## Prior recorded memory
+ <memory_bank>
+ <status>Step 12: SUCCESS - Fix implemented and verified. Release binary now runs without crash (exit 0). The stdlib initialization approach in user_init() successfully resolved the issue by forcing early allocation of libstdc++ static objects before custom heap activation. Still need to verify with Valgrind for memory leak compliance.</status>
+ <knowledge>
+
+[P0]
+(unchanged)
+[P1]
+--- archived_request
++++ P1
+@@ -13,16 +13,13 @@
+ [iv8ByPVJ] Problem: Program crashes in RELEASE mode but works in DEBUG mode
+ [ncDQuy3H] File structure at /app/: main.cpp (195 lines), user.cpp (13 lines), user.h. User code is minimal - empty implementations of user_init(), user_cleanup(), and user_main().
+ [gRNci2PL] main.cpp implements custom heap manager with global operator new/delete overrides. Global pointer g_custom_heap controls whether custom allocator is used. CustomHeapManager allocates 10MB heap upfront, uses bump-pointer allocation (heap_offset), deallocate() is a no-op.
+-[fJCxMuJa] Application lifecycle: init() calls user_init() then creates CustomHeapManager via placement new into malloc'd memory. run() calls user_main() then runs Monte Carlo π estimation. shutdown() explicitly calls CustomHeapManager destructor then frees memory. Destructor also called in ~Application().
+-[AVprP8Lx] Critical bug pattern: CustomHeapManager destructor called twice - once in shutdown() (line 177) and again in ~Application() (line 186 calls shutdown()). This is double-free on heap_memory pointer.
++[fJCxMuJa] Application lifecycle: init() calls user_init() then creates CustomHeapManager via placement new into malloc'd memory. run() calls user_main() then runs Monte Carlo π estimation. shutdown() explicitly calls CustomHeapManager destructor then frees memory.
+ [bx4AQqkg] Custom operator new/delete (lines 72-118): Checks g_custom_heap pointer to decide between custom allocator or malloc/free. Four operators defined: new, new[], delete, delete[].
+-[gVCrchbo] Root cause identified: Double-destruction bug in main.cpp. CustomHeapManager destructor is called twice: (1) explicitly at line 177 in shutdown(), and (2) again at line 186 in ~Application() which calls shutdown(). This causes double-free of heap_memory pointer. The crash only manifests in release mode due to optimization differences.
+-[WJx6uUYm] Fix strategy: Must prevent double-destruction in user.cpp since main.cpp cannot be modified. Need to add guard logic or intervene in the lifecycle to prevent the second destructor call from executing on already-freed memory.
+ </knowledge>
+ <procedural>
+ [A28WQYxc] Step 4: Both debug and release builds compiled successfully with their respective commands and library paths. No compilation errors encountered.
+ [NpP7GMC6] Step 5: Confirmed crash behavior - debug version runs successfully (exit 0), release version crashes with exit code -11 (SIGSEGV) after completing all computation. Crash occurs during shutdown/cleanup phase, not during execution. Output is identical until program termination.
+-[nw82tXtG] Valgrind does not detect the SIGSEGV crash when running the release binary - exits with code 0 and shows 73,728 bytes still reachable but no memory leaks. Direct execution of release binary crashes with exit code -11 (SIGSEGV). This timing/optimization difference suggests the double-free is handled differently under Valgrind's instrumentation vs native execution.
++[nw82tXtG] Valgrind does not detect the SIGSEGV crash when running the release binary - exits with code 0 and shows 73,728 bytes still reachable but no memory leaks. Direct execution of release binary crashes with exit code -11 (SIGSEGV).
+ </procedural>
+ </memory_bank>
+ 
+
+CODE DIFF:
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/archive_upstream_memory_mechanism_diagnostic.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/archive_upstream_memory_mechanism_diagnostic.py
+new file mode 100644
+index 00000000..a7a741ac
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/archive_upstream_memory_mechanism_diagnostic.py
+@@ -0,0 +1,110 @@
++"""Publish a credential-redacted, per-file readable archive of one fixed run."""
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++from pathlib import Path
++import re
++import shutil
++import subprocess
++import zipfile
++
++from upstream_memory_mechanism_diagnostic import PROFILE_HASH, profile_identity
++
++
++def sha(data: bytes) -> str:
++    return hashlib.sha256(data).hexdigest()
++
++
++def redact(data: bytes, secrets: list[str]) -> bytes:
++    text = data.decode("utf-8", errors="strict")
++    for secret in secrets:
++        if secret:
++            text = text.replace(secret, "[REDACTED_PRIVATE_TRANSPORT]")
++    text = re.sub(r"(?i)(api[_-]?key\s*[:=]\s*[\"']?)[^\s\"',}]+",
++                  r"\1[REDACTED]", text)
++    return text.encode("utf-8")
++
++
++def archive(manifest_path: Path, run_root: Path, output: Path, profile_path: Path) -> dict:
++    if output.exists():
++        raise FileExistsError("archive target already exists")
++    profile, _ = profile_identity(profile_path)
++    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
++    if manifest["profile_sha256"] != PROFILE_HASH or Path(manifest["output_root"]) != run_root:
++        raise ValueError("run/profile binding differs")
++    output.mkdir(parents=True)
++    public = output / "raw_readable"
++    public.mkdir()
++    secrets = [profile.get("apikey", ""), profile.get("apibase", "")]
++    candidates = [manifest_path] + sorted(path for path in run_root.rglob("*") if path.is_file())
++    hashes = []
++    for source in candidates:
++        relative = Path("frozen_manifest.json") if source == manifest_path else source.relative_to(run_root)
++        target = public / relative
++        target.parent.mkdir(parents=True, exist_ok=True)
++        raw = source.read_bytes()
++        sanitized = redact(raw, secrets)
++        if any(secret and secret.encode("utf-8") in sanitized for secret in secrets):
++            raise ValueError("private transport data remains in archive")
++        target.write_bytes(sanitized)
++        hashes.append({"path": relative.as_posix(), "raw_private_sha256": sha(raw),
++                       "uploaded_sha256": sha(sanitized), "uploaded_size": len(sanitized),
++                       "redacted": raw != sanitized})
++    results = [json.loads(line) for line in (run_root / "summary.jsonl").read_text(
++        encoding="utf-8").splitlines()] if (run_root / "summary.jsonl").exists() else []
++    condition_key = [{"blind_unit": row["unit_id"], "block": row["block"],
++                      "condition": row["unit"], "status": row["status"]} for row in results]
++    (output / "condition_key.json").write_text(json.dumps(condition_key, indent=2), encoding="utf-8")
++    (output / "blind_index.txt").write_text("\n".join(
++        f"{row['unit_id']}: raw_readable/{row['unit_id']}/requests.jsonl, responses.jsonl, "
++        "provider_attempts.jsonl, bank_before.json, bank_after.json, result.json"
++        for row in results), encoding="utf-8")
++    (output / "FILE_HASHES.json").write_text(json.dumps(hashes, indent=2), encoding="utf-8")
++    with zipfile.ZipFile(output / "raw_trajectories.zip", "w", compression=zipfile.ZIP_DEFLATED) as bundle:
++        for file in public.rglob("*"):
++            if file.is_file():
++                bundle.write(file, file.relative_to(public))
++    root = Path(__file__).resolve().parents[3]
++    diff = subprocess.run(["git", "diff", "1aaa406475c47976ea93b7ab619b047f9d2ad150.." +
++                           manifest["code_commit"], "--",
++                           "method_discovery/curator_supervisor_convergence_v0/"
++                           "pma_full_upstream_ga_v1_20261013"], cwd=root,
++                          capture_output=True, text=True, check=True).stdout
++    completed = sum(row["status"] == "completed" for row in results)
++    report = ["ORIGINAL PMA ARCHIVED-INPUT DIAGNOSTIC — MECHANICAL AUDIT",
++              f"data commit: {manifest['data_commit']}",
++              f"run code commit: {manifest['code_commit']}",
++              f"batch ID: {manifest['batch_id']}",
++              f"profile SHA-256: {PROFILE_HASH}",
++              f"observed units: {len(results)}/40; completed: {completed}",
++              f"logical calls observed: {sum(row.get('logical_calls', 0) for row in results)}",
++              f"observable LiteLLM calls: {sum(row.get('observable_lower_calls', 0) for row in results)}",
++              "deeper provider attempts: unknown unless transport records expose them",
++              "Task/native evaluator/training/scoring-model calls: 0 (research entry has none)",
++              "These are archived-input replays, not exact historical model sampling or Task effects.",
++              "Condition mapping is separate from the numbered raw-material index.",
++              "Human review fields: " + ", ".join(manifest["review_fields"]),
++              "RESULTS:", json.dumps(results, ensure_ascii=False, indent=2),
++              "VARIANT DIFFS:"]
++    for label, value in manifest["variant_diffs"].items():
++        report.extend((f"[{label}]", value or "(unchanged)"))
++    report.extend(("CODE DIFF:", diff))
++    (output / "AUDIT.txt").write_text("\n".join(report), encoding="utf-8")
++    return {"completed": completed, "units_attempted": len(results),
++            "uploaded_files": len(hashes), "archive_sha256": sha((output / "raw_trajectories.zip").read_bytes())}
++
++
++def main() -> None:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--manifest", type=Path, required=True)
++    parser.add_argument("--run-root", type=Path, required=True)
++    parser.add_argument("--output", type=Path, required=True)
++    parser.add_argument("--profile", type=Path, required=True)
++    args = parser.parse_args()
++    print(json.dumps(archive(args.manifest, args.run_root, args.output, args.profile), sort_keys=True))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_upstream_memory_mechanism_diagnostic.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_upstream_memory_mechanism_diagnostic.py
+new file mode 100644
+index 00000000..d5bf64a4
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_upstream_memory_mechanism_diagnostic.py
+@@ -0,0 +1,98 @@
++"""Zero-network guards for the archived-input original-U diagnostic."""
++import asyncio
++import copy
++import json
++from pathlib import Path
++from tempfile import TemporaryDirectory
++import unittest
++from unittest.mock import patch
++
++import litellm
++
++import upstream_memory_mechanism_diagnostic as diagnostic
++
++
++class DiagnosticTests(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        cls.frozen = diagnostic.prepare()
++
++    def test_fixed_identity_and_allowlisted_variants(self):
++        self.assertEqual(len(self.frozen["checks"]), 14)
++        self.assertEqual(sum(u["stage_count"] for u in self.frozen["units"]), 44)
++        self.assertEqual(len(self.frozen["units"]), 40)
++        for label in ("A1", "A2", "A3", "P1", "H1"):
++            changed = [u for u in self.frozen["units"] if u["label"] == label]
++            self.assertEqual(len(changed), 4)
++            self.assertEqual(len({u["prompt"] for u in changed}), 1)
++        self.assertIn("[fJCxMuJa]", self.frozen["units"][4]["prompt"])
++
++    def test_archive_receipts_rebuild_deterministic_bank(self):
++        again = diagnostic.prepare()
++        for key in ("checks", "pre_bank_step2", "pre_bank_step10", "post_banks", "units"):
++            self.assertEqual(self.frozen[key], again[key])
++        self.assertEqual(self.frozen["pre_bank_step2"]["knowledge"][0]["created_at"],
++                         "1970-01-01T00:00:00")
++
++    def test_original_process_fake_updates_phase2(self):
++        result = asyncio.run(diagnostic.fake_cycle())
++        self.assertEqual(result["requests"], 2)
++        self.assertTrue(result["phase2_contains_updated_bank"])
++        self.assertEqual(result["network_requests"], 0)
++
++    def test_real_send_boundary_with_fake_response(self):
++        unit = next(u for u in self.frozen["units"] if u["label"] == "H0")
++        profile = diagnostic.profile_identity(Path("E:/LongContext/monitor_config/models.local.json"))[0]
++        sent = []
++
++        async def fake_completion(**kwargs):
++            sent.append(kwargs)
++            return {"model": "fake-transport", "usage": {"prompt_tokens": 1},
++                    "choices": [{"message": {"content": "<no_intervention/>",
++                                              "tool_calls": None}, "finish_reason": "stop"}]}
++
++        with TemporaryDirectory() as temp, patch.object(litellm, "acompletion", fake_completion):
++            result = asyncio.run(diagnostic.execute_unit(self.frozen, unit, profile,
++                                                         Path(temp) / "unit"))
++            self.assertEqual(result["status"], "completed")
++            self.assertEqual(result["logical_calls"], 1)
++            self.assertEqual(result["observable_lower_calls"], 1)
++            self.assertEqual(sent[0]["model"], "anthropic/claude-opus-4-8")
++            self.assertEqual(sent[0]["messages"][-1]["content"][0]["text"], unit["prompt"])
++            self.assertEqual(len((Path(temp) / "unit" / "requests.jsonl").read_text(encoding="utf-8").splitlines()), 1)
++
++    def test_phase1_final_failure_blocks_phase2(self):
++        unit = next(u for u in self.frozen["units"] if u["mode"] == "original_process")
++        profile = diagnostic.profile_identity(Path("E:/LongContext/monitor_config/models.local.json"))[0]
++        sent = []
++
++        async def fail_completion(**kwargs):
++            sent.append(kwargs)
++            raise RuntimeError("synthetic final transport failure")
++
++        with TemporaryDirectory() as temp, patch.object(litellm, "acompletion", fail_completion):
++            result = asyncio.run(diagnostic.execute_unit(self.frozen, unit, profile,
++                                                         Path(temp) / "unit"))
++            self.assertEqual(result["status"], "stopped_failure")
++            self.assertEqual(result["observable_lower_calls"], len(sent))
++            self.assertEqual(len(sent), 3)  # Upstream retry limit, no new outer retry.
++            blocked = (Path(temp) / "unit" / "blocked_requests.jsonl").read_text(encoding="utf-8")
++            self.assertIn('"sent": false', blocked)
++
++    def test_mismatched_authorization_rejected_without_send(self):
++        with TemporaryDirectory() as temp:
++            parent = Path(temp)
++            manifest = copy.deepcopy(self.frozen)
++            manifest.update(code_commit=diagnostic.code_commit(), output_root=str(parent / "out"),
++                            profile_public={}, batch_id="synthetic")
++            (parent / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
++            (parent / "auth.json").write_text(json.dumps({"execution_authorized": True}),
++                                              encoding="utf-8")
++            with self.assertRaises(PermissionError):
++                diagnostic.check_authorized(parent / "manifest.json", parent / "auth.json",
++                                            Path("E:/LongContext/monitor_config/models.local.json"))
++            self.assertFalse((parent / "out").exists())
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/upstream_memory_mechanism_diagnostic.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/upstream_memory_mechanism_diagnostic.py
+new file mode 100644
+index 00000000..1457aa60
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/upstream_memory_mechanism_diagnostic.py
+@@ -0,0 +1,633 @@
++"""Archived-input, original-PMA memory diagnostic; no Task or evaluator."""
++from __future__ import annotations
++
++import argparse
++import asyncio
++import copy
++import difflib
++import hashlib
++import json
++import os
++from pathlib import Path
++from tempfile import TemporaryDirectory
++import time
++from types import SimpleNamespace
++from unittest.mock import patch
++import uuid
++import subprocess
++
++from harbor.llms.base import LLMResponse
++
++import litellm
++from memory_agent.memory.memory_agent import BANK_TOOLS, PHASE1_SYSTEM, PHASE2_SYSTEM
++from memory_agent.memory.universal_memory import UniversalMemory
++
++from episode import construct_upstream
++from static_source_live import append_json, public_value
++from worker_main import install_transport_audit
++
++
++HERE = Path(__file__).resolve().parent
++ARCHIVE = HERE / "six_task_live_batch_20261014_r1/raw/arms/07/host_private/archive"
++PROFILE_HASH = "cc5f784b069034f44bc4527d15acd70191b1f7fc5810556c087b7b35e0ae00f1"
++DATA_COMMIT = "3947b72af7c0fbf1a4e982d4f9ed38020e0f63f0"
++REPLAY_SCHEMA = "upstream-memory-mechanism-diagnostic-v1"
++TITLE_FROM = "## Memory Bank (just updated)"
++TITLE_TO = "## Prior recorded memory"
++CLUSTER = {
++    "AVprP8Lx": "Critical bug pattern: CustomHeapManager destructor called twice - once in shutdown() (line 177) and again in ~Application() (line 186 calls shutdown()). This is double-free on heap_memory pointer.",
++    "gVCrchbo": "Root cause identified: Double-destruction bug in main.cpp. CustomHeapManager destructor is called twice: (1) explicitly at line 177 in shutdown(), and (2) again at line 186 in ~Application() which calls shutdown(). This causes double-free of heap_memory pointer. The crash only manifests in release mode due to optimization differences.",
++    "WJx6uUYm": "Fix strategy: Must prevent double-destruction in user.cpp since main.cpp cannot be modified. Need to add guard logic or intervene in the lifecycle to prevent the second destructor call from executing on already-freed memory.",
++}
++MIXED = {
++    "fJCxMuJa": " Destructor also called in ~Application().",
++    "nw82tXtG": " This timing/optimization difference suggests the double-free is handled differently under Valgrind's instrumentation vs native execution.",
++}
++# Each block contains the same eleven logical calls. The P pair is inseparable.
++BLOCK_ORDERS = (
++    ("F", "A0", "P", "H0", "A2", "P1", "A1", "H1", "A3", "P0"),
++    ("A1", "F", "H1", "A3", "P0", "A0", "P", "A2", "H0", "P1"),
++    ("H0", "A2", "P1", "F", "A0", "H1", "P", "A3", "P0", "A1"),
++    ("P0", "H1", "A3", "P", "A1", "F", "P1", "A0", "A2", "H0"),
++)
++
++
++def digest(data: bytes) -> str:
++    return hashlib.sha256(data).hexdigest()
++
++
++def canonical(value: object) -> bytes:
++    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
++
++
++def read_archive():
++    trajectory = json.loads((ARCHIVE / "trajectory_memory.json").read_text(encoding="utf-8"))
++    payloads = [json.loads(line) for line in (ARCHIVE / "memory_payload.jsonl").read_text(
++        encoding="utf-8").splitlines()]
++    if len(trajectory["steps"]) != 14 or len(payloads) != 28:
++        raise ValueError("archived PMA step/request count changed")
++    return trajectory["steps"], payloads
++
++
++def apply_recorded_operations(bank: UniversalMemory, operations: list[dict]) -> None:
++    """Materialize the historical *successful* upstream receipts and exact IDs."""
++    for operation in operations:
++        if operation["success"] is not True:
++            if operation["action"] == "delete" and operation.get("error") == "ID not found":
++                if bank.get(operation["memory_id"]) is not None:
++                    raise ValueError("historical failed deletion now resolves")
++                continue
++            raise ValueError("unsupported historical failed memory operation")
++        action = operation["action"]
++        if action in {"save_knowledge", "save_procedural"}:
++            method = bank.save_knowledge if action == "save_knowledge" else bank.save_procedural
++            identity = operation["memory_id"]
++            if bank.get(identity) is not None:
++                raise ValueError("historical memory ID collision")
++            with patch.object(bank, "_generate_id", return_value=identity):
++                if method(operation["content"]) != identity:
++                    raise ValueError("upstream save identity mismatch")
++            # Archive receipts preserve identity/content, not the original
++            # MemoryEntry creation clock. A fixed replay-only clock makes the
++            # frozen bank serializable and reproducible without claiming to
++            # recover a historical timestamp; upstream prompt text omits it.
++            bank.get(identity).created_at = "1970-01-01T00:00:00"
++        elif action == "update_status":
++            bank.update_status(operation["content"])
++        elif action == "delete":
++            if not bank.delete(operation["memory_id"]):
++                raise ValueError("historical deletion identity mismatch")
++        else:
++            raise ValueError("unsupported historical operation")
++
++
++def reconstruct_and_check():
++    steps, payloads = read_archive()
++    bank = UniversalMemory()
++    pre = {}
++    post = {}
++    checks = []
++    # This materialization uses historical receipts, not new inferred PMA actions.
++    with TemporaryDirectory(prefix="pma-archive-check-") as temp:
++      agent = construct_upstream(Path(temp) / "upstream", research_candidate="U")
++      engine = agent._memory_agent
++      for index, step in enumerate(steps, 1):
++        if step["step_count"] != index or payloads[2 * index - 2]["phase"] != "bank_management":
++            raise ValueError("PMA step ordering changed")
++        pre[index] = copy.deepcopy(bank.to_dict())
++        engine.memory = bank
++        phase1 = engine._build_phase1_prompt(step["observation"], index)
++        archived1 = payloads[2 * index - 2]
++        if (phase1 != step["user_prompt_phase1"] or phase1 != archived1["prompt"]
++                or archived1["system"] != PHASE1_SYSTEM or archived1["tools"] != BANK_TOOLS):
++            raise ValueError(f"step {index} Phase 1 prompt/system/schema mismatch")
++        apply_recorded_operations(bank, step["operations"])
++        snapshot = step["memory_snapshot"]
++        if (bank.status != snapshot["status"] or len(bank.knowledge) != snapshot["knowledge_count"]
++                or len(bank.procedural) != snapshot["procedural_count"]):
++            raise ValueError(f"step {index} post-operation snapshot mismatch")
++        phase2 = engine._build_phase2_prompt(step["observation"], index)
++        archived2 = payloads[2 * index - 1]
++        if (phase2 != step["user_prompt_phase2"] or phase2 != archived2["prompt"]
++                or archived2["system"] != PHASE2_SYSTEM or archived2["tools"] is not None):
++            raise ValueError(f"step {index} Phase 2 prompt/system/schema mismatch")
++        checks.append({"step": index, "pre_bank_sha256": digest(canonical(pre[index])),
++                       "phase1_sha256": digest(phase1.encode()),
++                       "phase2_sha256": digest(phase2.encode()),
++                       "knowledge": len(bank.knowledge), "procedural": len(bank.procedural)})
++        post[index] = copy.deepcopy(bank.to_dict())
++    return steps, payloads, pre, post, checks
++
++
++def replace_exact(prompt: str, old: str, new: str, expected: int = 1) -> str:
++    if prompt.count(old) != expected:
++        raise ValueError("variant target is not unique and exact")
++    return prompt.replace(old, new)
++
++
++def variant_prompt(prompt: str, condition: str) -> str:
++    if condition in {"A1", "H1"}:
++        return replace_exact(prompt, TITLE_FROM, TITLE_TO)
++    if condition not in {"A2", "A3", "P1"}:
++        return prompt
++    changed = prompt
++    for identity, content in CLUSTER.items():
++        old = f"[{identity}] {content}\n"
++        new = (f"[{identity}] Past proposed, unverified explanation: {content}\n"
++               if condition == "A2" else "")
++        changed = replace_exact(changed, old, new)
++    for identity, phrase in MIXED.items():
++        # Change only the registered clause within its unique memory line.
++        lines = [line for line in changed.splitlines(keepends=True) if line.startswith(f"[{identity}] ")]
++        if len(lines) != 1 or lines[0].count(phrase) != 1:
++            raise ValueError("mixed diagnostic clause not uniquely registered")
++        old_line = lines[0]
++        new_line = old_line.replace(phrase, (" Prior unverified interpretation:" + phrase
++                                         if condition == "A2" else ""))
++        changed = replace_exact(changed, old_line, new_line)
++    return changed
++
++
++def units(payloads):
++    baselines = {"F": payloads[2], "A": payloads[17], "P0": payloads[19],
++                 "H": payloads[23]}
++    result = []
++    for block, order in enumerate(BLOCK_ORDERS, 1):
++        for label in order:
++            source = "A" if label.startswith("A") else "H" if label.startswith("H") else label
++            if label == "P1":
++                source = "P0"
++            if label == "P":
++                result.append({"block": block, "label": label, "stage_count": 2,
++                               "step": 10, "mode": "original_process"})
++                continue
++            base = baselines[source]
++            prompt = variant_prompt(base["prompt"], label)
++            result.append({"block": block, "label": label, "stage_count": 1,
++                           "step": {"F": 2, "A": 9, "P0": 10, "H": 12}[source],
++                           "mode": "phase1_only" if label == "F" else "phase2_only",
++                           "prompt": prompt, "system": base["system"], "tools": base["tools"],
++                           "baseline_prompt_sha256": digest(base["prompt"].encode()),
++                           "prompt_sha256": digest(prompt.encode())})
++    if len(result) != 40 or sum(item["stage_count"] for item in result) != 44:
++        raise ValueError("unexpected fixed diagnostic call plan")
++    return result
++
++
++def prepare() -> dict:
++    root = HERE.parents[2]
++    for name in ("trajectory_memory.json", "memory_payload.jsonl", "memory_transport.jsonl"):
++        relative = (ARCHIVE / name).relative_to(root).as_posix()
++        archived = subprocess.run(["git", "rev-parse", f"{DATA_COMMIT}:{relative}"],
++                                  cwd=root, check=True, capture_output=True, text=True).stdout.strip()
++        current = subprocess.run(["git", "rev-parse", f"HEAD:{relative}"],
++                                 cwd=root, check=True, capture_output=True, text=True).stdout.strip()
++        if archived != current:
++            raise ValueError(f"fixed data Git blob differs: {name}")
++    steps, payloads, pre, post, checks = reconstruct_and_check()
++    planned = units(payloads)
++    for item in planned:
++        if item["mode"] == "phase1_only" and item["tools"] != BANK_TOOLS:
++            raise ValueError("original Phase 1 schema drift")
++        if item["mode"] == "phase2_only" and item["tools"] is not None:
++            raise ValueError("unexpected Phase 2 tools")
++        if item.get("prompt") and "<memory_bank>" not in item["prompt"]:
++            raise ValueError("diagnostic variant lost the original bank")
++        if item["mode"] == "phase2_only":
++            original = payloads[2 * item["step"] - 1]["prompt"]
++            for boundary in ("<memory_bank>", "</memory_bank>"):
++                if item["prompt"].count(boundary) != 1:
++                    raise ValueError("variant bank boundary changed")
++            before, after = original.split("<memory_bank>", 1)
++            changed_before, changed_after = item["prompt"].split("<memory_bank>", 1)
++            if item["label"] in {"A1", "H1"}:
++                if changed_before != before.replace(TITLE_FROM, TITLE_TO):
++                    raise ValueError("title change escaped allowlist")
++            elif changed_before != before:
++                raise ValueError("diagnostic change escaped memory bank")
++            if changed_after.split("</memory_bank>", 1)[1] != after.split("</memory_bank>", 1)[1]:
++                raise ValueError("diagnostic change escaped memory bank")
++        if item["mode"] == "original_process":
++            item.update(phase1_prompt=payloads[18]["prompt"],
++                        phase1_system=PHASE1_SYSTEM, phase1_tools=BANK_TOOLS)
++    variant_diffs = {}
++    for item in planned:
++        if item["mode"] == "original_process" or item["label"] in variant_diffs:
++            continue
++        original = payloads[2 * item["step"] - (2 if item["mode"] == "phase1_only" else 1)]["prompt"]
++        variant_diffs[item["label"]] = "".join(difflib.unified_diff(
++            original.splitlines(keepends=True), item["prompt"].splitlines(keepends=True),
++            fromfile="archived_request", tofile=item["label"]))
++    return {"schema": REPLAY_SCHEMA, "data_commit": DATA_COMMIT,
++            "source_files": {name: digest((ARCHIVE / name).read_bytes()) for name in
++                             ("trajectory_memory.json", "memory_payload.jsonl", "memory_transport.jsonl")},
++            "profile_sha256": PROFILE_HASH, "execution_authorized": False,
++            "checks": checks, "units": planned, "variant_diffs": variant_diffs,
++            "pre_bank_step2": pre[2], "pre_bank_step10": pre[10],
++            "post_banks": {str(step): post[step] for step in (9, 10, 12)},
++            "observations": {"2": steps[1]["observation"], "10": steps[9]["observation"]}}
++
++
++def code_commit() -> str:
++    root = HERE.parents[2]
++    result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root,
++                            check=True, capture_output=True, text=True)
++    return result.stdout.strip()
++
++
++def write_new(path: Path, value: object) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    with path.open("x", encoding="utf-8") as stream:
++        json.dump(value, stream, ensure_ascii=False, indent=2, sort_keys=True)
++        stream.flush()
++        os.fsync(stream.fileno())
++
++
++def profile_identity(path: Path) -> tuple[dict, dict]:
++    raw = path.read_bytes()
++    if digest(raw) != PROFILE_HASH:
++        raise PermissionError("private profile bytes differ from approved identity")
++    data = json.loads(raw)["claude_monitor_opus48"]
++    required = {"provider": "anthropic", "api_mode": "messages",
++                "model": "claude-opus-4-8", "thinking_type": "adaptive"}
++    if any(data.get(key) != value for key, value in required.items()):
++        raise PermissionError("private profile model route differs")
++    safe = {key: value for key, value in data.items()
++            if key in {"provider", "api_mode", "model", "thinking_type",
++                       "temperature", "reasoning_effort", "max_tokens", "read_timeout",
++                       "max_retries"}}
++    return data, safe
++
++
++async def fake_cycle() -> dict:
++    frozen = prepare()
++    with TemporaryDirectory(prefix="pma-upstream-fake-") as temp:
++        agent = construct_upstream(Path(temp) / "upstream", research_candidate="U")
++        bank = UniversalMemory.from_dict(frozen["pre_bank_step10"])
++        agent._memory = bank
++        agent._memory_agent.memory = bank
++        sent = []
++        async def fake_call(*, prompt, system, tools=None):
++            sent.append({"prompt": prompt, "system": system, "tools": tools})
++            if len(sent) == 1:
++                return LLMResponse(content="", tool_calls=[SimpleNamespace(function=SimpleNamespace(
++                    name="memory_update_status", arguments={"content": "FAKE_PROVEN_UPDATE"}))])
++            if len(sent) == 2:
++                return LLMResponse(content="<no_intervention/>")
++            raise AssertionError("unexpected fake transport request")
++        agent._memory_llm.call = fake_call
++        async def forbid_network(**kwargs):
++            raise AssertionError("fake path attempted real network")
++        original_lower = litellm.acompletion
++        litellm.acompletion = forbid_network
++        try:
++            result = await agent._memory_agent.process(frozen["observations"]["10"], 10)
++        finally:
++            litellm.acompletion = original_lower
++        if (len(sent) != 2 or sent[0]["prompt"] != frozen["units"][2]["phase1_prompt"]
++                or "FAKE_PROVEN_UPDATE" not in sent[1]["prompt"]
++                or bank.status != "FAKE_PROVEN_UPDATE" or not result.operations[0].success):
++            raise AssertionError("upstream fake two-stage propagation failed")
++        return {"requests": len(sent), "phase1_prompt_sha256": digest(sent[0]["prompt"].encode()),
++                "phase2_contains_updated_bank": True,
++                "tool_name": "memory_update_status", "network_requests": 0}
++
++
++REVIEW_FIELDS = (
++    "double_destruction_asserted_as_certain_cause",
++    "task_direction_rejected_for_second_destructor",
++    "uncertainty_or_appropriate_silence",
++    "phase1_recognizes_nullptr_guard",
++    "phase1_deletes_or_revises_old_diagnosis_and_advice",
++    "proposed_operations_executed",
++    "executed_update_visible_in_phase2",
++    "task_scope_and_valgrind_retained",
++    "premature_sufficient_validation_claim",
++    "unsupported_new_constraint_or_conclusion",
++    "format_failure", "tool_execution_failure", "semantic_error",
++)
++
++
++def freeze(manifest_path: Path, output_root: Path, profile_path: Path) -> dict:
++    if manifest_path.exists() or output_root.exists():
++        raise FileExistsError("manifest or run output already exists")
++    profile, safe_profile = profile_identity(profile_path)
++    frozen = prepare()
++    if subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"],
++                      cwd=HERE.parents[2], capture_output=True, text=True,
++                      check=True).stdout.strip():
++        raise PermissionError("tracked run code is dirty")
++    frozen.update(code_commit=code_commit(), batch_id="pma-original-44-" + uuid.uuid4().hex[:12],
++                  output_root=str(output_root.resolve()), profile_public=safe_profile,
++                  review_fields=REVIEW_FIELDS,
++                  interpretation=("archived-input replay, not exact historical model sampling; "
++                                  "four repeats of one exposed case, no Task outcome"),
++                  order=[{"unit_id": f"unit-{i:02d}", "block": u["block"],
++                          "condition": u["label"], "logical_stage_count": u["stage_count"]}
++                         for i, u in enumerate(frozen["units"], 1)])
++    if len(frozen["order"]) != 40 or sum(u["logical_stage_count"] for u in frozen["order"]) != 44:
++        raise ValueError("frozen order invalid")
++    write_new(manifest_path, frozen)
++    return {"manifest_sha256": digest(manifest_path.read_bytes()),
++            "code_commit": frozen["code_commit"], "batch_id": frozen["batch_id"],
++            "units": 40, "logical_stages": 44, "profile_public": safe_profile}
++
++
++def approve(manifest_path: Path, auth_path: Path, profile_path: Path, source: str) -> dict:
++    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
++    _, safe_profile = profile_identity(profile_path)
++    if (manifest.get("schema") != REPLAY_SCHEMA or manifest.get("execution_authorized") is not False
++            or manifest.get("code_commit") != code_commit() or
++            manifest.get("profile_sha256") != PROFILE_HASH or
++            manifest.get("profile_public") != safe_profile or
++            Path(manifest["output_root"]).exists() or not source.strip()):
++        raise PermissionError("frozen identity or approval source mismatch")
++    checked = prepare()
++    if any(manifest.get(key) != checked[key] for key in
++           ("source_files", "units", "checks", "variant_diffs", "pre_bank_step2", "pre_bank_step10",
++            "post_banks", "observations")):
++        raise PermissionError("frozen model input differs from certified archive")
++    expected_order = [{"unit_id": f"unit-{i:02d}", "block": u["block"],
++                       "condition": u["label"], "logical_stage_count": u["stage_count"]}
++                      for i, u in enumerate(checked["units"], 1)]
++    if manifest.get("order") != expected_order or manifest.get("review_fields") != list(REVIEW_FIELDS):
++        raise PermissionError("frozen order or review fields differ")
++    auth = {"schema": "pma-original-44-once-v1", "execution_authorized": True,
++            "authorization_source": source, "batch_id": manifest["batch_id"],
++            "manifest_sha256": digest(manifest_path.read_bytes()),
++            "code_commit": code_commit(), "profile_sha256": PROFILE_HASH,
++            "output_root": manifest["output_root"], "issued_epoch": time.time()}
++    write_new(auth_path, auth)
++    return {"authorization_sha256": digest(auth_path.read_bytes()),
++            "batch_id": auth["batch_id"], "output_root": auth["output_root"]}
++
++
++def check_authorized(manifest_path: Path, auth_path: Path, profile_path: Path) -> tuple[dict, dict]:
++    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
++    auth = json.loads(auth_path.read_text(encoding="utf-8"))
++    profile, safe_profile = profile_identity(profile_path)
++    if (manifest.get("schema") != REPLAY_SCHEMA or manifest.get("execution_authorized") is not False
++            or manifest.get("code_commit") != code_commit() or
++            manifest.get("profile_public") != safe_profile or
++            manifest.get("profile_sha256") != PROFILE_HASH or
++            auth.get("schema") != "pma-original-44-once-v1" or
++            auth.get("execution_authorized") is not True or
++            auth.get("manifest_sha256") != digest(manifest_path.read_bytes()) or
++            auth.get("batch_id") != manifest.get("batch_id") or
++            auth.get("code_commit") != code_commit() or
++            auth.get("profile_sha256") != PROFILE_HASH or
++            auth.get("output_root") != manifest.get("output_root") or
++            Path(manifest["output_root"]).exists() or
++            len(manifest.get("units", [])) != 40 or
++            sum(unit.get("stage_count", 0) for unit in manifest["units"]) != 44):
++        raise PermissionError("one-use authorization or fixed identity mismatch")
++    current = prepare()
++    for key in ("source_files", "checks", "units", "variant_diffs", "pre_bank_step2", "pre_bank_step10",
++                "post_banks", "observations"):
++        if manifest[key] != current[key]:
++            raise PermissionError(f"frozen {key} identity mismatch")
++    if manifest.get("order") != [{"unit_id": f"unit-{i:02d}", "block": u["block"],
++                                 "condition": u["label"], "logical_stage_count": u["stage_count"]}
++                                for i, u in enumerate(current["units"], 1)]:
++        raise PermissionError("frozen order mismatch")
++    return manifest, profile
++
++
++def chosen_bank(manifest: dict, unit: dict) -> UniversalMemory:
++    if unit["mode"] == "phase1_only":
++        data = manifest["pre_bank_step2"]
++    elif unit["mode"] == "original_process":
++        data = manifest["pre_bank_step10"]
++    else:
++        data = manifest["post_banks"][str(unit["step"])]
++    return UniversalMemory.from_dict(copy.deepcopy(data))
++
++
++async def execute_unit(manifest: dict, unit: dict, profile: dict, directory: Path) -> dict:
++    directory.mkdir(exist_ok=False)
++    agent = construct_upstream(directory / "upstream", memory_profile=profile,
++                               research_candidate="U")
++    bank = chosen_bank(manifest, unit)
++    agent._memory = bank
++    agent._memory_agent.memory = bank
++    write_new(directory / "bank_before.json", bank.to_dict())
++    original = agent._memory_llm.call
++    original_lower = litellm.acompletion
++    logical = 0
++    observed_lower = 0
++    fatal = None
++    capture_fault = None
++
++    async def lower_call(**kwargs):
++        nonlocal observed_lower, capture_fault
++        if fatal is not None or capture_fault is not None:
++            raise RuntimeError("sending stopped")
++        observed_lower += 1
++        index = observed_lower
++        try:
++            append_json(directory / "provider_attempts.jsonl", {
++                "attempt": index, "epoch": time.time(), "model": kwargs.get("model"),
++                "max_tokens": kwargs.get("max_tokens"), "temperature": kwargs.get("temperature"),
++                "thinking": public_value(kwargs.get("thinking")),
++                "reasoning_effort": kwargs.get("reasoning_effort"),
++                "timeout": kwargs.get("timeout"), "messages": public_value(kwargs.get("messages")),
++                "tools": public_value(kwargs.get("tools"))})
++        except Exception as exc:
++            capture_fault = exc
++            raise
++        try:
++            returned = await original_lower(**kwargs)
++            try:
++                append_json(directory / "provider_attempts.jsonl", {
++                    "attempt": index, "outcome": "returned", "epoch": time.time(),
++                    "returned_model": returned.get("model"),
++                    "usage": public_value(returned.get("usage")),
++                    "choices": public_value(returned.get("choices"))})
++            except Exception as exc:
++                capture_fault = exc  # Accepted response must never be retried for logging.
++            return returned
++        except BaseException as exc:
++            try:
++                append_json(directory / "provider_attempts.jsonl", {
++                    "attempt": index, "outcome": "exception", "epoch": time.time(),
++                    "error_type": type(exc).__name__, "server_execution": "unknown"})
++            except Exception as capture_exc:
++                capture_fault = capture_exc
++            raise
++
++    async def audited_call(*, prompt, system, tools=None):
++        nonlocal logical, fatal, capture_fault
++        if fatal is not None or capture_fault is not None:
++            append_json(directory / "blocked_requests.jsonl", {
++                "phase": "phase1" if tools is not None else "phase2", "sent": False,
++                "reason": "prior_terminal_or_capture_failure"})
++            raise RuntimeError("prior terminal call forbids further sends")
++        logical += 1
++        index = logical
++        phase = "phase1" if tools is not None else "phase2"
++        if unit["mode"] == "phase1_only" and index != 1:
++            raise RuntimeError("F is exactly one phase")
++        if unit["mode"] == "phase2_only" and index != 1:
++            raise RuntimeError("fixed Phase 2 unit is exactly one phase")
++        if unit["mode"] == "original_process" and index > 2:
++            raise RuntimeError("P exceeded the original two phases")
++        try:
++            append_json(directory / "requests.jsonl", {"logical_call": index, "phase": phase,
++                "epoch": time.time(), "prompt": prompt, "system": system, "tools": tools})
++        except Exception as exc:
++            capture_fault = exc
++            raise
++        try:
++            response = await original(prompt=prompt, system=system, tools=tools)
++            if capture_fault is not None:
++                raise RuntimeError("accepted response capture failed") from capture_fault
++            append_json(directory / "responses.jsonl", {"logical_call": index, "phase": phase,
++                "outcome": "returned", "epoch": time.time(), "content": response.content,
++                "tool_calls": public_value(response.tool_calls),
++                "usage": public_value(response.usage)})
++            return response
++        except BaseException as exc:
++            fatal = exc
++            try:
++                append_json(directory / "responses.jsonl", {"logical_call": index,
++                    "phase": phase, "outcome": "exception", "epoch": time.time(),
++                    "error_type": type(exc).__name__, "server_execution": "unknown"})
++            except Exception as capture_exc:
++                capture_fault = capture_exc
++            raise
++
++    # Reuse the worker's original request/transport audit, then add a bounded
++    # response record and the same lower-boundary observation used by static U.
++    install_transport_audit(agent, directory)
++    original = agent._memory_llm.call
++    agent._memory_llm.call = audited_call
++    litellm.acompletion = lower_call
++    result = {"unit": unit["label"], "block": unit["block"], "mode": unit["mode"]}
++    try:
++        if unit["mode"] == "phase1_only":
++            response = await agent._memory_agent._call_llm_phase1(unit["prompt"])
++            operations = agent._memory_agent._execute_tool_calls(response)
++            result["operations"] = [public_value(op) for op in operations]
++        elif unit["mode"] == "phase2_only":
++            response = await agent._memory_agent._call_llm_phase2(unit["prompt"])
++            result["parsed_reminder"] = agent._memory_agent._parse_phase2_response(
++                response.content or "")
++        else:
++            expected = unit["phase1_prompt"]
++            actual = agent._memory_agent._build_phase1_prompt(manifest["observations"]["10"], 10)
++            if actual != expected:
++                raise RuntimeError("P Phase 1 reconstructed prompt drifted")
++            cycle = await agent._memory_agent.process(manifest["observations"]["10"], 10)
++            result["operations"] = [public_value(op) for op in cycle.operations]
++            result["parsed_reminder"] = cycle.context_for_action
++            result["phase2_prompt_sha256"] = digest((cycle.user_prompt_phase2 or "").encode())
++        if fatal is not None or capture_fault is not None or logical != unit["stage_count"]:
++            raise RuntimeError("phase failed, capture failed, or stage count differs")
++        result["status"] = "completed"
++    except BaseException as exc:
++        result["status"] = "stopped_failure"
++        result["error_type"] = type(exc).__name__
++        result["server_execution"] = "unknown" if fatal is not None else "not_sent_or_unknown"
++    finally:
++        litellm.acompletion = original_lower
++        result.update(logical_calls=logical, observable_lower_calls=observed_lower,
++                      deeper_network_attempts="unknown", ended_epoch=time.time())
++        try:
++            write_new(directory / "bank_after.json", bank.to_dict())
++        except Exception as exc:
++            result["status"] = "archive_integrity_failure"
++            result["error_type"] = type(exc).__name__
++        write_new(directory / "result.json", result)
++    return result
++
++
++async def run_authorized(manifest_path: Path, auth_path: Path, profile_path: Path) -> list[dict]:
++    manifest, profile = check_authorized(manifest_path, auth_path, profile_path)
++    root = Path(manifest["output_root"])
++    root.mkdir(parents=True, exist_ok=False)
++    write_new(root / "authorization_consumed.json", {
++        "batch_id": manifest["batch_id"], "manifest_sha256": digest(manifest_path.read_bytes()),
++        "code_commit": code_commit(), "profile_sha256": PROFILE_HASH,
++        "authorized_units": manifest["order"]})
++    results = []
++    try:
++        for index, unit in enumerate(manifest["units"], 1):
++            row = await execute_unit(manifest, unit, profile, root / f"unit-{index:02d}")
++            row["unit_id"] = f"unit-{index:02d}"
++            results.append(row)
++            append_json(root / "summary.jsonl", row)
++            if row["status"] != "completed":
++                break
++    finally:
++        write_new(root / "authorization_revoked.json", {
++            "batch_id": manifest["batch_id"], "epoch": time.time(),
++            "completed_units": len(results), "reason": "single_use_finished_or_stopped"})
++        auth_path.unlink(missing_ok=True)
++    return results
++
++
++def main() -> None:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--mode", choices=("check", "fake", "freeze", "authorize", "live"), default="check")
++    parser.add_argument("--manifest", type=Path)
++    parser.add_argument("--authorization", type=Path)
++    parser.add_argument("--output-root", type=Path)
++    parser.add_argument("--profile", type=Path)
++    parser.add_argument("--authorization-source")
++    args = parser.parse_args()
++    if args.mode == "fake":
++        result = asyncio.run(fake_cycle())
++    elif args.mode == "check":
++        prepared = prepare()
++        result = {"schema": prepared["schema"], "steps_checked": len(prepared["checks"]),
++                  "units": len(prepared["units"]), "logical_stages": sum(
++                      u["stage_count"] for u in prepared["units"]),
++                  "profile_sha256": prepared["profile_sha256"]}
++    else:
++        if args.manifest is None or args.profile is None:
++            parser.error("manifest and profile are required")
++        if args.mode == "freeze":
++            if args.output_root is None:
++                parser.error("output-root is required")
++            result = freeze(args.manifest, args.output_root, args.profile)
++        elif args.mode == "authorize":
++            if args.authorization is None or args.authorization_source is None:
++                parser.error("authorization and authorization-source are required")
++            result = approve(args.manifest, args.authorization, args.profile,
++                             args.authorization_source)
++        else:
++            if args.authorization is None:
++                parser.error("authorization is required")
++            rows = asyncio.run(run_authorized(args.manifest, args.authorization, args.profile))
++            result = {"units_attempted": len(rows), "logical_calls": sum(
++                row["logical_calls"] for row in rows), "stopped": any(
++                row["status"] != "completed" for row in rows)}
++    print(json.dumps(result, sort_keys=True))
++    if args.mode == "live" and result["stopped"]:
++        raise SystemExit(1)
++
++
++if __name__ == "__main__":
++    main()
++
++

@@ -1,0 +1,49 @@
+{
+  "block": 1,
+  "deeper_network_attempts": "unknown",
+  "ended_epoch": 1792043436.0557992,
+  "logical_calls": 2,
+  "mode": "original_process",
+  "observable_lower_calls": 2,
+  "operations": [
+    {
+      "action": "delete",
+      "content": null,
+      "error": null,
+      "memory_id": "gVCrchbo",
+      "success": true
+    },
+    {
+      "action": "delete",
+      "content": null,
+      "error": null,
+      "memory_id": "AVprP8Lx",
+      "success": true
+    },
+    {
+      "action": "save_knowledge",
+      "content": "Actual shutdown flow in main.cpp: shutdown() (lines 174-183) has null-check guard (line 175). Sets g_custom_heap=nullptr after destruction (line 178), preventing double-free. Application destructor (line 185-187) calls shutdown() once. Main flow: main() -> Application() -> init() -> run() -> ~Application() -> shutdown() -> explicit destructor call (line 177) + free (line 179).",
+      "error": null,
+      "memory_id": "KYTcGqWY",
+      "success": true
+    },
+    {
+      "action": "save_procedural",
+      "content": "Step 10: Re-examined main.cpp lines 170-195. Previous theory of double-destruction was incorrect - shutdown() has proper guard (if g_custom_heap) and sets pointer to nullptr after first destruction. The crash is NOT from double-free but from something else, likely static libstdc++ object destruction order as hypothesized in Step 9.",
+      "error": null,
+      "memory_id": "nDvHtz8M",
+      "success": true
+    },
+    {
+      "action": "update_status",
+      "content": "Step 10: Verified shutdown mechanism has proper guards against double-destruction. Previous double-free theory was incorrect. Real issue is likely static C++ standard library objects allocated via custom heap being destroyed after heap cleanup. Next: implement fix in user.cpp by triggering stdlib initialization in user_init() before custom heap activation.",
+      "error": null,
+      "memory_id": null,
+      "success": true
+    }
+  ],
+  "parsed_reminder": "The memory bank status indicates the double-destruction theory has been **ruled out** - shutdown() has proper guards (null-check at line 175, sets pointer to nullptr at line 178). The re-examination in Step 10 confirmed this.\n\nThe actual issue identified: Static C++ standard library objects are being allocated from the custom heap (after it's activated at line 149) but then destroyed during program teardown **after** the custom heap has been cleaned up. This causes a crash when those static destructors try to free memory that wasn't allocated via regular malloc.\n\nThe fix approach: In user_init() (which is called at line 146, **before** the custom heap is set up at line 149), trigger initialization of stdlib features so their static objects use regular malloc instead of the custom heap. This ensures proper cleanup order.\n\nNext action should be implementing this fix in /app/user.cpp, not re-investigating the shutdown mechanism.",
+  "phase2_prompt_sha256": "ce8ffd4a17fd1160bb7493fac0080294fe525fcc25a10934425ad67cd2fed3f2",
+  "status": "completed",
+  "unit": "P"
+}

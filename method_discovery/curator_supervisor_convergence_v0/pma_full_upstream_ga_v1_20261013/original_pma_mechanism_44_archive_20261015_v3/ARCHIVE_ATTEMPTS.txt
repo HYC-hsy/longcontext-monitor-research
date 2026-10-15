@@ -1,0 +1,22 @@
+Zero-model and archive failure attempts retained, not counted as model calls:
+
+1. The first freeze under code 86620138 produced a private manifest, but
+   approval rejected non-deterministic replay-only MemoryEntry timestamps.
+   No authorization or provider request was issued. The corrected code
+   67b3dfd5 and distinct manifest passed. The original failed manifest
+   remains in the host-private preparation directory; the readable failure
+   explanation is raw_readable/preflight_gate_failure.txt.
+2. The first offline test assertion assumed the outgoing Anthropic user
+   message remained a plain string. Actual transport wrapped it in a text
+   block; the test was corrected to inspect that actual field. A second
+   assertion used Windows' default GBK for a UTF-8 log; corrected to UTF-8.
+   Both failures occurred before true requests. Final raw test stdout/stderr
+   is raw_readable/preflight_tests_frozen.txt (6 tests passed).
+3. The first archive attempt stopped on UTF-16LE PowerShell test output.
+   The second stopped on Windows GBK decoding of UTF-8 Git diff output.
+   These partial archive directories were left in the private worktree,
+   not uploaded. The archive-only reader was corrected; this v3 output
+   was generated without any new PMA request or change to the run code.
+
+The model run finished before archive-only code changed. Run identity is
+67b3dfd5119d68d0342df2273aff996318edb247, not the later archive commit.

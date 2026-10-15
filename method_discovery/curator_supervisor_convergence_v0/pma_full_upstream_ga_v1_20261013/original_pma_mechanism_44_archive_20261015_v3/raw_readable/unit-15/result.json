@@ -1,0 +1,11 @@
+{
+  "block": 2,
+  "deeper_network_attempts": "unknown",
+  "ended_epoch": 1792043693.9731371,
+  "logical_calls": 1,
+  "mode": "phase2_only",
+  "observable_lower_calls": 1,
+  "parsed_reminder": "The memory bank's latest analysis (Step 10 status) concluded that the nullptr guard at line 175 should prevent the double-free from actually executing. When ~Application() calls shutdown() at line 186, g_custom_heap will already be nullptr (set at line 178 during the first shutdown call), so the if-guard prevents re-entry.\n\nThe memory bank suggests the actual crash source is \"possibly static libstdc++ objects being destroyed after custom heap cleanup\" - which aligns with your Step 9 hypothesis about initializing stdlib features in user_init() before the custom heap activates.\n\nThe fix strategy from Step 9 appears sound: use user_init() (called at line 146, before g_custom_heap setup at line 149) to force initialization of static libstdc++ objects using normal malloc, preventing them from being allocated from the custom heap and later freed after heap destruction.",
+  "status": "completed",
+  "unit": "P0"
+}

@@ -18,7 +18,10 @@ def sha(data: bytes) -> str:
 
 
 def redact(data: bytes, secrets: list[str]) -> bytes:
-    text = data.decode("utf-8", errors="strict")
+    # PowerShell's captured preflight console is UTF-16 with a BOM; model
+    # requests and upstream JSON are UTF-8. Never guess a decoding without it.
+    text = data.decode("utf-16" if data.startswith((b"\xff\xfe", b"\xfe\xff"))
+                       else "utf-8", errors="strict")
     for secret in secrets:
         if secret:
             text = text.replace(secret, "[REDACTED_PRIVATE_TRANSPORT]")
@@ -71,7 +74,7 @@ def archive(manifest_path: Path, run_root: Path, output: Path, profile_path: Pat
                            manifest["code_commit"], "--",
                            "method_discovery/curator_supervisor_convergence_v0/"
                            "pma_full_upstream_ga_v1_20261013"], cwd=root,
-                          capture_output=True, text=True, check=True).stdout
+                          capture_output=True, text=True, encoding="utf-8", check=True).stdout
     completed = sum(row["status"] == "completed" for row in results)
     report = ["ORIGINAL PMA ARCHIVED-INPUT DIAGNOSTIC — MECHANICAL AUDIT",
               f"data commit: {manifest['data_commit']}",

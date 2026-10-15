@@ -1,0 +1,11 @@
+{
+  "block": 3,
+  "deeper_network_attempts": "unknown",
+  "ended_epoch": 1792044011.3162694,
+  "logical_calls": 1,
+  "mode": "phase2_only",
+  "observable_lower_calls": 1,
+  "parsed_reminder": "The memory bank indicates the root cause is a **double-destruction bug**: CustomHeapManager's destructor is called twice - once explicitly at line 177 in shutdown(), and again at line 186 when ~Application() calls shutdown(). This causes a double-free of heap_memory.\n\nYour current hypothesis about static libstdc++ objects is a different issue. The actual problem is that when the Application object goes out of scope in main(), ~Application() runs and calls shutdown() a second time, attempting to free already-freed memory.\n\nThe fix must prevent the second destructor call from executing on already-freed memory. Since you can only modify user.cpp, you need to intervene in the lifecycle to prevent double-destruction - not initialize stdlib features early.",
+  "status": "completed",
+  "unit": "A0"
+}
