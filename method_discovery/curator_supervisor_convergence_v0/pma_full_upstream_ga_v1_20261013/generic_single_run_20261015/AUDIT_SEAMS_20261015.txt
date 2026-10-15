@@ -1,0 +1,143 @@
+Generic GA / original PMA single-run seam repair — offline audit, 2026-10-15
+
+Scope and identity
+  Baseline: 786f0acf2a091b96d8fb2e604419d7d73ddfbe6d
+  Branch: crs-v0-20261007; remote: public
+  Original PMA vendor: 89e5c0d6aadfe531a1aee42fd290d48be89973dd
+  Harbor source: 459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc
+  Official Terminal-Bench asset source: 2fd12b88aafdd04a52c298e3940bcb189f9766d6
+  Real Task, PMA/provider, official verifier, training and scoring calls: 0.
+  No real authorization was created or restored. The 12-task draft remains
+  execution_authorized=false. Only fake provider and synthetic test.sh were used.
+
+Implementation (full code diff: IMPLEMENTATION_DIFF_SEAMS.patch)
+  run_selection.py writes exclusive selection_preparation.json and a separate
+  exclusive selection_result.json. It stops on missing approval, exception,
+  non-completed arm or stop_reason; the original preparation receipt survives.
+  single_run.py exits nonzero for missing/failed arm even with null stop_reason;
+  a completed arm with reward=0 remains exit 0.
+  llmcore.py independently activates GA_PMA_CAPTURE_TASK_REQUESTS=1. Its
+  request-ready and attempt records require the installed research sink, not
+  any successful optional exporter. Post-accept capture failure retains the
+  parsed provider result, latches the session and forbids the next send.
+  research_runtime.py adds an explicit required-sink receipt while leaving
+  optional telemetry fail-open. Missing usage fields remain null/unknown;
+  returned numeric zero remains zero.
+  control_processes.py probes every registered PID, namespace, start tick and
+  argv hash, including a process no longer matching the classifier. The hook
+  refuses changed identity and unregistered controls, stops only still-matching
+  registered controls, and preserves Task-owned HTTP service processes.
+  single_run_fixture.py records execution-time Git source/vendor blob identities
+  and actual Harbor HEAD before fake launch. single_run_certification.py compares
+  these identities with the current execution source and checks committed Git
+  blob bytes of the redacted evidence. Old fixtures cannot certify changed code.
+  archive_live_six_task.py redacts nested redacted_thinking blocks including data,
+  JSONL, SSE and consecutive complete JSON records. Unparseable structured
+  records are excluded rather than copied raw. Private provider continuation
+  inputs and original private files are not altered.
+
+Raw offline commands and console results
+  $env:PYTHONPATH=(Resolve-Path GenericAgent-main).Path
+  python -m pytest GenericAgent-main/tests/test_pma_capture_boundary.py
+    GenericAgent-main/tests/test_research_agent_loop.py -q
+    --basetemp E:\LongContext\pma_pytest_capture_20261015
+    ............................. [100%]
+    29 passed in 2.27s
+
+  PMA_CONTROL_DOCKER_FIXTURE=1, image
+    alexgshaw/constraints-scheduling:20251031, runtime
+    E:\LongContext\bench_runtime\m2\linux
+  E:\LongContext\bench_runtime\m4\harbor-env\Scripts\python.exe -m unittest
+    method_discovery.curator_supervisor_convergence_v0.
+    pma_full_upstream_ga_v1_20261013.test_single_run_offline -v
+    test_committed_fixture_binds_executed_source_and_bytes ... ok
+    test_preparation_and_run_receipts_are_distinct ... ok
+    test_public_projection_removes_nested_hidden_thinking ... ok
+    test_registered_wrapper_stops_but_task_service_survives ... ok
+    test_selection_subsets_repeats_and_identity ... ok
+    test_single_binding_never_authorizes_changed_slot ... ok
+    test_single_run_exit_code_uses_disposition_not_reward ... ok
+    test_stream_projection_removes_private_delta_and_preserves_public ... ok
+    Ran 8 tests in 21.868s; OK
+    Exit fixture printed null arm, arm_failed_isolated, and completed reward 0;
+    the first two exited 1 and the latter returned normally.
+
+  E:\LongContext\bench_runtime\m4\harbor-env\Scripts\python.exe -m unittest
+    method_discovery.curator_supervisor_convergence_v0.
+    pma_full_upstream_ga_v1_20261013.test_live_wiring -v
+    7 tests, all ok; Ran 7 tests in 0.217s; OK.
+
+  Real single_run CLI/Harbor fake fixture, from clean code 61047e6f3362c622b87e2ea1fcf08781a3b0e455:
+    A constraints-scheduling: controller_exit=0, Task fake captures=2,
+      run_id=pma-fd430f87720a41f2, PMA not_enabled, synthetic reward=1,
+      cleanup_confirmed=true, fake authorization removed.
+    B constraints-scheduling: controller_exit=0, Task fake captures=2,
+      run_id=pma-be6179ebbb674b3c, PMA worker exit=0, two-phase payload
+      present (four phase request records), reminder linked to second Task
+      request, synthetic reward=1, cleanup_confirmed=true, fake authorization
+      removed.
+    Redacted individually readable evidence: certification_fixture_v5/A and /B.
+    verify_evidence committed Git bytes: conditions A,B; 40 checked fixture files;
+      two Task request-ready records and two attempts per condition.
+
+  Actual ordered CLI fixture from code 5236f99409a75efbb3b4a16089d566113a1d7aa6:
+    prepare_exit=0, run_exit=0, planned=3, attempted=3, all_completed=true.
+    Order: git-multibranch/B/r2 (pma-9362380c959646c2),
+      constraints-scheduling/A/r1 (pma-3c3328234d0b4398),
+      git-multibranch/B/r3 (pma-2744d393a832453d).
+    Each arm has distinct run_root and run_id. Each has 2 captured Task request
+    attempts. Each B has four original PMA phase request records and one
+    reminder-appended event; A has no PMA payload or reminder. Each completed
+    with synthetic reward=1 and cleanup_confirmed=true. This synthetic reward
+    is not an official task score. All temporary authorizations removed.
+    Full prepare/run stdout, stderr, Task event logs, PMA payloads, fake requests,
+    lifecycle and cleanup records: selection_fixture_v2_archive/.
+
+  Certified prepare only, using committed A/B evidence:
+    output manifest status=prepared_not_executed,
+    execution_authorized=false, has_cert=true, authorization.json absent.
+  No-approval actual CLI counterexample:
+    prepare attempted_or_prepared=3, then run exit=1;
+    slot 1 not_started_missing_approval, slots 2 and 3 not_started.
+    No provider or Harbor call was made by this counterexample.
+
+Preserved failures and limitations
+  Initial pytest invocation without PYTHONPATH failed to import llmcore; rerun
+  with the documented PYTHONPATH passed. Broad research_runtime test had an
+  unrelated missing method_discovery/schemas/event_envelope.schema.json in this
+  checkout (21 passed, 1 failed); no old assertion or file was altered.
+  First unittest run found a redaction count/shape regression; fixed while
+  preserving the old assertion. First Docker process test had misplaced test
+  setup and failed before identity assignment; fixed and rerun.
+  Initial archive of the first clean A/B fixture rejected consecutive JSON CLI
+  stdout rather than exposing it. Two partial collector directories remain
+  locally; the later full A/B fixture was rerun from the corrected clean code.
+  First ordered fixture completed two slots, then rejected the third before
+  model send with "PMA running code differs from authorized commit" because
+  the developer committed A/B evidence while that fixture was still running.
+  The failure is preserved in selection_fixture_v1_failed_archive/. A fresh,
+  unchanged-HEAD ordered fake fixture then completed 3/3; it was not an attempt
+  to obtain a benchmark result.
+  Unit tests cover missing and mismatched source identity; Docker tests cover
+  normal exit, registered stop, argv escape and Task service survival. They do
+  not prove adversarial Task process isolation or real provider compatibility.
+  Generic single-run assets remain fixed Terminal-Bench 2 assets. Fyne/Kitex
+  belong to another asset source and were not grafted into this path.
+  Provider-internal retries/cost remain unknown. No real Task, PMA, native
+  evaluator or scoring output was generated in this round.
+
+Artifact map and redaction
+  IMPLEMENTATION_DIFF_SEAMS.patch: complete bounded source diff against baseline.
+  certification_fixture_v5/FILE_HASHES.json: each exported A/B file and its
+    private-source SHA-256; execution_identity.json records pre-launch source.
+  selection_fixture_v2_archive/FILE_HASHES.json: each selected outer fixture
+    file, private-source hash and redacted Git-uploaded bytes.
+  selection_fixture_v1_failed_archive/FILE_HASHES.json: retained stopped run.
+  The private original run roots remain outside the repository under
+    E:\LongContext\pma_single_seam_fixture_{A,B}_v2_20261015 and
+    E:\LongContext\pma_selection_seam_fixture_v2_20261015.
+  The public projection removes configured secret values and hidden thinking
+  payloads. It does not claim to reconstruct private reasoning. A secret scan
+  over 41 A/B and 129 ordered redacted files found zero configured-value hits.
+  Three pre-existing untracked monitor_agent_core __pycache__ directories were
+  not staged or cleaned. Old trial records and historical Git commits remain.

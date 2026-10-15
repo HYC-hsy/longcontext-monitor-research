@@ -56,6 +56,18 @@ use a new output root and separately committed A/B evidence whose recorded
 execution source identities match the running source. An un-certified draft
 cannot be turned into an authorization by this fixture.
 
+For a future separately approved run, preparation (still no model request)
+uses a *new* root and committed evidence, for example:
+
+```powershell
+& $py -m "$module.single_run" prepare --task constraints-scheduling --condition A --occurrence 1 --output E:\new-certified-preparation --official-source-git $source --task-profile-file $taskProfile --pma-profile-file $pmaProfile --certification-dir E:\longcontext-cqs-v0-20261005\method_discovery\curator_supervisor_convergence_v0\pma_full_upstream_ga_v1_20261013\generic_single_run_20261015\certification_fixture_v5
+```
+
+This produces `execution_authorized=false`; the real authorization must be
+separately approved and bound to the unchanged manifest, execution Git blobs,
+profiles and fresh run root. The present round neither creates nor tests such
+a real authorization.
+
 ```powershell
 & $py -m "$module.single_run_fixture" --task constraints-scheduling --condition B --output E:\unused-fixture --official-source-git $source --task-profile-file $taskProfile --pma-profile-file $pmaProfile --ga-source E:\longcontext-cqs-v0-20261005\GenericAgent-main --runtime-root E:\LongContext\bench_runtime\m2\linux --worker-python E:\LongContext\bench_runtime\pma_native_venv\Scripts\python.exe --harbor-python $py --bench-root E:\longcontext-cqs-v0-20261005\long_context_bench --harbor-source-root E:\pma-harbor-459ff6e-clean --service-fixture
 ```
