@@ -451,12 +451,14 @@ class ProviderResponseCancelled(Exception):
 
 
 def _stream_with_retry(sess, url, headers, payload, parse_fn):
+    if getattr(sess, '_research_capture_failed', False):
+        raise RuntimeError('required research capture failed after an accepted response')
     observing = _telemetry_enabled()
     llm_call_id = _research_id('llm') if observing else None
+    pma_capture = observing and os.environ.get('GA_PMA_CAPTURE_TASK_REQUESTS') == '1'
     if observing:
         intervention_link = _consume_pending_intervention()
         reminder_link = _consume_pending_pma_reminder()
-        pma_capture = os.environ.get('GA_PMA_CAPTURE_TASK_REQUESTS') == '1'
         capture = bool(getattr(sess, 'research_capture_payload', False)) or pma_capture
         secrets = (str(getattr(sess, 'api_key', '') or ''), url.split('?', 1)[0]) if pma_capture else ()
         request_info = _payload_summary(payload, capture_content=capture, secrets=secrets)
@@ -468,6 +470,8 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
         if intervention_link: request_info.update(intervention_link)
         if reminder_link: request_info.update(reminder_link)
         request_event = _research_emit('provider_request_ready', request_info, llm_call_id=llm_call_id)
+        if pma_capture and request_event is None:
+            raise RuntimeError('required research request capture unavailable before send')
         _register_provider_call({
             'llm_call_id': llm_call_id,
             'provider_request_event_id': request_event['event_id'] if request_event else None,
@@ -484,7 +488,9 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
         if consume_cancel is not None and consume_cancel():
             raise ProviderResponseCancelled("provider response cancelled before retry")
         streamed = False
-        _research_emit('provider_request_attempt', {'attempt': attempt + 1}, llm_call_id=llm_call_id)
+        attempt_event = _research_emit('provider_request_attempt', {'attempt': attempt + 1}, llm_call_id=llm_call_id)
+        if pma_capture and attempt_event is None:
+            raise RuntimeError('required research attempt capture unavailable before send')
         try:
             with requests.post(url, headers=headers, json=payload, stream=sess.stream, 
                                timeout=(sess.connect_timeout, sess.read_timeout), proxies=sess.proxies, verify=sess.verify) as r:
@@ -536,14 +542,18 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                             visible = [block for block in (e.value or [])
                                        if isinstance(block, dict) and
                                        block.get('type') in ('text', 'tool_use')]
-                            _research_emit('provider_response_content', {
+                            content_event = _research_emit('provider_response_content', {
                                 'attempt': attempt + 1,
                                 'parsed_visible_blocks': _payload_summary(
                                     {'content': visible}, capture_content=True,
                                     secrets=secrets)['content']['content'],
                                 'hidden_thinking_excluded': True,
                             }, llm_call_id=llm_call_id)
-                        _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code, 'outcome': 'success'}, llm_call_id=llm_call_id)
+                            if content_event is None:
+                                sess._research_capture_failed = True
+                        success_event = _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code, 'outcome': 'success'}, llm_call_id=llm_call_id)
+                        if pma_capture and success_event is None:
+                            sess._research_capture_failed = True
                         return e.value or []
                 finally:
                     clear_active = getattr(sess, '_clear_active_response', None)

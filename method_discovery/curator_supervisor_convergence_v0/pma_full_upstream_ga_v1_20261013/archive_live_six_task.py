@@ -47,6 +47,53 @@ def private_values(task_profile: Path, pma_profile: Path) -> list[str]:
 def redact(raw: bytes, secrets: list[str]) -> tuple[bytes, int]:
     text = raw.decode("utf-8", errors="replace")
     changes = 0
+    hidden_keys = {'thinking', 'redacted_thinking', 'reasoning_content',
+                   'encrypted_content', 'signature', 'thinking_signature'}
+
+    def remove_hidden(value):
+        nonlocal changes
+        if isinstance(value, dict):
+            output = {}
+            for key, item in value.items():
+                request_setting = (key == 'thinking' and isinstance(item, dict) and
+                    set(item) <= {'type', 'budget_tokens'} and
+                    item.get('type') in {'adaptive', 'enabled', 'disabled'})
+                if key in hidden_keys and not request_setting:
+                    encoded = json.dumps(item, ensure_ascii=False, sort_keys=True).encode('utf-8')
+                    output[key] = {'public_projection': '[REDACTED_HIDDEN_THINKING]',
+                                   'original_bytes': len(encoded),
+                                   'private_sha256': hashlib.sha256(encoded).hexdigest()}
+                    changes += 1
+                else:
+                    output[key] = remove_hidden(item)
+            return output
+        if isinstance(value, list):
+            return [remove_hidden(item) for item in value]
+        return value
+
+    try:
+        parsed = json.loads(text)
+        text = json.dumps(remove_hidden(parsed), ensure_ascii=False)
+    except (ValueError, TypeError):
+        lines = text.splitlines(keepends=True)
+        if lines and all(not line.strip() or line.lstrip().startswith(('{', '['))
+                         for line in lines):
+            converted = []
+            for line in lines:
+                if not line.strip():
+                    converted.append(line)
+                    continue
+                try:
+                    converted.append(json.dumps(remove_hidden(json.loads(line)),
+                                                ensure_ascii=False) + '\n')
+                except (ValueError, TypeError):
+                    converted = []
+                    break
+            if converted:
+                text = ''.join(converted)
+    text, tag_changes = re.subn(r'(?is)<(thinking|redacted_thinking)>.*?</\1>',
+                                r'<\1>[REDACTED_HIDDEN_THINKING]</\1>', text)
+    changes += tag_changes
     for secret in secrets:
         count = text.count(secret)
         if count:
@@ -86,7 +133,9 @@ def summarize(root: Path) -> dict:
         counts: dict[str, int] = {}
         tool_uses = 0
         usage = {"input_tokens": 0, "output_tokens": 0,
-                 "cached_input_tokens": 0, "cache_creation_input_tokens": 0}
+                 "cached_input_tokens": 0, "cache_creation_input_tokens": 0,
+                 "cache_read_input_tokens": 0}
+        usage_seen = set()
         termination = None
         if len(events) == 1:
             for line in events[0].read_text(encoding="utf-8").splitlines():
@@ -95,7 +144,10 @@ def summarize(root: Path) -> dict:
                 counts[kind] = counts.get(kind, 0) + 1
                 if kind == "provider_usage":
                     for key in usage:
-                        usage[key] += event.get("payload", {}).get(key, 0) or 0
+                        value = event.get("payload", {}).get(key)
+                        if isinstance(value, (int, float)):
+                            usage[key] += value
+                            usage_seen.add(key)
                 elif kind == "termination":
                     termination = event.get("payload", {}).get("result")
                 elif kind == "action_selected":
@@ -107,6 +159,8 @@ def summarize(root: Path) -> dict:
                 event = json.loads(line)
                 kind = event.get("phase", "unknown") + ":" + event.get("status", "unknown")
                 phases[kind] = phases.get(kind, 0) + 1
+        usage = {key: value if key in usage_seen else None
+                 for key, value in usage.items()}
         output.append({"order": row["order"], "run_id": row["run_id"],
             "task": status.get("task"), "condition": status.get("condition"),
             "disposition": row["disposition"], "launcher_exit": row["launcher_exit"],
