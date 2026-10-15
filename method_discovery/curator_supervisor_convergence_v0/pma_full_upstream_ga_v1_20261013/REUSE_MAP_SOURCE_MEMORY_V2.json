@@ -8,10 +8,10 @@
       "commit": "89e5c0d6aadfe531a1aee42fd290d48be89973dd",
       "license": "Apache-2.0, complete vendor/pma_89e5c0d/LICENSE retained",
       "file": "src/memory_agent/memory/memory_agent.py",
-      "functions": ["MemoryAgent.process", "_build_phase1_prompt", "_build_phase2_prompt", "_extract_tool_call", "_parse_tool_calls_from_text", "MemoryOperation"],
+      "functions": ["MemoryAgent.process", "_execute_tool_calls", "_build_phase1_prompt", "_build_phase2_prompt", "_extract_tool_call", "MemoryOperation"],
       "classification": "direct call plus research subclass adaptation",
       "local_call_chain": "PMAEpisode._task_start/_actor_step -> original MemoryEnabledTerminus2._trigger_memory_agent -> SourceMemoryAgentV2.process -> super().process -> original phase calls and local tool dispatch",
-      "adaptation": "S2/R2 replace only prompt/schema/operation dispatch and retain exactly the existing two model phases. Operation receipts are injected into the existing Phase 2 and next Phase 1; upstream comment about tool feedback is not an implemented feedback loop."
+      "adaptation": "S2/R2 retain exactly the existing two model phases and adapt the original sequential per-operation error isolation with a separate validated copy for each operation. This is a new research-side commit implementation, not copied upstream code or an upstream transaction guarantee. Operation receipts are injected into the existing Phase 2 and next Phase 1; upstream comment about tool feedback is not an implemented feedback loop. U keeps its original path."
     },
     {
       "source": "yifannnwu/proactive-memory-agent",
@@ -20,7 +20,7 @@
       "file": "src/memory_agent/memory/universal_memory.py",
       "functions": ["UniversalMemory.save_knowledge", "save_procedural", "get", "delete", "search_knowledge", "search_procedural", "to_dict", "from_dict"],
       "classification": "inherited adaptation",
-      "local_call_chain": "SourceMemoryV2 -> SourceMemory -> UniversalMemory; copy.deepcopy for Phase 1 staging; validated in-memory switch; original active lists and BM25 invalidation",
+      "local_call_chain": "SourceMemoryV2 -> SourceMemory -> UniversalMemory; copy.deepcopy for each S2/R2 operation; validated in-memory switch; original active lists and BM25 invalidation",
       "adaptation": "The source registry and version/history are research-side; no upstream file changed and no distributed transaction guarantee is claimed."
     },
     {
@@ -60,7 +60,7 @@
       "file": "jsonpatch.py",
       "functions": ["JsonPatch.apply(in_place=False)"],
       "classification": "copy-then-commit idea only; no code copied or package installed",
-      "reason": "Existing SourceMemory serialization, validation, revision and index invalidation operate directly on a staged copy without translating operations to JSON Patch."
+      "reason": "Existing SourceMemory serialization, validation, revision and index invalidation operate directly on a staged copy per operation without translating operations to JSON Patch. The copy-commit pattern alone does not provide persistent-file atomicity."
     },
     {
       "source": "getzep/graphiti",

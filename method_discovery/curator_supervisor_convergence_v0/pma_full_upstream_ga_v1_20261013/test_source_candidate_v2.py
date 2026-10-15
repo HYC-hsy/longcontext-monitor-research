@@ -1,5 +1,6 @@
 """Zero-provider checks of the real upstream two-phase process with S2/R2 adapters."""
 import asyncio
+import copy
 import json
 import os
 from pathlib import Path
@@ -71,17 +72,23 @@ class V2Tests(unittest.TestCase):
             LLMResponse(content="<no_intervention/>")])
         before = bank.to_dict()
         asyncio.run(agent._memory_agent.process("New observation", 2))
-        self.assertEqual(bank.to_dict(), before)
+        self.assertEqual(bank.status, "B")  # Prior valid operation now survives.
+        self.assertEqual([entry.content for entry in bank.knowledge],
+                         [entry["content"] for entry in before["knowledge"]])
         schema = next(t["function"] for t in fake.requests[0]["tools"]
                       if t["function"]["name"] == "memory_reconcile")
         self.assertIn("exact active", schema["description"])
         self.assertIn("replacement", schema["parameters"]["properties"]["statement_type"]["description"])
         self.assertNotIn("statement_type", schema["parameters"]["required"])
         self.assertIn("memory_id", fake.requests[0]["system"])
+        self.assertIn("one isolated commit per operation", fake.requests[0]["system"])
+        self.assertIn("A valid citation establishes provenance, not truth", fake.requests[0]["system"])
+        self.assertIn("knowledge/procedural memory use",
+                      schema["parameters"]["properties"]["statement_type"]["description"])
         phase2 = self.receipt_view(fake.requests[1]["prompt"],
                                    "## This phase-1 execution result\n")
-        self.assertEqual(phase2["transaction"]["status"], "transaction_aborted")
-        self.assertEqual(phase2["receipts"][0]["status"], "transaction_aborted")
+        self.assertEqual(phase2["transaction"]["status"], "partially_committed")
+        self.assertEqual(phase2["receipts"][0]["status"], "committed")
         self.assertEqual(phase2["receipts"][1]["field_path"], "statement_type")
         self.assertEqual(phase2["receipts"][1]["rule_code"], "replacement_type_required")
         self.assertNotIn("Old active conclusion", json.dumps(phase2))
@@ -128,11 +135,13 @@ class V2Tests(unittest.TestCase):
                 LLMResponse(content="<no_intervention/>")])
             before = bank.to_dict()
             asyncio.run(replay._memory_agent.process("Observed", number))
-            self.assertEqual(bank.to_dict(), before)
+            self.assertEqual(bank.status, "would roll back")
+            self.assertEqual([item.content for item in bank.knowledge],
+                             [item["content"] for item in before["knowledge"]])
             visible = self.receipt_view(transport.requests[1]["prompt"],
                                         "## This phase-1 execution result\n")
-            self.assertEqual(visible["transaction"]["status"], "transaction_aborted")
-            self.assertEqual(visible["receipts"][0]["status"], "transaction_aborted")
+            self.assertEqual(visible["transaction"]["status"], "partially_committed")
+            self.assertEqual(visible["receipts"][0]["status"], "committed")
             self.assertTrue(all(receipt["rule_code"] in
                 {"replacement_type_required", "replacement_sources_required"}
                 for receipt in visible["receipts"][1:]))
@@ -265,9 +274,9 @@ class V2Tests(unittest.TestCase):
                 asyncio.run(agent._memory_agent.process("task", 1))
                 rollback = self.receipt_view(fake.requests[1]["prompt"],
                                              "## This phase-1 execution result\n")
-                self.assertEqual(rollback["transaction"]["status"], "transaction_aborted")
+                self.assertEqual(rollback["transaction"]["status"], "partially_committed")
                 self.assertEqual([r["status"] for r in rollback["receipts"]],
-                                 ["transaction_aborted", "rejected"])
+                                 ["committed", "rejected"])
                 self.assertEqual(rollback["receipts"][1]["error_code"], "memory_not_active")
                 self.assertNotIn("error", rollback["receipts"][1])
                 self.assertEqual(fake.requests[1]["prompt"].count('"call_index"'), 2)
@@ -327,7 +336,7 @@ class V2Tests(unittest.TestCase):
         self.assertIn("committed", fake.requests[2]["prompt"])
         self.assertIn("rejected", fake.requests[3]["prompt"])
 
-    def test_atomic_save_delete_both_orders_and_collision(self):
+    def test_delete_survives_invalid_save_in_both_orders(self):
         for first in ("memory_delete", "memory_save_knowledge"):
             with self.subTest(first=first):
                 agent, fake, _ = self.make("S2", [])
@@ -344,15 +353,14 @@ class V2Tests(unittest.TestCase):
                 fake.replies.extend([LLMResponse(content="", tool_calls=calls),
                                      LLMResponse(content="<no_intervention/>")])
                 asyncio.run(agent._memory_agent.process("Keep WAL.", 1))
-                self.assertEqual(bank.to_dict(), prior)
-                self.assertEqual(agent._memory_agent.last_transaction["before_bank"],
-                                 agent._memory_agent.last_transaction["after_bank"])
+                self.assertIsNone(bank.get(old))
+                self.assertNotEqual(bank.to_dict(), prior)
                 statuses = [r["status"] for r in agent._memory_agent.last_receipts]
                 self.assertIn("rejected", statuses)
-                self.assertIn("transaction_aborted", statuses)
-                self.assertEqual(agent._memory_agent.collateral_aborts, 1)
+                self.assertIn("committed", statuses)
+                self.assertEqual(agent._memory_agent.collateral_aborts, 0)
 
-    def test_valid_save_with_invalid_delete_rolls_back_in_both_orders(self):
+    def test_valid_save_survives_invalid_delete_in_both_orders(self):
         for bad_first in (True, False):
             with self.subTest(bad_first=bad_first):
                 agent, fake, _ = self.make("S2", [])
@@ -368,12 +376,12 @@ class V2Tests(unittest.TestCase):
                 fake.replies.extend([LLMResponse(content="", tool_calls=calls),
                                      LLMResponse(content="<no_intervention/>")])
                 asyncio.run(agent._memory_agent.process("Keep WAL", 1))
-                self.assertEqual(bank.to_dict(), prior)
+                self.assertNotEqual(bank.to_dict(), prior)
                 self.assertEqual({r["status"] for r in agent._memory_agent.last_receipts},
-                                 {"rejected", "transaction_aborted"})
-                self.assertEqual(bank.search_knowledge("WAL"), [])
+                                 {"rejected", "committed"})
+                self.assertEqual(len(bank.search_knowledge("WAL")), 1)
 
-    def test_status_update_is_included_in_abort_and_empty_phase_is_no_change(self):
+    def test_status_commit_survives_rejection_and_empty_phase_is_no_operations(self):
         agent, fake, _ = self.make("S2", [])
         bank = agent.memory
         fake.replies.extend([LLMResponse(content="", tool_calls=[
@@ -382,11 +390,11 @@ class V2Tests(unittest.TestCase):
             LLMResponse(content="<no_intervention/>"),
             LLMResponse(content="", tool_calls=[]), LLMResponse(content="<no_intervention/>")])
         asyncio.run(agent._memory_agent.process("task", 1))
-        self.assertEqual(bank.status, "")
-        self.assertEqual(agent._memory_agent.last_receipts[0]["status"], "transaction_aborted")
+        self.assertEqual(bank.status, "working")
+        self.assertEqual(agent._memory_agent.last_receipts[0]["status"], "committed")
         asyncio.run(agent._memory_agent.process("task", 2))
         self.assertEqual(agent._memory_agent.last_receipts, [])
-        self.assertTrue(agent._memory_agent.last_transaction["committed"])
+        self.assertEqual(agent._memory_agent.last_transaction["status"], "no_operations")
 
     def test_text_tool_fallback_is_rejected_whole_in_both_orders(self):
         good = "<tool_call><function=memory_update_status><parameter=content>B</parameter></function></tool_call>"
@@ -413,9 +421,9 @@ class V2Tests(unittest.TestCase):
             LLMResponse(content="<no_intervention/>")])
         result = asyncio.run(agent._memory_agent.process("task", 1))
         self.assertEqual(result.operations, [])
-        self.assertEqual(agent._memory_agent.last_transaction["status"], "no_change")
+        self.assertEqual(agent._memory_agent.last_transaction["status"], "no_operations")
 
-    def test_rollback_relabels_stage_local_no_change_and_feedback(self):
+    def test_partial_commit_preserves_no_change_and_feedback(self):
         agent, fake, _ = self.make("S2", [
             LLMResponse(content="", tool_calls=[
                 call("memory_update_status", content="B"),
@@ -426,16 +434,112 @@ class V2Tests(unittest.TestCase):
             LLMResponse(content="<no_intervention/>")])
         agent.memory.update_status("A")
         result = asyncio.run(agent._memory_agent.process("task", 1))
-        self.assertEqual(agent.memory.status, "A")
+        self.assertEqual(agent.memory.status, "B")
         self.assertEqual([r["status"] for r in agent._memory_agent.last_receipts],
-                         ["transaction_aborted", "transaction_aborted", "rejected"])
-        self.assertEqual([op.success for op in result.operations], [False, False, False])
-        self.assertEqual(agent._memory_agent.collateral_aborts, 2)
-        self.assertIn('"status": "transaction_aborted"', fake.requests[1]["prompt"])
+                         ["committed", "no_change", "rejected"])
+        self.assertEqual([op.success for op in result.operations], [True, True, False])
+        self.assertEqual(agent._memory_agent.collateral_aborts, 0)
+        self.assertIn('"status": "partially_committed"', fake.requests[1]["prompt"])
         self.assertIn('"status": "rejected"', fake.requests[1]["prompt"])
         asyncio.run(agent._memory_agent.process("task", 2))
-        self.assertIn('"status": "transaction_aborted"', fake.requests[2]["prompt"])
-        self.assertEqual(agent._memory_agent.last_transaction["status"], "no_change")
+        self.assertIn('"status": "partially_committed"', fake.requests[2]["prompt"])
+        self.assertEqual(agent._memory_agent.last_transaction["status"], "no_operations")
+
+    def test_revise_is_one_atomic_operation_and_old_id_identity_follows_commit(self):
+        agent, fake, _ = self.make("R2", [])
+        bank = agent.memory
+        handle = bank.register_leaf("task", "task_instruction", "keep it", 1,
+                                    "initial_user_content", "1" * 64)
+        refs = [{"source_handle": handle, "start_line": 1, "end_line": 1}]
+        old = bank.save_sourced("knowledge", "old", "task_requirement", refs)
+        revise = call("memory_reconcile", memory_id=old, decision="revise",
+                      reason="bounded revision", evidence_refs=refs, content="new",
+                      statement_type="task_requirement", inherit_source_ref_indices=[0])
+        fake.replies.extend([LLMResponse(content="", tool_calls=[
+            revise, call("memory_delete", memory_id=old)]),
+            LLMResponse(content="<no_intervention/>")])
+        asyncio.run(agent._memory_agent.process("task", 1))
+        self.assertEqual([r["status"] for r in agent._memory_agent.last_receipts],
+                         ["committed", "rejected"])
+        self.assertIsNone(bank.get(old))
+        self.assertEqual(bank.knowledge[0].content, "new")
+        self.assertEqual(bank.metadata[bank.knowledge[0].id]["supersedes"], old)
+        self.assertEqual(len([h for h in bank.history if h["action"] == "revise"]), 1)
+
+        # A host exception after staging the old entry's removal cannot publish
+        # a half-revision; an earlier independent commit still remains.
+        second, fake2, _ = self.make("R2", [])
+        second.memory.__dict__.update(copy.deepcopy(bank.__dict__))
+        active = second.memory.knowledge[0].id
+        bad = call("memory_reconcile", memory_id=active, decision="revise",
+                   reason="fault injection", evidence_refs=refs, content="half",
+                   statement_type="task_requirement", inherit_source_ref_indices=[0])
+        prior = second.memory.to_dict()
+        from source_memory_v2 import SourceMemoryV2
+        def fail_after_staging(staged, *args, **kwargs):
+            staged.history.append({"action": "incomplete"})
+            raise RuntimeError("synthetic host fault")
+        fake2.replies.append(LLMResponse(content="", tool_calls=[
+            call("memory_update_status", content="saved first"), bad]))
+        with patch.object(SourceMemoryV2, "revise", fail_after_staging):
+            with self.assertRaises(RuntimeError):
+                asyncio.run(second._memory_agent.process("task", 2))
+        self.assertEqual(second.memory.status, "saved first")
+        self.assertEqual(second.memory.knowledge[0].id, active)
+        self.assertEqual(second.memory.history, prior["history"])
+        self.assertEqual(second._memory_agent.last_transaction["status"], "host_failure")
+        self.assertEqual([r["status"] for r in second._memory_agent.last_receipts],
+                         ["committed", "integrity_error"])
+        self.assertEqual(len(fake2.requests), 1)  # No phase-2 send after host failure.
+
+    def test_failed_revision_does_not_invalidate_old_id_for_later_operation(self):
+        agent, fake, _ = self.make("R2", [])
+        bank = agent.memory
+        handle = bank.register_leaf("task", "task_instruction", "keep it", 1,
+                                    "initial_user_content", "1" * 64)
+        refs = [{"source_handle": handle, "start_line": 1, "end_line": 1}]
+        old = bank.save_sourced("knowledge", "old", "task_requirement", refs)
+        fake.replies.extend([LLMResponse(content="", tool_calls=[
+            call("memory_reconcile", memory_id=old, decision="revise", reason="bad",
+                 evidence_refs=refs, content="new", statement_type="task_requirement",
+                 source_refs=[{"source_handle": "missing", "start_line": 1, "end_line": 1}]),
+            call("memory_delete", memory_id=old)]),
+            LLMResponse(content="<no_intervention/>")])
+        asyncio.run(agent._memory_agent.process("task", 1))
+        self.assertEqual([r["status"] for r in agent._memory_agent.last_receipts],
+                         ["rejected", "committed"])
+        self.assertIsNone(bank.get(old))
+        self.assertFalse(any(h["action"] == "revise" for h in bank.history))
+        self.assertTrue(any(h["action"] == "upstream_delete" for h in bank.history))
+
+    def test_model_visible_partial_commit_sample_in_both_phases(self):
+        for variant in ("S2", "R2"):
+            with self.subTest(variant=variant):
+                agent, fake, _ = self.make(variant, [
+                    LLMResponse(content="", tool_calls=[
+                        call("memory_update_status", content="kept"),
+                        call("memory_delete", memory_id="absent")]),
+                    LLMResponse(content="<no_intervention/>"),
+                    LLMResponse(content="", tool_calls=[]),
+                    LLMResponse(content="<no_intervention/>")])
+                asyncio.run(agent._memory_agent.process("public", 1))
+                phase2 = self.receipt_view(fake.requests[1]["prompt"],
+                                           "## This phase-1 execution result\n")
+                asyncio.run(agent._memory_agent.process("public", 2))
+                next_phase1 = self.receipt_view(fake.requests[2]["prompt"],
+                                                 "## Previous phase-1 execution receipts\n")
+                self.assertEqual(phase2, next_phase1)
+                self.assertEqual(phase2["transaction"]["status"], "partially_committed")
+                self.assertEqual(phase2["transaction"]["committed_count"], 1)
+                self.assertEqual(phase2["transaction"]["rejected_count"], 1)
+                self.assertEqual([r["status"] for r in phase2["receipts"]],
+                                 ["committed", "rejected"])
+                self.assertEqual(len(fake.requests), 4)
+                print(json.dumps({"variant": variant,
+                                  "system_contract": "one isolated commit per operation" in fake.requests[0]["system"],
+                                  "statement_schema": fake.requests[0]["tools"][0]["function"]["parameters"]["properties"]["statement_type"]["description"],
+                                  "phase2_result": phase2,
+                                  "next_phase1_result": next_phase1}, ensure_ascii=False))
 
     def test_phase1_transport_failure_does_not_reuse_prior_receipts(self):
         agent, fake, _ = self.make("S2", [
@@ -585,9 +689,10 @@ class V2Tests(unittest.TestCase):
             SimpleNamespace(function=SimpleNamespace(name="memory_delete", arguments="{bad-json")),
             call("memory_unknown", content="x")]), LLMResponse(content="<no_intervention/>")])
         asyncio.run(agent._memory_agent.process("Keep WAL", 1))
-        self.assertEqual(bank.to_dict(), prior)
+        self.assertNotEqual(bank.to_dict(), prior)
+        self.assertEqual(len(bank.knowledge), 1)
         self.assertEqual([r["status"] for r in agent._memory_agent.last_receipts],
-                         ["transaction_aborted", "rejected", "rejected"])
+                         ["committed", "rejected", "rejected"])
         self.assertEqual(agent._memory_agent.last_receipts[2]["error_code"], "unknown_tool")
 
     def test_schema_and_local_validation_both_reject_nested_extra_and_coercion(self):

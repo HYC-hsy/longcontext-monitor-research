@@ -1,4 +1,4 @@
-"""Shared S2/R2 evidence selection, strict arguments and one-phase bank transaction."""
+"""Shared S2/R2 evidence selection, strict arguments and per-operation commits."""
 from __future__ import annotations
 
 import copy
@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from source_agent import RECONCILE_RULES, REMINDER_RULES, SourceMemoryAgent
 from source_memory_v2 import SourceMemoryV2, SourceSelectionError
-from source_protocol_v2 import MODELS, tool_schema
+from source_protocol_v2 import MODELS, STATEMENT_TYPE_GUIDANCE, tool_schema
 
 
 SOURCE_LINES_RULES = """
@@ -25,10 +25,13 @@ Working-memory summaries and Task responses are agent_report, not tool observati
 An old excerpt may be inherited only through the cited entry's explicit index.
 """
 RECEIPT_RULES = """
-Phase-1 memory operations are one transaction. A rejected operation aborts every
-operation in that phase, including otherwise valid saves/deletes. Receipts report
-execution, not task facts. Use the receipts to correct the next bank action without
-assuming an aborted or rejected operation changed memory.
+Phase-1 memory operations execute in order with one isolated commit per operation.
+A rejected operation leaves that operation unchanged; earlier committed changes remain
+and later independent operations still run. Use memory_reconcile/revise for an atomic
+replacement; separate delete and save are not an atomic revision. In the phase summary,
+committed means at least one state-changing operation committed, not that every operation
+succeeded. Receipts report execution, not task facts. Never assume a rejected operation
+changed memory; inspect each receipt and the current bank before acting again.
 """
 RECONCILE_V2_RULES = """
 memory_reconcile takes the exact active memory_id shown before the separate vN
@@ -51,7 +54,6 @@ _RECEIPT_REASONS = {
     "memory_not_active": "memory_id must be an exact active memory ID; omit the displayed version label",
     "unknown_tool": "tool name is not supported",
     "bank_integrity": "bank validation failed",
-    "transaction_abort": "operation was rolled back with the transaction",
     "text_tool_call_forbidden": "text tool calls are not executable",
     "host_integrity": "host integrity check failed",
 }
@@ -149,6 +151,7 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
         """Project execution feedback, never bank snapshots or raw exceptions, to a request."""
         summary = {key: transaction[key] for key in
                    ("transaction_id", "status", "committed", "commit_version",
+                    "committed_count", "no_change_count", "rejected_count",
                     "phase2_blocked", "error_type") if key in transaction}
         visible_receipts = []
         for receipt in receipts:
@@ -169,7 +172,7 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
 
     async def _call_llm_phase1(self, user_prompt: str):
         from memory_agent.memory.memory_agent import PHASE1_SYSTEM
-        system = PHASE1_SYSTEM + SOURCE_LINES_RULES + RECEIPT_RULES
+        system = PHASE1_SYSTEM + SOURCE_LINES_RULES + STATEMENT_TYPE_GUIDANCE + RECEIPT_RULES
         if self.variant == "R2":
             system += RECONCILE_RULES.replace("{event_id, role, quote}",
                                              "{source_handle, start_line, end_line}")
@@ -282,13 +285,12 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
         txn = f"p1-{self._phase_step}-{uuid.uuid4().hex[:12]}"
         original = self.memory
         before_bank = original.to_dict()
-        working = copy.deepcopy(original)
-        coordination_length = len(self.coordination)
         receipts: list[dict] = []
-        failed = False
         for number, call in enumerate(calls, 1):
             name = getattr(getattr(call, "function", call), "name", None)
             raw_args = None
+            working = None
+            coordination_length = len(self.coordination)
             row = {"transaction_id": txn, "call_index": number, "tool_name": name,
                    "status": "rejected", "error_code": None, "memory_id": None}
             try:
@@ -296,14 +298,27 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
                 if name not in self.get_tools_schema_names():
                     raise ValueError("unknown tool")
                 args = MODELS[name].model_validate(raw_args).model_dump(exclude_none=True)
+                # Only this operation sees its staged copy. Earlier commits are in
+                # original; a failed revision cannot leave half a history/metadata edit.
+                working = copy.deepcopy(original)
                 self.memory = working
                 working._diagnostic_ref_paths = {
                     id(args[key]): key for key in ("source_refs", "evidence_refs")
                     if isinstance(args.get(key), list)}
                 memory_id, status = self._dispatch_one(name, args)
+                try:
+                    working.validate_bank()
+                except Exception as exc:
+                    raise RuntimeError("bank integrity after operation") from exc
+                for key in ("_diagnostic_ref_paths", "_last_resolve_path"):
+                    working.__dict__.pop(key, None)
+                changed = original.to_dict() != working.to_dict() or len(self.coordination) != coordination_length
+                original.__dict__.update(working.__dict__)
+                if not changed:
+                    status = "no_change"
                 row.update(status=status, memory_id=memory_id)
             except (ValueError, TypeError, ValidationError) as exc:
-                failed = True
+                del self.coordination[coordination_length:]
                 row.update(error_code=self._error_code(exc), error_type=type(exc).__name__,
                            error=str(exc))
                 if isinstance(exc, ValidationError):
@@ -315,7 +330,7 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
                                    legal_line_range=f"1..{exc.total_lines}",
                                    hint="use this handle's own 1-based lines")
                         row["decoded_source_handles"] = [leaf["source_handle"]
-                            for leaf in working.visible_lines()
+                            for leaf in original.visible_lines()
                             if leaf.get("decoded_from") == exc.source_handle]
                     elif exc.code == "role_mismatch":
                         row.update(required_role=exc.required_role,
@@ -325,44 +340,42 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
                     row.update(rule_code="memory_not_active", field_path="memory_id",
                                hint=_RECEIPT_REASONS["memory_not_active"])
             except Exception as exc:
-                failed = True
+                del self.coordination[coordination_length:]
                 self._fatal_error = exc
                 row.update(status="integrity_error", error_code="host_integrity",
                            error_type=type(exc).__name__, error=str(exc))
             finally:
-                for key in ("_diagnostic_ref_paths", "_last_resolve_path"):
-                    working.__dict__.pop(key, None)
                 self.memory = original
+            row["commit_version"] = __import__("hashlib").sha256(json.dumps(
+                original.to_dict(), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
             receipts.append(row)
-        if not failed:
-            try:
-                working.validate_bank()
-            except Exception as exc:
-                failed = True
-                self._fatal_error = exc
-                receipts.append({"transaction_id": txn, "call_index": len(calls) + 1,
-                                 "tool_name": "validate_bank", "status": "rejected",
-                                 "error_code": "bank_integrity", "error": str(exc)})
-        if failed:
-            for row in receipts:
-                if row["status"] in {"committed", "no_change"}:
-                    row["status"] = "transaction_aborted"
-                    row["error_code"] = "transaction_abort"
-                    self.collateral_aborts += 1
-            del self.coordination[coordination_length:]
-        else:
-            original.__dict__.update(working.__dict__)
+            if self._fatal_error is not None:
+                break  # Host failure blocks later operations and the phase-2 request.
         after_bank = original.to_dict()
         version = __import__("hashlib").sha256(json.dumps(after_bank,
             ensure_ascii=False, sort_keys=True).encode()).hexdigest()
-        for row in receipts:
-            row["commit_version"] = version
         self.last_receipts = receipts
-        changed = before_bank != after_bank
+        committed_count = sum(row["status"] == "committed" for row in receipts)
+        no_change_count = sum(row["status"] == "no_change" for row in receipts)
+        rejected_count = sum(row["status"] == "rejected" for row in receipts)
+        if self._fatal_error is not None:
+            phase_status = "host_failure"
+        elif not receipts:
+            phase_status = "no_operations"
+        elif rejected_count and (committed_count or no_change_count):
+            phase_status = "partially_committed"
+        elif rejected_count:
+            phase_status = "all_rejected"
+        elif committed_count:
+            phase_status = "committed"
+        else:
+            phase_status = "no_change"
         self.last_transaction = {"transaction_id": txn,
-                                 "status": ("transaction_aborted" if failed else
-                                            "committed" if changed else "no_change"),
-                                 "committed": not failed,
+                                 "status": phase_status,
+                                 "committed": bool(committed_count),
+                                 "committed_count": committed_count,
+                                 "no_change_count": no_change_count,
+                                 "rejected_count": rejected_count,
                                  "commit_version": version, "receipts": copy.deepcopy(receipts),
                                  "before_bank": self._bank_view(before_bank),
                                  "after_bank": self._bank_view(after_bank)}

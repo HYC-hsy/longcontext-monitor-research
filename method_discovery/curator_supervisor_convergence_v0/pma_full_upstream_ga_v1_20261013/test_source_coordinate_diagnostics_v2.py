@@ -16,20 +16,22 @@ from test_source_candidate_v2 import Script, call
 HERE = Path(__file__).resolve().parent
 RAW = (HERE / "source_memory_v3_single_r2_archive_20261015" / "raw" /
        "source-v2-59f53dcd1a87-01-r2")
+LATER_RAW = (HERE / "source_memory_v3_single_r2_coordinate_20261015_archive" / "raw" /
+             "source-v2-413c2b181e2c-01-r2")
 FAILURES = {15: {3: "invalid_range"}, 17: {3: "invalid_range"},
             21: {11: "invalid_range"}, 23: {12: "invalid_range"},
             25: {3: "invalid_range", 4: "invalid_range", 10: "invalid_range"},
             27: {2: "role_mismatch"}}
 
 
-def records(name):
-    return [json.loads(line) for line in (RAW / name).read_text(encoding="utf-8").splitlines()]
+def records(name, root=RAW):
+    return [json.loads(line) for line in (root / name).read_text(encoding="utf-8").splitlines()]
 
 
-def archived_stage(logical_call):
-    request = next(row for row in records("requests.jsonl") if row["logical_call"] == logical_call)
-    response = next(row for row in records("responses.jsonl") if row["logical_call"] == logical_call)
-    bank_row = next(row for row in records("bank_states.jsonl") if row["sequence"] == logical_call)
+def archived_stage(logical_call, root=RAW):
+    request = next(row for row in records("requests.jsonl", root) if row["logical_call"] == logical_call)
+    response = next(row for row in records("responses.jsonl", root) if row["logical_call"] == logical_call)
+    bank_row = next(row for row in records("bank_states.jsonl", root) if row["sequence"] == logical_call)
     bank = SourceMemoryV2.from_dict(bank_row["memory"])
     leaves = json.loads(request["prompt"].split(
         "## Numbered visible public source leaves\n", 1)[1].split(
@@ -49,8 +51,8 @@ class ArchivedCoordinateTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         return construct_upstream(Path(tmp.name) / "upstream", research_candidate=variant)
 
-    def test_eight_original_rejections_and_six_atomic_rollbacks(self):
-        total_rejected = total_collateral = 0
+    def test_eight_original_rejections_with_per_operation_commits(self):
+        total_rejected = total_committed = 0
         for logical_call, expected in FAILURES.items():
             with self.subTest(logical_call=logical_call):
                 bank, leaves, calls = archived_stage(logical_call)
@@ -61,16 +63,16 @@ class ArchivedCoordinateTests(unittest.TestCase):
                 engine._phase_step = (logical_call + 1) // 2
                 before = copy.deepcopy(bank.to_dict())
                 engine._execute_tool_calls(LLMResponse(content="", tool_calls=calls))
-                self.assertEqual(bank.to_dict(), before)
-                self.assertEqual(engine.last_transaction["status"], "transaction_aborted")
-                self.assertFalse(engine.last_transaction["committed"])
+                self.assertNotEqual(bank.to_dict(), before)
+                self.assertEqual(engine.last_transaction["status"], "partially_committed")
+                self.assertTrue(engine.last_transaction["committed"])
                 rejected = {row["call_index"]: row for row in engine.last_receipts
                             if row["status"] == "rejected"}
                 self.assertEqual({index: row["error_code"] for index, row in rejected.items()},
                                  expected)
                 total_rejected += len(rejected)
-                total_collateral += sum(row["status"] == "transaction_aborted"
-                                        for row in engine.last_receipts)
+                total_committed += sum(row["status"] == "committed"
+                                       for row in engine.last_receipts)
                 for index, code in expected.items():
                     row = rejected[index]
                     self.assertEqual(row["call_index"], index)  # one-based tool call
@@ -90,10 +92,48 @@ class ArchivedCoordinateTests(unittest.TestCase):
                         self.assertEqual(row["actual_roles"], ["tool_observation"])
                 if logical_call == 23:
                     self.assertEqual(engine.last_receipts[11]["status"], "rejected")
-                    self.assertTrue(any(row["status"] == "transaction_aborted" for row in engine.last_receipts))
+                    self.assertTrue(any(row["status"] == "committed" for row in engine.last_receipts))
                 if logical_call == 27:
-                    self.assertTrue(any(row["status"] == "transaction_aborted" for row in engine.last_receipts))
-        self.assertEqual((total_rejected, total_collateral), (8, 65))
+                    self.assertTrue(any(row["status"] == "committed" for row in engine.last_receipts))
+        self.assertEqual(total_rejected, 8)
+        self.assertGreater(total_committed, 0)
+
+    def test_seven_later_stages_replay_independently_without_future_sources(self):
+        old_reviews = [row for row in records("episode/candidate_audit.jsonl", LATER_RAW)
+                       if row["kind"] in {"task_start", "actor_step"}]
+        self.assertEqual(len(old_reviews), 21)
+        for logical_call in (23, 25, 27, 35, 37, 39, 41):
+            with self.subTest(logical_call=logical_call):
+                bank, _, calls = archived_stage(logical_call, LATER_RAW)
+                old = old_reviews[(logical_call - 1) // 2]["transaction"]
+                agent = self.agent()
+                agent._memory = bank
+                engine = agent._memory_agent
+                engine.memory = bank
+                engine._phase_step = (logical_call + 1) // 2
+                engine._execute_tool_calls(LLMResponse(content="", tool_calls=calls))
+                new = engine.last_transaction
+                self.assertEqual(len(new["receipts"]), len(calls))
+                self.assertIsNone(engine._fatal_error)
+                old_rows = [(r["call_index"], r["status"], r.get("error_code"))
+                            for r in old["receipts"]]
+                new_rows = [(r["call_index"], r["status"], r.get("error_code"))
+                            for r in new["receipts"]]
+                print(json.dumps({"logical_call": logical_call,
+                                  "old_status": old["status"], "new_status": new["status"],
+                                  "old_rows": old_rows, "new_rows": new_rows},
+                                 ensure_ascii=False))
+                for row in new["receipts"]:
+                    if row["status"] == "rejected" and row["tool_name"] == "memory_save_procedural":
+                        self.assertEqual(row["error_code"], "role_mismatch")
+                if logical_call == 41:
+                    revised = [r for r in new["receipts"] if r["tool_name"] == "memory_reconcile"
+                               and r["status"] == "committed" and r["memory_id"]]
+                    self.assertGreaterEqual(len(revised), 2)
+                    for row in revised[:2]:
+                        self.assertIsNotNone(bank.get(row["memory_id"]))
+                        self.assertTrue(any(h.get("replaced_by") == row["memory_id"]
+                                            for h in bank.history))
 
     def test_synthetic_corrected_coordinates_and_roles(self):
         corrected = 0
