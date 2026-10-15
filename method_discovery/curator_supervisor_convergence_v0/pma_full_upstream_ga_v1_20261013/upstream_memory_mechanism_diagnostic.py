@@ -87,6 +87,11 @@ def apply_recorded_operations(bank: UniversalMemory, operations: list[dict]) -> 
             with patch.object(bank, "_generate_id", return_value=identity):
                 if method(operation["content"]) != identity:
                     raise ValueError("upstream save identity mismatch")
+            # Archive receipts preserve identity/content, not the original
+            # MemoryEntry creation clock. A fixed replay-only clock makes the
+            # frozen bank serializable and reproducible without claiming to
+            # recover a historical timestamp; upstream prompt text omits it.
+            bank.get(identity).created_at = "1970-01-01T00:00:00"
         elif action == "update_status":
             bank.update_status(operation["content"])
         elif action == "delete":

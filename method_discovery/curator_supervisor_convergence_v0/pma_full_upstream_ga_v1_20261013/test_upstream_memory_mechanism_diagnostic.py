@@ -27,6 +27,13 @@ class DiagnosticTests(unittest.TestCase):
             self.assertEqual(len({u["prompt"] for u in changed}), 1)
         self.assertIn("[fJCxMuJa]", self.frozen["units"][4]["prompt"])
 
+    def test_archive_receipts_rebuild_deterministic_bank(self):
+        again = diagnostic.prepare()
+        for key in ("checks", "pre_bank_step2", "pre_bank_step10", "post_banks", "units"):
+            self.assertEqual(self.frozen[key], again[key])
+        self.assertEqual(self.frozen["pre_bank_step2"]["knowledge"][0]["created_at"],
+                         "1970-01-01T00:00:00")
+
     def test_original_process_fake_updates_phase2(self):
         result = asyncio.run(diagnostic.fake_cycle())
         self.assertEqual(result["requests"], 2)
