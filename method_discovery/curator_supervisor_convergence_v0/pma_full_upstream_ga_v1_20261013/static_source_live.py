@@ -11,7 +11,9 @@ import subprocess
 import time
 from typing import Any, Callable
 
-from static_source_screen import HERE, MANIFEST, MANIFEST_V2, ordered_slots, projected_events, sha256, verify_public_projection
+from static_source_screen import (ASSET_REGISTRY, BATCH_SCHEMA, HERE, MANIFEST, MANIFEST_V2,
+                                  ordered_slots, plan_slots, projected_events, selected_cases,
+                                  sha256, verify_public_projection)
 from episode import PMAEpisode, construct_upstream
 import litellm
 
@@ -64,39 +66,58 @@ def authorize(manifest_path: Path, auth_path: Path, output: Path, profile_path: 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     auth = json.loads(auth_path.read_text(encoding="utf-8"))
     is_v2 = manifest.get("schema") == "pma-source-memory-static-live-batch-v2"
-    frozen = json.loads((MANIFEST_V2 if is_v2 else MANIFEST).read_text(encoding="utf-8"))
-    if (manifest.get("schema") not in {"pma-source-memory-static-live-batch-v1",
-                                      "pma-source-memory-static-live-batch-v2"} or
-            manifest.get("conditions") != frozen["conditions"] or
-            manifest.get("cases") != frozen["cases"] or
-            manifest.get("input_policy") != frozen["input_policy"] or
-            (is_v2 and manifest.get("planned_order") != frozen["planned_order"])):
-        raise PermissionError("static candidate or public-input identity mismatch")
+    is_v3 = manifest.get("schema") == BATCH_SCHEMA
+    if is_v3:
+        try:
+            slots = plan_slots(manifest)
+        except (ValueError, KeyError, TypeError) as exc:
+            raise PermissionError("v3 plan or fixed asset identity mismatch") from exc
+        if manifest.get("code_commit") != code_commit():
+            raise PermissionError("frozen run code identity mismatch")
+    else:
+        frozen = json.loads((MANIFEST_V2 if is_v2 else MANIFEST).read_text(encoding="utf-8"))
+        if (manifest.get("schema") not in {"pma-source-memory-static-live-batch-v1",
+                                          "pma-source-memory-static-live-batch-v2"} or
+                manifest.get("conditions") != frozen["conditions"] or
+                manifest.get("cases") != frozen["cases"] or
+                manifest.get("input_policy") != frozen["input_policy"] or
+                (is_v2 and manifest.get("planned_order") != frozen["planned_order"])):
+            raise PermissionError("static candidate or public-input identity mismatch")
+        slots = plan_slots(manifest)
     bindings = manifest.get("run_bindings")
-    expected = [(task, variant) for task, variant in ordered_slots(manifest)]
+    expected = [(slot["case_id"], slot["variant"]) for slot in slots]
     if (manifest.get("execution_authorized") is not False or
-            not isinstance(bindings, list) or len(bindings) != 6 or
+            not isinstance(bindings, list) or len(bindings) != len(slots) or
             [(b.get("task"), b.get("variant")) for b in bindings] != expected or
-            [b.get("order") for b in bindings] != list(range(1, 7)) or
-            len({b.get("run_id") for b in bindings}) != 6):
-        raise PermissionError("frozen six-slot manifest invalid")
+            [b.get("order") for b in bindings] != list(range(1, len(slots) + 1)) or
+            len({b.get("run_id") for b in bindings}) != len(slots) or
+            (is_v3 and any((b.get("case_id"), b.get("occurrence")) !=
+                           (slot["case_id"], slot["occurrence"])
+                           for b, slot in zip(bindings, slots, strict=True)))):
+        raise PermissionError("frozen static manifest invalid")
     if (auth.get("execution_authorized") is not True or
             auth.get("manifest_sha256") != sha256(manifest_path) or
             auth.get("code_commit") != code_commit() or
             auth.get("profile_sha256") != sha256(profile_path) or
             auth.get("run_bindings") != bindings or
+            (is_v3 and (auth.get("batch_id") != manifest.get("batch_id") or
+                        auth.get("asset_registry_sha256") != sha256(ASSET_REGISTRY))) or
             auth.get("output_root") != str(output.resolve()) or
             output.exists()):
         raise PermissionError("single-use static authorization/identity mismatch")
     if len({b.get("run_id") for b in bindings}) != len(bindings):
         raise PermissionError("duplicate run identity")
     for binding in bindings:
+        run_id = binding["run_id"]
+        if (not isinstance(run_id, str) or run_id in {"", ".", ".."} or
+                "/" in run_id or "\\" in run_id):
+            raise PermissionError("run ID must be one nonempty path segment")
         path = (output / binding["run_id"]).resolve()
         if (not path.is_relative_to(output.resolve()) or path.exists() or
-                (is_v2 and binding.get("run_root") != str(path))):
+                ((is_v2 or is_v3) and binding.get("run_root") != str(path))):
             raise PermissionError("run root exists or escapes batch")
     # Identity and public projection checks are pre-send gates, not observations.
-    for case in manifest["cases"]:
+    for case in selected_cases(manifest).values():
         verify_public_projection(case)
     return manifest, auth
 
@@ -111,8 +132,9 @@ async def run_authorized(manifest_path: Path, auth_path: Path, profile_path: Pat
         "profile": safe_profile, "bindings": manifest["run_bindings"]}, indent=2), encoding="utf-8")
     results = []
     try:
-        cases = {case["task"]: case for case in manifest["cases"]}
-        for task, variant in ordered_slots(manifest):
+        cases = selected_cases(manifest)
+        for identity in plan_slots(manifest):
+                task, variant = identity["case_id"], identity["variant"]
                 case = cases[task]
                 mapping = verify_public_projection(case)
                 binding = manifest["run_bindings"][len(results)]
@@ -254,6 +276,7 @@ async def run_authorized(manifest_path: Path, auth_path: Path, profile_path: Pat
                 finally:
                     litellm.acompletion = original_lower
                 row = {"order": binding["order"], "run_id": binding["run_id"],
+                       "occurrence": identity["occurrence"],
                        "task": case["task"], "variant": variant, "status": status,
                        "error_type": error_type, "logical_phase_calls": logical,
                        "observable_litellm_calls": lower,

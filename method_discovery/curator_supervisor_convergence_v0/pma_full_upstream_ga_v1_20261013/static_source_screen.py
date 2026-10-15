@@ -25,6 +25,9 @@ from episode import PMAEpisode, construct_upstream
 
 MANIFEST = HERE / "SOURCE_MEMORY_STATIC_SCREEN_DRAFT.json"
 MANIFEST_V2 = HERE / "SOURCE_MEMORY_STATIC_SCREEN_V2_DRAFT.json"
+ASSET_REGISTRY = MANIFEST_V2  # Fixed, audited public assets; plans name case IDs only.
+PLAN_SCHEMA = "pma-source-memory-static-plan-v3"
+BATCH_SCHEMA = "pma-source-memory-static-live-batch-v3"
 FIELDS = {
     "task_start": ("initial_user_content",),
     "before_actor_call": ("actor_attempt",),
@@ -33,6 +36,8 @@ FIELDS = {
 
 
 def ordered_slots(manifest: dict) -> list[tuple[str, str]]:
+    if manifest.get("schema") in {PLAN_SCHEMA, BATCH_SCHEMA}:
+        return [(slot["case_id"], slot["variant"]) for slot in plan_slots(manifest)]
     cases = {case["task"] for case in manifest["cases"]}
     if "planned_order" not in manifest:
         return [(case["task"], variant) for case in manifest["cases"]
@@ -46,6 +51,76 @@ def ordered_slots(manifest: dict) -> list[tuple[str, str]]:
                                                for variant in manifest["conditions"]}:
         raise ValueError("six-slot identity mismatch")
     return slots
+
+
+def asset_cases() -> dict[str, dict]:
+    registry = json.loads(ASSET_REGISTRY.read_text(encoding="utf-8"))
+    return {case["task"]: case for case in registry["cases"]}
+
+
+def resolve_config(config: dict) -> dict:
+    """Expand a selection-only v3 config with identities from the fixed registry."""
+    if config.get("schema") != PLAN_SCHEMA or "asset_identities" in config:
+        return config
+    if set(config) != {"schema", "execution_authorized", "slots"} or config["execution_authorized"] is not False:
+        raise ValueError("selection config contains unsupported fields")
+    cases = asset_cases()
+    slots = config["slots"]
+    if not isinstance(slots, list) or not slots:
+        raise ValueError("nonempty ordered slots required")
+    selected = {}
+    for slot in slots:
+        if not isinstance(slot, dict) or slot.get("case_id") not in cases:
+            raise ValueError("unknown case ID")
+        case = cases[slot["case_id"]]
+        selected[slot["case_id"]] = {key: case[key] for key in
+            ("event_file_sha256", "public_event_file_sha256", "inclusive_event_sequence")}
+    resolved = {**config, "asset_registry_sha256": sha256(ASSET_REGISTRY),
+                "asset_identities": selected}
+    plan_slots(resolved)
+    return resolved
+
+
+def plan_slots(manifest: dict) -> list[dict]:
+    """Validate a plan without allowing caller-supplied paths, cutoffs or hashes."""
+    if manifest.get("schema") not in {PLAN_SCHEMA, BATCH_SCHEMA}:
+        return [{"order": n, "case_id": task, "variant": variant, "occurrence": 1}
+                for n, (task, variant) in enumerate(ordered_slots(manifest), 1)]
+    allowed = {"schema", "execution_authorized", "status", "slots", "asset_registry_sha256",
+               "asset_identities", "batch_id", "run_bindings", "code_commit"}
+    if (set(manifest) - allowed or manifest.get("execution_authorized") is not False or
+            manifest.get("asset_registry_sha256") != sha256(ASSET_REGISTRY)):
+        raise ValueError("plan or fixed asset registry identity mismatch")
+    slots = manifest.get("slots")
+    if not isinstance(slots, list) or not slots:
+        raise ValueError("nonempty ordered slots required")
+    known = asset_cases()
+    seen = set()
+    for number, slot in enumerate(slots, 1):
+        if (not isinstance(slot, dict) or set(slot) !=
+                {"order", "case_id", "variant", "occurrence"} or
+                type(slot["order"]) is not int or slot["order"] != number or
+                slot["case_id"] not in known or slot["variant"] not in {"U", "S2", "R2"} or
+                type(slot["occurrence"]) is not int or slot["occurrence"] < 1):
+            raise ValueError("invalid slot identity or order")
+        identity = (slot["case_id"], slot["variant"], slot["occurrence"])
+        if identity in seen:
+            raise ValueError("duplicate occurrence identity")
+        seen.add(identity)
+    selected = {case_id: {"event_file_sha256": known[case_id]["event_file_sha256"],
+                          "public_event_file_sha256": known[case_id]["public_event_file_sha256"],
+                          "inclusive_event_sequence": known[case_id]["inclusive_event_sequence"]}
+                for case_id in {slot["case_id"] for slot in slots}}
+    if manifest.get("asset_identities") != selected:
+        raise ValueError("selected fixed asset identity mismatch")
+    return slots
+
+
+def selected_cases(manifest: dict) -> dict[str, dict]:
+    if manifest.get("schema") in {PLAN_SCHEMA, BATCH_SCHEMA}:
+        selected = {slot["case_id"] for slot in plan_slots(manifest)}
+        return {case_id: case for case_id, case in asset_cases().items() if case_id in selected}
+    return {case["task"]: case for case in manifest["cases"]}
 
 
 def sha256(path: Path) -> str:
@@ -203,14 +278,20 @@ class FakePublicTransport:
         return response
 
 
-async def run_fake(manifest: dict, output: Path) -> list[dict]:
+async def run_fake(manifest: dict, output: Path, *, fake_transport_factory=None) -> list[dict]:
+    manifest = resolve_config(manifest)
+    identities = plan_slots(manifest)
+    cases = selected_cases(manifest)
+    for case in cases.values():
+        verify_public_projection(case)
     output.mkdir(parents=True, exist_ok=False)
     results = []
-    cases = {case["task"]: case for case in manifest["cases"]}
-    for task, variant in ordered_slots(manifest):
+    for identity in identities:
+            task, variant = identity["case_id"], identity["variant"]
             case = cases[task]
             mapping = verify_public_projection(case)
-            run_id = f"shadow-{case['task']}-{variant.lower()}"
+            run_id = (f"shadow-{identity['order']:03d}-{task}-{variant.lower()}-"
+                      f"r{identity['occurrence']}")
             slot = output / run_id
             slot.mkdir()
             (slot / "public_mapping.json").write_text(json.dumps(mapping, indent=2), encoding="utf-8")
@@ -218,26 +299,36 @@ async def run_fake(manifest: dict, output: Path) -> list[dict]:
             expected = (case["estimated_phase1_calls_per_condition"]
                         + case["estimated_phase2_calls_per_condition"])
             agent = construct_upstream(slot / "upstream", research_candidate=variant)
-            fake = FakePublicTransport(slot / "requests.jsonl", expected=expected)
+            fake = (fake_transport_factory(variant, slot) if fake_transport_factory else
+                    FakePublicTransport(slot / "requests.jsonl", expected=expected))
             agent._memory_llm.call = fake
             episode = PMAEpisode(agent, run_id=run_id, task_id=case["task"],
                                  archive=slot / "episode")
-            for event in events:
-                await episode.handle(event)
-                fatal = getattr(agent._memory_agent, "_fatal_error", None)
-                if fatal is not None:
-                    raise RuntimeError("candidate host integrity failure") from fatal
-            if fake.calls != expected:
-                raise AssertionError(f"logical call count {fake.calls} != {expected}")
-            agent.save_memory(str(slot / "memory.json"))
-            row = {"run_id": run_id, "task": case["task"], "variant": variant,
+            status, error_type = "static_prefix_complete", None
+            try:
+                for event in events:
+                    await episode.handle(event)
+                    fatal = getattr(agent._memory_agent, "_fatal_error", None)
+                    if fatal is not None:
+                        raise RuntimeError("candidate host integrity failure") from fatal
+                if fake.calls != expected:
+                    raise AssertionError(f"logical call count {fake.calls} != {expected}")
+                agent.save_memory(str(slot / "memory.json"))
+            except BaseException as exc:
+                status, error_type = "stopped_failure", type(exc).__name__
+            row = {"order": identity["order"], "occurrence": identity["occurrence"],
+                   "run_id": run_id, "task": case["task"], "variant": variant,
+                   "status": status, "error_type": error_type,
                    "events": len(events), "logical_phase_calls": fake.calls,
                    "provider_attempts": 0, "task_calls": 0, "native_evaluator_calls": 0,
                    "task_completed": False, "input_sent": False,
                    "event_sha256": case["event_file_sha256"],
-                   "request_sha256": sha256(fake.path)}
+                   "request_sha256": sha256(fake.path) if fake.path.exists() else None}
             (slot / "result.json").write_text(json.dumps(row, indent=2), encoding="utf-8")
             results.append(row)
+            (output / "summary.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
+            if status != "static_prefix_complete":
+                return results
     (output / "summary.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
     return results
 
@@ -258,13 +349,16 @@ def main() -> int:
         rows = asyncio.run(run_authorized(args.manifest, args.authorization, args.profile,
                                           args.output))
         print(json.dumps({"slots_finished": len(rows), "results": [r["status"] for r in rows]}))
-        return 0 if len(rows) == 6 and all(r["status"] == "static_prefix_complete" for r in rows) else 1
+        return 0 if len(rows) == len(plan_slots(manifest)) and all(
+            r["status"] == "static_prefix_complete" for r in rows) else 1
     if manifest.get("execution_authorized") is not False:
         raise ValueError("fake static draft must remain unauthorized")
+    manifest = resolve_config(manifest)
     rows = asyncio.run(run_fake(manifest, args.output))
     print(json.dumps({"slots": len(rows), "logical_phase_calls": sum(r["logical_phase_calls"] for r in rows),
                       "real_provider_attempts": 0}, sort_keys=True))
-    return 0
+    return 0 if len(rows) == len(plan_slots(manifest)) and all(
+        r["status"] == "static_prefix_complete" for r in rows) else 1
 
 
 if __name__ == "__main__":

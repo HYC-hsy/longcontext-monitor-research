@@ -10,11 +10,10 @@ import subprocess
 import zipfile
 
 from static_source_live import profile_identity
-from static_source_screen import HERE, sha256
+from static_source_screen import BATCH_SCHEMA, HERE, plan_slots, sha256
 
 
 TEXT_EXTENSIONS = {".json", ".jsonl", ".txt", ".log", ".tsv", ".md"}
-BASELINE = "ab2945cf3ba5bda51bcc22ab969ef53c1d48dc1d"
 
 
 def redact(data: str, secrets: list[str]) -> str:
@@ -31,6 +30,7 @@ def main() -> None:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--profile", type=Path, required=True)
     parser.add_argument("--run-code-commit", required=True)
+    parser.add_argument("--comparison-baseline", help="optional explicit diff base")
     parser.add_argument("--gate-stdout", type=Path)
     parser.add_argument("--gate-stderr", type=Path)
     parser.add_argument("--gate-exit", type=Path)
@@ -66,15 +66,25 @@ def main() -> None:
     summary_file = raw / "summary.json"
     rows = json.loads(summary_file.read_text(encoding="utf-8")) if summary_file.exists() else []
     expected = manifest["run_bindings"]
+    is_v3 = manifest.get("schema") == BATCH_SCHEMA
+    slots = (plan_slots(manifest) if is_v3 or "cases" in manifest else
+             [{"case_id": b["task"], "variant": b["variant"], "occurrence": 1}
+              for b in expected])
     by_order = {row["order"]: row for row in rows}
     table = []
-    for binding in expected:
+    for binding, identity in zip(expected, slots, strict=True):
         row = by_order.get(binding["order"])
+        slot_dir = raw / binding["run_id"]
+        requests = slot_dir / "requests.jsonl"
+        started = slot_dir.exists() or row is not None
+        observed = (len(requests.read_text(encoding="utf-8").splitlines())
+                    if requests.is_file() else "unknown" if started else 0)
         table.append({"order": binding["order"], "task": binding["task"],
-                      "variant": binding["variant"], "run_id": binding["run_id"],
-                      "status": row["status"] if row else "not_started",
-                      "logical_calls": row.get("logical_phase_calls") if row else 0,
-                      "observable_litellm_calls": row.get("observable_litellm_calls") if row else 0,
+                      "variant": binding["variant"], "occurrence": identity["occurrence"],
+                      "run_id": binding["run_id"],
+                      "status": row["status"] if row else "started_incomplete" if started else "not_started",
+                      "logical_calls": row.get("logical_phase_calls") if row else observed,
+                      "observable_litellm_calls": row.get("observable_litellm_calls") if row else "unknown" if started else 0,
                       "error_type": row.get("error_type") if row else None})
     (archive / "SLOT_SUMMARY.json").write_text(json.dumps(table, ensure_ascii=False, indent=2) + "\n",
                                                encoding="utf-8")
@@ -88,19 +98,24 @@ def main() -> None:
                             "first_two_logical_requests": first})
     (archive / "REQUEST_SAMPLES.txt").write_text(
         json.dumps(samples, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    diff = subprocess.run(["git", "diff", BASELINE, args.run_code_commit, "--",
+    diff = (subprocess.run(["git", "diff", args.comparison_baseline, args.run_code_commit, "--",
         "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013"],
         cwd=HERE, capture_output=True, text=True, check=True).stdout
+        if args.comparison_baseline else "(comparison baseline not supplied; no diff asserted)")
+    case_ids = sorted({slot["case_id"] for slot in slots})
+    variants = sorted({slot["variant"] for slot in slots})
     lines = ["S2/R2 STATIC PMA ENGINEERING AUDIT", "",
              "Nature: fixed exposed Task trajectory shadow screen; no Task delivery or native score.",
-             f"Baseline: {BASELINE}", f"Run code commit: {args.run_code_commit}",
+             f"Comparison baseline: {args.comparison_baseline or 'not supplied'}",
+             f"Run code commit: {args.run_code_commit}",
              f"Manifest SHA-256: {sha256(args.manifest)}",
+             f"Plan: {len(slots)} ordered slots, {len(case_ids)} cases {case_ids}, variants {variants}",
              f"Profile public identity: {json.dumps(safe, sort_keys=True)}",
              "Task/native evaluator/training/scoring-model calls: 0 by static entry design;",
              "observable LiteLLM lower-bound calls are listed by slot, inner network attempts remain unknown.",
-             "Original task and two fixed public cutoffs were verified before send.",
-             "U is unchanged upstream PMA; S2/R2 share handle/schema/transaction/receipt code.",
-             "R2 alone adds explicit coordination. No semantic quality verdict is made here.",
+             "Selected fixed public cutoffs are verified before send.",
+             "Method paths present in this plan: " + ", ".join(variants) + ".",
+             "No semantic quality verdict is made here.",
              "No candidate reminders were delivered to a Task Agent.", "",
              "SLOTS", json.dumps(table, ensure_ascii=False, indent=2), "",
              "REUSE MAP", (HERE / "REUSE_MAP_SOURCE_MEMORY_V2.json").read_text(encoding="utf-8"),
@@ -112,7 +127,7 @@ def main() -> None:
         if file.exists():
             lines.extend(["", name, file.read_text(encoding="utf-8")])
     (archive / "AUDIT_COMPLETE.txt").write_text("\n".join(lines), encoding="utf-8")
-    zip_path = archive / "raw_six_slots.zip"
+    zip_path = archive / ("raw_trajectories.zip" if is_v3 else "raw_six_slots.zip")
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as bundle:
         for file in sorted(path for path in raw.rglob("*") if path.is_file()):
             bundle.write(file, file.relative_to(raw).as_posix())
