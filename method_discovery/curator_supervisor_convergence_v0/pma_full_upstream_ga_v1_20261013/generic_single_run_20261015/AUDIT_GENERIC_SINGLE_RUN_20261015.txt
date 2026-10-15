@@ -1,0 +1,151 @@
+GA / original-PMA generic single-run base — offline engineering audit
+2026-10-15; implementation baseline d8af3a91b26379ee273b2b734bb1c00eafe5b780
+Prior real six-task code reference 1272f883aea9e8ffb61fa78f7c610537f2b10f64
+Prior two-task run code reference bfbb4103f4d694ecd4cb0afc62e38a27a5974743
+Branch crs-v0-20261007; no real execution authorization created in this work.
+
+Scope and provenance
+--------------------
+Official Task bytes are read with git ls-tree/cat-file from Terminal-Bench 2
+2fd12b88aafdd04a52c298e3940bcb189f9766d6. The original PMA vendor
+89e5c0d6aadfe531a1aee42fd290d48be89973dd and Harbor
+459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc were not modified.
+The new entry is single_run.py: prepare one fixed Task and condition A/B,
+then, only with separate one-use approval, call the pre-existing
+batch_controller → live_launcher → native shared Harbor/GA/PMA path.
+run_selection.py is a thin ordered outer caller of single_run; neither entry
+contains the 12-task list. The 24 proposed A/B invocations are data in
+DISCOVERY_12_DRAFT.json (execution_authorized=false), not current calls.
+Existing historical V2/V3 plans and bindings remain accepted under their old
+rules. New V4 bindings cannot be authorized by those old plans.
+
+Changes, exact files and diff
+-----------------------------
+IMPLEMENTATION_DIFF.patch is the complete Git diff from d8af3a91 to the
+implementation code commits, including new tests and scripts. It is a Git
+blob diff; Windows worktree CRLF warnings do not change its claimed identity.
+llmcore.py initializes pma_capture when telemetry is disabled and guards
+required ready/attempt capture before network send. Capture failure after an
+accepted response latches a stop for subsequent sends without retrying the
+accepted request. archive_live_six_task.py recursively projects out hidden
+thinking/signatures in public JSON while preserving actual private requests;
+cache_read_input_tokens is not conflated with cached_input_tokens. Actual
+provider payload remains untouched. The token-cost totals remain unknown
+when no corresponding usage field is returned.
+control_processes.py and NativeSharedTrialHooks record run/container/PID
+namespace/start-tick/argv identities in host-private storage. At agent end
+they stop only registered GA wrapper/agent/local transport and the known
+gateway, not all new Task PIDs. The Task HTTP service survives into the same
+container's synthetic native evaluator. This proves control quiescence, not
+an atomic freeze of all task-owned files or services. PMA bank save and worker
+stop are recorded separately. Missing or changed control identity closes the
+verification gate. No new CURRENT_TASK_DONE condition was introduced.
+export_official_evaluator/six_task_assets allow new valid fixed-Git slugs only
+on V4; old eight-task allowlists remain for legacy protocols. V4 prepares a
+one-slot plan, checks fixed image/config/task identities, and derives the
+agent multiplier as 14400/native_agent_seconds. Verifier multiplier stays 1.
+No seed, temperature, prompt, original PMA mechanism, tool interpreter or
+provider retry semantics were added/changed. A future real V4 launch is
+fail-closed without committed A/B Harbor lifecycle certification.
+
+Fixed 12-task preparation (not official evaluations)
+----------------------------------------------------
+TASK_INVENTORY.json records the full public/evaluator Git member set, blob
+ID, mode, byte size and SHA-256, official image tag, local RepoDigest, image
+config ID, platform, native/overridden timeouts, resources, network and
+report contract. The 12 declared images were fetched from their official
+tags and inspected locally; no alternative image or Dockerfile edit was used.
+All twelve disposable no-network image probes checked that initial images
+do not expose /tests, /solution or the Docker socket. The checks did not run
+official verifier assertions, prove all task tools useful, install missing
+Task-solving dependencies, or certify real provider compatibility. Individual
+raw image_check_*.txt and pull_*.txt files give commands/results. The first
+constraints-scheduling pull output was observed in the terminal but not
+captured as a pull_*.txt; its final local image/digest is in the inventory.
+Native agent timeouts: 1200s for constraints-scheduling and
+financial-document-processor, 3600s for reshard-c4-data, 900s for the other
+nine. Native verifier timeout: 1200s for those first two, 3600s for reshard,
+1800s for query-optimize, 900s for the other eight. The research 14400s
+agent envelope is not the official native budget; the V4 launcher derives
+12/4/16 multipliers accordingly, without changing native verifier limits.
+
+Zero-model test commands and raw results
+----------------------------------------
+1. PYTHONPATH=GenericAgent-main python -m pytest
+   GenericAgent-main/tests/test_pma_capture_boundary.py -q
+   test_capture_final_r2.txt: 6 passed in 0.02s. Earlier invocation without
+   PYTHONPATH failed at import and is preserved in test_capture_final.txt.
+2. PMA_CONTROL_DOCKER_FIXTURE=1, PMA_CONTROL_FIXTURE_IMAGE=
+   alexgshaw/constraints-scheduling:20251031, PMA_CONTROL_RUNTIME=
+   E:\LongContext\bench_runtime\m2\linux, Harbor Python 3.12 -m unittest
+   ...test_single_run_offline -v
+   test_single_run_offline_docker_final_r3.txt: 4 tests, OK. Earlier runs
+   without these explicit fixture variables are preserved, including their
+   error output; one default run correctly skipped the optional Docker test.
+3. The real batch_controller → live_launcher → pinned Harbor → GA container →
+   fake provider → synthetic Task tool → AGENT_END → native shared synthetic
+   test.sh lifecycle ran once as A and once as B. Both used a temporary
+   fake-only authorization removed afterward. A run pma-8ec63bccb4df435e,
+   B run pma-d745cc49550f438f: each captured 2 complete fake Task
+   request/attempt pairs, one synthetic evaluator execution, synthetic
+   reward=1, cleanup_confirmed=true, control_remaining=0, and one
+   task-owned HTTP service PID preserved into evaluation. B additionally
+   captured 2 bank_management + 2 context_decision fake PMA calls, a reminder
+   appended and linked to its second Task provider_request_ready. A has no
+   PMA worker or PMA reminder. These are synthetic lifecycle results, not
+   official task rewards, model compatibility or PMA effectiveness.
+   Read certification_fixture_v1/A and /B individually: fake_requests,
+   research_events, memory_payload (B), agent start/end, control registry,
+   native test execution, synthetic test.sh, Harbor result and cleanup.
+   FILE_HASHES.json binds 38 exported files to private source hashes and
+   public SHA-256. A direct verify_evidence check found 21 required evidence
+   files and source_identity checked 29 committed execution files. The later
+   certified one-slot prepare returned execution_authorized=false and wrote
+   only an unused draft manifest (pma-6125818da6144f21).
+
+Failure attempts retained, not silently upgraded
+-----------------------------------------------
+Early long-path fixture attempts failed before Task requests. A5 failed
+before Harbor with "fixed clean native Harbor source unavailable"; A6 failed
+at Harbor import because the wrong bench-root lacked adapters. A4 reached
+the synthetic verifier but its background service was absent there, so the
+synthetic test exited 1 and reward was unavailable. A7/A8 verified that a
+simple stdout success label was insufficient: the readiness call received
+HTTP 501 from an unrelated listener on the first fixture port; evaluation
+subsequently saw connection refused. The final fixture uses a dedicated port
+and an actual readiness request. B2 initially had normal two-stage fake PMA
+calls but no reminder: the fake update condition expected the old tool marker.
+B3 preserved that marker alongside the service status, exercising original
+PMA save/selection and the next Task request. All failed private roots were
+left intact, not overwritten or treated as successful evidence. Raw private
+roots are E:\pma-ga-sr-a4/a5/a6/a7/a8-20261015 and B2; they are not uploaded
+because they contain unprojected Task/provider and host-private records.
+
+Public projection, counts, limitations
+--------------------------------------
+The public fixture is selected/redacted from the private originals; it keeps
+request and response structure, tool results, phase prompts and linking IDs,
+but recursively replaces hidden thinking/redacted_thinking and signatures
+with a marker, original length and hash. Provider endpoints are redacted.
+Private originals remain outside the repository. The fake transport/Harbor
+calls above were actual offline I/O. Real Task model, real PMA/provider API,
+official benchmark evaluator, training and scoring-model calls in this work:
+0. Actual inner real-provider attempts/cost are therefore not estimated.
+The profile says max_retries=8 for PMA, but original worker semantics control
+actual retries; the field alone is not an observed attempt count.
+The historical six-task run and this V4 route reuse the same fixed GA/PMA
+vendor and Harbor adapter, task/PMA profile SHA identities, shared native
+verifier and archive components. V4 changes task selection/materialization,
+authorization granularity and control-process stopping. Full request-byte
+equivalence to the historical run is not claimed, nor is target-image
+official evaluation of all 12 tasks. No new24-slot authorization exists.
+
+Next authorization boundary
+---------------------------
+RUNNING.md gives runnable prepare/fake commands and explains separate future
+approval. The prepared 24-slot plan is not permission to call a model. Before
+any future real launch, independently review the new code and public fixture,
+verify private profiles/image identities and commit SHA, bind a distinct
+one-use authorization for the selected single invocation(s), and retain
+fail-closed cleanup/capture rules. This engineering thread stops here for
+main-agent audit; no effectiveness conclusion is offered.
