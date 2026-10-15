@@ -43,6 +43,19 @@ output root and (for B) empty memory bank. An existing output is refused.
 The offline Harbor/Docker fake fixture runs through the same controller and
 launcher with a fake-only authorization that is removed afterward:
 
+The ordered fake exercise uses the same output root for prepare then run,
+retains `selection_preparation.json`, writes a separate exclusive
+`selection_result.json`, and removes every temporary fake authorization:
+
+```powershell
+& $py -m "$module.selection_fixture" --plan E:\longcontext-cqs-v0-20261005\method_discovery\curator_supervisor_convergence_v0\pma_full_upstream_ga_v1_20261013\generic_single_run_20261015\EXAMPLE_ORDERED_OFFLINE_AUDIT.json --output E:\unused-ordered-fixture --official-source-git $source --task-profile-file $taskProfile --pma-profile-file $pmaProfile --ga-source E:\longcontext-cqs-v0-20261005\GenericAgent-main --runtime-root E:\LongContext\bench_runtime\m2\linux --worker-python E:\LongContext\bench_runtime\pma_native_venv\Scripts\python.exe --harbor-python $py --bench-root E:\longcontext-cqs-v0-20261005\long_context_bench --harbor-source-root E:\pma-harbor-459ff6e-clean
+```
+
+This is a synthetic evaluator and fake provider only. A future real run must
+use a new output root and separately committed A/B evidence whose recorded
+execution source identities match the running source. An un-certified draft
+cannot be turned into an authorization by this fixture.
+
 ```powershell
 & $py -m "$module.single_run_fixture" --task constraints-scheduling --condition B --output E:\unused-fixture --official-source-git $source --task-profile-file $taskProfile --pma-profile-file $pmaProfile --ga-source E:\longcontext-cqs-v0-20261005\GenericAgent-main --runtime-root E:\LongContext\bench_runtime\m2\linux --worker-python E:\LongContext\bench_runtime\pma_native_venv\Scripts\python.exe --harbor-python $py --bench-root E:\longcontext-cqs-v0-20261005\long_context_bench --harbor-source-root E:\pma-harbor-459ff6e-clean --service-fixture
 ```
