@@ -5,6 +5,7 @@ import base64
 import json
 import os
 import posixpath
+import re
 import shlex
 from pathlib import Path
 from adapters.failure_snapshot import preserve_failed_workspace
@@ -112,6 +113,8 @@ class M4GenericAgent(BaseAgent):
     ) -> None:
         super().__init__(*args, **kwargs)
         self.llm_no = int(llm_no)
+        if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', run_id) is None:
+            raise ValueError('unsafe GA run identity')
         self.run_id = run_id
         self.expected_model = expected_model.lower()
         self.python_home = python_home
@@ -442,6 +445,7 @@ class M4GenericAgent(BaseAgent):
         )
         command = f"""
 set +e
+# GA_WRAPPER_RUN_ID={self.run_id}
 archive_output() {{
   if [ -f {_q(output)} ]; then
     cp {_q(output)} /logs/agent/output.txt.pending && mv /logs/agent/output.txt.pending /logs/agent/output.txt

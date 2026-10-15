@@ -11,7 +11,7 @@ from adapters import harbor_ga_agent as original
 from .networked_transport_setup import start_networked_transport
 
 
-EXPECTED_ADAPTER_SHA256 = "8a4513c6b28befe747d581d22e94cd2715f20234c63115e0ea424a56d033c3a0"
+EXPECTED_ADAPTER_SHA256 = "f50894cdb160793dcba83bcf4ecd2b73ff48e2bad427abef4551db87faadfb55"
 FORWARD = (
     "GA_PMA_UPSTREAM_ENABLED",
     "GA_PMA_UPSTREAM_REQUESTS",

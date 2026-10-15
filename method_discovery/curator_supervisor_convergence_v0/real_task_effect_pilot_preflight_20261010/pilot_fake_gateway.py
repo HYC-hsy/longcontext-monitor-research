@@ -29,6 +29,22 @@ class State:
             if route != 'monitor':
                 self.task_responses += 1
                 if os.environ.get('PMA_MULTITURN_FIXTURE') == '1' and self.task_responses == 1:
+                    if os.environ.get('PMA_SERVICE_FIXTURE') == '1':
+                        return sequence, 'code_run', 'Start a harmless local test service.', {
+                            'script': ('setsid /opt/m4-runtime/python/'
+                                       'cpython-3.12.12-linux-x86_64-gnu/bin/python3.12 '
+                                       '-m http.server 19173 --bind 127.0.0.1 '
+                                       '>/tmp/pma_service_fixture.log 2>&1 </dev/null & '
+                                       'sleep 1; /opt/m4-runtime/python/'
+                                       'cpython-3.12.12-linux-x86_64-gnu/bin/python3.12 '
+                                       '-c "import urllib.request; '
+                                       'urllib.request.build_opener('
+                                       'urllib.request.ProxyHandler({})).open('
+                                       '\'http://127.0.0.1:19173/\', '
+                                       'timeout=3).close()" && '
+                                       'printf "PMA_SERVICE_STARTED\\nPMA_OFFLINE_TOOL_OK\\n"'),
+                            'type': 'bash', 'timeout': 60,
+                        }
                     return sequence, 'code_run', 'Inspecting the public workspace.', {
                         'script': "printf 'PMA_OFFLINE_TOOL_OK\\n'",
                         'type': 'bash', 'timeout': 60,

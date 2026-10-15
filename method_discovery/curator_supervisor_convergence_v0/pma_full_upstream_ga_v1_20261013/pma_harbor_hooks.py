@@ -14,6 +14,7 @@ from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_p
     PilotTrialHooks, _atomic, _tree_sha256,
 )
 from .six_task_plan import validate_plan
+from .control_processes import scan as scan_control_processes, stop_registered
 
 
 def _source_identity(value: str) -> str:
@@ -50,7 +51,8 @@ def verify_live_spec(spec: dict) -> None:
     arms = frozen.get('arms')
     bindings = granted.get('run_bindings')
     if frozen.get('schema') in {'pma-ga-live-manifest-v2',
-                                'pma-ga-live-manifest-v3'}:
+                                'pma-ga-live-manifest-v3',
+                                'pma-ga-live-manifest-v4'}:
         if granted.get('manifest_sha256') != spec['manifest_sha256']:
             raise RuntimeError('six-task approval does not bind manifest bytes')
         bindings = validate_plan(frozen, granted)
@@ -164,6 +166,36 @@ class PMATrialHooks(PilotTrialHooks):
 class NativeSharedTrialHooks(PMATrialHooks):
     """New-protocol lifecycle only; never stop/restart the Task container."""
 
+    async def _watch_ga_control(self):
+        registry = self.archive / 'registered_control_processes'
+        registry.mkdir(exist_ok=True)
+        identities = {}
+        while not self._control_watch_stop.is_set():
+            snapshot = await asyncio.to_thread(scan_control_processes,
+                self.container_id, self._control_python, self.spec['run_id'])
+            if snapshot['pid_namespace'] != self._control_namespace:
+                raise RuntimeError('GA control PID namespace changed during task')
+            for row in snapshot['processes']:
+                identity = {**row, 'pid_namespace': self._control_namespace,
+                            'run_id': self.spec['run_id']}
+                key = (row['pid'], row['start_ticks'])
+                if key not in identities:
+                    identities[key] = identity
+                    path = registry / f"{row['pid']}-{row['start_ticks']}.json"
+                    if path.exists():
+                        if json.loads(path.read_text(encoding='utf-8')) != identity:
+                            raise RuntimeError('GA control registration changed')
+                    else:
+                        _atomic(path, identity)
+            await asyncio.sleep(.1)
+
+    async def _finish_control_watch(self):
+        self._control_watch_stop.set()
+        try:
+            await asyncio.wait_for(self._control_watch_task, timeout=35)
+        except BaseException as exc:
+            raise RuntimeError('trusted GA control registration incomplete') from exc
+
     async def agent_start(self, event):
         # Reuse the original PMA mount/public-test checks, with only the
         # network expectation changed for an official-network Task.
@@ -208,6 +240,26 @@ class NativeSharedTrialHooks(PMATrialHooks):
             raise RuntimeError('native baseline process inventory unavailable')
         self.baseline_pids = _docker_top_pids(top.stdout)
         self.container_id = container
+        self._control_python = ('/opt/m4-runtime/python/' +
+            self.spec.get('python_home', 'cpython-3.12.12-linux-x86_64-gnu') +
+            '/bin/python3.12')
+        initial = await asyncio.to_thread(scan_control_processes,
+                                          container, self._control_python,
+                                          self.spec['run_id'])
+        if any(row['kind'] in {'ga', 'wrapper'} for row in initial['processes']):
+            raise RuntimeError('GA agent or wrapper already present before agent start')
+        self._control_namespace = initial['pid_namespace']
+        _atomic(self.archive / 'control_process_registry.json', {
+            'run_id': self.spec['run_id'], 'container_id': container,
+            'pid_namespace': self._control_namespace,
+            'initial_control_count': len(initial['processes'])})
+        registered = self.archive / 'registered_control_processes'
+        registered.mkdir(exist_ok=False)
+        for row in initial['processes']:
+            identity = {**row, 'pid_namespace': self._control_namespace,
+                        'run_id': self.spec['run_id']}
+            _atomic(registered / f"{row['pid']}-{row['start_ticks']}.json",
+                    identity)
         _atomic(self.archive / 'agent_start_identity.json', {
             'run_id': self.spec['run_id'], 'container_id': container,
             'image_id': raw['Image'], 'network_mode': raw['HostConfig']['NetworkMode'],
@@ -215,8 +267,11 @@ class NativeSharedTrialHooks(PMATrialHooks):
                        for m in raw.get('Mounts', [])],
             'provider_key_env_absent': True, 'hidden_tests_absent': True,
             'baseline_pids': sorted(self.baseline_pids)})
+        self._control_watch_stop = asyncio.Event()
+        self._control_watch_task = asyncio.create_task(self._watch_ga_control())
 
     async def agent_end(self, event):
+        await self._finish_control_watch()
         _atomic(self.control / 'agent_end_pending.json',
                 {'run_id': self.spec['run_id'], 'container_id': self.container_id})
         cleared = self.control / 'sidecar_stopped.json'
@@ -236,34 +291,69 @@ class NativeSharedTrialHooks(PMATrialHooks):
         # task mounts and services for Harbor's normal collection/verifier.
         await self.trial.agent_environment._run_docker_compose_command(
             ['stop', 'model-gateway'])
+        gateway = await self.trial.agent_environment._run_docker_compose_command(
+            ['ps', '-a', '-q', 'model-gateway'])
+        gateway_ids = gateway.stdout.strip().splitlines()
+        if len(gateway_ids) != 1:
+            raise RuntimeError('native model gateway identity unavailable after stop')
+        gateway_state = await asyncio.to_thread(subprocess.run,
+            ['docker', 'inspect', '-f', '{{.State.Running}}', gateway_ids[0]],
+            text=True, capture_output=True, timeout=30)
+        if gateway_state.returncode or gateway_state.stdout.strip() != 'false':
+            raise RuntimeError('native model gateway stop unconfirmed')
+        registry = json.loads((self.archive / 'control_process_registry.json').read_text(
+            encoding='utf-8'))
+        if (registry.get('run_id') != self.spec['run_id'] or
+                registry.get('container_id') != self.container_id or
+                registry.get('pid_namespace') != self._control_namespace):
+            raise RuntimeError('trusted GA control registry identity changed')
+        observed = {}
+        for path in (self.archive / 'registered_control_processes').glob('*.json'):
+            row = json.loads(path.read_text(encoding='utf-8'))
+            if (row.get('run_id') != self.spec['run_id'] or
+                    row.get('pid_namespace') != self._control_namespace):
+                raise RuntimeError('trusted GA control registration identity differs')
+            observed[(row['pid'], row['start_ticks'])] = row
         top = await asyncio.to_thread(subprocess.run, ['docker', 'top', self.container_id],
                                       text=True, capture_output=True, timeout=30)
         first_top = top.stdout
-        if top.returncode == 0 and 'agentmain.py' in top.stdout.lower():
-            # Harbor cancellation can stop the host exec while its container
-            # child survives. Target only GA's process, then prove quiescence.
-            stopped = await asyncio.to_thread(subprocess.run,
-                ['docker', 'exec', self.container_id, 'sh', '-c',
-                 "pkill -TERM -f 'agentmain[.]py'; rc=$?; test $rc -eq 0 -o $rc -eq 1"],
-                text=True, capture_output=True, timeout=30)
-            if stopped.returncode:
-                raise RuntimeError('native GA process stop failed')
+        active = await asyncio.to_thread(scan_control_processes,
+                                         self.container_id, self._control_python,
+                                         self.spec['run_id'])
+        if active['pid_namespace'] != self._control_namespace:
+            raise RuntimeError('GA control PID namespace changed before evaluation')
+        for row in active['processes']:
+            identity = observed.get((row['pid'], row['start_ticks']))
+            if identity is None or identity['argv_sha256'] != row['argv_sha256']:
+                raise RuntimeError('unregistered or reused GA control process remains')
+            await asyncio.to_thread(stop_registered, self.container_id,
+                                    self._control_python, identity)
+        if active['processes']:
             await asyncio.sleep(2)
             top = await asyncio.to_thread(subprocess.run,
                 ['docker', 'top', self.container_id], text=True,
                 capture_output=True, timeout=30)
+        final_control = await asyncio.to_thread(scan_control_processes,
+                                                self.container_id, self._control_python,
+                                                self.spec['run_id'])
         _atomic(self.archive / 'writer_termination_check.json', {
             'run_id': self.spec['run_id'], 'before': first_top,
-            'after': top.stdout, 'docker_top_return_code': top.returncode})
-        if top.returncode or 'agentmain.py' in top.stdout.lower() or (
-                _docker_top_pids(top.stdout) - self.baseline_pids):
-            raise RuntimeError('native Task writer termination unconfirmed')
+            'after': top.stdout, 'docker_top_return_code': top.returncode,
+            'registered_control_processes': list(observed.values()),
+            'control_remaining': final_control['processes'],
+            'task_owned_pids_preserved': sorted(_docker_top_pids(top.stdout) - self.baseline_pids)
+                if top.returncode == 0 else None})
+        if (top.returncode or final_control['pid_namespace'] != self._control_namespace or
+                final_control['processes']):
+            raise RuntimeError('registered GA control processes not stopped')
         _atomic(self.archive / 'agent_end_native.json', {
             'run_id': self.spec['run_id'], 'container_id': self.container_id,
             'sidecar_clean': True, 'gateway_stopped': True,
+            'gateway_container_id': gateway_ids[0],
             'pma_finalization': clearance.get('pma_finalization'),
             'pma_worker_return_code': clearance.get('worker_return_code'),
-            'writers_stopped': True, 'docker_top': top.stdout,
+            'control_processes_stopped': True, 'writers_stopped': True,
+            'docker_top': top.stdout,
             'baseline_pids': sorted(self.baseline_pids),
             'agent_result_metadata': str(getattr(self.trial.result, 'agent_result', None)),
             'legal_agent_end_required': False})
