@@ -1,0 +1,139 @@
+S2/R2 PER-OPERATION ISOLATION -- OFFLINE AUDIT -- 2026-10-15
+
+Status: IMPLEMENTED_READY_FOR_BRAIN_AUDIT. No real experiment authorized.
+Repository: HYC-hsy/longcontext-monitor-research; branch crs-v0-20261007.
+Input baseline: 415b1f7bd0d072989177e7e267a26e1c9cc9bd69.
+Last real run code: 9d0ab5e116c77f29ec80d9357b145991e3ebf2a2.
+New implementation commit: 8f3f87a4640528d7d8cac49379143564323f49ff.
+Historical recordings and frozen candidate artifacts were read only. Replay uses
+independent in-memory banks restored from each archived pre-stage snapshot.
+The U path, PMA vendor, GA, model profiles, source window, source validation,
+Phase 2 silence grammar, assets and selector were not edited.
+
+What changed
+------------
+S2/R2 Phase 1 still makes one model request and receives its existing ordered
+structured tool-call list. Each operation now copies the last committed bank,
+executes and validates on that copy, then commits only that operation. A normal
+argument/source/ID rejection discards that operation and allows later calls.
+One reconcile/revise is an atomic unit across active entry, metadata, history,
+index and coordination; separate delete/save are not inferred to be a revision.
+An unexpected host integrity exception stops subsequent operations and blocks
+the Phase 2 request, while previously committed operations remain in the bank.
+No accepted provider request is replayed. No extra model call was added.
+
+Phase summaries distinguish committed, partially_committed, all_rejected,
+no_change, no_operations and host_failure. The retained `committed` boolean now
+means at least one state-changing operation committed; it does NOT mean all
+operations succeeded. committed_count, no_change_count, rejected_count and each
+row's post-operation commit_version make partial state visible in Phase 2 and
+the next Phase 1. Full before_bank/after_bank and raw errors remain audit-only;
+the model view stays an explicit whitelist. `collateral_aborts` is retained for
+old archive compatibility but is zero under this implementation.
+
+The shared statement_type guidance is used in both the actual S2/R2 Phase 1
+system and Pydantic-generated save/revise schemas. task_requirement requires
+task_instruction provenance; tool_observation is a directly returned tool
+observation, not an inferred effect; agent_report is attributed to Task;
+inference remains an inference. knowledge/procedural describes memory use, not
+claim type. A citation proves provenance only, not truth or entailment. Mixed
+claims should split or be marked as inference. Test source, edit receipt and
+old source do not by themselves prove current runtime behavior. Existing host
+role constraints remain group-level, not per-reference; source roles are not
+silently changed to pass validation.
+
+Reuse map
+---------
+Updated REUSE_MAP_SOURCE_MEMORY_V2.json is included by repository path and hash.
+Original PMA 89e5c0d6aadfe531a1aee42fd290d48be89973dd (Apache-2.0):
+vendor/pma_89e5c0d/src/memory_agent/memory/memory_agent.py,
+MemoryAgent.process and _execute_tool_calls directly retain two phases and
+sequential per-operation error isolation as the behavioral reference. The
+staged per-operation validated commit is NEW research-side code, not an upstream
+transaction feature. UniversalMemory active lists, get/delete/save, BM25 and
+serialization are inherited. Original LiteLLM transport is unchanged.
+Pydantic 2.12.5 (MIT), reference bd2d0dd0137dfa1a8fdff2529b9dfb1547980150:
+the same models drive model_json_schema and model_validate. No Graphiti,
+jsonpatch, new database, parser or model loop was installed or copied.
+
+Independent historical-stage replay
+-----------------------------------
+Source: source_memory_v3_single_r2_coordinate_20261015_archive/raw/
+source-v2-413c2b181e2c-01-r2/ (existing frozen archive).
+Each logical call 23,25,27,35,37,39,41 restores its OWN recorded bank, exact
+original structured calls and current-window source leaves. It does not feed a
+newly replayed stage's bank to a later recorded request, nor use future sources.
+The complete old/new row vectors are in TEST_OUTPUT_RAW.txt. Compact table:
+
+logical call | old stage status | new stage status | old collateral -> new commits | direct rejection
+23           | transaction_aborted | partially_committed | 6 -> 6 | row 7 role_mismatch
+25           | transaction_aborted | partially_committed | 1 -> 1 | row 2 role_mismatch
+27           | transaction_aborted | partially_committed | 3 -> 3 | row 2 role_mismatch
+35           | transaction_aborted | partially_committed | 3 -> 3 | row 2 role_mismatch
+37           | transaction_aborted | partially_committed | 3 -> 3 | row 2 role_mismatch
+39           | transaction_aborted | partially_committed | 7 -> 7 | row 4 role_mismatch
+41           | transaction_aborted | partially_committed | 7 -> 7 | row 4 role_mismatch
+
+Seven original procedural calls remain rejected with their original arguments.
+At call 41 at least two individually valid revisions now commit with new active
+IDs and superseded history; the procedural save remains rejected. Structural
+acceptance does not establish that the _hkey/_hval statements are semantically
+correct. Call 35's structurally legal old-source inference remains a semantic
+negative case; neither this code nor the replay verifies its meaning.
+Synthetic-corrected source/role cases in pre-existing tests are explicitly
+synthetic and not credited to the model. Old genuine recordings are unchanged.
+
+Actual fake-transport request and receipt example
+-------------------------------------------------
+TEST_OUTPUT_RAW.txt contains the model-facing serialized system/schema and
+Phase 2 / next Phase 1 projections from the actual SourceMemoryAgentV2 process.
+Both S2 and R2 send the same shared type guidance. In a two-call scripted Phase 1
+with status update then invalid delete, the actual requests contain:
+transaction.status=partially_committed, committed=true, committed_count=1,
+no_change_count=0, rejected_count=1; receipt 1 status=committed,
+receipt 2 status=rejected/error_code=memory_not_active. The identical safe view
+is seen in the next Phase 1. There is no bank/history/raw exception in that view.
+An injected host fault after a staged revise leaves the old entry and history
+intact, preserves a prior independent status commit and sends no Phase 2 request.
+
+Tests and unaltered raw output
+-----------------------------
+Environment: E:/LongContext/bench_runtime/pma_native_venv/Scripts/python.exe;
+PYTHONPATH contains repo root, GenericAgent-main, research directory, pinned
+vendor/src and vendor/external/harbor/src. All tests use scripted in-process
+transport; unexpected sends fail. Exact command strings and raw results are in
+TEST_OUTPUT_RAW.txt and the test files.
+1. python -m pytest -q test_source_candidate.py test_source_candidate_v2.py
+   test_source_coordinate_diagnostics_v2.py test_static_source_live_v2.py
+   test_static_source_screen.py => 55 passed, 56 subtests passed; exit 0.
+2. python -m pytest -s -q targeted seven-stage replay and actual-request sample
+   => 2 passed, 9 subtests passed; exit 0.
+3. package-alias `unittest.main(module='test_episode',verbosity=1)` => 13
+   tests, OK, exit 0. Its scripted failure stack traces are expected test data.
+
+Earlier attempts retained: before old whole-Phase-1 assertions were revised,
+pytest reported 19 failed/23 passed (plus subtests). Those assertions explicitly
+required old abort semantics and were updated to verify per-operation commits;
+tests were not deleted. Combining test_episode with plain top-level pytest gave
+collection ImportError (offline_launcher relative import); the previously
+verified package alias above ran it. The first PowerShell transcript capture
+omitted native stdout; TEST_OUTPUT.txt retains that failed capture. A separate
+Tee-Object capture, TEST_OUTPUT_RAW.txt, includes native stdout/stderr and exit
+markers. No failed run has been described as green.
+
+Evidence and limitations
+------------------------
+0001-Isolate-S2-R2-memory-commits-per-operation.txt is the complete Git patch
+for the implementation commit; not a command or abbreviated diff. FILE_HASHES.tsv
+lists the package and touched source bytes. Git blob IDs and worktree SHA-256
+are distinct identities. No private profile, credential, endpoint or activity
+authorization was read into or copied to this packet. Existing draft manifests
+remain execution_authorized=false. Real Task, PMA/provider, native evaluator,
+training and scoring-model calls this turn: 0. Fake transport calls were made
+by the tests only; they are not real provider attempts.
+
+This establishes mechanical interface behavior and deterministic replay only.
+It does not establish semantic accuracy, reliable provenance entailment,
+future model use of feedback, PMA benefit, or Task outcome. No live/static
+experiment or native evaluation was started. Historical real scores and traces
+remain tied to their own old frozen implementation SHA.
