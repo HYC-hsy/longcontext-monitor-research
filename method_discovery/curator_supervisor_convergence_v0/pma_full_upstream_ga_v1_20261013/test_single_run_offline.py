@@ -30,6 +30,13 @@ class SingleRunOfflineTests(unittest.TestCase):
         self.assertEqual(original.count(b'PRIVATE_DELTA'), 1)
         with self.assertRaises(UnsafePublicProjection):
             redact(b'data: {"type":"redacted_thinking","data":', [])
+        multiple = (b'{"content":[{"type":"redacted_thinking",'
+                    b'"data":"PRIVATE_ONE"}]}\n'
+                    b'{"content":[{"type":"text","text":"public"}]}\n')
+        projected, changed = redact(multiple, [])
+        self.assertEqual(changed, 1)
+        self.assertNotIn(b'PRIVATE_ONE', projected)
+        self.assertIn(b'public', projected)
 
     def test_preparation_and_run_receipts_are_distinct(self):
         from tempfile import TemporaryDirectory

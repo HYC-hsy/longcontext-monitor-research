@@ -97,6 +97,7 @@ def redact(raw: bytes, secrets: list[str]) -> tuple[bytes, int]:
         if isinstance(exc, UnsafePublicProjection):
             raise
         lines = text.splitlines(keepends=True)
+        converted = None
         if lines and all(not line.strip() or line.lstrip().startswith(('{', '[', 'data:', 'event:', 'id:'))
                          for line in lines):
             converted = []
@@ -118,11 +119,25 @@ def redact(raw: bytes, secrets: list[str]) -> tuple[bytes, int]:
                 except (ValueError, TypeError):
                     converted = []
                     break
-            if converted:
-                text = ''.join(converted)
-            else:
-                raise UnsafePublicProjection('structured record could not be projected')
-        elif text.lstrip().startswith(('{', '[', 'data:')) or any(
+        if converted:
+            text = ''.join(converted)
+        elif text.lstrip().startswith(('{', '[')):
+            # CLI logs may contain successive pretty-printed JSON values.
+            decoder = json.JSONDecoder()
+            offset, projected = 0, []
+            while offset < len(text):
+                while offset < len(text) and text[offset].isspace():
+                    offset += 1
+                if offset == len(text):
+                    break
+                try:
+                    value, offset = decoder.raw_decode(text, offset)
+                except ValueError as parse_error:
+                    raise UnsafePublicProjection(
+                        'structured record could not be projected') from parse_error
+                projected.append(json.dumps(remove_hidden(value), ensure_ascii=False))
+            text = '\n'.join(projected) + '\n'
+        elif text.lstrip().startswith('data:') or any(
                 marker in text for marker in ('redacted_thinking', 'reasoning_content',
                                                'encrypted_content', 'thinking_signature')):
             raise UnsafePublicProjection('structured private record could not be projected')
