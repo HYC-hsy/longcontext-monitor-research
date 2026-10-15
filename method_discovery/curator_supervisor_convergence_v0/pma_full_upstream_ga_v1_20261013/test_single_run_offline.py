@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import time
 import unittest
 import uuid
@@ -14,9 +15,33 @@ from .archive_live_six_task import redact, UnsafePublicProjection
 from .live_launcher import _require_evaluation_state_contract
 from .run_selection import _slots, execute
 from .six_task_plan import validate_plan
+from .single_run_certification import verify_evidence
 
 
 class SingleRunOfflineTests(unittest.TestCase):
+    def test_committed_fixture_binds_executed_source_and_bytes(self):
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        fixture = (Path(__file__).parent / 'generic_single_run_20261015' /
+                   'certification_fixture_v5')
+        self.assertEqual(set(verify_evidence(fixture)['outcomes']), {'A', 'B'})
+        with patch('method_discovery.curator_supervisor_convergence_v0.'
+                   'pma_full_upstream_ga_v1_20261013.single_run_certification.'
+                   'source_identity', return_value={'changed': 'source'}):
+            with self.assertRaises(RuntimeError):
+                verify_evidence(fixture, require_committed=False)
+        with TemporaryDirectory() as directory:
+            copy = Path(directory) / 'fixture'
+            shutil.copytree(fixture, copy)
+            executed = copy / 'A' / 'execution_identity.json'
+            wrong = json.loads(executed.read_text(encoding='utf-8'))
+            wrong['source_files']['GenericAgent-main/llmcore.py'] = '0' * 64
+            executed.write_text(json.dumps(wrong), encoding='utf-8')
+            with self.assertRaises(RuntimeError):
+                verify_evidence(copy, require_committed=False)
+            with self.assertRaises((ValueError, RuntimeError)):
+                verify_evidence(copy)
+
     def test_stream_projection_removes_private_delta_and_preserves_public(self):
         original = (b'data: {"delta":{"type":"redacted_thinking",'
                     b'"data":"PRIVATE_DELTA"},"id":"req-1"}\n\n'
