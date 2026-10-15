@@ -18,12 +18,18 @@ from .offline_launcher import (STAGE, TASKS, _prepare_common,
 from .pma_harbor_hooks import verify_live_spec
 from .export_official_evaluator import (COMMIT as OFFICIAL_COMMIT,
                                          export_task, official_members)
-from .prepare_six_task_manifest import (SOURCE_FILES, EVIDENCE_FILES,
+from .prepare_six_task_manifest import (SOURCE_FILES, V3_SOURCE_FILES, EVIDENCE_FILES,
                                         _committed_source_sha)
+from .two_task_certification import verify_evidence
 
 
 def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _native_schema(manifest: dict) -> bool:
+    return manifest.get('schema') in {'pma-ga-live-manifest-v2',
+                                      'pma-ga-live-manifest-v3'}
 
 
 def _stage_verifier(root: Path, task: str, manifest: dict,
@@ -52,6 +58,24 @@ def _stage_verifier(root: Path, task: str, manifest: dict,
 
 def _require_evaluation_state_contract(manifest: dict) -> None:
     """Bind the native SHARED protocol to code and zero-model raw evidence."""
+    if manifest.get('schema') == 'pma-ga-live-manifest-v3':
+        if manifest.get('zero_model_fixture_only') is True:
+            return
+        cert = manifest.get('native_shared_certification')
+        if (manifest.get('status') != 'prepared_not_executed' or
+                not isinstance(cert, dict) or
+                cert.get('harbor_commit') !=
+                '459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc' or
+                set(cert.get('source_files', {})) != set(V3_SOURCE_FILES)):
+            raise RuntimeError('V3 target-image lifecycle certification not frozen')
+        checkout = STAGE.parents[2]
+        for name in V3_SOURCE_FILES:
+            if _committed_source_sha(checkout, name) != cert['source_files'][name]:
+                raise RuntimeError('V3 certified source bytes changed')
+        evidence = STAGE / 'two_task_live_20261015' / 'zero_model_certification'
+        if verify_evidence(evidence, checkout, manifest['planned_order']) != cert.get('evidence'):
+            raise RuntimeError('V3 zero-model evidence changed')
+        return
     if manifest.get('schema') == 'pma-ga-live-manifest-v2':
         cert = manifest.get('native_shared_certification')
         if (manifest.get('status') != 'prepared_not_executed' or
@@ -226,7 +250,8 @@ def run_live(args) -> dict:
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
     authorized = json.loads(authorization_path.read_text(encoding='utf-8'))
     if (manifest.get('schema') not in {'pma-ga-live-manifest-v1',
-                                       'pma-ga-live-manifest-v2'} or
+                                       'pma-ga-live-manifest-v2',
+                                       'pma-ga-live-manifest-v3'} or
             manifest.get('execution_authorized') is not False or
             authorized.get('execution_authorized') is not True or
             authorized.get('manifest_sha256') != _sha(manifest_path)):
@@ -235,6 +260,10 @@ def run_live(args) -> dict:
     if fixture != (manifest.get('zero_model_fixture_only') is True and
                    authorized.get('zero_model_fixture_only') is True):
         raise RuntimeError('zero-model fixture identity does not match both records')
+    if (manifest.get('schema') == 'pma-ga-live-manifest-v3' and
+            Path(args.ga_source).resolve(strict=True) !=
+            (STAGE.parents[2] / 'GenericAgent-main').resolve(strict=True)):
+        raise RuntimeError('V3 GA source is not the frozen repository bridge')
     memory_profile_path = None
     if args.condition == 'B':
         if not args.pma_profile_file:
@@ -256,6 +285,8 @@ def run_live(args) -> dict:
         compose_path.write_text(json.dumps(compose), encoding='utf-8')
         _offline_gateway(root, Path(args.runtime_root), args.python_home)
         compose = json.loads(compose_path.read_text(encoding='utf-8'))
+        compose['services']['model-gateway']['environment'] = {
+            'PMA_MULTITURN_FIXTURE': '1'}
         if main_network is None:
             compose['services']['main'].pop('network_mode')
         else:
@@ -275,7 +306,7 @@ def run_live(args) -> dict:
         'authorization_sha256': _sha(authorization_path),
         'audited_code_commit': authorized['audited_code_commit'],
     }
-    if manifest['schema'] == 'pma-ga-live-manifest-v2':
+    if _native_schema(manifest):
         spec.update(repeat=args.repeat, batch_id=authorized['batch_id'],
                     config_sha256=manifest['config_sha256'],
                     evaluation_protocol='official_shared_v2',
@@ -289,9 +320,24 @@ def run_live(args) -> dict:
     verify_live_spec(spec)
     if _sha(Path(args.task_profile_file)) != manifest['task_profile_sha256']:
         raise RuntimeError('PMA Task profile differs from frozen identity')
-    staged = _stage_verifier(root, args.task, manifest,
-                             Path(args.official_source_git))
+    # A zero-model lifecycle fixture never places official tests in the Task
+    # tree. The live path still stages and byte-checks the fixed Git blobs.
+    if fixture:
+        test_script = root / 'public_task/tests/test.sh'
+        test_script.write_text('#!/bin/sh\nmkdir -p /logs/verifier\n'
+                               'printf "1\\n" > /logs/verifier/reward.txt\n',
+                               encoding='utf-8', newline='\n')
+        staged = {'native_tests_tree_sha256': digest_tree(test_script.parent),
+                  'native_test_sh_sha256': _sha(test_script)}
+    else:
+        staged = _stage_verifier(root, args.task, manifest,
+                                 Path(args.official_source_git))
     spec.update(staged)
+    if fixture:
+        spec.update(official_source_git_commit='synthetic_no_official_evaluator',
+                    expected_native_reports=[],
+                    official_evaluator_files=[{'relative': 'tests/test.sh',
+                                               'sha256': staged['native_test_sh_sha256']}])
     _require_evaluation_state_contract(manifest)
     spec_path = root / 'control' / 'harbor_spec.json'
     spec_path.write_text(json.dumps(spec, indent=2), encoding='utf-8')
@@ -334,7 +380,7 @@ def run_live(args) -> dict:
                 time.sleep(.05)
             ready_data = json.loads(ready.read_text(encoding='utf-8'))
             if (ready_data.get('run_id'), ready_data.get('task_id'),
-                    ready_data.get('fake_memory')) != (args.run_id, args.task, False):
+                    ready_data.get('fake_memory')) != (args.run_id, args.task, fixture):
                 raise RuntimeError('PMA worker identity or transport mode mismatch')
         else:
             _worker_clearance(root, None, args.run_id)
@@ -355,12 +401,12 @@ def run_live(args) -> dict:
             '--model', 'claude-opus-4-8', '--mounts', json.dumps(mounts),
             '--extra-docker-compose', str(root / 'bundle/isolation.compose.json'),
             '--n-concurrent', '1', '--max-retries', '0', '--yes',
-            '--disable-verification' if fixture else '--enable-verification',
+            '--enable-verification',
             '--agent-timeout-multiplier', str(14400 /
                 manifest['assets'][args.task]['native_agent_seconds'])
-                if manifest['schema'] == 'pma-ga-live-manifest-v2' else '16',
+                if _native_schema(manifest) else '16',
             '--verifier-timeout-multiplier', '1']
-        if manifest['schema'] == 'pma-ga-live-manifest-v2':
+        if _native_schema(manifest):
             command += ['--verifier-import-path',
                 'method_discovery.curator_supervisor_convergence_v0.'
                 'pma_full_upstream_ga_v1_20261013.native_shared_verifier:NativeSharedVerifier']
@@ -377,7 +423,7 @@ def run_live(args) -> dict:
             env.pop(name, None)
         python_roots = [str(repo), str(repo / 'GenericAgent-main'),
                         str(Path(args.bench_root).resolve(strict=True))]
-        if manifest['schema'] == 'pma-ga-live-manifest-v2':
+        if _native_schema(manifest):
             harbor_source = Path(args.harbor_source_root).resolve(strict=True)
             head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=harbor_source,
                                   capture_output=True, text=True, check=True).stdout.strip()
@@ -389,7 +435,7 @@ def run_live(args) -> dict:
         env['PYTHONPATH'] = os.pathsep.join(python_roots)
         env.update(PMA_HARBOR_SPEC=str(spec_path), PYTHONUTF8='1', PYTHONIOENCODING='utf-8',
                    GA_RUN_ISOLATION=('networked-host-keyed-v1' if
-                       manifest['schema'] == 'pma-ga-live-manifest-v2' else
+                       _native_schema(manifest) else
                        'no-network-unix-inference-v1'),
                    GA_PMA_UPSTREAM_ENABLED='1' if args.condition == 'B' else '0',
                    GA_PMA_CAPTURE_TASK_REQUESTS='1' if args.condition == 'B' else '0',
@@ -451,7 +497,7 @@ def run_live(args) -> dict:
         except BaseException as exc:
             cleanup_errors.append(f'container_cleanup_unknown:{type(exc).__name__}:{exc}')
             remaining = None
-        native_shared = manifest['schema'] == 'pma-ga-live-manifest-v2'
+        native_shared = _native_schema(manifest)
         volumes = _owned_volume_clearance(root) if native_shared else None
         frozen = root / 'archive' / ('agent_end_native.json' if native_shared else
                                      'agent_end_frozen.json')
@@ -472,8 +518,12 @@ def run_live(args) -> dict:
                 reports = None
         clearance = (_worker_clearance(root, worker, args.run_id)
                      if worker is None or worker.poll() is not None else None)
+        fake_requests = root / 'archive/fake_provider_requests'
+        fake_captures = sorted(fake_requests.glob('*.json')) if fixture else []
         status = {'schema': manifest['schema'], 'run_id': args.run_id,
                   'task': args.task, 'condition': args.condition,
+                  'zero_model_fixture_only': fixture,
+                  'fake_provider_captures': len(fake_captures) if fixture else None,
                   'harbor_return_code': result, 'primary_failure': first_error,
                   'worker_return_code': None if worker is None else worker.poll(),
                   'pma_finalization': clearance.get('pma_finalization')
@@ -506,8 +556,22 @@ def run_live(args) -> dict:
 
 
 def live_status_success(status: dict) -> bool:
+    if status.get('zero_model_fixture_only') is True:
+        return (status.get('primary_failure') is None and
+                status.get('harbor_return_code') == 0 and
+                status.get('cleanup_confirmed') is True and
+                status.get('frozen_product') is True and
+                status.get('evaluation_released') is True and
+                status.get('native_result', {}).get('status') == 'native_recorded' and
+                status.get('native_upload_checked') is True and
+                status.get('native_script_observed') is True and
+                status.get('native_reports_checked') is True and
+                isinstance(status.get('fake_provider_captures'), int) and
+                status['fake_provider_captures'] >= 2 and
+                (status.get('condition') != 'B' or
+                 status.get('worker_return_code') == 0))
     native = status.get('native_result')
-    native_required = status.get('schema') == 'pma-ga-live-manifest-v2'
+    native_required = _native_schema(status)
     return (status.get('primary_failure') is None and
             status.get('harbor_return_code') == 0 and
             status.get('cleanup_confirmed') is True and
@@ -529,7 +593,7 @@ def main() -> None:
                  'bench-root', 'official-source-git'):
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--order', type=int, required=True)
-    parser.add_argument('--repeat', type=int, choices=(1, 2))
+    parser.add_argument('--repeat', type=int)
     parser.add_argument('--task', choices=TASKS, required=True)
     parser.add_argument('--condition', choices=('A', 'B'), required=True)
     parser.add_argument('--task-profile', default='native_claude_cc_vibe_opus48')

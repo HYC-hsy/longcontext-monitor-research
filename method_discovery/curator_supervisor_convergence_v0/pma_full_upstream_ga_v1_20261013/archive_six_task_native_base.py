@@ -28,7 +28,8 @@ def _copy(source: Path, destination: Path, inventory: list[dict]) -> None:
         raise RuntimeError('fixture evidence readback mismatch')
     source_run = next(parent for parent in source.parents
                       if parent.name.startswith(('pma-native-shared-fixture-',
-                                                 'pma-v2-controller-')))
+                                                 'pma-v2-controller-',
+                                                 'pma-two-task-v3-fixture-')))
     checkout = Path(__file__).resolve().parents[3]
     inventory.append({'path': destination.relative_to(checkout).as_posix(),
                       'bytes': len(raw), 'sha256': digest,

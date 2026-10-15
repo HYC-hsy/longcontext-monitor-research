@@ -22,7 +22,7 @@ STAGE = Path(__file__).resolve().parent / "posthoc_official_20261014"
 SIX_TASKS = frozenset({
     "db-wal-recovery", "fix-code-vulnerability", "cobol-modernization",
     "custom-memory-heap-crash", "multi-source-data-merger",
-    "large-scale-text-editing",
+    "large-scale-text-editing", "headless-terminal", "cancel-async-tasks",
 })
 
 

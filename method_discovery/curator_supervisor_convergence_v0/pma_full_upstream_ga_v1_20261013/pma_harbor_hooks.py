@@ -49,7 +49,8 @@ def verify_live_spec(spec: dict) -> None:
     granted = json.loads(authorization.read_text(encoding='utf-8'))
     arms = frozen.get('arms')
     bindings = granted.get('run_bindings')
-    if frozen.get('schema') == 'pma-ga-live-manifest-v2':
+    if frozen.get('schema') in {'pma-ga-live-manifest-v2',
+                                'pma-ga-live-manifest-v3'}:
         if granted.get('manifest_sha256') != spec['manifest_sha256']:
             raise RuntimeError('six-task approval does not bind manifest bytes')
         bindings = validate_plan(frozen, granted)

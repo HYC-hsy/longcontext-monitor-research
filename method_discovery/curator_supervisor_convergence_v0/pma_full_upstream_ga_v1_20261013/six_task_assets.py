@@ -17,7 +17,7 @@ from .export_official_evaluator import COMMIT, SIX_TASKS, git, official_members
 
 def _members(source: Path, task: str, prefix: str) -> list[dict]:
     if task not in SIX_TASKS:
-        raise ValueError("task outside fixed six-task panel")
+        raise ValueError("task outside registered official panel")
     if git(source, "cat-file", "-t", COMMIT).strip() != b"commit":
         raise RuntimeError("fixed official source commit unavailable")
     result = []

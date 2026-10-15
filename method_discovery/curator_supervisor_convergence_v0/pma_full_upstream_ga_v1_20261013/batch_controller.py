@@ -32,7 +32,7 @@ def disposition(status: dict | None, run_root: Path, *, require_native: bool = F
         return "stop_batch_shared_runtime_unknown"
     if require_native and status.get('native_result') is None:
         return 'stop_batch_native_evaluation_unavailable'
-    if (status.get('native_result') is not None and
+    if (require_native and status.get('native_result') is not None and
             status['native_result'].get('status') != 'native_recorded'):
         return 'stop_batch_native_evaluation_unavailable'
     if not (run_root / "archive" / "agent_start_identity.json").is_file():
@@ -53,8 +53,9 @@ def run_batch(args: argparse.Namespace) -> dict:
     if fixture != (manifest.get('zero_model_fixture_only') is True and
                    granted.get('zero_model_fixture_only') is True):
         raise RuntimeError('zero-model batch fixture identity mismatch')
-    six_task = manifest.get("schema") == "pma-ga-live-manifest-v2"
-    if six_task:
+    native_plan = manifest.get("schema") in {"pma-ga-live-manifest-v2",
+                                                "pma-ga-live-manifest-v3"}
+    if native_plan:
         bindings = validate_plan(manifest, granted)
     else:
         arms = manifest.get("arms")
@@ -77,7 +78,7 @@ def run_batch(args: argparse.Namespace) -> dict:
         authorization_path=str(authorization_path), authorization_sha256=auth_hash,
         audited_code_commit=granted["audited_code_commit"], task_id=first["task"],
         **first))
-    record = {"schema": "pma-ga-batch-result-v2" if six_task else "pma-ga-batch-result-v1", "arms": [],
+    record = {"schema": "pma-ga-batch-result-v2" if native_plan else "pma-ga-batch-result-v1", "arms": [],
               "not_started": [], "stop_reason": None}
     output = Path(args.batch_result).resolve(strict=False)
     if output.exists():
@@ -91,7 +92,7 @@ def run_batch(args: argparse.Namespace) -> dict:
               "--official-source-git", args.official_source_git]
     if args.pma_profile_file:
         common += ["--pma-profile-file", args.pma_profile_file]
-    if six_task:
+    if native_plan:
         if not args.harbor_source_root:
             raise RuntimeError('six-task clean native Harbor source is required')
         common += ["--harbor-source-root", args.harbor_source_root]
@@ -103,7 +104,7 @@ def run_batch(args: argparse.Namespace) -> dict:
             "--order", str(binding["order"]), "--task", binding["task"],
             "--condition", binding["condition"], "--run-id", binding["run_id"],
             "--run-root", binding["run_root"]]
-        if six_task:
+        if native_plan:
             command += ["--repeat", str(binding["repeat"])]
         if fixture:
             command += ['--zero-model-fixture']
@@ -113,7 +114,7 @@ def run_batch(args: argparse.Namespace) -> dict:
             status = json.loads(result_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             status = None
-        outcome = disposition(status, root, require_native=six_task)
+        outcome = disposition(status, root, require_native=native_plan)
         if completed.returncode == 0 and outcome != "completed":
             outcome = "stop_batch_exit_status_disagrees"
         record["arms"].append({"order": binding["order"], "run_id": binding["run_id"],

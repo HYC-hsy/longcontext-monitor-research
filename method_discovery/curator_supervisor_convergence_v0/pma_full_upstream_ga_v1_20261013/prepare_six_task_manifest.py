@@ -20,6 +20,7 @@ from .export_official_evaluator import export_task
 from .offline_launcher import image_identity
 from .six_task_assets import descriptor, materialize_public
 from .six_task_plan import ORDER
+from .export_official_evaluator import SIX_TASKS
 
 STAGE = Path(__file__).resolve().parent
 SOURCE_FILES = (
@@ -49,6 +50,18 @@ SOURCE_FILES = (
     'six_task_assets.py',
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'six_task_plan.py',
+)
+V3_SOURCE_FILES = SOURCE_FILES + (
+    'GenericAgent-main/agent_loop.py',
+    'GenericAgent-main/agentmain.py',
+    'GenericAgent-main/llmcore.py',
+    'GenericAgent-main/pma_upstream_bridge.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'prepare_six_task_manifest.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'two_task_certification.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'archive_two_task_native_base.py',
 )
 EVIDENCE_FILES = (
     'FILE_HASHES.json', 'image_checks.json', 'request_comparison.json',
@@ -82,7 +95,33 @@ def _committed_source_sha(checkout: Path, name: str) -> str:
 
 
 def prepare(source: Path, task_profile: Path, pma_profile: Path,
-            evidence: Path | None = None) -> dict:
+            evidence: Path | None = None, plan: dict | None = None) -> dict:
+    if plan is None:
+        slots = [dict(order=o, task=t, repeat=r, condition=c)
+                 for o, t, r, c in ORDER]
+        schema = 'pma-ga-live-manifest-v2'
+    else:
+        if (plan.get('schema') != 'pma-ga-live-plan-v3' or
+                plan.get('execution_authorized') is not False or
+                plan.get('official_source_git_commit') !=
+                '2fd12b88aafdd04a52c298e3940bcb189f9766d6' or
+                set(plan) != {'schema', 'execution_authorized',
+                              'official_source_git_commit', 'planned_order'}):
+            raise RuntimeError('V3 plan schema mismatch')
+        slots = plan.get('planned_order')
+        if not isinstance(slots, list) or not slots:
+            raise RuntimeError('V3 plan is empty')
+        seen = set()
+        for number, row in enumerate(slots, 1):
+            if (not isinstance(row, dict) or
+                    set(row) != {'order', 'task', 'repeat', 'condition'} or
+                    row['order'] != number or row['task'] not in SIX_TASKS or
+                    type(row['repeat']) is not int or row['repeat'] < 1 or
+                    row['condition'] not in {'A', 'B'} or
+                    (row['task'], row['repeat'], row['condition']) in seen):
+                raise RuntimeError('V3 slot identity invalid')
+            seen.add((row['task'], row['repeat'], row['condition']))
+        schema = 'pma-ga-live-manifest-v3'
     task_settings = runpy.run_path(str(task_profile))[
         'native_claude_cc_vibe_opus48']
     pma_settings = json.loads(pma_profile.read_text(encoding='utf-8'))[
@@ -90,7 +129,7 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
     if (task_settings.get('model') != 'claude-opus-4-8' or
             pma_settings.get('model') != 'claude-opus-4-8'):
         raise RuntimeError('frozen Task/PMA models are not Opus 4.8')
-    tasks = tuple(dict.fromkeys(row[1] for row in ORDER))
+    tasks = tuple(dict.fromkeys(row['task'] for row in slots))
     assets = {}
     for task in tasks:
         desc = descriptor(source, task)
@@ -128,7 +167,7 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
     config_hash = hashlib.sha256(json.dumps(method, sort_keys=True,
         separators=(',', ':')).encode('utf-8')).hexdigest()
     certification = None
-    if evidence is not None:
+    if evidence is not None and schema == 'pma-ga-live-manifest-v2':
         if evidence != STAGE / 'six_task_native_base_20261014_v3':
             raise RuntimeError('unexpected native-base evidence namespace')
         checkout = STAGE.parents[2]
@@ -138,7 +177,18 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
             'source_identity_kind': 'HEAD_Git_blob_bytes_SHA256_with_clean_worktree',
             'evidence_files': {name: _sha(evidence / name) for name in EVIDENCE_FILES},
             'harbor_commit': '459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc'}
-    return {'schema': 'pma-ga-live-manifest-v2',
+    elif evidence is not None and schema == 'pma-ga-live-manifest-v3':
+        if evidence != STAGE / 'two_task_live_20261015' / 'zero_model_certification':
+            raise RuntimeError('unexpected V3 evidence namespace')
+        from .two_task_certification import verify_evidence
+        checkout = STAGE.parents[2]
+        certification = {
+            'source_files': {name: _committed_source_sha(checkout, name)
+                             for name in V3_SOURCE_FILES},
+            'source_identity_kind': 'HEAD_Git_blob_bytes_SHA256_with_clean_worktree',
+            'evidence': verify_evidence(evidence, checkout, slots),
+            'harbor_commit': '459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc'}
+    return {'schema': schema,
             'status': ('prepared_not_executed' if certification else
                        'prepared_assets_lifecycle_blocked'),
             'execution_authorized': False,
@@ -157,10 +207,9 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
             'config': method, 'config_sha256': config_hash,
             'native_shared_certification': certification,
             'assets': assets,
-            'planned_order': [dict(order=o, task=t, repeat=r, condition=c)
-                              for o, t, r, c in ORDER],
+            'planned_order': slots,
             'technical_replacements_before_first_model_request_only':
-                ['headless-terminal', 'cancel-async-tasks']}
+                ['headless-terminal', 'cancel-async-tasks'] if plan is None else []}
 
 
 def main() -> None:
@@ -169,14 +218,17 @@ def main() -> None:
     parser.add_argument('--task-profile-file', type=Path, required=True)
     parser.add_argument('--pma-profile-file', type=Path, required=True)
     parser.add_argument('--evidence-dir', type=Path)
+    parser.add_argument('--plan', type=Path)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     if args.output.exists():
         raise FileExistsError(args.output)
+    plan = json.loads(args.plan.read_text(encoding='utf-8')) if args.plan else None
     manifest = prepare(args.official_source_git.resolve(strict=True),
                        args.task_profile_file.resolve(strict=True),
                        args.pma_profile_file.resolve(strict=True),
-                       args.evidence_dir.resolve(strict=True) if args.evidence_dir else None)
+                       args.evidence_dir.resolve(strict=True) if args.evidence_dir else None,
+                       plan)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(manifest, indent=2, ensure_ascii=False),
                            encoding='utf-8')
