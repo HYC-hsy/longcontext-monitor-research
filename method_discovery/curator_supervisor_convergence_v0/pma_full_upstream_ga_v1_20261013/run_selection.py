@@ -95,7 +95,9 @@ def execute(args: argparse.Namespace) -> list[dict]:
                 break
     with result_path.open('w', encoding='utf-8', newline='\n') as stream:
         json.dump({'schema': 'pma-ga-selection-result-v1', 'mode': args.mode,
-                   'slots': results, 'remaining_not_started': slots[len(results):]},
+                   'slots': results, 'remaining_not_started': [
+                       {'order': index, **row, 'status': 'not_started'} for index, row in
+                       enumerate(slots[len(results):], len(results) + 1)]},
                   stream, indent=2, ensure_ascii=False)
     return results
 
@@ -123,6 +125,7 @@ def main() -> None:
     print(json.dumps({'mode': args.mode, 'attempted_or_prepared': len(results)}))
     if (len(results) != len(_slots(json.loads(Path(args.plan).read_text(encoding='utf-8')))) or
             any(row['status'] in {'preparation_failed', 'started_incomplete',
+                                  'not_started_missing_approval',
                                   'not_started_validation_failure'} or
                 (row.get('result', {}).get('arm') or {}).get('disposition') not in
                 (None, 'completed') for row in results)):
