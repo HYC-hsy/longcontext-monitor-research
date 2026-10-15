@@ -1,0 +1,225 @@
+{
+  "sent_tool_schema": {
+    "name": "memory_reconcile",
+    "description": "Coordinate an exact active memory ID. revise requires non-empty content, statement_type and source_refs or valid inherit_source_ref_indices; evidence_refs alone do not bind replacement sources. Other decisions must omit non-null replacement fields. Conditional rules are host-validated.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "memory_id": {
+          "description": "Exact active memory ID only; the displayed 'ID v1' includes a separate version and is not an ID.",
+          "minLength": 1,
+          "title": "Memory Id",
+          "type": "string"
+        },
+        "decision": {
+          "enum": [
+            "retain",
+            "revise",
+            "retract",
+            "unresolved"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "evidence_refs": {
+          "description": "Current evidence for the decision; does not supply replacement sources for revise.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "source_handle": {
+                "minLength": 1,
+                "title": "Source Handle",
+                "type": "string"
+              },
+              "start_line": {
+                "minimum": 1,
+                "title": "Start Line",
+                "type": "integer"
+              },
+              "end_line": {
+                "minimum": 1,
+                "title": "End Line",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "source_handle",
+              "start_line",
+              "end_line"
+            ],
+            "title": "SourceLines",
+            "type": "object"
+          },
+          "minItems": 1,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "For revise only: required non-empty replacement text. Omit or use null for other decisions.",
+          "title": "Content"
+        },
+        "statement_type": {
+          "anyOf": [
+            {
+              "enum": [
+                "task_requirement",
+                "tool_observation",
+                "agent_report",
+                "inference"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "For revise only: required replacement statement type. Omit or use null otherwise.",
+          "title": "Statement Type"
+        },
+        "source_refs": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "source_handle": {
+                    "minLength": 1,
+                    "title": "Source Handle",
+                    "type": "string"
+                  },
+                  "start_line": {
+                    "minimum": 1,
+                    "title": "Start Line",
+                    "type": "integer"
+                  },
+                  "end_line": {
+                    "minimum": 1,
+                    "title": "End Line",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "source_handle",
+                  "start_line",
+                  "end_line"
+                ],
+                "title": "SourceLines",
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "For revise only: current visible replacement sources; supply a non-empty list here or valid inherit_source_ref_indices. Omit or use null otherwise.",
+          "title": "Source Refs"
+        },
+        "inherit_source_ref_indices": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "For revise only: zero-based indices of this memory's already-bound sources. A non-empty valid list can replace or accompany source_refs. Omit or use null otherwise.",
+          "title": "Inherit Source Ref Indices"
+        }
+      },
+      "required": [
+        "memory_id",
+        "decision",
+        "reason",
+        "evidence_refs"
+      ],
+      "title": "ReconcileArgs",
+      "type": "object"
+    }
+  },
+  "sent_system_rule_tail": " the exact active memory_id shown before the separate vN\nversion label: never send \"ID v1\" as memory_id. For revise, provide non-empty\nreplacement content, statement_type, and either non-empty current source_refs\nor valid zero-based inherit_source_ref_indices (both are allowed). evidence_refs\njustify the decision but never supply replacement provenance. For retain,\nretract, or unresolved, omit replacement fields (explicit null is also accepted);\nnon-null replacement fields are rejected. The schema shows optional fields\nbecause they apply only to revise; the host enforces these conditional rules.\n",
+  "phase2_receipt": {
+    "transaction": {
+      "transaction_id": "p1-2-c52b2cde924b",
+      "status": "transaction_aborted",
+      "committed": false,
+      "commit_version": "2581cf29753fba7b9a35cee2171ea8071894a7ac94f4073efc5e333b2df114e6"
+    },
+    "receipts": [
+      {
+        "call_index": 1,
+        "tool_name": "memory_update_status",
+        "status": "transaction_aborted",
+        "memory_id": null,
+        "commit_version": "2581cf29753fba7b9a35cee2171ea8071894a7ac94f4073efc5e333b2df114e6",
+        "error_code": "transaction_abort",
+        "reason": "operation was rolled back with the transaction"
+      },
+      {
+        "call_index": 2,
+        "tool_name": "memory_reconcile",
+        "status": "rejected",
+        "memory_id": null,
+        "commit_version": "2581cf29753fba7b9a35cee2171ea8071894a7ac94f4073efc5e333b2df114e6",
+        "rule_code": "replacement_type_required",
+        "field_path": "statement_type",
+        "hint": "revise requires statement_type",
+        "error_code": "argument_shape",
+        "reason": "arguments do not match the required tool schema"
+      }
+    ]
+  },
+  "next_phase1_receipt": {
+    "transaction": {
+      "transaction_id": "p1-2-c52b2cde924b",
+      "status": "transaction_aborted",
+      "committed": false,
+      "commit_version": "2581cf29753fba7b9a35cee2171ea8071894a7ac94f4073efc5e333b2df114e6"
+    },
+    "receipts": [
+      {
+        "call_index": 1,
+        "tool_name": "memory_update_status",
+        "status": "transaction_aborted",
+        "memory_id": null,
+        "commit_version": "2581cf29753fba7b9a35cee2171ea8071894a7ac94f4073efc5e333b2df114e6",
+        "error_code": "transaction_abort",
+        "reason": "operation was rolled back with the transaction"
+      },
+      {
+        "call_index": 2,
+        "tool_name": "memory_reconcile",
+        "status": "rejected",
+        "memory_id": null,
+        "commit_version": "2581cf29753fba7b9a35cee2171ea8071894a7ac94f4073efc5e333b2df114e6",
+        "rule_code": "replacement_type_required",
+        "field_path": "statement_type",
+        "hint": "revise requires statement_type",
+        "error_code": "argument_shape",
+        "reason": "arguments do not match the required tool schema"
+      }
+    ]
+  },
+  "audit_error_present": true
+}

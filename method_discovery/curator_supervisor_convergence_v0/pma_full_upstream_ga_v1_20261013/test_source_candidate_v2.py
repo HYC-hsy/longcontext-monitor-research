@@ -51,6 +51,152 @@ class V2Tests(unittest.TestCase):
     def receipt_view(prompt, heading):
         return json.loads(prompt.split(heading, 1)[1].strip())
 
+    def test_reconcile_contract_and_safe_feedback_at_real_request_boundary(self):
+        agent, fake, _ = self.make("R2", [])
+        bank = agent.memory
+        old = bank.register_leaf("old", "task_instruction", "Keep the requirement", 1,
+                                 "initial_user_content", "1" * 64)
+        memory_id = bank.save_sourced("knowledge", "Old active conclusion", "task_requirement",
+                                      [{"source_handle": old, "start_line": 1, "end_line": 1}])
+        fresh = bank.register_leaf("fresh", "tool_observation", "New observation", 2,
+                                   "observation/tool_results/0/content", "2" * 64)
+        ref = [{"source_handle": fresh, "start_line": 1, "end_line": 1}]
+        bad = call("memory_reconcile", memory_id=memory_id, decision="revise",
+                   reason="new observation", evidence_refs=ref,
+                   content="Revised conclusion", inherit_source_ref_indices=[0])
+        fake.replies.extend([
+            LLMResponse(content="", tool_calls=[call("memory_update_status", content="B"), bad]),
+            LLMResponse(content="<no_intervention/>"),
+            LLMResponse(content="", tool_calls=[]),
+            LLMResponse(content="<no_intervention/>")])
+        before = bank.to_dict()
+        asyncio.run(agent._memory_agent.process("New observation", 2))
+        self.assertEqual(bank.to_dict(), before)
+        schema = next(t["function"] for t in fake.requests[0]["tools"]
+                      if t["function"]["name"] == "memory_reconcile")
+        self.assertIn("exact active", schema["description"])
+        self.assertIn("replacement", schema["parameters"]["properties"]["statement_type"]["description"])
+        self.assertNotIn("statement_type", schema["parameters"]["required"])
+        self.assertIn("memory_id", fake.requests[0]["system"])
+        phase2 = self.receipt_view(fake.requests[1]["prompt"],
+                                   "## This phase-1 execution result\n")
+        self.assertEqual(phase2["transaction"]["status"], "transaction_aborted")
+        self.assertEqual(phase2["receipts"][0]["status"], "transaction_aborted")
+        self.assertEqual(phase2["receipts"][1]["field_path"], "statement_type")
+        self.assertEqual(phase2["receipts"][1]["rule_code"], "replacement_type_required")
+        self.assertNotIn("Old active conclusion", json.dumps(phase2))
+        asyncio.run(agent._memory_agent.process("New observation", 3))
+        previous = self.receipt_view(fake.requests[2]["prompt"],
+                                     "## Previous phase-1 execution receipts\n")
+        self.assertEqual(previous, phase2)
+
+    def test_archived_failed_shapes_and_synthetic_corrected_revision(self):
+        archive = HERE / "source_memory_v2_live_batch_20261015_95940c8d" / "raw"
+        archive = archive / "source-v2-822ee4349181-04-r2" / "responses.jsonl"
+        recorded = {row["logical_call"]: row for line in archive.read_text(encoding="utf-8").splitlines()
+                    if (row := json.loads(line))["logical_call"] in (37, 39, 41)}
+        self.assertEqual(set(recorded), {37, 39, 41})
+        for number, row in recorded.items():
+            self.assertEqual(row["phase"], "phase1")
+            revisions = [json.loads(item["function"]["arguments"])
+                         for item in row["tool_calls"]
+                         if item["function"]["name"] == "memory_reconcile"]
+            self.assertTrue(revisions)
+            for revision in revisions:
+                self.assertEqual(revision["decision"], "revise")
+                # Preserve the original failed payload: no correction is made here.
+                self.assertTrue("statement_type" not in revision or
+                                not revision.get("source_refs") and
+                                not revision.get("inherit_source_ref_indices"), number)
+            # Synthetic bank/source identities, but the archived replacement-field
+            # shape is preserved and sent through the actual two-phase process.
+            replay, transport, _ = self.make("R2", [])
+            bank = replay.memory
+            old_handle = bank.register_leaf("old", "task_instruction", "Original", 1,
+                                            "initial_user_content", "6" * 64)
+            old_id = bank.save_sourced("knowledge", "Original", "task_requirement", [
+                {"source_handle": old_handle, "start_line": 1, "end_line": 1}])
+            new_handle = bank.register_leaf("new", "tool_observation", "Observed", 2,
+                                            "observation/tool_results/0/content", "7" * 64)
+            new_ref = [{"source_handle": new_handle, "start_line": 1, "end_line": 1}]
+            mapped = []
+            for revision in revisions:
+                mapped_args = {**revision, "memory_id": old_id, "evidence_refs": new_ref}
+                mapped.append(call("memory_reconcile", **mapped_args))
+            transport.replies.extend([LLMResponse(content="", tool_calls=[
+                call("memory_update_status", content="would roll back"), *mapped]),
+                LLMResponse(content="<no_intervention/>")])
+            before = bank.to_dict()
+            asyncio.run(replay._memory_agent.process("Observed", number))
+            self.assertEqual(bank.to_dict(), before)
+            visible = self.receipt_view(transport.requests[1]["prompt"],
+                                        "## This phase-1 execution result\n")
+            self.assertEqual(visible["transaction"]["status"], "transaction_aborted")
+            self.assertEqual(visible["receipts"][0]["status"], "transaction_aborted")
+            self.assertTrue(all(receipt["rule_code"] in
+                {"replacement_type_required", "replacement_sources_required"}
+                for receipt in visible["receipts"][1:]))
+        agent, fake, _ = self.make("R2", [])
+        bank = agent.memory
+        handle = bank.register_leaf("source", "task_instruction", "Keep evidence", 1,
+                                    "initial_user_content", "3" * 64)
+        ref = [{"source_handle": handle, "start_line": 1, "end_line": 1}]
+        memory_id = bank.save_sourced("knowledge", "Old", "task_requirement", ref)
+        # Synthetic correction, not a replay or amendment of the archived requests.
+        corrected = call("memory_reconcile", memory_id=memory_id, decision="revise",
+                         reason="synthetic_corrected", evidence_refs=ref, content="New",
+                         statement_type="task_requirement", inherit_source_ref_indices=[0])
+        fake.replies.extend([LLMResponse(content="", tool_calls=[corrected]),
+                             LLMResponse(content="<no_intervention/>")])
+        asyncio.run(agent._memory_agent.process("Keep evidence", 1))
+        self.assertEqual(agent._memory_agent.last_transaction["status"], "committed")
+        self.assertIsNone(bank.get(memory_id))
+        self.assertEqual(bank.knowledge[0].content, "New")
+
+    def test_reconcile_conditions_and_exact_active_identity(self):
+        from source_protocol_v2 import ReconcileArgs
+        agent, fake, _ = self.make("R2", [])
+        bank = agent.memory
+        old = bank.register_leaf("old", "task_instruction", "Old", 1,
+                                 "initial_user_content", "4" * 64)
+        old_ref = [{"source_handle": old, "start_line": 1, "end_line": 1}]
+        memory_id = bank.save_sourced("knowledge", "Active", "task_requirement", old_ref)
+        fresh = bank.register_leaf("fresh", "tool_observation", "Fresh", 2,
+                                   "observation/tool_results/0/content", "5" * 64)
+        ref = [{"source_handle": fresh, "start_line": 1, "end_line": 1}]
+        base = {"memory_id": memory_id, "reason": "current evidence", "evidence_refs": ref}
+        for decision in ("retain", "retract", "unresolved"):
+            ReconcileArgs.model_validate({**base, "decision": decision})
+            ReconcileArgs.model_validate({**base, "decision": decision, "content": None})
+            with self.assertRaises(ValueError):
+                ReconcileArgs.model_validate({**base, "decision": decision, "content": "bad"})
+        for sources in ({"source_refs": ref}, {"inherit_source_ref_indices": [0]},
+                        {"source_refs": ref, "inherit_source_ref_indices": [0]}):
+            args = ReconcileArgs.model_validate({**base, "decision": "revise", "content": "New",
+                                                 "statement_type": "task_requirement", **sources})
+            self.assertEqual(args.decision, "revise")
+        with self.assertRaises(ValueError):
+            ReconcileArgs.model_validate({**base, "decision": "revise", "content": "New",
+                                          "statement_type": "task_requirement"})
+        fake.replies.extend([LLMResponse(content="", tool_calls=[call(
+            "memory_reconcile", **{**base, "memory_id": memory_id + " v1",
+                                   "decision": "retain"})]),
+            LLMResponse(content="<no_intervention/>")])
+        asyncio.run(agent._memory_agent.process("Fresh", 2))
+        rejected = self.receipt_view(fake.requests[1]["prompt"],
+                                     "## This phase-1 execution result\n")["receipts"][0]
+        self.assertEqual((rejected["error_code"], rejected["field_path"]),
+                         ("memory_not_active", "memory_id"))
+        self.assertEqual(bank.get(memory_id).content, "Active")
+        fake.replies.extend([LLMResponse(content="", tool_calls=[call(
+            "memory_reconcile", **{**base, "decision": []})]),
+            LLMResponse(content="<no_intervention/>")])
+        asyncio.run(agent._memory_agent.process("Fresh", 3))
+        malformed = self.receipt_view(fake.requests[3]["prompt"],
+                                      "## This phase-1 execution result\n")["receipts"][0]
+        self.assertEqual(malformed["rule_code"], "field_invalid")
+        self.assertEqual(malformed["field_path"], "decision")
+
     def test_archived_old_content_is_not_projected_in_s2_r2_receipts(self):
         marker = "ARCHIVED_ONLY_REVOKED_CONTENT_6C81"
         inherited = "BOUND_INHERITABLE_SOURCE_7D32"
@@ -122,7 +268,7 @@ class V2Tests(unittest.TestCase):
                 self.assertEqual(rollback["transaction"]["status"], "transaction_aborted")
                 self.assertEqual([r["status"] for r in rollback["receipts"]],
                                  ["transaction_aborted", "rejected"])
-                self.assertEqual(rollback["receipts"][1]["error_code"], "version_stale")
+                self.assertEqual(rollback["receipts"][1]["error_code"], "memory_not_active")
                 self.assertNotIn("error", rollback["receipts"][1])
                 self.assertEqual(fake.requests[1]["prompt"].count('"call_index"'), 2)
                 asyncio.run(agent._memory_agent.process("task", 2))
@@ -145,12 +291,13 @@ class V2Tests(unittest.TestCase):
                        "committed": False, "commit_version": "v", "before_bank": {"history": marker},
                        "after_bank": {"metadata": marker}, "receipts": [{"error": marker}]}
         receipts = [{"call_index": 1, "tool_name": "memory_delete", "status": "rejected",
-                     "error_code": "version_stale", "error": marker, "error_type": marker,
+                     "error_code": "memory_not_active", "error": marker, "error_type": marker,
                      "memory_id": "missing", "commit_version": "v"}]
         agent, _, _ = self.make("S2", [])
         view = agent._memory_agent._model_transaction_view(transaction, receipts)
         self.assertNotIn(marker, json.dumps(view))
-        self.assertEqual(view["receipts"][0]["reason"], "memory ID or version is not active")
+        self.assertEqual(view["receipts"][0]["reason"],
+                         "memory_id must be an exact active memory ID; omit the displayed version label")
         self.assertNotIn("receipts", view["transaction"])
 
     def test_real_process_schema_transaction_receipts_and_next_phase(self):

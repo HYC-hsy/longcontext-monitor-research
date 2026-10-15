@@ -27,6 +27,16 @@ operation in that phase, including otherwise valid saves/deletes. Receipts repor
 execution, not task facts. Use the receipts to correct the next bank action without
 assuming an aborted or rejected operation changed memory.
 """
+RECONCILE_V2_RULES = """
+memory_reconcile takes the exact active memory_id shown before the separate vN
+version label: never send "ID v1" as memory_id. For revise, provide non-empty
+replacement content, statement_type, and either non-empty current source_refs
+or valid zero-based inherit_source_ref_indices (both are allowed). evidence_refs
+justify the decision but never supply replacement provenance. For retain,
+retract, or unresolved, omit replacement fields (explicit null is also accepted);
+non-null replacement fields are rejected. The schema shows optional fields
+because they apply only to revise; the host enforces these conditional rules.
+"""
 
 _RECEIPT_REASONS = {
     "argument_shape": "arguments do not match the required tool schema",
@@ -34,12 +44,60 @@ _RECEIPT_REASONS = {
     "window_invisible": "source is not visible in the current window",
     "invalid_range": "source line range is invalid",
     "version_stale": "memory ID or version is not active",
+    "memory_not_active": "memory_id must be an exact active memory ID; omit the displayed version label",
     "unknown_tool": "tool name is not supported",
     "bank_integrity": "bank validation failed",
     "transaction_abort": "operation was rolled back with the transaction",
     "text_tool_call_forbidden": "text tool calls are not executable",
     "host_integrity": "host integrity check failed",
 }
+
+_ARGUMENT_HINTS = {
+    "replacement_content_required": ("content", "revise requires non-empty replacement content"),
+    "replacement_type_required": ("statement_type", "revise requires statement_type"),
+    "replacement_sources_required": ("source_refs", "revise requires non-empty source_refs or valid inherit_source_ref_indices; evidence_refs do not replace them"),
+    "replacement_field_forbidden": ("replacement", "retain, retract and unresolved do not accept non-null replacement fields"),
+}
+
+
+class InactiveMemoryID(ValueError):
+    """An exact active ID was not found; never infer a version or repair an ID."""
+
+
+def _safe_validation_hint(name: str, args: object, exc: ValidationError) -> dict:
+    """Classify validation shape only; never return Pydantic input or exception text."""
+    if name == "memory_reconcile" and isinstance(args, dict):
+        if args.get("decision") == "revise":
+            if not isinstance(args.get("content"), str) or not args["content"].strip():
+                code = "replacement_content_required"
+            elif args.get("statement_type") is None:
+                code = "replacement_type_required"
+            elif not (args.get("source_refs") or args.get("inherit_source_ref_indices")):
+                code = "replacement_sources_required"
+            else:
+                code = None
+        elif args.get("decision") in ("retain", "retract", "unresolved") and any(
+                args.get(key) is not None for key in
+                ("content", "statement_type", "source_refs", "inherit_source_ref_indices")):
+            code = "replacement_field_forbidden"
+        else:
+            code = None
+        if code:
+            path, hint = _ARGUMENT_HINTS[code]
+            if code == "replacement_field_forbidden":
+                path = next(key for key in ("content", "statement_type", "source_refs",
+                                            "inherit_source_ref_indices")
+                            if args.get(key) is not None)
+            return {"rule_code": code, "field_path": path, "hint": hint}
+    # Only report model-declared top-level fields; never echo arbitrary locations.
+    fields = set(MODELS[name].model_fields) if name in MODELS else set()
+    for error in exc.errors():
+        loc = error.get("loc", ())
+        if loc and isinstance(loc[0], str) and loc[0] in fields:
+            return {"rule_code": "field_invalid", "field_path": loc[0],
+                    "hint": "provide this field with the declared type and shape"}
+    return {"rule_code": "argument_shape", "field_path": "arguments",
+            "hint": "arguments must match the tool schema and conditional decision rules"}
 
 
 class SourceMemoryAgentV2(SourceMemoryAgent):
@@ -75,7 +133,11 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
         descriptions = {tool["function"]["name"]: tool["function"]["description"]
                         for tool in BANK_TOOLS}
         if self.variant == "R2":
-            descriptions["memory_reconcile"] = "Coordinate an active memory with current evidence."
+            descriptions["memory_reconcile"] = (
+                "Coordinate an exact active memory ID. revise requires non-empty content, "
+                "statement_type and source_refs or valid inherit_source_ref_indices; "
+                "evidence_refs alone do not bind replacement sources. Other decisions "
+                "must omit non-null replacement fields. Conditional rules are host-validated.")
         return [tool_schema(name, description) for name, description in descriptions.items()]
 
     @staticmethod
@@ -87,7 +149,8 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
         visible_receipts = []
         for receipt in receipts:
             row = {key: receipt[key] for key in
-                   ("call_index", "tool_name", "status", "memory_id", "commit_version")
+                   ("call_index", "tool_name", "status", "memory_id", "commit_version",
+                    "rule_code", "field_path", "hint")
                    if key in receipt}
             code = receipt.get("error_code")
             if code is not None:
@@ -104,6 +167,7 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
         if self.variant == "R2":
             system += RECONCILE_RULES.replace("{event_id, role, quote}",
                                              "{source_handle, start_line, end_line}")
+            system += RECONCILE_V2_RULES
         try:
             return await self.llm.call(prompt=user_prompt, system=system,
                                        tools=self.get_tools_schema())
@@ -153,15 +217,24 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
             return None, "no_change" if self.memory.status == old else "committed"
         if name == "memory_delete":
             if not self.memory.delete(args["memory_id"]):
-                raise ValueError("memory ID not active")
+                raise InactiveMemoryID("memory ID not active")
             return args["memory_id"], "committed"
         if name == "memory_reconcile" and self.variant == "R2":
+            if args["decision"] in {"revise", "retain", "unresolved"} and self.memory.get(
+                    args["memory_id"]) is None:
+                raise InactiveMemoryID("memory ID not active")
+            if args["decision"] == "retract" and self.memory.get(args["memory_id"]) is None and not any(
+                    h.get("id") == args["memory_id"] and h.get("action") == "retract"
+                    for h in self.memory.history):
+                raise InactiveMemoryID("memory ID not active")
             operation = self._reconcile(args)
             return operation.memory_id, "committed"
         raise ValueError("unknown tool")
 
     @staticmethod
     def _error_code(exc: BaseException) -> str:
+        if isinstance(exc, InactiveMemoryID):
+            return "memory_not_active"
         if isinstance(exc, ValidationError):
             return "argument_shape"
         message = str(exc)
@@ -207,6 +280,7 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
         failed = False
         for number, call in enumerate(calls, 1):
             name = getattr(getattr(call, "function", call), "name", None)
+            raw_args = None
             row = {"transaction_id": txn, "call_index": number, "tool_name": name,
                    "status": "rejected", "error_code": None, "memory_id": None}
             try:
@@ -221,6 +295,11 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
                 failed = True
                 row.update(error_code=self._error_code(exc), error_type=type(exc).__name__,
                            error=str(exc))
+                if isinstance(exc, ValidationError):
+                    row.update(_safe_validation_hint(name, raw_args, exc))
+                elif isinstance(exc, InactiveMemoryID):
+                    row.update(rule_code="memory_not_active", field_path="memory_id",
+                               hint=_RECEIPT_REASONS["memory_not_active"])
             except Exception as exc:
                 failed = True
                 self._fatal_error = exc

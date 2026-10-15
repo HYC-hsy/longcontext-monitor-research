@@ -31,14 +31,14 @@ class DeleteArgs(StrictArgs):
 
 
 class ReconcileArgs(StrictArgs):
-    memory_id: str = Field(min_length=1)
+    memory_id: str = Field(min_length=1, description="Exact active memory ID only; the displayed 'ID v1' includes a separate version and is not an ID.")
     decision: Literal["retain", "revise", "retract", "unresolved"]
     reason: str = Field(min_length=1)
-    evidence_refs: list[SourceLines] = Field(min_length=1)
-    content: str | None = None
-    statement_type: Literal["task_requirement", "tool_observation", "agent_report", "inference"] | None = None
-    source_refs: list[SourceLines] | None = None
-    inherit_source_ref_indices: list[int] | None = None
+    evidence_refs: list[SourceLines] = Field(min_length=1, description="Current evidence for the decision; does not supply replacement sources for revise.")
+    content: str | None = Field(default=None, description="For revise only: required non-empty replacement text. Omit or use null for other decisions.")
+    statement_type: Literal["task_requirement", "tool_observation", "agent_report", "inference"] | None = Field(default=None, description="For revise only: required replacement statement type. Omit or use null otherwise.")
+    source_refs: list[SourceLines] | None = Field(default=None, description="For revise only: current visible replacement sources; supply a non-empty list here or valid inherit_source_ref_indices. Omit or use null otherwise.")
+    inherit_source_ref_indices: list[int] | None = Field(default=None, description="For revise only: zero-based indices of this memory's already-bound sources. A non-empty valid list can replace or accompany source_refs. Omit or use null otherwise.")
 
     @model_validator(mode="after")
     def check_decision_fields(self):
