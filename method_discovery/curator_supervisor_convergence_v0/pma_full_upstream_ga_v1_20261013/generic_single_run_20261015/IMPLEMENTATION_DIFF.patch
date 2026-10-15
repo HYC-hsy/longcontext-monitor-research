@@ -1019,10 +1019,10 @@ index 1abb692b..d20e0076 100644
                         'prepared_assets_lifecycle_blocked'),
 diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/run_selection.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/run_selection.py
 new file mode 100644
-index 00000000..f3ceb0f8
+index 00000000..8e54993f
 --- /dev/null
 +++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/run_selection.py
-@@ -0,0 +1,133 @@
+@@ -0,0 +1,136 @@
 +"""Thin ordered selection of independent single_run invocations.
 +
 +Preparation is the default. Real execution requires one distinct authorization
@@ -1120,7 +1120,9 @@ index 00000000..f3ceb0f8
 +                break
 +    with result_path.open('w', encoding='utf-8', newline='\n') as stream:
 +        json.dump({'schema': 'pma-ga-selection-result-v1', 'mode': args.mode,
-+                   'slots': results, 'remaining_not_started': slots[len(results):]},
++                   'slots': results, 'remaining_not_started': [
++                       {'order': index, **row, 'status': 'not_started'} for index, row in
++                       enumerate(slots[len(results):], len(results) + 1)]},
 +                  stream, indent=2, ensure_ascii=False)
 +    return results
 +
@@ -1148,6 +1150,7 @@ index 00000000..f3ceb0f8
 +    print(json.dumps({'mode': args.mode, 'attempted_or_prepared': len(results)}))
 +    if (len(results) != len(_slots(json.loads(Path(args.plan).read_text(encoding='utf-8')))) or
 +            any(row['status'] in {'preparation_failed', 'started_incomplete',
++                                  'not_started_missing_approval',
 +                                  'not_started_validation_failure'} or
 +                (row.get('result', {}).get('arm') or {}).get('disposition') not in
 +                (None, 'completed') for row in results)):
