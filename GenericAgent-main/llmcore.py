@@ -456,8 +456,7 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
     if observing:
         intervention_link = _consume_pending_intervention()
         reminder_link = _consume_pending_pma_reminder()
-        pma_capture = (os.environ.get('GA_PMA_UPSTREAM_ENABLED') == '1' and
-                       os.environ.get('GA_PMA_CAPTURE_TASK_REQUESTS') == '1')
+        pma_capture = os.environ.get('GA_PMA_CAPTURE_TASK_REQUESTS') == '1'
         capture = bool(getattr(sess, 'research_capture_payload', False)) or pma_capture
         secrets = (str(getattr(sess, 'api_key', '') or ''), url.split('?', 1)[0]) if pma_capture else ()
         request_info = _payload_summary(payload, capture_content=capture, secrets=secrets)
@@ -533,6 +532,17 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                                 f"provider response exceeded {total_timeout:g}s wall deadline"
                             )
                         if not e.value and not streamed: raise requests.ConnectionError("empty response")
+                        if pma_capture:
+                            visible = [block for block in (e.value or [])
+                                       if isinstance(block, dict) and
+                                       block.get('type') in ('text', 'tool_use')]
+                            _research_emit('provider_response_content', {
+                                'attempt': attempt + 1,
+                                'parsed_visible_blocks': _payload_summary(
+                                    {'content': visible}, capture_content=True,
+                                    secrets=secrets)['content']['content'],
+                                'hidden_thinking_excluded': True,
+                            }, llm_call_id=llm_call_id)
                         _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code, 'outcome': 'success'}, llm_call_id=llm_call_id)
                         return e.value or []
                 finally:

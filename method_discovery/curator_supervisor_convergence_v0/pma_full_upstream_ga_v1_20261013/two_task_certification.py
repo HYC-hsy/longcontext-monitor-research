@@ -72,6 +72,19 @@ def verify_evidence(evidence: Path, checkout: Path, slots: list[dict]) -> dict:
                     path.suffix == '.json']
         if len(captures) != status.get('fake_provider_captures') or len(captures) < 2:
             raise RuntimeError(f'V3 slot {number} fake send captures incomplete')
+        task_traces = [path for path in paths if path.name == 'research_events.jsonl'
+                       and f'run-{number}/jobs/' in path.as_posix()]
+        if len(task_traces) != 1:
+            raise RuntimeError('V3 Task provider event stream absent')
+        task_events = [json.loads(line) for line in task_traces[0].read_text(
+            encoding='utf-8').splitlines()]
+        if (not any(row['event_type'] == 'provider_request_ready' and
+                    row['payload'].get('content_availability') == 'complete'
+                    for row in task_events) or
+                not any(row['event_type'] == 'provider_response_content' and
+                        row['payload'].get('parsed_visible_blocks')
+                        for row in task_events)):
+            raise RuntimeError('V3 provider request or parsed response text not captured')
         if slots[number - 1]['condition'] == 'B':
             memory_path = evidence / prefix / 'host_private/archive/memory_payload.jsonl'
             events_path = evidence / prefix / 'host_private/archive/events.jsonl'

@@ -120,6 +120,16 @@ class TwoTaskLiveV3Tests(unittest.TestCase):
             self.assertTrue(arm['status']['native_script_observed'])
             self.assertTrue((Path(arm['run_root']) / 'archive' /
                              'agent_start_identity.json').is_file())
+            trace = list((Path(arm['run_root']) / 'jobs').rglob('research_events.jsonl'))
+            self.assertEqual(len(trace), 1)
+            task_events = [json.loads(line) for line in trace[0].read_text(
+                encoding='utf-8').splitlines()]
+            self.assertTrue(any(row['event_type'] == 'provider_request_ready' and
+                                row['payload'].get('content_availability') == 'complete'
+                                for row in task_events))
+            self.assertTrue(any(row['event_type'] == 'provider_response_content' and
+                                row['payload'].get('parsed_visible_blocks')
+                                for row in task_events))
             private = Path(arm['run_root']) / 'host_private' / 'archive'
             if arm['status']['condition'] == 'B':
                 self.assertTrue((private / 'memory_payload.jsonl').is_file())
