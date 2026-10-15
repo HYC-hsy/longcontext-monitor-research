@@ -96,10 +96,24 @@ def _committed_source_sha(checkout: Path, name: str) -> str:
 
 def prepare(source: Path, task_profile: Path, pma_profile: Path,
             evidence: Path | None = None, plan: dict | None = None) -> dict:
+    single = plan is not None and plan.get('schema') == 'pma-ga-single-plan-v1'
     if plan is None:
         slots = [dict(order=o, task=t, repeat=r, condition=c)
                  for o, t, r, c in ORDER]
         schema = 'pma-ga-live-manifest-v2'
+    elif single:
+        if (set(plan) != {'schema', 'execution_authorized',
+                          'official_source_git_commit', 'task', 'condition', 'occurrence'} or
+                plan['execution_authorized'] is not False or
+                plan['official_source_git_commit'] !=
+                '2fd12b88aafdd04a52c298e3940bcb189f9766d6' or
+                not isinstance(plan['task'], str) or
+                plan['condition'] not in {'A', 'B'} or
+                type(plan['occurrence']) is not int or plan['occurrence'] < 1):
+            raise RuntimeError('single-run plan schema mismatch')
+        slots = [dict(order=1, task=plan['task'],
+                      repeat=plan['occurrence'], condition=plan['condition'])]
+        schema = 'pma-ga-live-manifest-v4'
     else:
         if (plan.get('schema') != 'pma-ga-live-plan-v3' or
                 plan.get('execution_authorized') is not False or
@@ -132,24 +146,27 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
     tasks = tuple(dict.fromkeys(row['task'] for row in slots))
     assets = {}
     for task in tasks:
-        desc = descriptor(source, task)
+        desc = descriptor(source, task, registered=single)
         with TemporaryDirectory(prefix='pma-public-check-') as temporary:
             base = Path(temporary)
             public = base / 'public'
-            materialize_public(source, task, public, desc['public_members'])
+            materialize_public(source, task, public, desc['public_members'], registered=single)
             (public / 'tests').mkdir(exist_ok=True)
             (public / 'solution').mkdir(exist_ok=True)
             public_hash = digest_tree(public)
             tests = base / 'tests'
             tests.mkdir()
-            export_task(source, task, tests)
+            export_task(source, task, tests, registered=single)
             tests_hash = digest_tree(tests)
             test_sh_hash = _sha(tests / 'test.sh')
         image = image_identity(desc['image_tag'])
-        if len(image['repo_digests']) != 1:
-            raise RuntimeError(f'{task}: expected one exact local RepoDigest')
+        repo = desc['image_tag'].rsplit(':', 1)[0]
+        matching_digests = [value for value in image['repo_digests']
+                            if value.startswith(repo + '@sha256:')]
+        if len(matching_digests) != 1:
+            raise RuntimeError(f'{task}: no unique matching local official RepoDigest')
         assets[task] = {**desc, 'image_id': image['image_id'],
-                        'repo_digest': image['repo_digests'][0],
+                        'repo_digest': matching_digests[0],
                         'platform': image['platform'],
                         'public_task_tree_sha256': public_hash,
                         'official_evaluator_members': desc['evaluator_members'],
@@ -188,6 +205,17 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
             'source_identity_kind': 'HEAD_Git_blob_bytes_SHA256_with_clean_worktree',
             'evidence': verify_evidence(evidence, checkout, slots),
             'harbor_commit': '459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc'}
+    elif evidence is not None and schema == 'pma-ga-live-manifest-v4':
+        from .single_run_certification import (HARBOR_COMMIT, source_identity,
+                                               verify_evidence)
+        checkout = STAGE.parents[2]
+        evidence = evidence.resolve(strict=True)
+        if not evidence.is_relative_to(checkout):
+            raise RuntimeError('single-run certification must be committed in repository')
+        certification = {'source_files': source_identity(checkout),
+                         'evidence_path': evidence.relative_to(checkout).as_posix(),
+                         'evidence': verify_evidence(evidence),
+                         'harbor_commit': HARBOR_COMMIT}
     return {'schema': schema,
             'status': ('prepared_not_executed' if certification else
                        'prepared_assets_lifecycle_blocked'),

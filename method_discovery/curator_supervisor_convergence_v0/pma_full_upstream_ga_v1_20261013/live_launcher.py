@@ -29,7 +29,8 @@ def _sha(path: Path) -> str:
 
 def _native_schema(manifest: dict) -> bool:
     return manifest.get('schema') in {'pma-ga-live-manifest-v2',
-                                      'pma-ga-live-manifest-v3'}
+                                      'pma-ga-live-manifest-v3',
+                                      'pma-ga-live-manifest-v4'}
 
 
 def _stage_verifier(root: Path, task: str, manifest: dict,
@@ -43,10 +44,12 @@ def _stage_verifier(root: Path, task: str, manifest: dict,
     expected = manifest['assets'][task]
     source = official_source_git.resolve(strict=True)
     members = [{k: v for k, v in item.items() if k != 'raw'}
-               for item in official_members(source, task)]
+               for item in official_members(source, task,
+                   registered=manifest.get('schema') == 'pma-ga-live-manifest-v4')]
     if members != expected.get('official_evaluator_members'):
         raise RuntimeError('PMA official evaluator members differ from frozen manifest')
-    export_task(source, task, target)
+    export_task(source, task, target,
+                registered=manifest.get('schema') == 'pma-ga-live-manifest-v4')
     identity = {'native_tests_tree_sha256': digest_tree(target),
                 'native_test_sh_sha256': _sha(target / 'test.sh')}
     if any(identity[key] != expected[key] for key in identity):
@@ -75,6 +78,22 @@ def _require_evaluation_state_contract(manifest: dict) -> None:
         evidence = STAGE / 'two_task_live_20261015' / 'zero_model_certification'
         if verify_evidence(evidence, checkout, manifest['planned_order']) != cert.get('evidence'):
             raise RuntimeError('V3 zero-model evidence changed')
+        return
+    if manifest.get('schema') == 'pma-ga-live-manifest-v4':
+        if manifest.get('zero_model_fixture_only') is True:
+            return
+        from .single_run_certification import (HARBOR_COMMIT, SOURCE_FILES,
+                                               source_identity, verify_evidence)
+        cert = manifest.get('native_shared_certification')
+        checkout = STAGE.parents[2]
+        if (manifest.get('status') != 'prepared_not_executed' or
+                not isinstance(cert, dict) or cert.get('harbor_commit') != HARBOR_COMMIT or
+                set(cert.get('source_files', {})) != set(SOURCE_FILES) or
+                cert.get('source_files') != source_identity(checkout)):
+            raise RuntimeError('single-run native lifecycle source certification differs')
+        evidence = (checkout / cert.get('evidence_path', '')).resolve(strict=True)
+        if not evidence.is_relative_to(checkout) or verify_evidence(evidence) != cert.get('evidence'):
+            raise RuntimeError('single-run native lifecycle evidence differs')
         return
     if manifest.get('schema') == 'pma-ga-live-manifest-v2':
         cert = manifest.get('native_shared_certification')
@@ -251,7 +270,8 @@ def run_live(args) -> dict:
     authorized = json.loads(authorization_path.read_text(encoding='utf-8'))
     if (manifest.get('schema') not in {'pma-ga-live-manifest-v1',
                                        'pma-ga-live-manifest-v2',
-                                       'pma-ga-live-manifest-v3'} or
+                                       'pma-ga-live-manifest-v3',
+                                       'pma-ga-live-manifest-v4'} or
             manifest.get('execution_authorized') is not False or
             authorized.get('execution_authorized') is not True or
             authorized.get('manifest_sha256') != _sha(manifest_path)):
@@ -260,7 +280,8 @@ def run_live(args) -> dict:
     if fixture != (manifest.get('zero_model_fixture_only') is True and
                    authorized.get('zero_model_fixture_only') is True):
         raise RuntimeError('zero-model fixture identity does not match both records')
-    if (manifest.get('schema') == 'pma-ga-live-manifest-v3' and
+    if (manifest.get('schema') in {'pma-ga-live-manifest-v3',
+                                   'pma-ga-live-manifest-v4'} and
             Path(args.ga_source).resolve(strict=True) !=
             (STAGE.parents[2] / 'GenericAgent-main').resolve(strict=True)):
         raise RuntimeError('V3 GA source is not the frozen repository bridge')
@@ -286,7 +307,8 @@ def run_live(args) -> dict:
         _offline_gateway(root, Path(args.runtime_root), args.python_home)
         compose = json.loads(compose_path.read_text(encoding='utf-8'))
         compose['services']['model-gateway']['environment'] = {
-            'PMA_MULTITURN_FIXTURE': '1'}
+            'PMA_MULTITURN_FIXTURE': '1',
+            'PMA_SERVICE_FIXTURE': '1' if os.environ.get('PMA_SERVICE_FIXTURE') == '1' else '0'}
         if main_network is None:
             compose['services']['main'].pop('network_mode')
         else:
@@ -324,7 +346,14 @@ def run_live(args) -> dict:
     # tree. The live path still stages and byte-checks the fixed Git blobs.
     if fixture:
         test_script = root / 'public_task/tests/test.sh'
-        test_script.write_text('#!/bin/sh\nmkdir -p /logs/verifier\n'
+        service_check = ("/opt/m4-runtime/python/cpython-3.12.12-linux-x86_64-gnu/"
+                         "bin/python3.12 -c \"import urllib.request; "
+                         "assert urllib.request.build_opener("
+                         "urllib.request.ProxyHandler({})).open("
+                         "'http://127.0.0.1:19173').status == 200\"\n"
+                         if os.environ.get('PMA_SERVICE_FIXTURE') == '1' else '')
+        test_script.write_text('#!/bin/sh\nset -e\n' + service_check +
+                               'mkdir -p /logs/verifier\n'
                                'printf "1\\n" > /logs/verifier/reward.txt\n',
                                encoding='utf-8', newline='\n')
         staged = {'native_tests_tree_sha256': digest_tree(test_script.parent),
@@ -594,7 +623,7 @@ def main() -> None:
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--order', type=int, required=True)
     parser.add_argument('--repeat', type=int)
-    parser.add_argument('--task', choices=TASKS, required=True)
+    parser.add_argument('--task', required=True)
     parser.add_argument('--condition', choices=('A', 'B'), required=True)
     parser.add_argument('--task-profile', default='native_claude_cc_vibe_opus48')
     parser.add_argument('--pma-profile-file')

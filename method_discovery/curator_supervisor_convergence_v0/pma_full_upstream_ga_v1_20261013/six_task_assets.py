@@ -15,8 +15,8 @@ import tomllib
 from .export_official_evaluator import COMMIT, SIX_TASKS, git, official_members
 
 
-def _members(source: Path, task: str, prefix: str) -> list[dict]:
-    if task not in SIX_TASKS:
+def _members(source: Path, task: str, prefix: str, *, registered: bool = False) -> list[dict]:
+    if task not in SIX_TASKS and not registered:
         raise ValueError("task outside registered official panel")
     if git(source, "cat-file", "-t", COMMIT).strip() != b"commit":
         raise RuntimeError("fixed official source commit unavailable")
@@ -40,8 +40,10 @@ def _members(source: Path, task: str, prefix: str) -> list[dict]:
     return result
 
 
-def public_members(source: Path, task: str) -> list[dict]:
-    members = _members(source, task, task + "/")
+def public_members(source: Path, task: str, *, registered: bool = False) -> list[dict]:
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", task):
+        raise ValueError("invalid official task identity")
+    members = _members(source, task, task + "/", registered=registered)
     chosen = [m for m in members if Path(m["path"]).relative_to(task).parts[0]
               in {"instruction.md", "task.toml", "environment"}]
     if {task + "/instruction.md", task + "/task.toml"} - {
@@ -52,12 +54,12 @@ def public_members(source: Path, task: str) -> list[dict]:
     return chosen
 
 
-def descriptor(source: Path, task: str) -> dict:
-    public = public_members(source, task)
+def descriptor(source: Path, task: str, *, registered: bool = False) -> dict:
+    public = public_members(source, task, registered=registered)
     toml = next(m["raw"] for m in public if m["path"] == task + "/task.toml")
     cfg = tomllib.loads(toml.decode("utf-8"))
     env = cfg["environment"]
-    test_script = next(m["raw"] for m in official_members(source, task)
+    test_script = next(m["raw"] for m in official_members(source, task, registered=registered)
                        if m["path"] == task + "/tests/test.sh")
     report_paths = list(dict.fromkeys(re.findall(
         r"--ctrf\s+(/logs/verifier/[^\s]+)", test_script.decode("utf-8"))))
@@ -65,7 +67,7 @@ def descriptor(source: Path, task: str) -> dict:
         "official_commit": COMMIT, "task": task,
         "public_members": [{k: v for k, v in m.items() if k != "raw"} for m in public],
         "evaluator_members": [{k: v for k, v in m.items() if k != "raw"}
-                              for m in official_members(source, task)],
+                              for m in official_members(source, task, registered=registered)],
         "image_tag": env["docker_image"],
         "resources": {k: env[k] for k in ("cpus", "memory_mb", "storage_mb",
                                              "gpus", "allow_internet")},
@@ -78,11 +80,11 @@ def descriptor(source: Path, task: str) -> dict:
 
 
 def materialize_public(source: Path, task: str, target: Path,
-                       expected: list[dict]) -> None:
+                       expected: list[dict], *, registered: bool = False) -> None:
     """Copy only fixed public Git blobs to a fresh host-side Harbor task root."""
     if target.exists():
         raise FileExistsError(target)
-    members = public_members(source, task)
+    members = public_members(source, task, registered=registered)
     identities = [{k: v for k, v in m.items() if k != "raw"} for m in members]
     if identities != expected:
         raise RuntimeError("official public files differ from frozen descriptor")

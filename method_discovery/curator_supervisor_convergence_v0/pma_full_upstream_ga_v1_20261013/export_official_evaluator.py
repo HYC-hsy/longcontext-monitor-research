@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 
 
@@ -31,9 +32,11 @@ def git(source: Path, *args: str) -> bytes:
                           capture_output=True).stdout
 
 
-def official_members(source: Path, task: str) -> list[dict]:
+def official_members(source: Path, task: str, *, registered: bool = False) -> list[dict]:
     """Read the fixed upstream Git blobs, never a newline-converted worktree."""
-    if task not in SIX_TASKS:
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", task):
+        raise ValueError("invalid official task identity")
+    if not registered and task not in SIX_TASKS:
         raise ValueError("unknown fixed evaluator task")
     if git(source, "cat-file", "-t", COMMIT).strip() != b"commit":
         raise RuntimeError("fixed official source commit unavailable")
@@ -67,11 +70,11 @@ def official_members(source: Path, task: str) -> list[dict]:
     return selected
 
 
-def export_task(source: Path, task: str, target: Path) -> list[dict]:
+def export_task(source: Path, task: str, target: Path, *, registered: bool = False) -> list[dict]:
     """Export one task into an existing empty tests directory with readback."""
     if not target.is_dir() or any(target.iterdir()):
         raise RuntimeError("official evaluator target must be an empty directory")
-    members = official_members(source, task)
+    members = official_members(source, task, registered=registered)
     for item in members:
         relative = Path(item["path"]).relative_to(Path(task) / "tests")
         if not relative.parts or ".." in relative.parts:

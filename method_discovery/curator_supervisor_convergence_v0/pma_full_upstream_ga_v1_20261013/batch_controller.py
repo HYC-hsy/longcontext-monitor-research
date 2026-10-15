@@ -54,7 +54,8 @@ def run_batch(args: argparse.Namespace) -> dict:
                    granted.get('zero_model_fixture_only') is True):
         raise RuntimeError('zero-model batch fixture identity mismatch')
     native_plan = manifest.get("schema") in {"pma-ga-live-manifest-v2",
-                                                "pma-ga-live-manifest-v3"}
+                                                "pma-ga-live-manifest-v3",
+                                                "pma-ga-live-manifest-v4"}
     if native_plan:
         bindings = validate_plan(manifest, granted)
     else:

@@ -37,6 +37,32 @@ def _identity(row: dict) -> tuple:
 
 
 def validate_plan(manifest: dict, granted: dict) -> list[dict]:
+    if manifest.get('schema') == 'pma-ga-live-manifest-v4':
+        arms = manifest.get('planned_order')
+        bindings = granted.get('run_bindings')
+        if (manifest.get('execution_authorized') is not False or
+                granted.get('execution_authorized') is not True or
+                not isinstance(arms, list) or len(arms) != 1 or
+                not isinstance(bindings, list) or len(bindings) != 1 or
+                granted.get('approved_arms') != arms or
+                not isinstance(granted.get('output_root'), str)):
+            raise RuntimeError('single-run authorization incomplete')
+        row, bound = arms[0], bindings[0]
+        if (set(row) != {'order', 'task', 'repeat', 'condition'} or
+                row['order'] != 1 or type(row['repeat']) is not int or
+                row['repeat'] < 1 or row['condition'] not in {'A', 'B'} or
+                set(manifest.get('assets', {})) != {row['task']} or
+                _identity(bound) != _identity(row) or
+                bound.get('run_id') != granted.get('run_id') or
+                bound.get('config_sha256') != manifest.get('config_sha256') or
+                bound.get('batch_id') != granted.get('batch_id') or
+                granted.get('config_sha256') != manifest.get('config_sha256')):
+            raise RuntimeError('single-run binding differs from frozen plan')
+        root = Path(bound.get('run_root', '')).resolve(strict=False)
+        if (not bound.get('run_id') or not bound.get('batch_id') or
+                root.parent != Path(granted['output_root']).resolve(strict=False)):
+            raise RuntimeError('single-run root or identity invalid')
+        return bindings
     if manifest.get("schema") == "pma-ga-live-manifest-v3":
         arms = manifest.get("planned_order")
         bindings = granted.get("run_bindings")

@@ -77,7 +77,7 @@ def clean_owned_containers(root: Path) -> list[str]:
 
 
 def _prepare_common(args, *, fake_gateway: bool) -> dict:
-    if args.task not in TASKS or args.condition not in {"A", "B"}:
+    if args.condition not in {"A", "B"}:
         raise ValueError("unsupported PMA fixture arm")
     root = Path(args.run_root).resolve(strict=False)
     root.mkdir(parents=True, exist_ok=False)
@@ -86,11 +86,16 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
     manifest_path = (STAGE / "FOUR_RUN_MANIFEST_DRAFT.json" if fake_gateway
                      else Path(args.manifest).resolve(strict=True))
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    single = not fake_gateway and manifest.get('schema') == 'pma-ga-live-manifest-v4'
+    if (args.task not in (manifest.get('assets', {}) if single else TASKS)):
+        raise ValueError('task outside frozen PMA assets')
     task = root / "public_task"
     if not fake_gateway and manifest.get("schema") in {
-            "pma-ga-live-manifest-v2", "pma-ga-live-manifest-v3"}:
+            "pma-ga-live-manifest-v2", "pma-ga-live-manifest-v3",
+            "pma-ga-live-manifest-v4"}:
         materialize_public(Path(args.official_source_git).resolve(strict=True),
-                           args.task, task, manifest["assets"][args.task]["public_members"])
+                           args.task, task, manifest["assets"][args.task]["public_members"],
+                           registered=single)
     else:
         shutil.copytree(STAGE / "assets" / "public" / args.task, task)
     (task / "tests").mkdir(exist_ok=True)
@@ -108,7 +113,8 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
                                    args.python_home, args.task_profile, None, 15340,
                                    task_network_policy=("official" if not fake_gateway and
                                        manifest.get("schema") in {
-                                           "pma-ga-live-manifest-v2", "pma-ga-live-manifest-v3"}
+                                           "pma-ga-live-manifest-v2", "pma-ga-live-manifest-v3",
+                                           "pma-ga-live-manifest-v4"}
                                        else "isolated"))
     if fake_gateway:
         _offline_gateway(root, runtime, args.python_home)
@@ -119,7 +125,8 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
         compose.write_text(json.dumps(fake_compose, indent=2), encoding="utf-8")
     if manifest["execution_authorized"] is not False:
         raise RuntimeError("PMA draft unexpectedly authorized")
-    identity = image_identity(TASKS[args.task])
+    image_tag = manifest['assets'][args.task]['image_tag'] if single else TASKS[args.task]
+    identity = image_identity(image_tag)
     if not fake_gateway:
         approved = manifest['assets'][args.task]
         if (identity['image_id'] != approved['image_id'] or
@@ -140,7 +147,7 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
     record = {"schema": ("pma-ga-offline-harbor-v1" if fake_gateway else
                           "pma-ga-live-prepared-v1"), "execution_authorized": False,
               "run_id": args.run_id, "task": args.task, "condition": args.condition,
-              "image": TASKS[args.task], **identity,
+              "image": image_tag, **identity,
               "public_task_tree_sha256": digest_tree(task),
               "ga_bundle_tree_sha256": digest_tree(source),
               "source_profile_file_sha256": hashlib.sha256(
@@ -148,7 +155,8 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
               "worker_private_mounted": "not_yet_inspected",
               "network_mode": ("official_requested" if not fake_gateway and
                   manifest.get("schema") in {
-                      "pma-ga-live-manifest-v2", "pma-ga-live-manifest-v3"}
+                      "pma-ga-live-manifest-v2", "pma-ga-live-manifest-v3",
+                      "pma-ga-live-manifest-v4"}
                   else "none_requested"),
               "native_evaluator_calls": 0, "fake_provider_only": fake_gateway}
     (root / "archive" / "prepared.json").write_text(
