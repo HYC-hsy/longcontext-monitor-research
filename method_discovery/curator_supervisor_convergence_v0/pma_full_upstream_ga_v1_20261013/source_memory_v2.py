@@ -2,9 +2,25 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 from source_memory import SourceMemory
 from source_protocol_v2 import SourceLines
+
+
+class SourceSelectionError(ValueError):
+    """Typed source rejection; only fixed, bounded fields may reach the model."""
+
+    def __init__(self, code: str, *, argument_path: str = "source_refs",
+                 source_handle: str | None = None, total_lines: int | None = None,
+                 required_role: str | None = None, actual_roles: tuple[str, ...] = ()):
+        super().__init__(code)
+        self.code = code
+        self.argument_path = argument_path
+        self.source_handle = source_handle
+        self.total_lines = total_lines
+        self.required_role = required_role
+        self.actual_roles = actual_roles
 
 
 class SourceMemoryV2(SourceMemory):
@@ -45,6 +61,7 @@ class SourceMemoryV2(SourceMemory):
 
     def visible_lines(self) -> list[dict]:
         rows = []
+        visible = {key: self.sources[key] for key in self.current_source_ids}
         for source_id in self.current_source_ids:
             source = self.sources[source_id]
             if "handle" not in source:
@@ -52,7 +69,33 @@ class SourceMemoryV2(SourceMemory):
             lines = self._line_spans(source["text"])
             rows.append({"source_handle": source["handle"], "role": source["role"],
                          "field_path": source["field_path"], "order": source["order"],
+                         "total_lines": len(lines), "line_numbers": "1-based for this source_handle only",
                          "numbered_lines": [f"{n}: {line[2]}" for n, line in enumerate(lines, 1)]})
+        by_handle = {source["handle"]: source for source in visible.values()}
+        by_path = {(source["event_id"].removesuffix(":" + source["field_path"]),
+                    source["field_path"]): source
+                   for source in visible.values()}
+        for row in rows:
+            path = row["field_path"]
+            if not path.endswith(("/stdout", "/stderr", "/msg", "/output")):
+                continue
+            child = by_handle[row["source_handle"]]
+            event = child["event_id"].removesuffix(":" + path)
+            parent = by_path.get((event, path.rsplit("/", 1)[0]))
+            if parent is None or parent["role"] != "tool_observation":
+                continue
+            if (child["raw_sha256"], child["order"]) != (parent["raw_sha256"], parent["order"]):
+                continue
+            try:
+                envelope = json.loads(parent["text"])
+            except (ValueError, TypeError):
+                continue
+            if (isinstance(envelope, dict) and "status" in envelope
+                    and envelope.get(path.rsplit("/", 1)[1]) == child["text"]):
+                row["decoded_from"] = parent["handle"]
+                row["coordinate_note"] = (f"{parent['handle']} is a separate "
+                    f"{len(self._line_spans(parent['text']))}-line JSON wrapper; cite "
+                    f"{row['source_handle']} for this decoded field's lines")
         return rows
 
     def resolve_refs(self, refs: object, statement_type: str) -> list[dict]:
@@ -61,21 +104,26 @@ class SourceMemoryV2(SourceMemory):
         resolved = []
         visible = {self.sources[key].get("handle"): self.sources[key]
                    for key in self.current_source_ids}
-        for item in refs:
+        paths = getattr(self, "_diagnostic_ref_paths", {})
+        base_path = paths.get(id(refs), "source_refs")
+        self._last_resolve_path = base_path
+        for index, item in enumerate(refs):
             selection = SourceLines.model_validate(item)
             source = visible.get(selection.source_handle)
             if source is None:
                 if any(row.get("handle") == selection.source_handle for row in self.sources.values()):
-                    raise ValueError("window-invisible source handle")
-                raise ValueError("unknown source handle")
+                    raise SourceSelectionError("window_invisible", argument_path=f"{base_path}[{index}]")
+                raise SourceSelectionError("unknown_source", argument_path=f"{base_path}[{index}]")
             spans = self._line_spans(source["text"])
             if selection.end_line < selection.start_line or selection.end_line > len(spans):
-                raise ValueError("source line range outside visible leaf")
+                raise SourceSelectionError("invalid_range", argument_path=f"{base_path}[{index}]",
+                                           source_handle=selection.source_handle, total_lines=len(spans))
             start = spans[selection.start_line - 1][0]
             end = spans[selection.end_line - 1][1]
             excerpt = source["text"][start:end]
             if not excerpt:
-                raise ValueError("empty source line selection")
+                raise SourceSelectionError("invalid_range", argument_path=f"{base_path}[{index}]",
+                                           source_handle=selection.source_handle, total_lines=len(spans))
             resolved.append({"event_id": source["event_id"], "role": source["role"],
                              "order": source["order"], "start": start, "end": end,
                              "event_sha256": source["sha256"],
@@ -86,6 +134,16 @@ class SourceMemoryV2(SourceMemory):
                              "field_path": source["field_path"]})
         self._check_roles(resolved, statement_type)
         return resolved
+
+    def _check_roles(self, refs: list[dict], statement_type: str) -> None:
+        required = {"task_requirement": "task_instruction", "tool_observation": "tool_observation",
+                    "agent_report": "agent_report"}.get(statement_type)
+        roles = {ref["role"] for ref in refs}
+        if required and required not in roles:
+            raise SourceSelectionError("role_mismatch",
+                argument_path=getattr(self, "_last_resolve_path", "source_refs"),
+                required_role=required, actual_roles=tuple(sorted(roles)))
+        super()._check_roles(refs, statement_type)
 
     def source_ref_valid(self, ref: dict) -> bool:
         if not super().source_ref_valid(ref):

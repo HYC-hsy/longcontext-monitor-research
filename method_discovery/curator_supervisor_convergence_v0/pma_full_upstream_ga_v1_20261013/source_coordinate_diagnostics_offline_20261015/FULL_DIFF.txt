@@ -1,0 +1,633 @@
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/capture_source_coordinate_audit_v2.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/capture_source_coordinate_audit_v2.py
+new file mode 100644
+index 00000000..da1409e0
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/capture_source_coordinate_audit_v2.py
+@@ -0,0 +1,165 @@
++"""Generate offline-only, readable evidence for the S2/R2 coordinate repair."""
++from __future__ import annotations
++
++import asyncio
++import hashlib
++import json
++import os
++from pathlib import Path
++import subprocess
++import sys
++from tempfile import TemporaryDirectory
++
++HERE = Path(__file__).resolve().parent
++sys.path.insert(0, str(HERE / "vendor/pma_89e5c0d/src"))
++sys.path.insert(0, str(HERE / "vendor/pma_89e5c0d/external/harbor/src"))
++
++from harbor.llms.base import LLMResponse
++
++from episode import construct_upstream
++from test_source_candidate_v2 import Script, call
++from test_source_coordinate_diagnostics_v2 import FAILURES, archived_stage
++
++
++ROOT = HERE.parents[2]
++OUT = HERE / "source_coordinate_diagnostics_offline_20261015"
++ARCHIVE = (HERE / "source_memory_v3_single_r2_archive_20261015" / "raw" /
++           "source-v2-59f53dcd1a87-01-r2")
++
++
++def run(name: str, argv: list[str], env: dict[str, str] | None = None) -> int:
++    result = subprocess.run(argv, cwd=HERE, env=env, capture_output=True, timeout=180)
++    (OUT / f"{name}.stdout.txt").write_bytes(result.stdout)
++    (OUT / f"{name}.stderr.txt").write_bytes(result.stderr)
++    (OUT / f"{name}.command.txt").write_text(
++        "argv=" + json.dumps(argv, ensure_ascii=False) +
++        f"\nexit_code={result.returncode}\n", encoding="utf-8")
++    return result.returncode
++
++
++def samples() -> None:
++    payloads = []
++    with TemporaryDirectory() as temp:
++        for variant in ("S2", "R2"):
++            agent = construct_upstream(Path(temp) / variant, research_candidate=variant)
++            bank = agent.memory
++            wrapper = json.dumps({"status": "ok", "stdout": "first\nsecond"})
++            parent = bank.register_leaf("public", "tool_observation", wrapper, 1,
++                "observation/tool_results/0/content", "a" * 64)
++            child = bank.register_leaf("public", "tool_observation", "first\nsecond", 1,
++                "observation/tool_results/0/content/stdout", "a" * 64)
++            script = Script([
++                LLMResponse(content="", tool_calls=[call("memory_save_knowledge",
++                    content="coordinate mistake", statement_type="tool_observation",
++                    source_refs=[{"source_handle": parent, "start_line": 2, "end_line": 2}])]),
++                LLMResponse(content="<no_intervention/>"),
++                LLMResponse(content="", tool_calls=[call("memory_save_procedural",
++                    content="role mistake", statement_type="agent_report",
++                    source_refs=[{"source_handle": child, "start_line": 1, "end_line": 1}])]),
++                LLMResponse(content="<no_intervention/>"),
++                LLMResponse(content="", tool_calls=[]),
++                LLMResponse(content="<no_intervention/>")])
++            agent._memory_llm.call = script
++            for step in range(1, 4):
++                asyncio.run(agent._memory_agent.process("public", step))
++            payloads.append({"variant": variant, "requests": script.requests,
++                             "final_transaction": agent._memory_agent.last_transaction,
++                             "source_handles": {"wrapper": parent, "stdout": child}})
++    (OUT / "FAKE_REQUESTS_AND_RECEIPTS.json").write_text(
++        json.dumps(payloads, ensure_ascii=False, indent=2), encoding="utf-8")
++
++
++def original_cases() -> None:
++    rows = []
++    for logical_call, failures in FAILURES.items():
++        bank, _, calls = archived_stage(logical_call)
++        for call_index, expected in failures.items():
++            operation = calls[call_index - 1].function
++            sources = []
++            for key in ("source_refs", "evidence_refs"):
++                for ref in operation.arguments.get(key, []):
++                    source = next((bank.sources[source_id] for source_id in bank.current_source_ids
++                                   if bank.sources[source_id]["handle"] == ref["source_handle"]), None)
++                    sources.append({"argument_path": key, "selection": ref,
++                        "actual_role": source["role"] if source else None,
++                        "source_field_path": source["field_path"] if source else None,
++                        "actual_total_lines": len(bank._line_spans(source["text"])) if source else None})
++            rows.append({"public_event_sequence": logical_call, "logical_call": logical_call,
++                         "phase": "phase1", "call_index_1_based": call_index,
++                         "tool_name": operation.name, "original_arguments": operation.arguments,
++                         "original_error": "unknown_source" if logical_call == 27 else "invalid_range",
++                         "new_error": expected, "resolved_sources": sources,
++                         "fixture_correction": "synthetic_corrected_only; original payload is unchanged"})
++    (OUT / "EIGHT_ORIGINAL_CASES.json").write_text(
++        json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
++
++
++def main() -> int:
++    OUT.mkdir(exist_ok=True)
++    python = sys.executable
++    suites = ["test_source_candidate", "test_source_candidate_v2",
++              "test_source_coordinate_diagnostics_v2", "test_static_source_screen",
++              "test_static_source_live", "test_static_source_live_v2",
++              "test_archive_source_v2_batch"]
++    first = run("affected", [python, "-m", "unittest", "-q", *suites])
++    env = os.environ.copy()
++    env["PYTHONPATH"] = os.pathsep.join([str(ROOT), str(ROOT / "GenericAgent-main"),
++        str(HERE), str(HERE / "vendor/pma_89e5c0d/src"),
++        str(HERE / "vendor/pma_89e5c0d/external/harbor/src")])
++    command = ("import importlib,sys,unittest; "
++        "sys.modules['offline_launcher']=importlib.import_module("
++        "'method_discovery.curator_supervisor_convergence_v0."
++        "pma_full_upstream_ga_v1_20261013.offline_launcher'); "
++        "unittest.main(module='test_episode',verbosity=1)")
++    second = run("episode", [python, "-c", command], env)
++    original_cases()
++    samples()
++    (OUT / "AUDIT.txt").write_text(
++        "S2/R2 coordinate and safe receipt offline audit\n"
++        "baseline=657aa0eefe0652a9b6ce8be7eae899ca076fde79\n"
++        "real Task/PMA/provider/evaluator/training/scoring calls=0\n"
++        "fake transport requests=12 (six per variant across three process calls)\n"
++        f"affected_exit={first}; episode_exit={second}\n"
++        "Historical: six failed Phase 1 stages, eight direct rejects (seven invalid_range, "
++        "one previously mislabeled unknown_source), 65 collateral aborts. The original "
++        "arguments remain in EIGHT_ORIGINAL_CASES.json and the prior immutable archive. "
++        "All original stages still abort; synthetic_corrected operations are separate.\n"
++        "Model-visible: each handle's own 1-based total_lines, verified wrapper/stdout "
++        "relationship, bounded argument_path and typed diagnostic. Full old bank/history "
++        "remain audit-only. call_index is 1-based; ref indexes are 0-based.\n"
++        "Semantic limitation: event 35's in-range old-code citation is not validated "
++        "as supporting a current-code claim. This repair does not test model behavior.\n"
++        "FILE_HASHES.tsv records read_bytes of this checkout and archive files, not Git blob "
++        "byte hashes; the pushed commit SHA and Git blobs are separate identities.\n"
++        "Exploratory pre-fix test failures were observed in console and corrected by "
++        "using the archived public-event sequence as the bank-state key; full early "
++        "console bytes were not retained and are not represented as final test output.\n",
++        encoding="utf-8")
++    diff = subprocess.run(["git", "diff", "--cached", "--binary", "--",
++        str(HERE / "source_memory_v2.py"), str(HERE / "source_agent_v2.py"),
++        str(HERE / "source_protocol_v2.py"),
++        str(HERE / "test_source_coordinate_diagnostics_v2.py"),
++        str(HERE / "capture_source_coordinate_audit_v2.py")], cwd=ROOT,
++        capture_output=True, check=True)
++    (OUT / "FULL_DIFF.txt").write_bytes(diff.stdout)
++    sections = ("AUDIT.txt", "EIGHT_ORIGINAL_CASES.json",
++                "FAKE_REQUESTS_AND_RECEIPTS.json", "affected.command.txt",
++                "affected.stdout.txt", "affected.stderr.txt", "episode.command.txt",
++                "episode.stdout.txt", "episode.stderr.txt", "FULL_DIFF.txt")
++    (OUT / "AUDIT_COMPLETE.txt").write_text("".join(
++        f"\n\n===== {name} =====\n" + (OUT / name).read_text(encoding="utf-8")
++        for name in sections), encoding="utf-8")
++    files = sorted(p for p in OUT.iterdir() if p.is_file() and p.name != "FILE_HASHES.tsv")
++    files += [HERE / name for name in ("source_memory_v2.py", "source_agent_v2.py",
++        "source_protocol_v2.py", "test_source_coordinate_diagnostics_v2.py",
++        "capture_source_coordinate_audit_v2.py")]
++    files += [ARCHIVE / name for name in ("requests.jsonl", "responses.jsonl",
++                                        "bank_states.jsonl")]
++    (OUT / "FILE_HASHES.tsv").write_text("repo_relative_path\tsha256\tbytes\n" + "".join(
++        f"{p.relative_to(ROOT).as_posix()}\t{hashlib.sha256(p.read_bytes()).hexdigest()}\t{p.stat().st_size}\n"
++        for p in files), encoding="utf-8")
++    return first or second
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_agent_v2.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_agent_v2.py
+index 86d9b0be..3f305da8 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_agent_v2.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_agent_v2.py
+@@ -10,7 +10,7 @@ from memory_agent.memory.memory_agent import BANK_TOOLS, MemoryOperation
+ from pydantic import ValidationError
+ 
+ from source_agent import RECONCILE_RULES, REMINDER_RULES, SourceMemoryAgent
+-from source_memory_v2 import SourceMemoryV2
++from source_memory_v2 import SourceMemoryV2, SourceSelectionError
+ from source_protocol_v2 import MODELS, tool_schema
+ 
+ 
+@@ -18,6 +18,9 @@ SOURCE_LINES_RULES = """
+ Use only the numbered, visible public source leaves below. For each citation choose
+ {source_handle, start_line, end_line}, with inclusive 1-based line numbers. The host
+ binds exact bytes, role and event; do not repeat a quote or invent an event ID.
++Each handle has its own total_lines and coordinate system. Line numbers printed
++inside a source's text are content, not citation coordinates. A JSON wrapper and
++its decoded stdout have different handles; cite the decoded handle for stdout lines.
+ Working-memory summaries and Task responses are agent_report, not tool observations.
+ An old excerpt may be inherited only through the cited entry's explicit index.
+ """
+@@ -43,6 +46,7 @@ _RECEIPT_REASONS = {
+     "unknown_source": "source handle or reference is unknown",
+     "window_invisible": "source is not visible in the current window",
+     "invalid_range": "source line range is invalid",
++    "role_mismatch": "the selected source roles do not include the role required by statement_type",
+     "version_stale": "memory ID or version is not active",
+     "memory_not_active": "memory_id must be an exact active memory ID; omit the displayed version label",
+     "unknown_tool": "tool name is not supported",
+@@ -150,7 +154,9 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
+         for receipt in receipts:
+             row = {key: receipt[key] for key in
+                    ("call_index", "tool_name", "status", "memory_id", "commit_version",
+-                    "rule_code", "field_path", "hint")
++                    "rule_code", "field_path", "argument_path", "hint",
++                    "source_handle", "total_lines", "legal_line_range",
++                    "decoded_source_handles", "required_role", "actual_roles")
+                    if key in receipt}
+             code = receipt.get("error_code")
+             if code is not None:
+@@ -233,6 +239,8 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
+ 
+     @staticmethod
+     def _error_code(exc: BaseException) -> str:
++        if isinstance(exc, SourceSelectionError):
++            return exc.code
+         if isinstance(exc, InactiveMemoryID):
+             return "memory_not_active"
+         if isinstance(exc, ValidationError):
+@@ -289,6 +297,9 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
+                     raise ValueError("unknown tool")
+                 args = MODELS[name].model_validate(raw_args).model_dump(exclude_none=True)
+                 self.memory = working
++                working._diagnostic_ref_paths = {
++                    id(args[key]): key for key in ("source_refs", "evidence_refs")
++                    if isinstance(args.get(key), list)}
+                 memory_id, status = self._dispatch_one(name, args)
+                 row.update(status=status, memory_id=memory_id)
+             except (ValueError, TypeError, ValidationError) as exc:
+@@ -297,6 +308,19 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
+                            error=str(exc))
+                 if isinstance(exc, ValidationError):
+                     row.update(_safe_validation_hint(name, raw_args, exc))
++                elif isinstance(exc, SourceSelectionError):
++                    row["argument_path"] = exc.argument_path
++                    if exc.code == "invalid_range":
++                        row.update(source_handle=exc.source_handle, total_lines=exc.total_lines,
++                                   legal_line_range=f"1..{exc.total_lines}",
++                                   hint="use this handle's own 1-based lines")
++                        row["decoded_source_handles"] = [leaf["source_handle"]
++                            for leaf in working.visible_lines()
++                            if leaf.get("decoded_from") == exc.source_handle]
++                    elif exc.code == "role_mismatch":
++                        row.update(required_role=exc.required_role,
++                                   actual_roles=list(exc.actual_roles),
++                                   hint="select a statement_type and source group with the required role")
+                 elif isinstance(exc, InactiveMemoryID):
+                     row.update(rule_code="memory_not_active", field_path="memory_id",
+                                hint=_RECEIPT_REASONS["memory_not_active"])
+@@ -306,6 +330,8 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
+                 row.update(status="integrity_error", error_code="host_integrity",
+                            error_type=type(exc).__name__, error=str(exc))
+             finally:
++                for key in ("_diagnostic_ref_paths", "_last_resolve_path"):
++                    working.__dict__.pop(key, None)
+                 self.memory = original
+             receipts.append(row)
+         if not failed:
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory_v2.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory_v2.py
+index f9db441b..e480520d 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory_v2.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory_v2.py
+@@ -2,11 +2,27 @@
+ from __future__ import annotations
+ 
+ import hashlib
++import json
+ 
+ from source_memory import SourceMemory
+ from source_protocol_v2 import SourceLines
+ 
+ 
++class SourceSelectionError(ValueError):
++    """Typed source rejection; only fixed, bounded fields may reach the model."""
++
++    def __init__(self, code: str, *, argument_path: str = "source_refs",
++                 source_handle: str | None = None, total_lines: int | None = None,
++                 required_role: str | None = None, actual_roles: tuple[str, ...] = ()):
++        super().__init__(code)
++        self.code = code
++        self.argument_path = argument_path
++        self.source_handle = source_handle
++        self.total_lines = total_lines
++        self.required_role = required_role
++        self.actual_roles = actual_roles
++
++
+ class SourceMemoryV2(SourceMemory):
+     @staticmethod
+     def _line_spans(text: str) -> list[tuple[int, int, str]]:
+@@ -45,6 +61,7 @@ class SourceMemoryV2(SourceMemory):
+ 
+     def visible_lines(self) -> list[dict]:
+         rows = []
++        visible = {key: self.sources[key] for key in self.current_source_ids}
+         for source_id in self.current_source_ids:
+             source = self.sources[source_id]
+             if "handle" not in source:
+@@ -52,7 +69,33 @@ class SourceMemoryV2(SourceMemory):
+             lines = self._line_spans(source["text"])
+             rows.append({"source_handle": source["handle"], "role": source["role"],
+                          "field_path": source["field_path"], "order": source["order"],
++                         "total_lines": len(lines), "line_numbers": "1-based for this source_handle only",
+                          "numbered_lines": [f"{n}: {line[2]}" for n, line in enumerate(lines, 1)]})
++        by_handle = {source["handle"]: source for source in visible.values()}
++        by_path = {(source["event_id"].removesuffix(":" + source["field_path"]),
++                    source["field_path"]): source
++                   for source in visible.values()}
++        for row in rows:
++            path = row["field_path"]
++            if not path.endswith(("/stdout", "/stderr", "/msg", "/output")):
++                continue
++            child = by_handle[row["source_handle"]]
++            event = child["event_id"].removesuffix(":" + path)
++            parent = by_path.get((event, path.rsplit("/", 1)[0]))
++            if parent is None or parent["role"] != "tool_observation":
++                continue
++            if (child["raw_sha256"], child["order"]) != (parent["raw_sha256"], parent["order"]):
++                continue
++            try:
++                envelope = json.loads(parent["text"])
++            except (ValueError, TypeError):
++                continue
++            if (isinstance(envelope, dict) and "status" in envelope
++                    and envelope.get(path.rsplit("/", 1)[1]) == child["text"]):
++                row["decoded_from"] = parent["handle"]
++                row["coordinate_note"] = (f"{parent['handle']} is a separate "
++                    f"{len(self._line_spans(parent['text']))}-line JSON wrapper; cite "
++                    f"{row['source_handle']} for this decoded field's lines")
+         return rows
+ 
+     def resolve_refs(self, refs: object, statement_type: str) -> list[dict]:
+@@ -61,21 +104,26 @@ class SourceMemoryV2(SourceMemory):
+         resolved = []
+         visible = {self.sources[key].get("handle"): self.sources[key]
+                    for key in self.current_source_ids}
+-        for item in refs:
++        paths = getattr(self, "_diagnostic_ref_paths", {})
++        base_path = paths.get(id(refs), "source_refs")
++        self._last_resolve_path = base_path
++        for index, item in enumerate(refs):
+             selection = SourceLines.model_validate(item)
+             source = visible.get(selection.source_handle)
+             if source is None:
+                 if any(row.get("handle") == selection.source_handle for row in self.sources.values()):
+-                    raise ValueError("window-invisible source handle")
+-                raise ValueError("unknown source handle")
++                    raise SourceSelectionError("window_invisible", argument_path=f"{base_path}[{index}]")
++                raise SourceSelectionError("unknown_source", argument_path=f"{base_path}[{index}]")
+             spans = self._line_spans(source["text"])
+             if selection.end_line < selection.start_line or selection.end_line > len(spans):
+-                raise ValueError("source line range outside visible leaf")
++                raise SourceSelectionError("invalid_range", argument_path=f"{base_path}[{index}]",
++                                           source_handle=selection.source_handle, total_lines=len(spans))
+             start = spans[selection.start_line - 1][0]
+             end = spans[selection.end_line - 1][1]
+             excerpt = source["text"][start:end]
+             if not excerpt:
+-                raise ValueError("empty source line selection")
++                raise SourceSelectionError("invalid_range", argument_path=f"{base_path}[{index}]",
++                                           source_handle=selection.source_handle, total_lines=len(spans))
+             resolved.append({"event_id": source["event_id"], "role": source["role"],
+                              "order": source["order"], "start": start, "end": end,
+                              "event_sha256": source["sha256"],
+@@ -87,6 +135,16 @@ class SourceMemoryV2(SourceMemory):
+         self._check_roles(resolved, statement_type)
+         return resolved
+ 
++    def _check_roles(self, refs: list[dict], statement_type: str) -> None:
++        required = {"task_requirement": "task_instruction", "tool_observation": "tool_observation",
++                    "agent_report": "agent_report"}.get(statement_type)
++        roles = {ref["role"] for ref in refs}
++        if required and required not in roles:
++            raise SourceSelectionError("role_mismatch",
++                argument_path=getattr(self, "_last_resolve_path", "source_refs"),
++                required_role=required, actual_roles=tuple(sorted(roles)))
++        super()._check_roles(refs, statement_type)
++
+     def source_ref_valid(self, ref: dict) -> bool:
+         if not super().source_ref_valid(ref):
+             return False
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_protocol_v2.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_protocol_v2.py
+index 5f024c28..4c1c7d5d 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_protocol_v2.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_protocol_v2.py
+@@ -11,9 +11,9 @@ class StrictArgs(BaseModel):
+ 
+ 
+ class SourceLines(StrictArgs):
+-    source_handle: str = Field(min_length=1)
+-    start_line: int = Field(ge=1)
+-    end_line: int = Field(ge=1)
++    source_handle: str = Field(min_length=1, description="Exact handle of one visible source leaf; a JSON wrapper and decoded stdout use different handles.")
++    start_line: int = Field(ge=1, description="Inclusive 1-based line in this handle's own total_lines, not a line number printed inside its text.")
++    end_line: int = Field(ge=1, description="Inclusive 1-based line in the same handle; must not exceed its total_lines.")
+ 
+ 
+ class SaveArgs(StrictArgs):
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_source_coordinate_diagnostics_v2.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_source_coordinate_diagnostics_v2.py
+new file mode 100644
+index 00000000..26f671df
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_source_coordinate_diagnostics_v2.py
+@@ -0,0 +1,226 @@
++"""Offline replay of the archived R2 rejections; no provider endpoint is used."""
++import asyncio
++import copy
++import json
++from pathlib import Path
++from types import SimpleNamespace
++import unittest
++
++from harbor.llms.base import LLMResponse
++
++from episode import construct_upstream
++from source_memory_v2 import SourceMemoryV2, SourceSelectionError
++from test_source_candidate_v2 import Script, call
++
++
++HERE = Path(__file__).resolve().parent
++RAW = (HERE / "source_memory_v3_single_r2_archive_20261015" / "raw" /
++       "source-v2-59f53dcd1a87-01-r2")
++FAILURES = {15: {3: "invalid_range"}, 17: {3: "invalid_range"},
++            21: {11: "invalid_range"}, 23: {12: "invalid_range"},
++            25: {3: "invalid_range", 4: "invalid_range", 10: "invalid_range"},
++            27: {2: "role_mismatch"}}
++
++
++def records(name):
++    return [json.loads(line) for line in (RAW / name).read_text(encoding="utf-8").splitlines()]
++
++
++def archived_stage(logical_call):
++    request = next(row for row in records("requests.jsonl") if row["logical_call"] == logical_call)
++    response = next(row for row in records("responses.jsonl") if row["logical_call"] == logical_call)
++    bank_row = next(row for row in records("bank_states.jsonl") if row["sequence"] == logical_call)
++    bank = SourceMemoryV2.from_dict(bank_row["memory"])
++    leaves = json.loads(request["prompt"].split(
++        "## Numbered visible public source leaves\n", 1)[1].split(
++        "\n## Previous phase-1 execution receipts", 1)[0])
++    handles = {leaf["source_handle"] for leaf in leaves}
++    bank.current_source_ids = [key for key, value in bank.sources.items()
++                               if value.get("handle") in handles]
++    calls = [call(item["function"]["name"], **json.loads(item["function"]["arguments"]))
++             for item in response["tool_calls"]]
++    return bank, leaves, calls
++
++
++class ArchivedCoordinateTests(unittest.TestCase):
++    def agent(self, variant="R2"):
++        from tempfile import TemporaryDirectory
++        tmp = TemporaryDirectory()
++        self.addCleanup(tmp.cleanup)
++        return construct_upstream(Path(tmp.name) / "upstream", research_candidate=variant)
++
++    def test_eight_original_rejections_and_six_atomic_rollbacks(self):
++        total_rejected = total_collateral = 0
++        for logical_call, expected in FAILURES.items():
++            with self.subTest(logical_call=logical_call):
++                bank, leaves, calls = archived_stage(logical_call)
++                agent = self.agent()
++                agent._memory = bank
++                engine = agent._memory_agent
++                engine.memory = bank
++                engine._phase_step = (logical_call + 1) // 2
++                before = copy.deepcopy(bank.to_dict())
++                engine._execute_tool_calls(LLMResponse(content="", tool_calls=calls))
++                self.assertEqual(bank.to_dict(), before)
++                self.assertEqual(engine.last_transaction["status"], "transaction_aborted")
++                self.assertFalse(engine.last_transaction["committed"])
++                rejected = {row["call_index"]: row for row in engine.last_receipts
++                            if row["status"] == "rejected"}
++                self.assertEqual({index: row["error_code"] for index, row in rejected.items()},
++                                 expected)
++                total_rejected += len(rejected)
++                total_collateral += sum(row["status"] == "transaction_aborted"
++                                        for row in engine.last_receipts)
++                for index, code in expected.items():
++                    row = rejected[index]
++                    self.assertEqual(row["call_index"], index)  # one-based tool call
++                    self.assertTrue(row["argument_path"].startswith(
++                        ("source_refs", "evidence_refs")))
++                    if code == "invalid_range":
++                        self.assertEqual(row["total_lines"], 1)
++                        self.assertEqual(row["legal_line_range"], "1..1")
++                        leaf = next(leaf for leaf in leaves
++                                    if leaf["source_handle"] == row["source_handle"])
++                        self.assertEqual(leaf["field_path"].split("/")[-1], "content")
++                        self.assertTrue(row["decoded_source_handles"])
++                        self.assertTrue(any(leaf.get("decoded_from") == row["source_handle"]
++                                            for leaf in bank.visible_lines()))
++                    else:
++                        self.assertEqual(row["required_role"], "agent_report")
++                        self.assertEqual(row["actual_roles"], ["tool_observation"])
++                if logical_call == 23:
++                    self.assertEqual(engine.last_receipts[11]["status"], "rejected")
++                    self.assertTrue(any(row["status"] == "transaction_aborted" for row in engine.last_receipts))
++                if logical_call == 27:
++                    self.assertTrue(any(row["status"] == "transaction_aborted" for row in engine.last_receipts))
++        self.assertEqual((total_rejected, total_collateral), (8, 65))
++
++    def test_synthetic_corrected_coordinates_and_roles(self):
++        corrected = 0
++        for logical_call, expected in FAILURES.items():
++          for index in expected:
++            with self.subTest(logical_call=logical_call, call_index=index):
++                bank, leaves, calls = archived_stage(logical_call)
++                args = calls[index - 1].function.arguments
++                if logical_call == 27:
++                    args["statement_type"] = "tool_observation"
++                else:
++                    key = "source_refs" if "source_refs" in args else "evidence_refs"
++                    original = args[key][0]["source_handle"]
++                    child = next(leaf for leaf in bank.visible_lines()
++                                 if leaf.get("decoded_from") == original)
++                    args[key][0] = {"source_handle": child["source_handle"],
++                                    "start_line": 1, "end_line": 1}
++                    if logical_call == 25 and index == 3:
++                        args["statement_type"] = "tool_observation"
++                agent = self.agent()
++                agent._memory = bank
++                engine = agent._memory_agent
++                engine.memory = bank
++                engine._phase_step = (logical_call + 1) // 2
++                # This isolated operation is synthetic_corrected, not the historical stage.
++                engine._execute_tool_calls(LLMResponse(content="", tool_calls=[calls[index - 1]]))
++                self.assertTrue(engine.last_transaction["committed"])
++                corrected += 1
++        self.assertEqual(corrected, 8)
++
++    def test_display_and_safe_feedback_in_two_real_processes(self):
++        for variant in ("S2", "R2"):
++            with self.subTest(variant=variant):
++                agent = self.agent(variant)
++                bank = agent.memory
++                wrapper = json.dumps({"status": "ok", "stdout": "alpha\nbeta"})
++                parent = bank.register_leaf("e", "tool_observation", wrapper, 1,
++                    "observation/tool_results/0/content", "a" * 64)
++                child = bank.register_leaf("e", "tool_observation", "alpha\nbeta", 1,
++                    "observation/tool_results/0/content/stdout", "a" * 64)
++                fake = Script([LLMResponse(content="", tool_calls=[call(
++                    "memory_save_knowledge", content="bad", statement_type="tool_observation",
++                    source_refs=[{"source_handle": parent, "start_line": 2, "end_line": 2}])]),
++                    LLMResponse(content="<no_intervention/>"),
++                    LLMResponse(content="", tool_calls=[]),
++                    LLMResponse(content="<no_intervention/>")])
++                agent._memory_llm.call = fake
++                asyncio.run(agent._memory_agent.process("public", 1))
++                asyncio.run(agent._memory_agent.process("public", 2))
++                self.assertEqual(len(fake.requests), 4)
++                leaves = bank.visible_lines()
++                self.assertEqual(next(r for r in leaves if r["source_handle"] == parent)["total_lines"], 1)
++                self.assertEqual(next(r for r in leaves if r["source_handle"] == child)["total_lines"], 2)
++                self.assertEqual(next(r for r in leaves if r["source_handle"] == child)["decoded_from"], parent)
++                self.assertIn('"total_lines": 1', fake.requests[0]["prompt"])
++                self.assertIn('"decoded_from": "' + parent + '"', fake.requests[0]["prompt"])
++                for pos in (1, 2):
++                    self.assertIn('"invalid_range"', fake.requests[pos]["prompt"])
++                    self.assertIn('"legal_line_range": "1..1"', fake.requests[pos]["prompt"])
++
++    def test_role_mismatch_feedback_is_bounded_in_both_following_requests(self):
++        agent = self.agent("R2")
++        bank = agent.memory
++        handle = bank.register_leaf("e", "tool_observation", "VISIBLE TOOL RESULT", 1,
++                                    "observation/tool_results/0/content", "a" * 64)
++        hidden = bank.register_leaf("old", "agent_report", "HIDDEN_SENTINEL", 0,
++                                    "response", "b" * 64)
++        bank.current_source_ids = ["e:observation/tool_results/0/content"]
++        fake = Script([LLMResponse(content="", tool_calls=[call(
++            "memory_save_procedural", content="claim", statement_type="agent_report",
++            source_refs=[{"source_handle": handle, "start_line": 1, "end_line": 1}])]),
++            LLMResponse(content="<no_intervention/>"),
++            LLMResponse(content="", tool_calls=[]),
++            LLMResponse(content="<no_intervention/>")])
++        agent._memory_llm.call = fake
++        asyncio.run(agent._memory_agent.process("public", 1))
++        asyncio.run(agent._memory_agent.process("public", 2))
++        for pos in (1, 2):
++            payload = fake.requests[pos]["prompt"]
++            self.assertIn('"role_mismatch"', payload)
++            self.assertIn('"required_role": "agent_report"', payload)
++            self.assertIn('"actual_roles": ["tool_observation"]', payload)
++            self.assertNotIn(hidden, payload)
++            self.assertNotIn("HIDDEN_SENTINEL", payload)
++            self.assertNotIn("VISIBLE TOOL RESULT", payload.split("## This phase-1 execution result")[-1]
++                             if pos == 1 else payload.split("## Previous phase-1 execution receipts")[-1])
++        self.assertEqual(len(fake.requests), 4)
++
++    def test_hidden_unknown_mixed_roles_and_semantic_non_guarantee(self):
++        bank = SourceMemoryV2()
++        report = bank.register_leaf("r", "agent_report", "Task says changed", 1, "response", "a" * 64)
++        tool = bank.register_leaf("r", "tool_observation", "old code", 1,
++                                  "observation/tool_results/0/content", "a" * 64)
++        refs = [{"source_handle": report, "start_line": 1, "end_line": 1},
++                {"source_handle": tool, "start_line": 1, "end_line": 1}]
++        self.assertEqual(len(bank.resolve_refs(refs, "agent_report")), 2)
++        self.assertEqual(len(bank.resolve_refs(refs, "tool_observation")), 2)
++        self.assertEqual(bank.excerpt(bank.resolve_refs(refs[1:], "tool_observation")[0]), "old code")
++        # A valid range can still support the wrong temporal or causal interpretation.
++        with self.assertRaises(SourceSelectionError) as unknown:
++            bank.resolve_refs([{"source_handle": "hidden-sentinel", "start_line": 1,
++                                "end_line": 1}], "inference")
++        self.assertEqual(unknown.exception.code, "unknown_source")
++        bank.current_source_ids = []
++        with self.assertRaises(SourceSelectionError) as invisible:
++            bank.resolve_refs(refs[:1], "inference")
++        self.assertEqual(invisible.exception.code, "window_invisible")
++
++    def test_wrapper_without_visible_decoded_child_remains_citable(self):
++        bank = SourceMemoryV2()
++        wrapper = json.dumps({"status": "ok", "stdout": "first\nsecond"})
++        parent = bank.register_leaf("e", "tool_observation", wrapper, 1,
++                                    "observation/tool_results/0/content", "a" * 64)
++        child = bank.register_leaf("e", "tool_observation", "first\nsecond", 1,
++                                   "observation/tool_results/0/content/stdout", "a" * 64)
++        bank.current_source_ids = ["e:observation/tool_results/0/content"]
++        rows = bank.visible_lines()
++        self.assertEqual(len(rows), 1)
++        self.assertEqual(rows[0]["total_lines"], 1)
++        self.assertNotIn("decoded_from", rows[0])
++        self.assertEqual(bank.excerpt(bank.resolve_refs([{"source_handle": parent,
++            "start_line": 1, "end_line": 1}], "tool_observation")[0]), wrapper)
++        with self.assertRaises(SourceSelectionError) as failure:
++            bank.resolve_refs([{"source_handle": child, "start_line": 1,
++                                "end_line": 1}], "tool_observation")
++        self.assertEqual(failure.exception.code, "window_invisible")
++
++
++if __name__ == "__main__":
++    unittest.main()

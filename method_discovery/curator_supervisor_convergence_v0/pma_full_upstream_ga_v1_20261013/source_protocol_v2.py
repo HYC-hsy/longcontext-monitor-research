@@ -11,9 +11,9 @@ class StrictArgs(BaseModel):
 
 
 class SourceLines(StrictArgs):
-    source_handle: str = Field(min_length=1)
-    start_line: int = Field(ge=1)
-    end_line: int = Field(ge=1)
+    source_handle: str = Field(min_length=1, description="Exact handle of one visible source leaf; a JSON wrapper and decoded stdout use different handles.")
+    start_line: int = Field(ge=1, description="Inclusive 1-based line in this handle's own total_lines, not a line number printed inside its text.")
+    end_line: int = Field(ge=1, description="Inclusive 1-based line in the same handle; must not exceed its total_lines.")
 
 
 class SaveArgs(StrictArgs):

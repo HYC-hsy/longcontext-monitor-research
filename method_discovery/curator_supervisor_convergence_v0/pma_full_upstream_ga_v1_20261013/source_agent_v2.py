@@ -10,7 +10,7 @@ from memory_agent.memory.memory_agent import BANK_TOOLS, MemoryOperation
 from pydantic import ValidationError
 
 from source_agent import RECONCILE_RULES, REMINDER_RULES, SourceMemoryAgent
-from source_memory_v2 import SourceMemoryV2
+from source_memory_v2 import SourceMemoryV2, SourceSelectionError
 from source_protocol_v2 import MODELS, tool_schema
 
 
@@ -18,6 +18,9 @@ SOURCE_LINES_RULES = """
 Use only the numbered, visible public source leaves below. For each citation choose
 {source_handle, start_line, end_line}, with inclusive 1-based line numbers. The host
 binds exact bytes, role and event; do not repeat a quote or invent an event ID.
+Each handle has its own total_lines and coordinate system. Line numbers printed
+inside a source's text are content, not citation coordinates. A JSON wrapper and
+its decoded stdout have different handles; cite the decoded handle for stdout lines.
 Working-memory summaries and Task responses are agent_report, not tool observations.
 An old excerpt may be inherited only through the cited entry's explicit index.
 """
@@ -43,6 +46,7 @@ _RECEIPT_REASONS = {
     "unknown_source": "source handle or reference is unknown",
     "window_invisible": "source is not visible in the current window",
     "invalid_range": "source line range is invalid",
+    "role_mismatch": "the selected source roles do not include the role required by statement_type",
     "version_stale": "memory ID or version is not active",
     "memory_not_active": "memory_id must be an exact active memory ID; omit the displayed version label",
     "unknown_tool": "tool name is not supported",
@@ -150,7 +154,9 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
         for receipt in receipts:
             row = {key: receipt[key] for key in
                    ("call_index", "tool_name", "status", "memory_id", "commit_version",
-                    "rule_code", "field_path", "hint")
+                    "rule_code", "field_path", "argument_path", "hint",
+                    "source_handle", "total_lines", "legal_line_range",
+                    "decoded_source_handles", "required_role", "actual_roles")
                    if key in receipt}
             code = receipt.get("error_code")
             if code is not None:
@@ -233,6 +239,8 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
 
     @staticmethod
     def _error_code(exc: BaseException) -> str:
+        if isinstance(exc, SourceSelectionError):
+            return exc.code
         if isinstance(exc, InactiveMemoryID):
             return "memory_not_active"
         if isinstance(exc, ValidationError):
@@ -289,6 +297,9 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
                     raise ValueError("unknown tool")
                 args = MODELS[name].model_validate(raw_args).model_dump(exclude_none=True)
                 self.memory = working
+                working._diagnostic_ref_paths = {
+                    id(args[key]): key for key in ("source_refs", "evidence_refs")
+                    if isinstance(args.get(key), list)}
                 memory_id, status = self._dispatch_one(name, args)
                 row.update(status=status, memory_id=memory_id)
             except (ValueError, TypeError, ValidationError) as exc:
@@ -297,6 +308,19 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
                            error=str(exc))
                 if isinstance(exc, ValidationError):
                     row.update(_safe_validation_hint(name, raw_args, exc))
+                elif isinstance(exc, SourceSelectionError):
+                    row["argument_path"] = exc.argument_path
+                    if exc.code == "invalid_range":
+                        row.update(source_handle=exc.source_handle, total_lines=exc.total_lines,
+                                   legal_line_range=f"1..{exc.total_lines}",
+                                   hint="use this handle's own 1-based lines")
+                        row["decoded_source_handles"] = [leaf["source_handle"]
+                            for leaf in working.visible_lines()
+                            if leaf.get("decoded_from") == exc.source_handle]
+                    elif exc.code == "role_mismatch":
+                        row.update(required_role=exc.required_role,
+                                   actual_roles=list(exc.actual_roles),
+                                   hint="select a statement_type and source group with the required role")
                 elif isinstance(exc, InactiveMemoryID):
                     row.update(rule_code="memory_not_active", field_path="memory_id",
                                hint=_RECEIPT_REASONS["memory_not_active"])
@@ -306,6 +330,8 @@ class SourceMemoryAgentV2(SourceMemoryAgent):
                 row.update(status="integrity_error", error_code="host_integrity",
                            error_type=type(exc).__name__, error=str(exc))
             finally:
+                for key in ("_diagnostic_ref_paths", "_last_resolve_path"):
+                    working.__dict__.pop(key, None)
                 self.memory = original
             receipts.append(row)
         if not failed:
