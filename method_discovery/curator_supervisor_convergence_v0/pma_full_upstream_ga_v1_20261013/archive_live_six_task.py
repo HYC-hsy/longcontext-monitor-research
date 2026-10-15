@@ -120,7 +120,7 @@ def summarize(root: Path) -> dict:
             "cleanup_confirmed": status.get("cleanup_confirmed"),
             "remaining_containers": status.get("remaining_containers"),
             "cleanup_errors": status.get("cleanup_errors")})
-    return {"schema": "pma-ga-six-task-mechanical-summary-v1",
+    return {"schema": "pma-ga-live-mechanical-summary-v2",
             "attempted": len(batch["arms"]), "not_started": batch["not_started"],
             "stop_reason": batch["stop_reason"], "arms": output}
 
@@ -151,12 +151,14 @@ def main() -> None:
     secrets = private_values(args.task_profile, args.pma_profile)
     chosen = [root / "control" / "BATCH_RESULT.json",
               root / "control" / "AUTHORIZATION.json"]
-    for file in ("result.json", "task_response.json", "task_sse.jsonl",
-                 "task_transport.jsonl", "pma_transport.jsonl", "pma_phase_errors.json"):
-        candidate = root.parent / "pma-ga-six-compat-20261014-r1" / file
-        if candidate.is_file():
-            chosen.append(candidate)
-    for arm in range(1, 18):
+    if root.name == "pma-ga-six-batch-20261014-r1":
+        for file in ("result.json", "task_response.json", "task_sse.jsonl",
+                     "task_transport.jsonl", "pma_transport.jsonl", "pma_phase_errors.json"):
+            candidate = root.parent / "pma-ga-six-compat-20261014-r1" / file
+            if candidate.is_file():
+                chosen.append(candidate)
+    batch = json.loads((root / "control" / "BATCH_RESULT.json").read_text(encoding="utf-8"))
+    for arm in (int(row["order"]) for row in batch["arms"]):
         chosen.extend(selected(root, arm))
     target.mkdir(parents=True)
     archived = []

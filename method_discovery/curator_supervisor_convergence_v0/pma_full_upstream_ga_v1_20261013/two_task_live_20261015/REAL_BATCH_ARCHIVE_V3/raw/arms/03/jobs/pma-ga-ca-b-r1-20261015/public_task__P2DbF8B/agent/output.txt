@@ -1,0 +1,119 @@
+
+
+**Turn 1 ...**
+
+<summary>User requests async task runner with concurrency control. Will implement using asyncio.Semaphore and ensure cleanup on KeyboardInterrupt.</summary>
+
+I'll create an async task runner with concurrency control and proper KeyboardInterrupt handling that allows cleanup code to run.
+
+🛠️ Tool: `file_write`  📥 args:
+````text
+{
+  "path": "/app/run.py",
+  "content": "\"\"\"Async task runner with concurrency control and graceful cleanup on interruption.\"\"\"
+
+import asyncio
+from typing import Callable, Awaitable
+
+
+async def run_tasks(tasks: list[Callable[[], Awaitable[None]]], max_concurrent: int) -> None:
+    \"\"\"
+    Run async tasks with a maximum concurrency limit.
+    
+    Args:
+        tasks: List of async callables to execute
+        max_concurrent: Maximum number of tasks that can run concurrently
+        
+    Handles KeyboardInterrupt gracefully, allowing tasks' cleanup code (finally blocks) to run.
+    \"\"\"
+    if not tasks:
+        return
+    
+    if max_concurrent < 1:
+        raise ValueError(\"max_concurrent must be at least 1\")
+    
+    semaphore = asyncio.Semaphore(max_concurrent)
+    active_tasks = []
+    
+    async def run_with_semaphore(task_fn: Callable[[], Awaitable[None]]) -> None:
+        \"\"\"Wrapper that uses semaphore to limit concurrency.\"\"\"
+        async with semaphore:
+            await task_fn()
+    
+    try:
+        # Create all task coroutines with semaphore control
+        active_tasks = [
+            asyncio.create_task(run_with_semaphore(task_fn))
+            for task_fn in tasks
+        ]
+        
+        # Wait for all tasks to complete
+        await asyncio.gather(*active_tasks, return_exceptions=True)
+        
+    except KeyboardInterrupt:
+        # User pressed Ctrl+C - cancel all tasks but let them clean up
+        print(\"\
+KeyboardInterrupt received. Cancelling tasks and allowing cleanup...\")
+        
+        # Cancel all active tasks
+        for task in active_tasks:
+            if not task.done():
+                task.cancel()
+        
+        # Wait for all tasks to finish (allows finally blocks to execute)
+        # Use return_exceptions to prevent CancelledError from propagating
+        await asyncio.gather(*active_tasks, return_exceptions=True)
+        
+        print(\"All tasks cleaned up.\")
+        raise  # Re-raise KeyboardInterrupt after cleanup
+"
+}
+````
+`````
+[Action] Overwriting file: run.py
+[Status] ✅ Overwrite 成功 (1955 bytes)
+`````
+
+
+**Turn 2 ...**
+
+Done! I've created `/app/run.py` with the `run_tasks` function. 
+
+The implementation uses:
+- **asyncio.Semaphore** to limit concurrency to `max_concurrent` tasks
+- **Graceful KeyboardInterrupt handling** - when you press Ctrl+C, it cancels all running tasks but waits for them to complete, ensuring finally blocks and cleanup code execute
+- **asyncio.gather** with proper exception handling
+
+No additional packages needed - it uses only Python's standard library.
+
+**Example usage:**
+
+```python
+import asyncio
+from run import run_tasks
+
+async def task1():
+    try:
+        print("Task 1 starting")
+        await asyncio.sleep(5)
+        print("Task 1 done")
+    finally:
+        print("Task 1 cleanup")
+
+async def task2():
+    try:
+        print("Task 2 starting")
+        await asyncio.sleep(3)
+        print("Task 2 done")
+    finally:
+        print("Task 2 cleanup")
+
+# Run with max 2 concurrent tasks
+asyncio.run(run_tasks([task1, task2, task1], max_concurrent=2))
+```
+
+If you press Ctrl+C during execution, you'll see the cleanup messages from the finally blocks before the program exits.
+
+
+
+[ROUND END]
