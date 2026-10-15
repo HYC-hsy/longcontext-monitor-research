@@ -22,6 +22,7 @@ def collect(condition: str, source: Path, target: Path, secrets: list[str]) -> l
                if name not in {'memory_payload.jsonl', 'research_events.jsonl',
                                'fake_authorization_removed.json', 'synthetic_test.sh'}}
     mapping['fake_authorization_removed.json'] = source / 'fake_authorization_removed.json'
+    mapping['execution_identity.json'] = source / 'execution_identity.json'
     mapping['synthetic_test.sh'] = run / 'public_task/tests/test.sh'
     events = list((run / 'jobs').rglob('research_events.jsonl'))
     if len(events) != 1:
@@ -65,7 +66,7 @@ def main() -> None:
     secrets = private_values(args.task_profile_file, args.pma_profile_file)
     files = collect('A', args.a, args.output / 'A', secrets)
     files += collect('B', args.b, args.output / 'B', secrets)
-    summary = verify_evidence(args.output)
+    summary = verify_evidence(args.output, require_committed=False)
     (args.output / 'FILE_HASHES.json').write_text(json.dumps({
         'schema': 'pma-ga-generic-fixture-redacted-index-v1', 'files': files,
         'certification': summary}, indent=2, ensure_ascii=False), encoding='utf-8')

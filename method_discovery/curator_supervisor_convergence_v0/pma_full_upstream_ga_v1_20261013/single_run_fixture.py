@@ -10,6 +10,7 @@ import subprocess
 import sys
 
 from .single_run import prepare
+from .single_run_certification import HARBOR_COMMIT, source_identity, vendor_identity
 
 
 def main() -> None:
@@ -31,8 +32,22 @@ def main() -> None:
         task_profile_file=args.task_profile_file,
         pma_profile_file=args.pma_profile_file))
     manifest = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))
-    head = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True,
-                          text=True, check=True).stdout.strip()
+    checkout = Path(__file__).resolve().parents[3]
+    head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=checkout,
+                          capture_output=True, text=True, check=True).stdout.strip()
+    harbor_head = subprocess.run(['git', 'rev-parse', 'HEAD'],
+        cwd=args.harbor_source_root, capture_output=True, text=True, check=True).stdout.strip()
+    if harbor_head != HARBOR_COMMIT:
+        raise RuntimeError('fixture Harbor source commit differs')
+    if subprocess.run(['git', 'diff', '--quiet', 'HEAD'],
+                      cwd=args.harbor_source_root).returncode:
+        raise RuntimeError('fixture Harbor tracked source differs from commit')
+    execution = {'code_commit': head, 'source_files': source_identity(checkout),
+                 'vendor_files': vendor_identity(checkout),
+                 'harbor_commit': harbor_head,
+                 'pma_vendor_commit': manifest['pma_vendor_commit']}
+    (root / 'execution_identity.json').write_text(
+        json.dumps(execution, sort_keys=True, indent=2), encoding='utf-8')
     binding = dict(manifest['planned_order'][0], run_id=identity['run_id'],
                    run_root=identity['run_root'], batch_id=identity['run_id'],
                    config_sha256=manifest['config_sha256'])
@@ -47,10 +62,9 @@ def main() -> None:
     authorization.write_text(json.dumps(auth, indent=2), encoding='utf-8')
     command = [sys.executable, '-m',
         'method_discovery.curator_supervisor_convergence_v0.'
-        'pma_full_upstream_ga_v1_20261013.batch_controller',
-        '--zero-model-fixture', '--manifest', str(root / 'manifest.json'),
+        'pma_full_upstream_ga_v1_20261013.single_run', 'run',
+        '--zero-model-fixture', '--output', str(root),
         '--authorization', str(authorization),
-        '--batch-result', str(root / 'batch_result.json'),
         '--ga-source', args.ga_source, '--runtime-root', args.runtime_root,
         '--task-profile-file', args.task_profile_file,
         '--pma-profile-file', args.pma_profile_file,

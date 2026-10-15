@@ -107,7 +107,9 @@ def main() -> None:
     args = parser.parse_args()
     outcome = prepare(args) if args.command == 'prepare' else run(args)
     print(json.dumps(outcome, ensure_ascii=False, indent=2))
-    if args.command == 'run' and outcome['stop_reason']:
+    if (args.command == 'run' and
+            (outcome['stop_reason'] or not outcome['arm'] or
+             outcome['arm'].get('disposition') != 'completed')):
         raise SystemExit(1)
 
 

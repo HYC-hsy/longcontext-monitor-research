@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import llmcore
-from research_runtime import research_context
+from research_runtime import research_context, temporary_exporter, register_provider_call
 
 
 class Response:
@@ -89,3 +89,66 @@ def test_accepted_response_capture_failure_never_resends(monkeypatch):
         with pytest.raises(RuntimeError, match='capture failed'):
             next(llmcore._stream_with_retry(session, 'https://offline.invalid', {}, {}, parser))
     assert sent == [1]
+
+
+@pytest.mark.parametrize('failed_event', ['provider_request_ready',
+                                           'provider_request_attempt'])
+def test_required_sink_failure_blocks_send_despite_optional_exporter(
+        monkeypatch, failed_event):
+    monkeypatch.setenv('GA_PMA_CAPTURE_TASK_REQUESTS', '1')
+    sent, optional = [], []
+    monkeypatch.setattr(llmcore.requests, 'post', lambda *_a, **_k: sent.append(1))
+    session = SimpleNamespace(max_retries=0, stream=False, connect_timeout=1,
+                              read_timeout=1, proxies=None, verify=True, api_key='fake')
+    def sink(event):
+        if event['event_type'] == failed_event:
+            raise OSError('required sink failed')
+    with temporary_exporter(optional.append), research_context({}, sink):
+        with pytest.raises(RuntimeError, match='required research'):
+            next(llmcore._stream_with_retry(session, 'https://offline.invalid',
+                                            {}, {}, lambda _: iter(())))
+    assert sent == []
+    assert any(row['event_type'] == failed_event for row in optional)
+
+
+def test_required_capture_without_sink_blocks_send(monkeypatch):
+    monkeypatch.setenv('GA_PMA_CAPTURE_TASK_REQUESTS', '1')
+    sent = []
+    monkeypatch.setattr(llmcore.requests, 'post', lambda *_a, **_k: sent.append(1))
+    session = SimpleNamespace(max_retries=0, stream=False, connect_timeout=1,
+                              read_timeout=1, proxies=None, verify=True, api_key='fake')
+    with pytest.raises(RuntimeError, match='required research'):
+        next(llmcore._stream_with_retry(session, 'https://offline.invalid', {}, {},
+                                        lambda _: iter(())))
+    assert sent == []
+
+
+def test_optional_exporter_does_not_require_persistent_sink(monkeypatch):
+    monkeypatch.delenv('GA_PMA_CAPTURE_TASK_REQUESTS', raising=False)
+    sent, optional = [], []
+    monkeypatch.setattr(llmcore.requests, 'post',
+                        lambda *_a, **_k: sent.append(1) or Response())
+    session = SimpleNamespace(max_retries=0, stream=False, connect_timeout=1,
+                              read_timeout=1, proxies=None, verify=True)
+    def parser(_response):
+        if False:
+            yield None
+        return [{'type': 'text', 'text': 'accepted'}]
+    with temporary_exporter(optional.append):
+        with pytest.raises(StopIteration) as result:
+            next(llmcore._stream_with_retry(session, 'https://offline.invalid', {},
+                                            {}, parser))
+    assert result.value.value == [{'type': 'text', 'text': 'accepted'}]
+    assert sent == [1]
+
+
+def test_usage_distinguishes_returned_zero_from_missing_cache(monkeypatch):
+    events = []
+    with research_context({}, events.append):
+        register_provider_call({'llm_call_id': 'usage-fixture'})
+        llmcore._record_usage({'input_tokens': 0, 'output_tokens': 1}, 'messages')
+    usage = next(row['payload'] for row in events
+                 if row['event_type'] == 'provider_usage')
+    assert usage['input_tokens'] == 0
+    assert usage['cache_read_input_tokens'] is None
+    assert usage['cache_creation_input_tokens'] is None

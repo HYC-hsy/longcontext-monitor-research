@@ -47,7 +47,8 @@ def execute(args: argparse.Namespace) -> list[dict]:
         root.mkdir(parents=True, exist_ok=False)
     else:
         root = root.resolve(strict=True)
-    result_path = root / 'selection_result.json'
+    result_path = root / ('selection_preparation.json' if args.mode == 'prepare'
+                          else 'selection_result.json')
     if result_path.exists():
         raise FileExistsError(result_path)
     results = []
@@ -93,7 +94,7 @@ def execute(args: argparse.Namespace) -> list[dict]:
                                           'not_started_validation_failure',
                                 'error_type': type(exc).__name__, 'error': str(exc)})
                 break
-    with result_path.open('w', encoding='utf-8', newline='\n') as stream:
+    with result_path.open('x', encoding='utf-8', newline='\n') as stream:
         json.dump({'schema': 'pma-ga-selection-result-v1', 'mode': args.mode,
                    'slots': results, 'remaining_not_started': [
                        {'order': index, **row, 'status': 'not_started'} for index, row in
@@ -127,8 +128,9 @@ def main() -> None:
             any(row['status'] in {'preparation_failed', 'started_incomplete',
                                   'not_started_missing_approval',
                                   'not_started_validation_failure'} or
-                (row.get('result', {}).get('arm') or {}).get('disposition') not in
-                (None, 'completed') for row in results)):
+                (args.mode == 'run' and
+                 (row.get('result', {}).get('arm') or {}).get('disposition') !=
+                 'completed') for row in results)):
         raise SystemExit(1)
 
 

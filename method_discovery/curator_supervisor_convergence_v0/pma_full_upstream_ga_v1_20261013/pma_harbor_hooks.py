@@ -14,7 +14,8 @@ from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_p
     PilotTrialHooks, _atomic, _tree_sha256,
 )
 from .six_task_plan import validate_plan
-from .control_processes import scan as scan_control_processes, stop_registered
+from .control_processes import (scan as scan_control_processes,
+                                probe_registered, stop_registered)
 
 
 def _source_identity(value: str) -> str:
@@ -314,6 +315,8 @@ class NativeSharedTrialHooks(PMATrialHooks):
                     row.get('pid_namespace') != self._control_namespace):
                 raise RuntimeError('trusted GA control registration identity differs')
             observed[(row['pid'], row['start_ticks'])] = row
+        if not observed or not any(row['kind'] == 'transport' for row in observed.values()):
+            raise RuntimeError('trusted GA control registration incomplete')
         top = await asyncio.to_thread(subprocess.run, ['docker', 'top', self.container_id],
                                       text=True, capture_output=True, timeout=30)
         first_top = top.stdout
@@ -326,9 +329,17 @@ class NativeSharedTrialHooks(PMATrialHooks):
             identity = observed.get((row['pid'], row['start_ticks']))
             if identity is None or identity['argv_sha256'] != row['argv_sha256']:
                 raise RuntimeError('unregistered or reused GA control process remains')
-            await asyncio.to_thread(stop_registered, self.container_id,
-                                    self._control_python, identity)
-        if active['processes']:
+        probe_before = {}
+        for identity in observed.values():
+            state = await asyncio.to_thread(probe_registered, self.container_id,
+                                            self._control_python, identity)
+            probe_before[str(identity['pid'])] = state
+            if state == 'identity_changed':
+                raise RuntimeError('registered GA control process changed argv while alive')
+            if state == 'registered_alive':
+                await asyncio.to_thread(stop_registered, self.container_id,
+                                        self._control_python, identity)
+        if 'registered_alive' in probe_before.values():
             await asyncio.sleep(2)
             top = await asyncio.to_thread(subprocess.run,
                 ['docker', 'top', self.container_id], text=True,
@@ -336,15 +347,21 @@ class NativeSharedTrialHooks(PMATrialHooks):
         final_control = await asyncio.to_thread(scan_control_processes,
                                                 self.container_id, self._control_python,
                                                 self.spec['run_id'])
+        probe_after = {str(row['pid']): await asyncio.to_thread(
+            probe_registered, self.container_id, self._control_python, row)
+            for row in observed.values()}
         _atomic(self.archive / 'writer_termination_check.json', {
             'run_id': self.spec['run_id'], 'before': first_top,
             'after': top.stdout, 'docker_top_return_code': top.returncode,
             'registered_control_processes': list(observed.values()),
+            'registered_probe_before': probe_before,
+            'registered_probe_after': probe_after,
             'control_remaining': final_control['processes'],
             'task_owned_pids_preserved': sorted(_docker_top_pids(top.stdout) - self.baseline_pids)
                 if top.returncode == 0 else None})
         if (top.returncode or final_control['pid_namespace'] != self._control_namespace or
-                final_control['processes']):
+                final_control['processes'] or
+                any(state not in {'exited', 'pid_reused'} for state in probe_after.values())):
             raise RuntimeError('registered GA control processes not stopped')
         _atomic(self.archive / 'agent_end_native.json', {
             'run_id': self.spec['run_id'], 'container_id': self.container_id,

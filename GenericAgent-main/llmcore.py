@@ -333,21 +333,21 @@ def _parse_openai_sse(resp_lines, api_mode="chat_completions"):
 
 def _record_usage(usage, api_mode):
     if not usage: return
-    inp = out = cached = cache_creation = cache_read = 0
+    inp = out = cached = cache_creation = cache_read = None
     if api_mode == 'responses':
-        cached = (usage.get("input_tokens_details") or {}).get("cached_tokens", 0)
-        inp = usage.get("input_tokens", 0); out = usage.get("output_tokens", 0)
+        cached = (usage.get("input_tokens_details") or {}).get("cached_tokens")
+        inp = usage.get("input_tokens"); out = usage.get("output_tokens")
         print(f"[Cache] input={inp} cached={cached}")
         if out: print(f"[Output] tokens={out}")
     elif api_mode == 'chat_completions':
-        cached = (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
-        inp = usage.get("prompt_tokens", 0); out = usage.get("completion_tokens", 0)
+        cached = (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
+        inp = usage.get("prompt_tokens"); out = usage.get("completion_tokens")
         print(f"[Cache] input={inp} cached={cached}")
         if out: print(f"[Output] tokens={out}")
     elif api_mode == 'messages':
-        cache_creation = usage.get("cache_creation_input_tokens", 0)
-        cache_read = usage.get("cache_read_input_tokens", 0)
-        inp = usage.get("input_tokens", 0); out = usage.get("output_tokens", 0)
+        cache_creation = usage.get("cache_creation_input_tokens")
+        cache_read = usage.get("cache_read_input_tokens")
+        inp = usage.get("input_tokens"); out = usage.get("output_tokens")
         print(f"[Cache] input={inp} creation={cache_creation} read={cache_read}")
     provider_call = _current_provider_call()
     if provider_call:
@@ -453,9 +453,9 @@ class ProviderResponseCancelled(Exception):
 def _stream_with_retry(sess, url, headers, payload, parse_fn):
     if getattr(sess, '_research_capture_failed', False):
         raise RuntimeError('required research capture failed after an accepted response')
-    observing = _telemetry_enabled()
+    pma_capture = os.environ.get('GA_PMA_CAPTURE_TASK_REQUESTS') == '1'
+    observing = _telemetry_enabled() or pma_capture
     llm_call_id = _research_id('llm') if observing else None
-    pma_capture = observing and os.environ.get('GA_PMA_CAPTURE_TASK_REQUESTS') == '1'
     if observing:
         intervention_link = _consume_pending_intervention()
         reminder_link = _consume_pending_pma_reminder()
@@ -469,7 +469,8 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                              'call_type': call_type})
         if intervention_link: request_info.update(intervention_link)
         if reminder_link: request_info.update(reminder_link)
-        request_event = _research_emit('provider_request_ready', request_info, llm_call_id=llm_call_id)
+        request_event = _research_emit('provider_request_ready', request_info,
+                                       llm_call_id=llm_call_id, required_sink=pma_capture)
         if pma_capture and request_event is None:
             raise RuntimeError('required research request capture unavailable before send')
         _register_provider_call({
@@ -488,7 +489,8 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
         if consume_cancel is not None and consume_cancel():
             raise ProviderResponseCancelled("provider response cancelled before retry")
         streamed = False
-        attempt_event = _research_emit('provider_request_attempt', {'attempt': attempt + 1}, llm_call_id=llm_call_id)
+        attempt_event = _research_emit('provider_request_attempt', {'attempt': attempt + 1},
+                                       llm_call_id=llm_call_id, required_sink=pma_capture)
         if pma_capture and attempt_event is None:
             raise RuntimeError('required research attempt capture unavailable before send')
         try:
@@ -548,10 +550,11 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                                     {'content': visible}, capture_content=True,
                                     secrets=secrets)['content']['content'],
                                 'hidden_thinking_excluded': True,
-                            }, llm_call_id=llm_call_id)
+                            }, llm_call_id=llm_call_id, required_sink=True)
                             if content_event is None:
                                 sess._research_capture_failed = True
-                        success_event = _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code, 'outcome': 'success'}, llm_call_id=llm_call_id)
+                        success_event = _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code, 'outcome': 'success'},
+                                                       llm_call_id=llm_call_id, required_sink=pma_capture)
                         if pma_capture and success_event is None:
                             sess._research_capture_failed = True
                         return e.value or []

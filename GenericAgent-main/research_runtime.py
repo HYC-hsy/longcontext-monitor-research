@@ -248,7 +248,8 @@ def wrap_generator(generator: Iterator[Any], identity: Mapping[str, Any], sink: 
         return (yield from generator)
 
 
-def emit(event_type: str, payload: Optional[Mapping[str, Any]] = None, **identity: Any) -> Optional[dict[str, Any]]:
+def emit(event_type: str, payload: Optional[Mapping[str, Any]] = None,
+         *, required_sink: bool = False, **identity: Any) -> Optional[dict[str, Any]]:
     """Emit an event if enabled; telemetry failures are fail-open."""
     sink = _sink.get()
     with _exporters_lock:
@@ -270,13 +271,16 @@ def emit(event_type: str, payload: Optional[Mapping[str, Any]] = None, **identit
         "payload": dict(payload or {}),
     }
     delivered = False
+    sink_delivered = False
     for exporter in exporters + ((sink,) if sink is not None else ()):
         try:
             exporter(envelope)
             delivered = True
+            if exporter is sink:
+                sink_delivered = True
         except Exception:
             continue
-    if not delivered:
+    if not delivered or (required_sink and not sink_delivered):
         return None
     return envelope
 

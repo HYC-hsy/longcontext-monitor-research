@@ -14,6 +14,10 @@ import re
 import runpy
 
 
+class UnsafePublicProjection(ValueError):
+    """A structured private record cannot safely enter the public archive."""
+
+
 def sha(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -53,6 +57,13 @@ def redact(raw: bytes, secrets: list[str]) -> tuple[bytes, int]:
     def remove_hidden(value):
         nonlocal changes
         if isinstance(value, dict):
+            if value.get('type') == 'redacted_thinking':
+                encoded = json.dumps(value, ensure_ascii=False, sort_keys=True).encode('utf-8')
+                changes += max(1, sum(key in hidden_keys for key in value))
+                return {'type': value['type'], 'id': value.get('id'),
+                        'public_projection': '[REDACTED_HIDDEN_THINKING]',
+                        'original_bytes': len(encoded),
+                        'private_sha256': hashlib.sha256(encoded).hexdigest()}
             output = {}
             for key, item in value.items():
                 request_setting = (key == 'thinking' and isinstance(item, dict) and
@@ -69,14 +80,24 @@ def redact(raw: bytes, secrets: list[str]) -> tuple[bytes, int]:
             return output
         if isinstance(value, list):
             return [remove_hidden(item) for item in value]
+        if isinstance(value, str) and value.lstrip().startswith(('{', '[')):
+            try:
+                nested = json.loads(value)
+            except ValueError:
+                if any(marker in value for marker in hidden_keys):
+                    raise UnsafePublicProjection('unparseable nested JSON with private marker')
+            else:
+                return json.dumps(remove_hidden(nested), ensure_ascii=False)
         return value
 
     try:
         parsed = json.loads(text)
         text = json.dumps(remove_hidden(parsed), ensure_ascii=False)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as exc:
+        if isinstance(exc, UnsafePublicProjection):
+            raise
         lines = text.splitlines(keepends=True)
-        if lines and all(not line.strip() or line.lstrip().startswith(('{', '['))
+        if lines and all(not line.strip() or line.lstrip().startswith(('{', '[', 'data:', 'event:', 'id:'))
                          for line in lines):
             converted = []
             for line in lines:
@@ -84,13 +105,27 @@ def redact(raw: bytes, secrets: list[str]) -> tuple[bytes, int]:
                     converted.append(line)
                     continue
                 try:
-                    converted.append(json.dumps(remove_hidden(json.loads(line)),
-                                                ensure_ascii=False) + '\n')
+                    if line.startswith('data:'):
+                        prefix, body = line.split(':', 1)
+                        converted.append('data: ' + (body.strip() if body.strip() == '[DONE]'
+                            else json.dumps(remove_hidden(json.loads(body)),
+                                            ensure_ascii=False)) + '\n')
+                    elif line.startswith(('event:', 'id:')):
+                        converted.append(line)
+                    else:
+                        converted.append(json.dumps(remove_hidden(json.loads(line)),
+                                                    ensure_ascii=False) + '\n')
                 except (ValueError, TypeError):
                     converted = []
                     break
             if converted:
                 text = ''.join(converted)
+            else:
+                raise UnsafePublicProjection('structured record could not be projected')
+        elif text.lstrip().startswith(('{', '[', 'data:')) or any(
+                marker in text for marker in ('redacted_thinking', 'reasoning_content',
+                                               'encrypted_content', 'thinking_signature')):
+            raise UnsafePublicProjection('structured private record could not be projected')
     text, tag_changes = re.subn(r'(?is)<(thinking|redacted_thinking)>.*?</\1>',
                                 r'<\1>[REDACTED_HIDDEN_THINKING]</\1>', text)
     changes += tag_changes
@@ -223,7 +258,14 @@ def main() -> None:
             relative = Path("compatibility") / source.name
         destination = target / "raw" / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
-        data, changes = redact(source.read_bytes(), secrets)
+        try:
+            data, changes = redact(source.read_bytes(), secrets)
+        except UnsafePublicProjection as exc:
+            archived.append({'path': (Path('raw') / relative).as_posix(),
+                             'source_bytes': source.stat().st_size,
+                             'source_sha256': sha(source), 'excluded': True,
+                             'reason': str(exc)})
+            continue
         destination.write_bytes(data)
         archived.append({"path": (Path("raw") / relative).as_posix(),
                          "source_bytes": source.stat().st_size,
@@ -238,7 +280,7 @@ def main() -> None:
         json.dumps(summarize(root), indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps({"full_local_files": len(private_index),
                       "archived_files": len(archived),
-                      "redactions": sum(row["redactions"] for row in archived)},
+                      "redactions": sum(row.get("redactions", 0) for row in archived)},
                      ensure_ascii=False))
 
 

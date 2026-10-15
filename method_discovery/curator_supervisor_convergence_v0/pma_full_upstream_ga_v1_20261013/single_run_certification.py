@@ -5,12 +5,20 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 
 from .prepare_six_task_manifest import V3_SOURCE_FILES, _committed_source_sha
 
 
 HARBOR_COMMIT = '459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc'
+VENDOR_FILES = (
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'vendor/pma_89e5c0d/src/memory_agent/memory/memory_agent.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'vendor/pma_89e5c0d/src/memory_agent/memory/universal_memory.py',
+)
 SOURCE_FILES = tuple(dict.fromkeys(V3_SOURCE_FILES + (
+    'GenericAgent-main/research_runtime.py',
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'archive_live_six_task.py',
     'method_discovery/curator_supervisor_convergence_v0/'
@@ -31,6 +39,7 @@ SOURCE_FILES = tuple(dict.fromkeys(V3_SOURCE_FILES + (
     'harbor_adapter.py',
 )))
 EVIDENCE_FILES = (
+    'execution_identity.json',
     'live_result.json', 'agent_start_identity.json', 'agent_end_native.json',
     'writer_termination_check.json', 'control_process_registry.json',
     'native_reports_checked.json', 'native_test_execution.json',
@@ -39,7 +48,22 @@ EVIDENCE_FILES = (
 )
 
 
-def verify_evidence(evidence: Path) -> dict:
+def _committed_evidence_sha(checkout: Path, path: Path) -> str:
+    relative = path.resolve(strict=True).relative_to(checkout.resolve(strict=True)).as_posix()
+    if subprocess.run(['git', 'diff', '--quiet', 'HEAD', '--', relative],
+                      cwd=checkout).returncode:
+        raise RuntimeError(f'fixture evidence differs from committed blob: {relative}')
+    blob = subprocess.run(['git', 'show', f'HEAD:{relative}'], cwd=checkout,
+                          capture_output=True, check=True).stdout
+    digest = hashlib.sha256(blob).hexdigest()
+    if digest != hashlib.sha256(path.read_bytes()).hexdigest():
+        raise RuntimeError(f'fixture evidence bytes differ from Git blob: {relative}')
+    return digest
+
+
+def verify_evidence(evidence: Path, *, require_committed: bool = True) -> dict:
+    checkout = Path(__file__).resolve().parents[3]
+    current = source_identity(checkout)
     outcomes = {}
     hashes = {}
     for condition in ('A', 'B'):
@@ -50,7 +74,8 @@ def verify_evidence(evidence: Path) -> dict:
             path = base / name
             if not path.is_file():
                 raise RuntimeError(f'generic {condition} evidence missing: {name}')
-            hashes[f'{condition}/{name}'] = hashlib.sha256(path.read_bytes()).hexdigest()
+            hashes[f'{condition}/{name}'] = (_committed_evidence_sha(checkout, path)
+                if require_committed else hashlib.sha256(path.read_bytes()).hexdigest())
         load = lambda name: json.loads((base / name).read_text(encoding='utf-8'))
         result, started, ended = (load(name) for name in
             ('live_result.json', 'agent_start_identity.json', 'agent_end_native.json'))
@@ -58,6 +83,13 @@ def verify_evidence(evidence: Path) -> dict:
             ('writer_termination_check.json', 'control_process_registry.json',
              'native_reports_checked.json'))
         removed = load('fake_authorization_removed.json')
+        executed = load('execution_identity.json')
+        if (executed.get('source_files') != current or
+                executed.get('vendor_files') != vendor_identity(checkout) or
+                executed.get('pma_vendor_commit') !=
+                '89e5c0d6aadfe531a1aee42fd290d48be89973dd' or
+                executed.get('harbor_commit') != HARBOR_COMMIT):
+            raise RuntimeError(f'generic {condition} fixture execution identity differs')
         execution = load('native_test_execution.json')
         synthetic_script = (base / 'synthetic_test.sh').read_bytes()
         if (result.get('condition') != condition or
@@ -106,8 +138,19 @@ def verify_evidence(evidence: Path) -> dict:
                                'task': result['task'],
                                'requests': len(ready), 'attempts': len(attempts),
                                'control_stopped': True, 'native_recorded': True}
+    for path in sorted(evidence.rglob('*')):
+        if not path.is_file() or path.name == 'FILE_HASHES.json':
+            continue
+        name = path.relative_to(evidence).as_posix()
+        if name not in hashes:
+            hashes[name] = (_committed_evidence_sha(checkout, path)
+                if require_committed else hashlib.sha256(path.read_bytes()).hexdigest())
     return {'outcomes': outcomes, 'file_sha256': hashes}
 
 
 def source_identity(checkout: Path) -> dict:
     return {name: _committed_source_sha(checkout, name) for name in SOURCE_FILES}
+
+
+def vendor_identity(checkout: Path) -> dict:
+    return {name: _committed_source_sha(checkout, name) for name in VENDOR_FILES}
