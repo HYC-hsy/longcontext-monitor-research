@@ -581,3 +581,48 @@ async def run_authorized(manifest_path: Path, auth_path: Path, profile_path: Pat
     return results
 
 
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=("check", "fake", "freeze", "authorize", "live"), default="check")
+    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--authorization", type=Path)
+    parser.add_argument("--output-root", type=Path)
+    parser.add_argument("--profile", type=Path)
+    parser.add_argument("--authorization-source")
+    args = parser.parse_args()
+    if args.mode == "fake":
+        result = asyncio.run(fake_cycle())
+    elif args.mode == "check":
+        prepared = prepare()
+        result = {"schema": prepared["schema"], "steps_checked": len(prepared["checks"]),
+                  "units": len(prepared["units"]), "logical_stages": sum(
+                      u["stage_count"] for u in prepared["units"]),
+                  "profile_sha256": prepared["profile_sha256"]}
+    else:
+        if args.manifest is None or args.profile is None:
+            parser.error("manifest and profile are required")
+        if args.mode == "freeze":
+            if args.output_root is None:
+                parser.error("output-root is required")
+            result = freeze(args.manifest, args.output_root, args.profile)
+        elif args.mode == "authorize":
+            if args.authorization is None or args.authorization_source is None:
+                parser.error("authorization and authorization-source are required")
+            result = approve(args.manifest, args.authorization, args.profile,
+                             args.authorization_source)
+        else:
+            if args.authorization is None:
+                parser.error("authorization is required")
+            rows = asyncio.run(run_authorized(args.manifest, args.authorization, args.profile))
+            result = {"units_attempted": len(rows), "logical_calls": sum(
+                row["logical_calls"] for row in rows), "stopped": any(
+                row["status"] != "completed" for row in rows)}
+    print(json.dumps(result, sort_keys=True))
+    if args.mode == "live" and result["stopped"]:
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()
+
+
