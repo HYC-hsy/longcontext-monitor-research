@@ -225,6 +225,37 @@ def project_slot(directory: Path, target: Path, secrets: list[str]) -> dict:
         output[name] = {'public_bytes': destination.stat().st_size,
                         'public_sha256': digest(destination)}
 
+    plan_path = directory / 'plan.json'
+    manifest_path = directory / 'manifest.json'
+    authorization_path = directory / 'authorization.json'
+    plan = json.loads(plan_path.read_text(encoding='utf-8'))
+    manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    authorization = json.loads(authorization_path.read_text(encoding='utf-8'))
+    if (plan.get('schema') != 'pma-ga-single-plan-v1' or
+            manifest.get('schema') != 'pma-ga-live-manifest-v4' or
+            authorization.get('audited_code_commit') is None or
+            authorization.get('run_id') != identity_record['run_id']):
+        raise RuntimeError('prepared or authorized identity has unexpected shape')
+    emit(plan_path, 'plan_public.json', {key: plan.get(key) for key in
+         ('schema', 'execution_authorized', 'official_source_git_commit',
+          'task', 'condition', 'occurrence')})
+    manifest_keys = ('schema', 'status', 'execution_authorized',
+        'official_source_git_commit', 'pma_vendor_commit', 'task_profile_sha256',
+        'pma_profile_sha256', 'resolved_models_public', 'config', 'config_sha256',
+        'native_shared_certification', 'assets', 'planned_order')
+    emit(manifest_path, 'manifest_public.json', {key: projector.json_value(
+        manifest.get(key), f'manifest.{key}') for key in manifest_keys})
+    emit(authorization_path, 'authorization_proof_public.json', {
+        'authorization_source': projector.text(authorization.get('authorization_source'),
+                                                'authorization.source'),
+        'execution_authorized_at_start': authorization.get('execution_authorized'),
+        'manifest_sha256': authorization.get('manifest_sha256'),
+        'audited_code_commit': authorization.get('audited_code_commit'),
+        'approved_arms': authorization.get('approved_arms'),
+        'run_id': authorization.get('run_id'),
+        'run_root_exists_now': run_root.is_dir(),
+        'private_authorization_sha256': digest(authorization_path)})
+
     event_files = list((run_root / 'jobs').glob('*/*/agent/research_events.jsonl'))
     if len(event_files) != 1:
         raise RuntimeError('Task research event source is missing or ambiguous')
@@ -385,6 +416,18 @@ def archive(root: Path, target: Path, secrets: list[str], run_commit: str) -> di
         exclusions.extend({'order': order, **item} for item in projected['field_exclusions'])
     write_json(target / 'SUMMARY.json', {'schema': 'pma-ga-ordered-postrun-public-v1',
         'run_code_commit': run_commit, 'slots': summary,
+        'remaining_not_started': selection.get('remaining_not_started', [])})
+    write_json(target / 'PREPARATION_PUBLIC.json', {'source_sha256': digest(
+        root / 'selection_preparation.json'), 'slots': [{
+            **{key: row.get(key) for key in ('order', 'task', 'condition',
+                                              'occurrence', 'status')},
+            'run_id': (row.get('identity') or {}).get('run_id'),
+            'plan_sha256': (row.get('identity') or {}).get('plan_sha256'),
+            'manifest_sha256': (row.get('identity') or {}).get('manifest_sha256')}
+            for row in prepared['slots']]})
+    write_json(target / 'SELECTION_RECEIPT_PUBLIC.json', {
+        'source_sha256': digest(root / 'selection_result.json'),
+        'attempted': len(selection['slots']),
         'remaining_not_started': selection.get('remaining_not_started', [])})
     write_json(target / 'PRIVATE_SOURCE_INDEX.json', source_index)
     write_json(target / 'FIELD_EXCLUSIONS.json', exclusions)
