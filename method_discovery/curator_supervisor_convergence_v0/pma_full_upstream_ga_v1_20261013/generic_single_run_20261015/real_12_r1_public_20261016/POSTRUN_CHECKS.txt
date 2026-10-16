@@ -1,0 +1,40 @@
+Actual limited stdout/stderr extracts and independent readbacks, 2026-10-16.
+The complete mixed controller transcript is private because it is not a
+supported structured public record. No provider call occurred in these checks.
+
+run_selection --mode prepare (before real sends):
+{"mode": "prepare", "attempted_or_prepared": 24}
+exit 0
+
+run_selection --mode run (final line of private controller transcript):
+{"mode": "run", "attempted_or_prepared": 24}
+PowerShell transcript ended 2026-10-16 04:57:09 local time.
+The 24 batch_result.json and live_result.json files supply per-slot status.
+
+python -m unittest ...test_archive_ordered_real -v:
+test_embedded_transport_and_unknown_payload_fail_closed (method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.test_archive_ordered_real.PublicProjectionTests.test_embedded_transport_and_unknown_payload_fail_closed) ... ok
+test_missing_usage_distinct_from_actual_zero (method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.test_archive_ordered_real.PublicProjectionTests.test_missing_usage_distinct_from_actual_zero) ... ok
+test_reminder_link_is_kept_without_private_provider_url (method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.test_archive_ordered_real.PublicProjectionTests.test_reminder_link_is_kept_without_private_provider_url) ... ok
+test_request_removes_nested_hidden_blocks_and_private_transport (method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.test_archive_ordered_real.PublicProjectionTests.test_request_removes_nested_hidden_blocks_and_private_transport) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.001s
+
+OK
+exit 0
+
+archive_ordered_real on the stopped private batch:
+{"excluded_fields": 3275, "excluded_private_files": 18235, "public_files": 174, "slots": 24}
+exit 0
+
+Public readback:
+files 175 indexed 174 malformed 0 index_mismatch 0 secret_hits 0 suspicious 0
+ZIP: entries 175, missing indexed files 0, integrity error None.
+Complete delivery directory configured-private-value hits: 0.
+
+Private source readback (no private content printed):
+selected_source_checks 168 excluded_checks 18235 unique_checked 18331 actual 18331 unindexed 0 mismatches 0
+Harbor job reward vs live_result: compared 24, mismatches [], native_ones 11, native_zeros 13.
+Control clearance: slots 24, cleanup_failures [], fake_marked 0;
+B_worker_nonzero [], B_save_not_success [].
+Post-run docker ps: empty. Filtered owned host process inspection: empty.

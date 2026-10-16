@@ -1,0 +1,199 @@
+GA / fixed-upstream PMA: twelve new Terminal-Bench tasks, one A/B pair each
+Mechanical delivery and public-projection audit, 2026-10-16
+
+Status and scope
+----------------
+The frozen running code was 5f585523ea8b817c8a0761a98f82f38428f4ef1c.
+The post-run public projection code was committed separately at
+a72a284646e5459170f77a604e572e64eff6710f. The latter did not run in any
+Task, PMA, Harbor, or evaluator process. The original PMA vendor was
+89e5c0d6aadfe531a1aee42fd290d48be89973dd, Harbor source was
+459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc, and fixed Terminal-Bench
+source was 2fd12b88aafdd04a52c298e3940bcb189f9766d6.
+
+The user-approved DISCOVERY_12_DRAFT.json remained execution_authorized=false.
+The actual run used 24 new one-slot manifests, unique run IDs and roots, and
+24 separate private authorizations binding each manifest's raw SHA-256,
+the frozen code SHA, configuration SHA and slot identity. All 24 preparation
+receipts said prepared_not_authorized before authorization. Real mode had no
+zero_model_fixture flag. The provider profiles had byte SHA-256
+ED09A811B654B83097BEE77942704EAE2539D67291BF55AA34476692081FF02E
+(Task) and CC5F784B069034F44BC4527D15ACD70191B1F7FC5810556C087B7B35E0AE00F1
+(PMA), matching the previously registered Opus 4.8 profiles. No profile
+contents or credential values are in this archive. The actual resolved public
+model fields and each official image's RepoDigest, image ID, platform,
+resources, fixed task/evaluator hashes and time multipliers are in each
+NN/manifest_public.json. There was no independent compatibility probe.
+
+The prepared common budget was 300 Task turns and 14,400 seconds of shared
+agent wall time per slot, Harbor whole-trial retry 0; the native verifier
+multiplier was 1 against each task's own 900/1,200/1,800/3,600-second
+definition. The 14,400-second research agent limit is not the official
+agent limit. Task profile exposed max_retries=4; PMA profile exposed
+max_retries=8, which is not a claim of eight effective upstream attempts.
+Unobservable provider-internal retry counts and PMA token usage/cost remain
+unknown. Missing cached_input_tokens is null/unknown, not zero.
+
+Run command and checks
+----------------------
+The actual entry was run_selection --mode prepare, then run_selection
+--mode run, with the committed 24-slot DISCOVERY_12_DRAFT.json, committed
+certification_fixture_v5, the above private profiles, the official fixed Git
+checkout and the existing single_run -> batch_controller -> live_launcher ->
+Harbor path. The only private output root was E:\pma12_native_r1_20261015.
+The complete mixed controller transcript remains private there. It ended
+2026-10-16 04:57:09 local time with attempted_or_prepared=24. No later slot
+was sent after a batch stop, because no batch stop occurred.
+
+The private selection_result.json has 24 attempted/completed rows and zero
+remaining_not_started. Every live_result.json states zero_model_fixture_only
+false, native_recorded, cleanup_confirmed true, no remaining container and
+no primary failure. Every B worker returned 0 and recorded task_end_saved.
+All 24 agent_end_native records say control_processes_stopped, gateway_stopped
+and writers_stopped; all writer_termination_check records have empty
+control_remaining. A post-run Docker process listing and filtered host
+process inspection found no owned live process. These are mechanical
+observations, not a proof of task correctness or PMA effectiveness.
+
+For every slot, the original Harbor job result reward matched live_result;
+every native_reports_checked said all_reports_executed. The public summary
+contains each actual CTRF summary and its original file hash. Thus a reward
+of zero below is a recorded native score, not a substitute for missing
+evaluation. A Task's CURRENT_TASK_DONE is a termination signal, not a
+success oracle. Slot 14 reached MAX_TURNS_EXCEEDED and was evaluated under
+the frozen native lifecycle; its reward remains a valid recorded zero.
+
+Results, in frozen order
+------------------------
+Columns: A=无 PMA, B=原版 PMA; tests=CTRF passed/total; Task=logical
+request_ready/provider_attempt; PMA=observed two-stage logical records;
+rem=reminder present at a provider attempt; seconds=agent/verifier. All rows
+have native_recorded and cleanup_confirmed. A true provider response is
+separately linked to each of the 412 reminder-bearing attempts; the record
+does not prove the Task followed the reminder.
+
+No  Task                         条件  reward tests Task     PMA rem seconds
+01  constraints-scheduling       A      1.0  3/3     5/5        0   0 105/62
+02  constraints-scheduling       B      1.0  3/3     6/6       12   0 155/64
+03  financial-document-processor B      0.0  2/7    24/24      48  12 813/22
+04  financial-document-processor A      0.0  2/7    37/37       0   0 1206/43
+05  git-multibranch              A      1.0  1/1    16/16       0   0 179/29
+06  git-multibranch              B      0.0  0/1    13/13      26   0 264/79
+07  adaptive-rejection-sampler   B      0.0  8/9   249/249    498 158 8069/61
+08  adaptive-rejection-sampler   A      1.0  9/9    39/39       0   0 735/30
+09  query-optimize               A      1.0  6/6     9/9        0   0 153/792
+10  query-optimize               B      1.0  6/6    11/11      22   0 331/647
+11  raman-fitting                B      0.0  1/3    17/18      34   6 582/17
+12  raman-fitting                A      0.0  1/3    14/14       0   0 183/17
+13  write-compressor             A      0.0  1/3    22/22       0   0 441/57
+14  write-compressor             B      0.0  2/3   300/300    602 219 9369/48
+15  build-cython-ext             B      0.0  9/11   32/32      64  10 872/8
+16  build-cython-ext             A      0.0  9/11   23/23       0   0 308/8
+17  nginx-request-logging        A      1.0  8/8    12/12       0   0 130/12
+18  nginx-request-logging        B      1.0  8/8    13/13      26   0 259/12
+19  pypi-server                  B      1.0  1/1    11/11      22   1 205/13
+20  pypi-server                  A      1.0  1/1    16/16       0   0 135/18
+21  sqlite-with-gcov             A      0.0  0/3    16/16       0   0 382/34
+22  sqlite-with-gcov             B      1.0  3/3    16/16      32   4 517/44
+23  reshard-c4-data              B      0.0  0/1    20/20      40   2 431/83
+24  reshard-c4-data              A      0.0  0/1    28/28       0   0 372/81
+
+Aggregate mechanical counts: A 12 slots, six reward 1 and six reward 0,
+237 Task logical requests/237 observed attempts, 266 selected tool calls,
+zero PMA phases. B 12 slots, five reward 1 and seven reward 0, 712 Task
+logical requests/713 observed attempts, 725 selected tool calls, 1,426
+observed PMA phase records and 412 reminder-bearing Task attempts. Slot 11
+had one additional observed Task attempt, not an additional logical request.
+Across both conditions: 23 CURRENT_TASK_DONE and one MAX_TURNS_EXCEEDED;
+24 native scores available, none missing, 11 reward 1 and 13 reward 0.
+These twelve A/B pairs are one exploratory run per task, not a causal PMA
+effect estimate, statistical result, or claim about reminder quality.
+
+Visible Task usage totals: A input 306,034, output 135,461,
+cache_creation_input 217,042, cache_read_input 2,517,070; B input 940,508,
+output 345,102, cache_creation_input 1,375,090, cache_read_input
+11,706,490. The cached_input_tokens field was missing/unknown in both
+aggregates. Per-slot usage, actual timestamps, event counts, final bank,
+request bodies, visible responses, tool calls/results and PMA records are
+available in SUMMARY.json and NN/*.json. No price is inferred from usage.
+
+Public/private evidence boundary
+--------------------------------
+The private source root contains 18,331 files (1,806,423,845 bytes) and
+remains unchanged and outside Git. The public projection contains 175 JSON
+files, plus this TXT, two per-commit patches, one combined diff and
+PUBLIC_TRAJECTORIES.zip. Its
+PRIVATE_SOURCE_INDEX.json pairs each selected structured original's size
+and SHA-256 with the public path; EXCLUDED_PRIVATE_FILES.json records
+18,235 excluded raw/unsupported-file entries with size, SHA-256, reason and
+private relative locator. There are 168 selected structured-source
+references; 72 of their metadata files also occur in the excluded-file
+class list, so these counts are not additive. PUBLIC_FILE_HASHES.json
+indexes every generated JSON file except itself. Public and private byte
+hashes are not conflated with Git blob IDs; Git line-ending conversion may
+make checkout bytes differ from uploaded blob bytes.
+An independent post-export readback recomputed the SHA-256 of all 168 selected
+source references and 18,235 excluded entries: their union was exactly the
+18,331 private files, with zero unindexed files and zero hash/size mismatches.
+
+NN/task_events_public.json includes supported request-ready payloads with
+system, messages, visible text/tool content, tool schema and request IDs;
+hidden-thinking and signature blocks become only size/hash exclusion
+markers. It also includes the visible response blocks, attempt and usage
+events, tool selection and termination. NN/pma_requests_public.json gives
+the two-stage system/prompt/tool schema, NN/pma_steps_public.json gives
+operation results, visible phase responses, reminders and bank counts, and
+NN/pma_final_bank_public.json gives the final active bank. Full private PMA
+response envelopes, provider-internal retries and some inner usage fields
+were not captured in a safely publishable structured form; do not infer
+them from a missing public field. NN/authorization_proof_public.json gives
+the consumed binding identity and private authorization hash, not an active
+authorization. The exact private authorization file is never uploaded.
+
+Unsupported stdout/stderr, raw SSE, mixed logs, raw authorization, Task
+filesystem and evaluator logs are not copied as text. They remain privately
+addressable by EXCLUDED_PRIVATE_FILES.json. The structured projector
+recorded 3,275 field exclusions: 3,260 hidden/unsupported blocks and 15
+sensitive/transport-text fields. The latter comprise three Task tool-result
+texts and twelve PMA prompts in slot 03; therefore the public visible chain
+for that segment is deliberately incomplete. The private originals remain
+available for controlled brain audit. A safety check of all 175 public
+JSON files found zero malformed JSON, zero hash mismatches, zero exact
+configured-private-value hits and zero configured high-risk transport
+patterns. This structural check is not a proof that arbitrary task text
+cannot contain an unforeseen secret; publication was limited to an explicit
+field allowlist and unsupported content was omitted.
+
+Post-run projection tests (no model calls):
+test_embedded_transport_and_unknown_payload_fail_closed ... ok
+test_missing_usage_distinct_from_actual_zero ... ok
+test_reminder_link_is_kept_without_private_provider_url ... ok
+test_request_removes_nested_hidden_blocks_and_private_transport ... ok
+Ran 4 tests in 0.001s; OK.
+Archive CLI: slots=24, public_files=174 indexed before adding the hash-index
+file itself, excluded_private_files=18235, excluded_fields=3275.
+
+Earlier projection staging v1-v4 was private and retained, not presented as
+the final artifact. One read-only PowerShell JSON inspection failed on a
+large JSONL line and echoed a truncated private request excerpt, including
+thinking/signature material, into local tool output. It was not committed
+or copied into this public archive; subsequent inspection used a key-only
+Python parser. Treat that diagnostic tool transcript as private. This
+incident does not justify calling the public projection infallible.
+
+Reading and restoration
+-----------------------
+Start with SUMMARY.json, then NN/manifest_public.json and
+NN/mechanical_public.json. Correlate provider request/response by
+llm_call_id and PMA reminder by pma_reminder_event_id in
+NN/task_events_public.json. Inspect NN/pma_requests_public.json,
+NN/pma_steps_public.json and NN/pma_final_bank_public.json for B.
+The ZIP is a convenience copy of the same public JSON tree; individual JSON
+files are present and are the primary readable delivery. Full private
+originals remain at E:\pma12_native_r1_20261015, per-slot run_root in each
+private run_identity.json. They are deliberately not part of the push.
+
+No additional Task, PMA or official evaluator calls were made during
+post-run projection or its four synthetic unit tests. No S2/R2 candidate,
+Fyne/Kitex run, extra repeat, scorer or training job was started. Method
+quality and semantic causation remain for independent brain review.
