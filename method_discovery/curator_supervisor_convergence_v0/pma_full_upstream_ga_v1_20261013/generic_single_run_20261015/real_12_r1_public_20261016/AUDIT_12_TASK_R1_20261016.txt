@@ -121,7 +121,8 @@ Public/private evidence boundary
 --------------------------------
 The private source root contains 18,331 files (1,806,423,845 bytes) and
 remains unchanged and outside Git. The public projection contains 175 JSON
-files, plus this TXT, two per-commit patches, one combined diff and
+files plus the supplementary GIT_BLOB_HASHES.json, this TXT, two per-commit
+patches, one combined diff and
 PUBLIC_TRAJECTORIES.zip. Its
 PRIVATE_SOURCE_INDEX.json pairs each selected structured original's size
 and SHA-256 with the public path; EXCLUDED_PRIVATE_FILES.json records
@@ -129,9 +130,13 @@ and SHA-256 with the public path; EXCLUDED_PRIVATE_FILES.json records
 private relative locator. There are 168 selected structured-source
 references; 72 of their metadata files also occur in the excluded-file
 class list, so these counts are not additive. PUBLIC_FILE_HASHES.json
-indexes every generated JSON file except itself. Public and private byte
-hashes are not conflated with Git blob IDs; Git line-ending conversion may
-make checkout bytes differ from uploaded blob bytes.
+indexes every generated JSON file except itself, using the original public
+projection bytes preserved in PUBLIC_TRAJECTORIES.zip. Windows Git automatic
+line-ending conversion changed some uploaded JSON blob bytes. The separate
+GIT_BLOB_HASHES.json indexes SHA-256 of the 174 uploaded JSON blobs at
+archive commit 8ca27fbf76357a097dacb3f4002d1c075275cac1. These SHA-256
+values are not Git object IDs. ZIP/worktree bytes and Git blob bytes must not
+be conflated; both indices are supplied so each can be checked directly.
 An independent post-export readback recomputed the SHA-256 of all 168 selected
 source references and 18,235 excluded entries: their union was exactly the
 18,331 private files, with zero unindexed files and zero hash/size mismatches.
