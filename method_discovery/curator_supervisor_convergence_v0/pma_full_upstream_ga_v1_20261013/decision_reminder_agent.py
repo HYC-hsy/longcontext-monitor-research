@@ -70,7 +70,7 @@ def phase2_system(variant: str) -> str:
 
 
 def phase2_prompt(prompt: str, variant: str) -> str:
-    if not prompt.endswith(UPSTREAM_TASK) or prompt.count(UPSTREAM_TASK) != 1:
+    if not prompt.endswith(UPSTREAM_TASK):
         raise RuntimeError("upstream Phase 2 task suffix changed")
     if variant == "D1":
         suffix = "## Your Task\n" + D1_TASK + "\n"

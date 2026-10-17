@@ -70,8 +70,11 @@ class DecisionReminderTest(unittest.TestCase):
         self.assertEqual(PHASE2_SYSTEM.count('already visible in the recent trajectory'), 2)
         with self.assertRaises(RuntimeError):
             phase2_prompt(original + ' extra', 'D1')
-        with self.assertRaises(RuntimeError):
-            phase2_prompt(UPSTREAM_TASK + original, 'D1')
+        duplicated = UPSTREAM_TASK + original
+        self.assertEqual(phase2_prompt(duplicated, 'D1'),
+                         UPSTREAM_TASK + phase2_prompt(original, 'D1'))
+        self.assertEqual(phase2_prompt(duplicated, 'V1'),
+                         UPSTREAM_TASK + phase2_prompt(original, 'V1'))
 
     def test_real_constructor_and_two_phase_requests(self):
         all_requests = {}
