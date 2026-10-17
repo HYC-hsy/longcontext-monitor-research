@@ -175,7 +175,7 @@ def main() -> None:
     parser.add_argument("--deadline-epoch", type=float, required=True)
     parser.add_argument("--fake-memory", action="store_true")
     parser.add_argument("--fake-memory-update", action="store_true")
-    parser.add_argument("--research-candidate", choices=("U", "S", "R"), default="U")
+    parser.add_argument("--research-candidate", choices=("U", "V1", "D1", "S", "R", "S2", "R2"), default="U")
     asyncio.run(serve(parser.parse_args()))
 
 

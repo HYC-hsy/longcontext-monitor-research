@@ -53,7 +53,8 @@ def verify_live_spec(spec: dict) -> None:
     bindings = granted.get('run_bindings')
     if frozen.get('schema') in {'pma-ga-live-manifest-v2',
                                 'pma-ga-live-manifest-v3',
-                                'pma-ga-live-manifest-v4'}:
+                                'pma-ga-live-manifest-v4',
+                                'pma-ga-live-manifest-v5'}:
         if granted.get('manifest_sha256') != spec['manifest_sha256']:
             raise RuntimeError('six-task approval does not bind manifest bytes')
         bindings = validate_plan(frozen, granted)
@@ -64,7 +65,9 @@ def verify_live_spec(spec: dict) -> None:
                     and Path(b['run_root']).resolve() == Path(spec['run_root']).resolve()]
         if (len(matching) != 1 or spec.get('task_id') != spec.get('task') or
                 spec.get('batch_id') != granted['batch_id'] or
-                spec.get('config_sha256') != frozen['config_sha256']):
+                spec.get('config_sha256') != frozen['config_sha256'] or
+                spec.get('research_candidate', 'U') !=
+                matching[0].get('research_candidate', 'U')):
             raise RuntimeError('six-task run outside exact authorized binding')
         checkout = Path(__file__).resolve().parents[3]
         head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=checkout,

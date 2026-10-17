@@ -96,24 +96,35 @@ def _committed_source_sha(checkout: Path, name: str) -> str:
 
 def prepare(source: Path, task_profile: Path, pma_profile: Path,
             evidence: Path | None = None, plan: dict | None = None) -> dict:
-    single = plan is not None and plan.get('schema') == 'pma-ga-single-plan-v1'
+    single = plan is not None and plan.get('schema') in {
+        'pma-ga-single-plan-v1', 'pma-ga-single-plan-v2'}
+    candidate = plan.get('research_candidate', 'U') if single else 'U'
     if plan is None:
         slots = [dict(order=o, task=t, repeat=r, condition=c)
                  for o, t, r, c in ORDER]
         schema = 'pma-ga-live-manifest-v2'
     elif single:
-        if (set(plan) != {'schema', 'execution_authorized',
-                          'official_source_git_commit', 'task', 'condition', 'occurrence'} or
+        versioned = plan['schema'] == 'pma-ga-single-plan-v2'
+        required = {'schema', 'execution_authorized',
+                    'official_source_git_commit', 'task', 'condition', 'occurrence'}
+        if versioned:
+            required.add('research_candidate')
+        if (set(plan) != required or
                 plan['execution_authorized'] is not False or
                 plan['official_source_git_commit'] !=
                 '2fd12b88aafdd04a52c298e3940bcb189f9766d6' or
                 not isinstance(plan['task'], str) or
                 plan['condition'] not in {'A', 'B'} or
+                candidate not in ({'U', 'V1', 'D1'} if versioned else {'U'}) or
+                (plan['condition'] == 'A' and candidate != 'U') or
                 type(plan['occurrence']) is not int or plan['occurrence'] < 1):
             raise RuntimeError('single-run plan schema mismatch')
-        slots = [dict(order=1, task=plan['task'],
-                      repeat=plan['occurrence'], condition=plan['condition'])]
-        schema = 'pma-ga-live-manifest-v4'
+        slot = dict(order=1, task=plan['task'],
+                    repeat=plan['occurrence'], condition=plan['condition'])
+        if versioned:
+            slot['research_candidate'] = candidate
+        slots = [slot]
+        schema = 'pma-ga-live-manifest-v5' if versioned else 'pma-ga-live-manifest-v4'
     else:
         if (plan.get('schema') != 'pma-ga-live-plan-v3' or
                 plan.get('execution_authorized') is not False or
@@ -181,6 +192,8 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
               'pma_profile_name': 'claude_monitor_opus48',
               'network': 'official_task_network_with_host_credential_gateway',
               'evaluation': 'native_Harbor_SHARED_pending_lifecycle_certification'}
+    if schema == 'pma-ga-live-manifest-v5':
+        method['research_candidate'] = candidate
     config_hash = hashlib.sha256(json.dumps(method, sort_keys=True,
         separators=(',', ':')).encode('utf-8')).hexdigest()
     certification = None
@@ -205,16 +218,20 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
             'source_identity_kind': 'HEAD_Git_blob_bytes_SHA256_with_clean_worktree',
             'evidence': verify_evidence(evidence, checkout, slots),
             'harbor_commit': '459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc'}
-    elif evidence is not None and schema == 'pma-ga-live-manifest-v4':
+    elif evidence is not None and schema in {'pma-ga-live-manifest-v4',
+                                             'pma-ga-live-manifest-v5'}:
         from .single_run_certification import (HARBOR_COMMIT, source_identity,
                                                verify_evidence)
         checkout = STAGE.parents[2]
         evidence = evidence.resolve(strict=True)
         if not evidence.is_relative_to(checkout):
             raise RuntimeError('single-run certification must be committed in repository')
-        certification = {'source_files': source_identity(checkout),
+        research = candidate if schema == 'pma-ga-live-manifest-v5' else None
+        certification = {'source_files': source_identity(checkout,
+                             candidate=research is not None),
                          'evidence_path': evidence.relative_to(checkout).as_posix(),
-                         'evidence': verify_evidence(evidence),
+                         'evidence': verify_evidence(evidence,
+                             research_candidate=research),
                          'harbor_commit': HARBOR_COMMIT}
     return {'schema': schema,
             'status': ('prepared_not_executed' if certification else

@@ -17,6 +17,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--task', required=True)
     parser.add_argument('--condition', choices=('A', 'B'), required=True)
+    parser.add_argument('--research-candidate', choices=('U', 'V1', 'D1'), default='U')
     parser.add_argument('--output', type=Path, required=True)
     for name in ('official-source-git', 'task-profile-file', 'pma-profile-file',
                  'ga-source', 'runtime-root', 'worker-python', 'harbor-python',
@@ -28,6 +29,7 @@ def main() -> None:
     root = args.output.resolve(strict=False)
     identity = prepare(argparse.Namespace(output=str(root), task=args.task,
         condition=args.condition, occurrence=1, fake_only=True,
+        research_candidate=args.research_candidate,
         official_source_git=args.official_source_git,
         task_profile_file=args.task_profile_file,
         pma_profile_file=args.pma_profile_file))
@@ -42,7 +44,8 @@ def main() -> None:
     if subprocess.run(['git', 'diff', '--quiet', 'HEAD'],
                       cwd=args.harbor_source_root).returncode:
         raise RuntimeError('fixture Harbor tracked source differs from commit')
-    execution = {'code_commit': head, 'source_files': source_identity(checkout),
+    execution = {'code_commit': head, 'source_files': source_identity(checkout,
+                     candidate=args.research_candidate != 'U'),
                  'vendor_files': vendor_identity(checkout),
                  'harbor_commit': harbor_head,
                  'pma_vendor_commit': manifest['pma_vendor_commit']}

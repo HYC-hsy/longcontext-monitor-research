@@ -45,7 +45,7 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
                        memory_api_key: str | None = None,
                        memory_profile: dict[str, Any] | None = None,
                        research_candidate: str = "U") -> MemoryEnabledTerminus2:
-    if research_candidate not in {"U", "S", "R", "S2", "R2"}:
+    if research_candidate not in {"U", "V1", "D1", "S", "R", "S2", "R2"}:
         raise ValueError("unknown research candidate")
     if memory_profile is not None:
         if (memory_profile.get("provider"), memory_profile.get("api_mode"),
@@ -74,7 +74,18 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
     )
     if agent._llm is not actor:
         raise RuntimeError("upstream actor backend was not disabled")
-    if research_candidate != "U":
+    if research_candidate in {"V1", "D1"}:
+        from decision_reminder_agent import DecisionReminderAgent
+        original = agent._memory_agent
+        agent._memory_agent = DecisionReminderAgent(
+            variant=research_candidate, llm=agent._memory_llm,
+            memory=agent._memory,
+            max_memory_in_prompt=original.max_memory_in_prompt,
+            use_bm25_prefilter=original.use_bm25_prefilter,
+            keep_thinking=original.keep_thinking,
+            use_structured_tools=original.use_structured_tools)
+        agent._research_candidate = research_candidate
+    elif research_candidate != "U":
         # Preserve the original trigger, process, two provider calls, BM25 and
         # reminder consumption. Only the bank and prompt/tool adapters differ.
         from source_agent import SourceMemoryAgent

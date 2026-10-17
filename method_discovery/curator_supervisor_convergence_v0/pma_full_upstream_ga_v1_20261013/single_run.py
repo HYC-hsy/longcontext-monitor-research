@@ -31,6 +31,10 @@ def prepare(args: argparse.Namespace) -> dict:
     plan = {'schema': 'pma-ga-single-plan-v1', 'execution_authorized': False,
             'official_source_git_commit': COMMIT, 'task': args.task,
             'condition': args.condition, 'occurrence': args.occurrence}
+    candidate = getattr(args, 'research_candidate', 'U')
+    if candidate != 'U':
+        plan['schema'] = 'pma-ga-single-plan-v2'
+        plan['research_candidate'] = candidate
     _write_new(root / 'plan.json', plan)
     manifest = prepare_manifest(Path(args.official_source_git).resolve(strict=True),
         Path(args.task_profile_file).resolve(strict=True),
@@ -86,6 +90,7 @@ def main() -> None:
     prepared = commands.add_parser('prepare', help='fixed-Git asset and image check; no calls')
     prepared.add_argument('--task', required=True)
     prepared.add_argument('--condition', choices=('A', 'B'), required=True)
+    prepared.add_argument('--research-candidate', choices=('U', 'V1', 'D1'), default='U')
     prepared.add_argument('--occurrence', type=int, default=1)
     prepared.add_argument('--output', required=True)
     prepared.add_argument('--official-source-git', required=True)

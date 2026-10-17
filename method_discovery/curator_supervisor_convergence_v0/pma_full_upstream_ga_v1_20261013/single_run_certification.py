@@ -38,6 +38,12 @@ SOURCE_FILES = tuple(dict.fromkeys(V3_SOURCE_FILES + (
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'harbor_adapter.py',
 )))
+CANDIDATE_SOURCE_FILES = SOURCE_FILES + (
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'episode.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'decision_reminder_agent.py',
+)
 EVIDENCE_FILES = (
     'execution_identity.json',
     'live_result.json', 'agent_start_identity.json', 'agent_end_native.json',
@@ -61,9 +67,10 @@ def _committed_evidence_sha(checkout: Path, path: Path) -> str:
     return digest
 
 
-def verify_evidence(evidence: Path, *, require_committed: bool = True) -> dict:
+def verify_evidence(evidence: Path, *, require_committed: bool = True,
+                    research_candidate: str | None = None) -> dict:
     checkout = Path(__file__).resolve().parents[3]
-    current = source_identity(checkout)
+    current = source_identity(checkout, candidate=research_candidate is not None)
     outcomes = {}
     hashes = {}
     for condition in ('A', 'B'):
@@ -92,6 +99,10 @@ def verify_evidence(evidence: Path, *, require_committed: bool = True) -> dict:
             raise RuntimeError(f'generic {condition} fixture execution identity differs')
         execution = load('native_test_execution.json')
         synthetic_script = (base / 'synthetic_test.sh').read_bytes()
+        expected_candidate = research_candidate if condition == 'B' else 'U'
+        if (research_candidate is not None and
+                result.get('research_candidate') != expected_candidate):
+            raise RuntimeError('candidate fixture ran a different strategy')
         if (result.get('condition') != condition or
                 result.get('zero_model_fixture_only') is not True or
                 result.get('harbor_return_code') != 0 or
@@ -148,8 +159,9 @@ def verify_evidence(evidence: Path, *, require_committed: bool = True) -> dict:
     return {'outcomes': outcomes, 'file_sha256': hashes}
 
 
-def source_identity(checkout: Path) -> dict:
-    return {name: _committed_source_sha(checkout, name) for name in SOURCE_FILES}
+def source_identity(checkout: Path, *, candidate: bool = False) -> dict:
+    files = CANDIDATE_SOURCE_FILES if candidate else SOURCE_FILES
+    return {name: _committed_source_sha(checkout, name) for name in files}
 
 
 def vendor_identity(checkout: Path) -> dict:

@@ -55,7 +55,8 @@ def run_batch(args: argparse.Namespace) -> dict:
         raise RuntimeError('zero-model batch fixture identity mismatch')
     native_plan = manifest.get("schema") in {"pma-ga-live-manifest-v2",
                                                 "pma-ga-live-manifest-v3",
-                                                "pma-ga-live-manifest-v4"}
+                                                "pma-ga-live-manifest-v4",
+                                                "pma-ga-live-manifest-v5"}
     if native_plan:
         bindings = validate_plan(manifest, granted)
     else:
@@ -107,6 +108,8 @@ def run_batch(args: argparse.Namespace) -> dict:
             "--run-root", binding["run_root"]]
         if native_plan:
             command += ["--repeat", str(binding["repeat"])]
+        if manifest.get('schema') == 'pma-ga-live-manifest-v5':
+            command += ['--research-candidate', binding['research_candidate']]
         if fixture:
             command += ['--zero-model-fixture']
         completed = subprocess.run(command, check=False)
@@ -120,6 +123,7 @@ def run_batch(args: argparse.Namespace) -> dict:
             outcome = "stop_batch_exit_status_disagrees"
         record["arms"].append({"order": binding["order"], "run_id": binding["run_id"],
                                "run_root": str(root), "launcher_exit": completed.returncode,
+                               "research_candidate": binding.get('research_candidate', 'U'),
                                "disposition": outcome, "status": status})
         output.write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
         if outcome.startswith("stop_batch"):

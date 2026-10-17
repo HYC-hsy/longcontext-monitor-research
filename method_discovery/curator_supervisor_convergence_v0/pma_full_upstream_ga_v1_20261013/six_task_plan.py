@@ -33,11 +33,12 @@ ORDER = (
 
 
 def _identity(row: dict) -> tuple:
-    return tuple(row.get(k) for k in ("order", "task", "repeat", "condition"))
+    return tuple(row.get(k) for k in ("order", "task", "repeat", "condition",
+                                      "research_candidate"))
 
 
 def validate_plan(manifest: dict, granted: dict) -> list[dict]:
-    if manifest.get('schema') == 'pma-ga-live-manifest-v4':
+    if manifest.get('schema') in {'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5'}:
         arms = manifest.get('planned_order')
         bindings = granted.get('run_bindings')
         if (manifest.get('execution_authorized') is not False or
@@ -48,9 +49,17 @@ def validate_plan(manifest: dict, granted: dict) -> list[dict]:
                 not isinstance(granted.get('output_root'), str)):
             raise RuntimeError('single-run authorization incomplete')
         row, bound = arms[0], bindings[0]
-        if (set(row) != {'order', 'task', 'repeat', 'condition'} or
+        versioned = manifest['schema'] == 'pma-ga-live-manifest-v5'
+        expected = {'order', 'task', 'repeat', 'condition'}
+        if versioned:
+            expected.add('research_candidate')
+        if (set(row) != expected or
                 row['order'] != 1 or type(row['repeat']) is not int or
                 row['repeat'] < 1 or row['condition'] not in {'A', 'B'} or
+                row.get('research_candidate', 'U') not in {'U', 'V1', 'D1'} or
+                (row['condition'] == 'A' and row.get('research_candidate', 'U') != 'U') or
+                (versioned and manifest.get('config', {}).get('research_candidate') !=
+                 row['research_candidate']) or
                 set(manifest.get('assets', {})) != {row['task']} or
                 _identity(bound) != _identity(row) or
                 bound.get('run_id') != granted.get('run_id') or
@@ -113,8 +122,8 @@ def validate_plan(manifest: dict, granted: dict) -> list[dict]:
     arms = manifest.get("planned_order")
     bindings = granted.get("run_bindings")
     if (not isinstance(arms, list) or not isinstance(bindings, list) or
-            tuple(map(_identity, arms)) != ORDER or
-            tuple(map(_identity, bindings)) != ORDER or
+            tuple(_identity(row)[:4] for row in arms) != ORDER or
+            tuple(_identity(row)[:4] for row in bindings) != ORDER or
             granted.get("approved_arms") != arms):
         raise RuntimeError("six-task order or complete approval differs")
     batch_id = granted.get("batch_id")

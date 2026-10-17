@@ -30,7 +30,8 @@ def _sha(path: Path) -> str:
 def _native_schema(manifest: dict) -> bool:
     return manifest.get('schema') in {'pma-ga-live-manifest-v2',
                                       'pma-ga-live-manifest-v3',
-                                      'pma-ga-live-manifest-v4'}
+                                      'pma-ga-live-manifest-v4',
+                                      'pma-ga-live-manifest-v5'}
 
 
 def _stage_verifier(root: Path, task: str, manifest: dict,
@@ -45,11 +46,13 @@ def _stage_verifier(root: Path, task: str, manifest: dict,
     source = official_source_git.resolve(strict=True)
     members = [{k: v for k, v in item.items() if k != 'raw'}
                for item in official_members(source, task,
-                   registered=manifest.get('schema') == 'pma-ga-live-manifest-v4')]
+                   registered=manifest.get('schema') in {
+                       'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5'})]
     if members != expected.get('official_evaluator_members'):
         raise RuntimeError('PMA official evaluator members differ from frozen manifest')
     export_task(source, task, target,
-                registered=manifest.get('schema') == 'pma-ga-live-manifest-v4')
+                registered=manifest.get('schema') in {
+                    'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5'})
     identity = {'native_tests_tree_sha256': digest_tree(target),
                 'native_test_sh_sha256': _sha(target / 'test.sh')}
     if any(identity[key] != expected[key] for key in identity):
@@ -79,20 +82,27 @@ def _require_evaluation_state_contract(manifest: dict) -> None:
         if verify_evidence(evidence, checkout, manifest['planned_order']) != cert.get('evidence'):
             raise RuntimeError('V3 zero-model evidence changed')
         return
-    if manifest.get('schema') == 'pma-ga-live-manifest-v4':
+    if manifest.get('schema') in {'pma-ga-live-manifest-v4',
+                                  'pma-ga-live-manifest-v5'}:
         if manifest.get('zero_model_fixture_only') is True:
             return
         from .single_run_certification import (HARBOR_COMMIT, SOURCE_FILES,
+                                               CANDIDATE_SOURCE_FILES,
                                                source_identity, verify_evidence)
         cert = manifest.get('native_shared_certification')
         checkout = STAGE.parents[2]
+        research = (manifest['planned_order'][0]['research_candidate']
+                    if manifest['schema'] == 'pma-ga-live-manifest-v5' else None)
+        expected_files = CANDIDATE_SOURCE_FILES if research is not None else SOURCE_FILES
         if (manifest.get('status') != 'prepared_not_executed' or
                 not isinstance(cert, dict) or cert.get('harbor_commit') != HARBOR_COMMIT or
-                set(cert.get('source_files', {})) != set(SOURCE_FILES) or
-                cert.get('source_files') != source_identity(checkout)):
+                set(cert.get('source_files', {})) != set(expected_files) or
+                cert.get('source_files') != source_identity(checkout,
+                    candidate=research is not None)):
             raise RuntimeError('single-run native lifecycle source certification differs')
         evidence = (checkout / cert.get('evidence_path', '')).resolve(strict=True)
-        if not evidence.is_relative_to(checkout) or verify_evidence(evidence) != cert.get('evidence'):
+        if (not evidence.is_relative_to(checkout) or
+                verify_evidence(evidence, research_candidate=research) != cert.get('evidence')):
             raise RuntimeError('single-run native lifecycle evidence differs')
         return
     if manifest.get('schema') == 'pma-ga-live-manifest-v2':
@@ -271,7 +281,8 @@ def run_live(args) -> dict:
     if (manifest.get('schema') not in {'pma-ga-live-manifest-v1',
                                        'pma-ga-live-manifest-v2',
                                        'pma-ga-live-manifest-v3',
-                                       'pma-ga-live-manifest-v4'} or
+                                       'pma-ga-live-manifest-v4',
+                                       'pma-ga-live-manifest-v5'} or
             manifest.get('execution_authorized') is not False or
             authorized.get('execution_authorized') is not True or
             authorized.get('manifest_sha256') != _sha(manifest_path)):
@@ -280,8 +291,14 @@ def run_live(args) -> dict:
     if fixture != (manifest.get('zero_model_fixture_only') is True and
                    authorized.get('zero_model_fixture_only') is True):
         raise RuntimeError('zero-model fixture identity does not match both records')
+    candidate = getattr(args, 'research_candidate', 'U')
+    expected_candidate = (manifest['planned_order'][0]['research_candidate']
+        if manifest['schema'] == 'pma-ga-live-manifest-v5' else 'U')
+    if candidate != expected_candidate or (args.condition == 'A' and candidate != 'U'):
+        raise RuntimeError('PMA candidate differs from frozen plan')
     if (manifest.get('schema') in {'pma-ga-live-manifest-v3',
-                                   'pma-ga-live-manifest-v4'} and
+                                   'pma-ga-live-manifest-v4',
+                                   'pma-ga-live-manifest-v5'} and
             Path(args.ga_source).resolve(strict=True) !=
             (STAGE.parents[2] / 'GenericAgent-main').resolve(strict=True)):
         raise RuntimeError('V3 GA source is not the frozen repository bridge')
@@ -321,6 +338,7 @@ def run_live(args) -> dict:
         'schema': 'pma-ga-live-run-v1', 'mode': 'authorized_live',
         'execution_authorized': True, 'order': order, 'task': args.task,
         'task_id': args.task, 'condition': args.condition, 'run_id': args.run_id,
+        'research_candidate': candidate,
         'run_root': str(root), 'image_id': prepared['image_id'],
         'control_root': str(root / 'control'), 'archive_root': str(root / 'archive'),
         'manifest_path': str(manifest_path), 'manifest_sha256': _sha(manifest_path),
@@ -398,6 +416,7 @@ def run_live(args) -> dict:
                 '--requests', str(root / 'control' / 'spool' / 'requests'),
                 '--responses', str(root / 'control' / 'spool' / 'responses'),
                 '--deadline-epoch', str(deadline),
+                '--research-candidate', candidate,
                 *(['--fake-memory', '--fake-memory-update'] if fixture else [])],
                 cwd=STAGE, env=worker_env,
                 stdout=worker_logs[0], stderr=worker_logs[1])
@@ -409,7 +428,8 @@ def run_live(args) -> dict:
                 time.sleep(.05)
             ready_data = json.loads(ready.read_text(encoding='utf-8'))
             if (ready_data.get('run_id'), ready_data.get('task_id'),
-                    ready_data.get('fake_memory')) != (args.run_id, args.task, fixture):
+                    ready_data.get('fake_memory'), ready_data.get('research_candidate')) != (
+                    args.run_id, args.task, fixture, candidate):
                 raise RuntimeError('PMA worker identity or transport mode mismatch')
         else:
             _worker_clearance(root, None, args.run_id)
@@ -551,6 +571,7 @@ def run_live(args) -> dict:
         fake_captures = sorted(fake_requests.glob('*.json')) if fixture else []
         status = {'schema': manifest['schema'], 'run_id': args.run_id,
                   'task': args.task, 'condition': args.condition,
+                  'research_candidate': candidate,
                   'zero_model_fixture_only': fixture,
                   'fake_provider_captures': len(fake_captures) if fixture else None,
                   'harbor_return_code': result, 'primary_failure': first_error,
@@ -625,6 +646,7 @@ def main() -> None:
     parser.add_argument('--repeat', type=int)
     parser.add_argument('--task', required=True)
     parser.add_argument('--condition', choices=('A', 'B'), required=True)
+    parser.add_argument('--research-candidate', choices=('U', 'V1', 'D1'), default='U')
     parser.add_argument('--task-profile', default='native_claude_cc_vibe_opus48')
     parser.add_argument('--pma-profile-file')
     parser.add_argument('--harbor-source-root')
