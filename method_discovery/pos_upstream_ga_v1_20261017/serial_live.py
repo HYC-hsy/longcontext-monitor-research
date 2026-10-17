@@ -9,8 +9,9 @@ import subprocess
 import sys
 
 from .single_manifest import CHECKOUT, FOUR, source_hashes, vendor_hashes
-from .worker import (ROLE_JSON_CONTRACT_VERSION, ROLE_MAX_TOKENS,
-                     ROLE_TEMPERATURE, ROLE_THINKING_TYPE)
+from .worker import (ROLE_JSON_CONTRACT_VERSION, ROLE_INPUT_CONTRACT_VERSION,
+                     ROLE_OBJECT_INSTRUCTION, ROLE_UPDATE_FIELDS_INSTRUCTION,
+                     ROLE_MAX_TOKENS, ROLE_TEMPERATURE, ROLE_THINKING_TYPE)
 
 ENTRY = ('method_discovery.curator_supervisor_convergence_v0.'
          'pma_full_upstream_ga_v1_20261013.single_run')
@@ -63,6 +64,9 @@ def prepare(args):
         'role_thinking_type': ROLE_THINKING_TYPE,
         'role_temperature': ROLE_TEMPERATURE,
         'role_json_contract': ROLE_JSON_CONTRACT_VERSION,
+        'role_input_contract': ROLE_INPUT_CONTRACT_VERSION,
+        'role_object_instruction': ROLE_OBJECT_INSTRUCTION,
+        'role_update_fields_instruction': ROLE_UPDATE_FIELDS_INSTRUCTION,
         'role_transport_retries': 0}
     for order, task in enumerate(tasks, 1):
         directory = root / f'{order:02d}_{task}'
@@ -111,6 +115,7 @@ def prepare(args):
 
 
 def run(args):
+    from .compatibility_probe import compatibility_checks
     root = Path(args.output).resolve(strict=True)
     scope_path = root / 'authorized_serial_scope.json'
     scope = json.loads(scope_path.read_text(encoding='utf-8'))
@@ -122,9 +127,16 @@ def run(args):
         (compat_path.parent / 'role_events.jsonl').read_text(
             encoding='utf-8').splitlines()]
     identity = compat.get('identity') or {}
-    if (compat.get('schema') != 'pos-ga-live-compatibility-result-v2' or
+    recomputed = compatibility_checks(role_events, compat.get('pos_result') or {},
+        compat.get('initial_context') or {}, compat.get('update_context') or {},
+        wire, compat.get('pos_roles') or [],
+        work_finished=(compat.get('compatibility_checks') or {}).get('checks', {}).get(
+            'applicable_work_finished') is True)
+    if (compat.get('schema') != 'pos-ga-live-compatibility-result-v3' or
             compat.get('status') != 'passed' or
-            identity.get('schema') != 'pos-ga-live-compatibility-v2' or
+            recomputed != compat.get('compatibility_checks') or
+            recomputed.get('status') != 'passed' or
+            identity.get('schema') != 'pos-ga-live-compatibility-v3' or
             identity.get('scope_sha256') != sha(scope_path) or
             identity.get('code_commit') != scope.get('code_commit') or
             identity.get('source_files_sha256') != scope.get('source_files_sha256') or

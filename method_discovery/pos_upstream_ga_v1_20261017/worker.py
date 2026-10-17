@@ -13,6 +13,27 @@ import time
 
 
 ROLE_JSON_CONTRACT_VERSION = 'pos-role-json-object-fence-v1'
+ROLE_INPUT_CONTRACT_VERSION = 'pos-ga-input-contract-v1'
+ROLE_OBJECT_INSTRUCTION = (
+    'PoS JSON output contract: the entire public response must be exactly one '
+    'complete JSON object. Do not use a Markdown code fence, explanatory text '
+    'before or after it, or a second object.'
+)
+ROLE_UPDATE_FIELDS_INSTRUCTION = (
+    'PoS incremental World record interface (the original requested update '
+    'schema and validator remain authoritative): each upsert_entities item is '
+    'an Entity with required entity_id, entity_type, name; attributes defaults '
+    'to {}. Each upsert_states item is a State with required state_id, '
+    'entity_id, description; probability defaults to 1.0, reason to null, '
+    'source_type to "observed". Each upsert_relations item is a Relation with '
+    'required relation_id, source_id, target_id, description; probability '
+    'defaults to 0.5, reason to null, source_type to "observed". For Relation '
+    'only, the original normalizer accepts source_entity_id/src_entity_id/'
+    'source/src as aliases for source_id, target_entity_id/dst_entity_id/'
+    'target/dst as aliases for target_id, and relation_type/relation/type '
+    'as aliases for description. These are accepted aliases, not extra '
+    'required fields.'
+)
 ROLE_THINKING_TYPE = 'disabled'
 ROLE_TEMPERATURE = 0
 ROLE_MAX_TOKENS = {'belief': 4096, 'consistency': 512, 'progress': 512}
@@ -66,6 +87,27 @@ def _json(value):
     return json.dumps(value, ensure_ascii=True, separators=(',', ':'))
 
 
+def _role_input_contract(role, messages):
+    """Append an auditable adapter message without editing upstream messages.
+
+    Fixed upstream update and Sentinel repair prompts retain the first user
+    message's Required JSON schema through their bounded correction calls.
+    Textualize, initialize, consistency, and progress do not have that schema.
+    """
+    update = role == 'belief' and any(
+        item.get('role') == 'user' and
+        'Required JSON schema:' in item.get('content', '') and
+        '"upsert_entities"' in item['content'].split('Required JSON schema:', 1)[1]
+        for item in messages[:2]
+    )
+    supplement = ROLE_OBJECT_INSTRUCTION
+    if update:
+        supplement += '\n\n' + ROLE_UPDATE_FIELDS_INSTRUCTION
+    effective = [dict(item) for item in messages]
+    effective.append({'role': 'system', 'content': supplement})
+    return effective, supplement, 'update_records' if update else 'object_only'
+
+
 def _persist_receipt(path, *, case_id, status, result=None, error=None,
                      run_id=None, task_id=None):
     """Durable episode receipt; never infer a missing core state as saved."""
@@ -98,9 +140,18 @@ class RoleTransport:
     def caller(self, role):
         def call(messages):
             started = time.monotonic()
+            effective, supplement, scope = _role_input_contract(role, messages)
             record = {'role': role, 'attempt': len(self.calls) + 1,
-                      'messages': messages, 'status': 'attempted'}
+                      'messages': effective, 'status': 'attempted'}
             self.calls.append(record)
+            self.archive.log('pos_role_input_contract',
+                             contract_version=ROLE_INPUT_CONTRACT_VERSION,
+                             role=role, attempt=record['attempt'], scope=scope,
+                             original_messages=messages, supplement=supplement,
+                             supplement_sha256=hashlib.sha256(
+                                 supplement.encode('utf-8')).hexdigest(),
+                             effective_messages_sha256=hashlib.sha256(
+                                 _json(effective).encode('utf-8')).hexdigest())
             self.archive.log('pos_role_request', **record)
             try:
                 if self.mode == 'fake':
@@ -113,7 +164,7 @@ class RoleTransport:
                         raise TypeError('fake reply must be string')
                     usage = {'status': 'synthetic_not_provider_usage'}
                 else:
-                    response, usage = self._profile_call(role, messages)
+                    response, usage = self._profile_call(role, effective)
                 record.update(status='returned', response=response, usage=usage,
                               elapsed_seconds=time.monotonic() - started)
                 self.archive.log('pos_role_response', **record)

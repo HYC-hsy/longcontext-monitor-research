@@ -11,8 +11,9 @@ from long_context_bench.scripts.isolated_run_bundle import digest_tree
 from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.export_official_evaluator import COMMIT, export_task
 from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.offline_launcher import image_identity
 from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.six_task_assets import descriptor, materialize_public
-from .worker import (ROLE_JSON_CONTRACT_VERSION, ROLE_MAX_TOKENS,
-                     ROLE_TEMPERATURE, ROLE_THINKING_TYPE)
+from .worker import (ROLE_JSON_CONTRACT_VERSION, ROLE_INPUT_CONTRACT_VERSION,
+                     ROLE_OBJECT_INSTRUCTION, ROLE_UPDATE_FIELDS_INSTRUCTION,
+                     ROLE_MAX_TOKENS, ROLE_TEMPERATURE, ROLE_THINKING_TYPE)
 
 ROOT = Path(__file__).resolve().parent
 CHECKOUT = ROOT.parents[1]
@@ -138,6 +139,9 @@ def prepare(plan: dict, source: Path, task_profile: Path,
               'role_thinking_type': ROLE_THINKING_TYPE,
               'role_temperature': ROLE_TEMPERATURE,
               'role_json_contract': ROLE_JSON_CONTRACT_VERSION,
+              'role_input_contract': ROLE_INPUT_CONTRACT_VERSION,
+              'role_object_instruction': ROLE_OBJECT_INSTRUCTION,
+              'role_update_fields_instruction': ROLE_UPDATE_FIELDS_INSTRUCTION,
               'role_transport_retries': 0, 'synthetic_fixture': synthetic}
     config_sha = hashlib.sha256(json.dumps(method, sort_keys=True,
         separators=(',', ':')).encode('utf-8')).hexdigest()

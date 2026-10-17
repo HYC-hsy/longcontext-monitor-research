@@ -14,10 +14,13 @@ sys.path[:0] = [str(HERE), str(HERE / 'vendor'),
                 str(HERE.parents[1] / 'GenericAgent-main')]
 import llmcore
 from belief.manager import BeliefManager
+from prompts.prompt_generation import build_belief_update_prompt, build_initial_belief_prompt, build_belief_text_prompt
 from episode import PoSEpisode, execution_config
 from test_offline import replies, Recorder
-from worker import RoleTransport, _adapt_role_json
+from worker import (RoleTransport, _adapt_role_json, _role_input_contract,
+                    ROLE_OBJECT_INSTRUCTION, ROLE_UPDATE_FIELDS_INSTRUCTION)
 from method_discovery.pos_upstream_ga_v1_20261017 import serial_live
+from method_discovery.pos_upstream_ga_v1_20261017.compatibility_probe import compatibility_checks
 
 
 def fenced(value):
@@ -25,6 +28,138 @@ def fenced(value):
 
 
 class RoleContractTests(unittest.TestCase):
+    def test_six_historical_responses_remain_original_failures(self):
+        rows = [json.loads(line) for line in
+            (HERE / 'raw_compat_v2/probe/role_events.jsonl').read_text(
+                encoding='utf-8').splitlines()]
+        answers = [row for row in rows if row['event'] == 'pos_role_response']
+        self.assertEqual(len(answers), 6)
+        self.assertEqual([row['response'] for row in answers],
+                         [row['raw_response'] for row in rows
+                          if row['event'] == 'pos_role_json_adapter'])
+        self.assertTrue(any(_adapt_role_json(row['response'])[0] == row['response']
+                            for row in answers))
+        self.assertTrue(any(row['event'] == 'belief_sentinel_audit_failed'
+                            for row in rows))
+        self.assertTrue(any(row['event'] == 'belief_model_schema_error'
+                            for row in rows))
+
+    def test_update_interface_scope_covers_repair_without_changing_upstream(self):
+        config = execution_config()
+        update = build_belief_update_prompt({}, {'action':'x','observation':'y'},
+                                            {'done':False}, config)
+        initial = build_initial_belief_prompt({'task':'x','observation':'y'}, config)
+        textual = build_belief_text_prompt({}, {}, [], [], config)
+        for source, expected in ((update, 'update_records'),
+                                 (update + [{'role':'user','content':'repair'}], 'update_records'),
+                                 (initial, 'object_only'), (textual, 'object_only')):
+            effective, note, scope = _role_input_contract('belief', source)
+            self.assertEqual(scope, expected)
+            self.assertEqual(effective[:-1], source)
+            self.assertEqual(effective[-1], {'role':'system','content':note})
+            self.assertIn(ROLE_OBJECT_INSTRUCTION, note)
+            self.assertEqual(ROLE_UPDATE_FIELDS_INSTRUCTION in note,
+                             expected == 'update_records')
+        for role in ('consistency', 'progress'):
+            self.assertEqual(_role_input_contract(role, update)[2], 'object_only')
+
+    def test_original_minimal_optional_alias_and_invalid_fields(self):
+        minimum = {'remove_state_ids': [], 'remove_relation_ids': [],
+            'upsert_entities': [{'entity_id':'e1','entity_type':'object','name':'item'}],
+            'upsert_states': [{'state_id':'s1','entity_id':'e1','description':'visible'}],
+            'upsert_relations': [{'relation_id':'r1','src':'e1','dst':'e1',
+                                  'relation':'self'}],
+            'epistemic_gaps': [], 'achievement_gaps': [], 'frontier': None}
+        normalized = BeliefManager._normalize_model_payload(json.loads(json.dumps(minimum)),
+                                                             'update')
+        self.assertEqual(normalized['upsert_relations'][0]['source_id'], 'e1')
+        self.assertEqual(normalized['upsert_relations'][0]['target_id'], 'e1')
+        BeliefManager._validate_model_payload(normalized, 'update')
+        for wrong in ({**minimum, 'unknown': 1},
+                      {**minimum, 'upsert_entities':[{'entity_id':'e1','name':'item'}]}):
+            with self.assertRaises((TypeError, ValueError)):
+                BeliefManager._validate_model_payload(wrong, 'update')
+
+    def test_probe_final_outcomes_not_merely_roles_seen(self):
+        fixed = replies()
+        fixed['belief'].insert(0, 'not JSON')
+        logger = Recorder()
+        transport = RoleTransport(mode='fake', replies=fixed, archive=logger)
+        episode = PoSEpisode(case_id='probe-gate', config=execution_config(),
+            logger=logger, belief_call=transport.caller('belief'),
+            consistency_call=transport.caller('consistency'),
+            progress_call=transport.caller('progress'))
+        initial = episode.reset(task='Clean mug 1.', observation='Mug dirty.', actions=[])
+        updated = episode.update(thought='Inspect.', action_batch=[{'id':'c1',
+            'name':'inspect','arguments':{},'order':0,'status':'executed'}],
+            observation='Still dirty.')
+        episode.manager.close()
+        result = episode.get_result()
+        wire = [{'http_status':200,'returned_model':'claude-opus-4-8',
+                 'stop_reason':'end_turn'}]
+        roles = [row['role'] for row in transport.calls]
+        def gate(rows=logger.events, state=result, finished=True):
+            return compatibility_checks(rows, state, initial, updated, wire,
+                                        roles, work_finished=finished)
+        self.assertEqual(gate()['status'], 'passed', (gate(),
+            [(row['event'], row.get('step'), row.get('operation')) for row in logger.events]))
+        self.assertTrue(any(row['event']=='belief_model_parse_error'
+                            for row in logger.events))
+        self.assertEqual(gate(finished=False)['status'], 'failed')
+        no_audit = [row for row in logger.events if
+                    row['event'] != 'belief_sentinel_audit_completed']
+        no_audit.append({'event':'belief_sentinel_audit_failed','step':0})
+        self.assertFalse(gate(rows=no_audit)['checks']['sentinel_final_audit_resolved'])
+        no_progress = json.loads(json.dumps(result))
+        no_progress['health_transitions'][0]['progress'] = None
+        self.assertFalse(gate(state=no_progress)['checks']['valid_nonterminal_progress'])
+        rejected = logger.events + [{'event':'belief_candidate_rejected','step':0,
+                                     'issues':[{'reason':'legitimate'}]}]
+        self.assertEqual(gate(rows=rejected)['status'], 'passed')
+
+    def test_original_correction_exhaustion_and_sentinel_text_fallback(self):
+        fixed = replies()
+        fixed['belief'] = ['not JSON', 'still not JSON']
+        logger = Recorder()
+        transport = RoleTransport(mode='fake', replies=fixed, archive=logger)
+        episode = PoSEpisode(case_id='exhaustion', config=execution_config(),
+            logger=logger, belief_call=transport.caller('belief'),
+            consistency_call=transport.caller('consistency'),
+            progress_call=transport.caller('progress'))
+        with self.assertRaises(json.JSONDecodeError):
+            episode.reset(task='Clean mug 1.', observation='Mug dirty.', actions=[])
+        self.assertEqual(len([row for row in logger.events if
+            row['event']=='belief_model_parse_error']), 2)
+
+        fixed = replies()
+        fixed['consistency'] = ['invalid audit', 'invalid audit']
+        logger = Recorder()
+        transport = RoleTransport(mode='fake', replies=fixed, archive=logger)
+        episode = PoSEpisode(case_id='audit-fallback', config=execution_config(),
+            logger=logger, belief_call=transport.caller('belief'),
+            consistency_call=transport.caller('consistency'),
+            progress_call=transport.caller('progress'))
+        context = episode.reset(task='Clean mug 1.', observation='Mug dirty.', actions=[])
+        self.assertTrue(context['belief_text'])
+        self.assertTrue(any(row['event']=='belief_sentinel_audit_failed'
+                            for row in logger.events))
+
+        fixed = replies()
+        fixed['progress'][0] = '{"progress":2}'
+        logger = Recorder()
+        transport = RoleTransport(mode='fake', replies=fixed, archive=logger)
+        episode = PoSEpisode(case_id='unscored', config=execution_config(),
+            logger=logger, belief_call=transport.caller('belief'),
+            consistency_call=transport.caller('consistency'),
+            progress_call=transport.caller('progress'))
+        episode.reset(task='Clean mug 1.', observation='Mug dirty.', actions=[])
+        episode.update(thought='Inspect.', action_batch=[{'id':'c1',
+            'name':'inspect','arguments':{},'order':0,'status':'executed'}],
+            observation='Still dirty.')
+        self.assertEqual(episode.get_result()['scored_transitions'], 0)
+        self.assertTrue(any(row['event']=='belief_sentinel_progress_failed'
+                            for row in logger.events))
+
     def test_historical_two_public_answers_replayed_without_rewriting(self):
         rows = [json.loads(line) for line in
             (HERE / 'raw_compat_v1/role_events.jsonl').read_text(
@@ -136,16 +271,25 @@ class RoleContractTests(unittest.TestCase):
             for role in ('belief', 'consistency', 'progress'):
                 self.assertEqual(transport.caller(role)([{'role':'user',
                     'content':'Synthetic role request.'}]), '{"issues":[]}')
+            update_prompt = build_belief_update_prompt({},
+                {'action':'synthetic','observation':'synthetic'},
+                {'done':False}, execution_config())
+            self.assertEqual(transport.caller('belief')(update_prompt), '{"issues":[]}')
             task = llmcore.NativeClaudeSession(profile)
             generator = task.raw_ask([{'role':'user','content':[{'type':'text',
                 'text':'Synthetic Task request.'}]}])
             with self.assertRaises(StopIteration):
                 while True: next(generator)
-        self.assertEqual(len(payloads), 4)
+        self.assertEqual(len(payloads), 5)
         for role, payload in zip(('belief','consistency','progress'), payloads[:3]):
             self.assertEqual(payload['thinking'], {'type':'disabled'})
             self.assertEqual(payload['temperature'], 0)
             self.assertEqual(payload['max_tokens'], 4096 if role == 'belief' else 512)
+        self.assertIn(ROLE_OBJECT_INSTRUCTION, payloads[3]['system'][0]['text'])
+        self.assertIn(ROLE_UPDATE_FIELDS_INSTRUCTION, payloads[3]['system'][0]['text'])
+        self.assertTrue(any(item['content'][0]['text'] == update_prompt[1]['content']
+                            for item in payloads[3]['messages']))
+        self.assertNotIn(ROLE_UPDATE_FIELDS_INSTRUCTION, payloads[0]['system'][0]['text'])
         self.assertEqual(payloads[-1]['thinking'], {'type':'adaptive'})
         self.assertNotIn('temperature', payloads[-1])
         self.assertEqual(payloads[-1]['max_tokens'], 1000)

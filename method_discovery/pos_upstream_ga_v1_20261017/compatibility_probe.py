@@ -17,7 +17,68 @@ import llmcore
 from .episode import PoSEpisode, execution_config
 from .single_manifest import CHECKOUT, source_hashes, vendor_hashes
 from .worker import (RoleTransport, ROLE_JSON_CONTRACT_VERSION,
-                     ROLE_MAX_TOKENS, ROLE_TEMPERATURE, ROLE_THINKING_TYPE)
+                     ROLE_INPUT_CONTRACT_VERSION, ROLE_OBJECT_INSTRUCTION,
+                     ROLE_UPDATE_FIELDS_INSTRUCTION, ROLE_MAX_TOKENS,
+                     ROLE_TEMPERATURE, ROLE_THINKING_TYPE)
+
+
+def generation_identity():
+    return {'role_max_tokens': ROLE_MAX_TOKENS,
+        'role_thinking_type': ROLE_THINKING_TYPE,
+        'role_temperature': ROLE_TEMPERATURE,
+        'role_json_contract': ROLE_JSON_CONTRACT_VERSION,
+        'role_input_contract': ROLE_INPUT_CONTRACT_VERSION,
+        'role_object_instruction': ROLE_OBJECT_INSTRUCTION,
+        'role_update_fields_instruction': ROLE_UPDATE_FIELDS_INSTRUCTION,
+        'role_transport_retries': 0}
+
+
+def compatibility_checks(rows, result, initial, updated, wire, roles,
+                         *, work_finished):
+    """Judge final original-core outcomes, not a transient parse error or HTTP 200."""
+    def has(event, step=None, operation=None):
+        return any(row.get('event') == event and
+                   (step is None or row.get('step') == step) and
+                   (operation is None or row.get('operation') == operation)
+                   for row in rows)
+    audit_submitted = [row for row in rows if
+        row.get('event') == 'belief_sentinel_audit_submitted' and row.get('step') == 0]
+    audit_completed = [row for row in rows if
+        row.get('event') == 'belief_sentinel_audit_completed' and row.get('step') == 0]
+    audit_failed = [row for row in rows if
+        row.get('event') == 'belief_sentinel_audit_failed' and row.get('step') == 0]
+    transitions = result.get('health_transitions') or []
+    progress = transitions[-1].get('progress') if len(transitions) == 1 else None
+    checks = {
+        'initial_original_parse_committed': has('belief_model_response', -1, 'initialize')
+            and has('belief_state_initialized', -1) and bool(initial.get('belief_text')),
+        'update_original_parse_resolved': has('belief_model_response', 0, 'update')
+            and has('belief_candidate_generated', 0)
+            and has('belief_state_updated', 0)
+            and len([item for item in result.get('belief_update_history') or []
+                     if item.get('step') == 0 and item.get('status') in
+                     {'validated', 'repaired', 'rejected'}]) == 1,
+        'sentinel_final_audit_resolved': bool(audit_submitted)
+            and len(audit_completed) == len(audit_submitted)
+            and not audit_failed
+            and len((result.get('belief_sentinel') or {}).get('audit_history') or [])
+                >= len(audit_completed),
+        'final_textualization': has('belief_model_response', 0, 'textualize')
+            and has('belief_text_updated', 0) and bool(updated.get('belief_text')),
+        'valid_nonterminal_progress': has('belief_sentinel_progress_completed', 0)
+            and has('belief_transition_progress_applied', 0)
+            and progress in (0, 1) and not isinstance(progress, bool)
+            and result.get('scored_transitions') == 1,
+        'applicable_work_finished': work_finished,
+        'role_and_transport_protocol': {'belief', 'consistency', 'progress'} <= set(roles)
+            and bool(wire) and all(row.get('http_status') == 200 and
+                row.get('returned_model') == 'claude-opus-4-8' and
+                row.get('stop_reason') not in {None, 'max_tokens'} for row in wire),
+    }
+    return {'status': 'passed' if all(checks.values()) else 'failed',
+            'checks': checks, 'audit_submitted': len(audit_submitted),
+            'audit_completed': len(audit_completed),
+            'audit_failed': len(audit_failed), 'transition_progress': progress}
 
 
 def safe_json(path, value):
@@ -31,12 +92,15 @@ class PublicLogger:
         self.path = path
         self.stream = path.open('x', encoding='utf-8', newline='\n')
         self.events = []
+        self.rows = []
     def log(self, event, **data):
         # Transport exception text can contain a private endpoint. The type,
         # role, stage and attempted HTTP status remain sufficient here.
         data.pop('error', None)
         self.events.append((event, data.get('operation')))
-        self.stream.write(json.dumps({'event': event, **data},
+        row = {'event': event, **data}
+        self.rows.append(row)
+        self.stream.write(json.dumps(row,
                                      ensure_ascii=False, default=str) + '\n')
         self.stream.flush()
     def close(self):
@@ -96,11 +160,7 @@ def main():
     profile_path = args.profile_file.resolve(strict=True)
     profile = runpy.run_path(str(profile_path))['native_claude_cc_vibe_opus48']
     sha = lambda path: hashlib.sha256(Path(path).read_bytes()).hexdigest()
-    generation = {'role_max_tokens': ROLE_MAX_TOKENS,
-        'role_thinking_type': ROLE_THINKING_TYPE,
-        'role_temperature': ROLE_TEMPERATURE,
-        'role_json_contract': ROLE_JSON_CONTRACT_VERSION,
-        'role_transport_retries': 0}
+    generation = generation_identity()
     if (scope.get('schema') != 'pos-ga-user-authorized-serial-scope-v1' or
             scope.get('code_commit') != head or
             scope.get('source_files_sha256') != source_hashes() or
@@ -115,7 +175,7 @@ def main():
         raise RuntimeError('compatibility scope, code, certification or profile differs')
     root = args.output.resolve(strict=False)
     root.mkdir(parents=True, exist_ok=False)
-    identity = {'schema': 'pos-ga-live-compatibility-v2',
+    identity = {'schema': 'pos-ga-live-compatibility-v3',
         'scope_sha256': sha(scope_path), 'code_commit': head,
         'source_files_sha256': source_hashes(),
         'vendor_files_sha256': vendor_hashes(),
@@ -146,7 +206,7 @@ def main():
             row['error_type'] = type(error).__name__
             raise
     llmcore.requests.post = post
-    report = {'schema': 'pos-ga-live-compatibility-result-v2',
+    report = {'schema': 'pos-ga-live-compatibility-result-v3',
               'status': 'failed', 'phase': phase['name'],
               'identity': identity, 'task_logical_calls': 0, 'pos_logical_calls': 0,
               'task_tools_executed': 0, 'official_evaluator_calls': 0,
@@ -175,16 +235,13 @@ def main():
         report['pos_result'] = episode.get_result()
         report['initial_context'] = initial_context
         report['update_context'] = update_context
-        if not {'belief', 'consistency', 'progress'} <= set(report['pos_roles']):
-            raise RuntimeError('released PoS role path incomplete')
-        if (not initial_context.get('belief_text') or
-                not update_context.get('belief_text') or
-                ('belief_model_input', 'textualize') not in logger.events or
-                not all(row.get('http_status') == 200 and
-                        row.get('returned_model') == 'claude-opus-4-8' and
-                        row.get('stop_reason') not in {None, 'max_tokens'}
-                        for row in wire)):
-            raise RuntimeError('PoS textualization or provider protocol incomplete')
+        report['compatibility_checks'] = compatibility_checks(
+            logger.rows, report['pos_result'], initial_context, update_context,
+            wire, report['pos_roles'],
+            work_finished=bool(episode.manager.sentinel and
+                               episode.manager.sentinel.closed))
+        if report['compatibility_checks']['status'] != 'passed':
+            raise RuntimeError('final original PoS protocol/stage incomplete')
         report['status'] = 'passed'
     except BaseException as error:
         report['phase'] = phase['name']
