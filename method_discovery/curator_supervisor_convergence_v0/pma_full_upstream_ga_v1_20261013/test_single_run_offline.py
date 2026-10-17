@@ -22,8 +22,12 @@ class SingleRunOfflineTests(unittest.TestCase):
     def test_committed_fixture_binds_executed_source_and_bytes(self):
         from tempfile import TemporaryDirectory
         from unittest.mock import patch
-        fixture = (Path(__file__).parent / 'generic_single_run_20261015' /
-                   'certification_fixture_v5')
+        old_fixture = (Path(__file__).parent / 'generic_single_run_20261015' /
+                       'certification_fixture_v5')
+        with self.assertRaises(RuntimeError):
+            verify_evidence(old_fixture)
+        fixture = (Path(__file__).parent / 'decision_reminder_v1_20261017' /
+                   'certification_fixture_u')
         self.assertEqual(set(verify_evidence(fixture)['outcomes']), {'A', 'B'})
         with patch('method_discovery.curator_supervisor_convergence_v0.'
                    'pma_full_upstream_ga_v1_20261013.single_run_certification.'
