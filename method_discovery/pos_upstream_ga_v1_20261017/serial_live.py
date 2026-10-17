@@ -15,6 +15,13 @@ from .worker import (ROLE_JSON_CONTRACT_VERSION, ROLE_INPUT_CONTRACT_VERSION,
 
 ENTRY = ('method_discovery.curator_supervisor_convergence_v0.'
          'pma_full_upstream_ga_v1_20261013.single_run')
+HISTORICAL_PROBE = Path(__file__).resolve().parent / 'raw_compat_v3/probe'
+HISTORICAL_PROBE_HASHES = {
+    'result.json': 'e4f4ce0426fc25d119369e2f855ca9cb0bf2601de93cb3226d34fedad5c3549c',
+    'role_events.jsonl': 'c54968cdb60f86fc3c0a3181c75c06fe59636e41363c7d616086c4263906d781',
+    'http_attempts.json': '94be22e76da39c547fddf300e2b5f157efd2c9e00a0a63d610e86d8cbd09834d',
+}
+HISTORICAL_SCOPE_SHA256 = 'f1294c085f7cb5d945180e0326280e5380c9568d14340bbab766d08a940931ea'
 
 
 def sha(path):
@@ -42,6 +49,179 @@ def common(args):
             '--harbor-python', args.harbor_python,
             '--bench-root', args.bench_root,
             '--harbor-source-root', args.harbor_source_root]
+
+
+def _ancestor(commit):
+    return subprocess.run(['git', 'merge-base', '--is-ancestor', commit, 'HEAD'],
+                          cwd=CHECKOUT, check=False).returncode == 0
+
+
+def native_unscored_review(scope_path, certification, profile_path, continuity_path):
+    """Bind one *historical failure* to a new source-exact discovery scope."""
+    from .certification import verify_evidence
+    scope_path = Path(scope_path).resolve(strict=True)
+    certification = Path(certification).resolve(strict=True)
+    profile_path = Path(profile_path).resolve(strict=True)
+    continuity_path = Path(continuity_path).resolve(strict=True)
+    if verify_evidence(certification, require_committed=True).get('status') != 'pass':
+        raise RuntimeError('current source-bound synthetic certification failed')
+    scope = json.loads(scope_path.read_text(encoding='utf-8'))
+    old_scope = HISTORICAL_PROBE.parent / 'preparation/authorized_serial_scope.json'
+    if sha(old_scope) != HISTORICAL_SCOPE_SHA256 or any(
+            sha(HISTORICAL_PROBE / name) != expected
+            for name, expected in HISTORICAL_PROBE_HASHES.items()):
+        raise RuntimeError('fixed historical v3 probe identity changed')
+    old = json.loads((HISTORICAL_PROBE / 'result.json').read_text(encoding='utf-8'))
+    events = [json.loads(line) for line in
+        (HISTORICAL_PROBE / 'role_events.jsonl').read_text(encoding='utf-8').splitlines()]
+    checks = (old.get('compatibility_checks') or {}).get('checks') or {}
+    if (old.get('status') != 'failed' or old.get('schema') !=
+            'pos-ga-live-compatibility-result-v3' or
+            checks != {'initial_original_parse_committed': True,
+                       'update_original_parse_resolved': True,
+                       'sentinel_final_audit_resolved': True,
+                       'final_textualization': True,
+                       'valid_nonterminal_progress': False,
+                       'applicable_work_finished': True,
+                       'role_and_transport_protocol': True} or
+            old.get('task_logical_calls') != 0 or
+            old.get('task_tools_executed') != 0 or
+            old.get('official_evaluator_calls') != 0 or
+            old.get('pos_logical_calls') != 9 or old.get('http_attempts') != 9):
+        raise RuntimeError('historical failure is outside the reviewed scope')
+    for step, expected in ((-1, 1), (0, 2)):
+        for event, count in (('belief_sentinel_audit_submitted', expected),
+                             ('belief_sentinel_audit_completed', expected),
+                             ('belief_sentinel_audit_failed', 0)):
+            if sum(row.get('event') == event and row.get('step') == step
+                   for row in events) != count:
+                raise RuntimeError('initial or update Sentinel outcome differs')
+    for event, step in (('belief_state_initialized', -1),
+                        ('belief_state_updated', 0),
+                        ('belief_candidate_repaired', 0),
+                        ('belief_text_updated', -1),
+                        ('belief_text_updated', 0),
+                        ('belief_sentinel_progress_failed', 0)):
+        if sum(row.get('event') == event and row.get('step') == step
+               for row in events) != 1:
+            raise RuntimeError('reviewed stage completion/failure differs')
+    if any(row.get('event') in {'belief_model_parse_error',
+            'belief_model_schema_error', 'belief_candidate_schema_error',
+            'belief_candidate_rejected', 'belief_sentinel_model_parse_error',
+            'belief_sentinel_progress_model_parse_error'} for row in events):
+        raise RuntimeError('unreviewed original parser or audit failure')
+    progress_response = [row for row in events if row.get('event') ==
+                         'belief_sentinel_progress_model_response']
+    progress_input = [row for row in events if row.get('event') ==
+                      'belief_sentinel_progress_model_input']
+    if len(progress_response) != 1 or len(progress_input) != 1:
+        raise RuntimeError('historical progress identity differs')
+    payload = json.loads(progress_response[0]['raw_response'])
+    before_after = json.loads(progress_input[0]['messages'][1]['content'].splitlines()[0])
+    before = before_after['belief_before']['world']
+    after = before_after['belief_after']['world']
+    transition = (old.get('partial_pos_result') or {}).get('health_transitions') or []
+    if (payload.get('affected_record_ids') != ['e1', 's1'] or
+            before['entities'].get('e1') != after['entities'].get('e1') or
+            's1' in before['states'] or 's1' not in after['states'] or
+            len(transition) != 1 or
+            any(transition[0].get(key) is not None for key in
+                ('progress', 'score', 'scoring_method')) or
+            (old.get('partial_pos_result') or {}).get('scored_transitions') != 0):
+        raise RuntimeError('unscored native progress is not the reviewed e1 case')
+    continuity = json.loads(continuity_path.read_text(encoding='utf-8'))
+    if (continuity.get('schema') != 'pos-native-unscored-continuity-v1' or
+            continuity.get('model_calls') != 0 or
+            continuity.get('archived_probe_status') != 'failed' or
+            continuity.get('archived_role_events_sha256') !=
+                HISTORICAL_PROBE_HASHES['role_events.jsonl'] or
+            continuity.get('first_progress') is not None or
+            continuity.get('first_score') is not None or
+            continuity.get('first_scoring_method') is not None or
+            continuity.get('first_update_status') != 'repaired' or
+            continuity.get('first_progress_failed') is not True or
+            continuity.get('first_window_ready') is not False or
+            continuity.get('second_progress') != 1 or
+            continuity.get('second_affected_record_ids') != ['s2'] or
+            continuity.get('second_scored_transitions') != 1 or
+            continuity.get('second_window_ready') is not False or
+            continuity.get('recovery') is not None or
+            continuity.get('next_decision_view_generated') is not True):
+        raise RuntimeError('zero-model native continuity evidence is incomplete')
+    old_identity = old['identity']
+    current_sources = source_hashes()
+    previous_sources = old_identity['source_files_sha256']
+    changed = [name for name in current_sources if
+               current_sources[name] != previous_sources.get(name)]
+    if (changed != ['method_discovery/pos_upstream_ga_v1_20261017/serial_live.py'] or
+            scope.get('schema') != 'pos-ga-user-authorized-serial-scope-v1' or
+            not _ancestor(scope.get('code_commit', '')) or
+            scope.get('source_files_sha256') != current_sources or
+            scope.get('vendor_files_sha256') != vendor_hashes() or
+            scope.get('vendor_files_sha256') != old_identity['vendor_files_sha256'] or
+            scope.get('role_generation') != old_identity['role_generation'] or
+            scope.get('certification_sha256') != sha(certification / 'FILE_HASHES.json') or
+            scope.get('task_turns_max') != 300 or
+            scope.get('agent_wall_seconds') != 14400 or
+            scope.get('formal_runs_started') != 0 or
+            tuple(row.get('task') for row in scope.get('prepared', [])) != FOUR or
+            [row.get('order') for row in scope['prepared']] != [1, 2, 3, 4] or
+            old_identity.get('profile_sha256') != sha(profile_path)):
+        raise RuntimeError('current method/source/profile/asset scope differs')
+    if len({row['run_id'] for row in scope['prepared']}) != 4 or len({
+            row['run_root'] for row in scope['prepared']}) != 4:
+        raise RuntimeError('prepared run identities are not independent')
+    for row in scope['prepared']:
+        directory = Path(row['directory']).resolve(strict=True)
+        manifest = json.loads((directory / 'manifest.json').read_text(encoding='utf-8'))
+        identity = json.loads((directory / 'run_identity.json').read_text(encoding='utf-8'))
+        if (directory.parent != scope_path.parent or
+                sha(directory / 'manifest.json') != row['manifest_sha256'] or
+                manifest.get('task_profile_sha256') != sha(profile_path) or
+                manifest.get('config_sha256') != row['config_sha256'] or
+                manifest.get('source_files_sha256') != current_sources or
+                manifest.get('vendor_files_sha256') != vendor_hashes() or
+                manifest.get('assets', {}).get(row['task'], {}).get('image_id') !=
+                    row['image_id'] or
+                manifest.get('assets', {}).get(row['task'], {}).get(
+                    'native_tests_tree_sha256') != row['native_tests_tree_sha256'] or
+                manifest.get('execution_authorized') is not False or
+                identity.get('run_id') != row['run_id'] or
+                identity.get('run_root') != row['run_root'] or
+                Path(row['run_root']).exists() or
+                (directory / 'authorization.json').exists() or
+                (directory / 'batch_result.json').exists()):
+            raise RuntimeError('prepared task/image/evaluator/output binding differs')
+    note = scope['role_generation']
+    return {'schema': 'pos-ga-native-unscored-review-v1',
+        'decision': 'fixed_native_unscored_fallback_accepted_for_discovery',
+        'historical_status': 'failed',
+        'accepted_failure': 'progress_affected_record_ids_unchanged_e1_only',
+        'historical_probe_sha256': HISTORICAL_PROBE_HASHES,
+        'historical_scope_sha256': HISTORICAL_SCOPE_SHA256,
+        'historical_code_commit': old_identity['code_commit'],
+        'initial_audit': 'completed_once', 'update_audit': 'completed_twice_repaired',
+        'progress': 'invalid_unscored_not_zero',
+        'continuity_sha256': sha(continuity_path),
+        'continuity_test_sha256': sha(Path(__file__).with_name(
+            'test_unscored_continuity.py')),
+        'current_scope_sha256': sha(scope_path),
+        'current_code_commit': scope['code_commit'],
+        'current_source_files_sha256': current_sources,
+        'current_vendor_files_sha256': vendor_hashes(),
+        'input_contract_version': note['role_input_contract'],
+        'object_instruction': note['role_object_instruction'],
+        'object_instruction_sha256': hashlib.sha256(note[
+            'role_object_instruction'].encode('utf-8')).hexdigest(),
+        'update_instruction': note['role_update_fields_instruction'],
+        'update_instruction_sha256': hashlib.sha256(note[
+            'role_update_fields_instruction'].encode('utf-8')).hexdigest(),
+        'profile_sha256': sha(profile_path),
+        'certification_sha256': scope['certification_sha256'],
+        'role_generation': note, 'prepared': scope['prepared'],
+        'output_root': str(scope_path.parent),
+        'task_turns_max': 300, 'agent_wall_seconds': 14400,
+        'formal_runs_started_at_review': 0}
 
 
 def prepare(args):
@@ -115,59 +295,72 @@ def prepare(args):
 
 
 def run(args):
-    from .compatibility_probe import compatibility_checks
     root = Path(args.output).resolve(strict=True)
     scope_path = root / 'authorized_serial_scope.json'
     scope = json.loads(scope_path.read_text(encoding='utf-8'))
-    compat_path = Path(args.compatibility_result).resolve(strict=True)
-    compat = json.loads(compat_path.read_text(encoding='utf-8'))
-    wire = json.loads((compat_path.parent / 'http_attempts.json').read_text(
-        encoding='utf-8'))
-    role_events = [json.loads(line) for line in
-        (compat_path.parent / 'role_events.jsonl').read_text(
-            encoding='utf-8').splitlines()]
-    identity = compat.get('identity') or {}
-    recomputed = compatibility_checks(role_events, compat.get('pos_result') or {},
-        compat.get('initial_context') or {}, compat.get('update_context') or {},
-        wire, compat.get('pos_roles') or [],
-        work_finished=(compat.get('compatibility_checks') or {}).get('checks', {}).get(
-            'applicable_work_finished') is True)
-    if (compat.get('schema') != 'pos-ga-live-compatibility-result-v3' or
-            compat.get('status') != 'passed' or
-            recomputed != compat.get('compatibility_checks') or
-            recomputed.get('status') != 'passed' or
-            identity.get('schema') != 'pos-ga-live-compatibility-v3' or
-            identity.get('scope_sha256') != sha(scope_path) or
-            identity.get('code_commit') != scope.get('code_commit') or
-            identity.get('source_files_sha256') != scope.get('source_files_sha256') or
-            identity.get('vendor_files_sha256') != scope.get('vendor_files_sha256') or
-            identity.get('certification_sha256') != scope.get('certification_sha256') or
-            identity.get('role_generation') != scope.get('role_generation') or
-            identity.get('profile_sha256') != sha(args.task_profile_file) or
-            identity.get('probe_sha256') != sha(Path(__file__).with_name(
-                'compatibility_probe.py')) or
-            identity.get('serial_sha256') != sha(__file__) or
-            compat.get('role_events_sha256') != sha(
-                compat_path.parent / 'role_events.jsonl') or
-            compat.get('http_attempts_sha256') != sha(
-                compat_path.parent / 'http_attempts.json') or
-            not wire or
-            compat.get('http_attempts') != len(wire) or
-            compat.get('pos_logical_calls') != len([
-                row for row in role_events if row.get('event') == 'pos_role_request']) or
-            not {'belief', 'consistency', 'progress'} <= set(compat.get('pos_roles', [])) or
-            not any(row.get('event') == 'belief_model_input' and
-                    row.get('operation') == 'textualize' for row in role_events) or
-            not compat.get('update_context', {}).get('belief_text') or
-            not all(row.get('http_status') == 200 and
-                    row.get('returned_model') == 'claude-opus-4-8' for row in wire) or
-            compat.get('task_logical_calls') != 0 or
-            compat.get('official_evaluator_calls') != 0 or
-            compat.get('task_tools_executed') != 0):
-        raise RuntimeError('current bound PoS compatibility did not pass')
+    review_path = getattr(args, 'compatibility_review', None)
+    compat_result = getattr(args, 'compatibility_result', None)
+    if bool(review_path) == bool(compat_result):
+        raise RuntimeError('select exactly one bound compatibility decision')
+    if review_path:
+        review = json.loads(Path(review_path).resolve(strict=True).read_text(
+            encoding='utf-8'))
+        expected = native_unscored_review(scope_path, args.certification,
+            args.task_profile_file, args.continuity_evidence)
+        if review != expected or Path(review_path).resolve(strict=True).parent != root:
+            raise RuntimeError('independent native-unscored review identity differs')
+    else:
+        from .compatibility_probe import compatibility_checks
+        compat_path = Path(compat_result).resolve(strict=True)
+        compat = json.loads(compat_path.read_text(encoding='utf-8'))
+        wire = json.loads((compat_path.parent / 'http_attempts.json').read_text(
+            encoding='utf-8'))
+        role_events = [json.loads(line) for line in
+            (compat_path.parent / 'role_events.jsonl').read_text(
+                encoding='utf-8').splitlines()]
+        identity = compat.get('identity') or {}
+        recomputed = compatibility_checks(role_events, compat.get('pos_result') or {},
+            compat.get('initial_context') or {}, compat.get('update_context') or {},
+            wire, compat.get('pos_roles') or [],
+            work_finished=(compat.get('compatibility_checks') or {}).get('checks', {}).get(
+                'applicable_work_finished') is True)
+        if (compat.get('schema') != 'pos-ga-live-compatibility-result-v3' or
+                compat.get('status') != 'passed' or
+                recomputed != compat.get('compatibility_checks') or
+                recomputed.get('status') != 'passed' or
+                identity.get('schema') != 'pos-ga-live-compatibility-v3' or
+                identity.get('scope_sha256') != sha(scope_path) or
+                identity.get('code_commit') != scope.get('code_commit') or
+                identity.get('source_files_sha256') != scope.get('source_files_sha256') or
+                identity.get('vendor_files_sha256') != scope.get('vendor_files_sha256') or
+                identity.get('certification_sha256') != scope.get('certification_sha256') or
+                identity.get('role_generation') != scope.get('role_generation') or
+                identity.get('profile_sha256') != sha(args.task_profile_file) or
+                identity.get('probe_sha256') != sha(Path(__file__).with_name(
+                    'compatibility_probe.py')) or
+                identity.get('serial_sha256') != sha(__file__) or
+                compat.get('role_events_sha256') != sha(
+                    compat_path.parent / 'role_events.jsonl') or
+                compat.get('http_attempts_sha256') != sha(
+                    compat_path.parent / 'http_attempts.json') or
+                not wire or
+                compat.get('http_attempts') != len(wire) or
+                compat.get('pos_logical_calls') != len([
+                    row for row in role_events if row.get('event') == 'pos_role_request']) or
+                not {'belief', 'consistency', 'progress'} <= set(compat.get('pos_roles', [])) or
+                not any(row.get('event') == 'belief_model_input' and
+                        row.get('operation') == 'textualize' for row in role_events) or
+                not compat.get('update_context', {}).get('belief_text') or
+                not all(row.get('http_status') == 200 and
+                        row.get('returned_model') == 'claude-opus-4-8' for row in wire) or
+                compat.get('task_logical_calls') != 0 or
+                compat.get('official_evaluator_calls') != 0 or
+                compat.get('task_tools_executed') != 0):
+            raise RuntimeError('current bound PoS compatibility did not pass')
     head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=CHECKOUT,
         capture_output=True, text=True, check=True).stdout.strip()
-    if (scope['code_commit'] != head or scope['source_files_sha256'] != source_hashes() or
+    if (not _ancestor(scope['code_commit']) or
+            scope['source_files_sha256'] != source_hashes() or
             scope['vendor_files_sha256'] != vendor_hashes() or
             sha(Path(args.certification) / 'FILE_HASHES.json') !=
             scope['certification_sha256']):
@@ -275,10 +468,24 @@ def main():
     launched = commands.add_parser('run')
     base_arguments(launched)
     launched.add_argument('--certification', required=True)
-    launched.add_argument('--compatibility-result', required=True)
+    launched.add_argument('--compatibility-result')
+    launched.add_argument('--compatibility-review')
+    launched.add_argument('--continuity-evidence')
     launched.add_argument('--output', required=True)
+    reviewed = commands.add_parser('review')
+    reviewed.add_argument('--scope', required=True)
+    reviewed.add_argument('--certification', required=True)
+    reviewed.add_argument('--task-profile-file', required=True)
+    reviewed.add_argument('--continuity-evidence', required=True)
+    reviewed.add_argument('--output', required=True)
     args = parser.parse_args()
-    prepare(args) if args.command == 'prepare' else run(args)
+    if args.command == 'prepare':
+        prepare(args)
+    elif args.command == 'review':
+        write_new(Path(args.output), native_unscored_review(args.scope,
+            args.certification, args.task_profile_file, args.continuity_evidence))
+    else:
+        run(args)
 
 
 if __name__ == '__main__':
