@@ -1,0 +1,648 @@
+﻿diff --git a/.gitattributes b/.gitattributes
+index a95ef03f..a141bfaa 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -3,3 +3,5 @@ method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261
+ method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/six_task_live_batch_20261014_r1/** -text
+ method_discovery/pos_upstream_ga_v1_20261017/acceptance_v11/** -text
+ method_discovery/pos_upstream_ga_v1_20261017/raw_v8/** -text
++method_discovery/pos_upstream_ga_v1_20261017/raw_v9/** -text
++method_discovery/pos_upstream_ga_v1_20261017/acceptance_v12/** -text
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py
+index 8e965dbf..f4648a9a 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py
+@@ -39,9 +39,17 @@ def _docker_top_pids(output: str) -> set[str]:
+     return pids
+ 
+ 
+-def pos_archive_summary(run_id: str, task_id: str, terminal: dict,
+-                        result_receipt: dict, close_receipt: dict) -> dict:
++def pos_archive_summary(run_id: str, task_id: str, terminal: dict | None,
++                        result_receipt: dict, close_receipt: dict,
++                        terminal_error_category: str | None = None) -> dict:
+     """Summarize bound receipts without conflating Task completion and archive health."""
++    known = terminal is not None
++    finalization = terminal.get('pos_finalization') if known else None
++    finalization = finalization if isinstance(finalization, dict) else {}
++    errors = terminal.get('pos_auxiliary_errors') if known else None
++    errors = ([{'kind': item.get('kind'), 'error_type': item.get('error_type')}
++               for item in errors if isinstance(item, dict)]
++              if isinstance(errors, list) else [])
+     return {
+         'run_id': run_id, 'task_id': task_id,
+         'result_status': result_receipt.get('status'),
+@@ -51,11 +59,18 @@ def pos_archive_summary(run_id: str, task_id: str, terminal: dict,
+         'close_bound': (close_receipt.get('run_id') == run_id and
+                         close_receipt.get('task_id') == task_id),
+         'worker_return_code': close_receipt.get('worker_return_code'),
+-        'task_result': terminal['result'],
+-        'task_archive_incomplete': terminal['pos_archive_incomplete'],
+-        'auxiliary_errors': terminal['pos_auxiliary_errors'],
+-        'archive_incomplete': (terminal['pos_archive_incomplete'] or
+-            terminal['pos_finalization'].get('archive_incomplete') is True or
++        'task_terminal_status': ('partial' if terminal_error_category == 'missing_fields'
++                                 else 'available' if known else 'unavailable'),
++        'task_terminal_error_category': terminal_error_category,
++        'task_result': (terminal.get('result') if isinstance(terminal.get('result'), str)
++                        else None) if known else None,
++        'task_archive_incomplete': (terminal.get('pos_archive_incomplete') if
++                                    type(terminal.get('pos_archive_incomplete')) is bool
++                                    else None) if known else None,
++        'auxiliary_errors': errors,
++        'archive_incomplete': (not known or terminal_error_category is not None or
++            terminal.get('pos_archive_incomplete') is True or
++            finalization.get('archive_incomplete') is True or
+             result_receipt.get('status') in {'missing', 'missing_or_unknown', None}),
+     }
+ 
+@@ -458,16 +473,33 @@ class NativeSharedTrialHooks(PMATrialHooks):
+                 except (OSError, ValueError):
+                     return {'status': 'missing_or_unknown'}
+             result_receipt, close_receipt = read_receipt(result_path), read_receipt(close_path)
+-            terminal_read = await self.trial.agent_environment.exec(
+-                'cat /logs/agent/task_terminal.json', timeout_sec=30, user='root')
+-            if terminal_read.return_code:
+-                raise RuntimeError('PoS Task terminal receipt unavailable')
+-            terminal = json.loads(terminal_read.stdout)
+-            if not self.terminal_identity_valid(terminal):
+-                raise RuntimeError('PoS Task terminal identity unavailable')
++            terminal, terminal_error = None, None
++            try:
++                terminal_read = await self.trial.agent_environment.exec(
++                    'cat /logs/agent/task_terminal.json', timeout_sec=30, user='root')
++                if terminal_read.return_code:
++                    terminal_error = 'cat_nonzero'
++                else:
++                    try:
++                        candidate = json.loads(terminal_read.stdout)
++                    except (TypeError, ValueError):
++                        terminal_error = 'invalid_json'
++                    else:
++                        if not isinstance(candidate, dict):
++                            terminal_error = 'invalid_shape'
++                        elif (candidate.get('run_id') not in (None, self.spec['run_id']) or
++                              candidate.get('task_id') not in (None, self.spec['task_id'])):
++                            raise RuntimeError('PoS Task terminal identity conflict')
++                        elif self.terminal_identity_valid(candidate):
++                            terminal = candidate
++                        else:
++                            terminal = candidate
++                            terminal_error = 'missing_fields'
++            except (OSError, TimeoutError):
++                terminal_error = 'read_error'
+             _atomic(self.archive / 'pos_archive_status.json', pos_archive_summary(
+                 self.spec['run_id'], self.spec['task_id'], terminal,
+-                result_receipt, close_receipt))
++                result_receipt, close_receipt, terminal_error))
+ 
+     async def verification_start(self, event):
+         ended = json.loads((self.archive / 'agent_end_native.json').read_text(encoding='utf-8'))
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/compatibility_probe.py b/method_discovery/pos_upstream_ga_v1_20261017/compatibility_probe.py
+new file mode 100644
+index 00000000..f5ca3dc7
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/compatibility_probe.py
+@@ -0,0 +1,194 @@
++"""One authorized synthetic live-protocol check; no Task tools or evaluator."""
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import os
++from pathlib import Path
++import runpy
++import sys
++
++HERE = Path(__file__).resolve().parent
++sys.path.insert(0, str(HERE.parents[1] / 'GenericAgent-main'))
++sys.path.insert(0, str(HERE / 'vendor'))
++
++import llmcore
++from .episode import PoSEpisode, execution_config
++from .worker import RoleTransport
++
++
++def safe_json(path, value):
++    with path.open('x', encoding='utf-8', newline='\n') as stream:
++        json.dump(value, stream, ensure_ascii=False, indent=2, default=str)
++        stream.write('\n')
++
++
++class PublicLogger:
++    def __init__(self, path):
++        self.path = path
++        self.stream = path.open('x', encoding='utf-8', newline='\n')
++    def log(self, event, **data):
++        # Transport exception text can contain a private endpoint. The type,
++        # role, stage and attempted HTTP status remain sufficient here.
++        data.pop('error', None)
++        self.stream.write(json.dumps({'event': event, **data},
++                                     ensure_ascii=False, default=str) + '\n')
++        self.stream.flush()
++    def close(self):
++        self.stream.close()
++
++
++class ResponseTap:
++    def __init__(self, response, row):
++        self.response, self.row = response, row
++    def __enter__(self):
++        self.response.__enter__()
++        return self
++    def __exit__(self, *args):
++        return self.response.__exit__(*args)
++    def __getattr__(self, name):
++        return getattr(self.response, name)
++    def iter_lines(self, *args, **kwargs):
++        for line in self.response.iter_lines(*args, **kwargs):
++            if isinstance(line, bytes) and line.startswith(b'data: '):
++                try:
++                    data = json.loads(line[6:])
++                    model = (data.get('message') or {}).get('model')
++                    if model:
++                        self.row['returned_model'] = model
++                except (ValueError, AttributeError):
++                    pass
++            yield line
++    def json(self):
++        value = self.response.json()
++        if isinstance(value, dict) and value.get('model'):
++            self.row['returned_model'] = value['model']
++        return value
++
++
++def exhaust(generator):
++    try:
++        while True:
++            next(generator)
++    except StopIteration as stopped:
++        return stopped.value
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--profile-file', type=Path, required=True)
++    parser.add_argument('--output', type=Path, required=True)
++    args = parser.parse_args()
++    root = args.output.resolve(strict=False)
++    root.mkdir(parents=True, exist_ok=False)
++    profile_path = args.profile_file.resolve(strict=True)
++    profile = runpy.run_path(str(profile_path))['native_claude_cc_vibe_opus48']
++    if profile.get('model') != 'claude-opus-4-8':
++        raise RuntimeError('frozen Task model differs')
++    safe_json(root / 'identity.json', {'schema': 'pos-ga-live-compatibility-v1',
++        'profile_sha256': hashlib.sha256(profile_path.read_bytes()).hexdigest(),
++        'model_requested': profile['model'], 'task_tools_executed': 0,
++        'official_evaluator_calls': 0})
++    logger = PublicLogger(root / 'role_events.jsonl')
++    wire = []
++    phase = {'name': 'task_step_1'}
++    original_post = llmcore.requests.post
++    def post(url, **kwargs):
++        row = {'phase': phase['name'], 'attempt': len(wire) + 1,
++               'model_visible_payload': {k: v for k, v in kwargs['json'].items()
++                                         if k != 'metadata'},
++               'http_status': None, 'returned_model': None}
++        wire.append(row)
++        try:
++            response = original_post(url, **kwargs)
++            row['http_status'] = response.status_code
++            return ResponseTap(response, row)
++        except BaseException as error:
++            row['error_type'] = type(error).__name__
++            raise
++    llmcore.requests.post = post
++    report = {'schema': 'pos-ga-live-compatibility-result-v1',
++              'status': 'failed', 'phase': phase['name'],
++              'task_logical_calls': 0, 'pos_logical_calls': 0,
++              'task_tools_executed': 0, 'official_evaluator_calls': 0,
++              'public_task_responses': []}
++    transport = None
++    try:
++        task = llmcore.NativeClaudeSession(profile)
++        task.system = ('Synthetic protocol check only. For the first request, use the '
++            'native tool probe with an empty object. No actual tool will run. '
++            'Treat later observations as explicitly synthetic.')
++        task.tools = [{'type': 'function', 'function': {'name': 'probe',
++            'description': 'Synthetic no-op protocol marker; never executed.',
++            'parameters': {'type': 'object', 'properties': {}}}}]
++        first = {'role': 'user', 'content': [{'type': 'text', 'text':
++            'SYNTHETIC_PROTOCOL_INPUT: request the native probe tool once.'}]}
++        report['task_logical_calls'] += 1
++        answer = exhaust(task.ask_stateless(first))
++        report['public_task_responses'].append({'step': 1,
++            'content': answer.content, 'hidden_thinking_present': bool(answer.thinking),
++            'tools': [{'id': call.id, 'name': call.function.name,
++                       'arguments': call.function.arguments} for call in answer.tool_calls]})
++        if (answer.content.startswith('!!!Error:') or
++                not any(call.function.name == 'probe' for call in answer.tool_calls)):
++            raise RuntimeError('native synthetic tool call not parsed')
++        phase['name'] = 'task_step_2'
++        second = {'role': 'user', 'content': [{'type': 'text', 'text':
++            'SYNTHETIC_PUBLIC_OBSERVATION: probe was NOT executed. This is a '
++            'provided test observation, not a native tool_result. Continue with '
++            'a short public acknowledgement; do not infer external success.'}]}
++        report['task_logical_calls'] += 1
++        answer = exhaust(task.ask_stateless(second))
++        report['public_task_responses'].append({'step': 2,
++            'content': answer.content, 'hidden_thinking_present': bool(answer.thinking),
++            'tools': [{'id': call.id, 'name': call.function.name,
++                       'arguments': call.function.arguments} for call in answer.tool_calls]})
++        if answer.content.startswith('!!!Error:'):
++            raise RuntimeError('second native synthetic response failed')
++        phase['name'] = 'pos_reset_update'
++        transport = RoleTransport(mode='profile', profile=profile, archive=logger)
++        episode = PoSEpisode(case_id='synthetic-compatibility',
++            config=execution_config(), logger=logger,
++            belief_call=transport.caller('belief'),
++            consistency_call=transport.caller('consistency'),
++            progress_call=transport.caller('progress'))
++        episode.reset(task='SYNTHETIC GOAL: inspect a marked item once.',
++            observation='SYNTHETIC INITIAL OBSERVATION: item state unknown.',
++            actions=task.tools)
++        episode.update(thought='Synthetic inspection decision.',
++            action_batch=[{'id': 'synthetic-action-1', 'name': 'probe',
++                           'arguments': {}, 'order': 0,
++                           'status': 'synthetic_observation_only'}],
++            observation='SYNTHETIC PUBLIC OBSERVATION: marker is visible; '
++                        'no real environment action occurred.', done=False)
++        report['pos_logical_calls'] = len(transport.calls)
++        report['pos_roles'] = [row['role'] for row in transport.calls]
++        report['pos_result'] = episode.get_result()
++        if not {'belief', 'consistency', 'progress'} <= set(report['pos_roles']):
++            raise RuntimeError('released PoS role path incomplete')
++        report['status'] = 'passed'
++    except BaseException as error:
++        report['phase'] = phase['name']
++        report['error_type'] = type(error).__name__
++    finally:
++        if transport is not None:
++            report['pos_logical_calls'] = len(transport.calls)
++            report['pos_roles'] = [row['role'] for row in transport.calls]
++        report['http_attempts'] = len(wire)
++        report['returned_models'] = [row.get('returned_model') for row in wire]
++        safe_json(root / 'http_attempts.json', wire)
++        safe_json(root / 'result.json', report)
++        logger.close()
++        llmcore.requests.post = original_post
++    print(json.dumps({'status': report['status'], 'phase': report['phase'],
++        'task_logical_calls': report['task_logical_calls'],
++        'pos_logical_calls': report['pos_logical_calls'],
++        'http_attempts': report['http_attempts'],
++        'error_type': report.get('error_type')}, ensure_ascii=False))
++    if report['status'] != 'passed':
++        raise SystemExit(1)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/serial_live.py b/method_discovery/pos_upstream_ga_v1_20261017/serial_live.py
+new file mode 100644
+index 00000000..8b1c913f
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/serial_live.py
+@@ -0,0 +1,226 @@
++"""Thin prepare/run loop over the existing single_run entry and one-use bindings."""
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++from pathlib import Path
++import subprocess
++import sys
++
++from .single_manifest import CHECKOUT, FOUR, source_hashes, vendor_hashes
++
++ENTRY = ('method_discovery.curator_supervisor_convergence_v0.'
++         'pma_full_upstream_ga_v1_20261013.single_run')
++
++
++def sha(path):
++    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
++
++
++def write_new(path, value):
++    with path.open('x', encoding='utf-8', newline='\n') as stream:
++        json.dump(value, stream, ensure_ascii=False, indent=2)
++        stream.write('\n')
++
++
++def base_arguments(parser):
++    for name in ('task-profile-file', 'official-source-git', 'ga-source',
++                 'runtime-root', 'worker-python', 'harbor-python', 'bench-root',
++                 'harbor-source-root'):
++        parser.add_argument('--' + name, required=True)
++
++
++def common(args):
++    return ['--task-profile-file', args.task_profile_file,
++            '--official-source-git', args.official_source_git,
++            '--ga-source', args.ga_source, '--runtime-root', args.runtime_root,
++            '--worker-python', args.worker_python,
++            '--harbor-python', args.harbor_python,
++            '--bench-root', args.bench_root,
++            '--harbor-source-root', args.harbor_source_root]
++
++
++def prepare(args):
++    root = Path(args.output).resolve(strict=False)
++    root.mkdir(parents=True, exist_ok=False)
++    plan = json.loads(Path(args.plan).read_text(encoding='utf-8'))
++    tasks = tuple(row['task'] for row in plan['planned_order'])
++    if (plan.get('schema') != 'pos-ga-serial-plan-v1' or
++            plan.get('execution_authorized') is not False or tasks != FOUR or
++            [row.get('order') for row in plan['planned_order']] != [1, 2, 3, 4]):
++        raise RuntimeError('four-task historical order/identity differs')
++    from .certification import verify_evidence
++    certified = verify_evidence(Path(args.certification))
++    if certified.get('status') != 'pass':
++        raise RuntimeError('committed PoS synthetic certification failed')
++    head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=CHECKOUT,
++        capture_output=True, text=True, check=True).stdout.strip()
++    prepared = []
++    for order, task in enumerate(tasks, 1):
++        directory = root / f'{order:02d}_{task}'
++        command = [sys.executable, '-B', '-m', ENTRY, 'prepare',
++                   '--condition', 'P', '--research-candidate', 'PoS',
++                   '--task', task, '--output', str(directory),
++                   '--certification-dir', str(Path(args.certification).resolve()),
++                   '--official-source-git', args.official_source_git,
++                   '--task-profile-file', args.task_profile_file]
++        completed = subprocess.run(command, cwd=CHECKOUT, capture_output=True,
++                                   text=True, check=False)
++        write_new(root / f'prepare_{order:02d}.json', {
++            'task': task, 'command_public': command, 'return_code': completed.returncode,
++            'stdout': completed.stdout, 'stderr': completed.stderr})
++        if completed.returncode:
++            raise RuntimeError('PoS prepare failed for order ' + str(order))
++        manifest = json.loads((directory / 'manifest.json').read_text(encoding='utf-8'))
++        identity = json.loads((directory / 'run_identity.json').read_text(encoding='utf-8'))
++        if (manifest['config']['task_turns_max'] != 300 or
++                manifest['config']['agent_wall_seconds'] != 14400 or
++                manifest['source_files_sha256'] != source_hashes() or
++                manifest['vendor_files_sha256'] != vendor_hashes() or
++                manifest.get('zero_model_fixture_only') is not False):
++            raise RuntimeError('prepared PoS profile/source/budget differs')
++        prepared.append({'order': order, 'task': task, 'directory': str(directory),
++            'run_id': identity['run_id'], 'run_root': identity['run_root'],
++            'manifest_sha256': sha(directory / 'manifest.json'),
++            'profile_sha256': manifest['task_profile_sha256'],
++            'config_sha256': manifest['config_sha256'],
++            'image_id': manifest['assets'][task]['image_id'],
++            'native_tests_tree_sha256': manifest['assets'][task]['native_tests_tree_sha256']})
++    write_new(root / 'authorized_serial_scope.json', {
++        'schema': 'pos-ga-user-authorized-serial-scope-v1',
++        'authorization_basis': 'current user instruction; each run still requires a one-use binding',
++        'historical_plan_sha256': sha(args.plan),
++        'code_commit': head, 'certification_sha256': sha(
++            Path(args.certification) / 'FILE_HASHES.json'),
++        'source_files_sha256': source_hashes(), 'vendor_files_sha256': vendor_hashes(),
++        'prepared': prepared, 'task_turns_max': 300,
++        'agent_wall_seconds': 14400, 'formal_runs_started': 0})
++    print(json.dumps({'prepared': len(prepared), 'code_commit': head,
++                      'scope': str(root / 'authorized_serial_scope.json')}))
++
++
++def run(args):
++    root = Path(args.output).resolve(strict=True)
++    scope = json.loads((root / 'authorized_serial_scope.json').read_text(encoding='utf-8'))
++    compat = json.loads(Path(args.compatibility_result).read_text(encoding='utf-8'))
++    if compat.get('status') != 'passed':
++        raise RuntimeError('real compatibility did not pass; no formal Task may start')
++    head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=CHECKOUT,
++        capture_output=True, text=True, check=True).stdout.strip()
++    if (scope['code_commit'] != head or scope['source_files_sha256'] != source_hashes() or
++            scope['vendor_files_sha256'] != vendor_hashes() or
++            sha(Path(args.certification) / 'FILE_HASHES.json') !=
++            scope['certification_sha256']):
++        raise RuntimeError('frozen execution code/certification changed')
++    rows = scope['prepared']
++    if tuple(row['task'] for row in rows) != FOUR:
++        raise RuntimeError('serial order changed')
++    for row in rows:
++        order, task = row['order'], row['task']
++        directory = Path(row['directory'])
++        manifest_path = directory / 'manifest.json'
++        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
++        identity = json.loads((directory / 'run_identity.json').read_text(encoding='utf-8'))
++        if (sha(manifest_path) != row['manifest_sha256'] or
++                sha(args.task_profile_file) != row['profile_sha256'] or
++                Path(row['run_root']).exists() or (directory / 'batch_result.json').exists()):
++            raise RuntimeError('prepared run identity or output root changed')
++        arm = manifest['planned_order'][0]
++        binding = dict(arm, run_id=row['run_id'], run_root=row['run_root'],
++                       batch_id=row['run_id'], config_sha256=row['config_sha256'])
++        authorization = {'execution_authorized': True,
++            'zero_model_fixture_only': False,
++            'manifest_sha256': row['manifest_sha256'],
++            'audited_code_commit': head, 'approved_arms': [arm],
++            'run_bindings': [binding], 'run_id': row['run_id'],
++            'batch_id': row['run_id'], 'config_sha256': row['config_sha256'],
++            'output_root': identity['output_root']}
++        auth_path = directory / 'authorization.json'
++        write_new(auth_path, authorization)
++        command = [sys.executable, '-B', '-m', ENTRY, 'run',
++            '--output', str(directory), '--authorization', str(auth_path),
++            *common(args)]
++        record = {'order': order, 'task': task, 'run_id': row['run_id'],
++                  'authorization_sha256': sha(auth_path),
++                  'command_public': command, 'status': 'started'}
++        write_new(directory / 'serial_start.json', record)
++        try:
++            with (directory / 'serial_stdout.txt').open('xb') as out, (
++                    directory / 'serial_stderr.txt').open('xb') as err:
++                completed = subprocess.run(command, cwd=CHECKOUT,
++                                           stdout=out, stderr=err, check=False)
++        finally:
++            auth_path.unlink(missing_ok=True)
++            write_new(directory / 'authorization_removed.json', {
++                'authorization_removed': not auth_path.exists(),
++                'authorization_sha256': record['authorization_sha256']})
++        status_path = Path(row['run_root']) / 'archive/live_result.json'
++        try:
++            status = json.loads(status_path.read_text(encoding='utf-8'))
++        except (OSError, ValueError):
++            status = None
++        terminal_paths = list(Path(row['run_root']).glob('jobs/*/*/agent/task_terminal.json'))
++        try:
++            terminal = (json.loads(terminal_paths[0].read_text(encoding='utf-8'))
++                        if len(terminal_paths) == 1 else None)
++        except (OSError, ValueError):
++            terminal = None
++        summary = {'order': order, 'task': task, 'run_id': row['run_id'],
++                   'run_exit': completed.returncode,
++                   'status_available': status is not None,
++                   'primary_failure': status.get('primary_failure') if status else None,
++                   'cleanup_confirmed': status.get('cleanup_confirmed') if status else None,
++                   'harbor_return_code': status.get('harbor_return_code') if status else None,
++                   'native_result_status': (status.get('native_result') or {}).get('status')
++                       if status else None,
++                   'native_reward': ((status.get('native_result') or {}).get('rewards') or {})
++                       if status else None,
++                   'task_terminal_result': terminal.get('result') if terminal else None,
++                   'pos_archive_status': status.get('pos_archive_status') if status else None}
++        safe = bool(status and not status.get('primary_failure') and
++            status.get('cleanup_confirmed') is True and
++            status.get('remaining_containers') == [] and
++            status.get('harbor_return_code') == 0 and
++            status.get('frozen_product') is True and
++            status.get('evaluation_released') is True and
++            (status.get('native_result') or {}).get('status') == 'native_recorded' and
++            status.get('native_script_observed') is True and
++            len(status.get('native_script_executions') or []) == 1 and
++            status.get('native_upload_checked') is True and
++            status.get('native_reports_checked') is True and
++            (status.get('pos_archive_status') or {}).get('result_bound') is True and
++            (status.get('pos_archive_status') or {}).get('close_bound') is True and
++            (status.get('pos_archive_status') or {}).get('archive_incomplete') is False and
++            (status.get('pos_archive_status') or {}).get('close_status') == 'graceful_exit' and
++            terminal and terminal.get('run_id') == row['run_id'] and
++            terminal.get('task_id') == task and
++            terminal.get('result') in {'CURRENT_TASK_DONE', 'MAX_TURNS_EXCEEDED', 'EXITED'})
++        summary['continue_safe'] = safe
++        write_new(directory / 'serial_result.json', summary)
++        print(json.dumps({'order': order, 'task': task,
++                          'continue_safe': safe, 'reward': summary['native_reward']},
++                         ensure_ascii=False), flush=True)
++        if not safe:
++            raise RuntimeError('formal run/evaluation/cleanup uncertain; later tasks stopped')
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    commands = parser.add_subparsers(dest='command', required=True)
++    prepared = commands.add_parser('prepare')
++    base_arguments(prepared)
++    prepared.add_argument('--plan', required=True)
++    prepared.add_argument('--certification', required=True)
++    prepared.add_argument('--output', required=True)
++    launched = commands.add_parser('run')
++    base_arguments(launched)
++    launched.add_argument('--certification', required=True)
++    launched.add_argument('--compatibility-result', required=True)
++    launched.add_argument('--output', required=True)
++    args = parser.parse_args()
++    prepare(args) if args.command == 'prepare' else run(args)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/test_terminal_handoff.py b/method_discovery/pos_upstream_ga_v1_20261017/test_terminal_handoff.py
+new file mode 100644
+index 00000000..a634272c
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/test_terminal_handoff.py
+@@ -0,0 +1,110 @@
++"""Exercise the actual native-SHARED hooks with finite container/receipt mocks."""
++import asyncio
++import hashlib
++import json
++from pathlib import Path
++from types import SimpleNamespace
++import tempfile
++import unittest
++from unittest.mock import AsyncMock, patch
++
++from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.pma_harbor_hooks import NativeSharedTrialHooks, _tree_sha256
++
++
++class TerminalHandoffTests(unittest.TestCase):
++    def test_auxiliary_terminal_unavailability_never_adds_evaluation_gate(self):
++        for case in ('normal', 'host_journal_incomplete', 'cat_nonzero',
++                     'invalid_json', 'missing_fields', 'identity_conflict'):
++            with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
++                root = Path(tmp)
++                archive, control, tests = (root / name for name in
++                                           ('archive', 'control', 'tests'))
++                for directory in (archive, control / 'pos_archive', tests,
++                                  archive / 'registered_control_processes'):
++                    directory.mkdir(parents=True, exist_ok=True)
++                (tests / 'test.sh').write_bytes(b'#!/bin/sh\nexit 0\n')
++                (control / 'sidecar_stopped.json').write_text(json.dumps({
++                    'run_id': 'run', 'clean': True, 'stopped': True}), encoding='utf-8')
++                (archive / 'control_process_registry.json').write_text(json.dumps({
++                    'run_id': 'run', 'container_id': 'main', 'pid_namespace': 'namespace'}),
++                    encoding='utf-8')
++                registered = {'pid': 100, 'start_ticks': 5,
++                    'argv_sha256': 'fixed', 'kind': 'transport',
++                    'run_id': 'run', 'pid_namespace': 'namespace'}
++                (archive / 'registered_control_processes/100-5.json').write_text(
++                    json.dumps(registered), encoding='utf-8')
++                for filename, status in (('events.result.json', 'completed'),
++                                         ('events.close.json', 'graceful_exit')):
++                    (control / 'pos_archive' / filename).write_text(json.dumps({
++                        'run_id': 'run', 'task_id': 'task', 'status': status,
++                        'worker_return_code': 0}), encoding='utf-8')
++                terminal = {'run_id': 'run', 'task_id': 'task',
++                    'result': 'CURRENT_TASK_DONE',
++                    'pma_finalization': {'status': 'not_enabled'},
++                    'pos_finalization': {'status': 'completed',
++                                         'archive_incomplete': case == 'host_journal_incomplete'},
++                    'pos_archive_incomplete': case == 'host_journal_incomplete',
++                    'pos_auxiliary_errors': ([{'kind': 'terminal', 'error_type': 'OSError'}]
++                                             if case == 'host_journal_incomplete' else [])}
++                if case == 'missing_fields':
++                    del terminal['result']
++                if case == 'identity_conflict':
++                    terminal['run_id'] = 'another-run'
++                raw = 'not-json' if case == 'invalid_json' else json.dumps(terminal)
++                async def compose(command):
++                    return SimpleNamespace(stdout='gateway\n' if command[:2] ==
++                                           ['ps', '-a'] else '')
++                async def container_exec(*args, **kwargs):
++                    return SimpleNamespace(return_code=1 if case == 'cat_nonzero' else 0,
++                                           stdout=raw)
++                environment = SimpleNamespace(_run_docker_compose_command=compose,
++                                              exec=container_exec)
++                hook = object.__new__(NativeSharedTrialHooks)
++                hook.archive, hook.control = archive, control
++                hook.spec = {'run_id': 'run', 'task_id': 'task', 'condition': 'P',
++                    'native_tests_tree_sha256': _tree_sha256(tests),
++                    'native_test_sh_sha256': hashlib.sha256(
++                        (tests / 'test.sh').read_bytes()).hexdigest()}
++                hook.container_id = 'main'
++                hook._control_namespace = 'namespace'
++                hook._control_python = 'python'
++                hook.baseline_pids = {'100'}
++                hook._finish_control_watch = AsyncMock()
++                hook._main_id = AsyncMock(return_value='main')
++                hook.trial = SimpleNamespace(agent_environment=environment,
++                    result=SimpleNamespace(agent_result=None),
++                    task=SimpleNamespace(paths=SimpleNamespace(tests_dir=tests)))
++                def docker(args, **kwargs):
++                    return SimpleNamespace(returncode=0,
++                        stdout=('false\n' if args[1] == 'inspect' else
++                                'PID CMD\n100 control\n200 task-service\n'))
++                with patch('method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.pma_harbor_hooks.subprocess.run', side_effect=docker), patch(
++                    'method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.pma_harbor_hooks.scan_control_processes',
++                    return_value={'pid_namespace': 'namespace', 'processes': []}), patch(
++                    'method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.pma_harbor_hooks.probe_registered',
++                    return_value='exited'):
++                    async def run():
++                        await hook.agent_end(None)
++                        await hook.verification_start(None)
++                    if case == 'identity_conflict':
++                        with self.assertRaisesRegex(RuntimeError, 'identity conflict'):
++                            asyncio.run(run())
++                        self.assertFalse((archive / 'verification_released.json').exists())
++                        continue
++                    asyncio.run(run())
++                status = json.loads((archive / 'pos_archive_status.json').read_text())
++                self.assertTrue((archive / 'verification_released.json').is_file())
++                self.assertEqual(status['task_terminal_status'],
++                                 'available' if case in {'normal', 'host_journal_incomplete'}
++                                 else 'partial' if case == 'missing_fields'
++                                 else 'unavailable')
++                self.assertEqual(status['task_result'], 'CURRENT_TASK_DONE' if case in
++                                 {'normal', 'host_journal_incomplete'} else None)
++                self.assertEqual(status['archive_incomplete'], case != 'normal')
++                if case == 'host_journal_incomplete':
++                    self.assertEqual(status['auxiliary_errors'],
++                                     [{'kind': 'terminal', 'error_type': 'OSError'}])
++
++
++if __name__ == '__main__':
++    unittest.main(verbosity=2)
