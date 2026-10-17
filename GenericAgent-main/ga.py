@@ -548,6 +548,8 @@ class GenericAgentHandler(BaseHandler):
         return "\n".join(parts[-70:])
 
     def _get_anchor_prompt(self, skip=False):
+        if getattr(self.parent, 'pos_decision_context', False):
+            return '\n'
         if skip: return "\n"
         h = self.history_info; W = 30
         earlier = f'<earlier_context>\n{self._fold_earlier(h[:-W])}\n</earlier_context>\n' if len(h) > W else ""
@@ -574,7 +576,9 @@ class GenericAgentHandler(BaseHandler):
         self.history_info.append(f'[Agent] {summary}')
         _plan = self._in_plan_mode()
 
-        if turn % 175 == 0 and (not _plan):
+        if getattr(self.parent, 'pos_decision_context', False):
+            pass  # PoS owns the decision memory; keep actual tool/user updates below.
+        elif turn % 175 == 0 and (not _plan):
             next_prompt += f"\n\n[DANGER] Turn {turn}. Must call ask_user to summarize progress and get direction. No more blind retries."
         elif turn % 7 == 0:
             next_prompt += f"\n\n[SYSTEM] Turn {turn}. Call update_working_checkpoint to save key context. Stop ineffective retries; if no progress, switch strategy: 1) Probe physical boundaries 2) **Re-read relevant SOPs**"

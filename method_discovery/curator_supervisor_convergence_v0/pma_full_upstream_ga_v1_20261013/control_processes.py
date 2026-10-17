@@ -21,6 +21,7 @@ for name in os.listdir('/proc'):
         raw = open('/proc/' + name + '/cmdline', 'rb').read()
         argv = [part.decode('utf-8', 'surrogateescape') for part in raw.split(b'\0') if part]
         kind = ('ga' if '/opt/genericagent/agentmain.py' in argv else
+                'pos' if '/opt/genericagent/pos_runtime/worker.py' in argv else
                 'transport' if '/opt/genericagent/isolated_transport.py' in argv and
                 'local' in argv else
                 'wrapper' if len(argv) > 2 and os.path.basename(argv[0]) in
@@ -100,6 +101,7 @@ except FileNotFoundError:
     raise SystemExit(0)
 argv = [part.decode('utf-8', 'surrogateescape') for part in raw.split(b'\0') if part]
 kind = ('ga' if '/opt/genericagent/agentmain.py' in argv else
+        'pos' if '/opt/genericagent/pos_runtime/worker.py' in argv else
         'transport' if '/opt/genericagent/isolated_transport.py' in argv and
         'local' in argv else
         'wrapper' if len(argv) > 2 and os.path.basename(argv[0]) in

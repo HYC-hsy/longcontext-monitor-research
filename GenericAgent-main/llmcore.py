@@ -998,6 +998,23 @@ class NativeClaudeSession(BaseSession):
                 content = re.sub(think_pattern, "", content, flags=re.DOTALL)
         return MockResponse(thinking, content, tool_calls, str(content_blocks))
 
+    def ask_stateless(self, msg):
+        """PoS-only one-decision request: do not read or append session history."""
+        assert type(msg) is dict and msg.get('role') == 'user'
+        content_blocks = None
+        gen = self.raw_ask([msg])
+        try:
+            while True: yield next(gen)
+        except StopIteration as e: content_blocks = e.value or []
+        if content_blocks and (_injected := _ensure_text_block(content_blocks)): yield _injected
+        text_parts = [b['text'] for b in content_blocks if b.get('type') == 'text']
+        content = '\n'.join(text_parts).strip()
+        tool_calls = [MockToolCall(b['name'], b.get('input', {}), id=b.get('id', ''))
+                      for b in content_blocks if b.get('type') == 'tool_use']
+        if not tool_calls: tool_calls, content = _parse_text_tool_calls(content)
+        thinking = '\n'.join(b['thinking'] for b in content_blocks if b.get('type') == 'thinking').strip()
+        return MockResponse(thinking, content, tool_calls, str(content_blocks))
+
 class NativeOAISession(NativeClaudeSession):
     native_ua = "codex_exec/0.139.0 (Windows 10.0.26200; x86_64) unknown (codex_exec; 0.139.0)"
     def raw_ask(self, messages):
@@ -1297,7 +1314,26 @@ class NativeToolClient:
         combined = f"{extra_system}\n\n{protocol}" if extra_system and protocol else (extra_system or protocol)
         if combined != self.backend.system: print(f"[Debug] Updated system prompt, length {len(combined)} chars.")
         self.backend.system = combined
-    def chat(self, messages, tools=None):
+    def chat(self, messages, tools=None, request_view=None):
+        if request_view is not None:
+            if not isinstance(self.backend, NativeClaudeSession):
+                raise RuntimeError('PoS stateless request requires native GA backend')
+            if set(request_view) != {'system', 'user'}:
+                raise ValueError('PoS request view must contain exact system/user fields')
+            if tools: self.backend.tools = tools
+            self.set_system(request_view['system'])
+            # Actual lower-boundary payload is one new user text block. Never
+            # attach pending tool_result blocks or replay backend.history.
+            self._pending_tool_ids = []
+            merged = {'role': 'user', 'content': [
+                {'type': 'text', 'text': request_view['user']}]}
+            _write_llm_log('Prompt', json.dumps(merged, ensure_ascii=False), self.log_path)
+            gen = self.backend.ask_stateless(merged)
+            try:
+                while True: yield next(gen)
+            except StopIteration as e: resp = e.value
+            if resp: _write_llm_log('Response', resp.raw, self.log_path, model=self.backend.model)
+            return resp
         if tools: self.backend.tools = tools
         if not self.backend.history: self._pending_tool_ids = []
         combined_content = []; resp = None; tool_results = []

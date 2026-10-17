@@ -59,6 +59,21 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
     _hook('agent_before', locals())
     pma = None
     pma_upstream = None
+    pos = None
+    pos_observation = initial_content
+    if os.environ.get('GA_POS_ENABLED') == '1':
+        if any(os.environ.get(name) == '1' for name in (
+                'GA_PMA_UPSTREAM_ENABLED', 'GA_PMA_ENABLED',
+                'GA_MONITOR_ENABLED', 'GA_M0_MONITOR_ENABLED')):
+            raise ValueError('PoS is exclusive of PMA and monitor modes')
+        if int(turn_offset) != 0:
+            raise ValueError('PoS requires a fresh Task episode')
+        from pos_bridge import PoSBridge
+        pos = PoSBridge.from_environment()
+        handler.parent.pos_decision_context = True
+        pos.exchange('reset', case_id=os.environ.get('GA_BENCH_TASK_ID', 'offline-task'),
+                     task=initial_content, observation=initial_content,
+                     actions=tools_schema)
     if os.environ.get('GA_PMA_UPSTREAM_ENABLED') == '1':
         if (os.environ.get('GA_PMA_ENABLED') == '1' or
                 os.environ.get('GA_MONITOR_ENABLED') == '1' or
@@ -128,7 +143,16 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
                             event, actor_attempt=turn,
                             pma_event_id=pma_upstream.last_event_id)
         _hook('llm_before', locals())
-        response_gen = client.chat(messages=messages, tools=tools_schema)
+        if pos is not None:
+            view = pos.exchange('decision_view', observation=pos_observation,
+                                actions=tools_schema,
+                                runtime_constraints='')
+            request_view = {'system': system_prompt + '\n\n' + view['system'],
+                            'user': view['user']}
+            response_gen = client.chat(messages=messages, tools=tools_schema,
+                                       request_view=request_view)
+        else:
+            response_gen = client.chat(messages=messages, tools=tools_schema)
         try:
             if verbose:
                 response = yield from response_gen
@@ -143,11 +167,20 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             yield "\n[Task Agent response interrupted for monitor correction.]\n"
             if pma_upstream is not None:
                 pma_upstream.actor_step(turn, status='provider_cancelled')
+            if pos is not None:
+                pos.exchange('finish', reason='provider_cancelled')
+                pos.close()
+                raise
             messages = [{
                 "role": "user",
                 "content": "The previous response was interrupted before it became an accepted action.",
             }]
             continue
+        except BaseException:
+            if pos is not None:
+                try: pos.exchange('finish', reason='provider_or_capture_failure')
+                finally: pos.close()
+            raise
         _hook('llm_after', locals())
 
         provider_link = _consume_provider_call() if _telemetry_enabled() else None
@@ -215,6 +248,12 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             tool_calls = [{'tool_name': 'no_tool', 'args': {}}]
         else: tool_calls = [{'tool_name': tc.function.name, 'args': json.loads(tc.function.arguments), 'id': tc.id}
                           for tc in response.tool_calls]
+
+        pos_actions = ([{'id': call.get('id', ''), 'name': call['tool_name'],
+                         'arguments': dict(call['args']), 'order': index,
+                         'status': 'not_executed'}
+                        for index, call in enumerate(tool_calls)
+                        if call['tool_name'] != 'no_tool'] if pos is not None else None)
        
         tool_results = []; next_prompts = set(); exit_reason = {}
         for ii, tc in enumerate(tool_calls):
@@ -223,6 +262,8 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             barrier = getattr(handler.parent, 'monitor_correction_barrier', None)
             if ((interruption is not None and interruption.is_requested()) or
                     (barrier is not None and barrier.is_active())):
+                if pos_actions is not None:
+                    for item in pos_actions[ii:]: item['status'] = 'cancelled'
                 for pending in tool_calls[ii:]:
                     pending_id = pending.get('id', '')
                     if pending_id:
@@ -237,6 +278,8 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
                 if verbose: yield f"🛠️ Tool: `{tool_name}`  📥 args:\n````text\n{get_pretty_json(args)}\n````\n"
                 else: yield f"🛠️ {tool_name}({_compact_tool_args(tool_name, args)})\n\n\n"
             handler.current_turn = turn
+            if pos_actions is not None and tool_name != 'no_tool':
+                pos_actions[ii]['status'] = 'started'
             if tool_name == 'no_tool' and completion_decision and completion_decision.decision not in ('ALLOW_COMPLETE', 'ERROR_FAIL_OPEN'):
                 outcome = StepOutcome(None, next_prompt=completion_decision.next_prompt,
                                       should_exit=completion_decision.decision in ('ABSTAIN', 'ERROR_FAIL_CLOSED'))
@@ -249,6 +292,10 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
                     outcome = (yield from proxy()) if verbose else exhaust(proxy())
                     if verbose: yield '`````\n'
                 except StopIteration as e: outcome = e.value
+            if pos_actions is not None and tool_name != 'no_tool':
+                pos_actions[ii]['status'] = 'executed'
+                pos_actions[ii]['result'] = outcome.data
+                pos_actions[ii]['next_prompt'] = outcome.next_prompt
             
             if outcome.data is not None and tool_name != 'no_tool':
                 handler.observe_tool_outcome(outcome.data, turn)
@@ -263,6 +310,21 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             next_prompts.add(outcome.next_prompt)
         if len(next_prompts) == 0 or exit_reason:
             if len(handler._done_hooks) == 0 or exit_reason.get('result', '') == 'EXITED':
+                if pos is not None:
+                    terminal_observation = json.dumps({
+                        'source': 'GA_completed_joint_action', 'turn': turn,
+                        'tool_batch': pos_actions, 'response_content': response.content or '',
+                        'exit_reason': exit_reason or {'result': 'CURRENT_TASK_DONE'}},
+                        ensure_ascii=False, default=json_default)
+                    if pos_actions and any(a['status'] == 'executed' for a in pos_actions):
+                        pos.exchange('update', thought=response.content or '',
+                            action_batch=pos_actions, observation=terminal_observation,
+                            done=True)
+                    pos.exchange('finish', reason=('PROVIDER_FAILURE' if
+                                 provider_error_response else (exit_reason or
+                                 {'result': 'CURRENT_TASK_DONE'})['result']),
+                                 observation=terminal_observation)
+                    pos.close()
                 if pma_upstream is not None:
                     pma_upstream.actor_step(
                         turn, status='completed', response=response.content or '',
@@ -271,6 +333,17 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
                 break
             next_prompts.add(handler._done_hooks.pop(0))
         next_prompt = handler.turn_end_callback(response, tool_calls, tool_results, turn, '\n'.join(next_prompts), exit_reason)
+        if pos is not None:
+            pos_observation = json.dumps({
+                'source': 'GA_completed_joint_action', 'turn': turn,
+                'tool_batch': pos_actions, 'tool_results': tool_results,
+                'current_runtime_instructions': next_prompt,
+                'response_content': response.content or '',
+                'exit_reason': exit_reason}, ensure_ascii=False, default=json_default)
+            if pos_actions and any(a['status'] == 'executed' for a in pos_actions):
+                pos.exchange('update', thought=response.content or '',
+                             action_batch=pos_actions, observation=pos_observation,
+                             done=False)
         _hook('turn_after', locals())
         if pma is not None:
             pma.observe(response.content or '',
@@ -293,6 +366,10 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
     final_outcome = exit_reason or {'result': 'MAX_TURNS_EXCEEDED'}
     if response is not None and _is_provider_error_response(response):
         final_outcome = {'result': 'PROVIDER_FAILURE', 'error': response.content}
+    if pos is not None and not pos.closed:
+        try: pos.exchange('finish', reason=final_outcome['result'],
+                          observation=pos_observation)
+        finally: pos.close()
     _research_emit('termination', final_outcome, internal_turn=turn)
     _hook('agent_after', locals())
     return final_outcome

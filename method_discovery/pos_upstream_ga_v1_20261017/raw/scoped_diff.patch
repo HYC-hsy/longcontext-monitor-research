@@ -1,0 +1,2055 @@
+diff --git a/GenericAgent-main/agent_loop.py b/GenericAgent-main/agent_loop.py
+index 6cb5c6a5..9b4d0d98 100644
+--- a/GenericAgent-main/agent_loop.py
++++ b/GenericAgent-main/agent_loop.py
+@@ -59,6 +59,21 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
+     _hook('agent_before', locals())
+     pma = None
+     pma_upstream = None
++    pos = None
++    pos_observation = initial_content
++    if os.environ.get('GA_POS_ENABLED') == '1':
++        if any(os.environ.get(name) == '1' for name in (
++                'GA_PMA_UPSTREAM_ENABLED', 'GA_PMA_ENABLED',
++                'GA_MONITOR_ENABLED', 'GA_M0_MONITOR_ENABLED')):
++            raise ValueError('PoS is exclusive of PMA and monitor modes')
++        if int(turn_offset) != 0:
++            raise ValueError('PoS requires a fresh Task episode')
++        from pos_bridge import PoSBridge
++        pos = PoSBridge.from_environment()
++        handler.parent.pos_decision_context = True
++        pos.exchange('reset', case_id=os.environ.get('GA_BENCH_TASK_ID', 'offline-task'),
++                     task=initial_content, observation=initial_content,
++                     actions=tools_schema)
+     if os.environ.get('GA_PMA_UPSTREAM_ENABLED') == '1':
+         if (os.environ.get('GA_PMA_ENABLED') == '1' or
+                 os.environ.get('GA_MONITOR_ENABLED') == '1' or
+@@ -128,7 +143,16 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
+                             event, actor_attempt=turn,
+                             pma_event_id=pma_upstream.last_event_id)
+         _hook('llm_before', locals())
+-        response_gen = client.chat(messages=messages, tools=tools_schema)
++        if pos is not None:
++            view = pos.exchange('decision_view', observation=pos_observation,
++                                actions=tools_schema,
++                                runtime_constraints='')
++            request_view = {'system': system_prompt + '\n\n' + view['system'],
++                            'user': view['user']}
++            response_gen = client.chat(messages=messages, tools=tools_schema,
++                                       request_view=request_view)
++        else:
++            response_gen = client.chat(messages=messages, tools=tools_schema)
+         try:
+             if verbose:
+                 response = yield from response_gen
+@@ -143,11 +167,20 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
+             yield "\n[Task Agent response interrupted for monitor correction.]\n"
+             if pma_upstream is not None:
+                 pma_upstream.actor_step(turn, status='provider_cancelled')
++            if pos is not None:
++                pos.exchange('finish', reason='provider_cancelled')
++                pos.close()
++                raise
+             messages = [{
+                 "role": "user",
+                 "content": "The previous response was interrupted before it became an accepted action.",
+             }]
+             continue
++        except BaseException:
++            if pos is not None:
++                try: pos.exchange('finish', reason='provider_or_capture_failure')
++                finally: pos.close()
++            raise
+         _hook('llm_after', locals())
+ 
+         provider_link = _consume_provider_call() if _telemetry_enabled() else None
+@@ -215,6 +248,12 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
+             tool_calls = [{'tool_name': 'no_tool', 'args': {}}]
+         else: tool_calls = [{'tool_name': tc.function.name, 'args': json.loads(tc.function.arguments), 'id': tc.id}
+                           for tc in response.tool_calls]
++
++        pos_actions = ([{'id': call.get('id', ''), 'name': call['tool_name'],
++                         'arguments': dict(call['args']), 'order': index,
++                         'status': 'not_executed'}
++                        for index, call in enumerate(tool_calls)
++                        if call['tool_name'] != 'no_tool'] if pos is not None else None)
+        
+         tool_results = []; next_prompts = set(); exit_reason = {}
+         for ii, tc in enumerate(tool_calls):
+@@ -223,6 +262,8 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
+             barrier = getattr(handler.parent, 'monitor_correction_barrier', None)
+             if ((interruption is not None and interruption.is_requested()) or
+                     (barrier is not None and barrier.is_active())):
++                if pos_actions is not None:
++                    for item in pos_actions[ii:]: item['status'] = 'cancelled'
+                 for pending in tool_calls[ii:]:
+                     pending_id = pending.get('id', '')
+                     if pending_id:
+@@ -237,6 +278,8 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
+                 if verbose: yield f"🛠️ Tool: `{tool_name}`  📥 args:\n````text\n{get_pretty_json(args)}\n````\n"
+                 else: yield f"🛠️ {tool_name}({_compact_tool_args(tool_name, args)})\n\n\n"
+             handler.current_turn = turn
++            if pos_actions is not None and tool_name != 'no_tool':
++                pos_actions[ii]['status'] = 'started'
+             if tool_name == 'no_tool' and completion_decision and completion_decision.decision not in ('ALLOW_COMPLETE', 'ERROR_FAIL_OPEN'):
+                 outcome = StepOutcome(None, next_prompt=completion_decision.next_prompt,
+                                       should_exit=completion_decision.decision in ('ABSTAIN', 'ERROR_FAIL_CLOSED'))
+@@ -249,6 +292,10 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
+                     outcome = (yield from proxy()) if verbose else exhaust(proxy())
+                     if verbose: yield '`````\n'
+                 except StopIteration as e: outcome = e.value
++            if pos_actions is not None and tool_name != 'no_tool':
++                pos_actions[ii]['status'] = 'executed'
++                pos_actions[ii]['result'] = outcome.data
++                pos_actions[ii]['next_prompt'] = outcome.next_prompt
+             
+             if outcome.data is not None and tool_name != 'no_tool':
+                 handler.observe_tool_outcome(outcome.data, turn)
+@@ -263,6 +310,21 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
+             next_prompts.add(outcome.next_prompt)
+         if len(next_prompts) == 0 or exit_reason:
+             if len(handler._done_hooks) == 0 or exit_reason.get('result', '') == 'EXITED':
++                if pos is not None:
++                    terminal_observation = json.dumps({
++                        'source': 'GA_completed_joint_action', 'turn': turn,
++                        'tool_batch': pos_actions, 'response_content': response.content or '',
++                        'exit_reason': exit_reason or {'result': 'CURRENT_TASK_DONE'}},
++                        ensure_ascii=False, default=json_default)
++                    if pos_actions and any(a['status'] == 'executed' for a in pos_actions):
++                        pos.exchange('update', thought=response.content or '',
++                            action_batch=pos_actions, observation=terminal_observation,
++                            done=True)
++                    pos.exchange('finish', reason=('PROVIDER_FAILURE' if
++                                 provider_error_response else (exit_reason or
++                                 {'result': 'CURRENT_TASK_DONE'})['result']),
++                                 observation=terminal_observation)
++                    pos.close()
+                 if pma_upstream is not None:
+                     pma_upstream.actor_step(
+                         turn, status='completed', response=response.content or '',
+@@ -271,6 +333,17 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
+                 break
+             next_prompts.add(handler._done_hooks.pop(0))
+         next_prompt = handler.turn_end_callback(response, tool_calls, tool_results, turn, '\n'.join(next_prompts), exit_reason)
++        if pos is not None:
++            pos_observation = json.dumps({
++                'source': 'GA_completed_joint_action', 'turn': turn,
++                'tool_batch': pos_actions, 'tool_results': tool_results,
++                'current_runtime_instructions': next_prompt,
++                'response_content': response.content or '',
++                'exit_reason': exit_reason}, ensure_ascii=False, default=json_default)
++            if pos_actions and any(a['status'] == 'executed' for a in pos_actions):
++                pos.exchange('update', thought=response.content or '',
++                             action_batch=pos_actions, observation=pos_observation,
++                             done=False)
+         _hook('turn_after', locals())
+         if pma is not None:
+             pma.observe(response.content or '',
+@@ -293,6 +366,10 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
+     final_outcome = exit_reason or {'result': 'MAX_TURNS_EXCEEDED'}
+     if response is not None and _is_provider_error_response(response):
+         final_outcome = {'result': 'PROVIDER_FAILURE', 'error': response.content}
++    if pos is not None and not pos.closed:
++        try: pos.exchange('finish', reason=final_outcome['result'],
++                          observation=pos_observation)
++        finally: pos.close()
+     _research_emit('termination', final_outcome, internal_turn=turn)
+     _hook('agent_after', locals())
+     return final_outcome
+diff --git a/GenericAgent-main/ga.py b/GenericAgent-main/ga.py
+index 671ef1a2..844ebde1 100644
+--- a/GenericAgent-main/ga.py
++++ b/GenericAgent-main/ga.py
+@@ -548,6 +548,8 @@ class GenericAgentHandler(BaseHandler):
+         return "\n".join(parts[-70:])
+ 
+     def _get_anchor_prompt(self, skip=False):
++        if getattr(self.parent, 'pos_decision_context', False):
++            return '\n'
+         if skip: return "\n"
+         h = self.history_info; W = 30
+         earlier = f'<earlier_context>\n{self._fold_earlier(h[:-W])}\n</earlier_context>\n' if len(h) > W else ""
+@@ -574,7 +576,9 @@ class GenericAgentHandler(BaseHandler):
+         self.history_info.append(f'[Agent] {summary}')
+         _plan = self._in_plan_mode()
+ 
+-        if turn % 175 == 0 and (not _plan):
++        if getattr(self.parent, 'pos_decision_context', False):
++            pass  # PoS owns the decision memory; keep actual tool/user updates below.
++        elif turn % 175 == 0 and (not _plan):
+             next_prompt += f"\n\n[DANGER] Turn {turn}. Must call ask_user to summarize progress and get direction. No more blind retries."
+         elif turn % 7 == 0:
+             next_prompt += f"\n\n[SYSTEM] Turn {turn}. Call update_working_checkpoint to save key context. Stop ineffective retries; if no progress, switch strategy: 1) Probe physical boundaries 2) **Re-read relevant SOPs**"
+diff --git a/GenericAgent-main/llmcore.py b/GenericAgent-main/llmcore.py
+index 57b29e4d..fe994c7d 100644
+--- a/GenericAgent-main/llmcore.py
++++ b/GenericAgent-main/llmcore.py
+@@ -998,6 +998,23 @@ class NativeClaudeSession(BaseSession):
+                 content = re.sub(think_pattern, "", content, flags=re.DOTALL)
+         return MockResponse(thinking, content, tool_calls, str(content_blocks))
+ 
++    def ask_stateless(self, msg):
++        """PoS-only one-decision request: do not read or append session history."""
++        assert type(msg) is dict and msg.get('role') == 'user'
++        content_blocks = None
++        gen = self.raw_ask([msg])
++        try:
++            while True: yield next(gen)
++        except StopIteration as e: content_blocks = e.value or []
++        if content_blocks and (_injected := _ensure_text_block(content_blocks)): yield _injected
++        text_parts = [b['text'] for b in content_blocks if b.get('type') == 'text']
++        content = '\n'.join(text_parts).strip()
++        tool_calls = [MockToolCall(b['name'], b.get('input', {}), id=b.get('id', ''))
++                      for b in content_blocks if b.get('type') == 'tool_use']
++        if not tool_calls: tool_calls, content = _parse_text_tool_calls(content)
++        thinking = '\n'.join(b['thinking'] for b in content_blocks if b.get('type') == 'thinking').strip()
++        return MockResponse(thinking, content, tool_calls, str(content_blocks))
++
+ class NativeOAISession(NativeClaudeSession):
+     native_ua = "codex_exec/0.139.0 (Windows 10.0.26200; x86_64) unknown (codex_exec; 0.139.0)"
+     def raw_ask(self, messages):
+@@ -1297,7 +1314,26 @@ class NativeToolClient:
+         combined = f"{extra_system}\n\n{protocol}" if extra_system and protocol else (extra_system or protocol)
+         if combined != self.backend.system: print(f"[Debug] Updated system prompt, length {len(combined)} chars.")
+         self.backend.system = combined
+-    def chat(self, messages, tools=None):
++    def chat(self, messages, tools=None, request_view=None):
++        if request_view is not None:
++            if not isinstance(self.backend, NativeClaudeSession):
++                raise RuntimeError('PoS stateless request requires native GA backend')
++            if set(request_view) != {'system', 'user'}:
++                raise ValueError('PoS request view must contain exact system/user fields')
++            if tools: self.backend.tools = tools
++            self.set_system(request_view['system'])
++            # Actual lower-boundary payload is one new user text block. Never
++            # attach pending tool_result blocks or replay backend.history.
++            self._pending_tool_ids = []
++            merged = {'role': 'user', 'content': [
++                {'type': 'text', 'text': request_view['user']}]}
++            _write_llm_log('Prompt', json.dumps(merged, ensure_ascii=False), self.log_path)
++            gen = self.backend.ask_stateless(merged)
++            try:
++                while True: yield next(gen)
++            except StopIteration as e: resp = e.value
++            if resp: _write_llm_log('Response', resp.raw, self.log_path, model=self.backend.model)
++            return resp
+         if tools: self.backend.tools = tools
+         if not self.backend.history: self._pending_tool_ids = []
+         combined_content = []; resp = None; tool_results = []
+diff --git a/GenericAgent-main/pos_bridge.py b/GenericAgent-main/pos_bridge.py
+new file mode 100644
+index 00000000..b46bc79d
+--- /dev/null
++++ b/GenericAgent-main/pos_bridge.py
+@@ -0,0 +1,120 @@
++"""Default-off GA-side IPC for an isolated released-core PoS worker."""
++from __future__ import annotations
++
++import json
++import os
++from pathlib import Path
++import queue
++import subprocess
++import sys
++import threading
++import time
++
++
++class PoSBridgeError(RuntimeError):
++    pass
++
++
++class PoSBridge:
++    def __init__(self, *, worker_script, vendor, episode_module, archive,
++                 mode, fake_replies=None, profile_file=None, profile_name=None,
++                 timeout=180):
++        if mode not in {'fake', 'profile'}:
++            raise PoSBridgeError('explicit PoS transport mode required')
++        argv = [sys.executable, '-B', '-u', str(Path(worker_script).resolve(strict=True)),
++                '--vendor', str(Path(vendor).resolve(strict=True)),
++                '--episode-module', str(Path(episode_module).resolve(strict=True)),
++                '--archive', str(Path(archive)), '--mode', mode]
++        if mode == 'fake':
++            argv += ['--fake-replies', str(Path(fake_replies).resolve(strict=True))]
++        else:
++            argv += ['--profile-file', str(Path(profile_file).resolve(strict=True)),
++                     '--profile-name', profile_name]
++        archive_path = Path(archive)
++        archive_path.parent.mkdir(parents=True, exist_ok=True)
++        self._stderr = archive_path.with_suffix('.stderr.log').open('ab')
++        try:
++            self.process = subprocess.Popen(argv, stdin=subprocess.PIPE,
++                stdout=subprocess.PIPE, stderr=self._stderr, text=True,
++                encoding='utf-8', bufsize=1)
++        except BaseException:
++            self._stderr.close()
++            raise
++        self.timeout = float(timeout)
++        self.replies = queue.Queue()
++        self._reader = threading.Thread(target=self._read, daemon=True)
++        self._reader.start()
++        self.sent = 0
++        self.closed = False
++
++    @classmethod
++    def from_environment(cls):
++        required = ('GA_POS_WORKER_SCRIPT', 'GA_POS_VENDOR_ROOT',
++                    'GA_POS_EPISODE_MODULE', 'GA_POS_ARCHIVE', 'GA_POS_TRANSPORT')
++        if any(not os.environ.get(name) for name in required):
++            raise PoSBridgeError('PoS worker identity or archive missing')
++        mode = os.environ['GA_POS_TRANSPORT']
++        if mode == 'profile' and os.environ.get('GA_POS_LIVE_AUTHORIZED') != '1':
++            raise PoSBridgeError('PoS profile transport is not authorized')
++        return cls(worker_script=os.environ['GA_POS_WORKER_SCRIPT'],
++                   vendor=os.environ['GA_POS_VENDOR_ROOT'],
++                   episode_module=os.environ['GA_POS_EPISODE_MODULE'],
++                   archive=os.environ['GA_POS_ARCHIVE'], mode=mode,
++                   fake_replies=os.environ.get('GA_POS_FAKE_REPLIES'),
++                   profile_file=os.environ.get('GA_POS_PROFILE_FILE'),
++                   profile_name=os.environ.get('GA_POS_PROFILE_NAME'),
++                   timeout=float(os.environ.get('GA_POS_TIMEOUT', '180')))
++
++    def _read(self):
++        try:
++            for line in self.process.stdout:
++                self.replies.put(line)
++        finally:
++            self.replies.put(None)
++
++    def exchange(self, kind, **fields):
++        if self.closed or self.process.poll() is not None:
++            raise PoSBridgeError('PoS worker is unavailable')
++        command = {'kind': kind, **fields}
++        self.sent += 1
++        try:
++            self.process.stdin.write(json.dumps(command, ensure_ascii=False) + '\n')
++            self.process.stdin.flush()
++        except (BrokenPipeError, OSError) as error:
++            self.close()
++            raise PoSBridgeError('PoS command acceptance unknown; never resend') from error
++        try:
++            raw = self.replies.get(timeout=self.timeout)
++        except queue.Empty as error:
++            self.close()
++            raise PoSBridgeError('PoS command result unknown; never resend') from error
++        if raw is None:
++            self.close()
++            raise PoSBridgeError('PoS worker exited without receipt')
++        try:
++            receipt = json.loads(raw)
++        except (ValueError, TypeError) as error:
++            self.close()
++            raise PoSBridgeError('PoS receipt malformed; never resend') from error
++        if receipt.get('status') != 'ok' or not isinstance(receipt.get('result'), dict):
++            self.close()
++            raise PoSBridgeError('PoS worker failed: ' + str(receipt.get('error')))
++        return receipt['result']
++
++    def close(self):
++        if self.closed:
++            return
++        self.closed = True
++        if self.process.poll() is None:
++            self.process.terminate()
++            try:
++                self.process.wait(timeout=5)
++            except subprocess.TimeoutExpired:
++                self.process.kill()
++                self.process.wait(timeout=5)
++        if self.process.stdin:
++            self.process.stdin.close()
++        if self.process.stdout:
++            self.process.stdout.close()
++        self._stderr.close()
++        self._reader.join(timeout=1)
+diff --git a/long_context_bench/scripts/isolated_run_bundle.py b/long_context_bench/scripts/isolated_run_bundle.py
+index b5d438a6..be53d4fd 100644
+--- a/long_context_bench/scripts/isolated_run_bundle.py
++++ b/long_context_bench/scripts/isolated_run_bundle.py
+@@ -70,7 +70,7 @@ def build_bundle(root, source, runtime, python_home, task_config, monitor_config
+             raise ValueError('Runtime source must not contain symbolic links')
+         if not p.name.startswith('mykey'):
+             shutil.copy2(p, copied / p.name)
+-    for name in ('assets', 'memory', 'plugins', 'monitor_agent_core', 'pma_baseline', 'reflect',
++    for name in ('assets', 'memory', 'plugins', 'monitor_agent_core', 'pma_baseline', 'pos_runtime', 'reflect',
+                  'ga_cli', 'frontends'):
+         p = source / name
+         if p.exists():
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/control_processes.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/control_processes.py
+index 7fca109f..b1d05772 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/control_processes.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/control_processes.py
+@@ -21,6 +21,7 @@ for name in os.listdir('/proc'):
+         raw = open('/proc/' + name + '/cmdline', 'rb').read()
+         argv = [part.decode('utf-8', 'surrogateescape') for part in raw.split(b'\0') if part]
+         kind = ('ga' if '/opt/genericagent/agentmain.py' in argv else
++                'pos' if '/opt/genericagent/pos_runtime/worker.py' in argv else
+                 'transport' if '/opt/genericagent/isolated_transport.py' in argv and
+                 'local' in argv else
+                 'wrapper' if len(argv) > 2 and os.path.basename(argv[0]) in
+@@ -100,6 +101,7 @@ except FileNotFoundError:
+     raise SystemExit(0)
+ argv = [part.decode('utf-8', 'surrogateescape') for part in raw.split(b'\0') if part]
+ kind = ('ga' if '/opt/genericagent/agentmain.py' in argv else
++        'pos' if '/opt/genericagent/pos_runtime/worker.py' in argv else
+         'transport' if '/opt/genericagent/isolated_transport.py' in argv and
+         'local' in argv else
+         'wrapper' if len(argv) > 2 and os.path.basename(argv[0]) in
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/harbor_adapter.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/harbor_adapter.py
+index 0d9c51e5..37e39fe3 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/harbor_adapter.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/harbor_adapter.py
+@@ -18,6 +18,16 @@ FORWARD = (
+     "GA_PMA_UPSTREAM_RESPONSES",
+     "GA_PMA_UPSTREAM_DEADLINE_EPOCH",
+     "GA_PMA_CAPTURE_TASK_REQUESTS",
++    "GA_POS_ENABLED",
++    "GA_POS_TRANSPORT",
++    "GA_POS_WORKER_SCRIPT",
++    "GA_POS_VENDOR_ROOT",
++    "GA_POS_EPISODE_MODULE",
++    "GA_POS_ARCHIVE",
++    "GA_POS_FAKE_REPLIES",
++    "GA_POS_PROFILE_FILE",
++    "GA_POS_PROFILE_NAME",
++    "GA_POS_LIVE_AUTHORIZED",
+ )
+ 
+ actual = hashlib.sha256(Path(original.__file__).read_bytes()).hexdigest()
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py
+index e69a6901..b3f43f69 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py
+@@ -77,26 +77,31 @@ def clean_owned_containers(root: Path) -> list[str]:
+ 
+ 
+ def _prepare_common(args, *, fake_gateway: bool) -> dict:
+-    if args.condition not in {"A", "B"}:
++    if args.condition not in {"A", "B", "P"}:
+         raise ValueError("unsupported PMA fixture arm")
+     root = Path(args.run_root).resolve(strict=False)
+     root.mkdir(parents=True, exist_ok=False)
+     (root / "control").mkdir()
+     (root / "archive").mkdir()
+-    manifest_path = (STAGE / "FOUR_RUN_MANIFEST_DRAFT.json" if fake_gateway
++    manifest_path = (Path(args.manifest).resolve(strict=True) if args.condition == 'P' else
++                     STAGE / "FOUR_RUN_MANIFEST_DRAFT.json" if fake_gateway
+                      else Path(args.manifest).resolve(strict=True))
+     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+     single = not fake_gateway and manifest.get('schema') in {
+         'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5'}
+-    if (args.task not in (manifest.get('assets', {}) if single else TASKS)):
++    pos = args.condition == 'P'
++    if (pos and (manifest.get('schema') != 'pos-ga-prepared-v1' or
++                manifest.get('execution_authorized') is not False)):
++        raise RuntimeError('PoS prepared identity missing or authorized')
++    if (args.task not in (manifest.get('assets', {}) if single or pos else TASKS)):
+         raise ValueError('task outside frozen PMA assets')
+     task = root / "public_task"
+-    if not fake_gateway and manifest.get("schema") in {
++    if pos or not fake_gateway and manifest.get("schema") in {
+             "pma-ga-live-manifest-v2", "pma-ga-live-manifest-v3",
+             "pma-ga-live-manifest-v4", "pma-ga-live-manifest-v5"}:
+         materialize_public(Path(args.official_source_git).resolve(strict=True),
+                            args.task, task, manifest["assets"][args.task]["public_members"],
+-                           registered=single)
++                           registered=single or pos)
+     else:
+         shutil.copytree(STAGE / "assets" / "public" / args.task, task)
+     (task / "tests").mkdir(exist_ok=True)
+@@ -109,6 +114,14 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
+         ".git", "temp", "tests", "__pycache__", ".pytest_cache", "*.pyc",
+         "*.local.json", "file_access_stats.json", "mykey.py"))
+     shutil.copy2(Path(args.task_profile_file).resolve(strict=True), ga_stage / "mykey.py")
++    if pos:
++        pos_source = STAGE.parents[1] / 'pos_upstream_ga_v1_20261017'
++        pos_stage = ga_stage / 'pos_runtime'
++        pos_stage.mkdir()
++        for name in ('worker.py', 'episode.py'):
++            shutil.copy2(pos_source / name, pos_stage / name)
++        shutil.copytree(pos_source / 'vendor', pos_stage / 'vendor',
++                        ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '.git'))
+     runtime = Path(args.runtime_root).resolve(strict=True)
+     source, compose = build_bundle(root / "bundle", ga_stage, runtime,
+                                    args.python_home, args.task_profile, None, 15340,
+@@ -127,15 +140,19 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
+         compose.write_text(json.dumps(fake_compose, indent=2), encoding="utf-8")
+     if manifest["execution_authorized"] is not False:
+         raise RuntimeError("PMA draft unexpectedly authorized")
+-    image_tag = manifest['assets'][args.task]['image_tag'] if single else TASKS[args.task]
++    image_tag = manifest['assets'][args.task]['image_tag'] if single or pos else TASKS[args.task]
+     identity = image_identity(image_tag)
+-    if not fake_gateway:
++    if not fake_gateway or pos:
+         approved = manifest['assets'][args.task]
+         if (identity['image_id'] != approved['image_id'] or
+                 approved['repo_digest'] not in identity['repo_digests']):
+             raise RuntimeError('PMA target image differs from frozen live manifest')
+     for name in ("requests", "responses"):
+         (root / "control" / "spool" / name).mkdir(parents=True, exist_ok=False)
++    if pos:
++        (root / 'control' / 'pos_archive').mkdir()
++        shutil.copy2(Path(args.pos_fake_replies).resolve(strict=True),
++                     root / 'control' / 'pos_fake_replies.json')
+     config = json.loads(compose.read_text(encoding="utf-8"))
+     if args.condition == "B":
+         main = config["services"]["main"]
+@@ -145,6 +162,13 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
+             {"type": "bind", "source": (root / "control" / "spool" / "responses").as_posix(),
+              "target": "/run/pma-bridge/responses", "read_only": True},
+         ]
++    if pos:
++        config['services']['main']['volumes'] += [
++            {'type': 'bind', 'source': (root / 'control' / 'pos_archive').as_posix(),
++             'target': '/run/pos-archive', 'read_only': False},
++            {'type': 'bind', 'source': (root / 'control' / 'pos_fake_replies.json').as_posix(),
++             'target': '/run/pos-fake-replies.json', 'read_only': True},
++        ]
+     compose.write_text(json.dumps(config, indent=2), encoding="utf-8")
+     record = {"schema": ("pma-ga-offline-harbor-v1" if fake_gateway else
+                           "pma-ga-live-prepared-v1"), "execution_authorized": False,
+@@ -243,8 +267,16 @@ def run_offline(args) -> dict:
+         env["NO_COLOR"] = "1"
+         env["CI"] = "1"
+         env["GA_PMA_UPSTREAM_ENABLED"] = "1" if args.condition == "B" else "0"
++        env['GA_POS_ENABLED'] = '1' if args.condition == 'P' else '0'
+         env["GA_PMA_ENABLED"] = env["GA_MONITOR_ENABLED"] = "0"
+         env["GA_M0_MONITOR_ENABLED"] = "0"
++        if args.condition == 'P':
++            env.update(GA_POS_TRANSPORT='fake',
++                       GA_POS_WORKER_SCRIPT='/opt/genericagent/pos_runtime/worker.py',
++                       GA_POS_VENDOR_ROOT='/opt/genericagent/pos_runtime/vendor',
++                       GA_POS_EPISODE_MODULE='/opt/genericagent/pos_runtime/episode.py',
++                       GA_POS_ARCHIVE='/run/pos-archive/events.jsonl',
++                       GA_POS_FAKE_REPLIES='/run/pos-fake-replies.json')
+         if args.condition == "B":
+             env.update(GA_PMA_UPSTREAM_REQUESTS="/run/pma-bridge/requests",
+                        GA_PMA_UPSTREAM_RESPONSES="/run/pma-bridge/responses",
+@@ -325,7 +357,7 @@ def run_offline(args) -> dict:
+         cleanup_errors.append(f"worker_receipt_unreadable:{type(exc).__name__}:{exc}")
+         worker_receipt = None
+     main = [row for row in actual_mounts if row["image_id"] == record["image_id"]]
+-    spool_ok = args.condition == "A" or (len(main) == 1 and
++    spool_ok = args.condition in {'A', 'P'} or (len(main) == 1 and
+         {m["destination"]: m["rw"] for m in main[0]["mounts"]}.get(
+             "/run/pma-bridge/requests") is True and
+         {m["destination"]: m["rw"] for m in main[0]["mounts"]}.get(
+@@ -333,7 +365,7 @@ def run_offline(args) -> dict:
+     integration_ok = bool(primary_failure is None and result is not None and result.returncode == 0 and
+         not exposed_private and not remaining_containers and not cleanup_errors and
+         len(main) == 1 and spool_ok and
+-        (args.condition == "A" or (worker.returncode == 0 and worker_receipt is not None
++        (args.condition in {'A', 'P'} or (worker.returncode == 0 and worker_receipt is not None
+          and worker_receipt.get("task_end_saved") is True)))
+     status = {**record, "harbor_return_code": None if result is None else result.returncode,
+               "worker_return_code": None if worker is None else worker.returncode,
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run.py
+index 88df3ac9..17434390 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run.py
+@@ -109,13 +109,49 @@ def main() -> None:
+     launched.add_argument('--pma-profile-file')
+     launched.add_argument('--python-home', default='cpython-3.12.12-linux-x86_64-gnu')
+     launched.add_argument('--zero-model-fixture', action='store_true')
++    pos_plan = commands.add_parser('prepare-pos', help='unarmed fixed-source PoS serial plan')
++    pos_plan.add_argument('--task', action='append', required=True,
++                          help='canonical registered task ID, repeat in desired serial order')
++    pos_plan.add_argument('--output', required=True)
++    pos_plan.add_argument('--official-source-git', required=True)
++    pos_plan.add_argument('--frozen-reference-manifest', required=True)
++    pos_fake = commands.add_parser('fake-pos', help='one offline Harbor fake-only PoS run')
++    pos_fake.add_argument('--output', required=True, help='prepared PoS plan directory')
++    pos_fake.add_argument('--task', required=True)
++    pos_fake.add_argument('--run-root', required=True)
++    pos_fake.add_argument('--run-id', required=True)
++    pos_fake.add_argument('--pos-fake-replies', required=True)
++    for name in ('ga-source', 'runtime-root', 'task-profile-file',
++                 'worker-python', 'harbor-exe', 'bench-root', 'official-source-git'):
++        pos_fake.add_argument('--' + name, required=True)
++    pos_fake.add_argument('--task-profile', default='native_claude_cc_vibe_opus48')
++    pos_fake.add_argument('--python-home', default='cpython-3.12.12-linux-x86_64-gnu')
++    pos_fake.add_argument('--timeout-sec', type=int, default=180)
+     args = parser.parse_args()
+-    outcome = prepare(args) if args.command == 'prepare' else run(args)
++    if args.command == 'prepare-pos':
++        from method_discovery.pos_upstream_ga_v1_20261017.prepare_plan import prepare as prepare_pos
++        outcome = prepare_pos(source=args.official_source_git, tasks=args.task,
++                              reference=args.frozen_reference_manifest, output=args.output)
++    elif args.command == 'fake-pos':
++        from .offline_launcher import run_offline
++        args.manifest = str(Path(args.output) / 'manifest.json')
++        prepared_pos = json.loads(Path(args.manifest).read_text(encoding='utf-8'))
++        if prepared_pos.get('synthetic_fixture') is not True:
++            raise RuntimeError('fake-pos requires a synthetic Task fixture; '
++                               'the four registered tasks are not a fake fixture')
++        args.condition = 'P'
++        args.execution_authorized = False
++        args.multiturn_fixture = False
++        outcome = run_offline(args)
++    else:
++        outcome = prepare(args) if args.command == 'prepare' else run(args)
+     print(json.dumps(outcome, ensure_ascii=False, indent=2))
+     if (args.command == 'run' and
+             (outcome['stop_reason'] or not outcome['arm'] or
+              outcome['arm'].get('disposition') != 'completed')):
+         raise SystemExit(1)
++    if args.command == 'fake-pos' and not outcome['integration_ok']:
++        raise SystemExit(1)
+ 
+ 
+ if __name__ == '__main__':
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/.gitattributes b/method_discovery/pos_upstream_ga_v1_20261017/.gitattributes
+new file mode 100644
+index 00000000..7e34287a
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/.gitattributes
+@@ -0,0 +1,3 @@
++vendor/** -text
++raw/** -text
++plan_four/** -text
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/AUDIT.txt b/method_discovery/pos_upstream_ga_v1_20261017/AUDIT.txt
+new file mode 100644
+index 00000000..a6d55df5
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/AUDIT.txt
+@@ -0,0 +1,181 @@
++Released-core PoS-on-GA transfer — public offline handoff (2026-10-18)
++=====================================================================
++
++STATUS AND AUTHORITY
++--------------------
++This is a partial, fail-closed engineering handoff, not a completed live-ready
++PoS comparison. The actual scoped repository is
++E:\longcontext-cqs-v0-20261005, branch crs-v0-20261007, initial HEAD
++ec5920638d9d72c0b4d554cdfa14b2f284f57ba7. E:\LongContext is a separate
++dirty branch and was only inspected. No running Docker task was found at the
++start. Pre-existing ignored __pycache__ was left alone. No reset or force push.
++No real Task, PoS/PMA/provider, native evaluator, training or scoring-model
++request was made: all these new real call counts are 0.
++
++FIXED SOURCE AND ADAPTATION
++---------------------------
++PoS official source: https://github.com/luoyu100/PoS at
++6818cfa6434dbc91fcf67f0b3eb12a91db47433f. Paper:
++https://arxiv.org/abs/2610.01415. The byte-exact 20-file runtime/method
++selection is in vendor/. All 20 local bytes were compared to Git blob bytes;
++raw/UPSTREAM_FILE_HASHES.json lists each blob, byte count and SHA-256.
++LICENSE and THIRD_PARTY_NOTICES.md are included. The Windows clone checkout
++had CRLF-converted working files; restore_vendor_blobs.py restored the exact
++Git blob bytes before verification. No upstream algorithm or prompt patch was
++made. The cloned upstream/.git is a local verification aid, not a public file.
++
++The original BeliefManager from vendor/belief/manager.py owns initialization,
++candidate updates, consistency audit, one repair/re-audit, state commit,
++progress scoring, health/trapping, recovery, and textualization in its source
++order. PoSEpisode in episode.py adapts only lifecycle, GA joint-action shape,
++terminal unknown success and original build_belief_prompt hybrid decision view.
++worker.py imports upstream through an isolated vendor path and has distinct
++belief/consistency/progress role calls. It does not instantiate PMA. Profile
++transport uses the existing GA NativeClaudeSession and gateway-rewritten
++mykey.json if an independently authorized live launch is later provided; this
++turn used finite fake responses only. A role call/attempt is individually
++logged. No official Qwen provider route was used.
++
++GenericAgent-main/agent_loop.py taps the completed ordered GA tool batch and
++next request. GenericAgent-main/llmcore.py has a PoS-only stateless actual-send
++path that clears old pending tool IDs, skips backend.history and sends one new
++ordinary user text block with native tool schema. GenericAgent-main/ga.py
++suppresses old WORKING MEMORY and turn-end memory accumulation only in PoS mode.
++Raw Task history remains in GA archives, not the sent decision view.
++GenericAgent-main/pos_bridge.py is a fail-closed worker IPC; no replay after
++uncertain acceptance/result. The general bundle copier now includes an optional
++pos_runtime directory. The existing single_run CLI gained prepare-pos and
++fake-pos, but the old A/B run/authorization path is not repurposed. The
++existing Harbor adapter forwards PoS identity variables only when selected.
++The limited diff is raw/scoped_diff.patch; new files are separately readable
++in this directory. No legacy method's prompts, algorithm, task results or
++historical runs were edited.
++
++ACTUAL CONFIGURATION AND INPUTS
++-------------------------------
++Fixed configs/loca/pos.yaml execution method values were copied into
++episode.execution_config and independently extracted into plan_four/manifest.json:
++task_mode=execution, agent_view=hybrid, update_every_steps=1, local audit=1,
++global audit=32, recent audit history=4, K/window_size=8,
++diagnostic_progress_threshold=0.3, recurrence_epsilon=0.15,
++max_cycle_length=4, health_threshold=0.25, cycle_threshold=0.75,
++recovery recent_low_progress_count=4. The original JSON repair limit is 1.
++These are method values; fixed YAML's Qwen endpoint/key settings and infinite
++crash restart policy were not adopted. The inherited historical public Task
++profile is claude-opus-4-8, max_tokens=64000, temperature=1,
++max_retries=4. PoS role transport would use that same private profile as
++separate calls, with belief max_tokens=4096, consistency/progress=512 and
++transport retries=0. Exact private endpoint, key and file bytes are excluded.
++No profile was loaded by the PoS worker in this turn.
++
++The official Task asset Git commit is
++2fd12b88aafdd04a52c298e3940bcb189f9766d6. The existing generic
++descriptor and local Docker image inspector verified all four task IDs,
++public instruction/task.toml/environment members, native test member hashes,
++image IDs and repo digests. plan_four/manifest.json records exact identities
++and verified inherited Task budget of 300 turns/14400 seconds, without an
++execution authorization. The four slots are, in order:
++  1 nginx-request-logging
++  2 adaptive-rejection-sampler
++  3 sqlite-with-gcov
++  4 write-compressor
++All are observed development tasks, not held-out. No PMA checkpoint/bank is a
++PoS input. No new A/U baseline run was planned or executed.
++
++OFFLINE EVIDENCE AND WHAT IT DOES NOT PROVE
++-------------------------------------------
++raw/worker_ipc_requests.jsonl, raw/worker_ipc_responses.jsonl,
++raw/worker_events.jsonl and raw/fixture_replies.json are a permanent
++synthetic replay through the isolated worker. They contain full model-visible
++fake role requests/responses, update and terminal receipt, but no actual Task
++or provider traffic. raw/final_task_payload.json captures the exact GA native
++backend ask boundary under a fake backend: old backend.history, old WORKING
++MEMORY and pending native tool ID canaries are absent; original task, current
++observation, active gap, runtime constraint and native tool schema are present.
++The full current-GA-loop view assertions are in test_ga_seam.py. This is
++fake-boundary evidence, not a real provider wire capture.
++
++raw/core.stderr.txt: 4/4 tests passed. Original BeliefManager and PoSEpisode
++received identical scripted single-action observations and role responses;
++their emitted role prompts, committed belief, frontier/health/recovery and
++exported history matched. Original reference ReAct runner was not executed.
++One test exercises Sentinel issue, repair/re-audit before commit, eight
++low-progress transitions creating recovery, then gap resolution/release.
++Eight tools in one GA decision batch score once; eight independent batches
++create the K=8 window. This changes the original per-environment-action
++granularity deliberately and is not a semantic equivalence claim.
++
++raw/ga_seam.stderr.txt: 5/5 tests passed. They cover default-off, final
++stateless payload, one ordered joint batch, mixed text, a terminal batch with
++unexecuted suffix and exit_code=null/still-running receipt, no-tool finish
++without invented progress, and a failed worker command with one attempt/no
++replay. Hidden thinking is not supplied to the PoS worker. No orphan or
++fabricated native tool_result is sent in PoS mode.
++
++raw/legacy_ga_pma.stderr.txt: 2/2 previous GA-only/PMA synthetic compatibility
++checks passed, with PoS off. The first local invocation failed only because
++PYTHONPATH omitted GenericAgent-main (ModuleNotFoundError: llmcore); rerun
++with that existing test prerequisite passed. That environmental failure is
++retained here, not recast as an algorithm failure. The tests do not prove
++all historical GA/PMA Harbor paths unchanged.
++
++Terminal mapping: the last executed tool batch is passed to PoS before
++finish. A no-tool normal completion calls finish only. GA's CURRENT_TASK_DONE
++is lawful runtime termination, not hidden evaluator success;
++success_known=false and task_success=null in the outer result. The bool false
++provided to the original manager means no authoritative success signal, not
++known failure. Non-completion exits are partial/failed, not success. A tool
++return with exit_code=null is retained as such and not completion proof.
++PoS health, empty frontier or Sentinel advice do not call GA's termination or
++tool-control functions. Recovery remains Task-facing text, not a rollback,
++approval gate or tool interception.
++
++LIMITATIONS AND MISSING ACCEPTANCE
++----------------------------------
++H — Actual Harbor/Docker synthetic fixture was NOT run. The current fake-pos
++CLI rejects the prepared four-task manifest before launch because it lacks
++synthetic_fixture=true. Invoking it on an actual registered Task package
++would constitute a new Task experiment forbidden this turn. A synthetic
++public asset and dedicated Harbor lifecycle/Task-service retention/fake
++evaluator-sentinel test are still needed. It must not be inferred from the
++existing direct-GA fake seam test.
++
++The PoS live run arm, PoS-specific one-use authorization binding, Harbor
++stop/freeze/evaluation hook, and exact post-run cleanup evidence are not
++implemented or verified. The old A/B live run remains A/B-only. Consequently
++the prepared serial plan is NOT launchable and no future live command is
++advertised as currently executable. The required independent authorization
++must precede any later real request. The current task asks for a complete
++offline acceptance; this partial handoff does not claim it.
++
++Additional partial coverage: original reference ReAct path not replayed;
++provider accepted-then-capture failure and interrupt save semantics were not
++exercised end-to-end; full old GA/PMA tool/terminal regression was not run;
++actual final provider payload was not observed. Per-role token/latency/cost
++instrumentation exists in the profile transport but has no real values here.
++No fixed-response fixture establishes semantic correctness or paper efficacy.
++
++The public version fixes the initial goal interpretation; this transfer does
++not add goal revision. `observed`/source_type does not prove truth. Sentinel's
++quote/target validation does not establish semantic entailment. The paper's
++E/A persistence tie description differs from code; fixed code favors
++epistemic, and was not changed. No hidden tests, answers, reward or future
++evaluation are fed to online PoS. No official infinite task restart adopted.
++
++FILES, REDACTION AND INTEGRITY
++------------------------------
++PUBLIC_FILE_SHA256.json lists per-file actual byte sizes and SHA-256 for every
++public handoff file except itself. raw/UPSTREAM_FILE_HASHES.json
++lists expected Git blob IDs and actual content SHA-256 for each upstream file;
++all match. plan_four/plan.json and manifest.json are public, unarmed and can
++be read individually. The public archive excludes the cloned upstream/.git,
++private profiles, keys, authorization headers, private endpoints, Task logs,
++and run-specific private archives. No task text, model error or tool output
++was removed from the synthetic fixture records; those fixtures have no secret
++fields. The only redaction is omission of the existing private profile's
++credential/endpoint/file content: reason, outside public research data and
++unneeded for byte-exact offline checks. No secret original values are given.
++
++This handoff is a safe partial archive under the user's explicit instruction
++to deliver publishable material even with gaps. Stop here for main-agent audit;
++do not start the four tasks or infer authorization from this TXT.
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/PUBLIC_FILE_SHA256.json b/method_discovery/pos_upstream_ga_v1_20261017/PUBLIC_FILE_SHA256.json
+new file mode 100644
+index 00000000..6c175fda
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/PUBLIC_FILE_SHA256.json
+@@ -0,0 +1,235 @@
++{
++  "scope": "public PoS handoff files except this generated manifest and AUDIT.txt",
++  "files": [
++    {
++      "path": ".gitattributes",
++      "bytes": 48,
++      "sha256": "e32dbb0a58291927b91562a230b0382859b16533721f99cd3d5c51f1af68a4ef"
++    },
++    {
++      "path": "build_archive.py",
++      "bytes": 7587,
++      "sha256": "048ac0677c81991e6f3f455ddded55264dab601e562afe5f30f501d1bfb0ccf2"
++    },
++    {
++      "path": "episode.py",
++      "bytes": 6139,
++      "sha256": "151c9ddd1191e23b180d1d950272119f4749263136655b9d83c6d4e6edd07023"
++    },
++    {
++      "path": "plan_four/manifest.json",
++      "bytes": 15323,
++      "sha256": "506684cb26e0ba60aa9180c39c552c1e42dcadb40950d7b56a70541ab89563a1"
++    },
++    {
++      "path": "plan_four/plan.json",
++      "bytes": 619,
++      "sha256": "f9369ab094397f19dfffc852a995f9ac0db8b274f611dc3de9f7dbec5aabbdeb"
++    },
++    {
++      "path": "prepare_plan.py",
++      "bytes": 4902,
++      "sha256": "6a746bc4ca95cf5e5e2e617529b05e447ce4d4910c5a16e55d625e3c0ba6ee12"
++    },
++    {
++      "path": "raw/core.stderr.txt",
++      "bytes": 612,
++      "sha256": "82e85d3e35d2cbde29861fd0facc824d9bed3a2c5af6874955b9be5e40c8564f"
++    },
++    {
++      "path": "raw/core.stdout.txt",
++      "bytes": 0,
++      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
++    },
++    {
++      "path": "raw/final_task_payload.json",
++      "bytes": 767,
++      "sha256": "37f507cafad27551d87a5a430c1805c5b9510d8dfa2b9aacbfd47409bb7f848e"
++    },
++    {
++      "path": "raw/fixture_replies.json",
++      "bytes": 1160,
++      "sha256": "674c1cfa604d382eb9298e4131a0d762443f72a74555c3334e7ed45d52181c1c"
++    },
++    {
++      "path": "raw/ga_seam.stderr.txt",
++      "bytes": 770,
++      "sha256": "45a8af0162a31610fc32cd82fc3eb9eeb057b4957c01826c25252c3ecf91b9dc"
++    },
++    {
++      "path": "raw/ga_seam.stdout.txt",
++      "bytes": 49,
++      "sha256": "f449d52ed96f5ffd1fc925b1dd876c5251facce267e4a53f8b70b142090e4f73"
++    },
++    {
++      "path": "raw/legacy_ga_pma.stderr.txt",
++      "bytes": 620,
++      "sha256": "d22203e1b9a11241ebf04a35ed1428647021e8bbae33905255e71415a8ddc1b9"
++    },
++    {
++      "path": "raw/legacy_ga_pma.stdout.txt",
++      "bytes": 79,
++      "sha256": "718e7744ad9163e2f6b5f20c75193c687bca63895b50a2319146204e6245bfd4"
++    },
++    {
++      "path": "raw/scoped_diff.patch",
++      "bytes": 107622,
++      "sha256": "700c116e1668bfe21cdf69f58698b8fb22b015b6a5eb19053c3becda747ccfa9"
++    },
++    {
++      "path": "raw/TEST_RESULTS.json",
++      "bytes": 405,
++      "sha256": "3ba5942d903cfbae18fde638a6724bf9cb552e66853b71932591ecb2d7330807"
++    },
++    {
++      "path": "raw/UPSTREAM_FILE_HASHES.json",
++      "bytes": 5443,
++      "sha256": "c2c11f4a208066095aadbb5b5631972336b9a8d68fcdd7a10f0227ccb45c35af"
++    },
++    {
++      "path": "raw/worker.stderr.txt",
++      "bytes": 0,
++      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
++    },
++    {
++      "path": "raw/worker_events.jsonl",
++      "bytes": 69038,
++      "sha256": "9c4341a221001c614196d5b740eea8f9be848e037bf45d8a2998217df894d3f8"
++    },
++    {
++      "path": "raw/worker_ipc_requests.jsonl",
++      "bytes": 438,
++      "sha256": "d99cfbe74d19aa80069c0fa91243176eeb9ffb43fb75efabb427b523473f8601"
++    },
++    {
++      "path": "raw/worker_ipc_responses.jsonl",
++      "bytes": 14348,
++      "sha256": "03a8ce9ecbd586bd6833d0cfa1b2a6b108c0fa5107c89d3f78cface04079856c"
++    },
++    {
++      "path": "restore_vendor_blobs.py",
++      "bytes": 896,
++      "sha256": "ca68e577070ab9b7a4375796ecee5af5ab59331d32ff91041d2c9a5b67f3b17b"
++    },
++    {
++      "path": "RUNNING.md",
++      "bytes": 3762,
++      "sha256": "559c4af018b7ad4836c6350d0a7de1a13e32d15d2407360c32e960ed5d8052bb"
++    },
++    {
++      "path": "test_ga_seam.py",
++      "bytes": 9438,
++      "sha256": "66506ec3e903ee42c5288508b88cfff008bfd951b7ef16f6f5c4c3209a0af4c5"
++    },
++    {
++      "path": "test_offline.py",
++      "bytes": 8669,
++      "sha256": "7af181ad059746908ad87a535fcaf7a2b3e35daa043605fa166a35f3be3783d9"
++    },
++    {
++      "path": "vendor/belief/__init__.py",
++      "bytes": 208,
++      "sha256": "61596983ee325a6d8dad536c78fa0d8d261bf950df21a7887b91aa91087e9708"
++    },
++    {
++      "path": "vendor/belief/beliefSentinel.py",
++      "bytes": 17579,
++      "sha256": "0c8f3a63c21abc6cbd60a9abab30220b9285fa015c916e7d4c56a535bfd10a5e"
++    },
++    {
++      "path": "vendor/belief/beliefStates.py",
++      "bytes": 3465,
++      "sha256": "5178259d2c0122ca778efd4b0a2a6e005c455f40d5ff430fb561054404511e86"
++    },
++    {
++      "path": "vendor/belief/manager.py",
++      "bytes": 46992,
++      "sha256": "d89213252f207cceff0eebfb0a4d12fcade9d0973d2159c17a8065ec9b289518"
++    },
++    {
++      "path": "vendor/belief/progressScoring.py",
++      "bytes": 3695,
++      "sha256": "3850f1b8ddb9a735340851554428e6080ff3f6f1b920d3a5758f22720f5728a7"
++    },
++    {
++      "path": "vendor/belief/recoveryPlanning.py",
++      "bytes": 2284,
++      "sha256": "8e7479f2b0e7c94f3cf9bc20257f8328d73887c2a71b689e770ac7eb6746f3be"
++    },
++    {
++      "path": "vendor/belief/textualizer.py",
++      "bytes": 4865,
++      "sha256": "f22cd7be5681f464db2c9c2e6a8248cb80afdd0a21fade17f98941c03cf0b058"
++    },
++    {
++      "path": "vendor/belief/trappingDetection.py",
++      "bytes": 14898,
++      "sha256": "bcec4f17d0fdfeef9ae44eca5b79e36b2ef8b05d56273bcc3794a525c8f20693"
++    },
++    {
++      "path": "vendor/belief/worldStates.py",
++      "bytes": 6191,
++      "sha256": "17f67c58f4e41407a7e178e7aaf1cbdfbb5de926ef5e11179408b8b6f5a4ee5b"
++    },
++    {
++      "path": "vendor/configs/loca/pos.yaml",
++      "bytes": 2558,
++      "sha256": "f4590a16974de876f63fba09c30d411444428df36005640dc8bc10fd6381f8cd"
++    },
++    {
++      "path": "vendor/contexts/__init__.py",
++      "bytes": 24,
++      "sha256": "4cdcf8e32ef7523bcf8b5c4ad8b51397e6f5ecb45b1339ea4186601acbabcd01"
++    },
++    {
++      "path": "vendor/contexts/base.py",
++      "bytes": 800,
++      "sha256": "1257c51e25cca2c39c03efa5864bf42c4ea0e2db4cd3e4fde585ce2d87c07b95"
++    },
++    {
++      "path": "vendor/LICENSE",
++      "bytes": 1073,
++      "sha256": "2f40e5ec7fa027c8a8fe747eb19a4d0983b9130cde0f132987412effd4e54b06"
++    },
++    {
++      "path": "vendor/prompts/__init__.py",
++      "bytes": 24,
++      "sha256": "4cdcf8e32ef7523bcf8b5c4ad8b51397e6f5ecb45b1339ea4186601acbabcd01"
++    },
++    {
++      "path": "vendor/prompts/beliefSentinel_prompt.py",
++      "bytes": 3135,
++      "sha256": "63a1f5ff06c544cc67d84605554084f3a2f3fb6cf973ee0574e225c6a64a917c"
++    },
++    {
++      "path": "vendor/prompts/prompt_generation.py",
++      "bytes": 6499,
++      "sha256": "c2c6882000669871aa13b52de2683aeebca213aef5081f326644161bf0da2611"
++    },
++    {
++      "path": "vendor/prompts/react_prompt.py",
++      "bytes": 18554,
++      "sha256": "814202d28b55337395cf0cec730c097d2a041915cfe14a0dfc6eb4b7b75e2210"
++    },
++    {
++      "path": "vendor/THIRD_PARTY_NOTICES.md",
++      "bytes": 2999,
++      "sha256": "83b425a68a3907a251e15c2712c2c8b298967c422570b8ff33f049a711c48c09"
++    },
++    {
++      "path": "vendor/utils/__init__.py",
++      "bytes": 24,
++      "sha256": "4cdcf8e32ef7523bcf8b5c4ad8b51397e6f5ecb45b1339ea4186601acbabcd01"
++    },
++    {
++      "path": "vendor/utils/logger.py",
++      "bytes": 818,
++      "sha256": "be814c7d1a6afc9c3ab810dc4bffa977d10247c44ec71989291e5cdcb2996673"
++    },
++    {
++      "path": "worker.py",
++      "bytes": 8574,
++      "sha256": "762e310481185ab082b566ae18ce15881867c3ad0856d9c172fe76674013c34a"
++    }
++  ]
++}
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/RUNNING.md b/method_discovery/pos_upstream_ga_v1_20261017/RUNNING.md
+new file mode 100644
+index 00000000..3ab5a911
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/RUNNING.md
+@@ -0,0 +1,52 @@
++# Released-core PoS-on-GA transfer: current stopping point
++
++The only prepared comparison plan is `plan_four/plan.json`. Its four slots are
++PoS-only and `execution_authorized=false`: nginx-request-logging,
++adaptive-rejection-sampler, sqlite-with-gcov, write-compressor. They are
++observed development tasks, not held-out tasks. Each future trial must begin
++from the original instruction and a clean Task workspace, never a PMA bank.
++
++The existing generic single-run CLI has an unarmed PoS plan command:
++
++    python -m method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.single_run prepare-pos --task nginx-request-logging --task adaptive-rejection-sampler --task sqlite-with-gcov --task write-compressor --output NEW_EMPTY_DIRECTORY --official-source-git FIXED_OFFICIAL_GIT_CHECKOUT --frozen-reference-manifest PRIOR_PUBLIC_MANIFEST_JSON
++
++The same entry exposes `fake-pos`, an offline Harbor path with a finite fake
++gateway, a finite fake PoS role reply file, and verification disabled. It is
++not a real-model switch and was **not run** in this handoff. It refuses the
++prepared four-task manifest before launch; its preparer would otherwise stage
++an actual registered Task package and cross this turn's ban on new Task
++experiments. It requires a synthetic public Task fixture and dedicated Harbor
++lifecycle assertions before it may count as the requested H acceptance test.
++The future fake command shape is:
++
++    python -m method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.single_run fake-pos --output PREPARED_PLAN_DIRECTORY --task SYNTHETIC_REGISTERED_TASK --run-root NEW_EMPTY_RUN_DIRECTORY --run-id UNIQUE_ID --pos-fake-replies FINITE_REPLIES_JSON --ga-source GA_SOURCE --runtime-root EXISTING_RUNTIME --task-profile-file EXISTING_PRIVATE_PROFILE --worker-python PYTHON --harbor-exe HARBOR --bench-root EXISTING_BENCH --official-source-git FIXED_OFFICIAL_GIT_CHECKOUT
++
++There is deliberately no PoS `run`/live command yet. The old `run` command
++still accepts only the old A/B authorization schema. Future live execution
++requires independent authorization and a PoS-specific Harbor hook/identity
++binding, artifact freeze, profile forwarding, failure cleanup, and H fake
++acceptance first. Merely setting `GA_POS_LIVE_AUTHORIZED=1` is not an
++authorization for an experiment. No four-task command should be executed now.
++
++Local safe tests (no provider, Task, Docker, or evaluator call):
++
++    C:\Python312\python.exe -B method_discovery/pos_upstream_ga_v1_20261017/test_offline.py
++    C:\Users\hsy\AppData\Local\Temp\pma-ga-py312\Scripts\python.exe -B method_discovery/pos_upstream_ga_v1_20261017/test_ga_seam.py
++
++The temporary Python paths above were used on the development host; they are
++not public profile paths and need not exist elsewhere. Use Python 3.12 with
++GA dependencies for the second test.
++
++Methods: original `BeliefManager` owns initialization, candidate generation,
++Sentinel audit/repair, commit, progress, health, recovery and textualization.
++The wrapper maps one GA decision and ordered tool batch to one PoS transition.
++Eight tools in one batch count once; K=8 means eight scored decision batches.
++GA owns execution/termination. `CURRENT_TASK_DONE` is not hidden evaluator
++success; `success_known=false` and task success remains unknown. The released
++code's E/A persistence tie favors epistemic; its goal interpretation is fixed;
++source labels and Sentinel quotes are not semantic proof. Recovery is advice,
++not an execution or completion gate.
++
++No real Task, PoS/PMA/provider, native evaluator, training or scoring-model
++calls were made during this preparation. The audit TXT lists missing checks;
++do not treat this as a completed live-ready integration or a PoS efficacy result.
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/build_archive.py b/method_discovery/pos_upstream_ga_v1_20261017/build_archive.py
+new file mode 100644
+index 00000000..b3cda461
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/build_archive.py
+@@ -0,0 +1,157 @@
++"""Mechanical public source/hash and fake-test archive builder; no live calls."""
++from __future__ import annotations
++
++import hashlib
++import json
++from pathlib import Path
++import subprocess
++import sys
++
++HERE = Path(__file__).resolve().parent
++REPO = HERE.parents[1]
++COMMIT = '6818cfa6434dbc91fcf67f0b3eb12a91db47433f'
++VENDOR = HERE / 'vendor'
++UPSTREAM = HERE / 'upstream'
++RAW = HERE / 'raw'
++
++
++def git(*args):
++    return subprocess.run(['git', '-C', str(UPSTREAM), *args],
++                          capture_output=True, check=True).stdout
++
++
++def sha(raw):
++    return hashlib.sha256(raw).hexdigest()
++
++
++def write(path, value):
++    with path.open('w', encoding='utf-8', newline='\n') as stream:
++        stream.write(value)
++
++
++def main():
++    if git('rev-parse', 'HEAD').decode().strip() != COMMIT:
++        raise RuntimeError('upstream clone moved')
++    RAW.mkdir(exist_ok=True)
++    files = []
++    for path in sorted(VENDOR.rglob('*')):
++        if not path.is_file() or '__pycache__' in path.parts:
++            continue
++        relative = path.relative_to(VENDOR).as_posix()
++        raw = path.read_bytes()
++        blob = git('rev-parse', f'{COMMIT}:{relative}').decode().strip()
++        expected = git('cat-file', 'blob', blob)
++        if raw != expected:
++            raise RuntimeError('vendor bytes differ: ' + relative)
++        files.append({'path': 'vendor/' + relative, 'bytes': len(raw),
++                      'sha256': sha(raw), 'git_blob': blob,
++                      'match_fixed_upstream_blob': True})
++    write(RAW / 'UPSTREAM_FILE_HASHES.json', json.dumps({
++        'repository': 'https://github.com/luoyu100/PoS', 'commit': COMMIT,
++        'files': files}, ensure_ascii=False, indent=2) + '\n')
++    tests = [
++        ('core', [r'C:\Python312\python.exe', '-B', str(HERE / 'test_offline.py')]),
++        ('ga_seam', [sys.executable, '-B', str(HERE / 'test_ga_seam.py')]),
++        ('legacy_ga_pma', [sys.executable, '-B', '-m', 'unittest',
++          'method_discovery.curator_supervisor_convergence_v0.'
++          'pma_full_upstream_ga_v1_20261013.test_synthetic_compat', '-v']),
++    ]
++    outcomes = []
++    for name, command in tests:
++        env = None
++        if name == 'legacy_ga_pma':
++            import os
++            env = dict(os.environ)
++            env['PYTHONPATH'] = os.pathsep.join((str(REPO / 'GenericAgent-main'),
++                                                str(REPO)))
++        result = subprocess.run(command, cwd=REPO, capture_output=True,
++                                text=True, encoding='utf-8', timeout=60, env=env)
++        write(RAW / (name + '.stdout.txt'), result.stdout)
++        write(RAW / (name + '.stderr.txt'), result.stderr)
++        outcomes.append({'test': name, 'exit_code': result.returncode,
++                         'stdout': f'raw/{name}.stdout.txt',
++                         'stderr': f'raw/{name}.stderr.txt'})
++    write(RAW / 'TEST_RESULTS.json', json.dumps(outcomes, indent=2) + '\n')
++    if any(row['exit_code'] for row in outcomes):
++        raise RuntimeError('offline tests failed; raw outputs retained')
++    # One permanent finite fixture transcript through the same isolated worker.
++    sys.path.insert(0, str(HERE))
++    from test_offline import replies
++    fixed = RAW / 'fixture_replies.json'
++    write(fixed, json.dumps(replies(), ensure_ascii=False, indent=2) + '\n')
++    commands = [
++        {'kind': 'reset', 'case_id': 'public/synthetic', 'task': 'Clean mug 1.',
++         'observation': 'Mug dirty.', 'actions': []},
++        {'kind': 'decision_view', 'observation': 'Mug dirty.', 'actions': []},
++        {'kind': 'update', 'thought': 'Inspect.', 'action_batch': [
++            {'id': 'c1', 'name': 'inspect', 'arguments': {}, 'order': 0,
++             'status': 'executed', 'result': 'Still dirty.'}],
++         'observation': 'Still dirty.'},
++        {'kind': 'finish', 'reason': 'CURRENT_TASK_DONE'},
++    ]
++    input_text = ''.join(json.dumps(row, ensure_ascii=False) + '\n' for row in commands)
++    write(RAW / 'worker_ipc_requests.jsonl', input_text)
++    result = subprocess.run([sys.executable, '-B', '-u', str(HERE / 'worker.py'),
++        '--vendor', str(VENDOR), '--episode-module', str(HERE / 'episode.py'),
++        '--archive', str(RAW / 'worker_events.jsonl'), '--mode', 'fake',
++        '--fake-replies', str(fixed)], input=input_text, text=True,
++        capture_output=True, encoding='utf-8', timeout=20)
++    write(RAW / 'worker_ipc_responses.jsonl', result.stdout)
++    write(RAW / 'worker.stderr.txt', result.stderr)
++    if result.returncode or len(result.stdout.splitlines()) != len(commands):
++        raise RuntimeError('public fake worker transcript failed')
++    sys.path.insert(0, str(REPO / 'GenericAgent-main'))
++    from llmcore import NativeClaudeSession, NativeToolClient
++    backend = NativeClaudeSession({'apibase': 'https://synthetic.invalid',
++        'apikey': 'SYNTHETIC-NO-ACCESS', 'model': 'claude-opus-4-8',
++        'max_tokens': 64, 'max_retries': 0})
++    backend.history = [{'role': 'user', 'content': [{'type': 'text',
++        'text': 'OLD_BACKEND_HISTORY_CANARY'}]}]
++    payload = []
++    def fake_raw(messages):
++        payload.append({'messages': messages, 'system': backend.system,
++                        'tools': backend.tools})
++        if False:
++            yield None
++        return [{'type': 'text', 'text': 'done'}]
++    backend.raw_ask = fake_raw
++    client = NativeToolClient(backend)
++    client._pending_tool_ids = ['OLD_TOOL_ID_CANARY']
++    gen = client.chat(messages=[{'role': 'user', 'content': 'OLD_SUMMARY_CANARY'}],
++        tools=[{'type': 'function', 'function': {'name': 'inspect',
++               'parameters': {'type': 'object'}}}],
++        request_view={'system': 'RUN_CONSTRAINT',
++                      'user': 'ORIGINAL_TASK CURRENT_OBSERVATION ACTIVE_GAP'})
++    try:
++        while True:
++            next(gen)
++    except StopIteration:
++        pass
++    visible = json.dumps(payload, ensure_ascii=False, indent=2)
++    if any(x in visible for x in ('OLD_BACKEND_HISTORY_CANARY',
++                                  'OLD_TOOL_ID_CANARY', 'OLD_SUMMARY_CANARY')):
++        raise RuntimeError('old history reached final Task payload')
++    write(RAW / 'final_task_payload.json', visible + '\n')
++    diff = subprocess.run(['git', 'diff', '--cached', '--binary', '--',
++        'GenericAgent-main', 'long_context_bench/scripts/isolated_run_bundle.py',
++        'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013',
++        'method_discovery/pos_upstream_ga_v1_20261017',
++        ':!method_discovery/pos_upstream_ga_v1_20261017/vendor',
++        ':!method_discovery/pos_upstream_ga_v1_20261017/raw',
++        ':!method_discovery/pos_upstream_ga_v1_20261017/plan_four'],
++        cwd=REPO, capture_output=True, check=True).stdout
++    (RAW / 'scoped_diff.patch').write_bytes(diff)
++    public = [path for path in HERE.rglob('*') if path.is_file() and
++              'upstream' not in path.parts and '__pycache__' not in path.parts and
++              path.name != 'PUBLIC_FILE_SHA256.json']
++    rows = [{'path': path.relative_to(HERE).as_posix(), 'bytes': path.stat().st_size,
++             'sha256': sha(path.read_bytes())} for path in sorted(public)]
++    write(HERE / 'PUBLIC_FILE_SHA256.json', json.dumps({
++        'scope': 'public PoS handoff files except this generated manifest',
++        'files': rows}, ensure_ascii=False, indent=2) + '\n')
++    print(json.dumps({'upstream_files_verified': len(files),
++                      'public_files_hashed': len(rows), 'tests': outcomes}, indent=2))
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/episode.py b/method_discovery/pos_upstream_ga_v1_20261017/episode.py
+new file mode 100644
+index 00000000..97581068
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/episode.py
+@@ -0,0 +1,127 @@
++"""Thin GA lifecycle adapter around the unmodified released PoS BeliefManager.
++
++This module is imported only by an isolated worker with ``vendor`` on sys.path.
++The caller owns Task actions and termination; no PMA object is instantiated.
++"""
++from __future__ import annotations
++
++from copy import deepcopy
++import json
++
++from belief.manager import BeliefManager
++from prompts.react_prompt import build_belief_prompt
++
++
++def execution_config() -> dict:
++    """Resolved method values from fixed configs/loca/pos.yaml, not its provider route."""
++    return {
++        'benchmark': 'LOCA-Bench', 'method': 'ReAct-PoS', 'harness': 'ReAct',
++        'include_actions': True, 'max_json_retries': 1,
++        'context': {
++            'type': 'belief', 'task_mode': 'execution', 'agent_view': 'hybrid',
++            'update_every_steps': 1, 'diagnostic_progress_threshold': .3,
++            'model': {'max_json_retries': 1},
++            'sentinel': {'enabled': True, 'consistency_enabled': True,
++                         'progress_enabled': True, 'local_audit_every_steps': 1,
++                         'global_audit_every_steps': 32,
++                         'recent_transition_count': 4},
++            'trapping': {'enabled': True, 'window_size': 8,
++                         'recurrence_epsilon': .15, 'max_cycle_length': 4,
++                         'health_threshold': .25, 'cycle_threshold': .75},
++            'recovery': {'enabled': True, 'recent_low_progress_count': 4},
++        },
++    }
++
++
++class PoSEpisode:
++    """One completed GA decision/batch becomes one PoS transition."""
++
++    def __init__(self, *, case_id, config, logger, belief_call, consistency_call,
++                 progress_call):
++        self.case_id = case_id
++        self.config = deepcopy(config)
++        self.logger = logger
++        self.manager = BeliefManager(self.config, belief_call, logger,
++                                     call_sentinel=consistency_call,
++                                     call_progress=progress_call)
++        self.started = False
++        self.ended = False
++        self.success_known = False
++        self.step = 0
++        self.state = None
++        self.lifecycle = []
++        self.terminal_status = None
++
++    def reset(self, *, task, observation, actions):
++        if self.started:
++            raise RuntimeError('PoS episode already started')
++        self.state = dict(case_id=self.case_id, task=task, observation=observation,
++                          actions=actions, done=False, success=False, score=0.0)
++        self.manager.reset(deepcopy(self.state))
++        self.started = True
++        self.lifecycle.append({'kind': 'reset', 'success_known': False})
++        return self.get_context()
++
++    def update(self, *, thought, action_batch, observation, done=False):
++        if not self.started or self.ended:
++            raise RuntimeError('PoS episode is not active')
++        if not action_batch:
++            raise ValueError('empty batch is not a PoS action transition')
++        self.state = {**self.state, 'observation': observation, 'done': bool(done),
++                      'success': False, 'score': 0.0}
++        transition = {'thought': thought, 'action': deepcopy(action_batch),
++                      'observation': observation}
++        self.manager.update(transition, deepcopy(self.state), self.step)
++        self.lifecycle.append({'kind': 'update', 'step': self.step,
++                               'batch_size': len(action_batch),
++                               'success_known': False, 'done': bool(done)})
++        self.step += 1
++        if done:
++            self.ended = True
++        return self.get_context()
++
++    def finish(self, *, reason, observation=None):
++        if not self.started:
++            return {'status': 'never_started', 'reason': reason}
++        if observation is not None:
++            self.state['observation'] = observation
++        self.state['done'] = True
++        self.ended = True
++        self.manager.close()
++        self.terminal_status = ('completed' if reason == 'CURRENT_TASK_DONE' else
++                                'partial' if reason in {'MAX_TURNS_EXCEEDED', 'EXITED',
++                                                       'provider_cancelled', 'interrupted'} else
++                                'failed')
++        self.lifecycle.append({'kind': 'finish', 'reason': reason,
++                               'success_known': False})
++        return self.get_result()
++
++    def get_context(self):
++        if not self.started:
++            raise RuntimeError('PoS episode not initialized')
++        return self.manager.get_context()
++
++    def decision_view(self, *, current_observation, actions, runtime_constraints=''):
++        """Use released hybrid builder; adapt only its JSON action envelope."""
++        if not self.started or self.ended:
++            raise RuntimeError('PoS decision unavailable')
++        state = {**self.state, 'observation': current_observation,
++                 'actions': deepcopy(actions)}
++        original = build_belief_prompt(state, self.get_context(), self.config)
++        system = (original[0]['content'] + '\n\nGA native-action envelope: use the mounted '
++                  'tool schema and emit native tool calls; the JSON thought/action format '
++                  'above is replaced only at the action-transport boundary. Do not treat '
++                  'a reminder, health score, or empty gap as permission to terminate.')
++        user = (original[1]['content'] + '\n\nFull mounted native tool schemas:\n' +
++                json.dumps(actions, ensure_ascii=False) +
++                ('\n\nCurrent runtime constraints and instructions:\n' +
++                 runtime_constraints if runtime_constraints else ''))
++        return {'system': system, 'user': user,
++                'context': self.get_context(), 'upstream_messages': original}
++
++    def get_result(self):
++        result = self.manager.get_result() if self.started else {}
++        return {'status': self.terminal_status or 'partial',
++                'success_known': self.success_known, 'task_success': None,
++                'scored_decision_batches': self.step,
++                'lifecycle': deepcopy(self.lifecycle), **result}
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/prepare_plan.py b/method_discovery/pos_upstream_ga_v1_20261017/prepare_plan.py
+new file mode 100644
+index 00000000..d5a61b0e
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/prepare_plan.py
+@@ -0,0 +1,81 @@
++"""Read-only fixed-source PoS plan materialization; no Task or model execution."""
++from __future__ import annotations
++
++import hashlib
++import json
++from pathlib import Path
++import yaml
++
++from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.export_official_evaluator import COMMIT
++from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.offline_launcher import image_identity
++from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.six_task_assets import descriptor
++
++HERE = Path(__file__).resolve().parent
++UPSTREAM_COMMIT = '6818cfa6434dbc91fcf67f0b3eb12a91db47433f'
++
++
++def prepare(*, source, tasks, reference, output):
++    source, reference, output = Path(source), Path(reference), Path(output)
++    if not tasks or len(set(tasks)) != len(tasks):
++        raise ValueError('provide unique serial Task IDs')
++    historical = json.loads(reference.read_text(encoding='utf-8'))
++    frozen = historical['config']
++    if (historical['official_source_git_commit'] != COMMIT or
++            frozen['task_turns_max'] != 300 or frozen['agent_wall_seconds'] != 14400 or
++            frozen['task_profile_name'] != 'native_claude_cc_vibe_opus48'):
++        raise RuntimeError('historical Task budget/profile identity differs')
++    assets = {}
++    for task in tasks:
++        item = descriptor(source, task, registered=True)
++        image = image_identity(item['image_tag'])
++        matching = [value for value in image['repo_digests'] if value.startswith(
++            item['image_tag'].rsplit(':', 1)[0] + '@sha256:')]
++        if len(matching) != 1:
++            raise RuntimeError(f'{task}: unique local official image digest missing')
++        assets[task] = {**item, **image, 'repo_digest': matching[0]}
++    fixed = yaml.safe_load((HERE / 'vendor' / 'configs' / 'loca' / 'pos.yaml').read_text(
++        encoding='utf-8'))
++    context = fixed['context']
++    method_parameters = {key: fixed[key] for key in ('benchmark', 'method', 'harness',
++                                                        'include_actions', 'max_json_retries')}
++    method_parameters['context'] = {key: context[key] for key in (
++        'type', 'task_mode', 'update_every_steps', 'agent_view',
++        'diagnostic_progress_threshold', 'trapping', 'recovery')}
++    method_parameters['context']['model'] = {
++        'max_json_retries': context['model']['max_json_retries']}
++    method_parameters['context']['sentinel'] = {key: context['sentinel'][key] for key in (
++        'enabled', 'local_audit_every_steps', 'global_audit_every_steps',
++        'recent_transition_count', 'consistency_enabled', 'progress_enabled')}
++    method = {'name': 'released-core PoS-on-GA transfer',
++              'upstream_commit': UPSTREAM_COMMIT,
++              'task_turns_max': frozen['task_turns_max'],
++              'agent_wall_seconds': frozen['agent_wall_seconds'],
++              'harbor_whole_trial_retries': 0,
++              'task_profile_name': frozen['task_profile_name'],
++              'task_model_public': historical['resolved_models_public']['task'],
++              'pos_roles': {'belief': 'same private Task profile, independent calls',
++                            'consistency': 'same private Task profile, independent calls',
++                            'progress': 'same private Task profile, independent calls'},
++              'pos_role_max_tokens': {'belief': 4096, 'consistency': 512,
++                                      'progress': 512},
++              'pos_role_transport_retries': 0,
++              'method_parameters': method_parameters,
++              'network': frozen['network'], 'evaluation': frozen['evaluation']}
++    plan = {'schema': 'pos-ga-serial-plan-v1', 'execution_authorized': False,
++            'source_partition': 'observed_development_not_held_out',
++            'official_source_git_commit': COMMIT, 'method': 'PoS',
++            'planned_order': [{'order': n, 'task': task, 'condition': 'P'}
++                              for n, task in enumerate(tasks, 1)]}
++    manifest = {'schema': 'pos-ga-prepared-v1', 'status': 'prepared_not_executed',
++                'execution_authorized': False, 'official_source_git_commit': COMMIT,
++                'upstream_commit': UPSTREAM_COMMIT,
++                'historical_config_sha256': hashlib.sha256(reference.read_bytes()).hexdigest(),
++                'method': method, 'assets': assets,
++                'planned_order': plan['planned_order']}
++    output.mkdir(parents=True, exist_ok=False)
++    for name, value in (('plan.json', plan), ('manifest.json', manifest)):
++        with (output / name).open('x', encoding='utf-8', newline='\n') as stream:
++            json.dump(value, stream, ensure_ascii=False, indent=2)
++            stream.write('\n')
++    return {'plan': str(output / 'plan.json'), 'manifest': str(output / 'manifest.json'),
++            'tasks': tasks, 'execution_authorized': False}
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/restore_vendor_blobs.py b/method_discovery/pos_upstream_ga_v1_20261017/restore_vendor_blobs.py
+new file mode 100644
+index 00000000..9df18b8a
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/restore_vendor_blobs.py
+@@ -0,0 +1,21 @@
++"""One-time mechanical replacement of Git checkout newline conversion with blob bytes."""
++from pathlib import Path
++import subprocess
++
++HERE = Path(__file__).resolve().parent
++VENDOR = HERE / 'vendor'
++COMMIT = '6818cfa6434dbc91fcf67f0b3eb12a91db47433f'
++
++for target in sorted(VENDOR.rglob('*')):
++    if not target.is_file() or '__pycache__' in target.parts:
++        continue
++    relative = target.relative_to(VENDOR).as_posix()
++    blob = subprocess.run(['git', '-C', str(HERE / 'upstream'), 'show',
++                           f'{COMMIT}:{relative}'], check=True,
++                          capture_output=True).stdout
++    existing = target.read_bytes()
++    if existing != blob:
++        if existing.replace(b'\r\n', b'\n') != blob:
++            raise RuntimeError(f'not newline-only conversion: {relative}')
++        target.write_bytes(blob)
++        print('restored original Git blob bytes:', relative)
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/test_ga_seam.py b/method_discovery/pos_upstream_ga_v1_20261017/test_ga_seam.py
+new file mode 100644
+index 00000000..50f45b31
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/test_ga_seam.py
+@@ -0,0 +1,183 @@
++"""Actual GA loop/native-send seams with fake responses only."""
++from __future__ import annotations
++
++import json
++import os
++from pathlib import Path
++import sys
++import tempfile
++from types import SimpleNamespace
++import unittest
++from unittest.mock import patch
++
++HERE = Path(__file__).resolve().parent
++GA = HERE.parents[1] / 'GenericAgent-main'
++sys.path.insert(0, str(GA))
++from agent_loop import BaseHandler, StepOutcome, agent_runner_loop, exhaust
++from llmcore import NativeClaudeSession, NativeToolClient
++from pos_bridge import PoSBridge, PoSBridgeError
++from test_offline import replies
++
++
++class Handler(BaseHandler):
++    def __init__(self):
++        self.parent = SimpleNamespace(task_dir=None)
++        self._done_hooks = []
++        self.code_stop_signal = SimpleNamespace(clear=lambda: None)
++    def do_probe(self, args, response):
++        if False: yield None
++        return StepOutcome({'stdout': 'CURRENT_OBSERVATION_MARKER'},
++                           next_prompt='Current user instruction remains in effect.')
++    def do_stop(self, args, response):
++        if False: yield None
++        return StepOutcome({'stdout': 'PARTIAL_RESULT', 'exit_code': None,
++                            'process_state': 'still_running'}, next_prompt=None)
++    def do_no_tool(self, args, response):
++        if False: yield None
++        return StepOutcome(response, next_prompt=None)
++    def turn_end_callback(self, response, tool_calls, tool_results, turn,
++                          next_prompt, exit_reason):
++        return next_prompt
++
++
++class Client:
++    last_tools = ''
++    def __init__(self, responses):
++        self.responses = iter(responses)
++        self.views = []
++    def chat(self, messages, tools, request_view=None):
++        self.views.append(request_view)
++        if False: yield None
++        return next(self.responses)
++
++
++def response(content, tools=()):
++    return SimpleNamespace(content=content, thinking='HIDDEN_THINKING_CANARY',
++                           tool_calls=list(tools))
++
++
++class SeamTests(unittest.TestCase):
++    def test_default_off_does_not_create_pos(self):
++        with patch.dict(os.environ, {'GA_POS_ENABLED': '0', 'GA_PMA_ENABLED': '0',
++                                     'GA_PMA_UPSTREAM_ENABLED': '0'}):
++            client = Client([response('done')])
++            outcome = exhaust(agent_runner_loop(client, 'RUN_CONSTRAINT', 'ORIGINAL_TASK',
++                         Handler(), [], max_turns=1, verbose=False))
++        self.assertEqual(outcome['result'], 'CURRENT_TASK_DONE')
++        self.assertEqual(client.views, [None])
++
++    def test_native_final_send_is_stateless_with_old_canaries(self):
++        backend = NativeClaudeSession({'apibase': 'https://fixture.invalid',
++            'apikey': 'SYNTHETIC-NO-ACCESS', 'model': 'claude-opus-4-8',
++            'max_tokens': 64, 'max_retries': 0})
++        backend.history = [{'role': 'user', 'content': [
++            {'type': 'text', 'text': 'OLD_BACKEND_HISTORY_CANARY'}]}]
++        seen = []
++        def fake_raw(messages):
++            seen.append({'messages': messages, 'system': backend.system,
++                         'tools': backend.tools})
++            if False: yield None
++            return [{'type': 'text', 'text': 'done'}]
++        backend.raw_ask = fake_raw
++        client = NativeToolClient(backend)
++        client._pending_tool_ids = ['OLD_TOOL_ID_CANARY']
++        tools = [{'type': 'function', 'function': {'name': 'probe',
++                   'description': 'probe', 'parameters': {'type': 'object'}}}]
++        result = exhaust(client.chat(messages=[{'role': 'user',
++            'content': '[WORKING MEMORY] OLD_SUMMARY_CANARY'}], tools=tools,
++            request_view={'system': 'RUN_CONSTRAINT',
++                          'user': 'ORIGINAL_TASK CURRENT_OBSERVATION_MARKER ACTIVE_GAP'}))
++        self.assertEqual(result.content, 'done')
++        payload = json.dumps(seen)
++        for canary in ('OLD_BACKEND_HISTORY_CANARY', 'OLD_TOOL_ID_CANARY',
++                       'OLD_SUMMARY_CANARY'):
++            self.assertNotIn(canary, payload)
++        for required in ('RUN_CONSTRAINT', 'ORIGINAL_TASK',
++                         'CURRENT_OBSERVATION_MARKER', 'ACTIVE_GAP', 'probe'):
++            self.assertIn(required, payload)
++        self.assertEqual(len(backend.history), 1)
++
++    def test_loop_one_joint_batch_and_terminal_no_fake_action(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root = Path(tmp)
++            fixed = root / 'replies.json'
++            fixed.write_text(json.dumps(replies()), encoding='utf-8')
++            env = {'GA_POS_ENABLED': '1', 'GA_PMA_ENABLED': '0',
++                   'GA_PMA_UPSTREAM_ENABLED': '0', 'GA_MONITOR_ENABLED': '0',
++                   'GA_M0_MONITOR_ENABLED': '0', 'GA_POS_TRANSPORT': 'fake',
++                   'GA_POS_WORKER_SCRIPT': str(HERE / 'worker.py'),
++                   'GA_POS_VENDOR_ROOT': str(HERE / 'vendor'),
++                   'GA_POS_EPISODE_MODULE': str(HERE / 'episode.py'),
++                   'GA_POS_ARCHIVE': str(root / 'pos_events.jsonl'),
++                   'GA_POS_FAKE_REPLIES': str(fixed), 'GA_BENCH_TASK_ID': 'fixture'}
++            tool = SimpleNamespace(id='tool-1', function=SimpleNamespace(
++                name='probe', arguments='{}'))
++            client = Client([response('inspect', [tool]), response('done')])
++            with patch.dict(os.environ, env):
++                outcome = exhaust(agent_runner_loop(client, 'RUN_CONSTRAINT',
++                    'ORIGINAL_TASK', Handler(), [{'type': 'function',
++                    'function': {'name': 'probe', 'parameters': {'type': 'object'}}}],
++                    max_turns=2, verbose=False))
++            self.assertEqual(outcome['result'], 'CURRENT_TASK_DONE')
++            self.assertEqual(len(client.views), 2)
++            self.assertIn('ORIGINAL_TASK', client.views[0]['user'])
++            self.assertIn('CURRENT_OBSERVATION_MARKER', client.views[1]['user'])
++            self.assertNotIn('HIDDEN_THINKING_CANARY', client.views[1]['user'])
++            records = [json.loads(x) for x in (root / 'pos_events.jsonl').read_text(
++                encoding='utf-8').splitlines()]
++            result = next(x['result'] for x in records if x['event'] == 'pos_episode_result')
++            self.assertEqual(result['scored_decision_batches'], 1)
++            self.assertFalse(result['success_known'])
++
++    def test_terminal_joint_batch_keeps_unexecuted_suffix_and_partial_receipt(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root = Path(tmp)
++            fixed = root / 'replies.json'
++            fixed.write_text(json.dumps(replies()), encoding='utf-8')
++            env = {'GA_POS_ENABLED': '1', 'GA_PMA_ENABLED': '0',
++                   'GA_PMA_UPSTREAM_ENABLED': '0', 'GA_MONITOR_ENABLED': '0',
++                   'GA_M0_MONITOR_ENABLED': '0', 'GA_POS_TRANSPORT': 'fake',
++                   'GA_POS_WORKER_SCRIPT': str(HERE / 'worker.py'),
++                   'GA_POS_VENDOR_ROOT': str(HERE / 'vendor'),
++                   'GA_POS_EPISODE_MODULE': str(HERE / 'episode.py'),
++                   'GA_POS_ARCHIVE': str(root / 'events.jsonl'),
++                   'GA_POS_FAKE_REPLIES': str(fixed)}
++            calls = [SimpleNamespace(id='id-' + str(i),
++                function=SimpleNamespace(name=name, arguments='{}'))
++                for i, name in enumerate(('stop', 'probe'))]
++            client = Client([response('MIXED_TEXT', calls)])
++            with patch.dict(os.environ, env):
++                outcome = exhaust(agent_runner_loop(client, 'RUN_CONSTRAINT',
++                    'ORIGINAL_TASK', Handler(), [], max_turns=1, verbose=False))
++            self.assertEqual(outcome['result'], 'CURRENT_TASK_DONE')
++            rows = [json.loads(x) for x in (root / 'events.jsonl').read_text(
++                encoding='utf-8').splitlines()]
++            result = next(x['result'] for x in rows if x['event'] == 'pos_episode_result')
++            self.assertEqual(result['scored_decision_batches'], 1)
++            batch = result['raw_trajectory'][-1]['action']
++            self.assertEqual([x['status'] for x in batch],
++                             ['executed', 'not_executed'])
++            self.assertIsNone(batch[0]['result']['exit_code'])
++            self.assertEqual(batch[0]['result']['process_state'], 'still_running')
++            self.assertEqual(batch[1]['id'], 'id-1')
++
++    def test_worker_failure_never_replays_accepted_command(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root = Path(tmp)
++            fixed = root / 'replies.json'
++            fixed.write_text(json.dumps({'belief': [], 'consistency': [],
++                                         'progress': []}), encoding='utf-8')
++            bridge = PoSBridge(worker_script=HERE / 'worker.py', vendor=HERE / 'vendor',
++                episode_module=HERE / 'episode.py', archive=root / 'events.jsonl',
++                mode='fake', fake_replies=fixed, timeout=10)
++            with self.assertRaises(PoSBridgeError):
++                bridge.exchange('reset', case_id='case', task='task',
++                                observation='initial', actions=[])
++            self.assertEqual(bridge.sent, 1)
++            self.assertTrue(bridge.closed)
++            rows = [json.loads(x) for x in (root / 'events.jsonl').read_text(
++                encoding='utf-8').splitlines()]
++            self.assertEqual(len([x for x in rows if x['event'] == 'pos_role_request']), 1)
++
++
++if __name__ == '__main__': unittest.main(verbosity=2)
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/test_offline.py b/method_discovery/pos_upstream_ga_v1_20261017/test_offline.py
+new file mode 100644
+index 00000000..3f8a913f
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/test_offline.py
+@@ -0,0 +1,169 @@
++"""Fixed-response, no-provider checks of the released-core transfer."""
++from __future__ import annotations
++
++import copy
++import importlib.util
++import json
++from pathlib import Path
++import subprocess
++import sys
++import tempfile
++import unittest
++
++HERE = Path(__file__).resolve().parent
++VENDOR = HERE / 'vendor'
++sys.path.insert(0, str(VENDOR))
++from belief.manager import BeliefManager
++from prompts.react_prompt import build_belief_prompt
++from episode import PoSEpisode, execution_config
++
++INITIAL = {
++    'goal_specification': 'Mug 1 must be clean.',
++    'entities': [{'entity_id': 'e1', 'entity_type': 'mug', 'name': 'mug 1'}],
++    'states': [{'state_id': 's1', 'entity_id': 'e1', 'description': 'Mug 1 is dirty.',
++                'source_type': 'observed', 'probability': 1.0}],
++    'relations': [], 'epistemic_gaps': [],
++    'achievement_gaps': [{'target': 'Mug 1 must be clean', 'reason': 'Mug 1 is dirty.'}],
++    'frontier': {'gap_type': 'achievement', 'target': 'Mug 1 must be clean'},
++}
++DELTA = {'remove_state_ids': [], 'remove_relation_ids': [],
++         'upsert_entities': [], 'upsert_states': [], 'upsert_relations': [],
++         'epistemic_gaps': [], 'achievement_gaps': INITIAL['achievement_gaps'],
++         'frontier': INITIAL['frontier']}
++PROGRESS = {'progress': 0, 'score': 0.0, 'affected_record_ids': [],
++            'reason': 'No new evidence.'}
++
++
++class Recorder:
++    def __init__(self): self.events = []
++    def log(self, event, **data): self.events.append({'event': event, **data})
++
++
++def replies(count=1):
++    return {'belief': [json.dumps(INITIAL), json.dumps({'belief_text': 'Mug dirty.'})] +
++            [part for _ in range(count) for part in
++             (json.dumps(DELTA), json.dumps({'belief_text': 'Mug dirty.'}))],
++            'consistency': ['{"issues": []}'] * (count + 1),
++            'progress': [json.dumps(PROGRESS)] * count}
++
++
++def callers(fixed, captured):
++    def role(name):
++        def call(messages):
++            captured.append({'role': name, 'messages': copy.deepcopy(messages)})
++            return fixed[name].pop(0)
++        return call
++    return role
++
++
++def state(observation='Mug dirty.', done=False):
++    return {'case_id': 'fixed/case', 'task': 'Clean mug 1.',
++            'observation': observation, 'actions': [], 'done': done,
++            'success': False, 'score': 0.0}
++
++
++class TransferTests(unittest.TestCase):
++    def test_original_core_single_action_equivalence(self):
++        config = execution_config()
++        fixed1, fixed2 = replies(), replies()
++        calls1, calls2 = [], []
++        a, b = callers(fixed1, calls1), callers(fixed2, calls2)
++        core = BeliefManager(config, a('belief'), Recorder(),
++                             call_sentinel=a('consistency'), call_progress=a('progress'))
++        adapted = PoSEpisode(case_id='fixed/case', config=config, logger=Recorder(),
++                             belief_call=b('belief'), consistency_call=b('consistency'),
++                             progress_call=b('progress'))
++        core.reset(state())
++        adapted.reset(task='Clean mug 1.', observation='Mug dirty.', actions=[])
++        action = [{'id': 'c1', 'name': 'inspect', 'arguments': {}, 'order': 0,
++                   'status': 'executed', 'result': 'Still dirty.'}]
++        transition = {'thought': 'Inspect.', 'action': action,
++                      'observation': 'Still dirty.'}
++        core.update(transition, state('Still dirty.'), 0)
++        adapted.update(thought='Inspect.', action_batch=action,
++                       observation='Still dirty.')
++        self.assertEqual(calls1, calls2)
++        self.assertEqual(core.get_context(), adapted.get_context())
++        for key in ('belief_state', 'belief_update_history', 'belief_health_history',
++                    'health_transitions', 'frontier_history', 'recovery_history'):
++            self.assertEqual(core.get_result()[key], adapted.get_result()[key])
++        view = adapted.decision_view(current_observation='Still dirty.', actions=[])
++        original = build_belief_prompt(state('Still dirty.'), core.get_context(), config)
++        self.assertEqual(view['upstream_messages'], original)
++        self.assertIn('Mug dirty.', view['user'])
++        self.assertFalse(adapted.get_result()['success_known'])
++
++    def test_eight_actions_one_window_step_and_eight_batches(self):
++        fixed = replies(8)
++        role = callers(fixed, [])
++        episode = PoSEpisode(case_id='fixed/case', config=execution_config(),
++                             logger=Recorder(), belief_call=role('belief'),
++                             consistency_call=role('consistency'),
++                             progress_call=role('progress'))
++        episode.reset(task='Clean mug 1.', observation='Mug dirty.', actions=[])
++        batch = [{'id': str(i), 'name': 'inspect', 'arguments': {},
++                  'order': i, 'status': 'executed', 'result': 'dirty'} for i in range(8)]
++        episode.update(thought='Inspect eight.', action_batch=batch, observation='dirty')
++        self.assertEqual(episode.step, 1)
++        self.assertEqual(len(episode.get_result()['health_transitions']), 1)
++        for i in range(1, 8):
++            episode.update(thought='Inspect.', action_batch=batch[:1], observation='dirty')
++        self.assertEqual(episode.step, 8)
++        self.assertEqual(len(episode.get_result()['health_transitions']), 8)
++        self.assertIsNotNone(episode.get_context().get('recovery'))
++
++    def test_worker_framing_and_no_tool_finish(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root = Path(tmp)
++            responses = root / 'replies.json'
++            responses.write_text(json.dumps(replies()), encoding='utf-8')
++            cmd = [sys.executable, '-B', '-u', str(HERE / 'worker.py'),
++                   '--vendor', str(VENDOR), '--episode-module', str(HERE / 'episode.py'),
++                   '--archive', str(root / 'events.jsonl'), '--mode', 'fake',
++                   '--fake-replies', str(responses)]
++            events = [dict(kind='reset', case_id='fixed/case', task='Clean mug 1.',
++                           observation='Mug dirty.', actions=[]),
++                      dict(kind='decision_view', observation='Mug dirty.', actions=[]),
++                      dict(kind='finish', reason='CURRENT_TASK_DONE')]
++            run = subprocess.run(cmd, input=''.join(json.dumps(x) + '\n' for x in events),
++                                 text=True, capture_output=True, timeout=15)
++            self.assertEqual(run.returncode, 0, run.stderr)
++            output = [json.loads(x) for x in run.stdout.splitlines()]
++            self.assertEqual(len(output), 3)
++            self.assertTrue(all(x['status'] == 'ok' for x in output))
++            self.assertEqual(output[-1]['result']['scored_decision_batches'], 0)
++            self.assertFalse(output[-1]['result']['success_known'])
++
++    def test_sentinel_repair_before_commit_and_recovery_release(self):
++        fixed = replies(9)
++        issue = {'targets': ['Mug 1 must be clean'], 'issue_type': 'unsupported',
++                 'problem': 'Check the claim.', 'evidence_step': 0,
++                 'evidence_quote': 'Still dirty.', 'evidence': 'Still dirty.',
++                 'suggestion': 'Retain uncertainty.'}
++        fixed['consistency'][1] = json.dumps({'issues': [issue]})
++        fixed['consistency'].insert(2, '{"issues": []}')
++        fixed['belief'].insert(3, json.dumps(DELTA))
++        # The final validated update removes the active gap; the original
++        # health/recovery mechanism must release its prior constraint.
++        terminal_delta = {**DELTA, 'achievement_gaps': [], 'frontier': None}
++        fixed['belief'][-2] = json.dumps(terminal_delta)
++        logger = Recorder()
++        role = callers(fixed, [])
++        episode = PoSEpisode(case_id='fixed/case', config=execution_config(),
++            logger=logger, belief_call=role('belief'),
++            consistency_call=role('consistency'), progress_call=role('progress'))
++        episode.reset(task='Clean mug 1.', observation='Mug dirty.', actions=[])
++        action = [{'id': 'x', 'name': 'inspect', 'arguments': {}, 'order': 0,
++                   'status': 'executed', 'result': 'Still dirty.'}]
++        for step in range(9):
++            episode.update(thought='Inspect.', action_batch=action,
++                           observation='Still dirty.')
++        events = [row['event'] for row in logger.events]
++        self.assertIn('belief_candidate_repaired', events)
++        self.assertIn('belief_recovery_started', events)
++        self.assertIn('belief_recovery_finished', events)
++        self.assertIsNone(episode.get_context().get('recovery'))
++
++
++if __name__ == '__main__':
++    unittest.main(verbosity=2)
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/worker.py b/method_discovery/pos_upstream_ga_v1_20261017/worker.py
+new file mode 100644
+index 00000000..5536f64c
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/worker.py
+@@ -0,0 +1,180 @@
++"""Isolated PoS process. JSON-line IPC; no Task tools or PMA imports."""
++from __future__ import annotations
++
++import argparse
++import contextlib
++import json
++import os
++from pathlib import Path
++import sys
++import time
++
++
++def _json(value):
++    return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
++
++
++class RoleTransport:
++    def __init__(self, *, mode, replies=None, profile=None, archive):
++        self.mode = mode
++        self.replies = {key: list(value) for key, value in (replies or {}).items()}
++        self.profile = profile
++        self.archive = archive
++        self.calls = []
++        self.sessions = {}
++        if mode not in {'fake', 'profile'}:
++            raise ValueError('PoS transport must explicitly be fake or profile')
++        if mode == 'profile':
++            if not isinstance(profile, dict) or not profile.get('apikey') or not profile.get('apibase'):
++                raise ValueError('authorized private GA profile is required')
++
++    def caller(self, role):
++        def call(messages):
++            started = time.monotonic()
++            record = {'role': role, 'attempt': len(self.calls) + 1,
++                      'messages': messages, 'status': 'attempted'}
++            self.calls.append(record)
++            self.archive.log('pos_role_request', **record)
++            try:
++                if self.mode == 'fake':
++                    if not self.replies.get(role):
++                        raise RuntimeError('fake PoS reply exhausted: ' + role)
++                    response = self.replies[role].pop(0)
++                    if isinstance(response, dict) and 'raise' in response:
++                        raise RuntimeError(str(response['raise']))
++                    if not isinstance(response, str):
++                        raise TypeError('fake reply must be string')
++                    usage = {'status': 'synthetic_not_provider_usage'}
++                else:
++                    response, usage = self._profile_call(role, messages)
++                record.update(status='returned', response=response, usage=usage,
++                              elapsed_seconds=time.monotonic() - started)
++                self.archive.log('pos_role_response', **record)
++                return response
++            except BaseException as error:
++                record.update(status='failed', error_type=type(error).__name__,
++                              error=str(error), elapsed_seconds=time.monotonic() - started)
++                self.archive.log('pos_role_error', **record)
++                raise
++        return call
++
++    def _profile_call(self, role, messages):
++        """Reuse GA native transport and private profile; zero hidden transport retries."""
++        import llmcore
++        if role not in self.sessions:
++            cfg = dict(self.profile)
++            cfg['max_retries'] = 0
++            cfg['max_tokens'] = 4096 if role == 'belief' else 512
++            self.sessions[role] = llmcore.NativeClaudeSession(cfg)
++        session = self.sessions[role]
++        system = '\n'.join(item['content'] for item in messages if item['role'] == 'system')
++        request = [
++            {'role': item['role'], 'content': [{'type': 'text', 'text': item['content']}]}
++            for item in messages if item['role'] != 'system'
++        ]
++        session.system = system
++        usages = []
++        original = llmcore._record_usage
++        def capture(value, api_mode):
++            usages.append(dict(value))
++            return original(value, api_mode)
++        llmcore._record_usage = capture
++        try:
++            with contextlib.redirect_stdout(sys.stderr):
++                generator = session.raw_ask(request)
++                try:
++                    while True:
++                        next(generator)
++                except StopIteration as done:
++                    blocks = done.value or []
++        finally:
++            llmcore._record_usage = original
++        response = '\n'.join(block['text'] for block in blocks if block.get('type') == 'text')
++        if not response:
++            raise RuntimeError('PoS role returned no text; never fabricate JSON')
++        return response, {'provider_usage': usages, 'status': 'captured' if usages else 'unavailable'}
++
++
++def main():
++    parser = argparse.ArgumentParser()
++    parser.add_argument('--vendor', type=Path, required=True)
++    parser.add_argument('--episode-module', type=Path, required=True)
++    parser.add_argument('--archive', type=Path, required=True)
++    parser.add_argument('--mode', choices=('fake', 'profile'), required=True)
++    parser.add_argument('--fake-replies', type=Path)
++    parser.add_argument('--profile-file', type=Path)
++    parser.add_argument('--profile-name')
++    args = parser.parse_args()
++    sys.path.insert(0, str(args.vendor.resolve(strict=True)))
++    # The GA source bundle contains llmcore.py as a sibling of pos_runtime.
++    # This has no effect in fake mode and does not load the private profile.
++    sys.path.insert(0, str(args.episode_module.resolve(strict=True).parent.parent))
++    import importlib.util
++    spec = importlib.util.spec_from_file_location('pos_ga_episode', args.episode_module)
++    module = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(module)
++    from utils.logger import Logger
++    logger = Logger(args.archive)
++    replies = json.loads(args.fake_replies.read_text(encoding='utf-8')) if args.mode == 'fake' else None
++    profile = None
++    if args.mode == 'profile':
++        if not args.profile_file or not args.profile_name:
++            raise ValueError('profile file/name missing')
++        profile_path = args.profile_file.resolve(strict=True)
++        if profile_path.suffix == '.json':
++            profile = json.loads(profile_path.read_text(encoding='utf-8'))[args.profile_name]
++        else:
++            # Host-only offline checks may supply an existing private Python
++            # profile; the GA bundle uses its gateway-rewritten mykey.json.
++            import runpy
++            profile = runpy.run_path(str(profile_path))[args.profile_name]
++    transport = RoleTransport(mode=args.mode, replies=replies, profile=profile, archive=logger)
++    episode = None
++    try:
++        for line in sys.stdin:
++            command = json.loads(line)
++            kind = command['kind']
++            try:
++                if kind == 'reset':
++                    if episode is not None:
++                        raise RuntimeError('PoS episode already constructed')
++                    episode = module.PoSEpisode(case_id=command['case_id'],
++                        config=module.execution_config(), logger=logger,
++                        belief_call=transport.caller('belief'),
++                        consistency_call=transport.caller('consistency'),
++                        progress_call=transport.caller('progress'))
++                    value = episode.reset(task=command['task'],
++                        observation=command['observation'], actions=command['actions'])
++                elif episode is None:
++                    raise RuntimeError('PoS episode has not reset')
++                elif kind == 'decision_view':
++                    value = episode.decision_view(current_observation=command['observation'],
++                        actions=command['actions'],
++                        runtime_constraints=command.get('runtime_constraints', ''))
++                elif kind == 'update':
++                    value = episode.update(thought=command.get('thought', ''),
++                        action_batch=command['action_batch'], observation=command['observation'],
++                        done=command.get('done', False))
++                elif kind == 'finish':
++                    value = episode.finish(reason=command['reason'],
++                                           observation=command.get('observation'))
++                    logger.log('pos_episode_result', result=value)
++                elif kind == 'get_result':
++                    value = episode.get_result()
++                else:
++                    raise ValueError('unknown PoS worker command')
++                print(_json({'status': 'ok', 'result': value}), flush=True)
++            except BaseException as error:
++                logger.log('pos_worker_command_error', kind=kind,
++                           error_type=type(error).__name__, error=str(error))
++                print(_json({'status': 'error', 'error_type': type(error).__name__,
++                             'error': str(error)}), flush=True)
++                break
++    finally:
++        if episode is not None:
++            episode.manager.close()
++        logger.close()
++
++
++if __name__ == '__main__':
++    main()

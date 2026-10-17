@@ -18,6 +18,16 @@ FORWARD = (
     "GA_PMA_UPSTREAM_RESPONSES",
     "GA_PMA_UPSTREAM_DEADLINE_EPOCH",
     "GA_PMA_CAPTURE_TASK_REQUESTS",
+    "GA_POS_ENABLED",
+    "GA_POS_TRANSPORT",
+    "GA_POS_WORKER_SCRIPT",
+    "GA_POS_VENDOR_ROOT",
+    "GA_POS_EPISODE_MODULE",
+    "GA_POS_ARCHIVE",
+    "GA_POS_FAKE_REPLIES",
+    "GA_POS_PROFILE_FILE",
+    "GA_POS_PROFILE_NAME",
+    "GA_POS_LIVE_AUTHORIZED",
 )
 
 actual = hashlib.sha256(Path(original.__file__).read_bytes()).hexdigest()

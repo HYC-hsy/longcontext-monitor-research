@@ -1,0 +1,181 @@
+Released-core PoS-on-GA transfer — public offline handoff (2026-10-18)
+=====================================================================
+
+STATUS AND AUTHORITY
+--------------------
+This is a partial, fail-closed engineering handoff, not a completed live-ready
+PoS comparison. The actual scoped repository is
+E:\longcontext-cqs-v0-20261005, branch crs-v0-20261007, initial HEAD
+ec5920638d9d72c0b4d554cdfa14b2f284f57ba7. E:\LongContext is a separate
+dirty branch and was only inspected. No running Docker task was found at the
+start. Pre-existing ignored __pycache__ was left alone. No reset or force push.
+No real Task, PoS/PMA/provider, native evaluator, training or scoring-model
+request was made: all these new real call counts are 0.
+
+FIXED SOURCE AND ADAPTATION
+---------------------------
+PoS official source: https://github.com/luoyu100/PoS at
+6818cfa6434dbc91fcf67f0b3eb12a91db47433f. Paper:
+https://arxiv.org/abs/2610.01415. The byte-exact 20-file runtime/method
+selection is in vendor/. All 20 local bytes were compared to Git blob bytes;
+raw/UPSTREAM_FILE_HASHES.json lists each blob, byte count and SHA-256.
+LICENSE and THIRD_PARTY_NOTICES.md are included. The Windows clone checkout
+had CRLF-converted working files; restore_vendor_blobs.py restored the exact
+Git blob bytes before verification. No upstream algorithm or prompt patch was
+made. The cloned upstream/.git is a local verification aid, not a public file.
+
+The original BeliefManager from vendor/belief/manager.py owns initialization,
+candidate updates, consistency audit, one repair/re-audit, state commit,
+progress scoring, health/trapping, recovery, and textualization in its source
+order. PoSEpisode in episode.py adapts only lifecycle, GA joint-action shape,
+terminal unknown success and original build_belief_prompt hybrid decision view.
+worker.py imports upstream through an isolated vendor path and has distinct
+belief/consistency/progress role calls. It does not instantiate PMA. Profile
+transport uses the existing GA NativeClaudeSession and gateway-rewritten
+mykey.json if an independently authorized live launch is later provided; this
+turn used finite fake responses only. A role call/attempt is individually
+logged. No official Qwen provider route was used.
+
+GenericAgent-main/agent_loop.py taps the completed ordered GA tool batch and
+next request. GenericAgent-main/llmcore.py has a PoS-only stateless actual-send
+path that clears old pending tool IDs, skips backend.history and sends one new
+ordinary user text block with native tool schema. GenericAgent-main/ga.py
+suppresses old WORKING MEMORY and turn-end memory accumulation only in PoS mode.
+Raw Task history remains in GA archives, not the sent decision view.
+GenericAgent-main/pos_bridge.py is a fail-closed worker IPC; no replay after
+uncertain acceptance/result. The general bundle copier now includes an optional
+pos_runtime directory. The existing single_run CLI gained prepare-pos and
+fake-pos, but the old A/B run/authorization path is not repurposed. The
+existing Harbor adapter forwards PoS identity variables only when selected.
+The limited diff is raw/scoped_diff.patch; new files are separately readable
+in this directory. No legacy method's prompts, algorithm, task results or
+historical runs were edited.
+
+ACTUAL CONFIGURATION AND INPUTS
+-------------------------------
+Fixed configs/loca/pos.yaml execution method values were copied into
+episode.execution_config and independently extracted into plan_four/manifest.json:
+task_mode=execution, agent_view=hybrid, update_every_steps=1, local audit=1,
+global audit=32, recent audit history=4, K/window_size=8,
+diagnostic_progress_threshold=0.3, recurrence_epsilon=0.15,
+max_cycle_length=4, health_threshold=0.25, cycle_threshold=0.75,
+recovery recent_low_progress_count=4. The original JSON repair limit is 1.
+These are method values; fixed YAML's Qwen endpoint/key settings and infinite
+crash restart policy were not adopted. The inherited historical public Task
+profile is claude-opus-4-8, max_tokens=64000, temperature=1,
+max_retries=4. PoS role transport would use that same private profile as
+separate calls, with belief max_tokens=4096, consistency/progress=512 and
+transport retries=0. Exact private endpoint, key and file bytes are excluded.
+No profile was loaded by the PoS worker in this turn.
+
+The official Task asset Git commit is
+2fd12b88aafdd04a52c298e3940bcb189f9766d6. The existing generic
+descriptor and local Docker image inspector verified all four task IDs,
+public instruction/task.toml/environment members, native test member hashes,
+image IDs and repo digests. plan_four/manifest.json records exact identities
+and verified inherited Task budget of 300 turns/14400 seconds, without an
+execution authorization. The four slots are, in order:
+  1 nginx-request-logging
+  2 adaptive-rejection-sampler
+  3 sqlite-with-gcov
+  4 write-compressor
+All are observed development tasks, not held-out. No PMA checkpoint/bank is a
+PoS input. No new A/U baseline run was planned or executed.
+
+OFFLINE EVIDENCE AND WHAT IT DOES NOT PROVE
+-------------------------------------------
+raw/worker_ipc_requests.jsonl, raw/worker_ipc_responses.jsonl,
+raw/worker_events.jsonl and raw/fixture_replies.json are a permanent
+synthetic replay through the isolated worker. They contain full model-visible
+fake role requests/responses, update and terminal receipt, but no actual Task
+or provider traffic. raw/final_task_payload.json captures the exact GA native
+backend ask boundary under a fake backend: old backend.history, old WORKING
+MEMORY and pending native tool ID canaries are absent; original task, current
+observation, active gap, runtime constraint and native tool schema are present.
+The full current-GA-loop view assertions are in test_ga_seam.py. This is
+fake-boundary evidence, not a real provider wire capture.
+
+raw/core.stderr.txt: 4/4 tests passed. Original BeliefManager and PoSEpisode
+received identical scripted single-action observations and role responses;
+their emitted role prompts, committed belief, frontier/health/recovery and
+exported history matched. Original reference ReAct runner was not executed.
+One test exercises Sentinel issue, repair/re-audit before commit, eight
+low-progress transitions creating recovery, then gap resolution/release.
+Eight tools in one GA decision batch score once; eight independent batches
+create the K=8 window. This changes the original per-environment-action
+granularity deliberately and is not a semantic equivalence claim.
+
+raw/ga_seam.stderr.txt: 5/5 tests passed. They cover default-off, final
+stateless payload, one ordered joint batch, mixed text, a terminal batch with
+unexecuted suffix and exit_code=null/still-running receipt, no-tool finish
+without invented progress, and a failed worker command with one attempt/no
+replay. Hidden thinking is not supplied to the PoS worker. No orphan or
+fabricated native tool_result is sent in PoS mode.
+
+raw/legacy_ga_pma.stderr.txt: 2/2 previous GA-only/PMA synthetic compatibility
+checks passed, with PoS off. The first local invocation failed only because
+PYTHONPATH omitted GenericAgent-main (ModuleNotFoundError: llmcore); rerun
+with that existing test prerequisite passed. That environmental failure is
+retained here, not recast as an algorithm failure. The tests do not prove
+all historical GA/PMA Harbor paths unchanged.
+
+Terminal mapping: the last executed tool batch is passed to PoS before
+finish. A no-tool normal completion calls finish only. GA's CURRENT_TASK_DONE
+is lawful runtime termination, not hidden evaluator success;
+success_known=false and task_success=null in the outer result. The bool false
+provided to the original manager means no authoritative success signal, not
+known failure. Non-completion exits are partial/failed, not success. A tool
+return with exit_code=null is retained as such and not completion proof.
+PoS health, empty frontier or Sentinel advice do not call GA's termination or
+tool-control functions. Recovery remains Task-facing text, not a rollback,
+approval gate or tool interception.
+
+LIMITATIONS AND MISSING ACCEPTANCE
+----------------------------------
+H — Actual Harbor/Docker synthetic fixture was NOT run. The current fake-pos
+CLI rejects the prepared four-task manifest before launch because it lacks
+synthetic_fixture=true. Invoking it on an actual registered Task package
+would constitute a new Task experiment forbidden this turn. A synthetic
+public asset and dedicated Harbor lifecycle/Task-service retention/fake
+evaluator-sentinel test are still needed. It must not be inferred from the
+existing direct-GA fake seam test.
+
+The PoS live run arm, PoS-specific one-use authorization binding, Harbor
+stop/freeze/evaluation hook, and exact post-run cleanup evidence are not
+implemented or verified. The old A/B live run remains A/B-only. Consequently
+the prepared serial plan is NOT launchable and no future live command is
+advertised as currently executable. The required independent authorization
+must precede any later real request. The current task asks for a complete
+offline acceptance; this partial handoff does not claim it.
+
+Additional partial coverage: original reference ReAct path not replayed;
+provider accepted-then-capture failure and interrupt save semantics were not
+exercised end-to-end; full old GA/PMA tool/terminal regression was not run;
+actual final provider payload was not observed. Per-role token/latency/cost
+instrumentation exists in the profile transport but has no real values here.
+No fixed-response fixture establishes semantic correctness or paper efficacy.
+
+The public version fixes the initial goal interpretation; this transfer does
+not add goal revision. `observed`/source_type does not prove truth. Sentinel's
+quote/target validation does not establish semantic entailment. The paper's
+E/A persistence tie description differs from code; fixed code favors
+epistemic, and was not changed. No hidden tests, answers, reward or future
+evaluation are fed to online PoS. No official infinite task restart adopted.
+
+FILES, REDACTION AND INTEGRITY
+------------------------------
+PUBLIC_FILE_SHA256.json lists per-file actual byte sizes and SHA-256 for every
+public handoff file except itself. raw/UPSTREAM_FILE_HASHES.json
+lists expected Git blob IDs and actual content SHA-256 for each upstream file;
+all match. plan_four/plan.json and manifest.json are public, unarmed and can
+be read individually. The public archive excludes the cloned upstream/.git,
+private profiles, keys, authorization headers, private endpoints, Task logs,
+and run-specific private archives. No task text, model error or tool output
+was removed from the synthetic fixture records; those fixtures have no secret
+fields. The only redaction is omission of the existing private profile's
+credential/endpoint/file content: reason, outside public research data and
+unneeded for byte-exact offline checks. No secret original values are given.
+
+This handoff is a safe partial archive under the user's explicit instruction
+to deliver publishable material even with gaps. Stop here for main-agent audit;
+do not start the four tasks or infer authorization from this TXT.

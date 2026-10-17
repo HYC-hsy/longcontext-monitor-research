@@ -77,26 +77,31 @@ def clean_owned_containers(root: Path) -> list[str]:
 
 
 def _prepare_common(args, *, fake_gateway: bool) -> dict:
-    if args.condition not in {"A", "B"}:
+    if args.condition not in {"A", "B", "P"}:
         raise ValueError("unsupported PMA fixture arm")
     root = Path(args.run_root).resolve(strict=False)
     root.mkdir(parents=True, exist_ok=False)
     (root / "control").mkdir()
     (root / "archive").mkdir()
-    manifest_path = (STAGE / "FOUR_RUN_MANIFEST_DRAFT.json" if fake_gateway
+    manifest_path = (Path(args.manifest).resolve(strict=True) if args.condition == 'P' else
+                     STAGE / "FOUR_RUN_MANIFEST_DRAFT.json" if fake_gateway
                      else Path(args.manifest).resolve(strict=True))
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     single = not fake_gateway and manifest.get('schema') in {
         'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5'}
-    if (args.task not in (manifest.get('assets', {}) if single else TASKS)):
+    pos = args.condition == 'P'
+    if (pos and (manifest.get('schema') != 'pos-ga-prepared-v1' or
+                manifest.get('execution_authorized') is not False)):
+        raise RuntimeError('PoS prepared identity missing or authorized')
+    if (args.task not in (manifest.get('assets', {}) if single or pos else TASKS)):
         raise ValueError('task outside frozen PMA assets')
     task = root / "public_task"
-    if not fake_gateway and manifest.get("schema") in {
+    if pos or not fake_gateway and manifest.get("schema") in {
             "pma-ga-live-manifest-v2", "pma-ga-live-manifest-v3",
             "pma-ga-live-manifest-v4", "pma-ga-live-manifest-v5"}:
         materialize_public(Path(args.official_source_git).resolve(strict=True),
                            args.task, task, manifest["assets"][args.task]["public_members"],
-                           registered=single)
+                           registered=single or pos)
     else:
         shutil.copytree(STAGE / "assets" / "public" / args.task, task)
     (task / "tests").mkdir(exist_ok=True)
@@ -109,6 +114,14 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
         ".git", "temp", "tests", "__pycache__", ".pytest_cache", "*.pyc",
         "*.local.json", "file_access_stats.json", "mykey.py"))
     shutil.copy2(Path(args.task_profile_file).resolve(strict=True), ga_stage / "mykey.py")
+    if pos:
+        pos_source = STAGE.parents[1] / 'pos_upstream_ga_v1_20261017'
+        pos_stage = ga_stage / 'pos_runtime'
+        pos_stage.mkdir()
+        for name in ('worker.py', 'episode.py'):
+            shutil.copy2(pos_source / name, pos_stage / name)
+        shutil.copytree(pos_source / 'vendor', pos_stage / 'vendor',
+                        ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '.git'))
     runtime = Path(args.runtime_root).resolve(strict=True)
     source, compose = build_bundle(root / "bundle", ga_stage, runtime,
                                    args.python_home, args.task_profile, None, 15340,
@@ -127,15 +140,19 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
         compose.write_text(json.dumps(fake_compose, indent=2), encoding="utf-8")
     if manifest["execution_authorized"] is not False:
         raise RuntimeError("PMA draft unexpectedly authorized")
-    image_tag = manifest['assets'][args.task]['image_tag'] if single else TASKS[args.task]
+    image_tag = manifest['assets'][args.task]['image_tag'] if single or pos else TASKS[args.task]
     identity = image_identity(image_tag)
-    if not fake_gateway:
+    if not fake_gateway or pos:
         approved = manifest['assets'][args.task]
         if (identity['image_id'] != approved['image_id'] or
                 approved['repo_digest'] not in identity['repo_digests']):
             raise RuntimeError('PMA target image differs from frozen live manifest')
     for name in ("requests", "responses"):
         (root / "control" / "spool" / name).mkdir(parents=True, exist_ok=False)
+    if pos:
+        (root / 'control' / 'pos_archive').mkdir()
+        shutil.copy2(Path(args.pos_fake_replies).resolve(strict=True),
+                     root / 'control' / 'pos_fake_replies.json')
     config = json.loads(compose.read_text(encoding="utf-8"))
     if args.condition == "B":
         main = config["services"]["main"]
@@ -144,6 +161,13 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
              "target": "/run/pma-bridge/requests", "read_only": False},
             {"type": "bind", "source": (root / "control" / "spool" / "responses").as_posix(),
              "target": "/run/pma-bridge/responses", "read_only": True},
+        ]
+    if pos:
+        config['services']['main']['volumes'] += [
+            {'type': 'bind', 'source': (root / 'control' / 'pos_archive').as_posix(),
+             'target': '/run/pos-archive', 'read_only': False},
+            {'type': 'bind', 'source': (root / 'control' / 'pos_fake_replies.json').as_posix(),
+             'target': '/run/pos-fake-replies.json', 'read_only': True},
         ]
     compose.write_text(json.dumps(config, indent=2), encoding="utf-8")
     record = {"schema": ("pma-ga-offline-harbor-v1" if fake_gateway else
@@ -243,8 +267,16 @@ def run_offline(args) -> dict:
         env["NO_COLOR"] = "1"
         env["CI"] = "1"
         env["GA_PMA_UPSTREAM_ENABLED"] = "1" if args.condition == "B" else "0"
+        env['GA_POS_ENABLED'] = '1' if args.condition == 'P' else '0'
         env["GA_PMA_ENABLED"] = env["GA_MONITOR_ENABLED"] = "0"
         env["GA_M0_MONITOR_ENABLED"] = "0"
+        if args.condition == 'P':
+            env.update(GA_POS_TRANSPORT='fake',
+                       GA_POS_WORKER_SCRIPT='/opt/genericagent/pos_runtime/worker.py',
+                       GA_POS_VENDOR_ROOT='/opt/genericagent/pos_runtime/vendor',
+                       GA_POS_EPISODE_MODULE='/opt/genericagent/pos_runtime/episode.py',
+                       GA_POS_ARCHIVE='/run/pos-archive/events.jsonl',
+                       GA_POS_FAKE_REPLIES='/run/pos-fake-replies.json')
         if args.condition == "B":
             env.update(GA_PMA_UPSTREAM_REQUESTS="/run/pma-bridge/requests",
                        GA_PMA_UPSTREAM_RESPONSES="/run/pma-bridge/responses",
@@ -325,7 +357,7 @@ def run_offline(args) -> dict:
         cleanup_errors.append(f"worker_receipt_unreadable:{type(exc).__name__}:{exc}")
         worker_receipt = None
     main = [row for row in actual_mounts if row["image_id"] == record["image_id"]]
-    spool_ok = args.condition == "A" or (len(main) == 1 and
+    spool_ok = args.condition in {'A', 'P'} or (len(main) == 1 and
         {m["destination"]: m["rw"] for m in main[0]["mounts"]}.get(
             "/run/pma-bridge/requests") is True and
         {m["destination"]: m["rw"] for m in main[0]["mounts"]}.get(
@@ -333,7 +365,7 @@ def run_offline(args) -> dict:
     integration_ok = bool(primary_failure is None and result is not None and result.returncode == 0 and
         not exposed_private and not remaining_containers and not cleanup_errors and
         len(main) == 1 and spool_ok and
-        (args.condition == "A" or (worker.returncode == 0 and worker_receipt is not None
+        (args.condition in {'A', 'P'} or (worker.returncode == 0 and worker_receipt is not None
          and worker_receipt.get("task_end_saved") is True)))
     status = {**record, "harbor_return_code": None if result is None else result.returncode,
               "worker_return_code": None if worker is None else worker.returncode,

@@ -109,12 +109,48 @@ def main() -> None:
     launched.add_argument('--pma-profile-file')
     launched.add_argument('--python-home', default='cpython-3.12.12-linux-x86_64-gnu')
     launched.add_argument('--zero-model-fixture', action='store_true')
+    pos_plan = commands.add_parser('prepare-pos', help='unarmed fixed-source PoS serial plan')
+    pos_plan.add_argument('--task', action='append', required=True,
+                          help='canonical registered task ID, repeat in desired serial order')
+    pos_plan.add_argument('--output', required=True)
+    pos_plan.add_argument('--official-source-git', required=True)
+    pos_plan.add_argument('--frozen-reference-manifest', required=True)
+    pos_fake = commands.add_parser('fake-pos', help='one offline Harbor fake-only PoS run')
+    pos_fake.add_argument('--output', required=True, help='prepared PoS plan directory')
+    pos_fake.add_argument('--task', required=True)
+    pos_fake.add_argument('--run-root', required=True)
+    pos_fake.add_argument('--run-id', required=True)
+    pos_fake.add_argument('--pos-fake-replies', required=True)
+    for name in ('ga-source', 'runtime-root', 'task-profile-file',
+                 'worker-python', 'harbor-exe', 'bench-root', 'official-source-git'):
+        pos_fake.add_argument('--' + name, required=True)
+    pos_fake.add_argument('--task-profile', default='native_claude_cc_vibe_opus48')
+    pos_fake.add_argument('--python-home', default='cpython-3.12.12-linux-x86_64-gnu')
+    pos_fake.add_argument('--timeout-sec', type=int, default=180)
     args = parser.parse_args()
-    outcome = prepare(args) if args.command == 'prepare' else run(args)
+    if args.command == 'prepare-pos':
+        from method_discovery.pos_upstream_ga_v1_20261017.prepare_plan import prepare as prepare_pos
+        outcome = prepare_pos(source=args.official_source_git, tasks=args.task,
+                              reference=args.frozen_reference_manifest, output=args.output)
+    elif args.command == 'fake-pos':
+        from .offline_launcher import run_offline
+        args.manifest = str(Path(args.output) / 'manifest.json')
+        prepared_pos = json.loads(Path(args.manifest).read_text(encoding='utf-8'))
+        if prepared_pos.get('synthetic_fixture') is not True:
+            raise RuntimeError('fake-pos requires a synthetic Task fixture; '
+                               'the four registered tasks are not a fake fixture')
+        args.condition = 'P'
+        args.execution_authorized = False
+        args.multiturn_fixture = False
+        outcome = run_offline(args)
+    else:
+        outcome = prepare(args) if args.command == 'prepare' else run(args)
     print(json.dumps(outcome, ensure_ascii=False, indent=2))
     if (args.command == 'run' and
             (outcome['stop_reason'] or not outcome['arm'] or
              outcome['arm'].get('disposition') != 'completed')):
+        raise SystemExit(1)
+    if args.command == 'fake-pos' and not outcome['integration_ok']:
         raise SystemExit(1)
 
 
