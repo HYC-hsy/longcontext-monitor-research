@@ -34,7 +34,30 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def hash_index() -> int:
+    rows = []
+    for file in sorted(ROOT.rglob('*')):
+        if not file.is_file() or file.name == 'FILE_HASHES_ALL.json':
+            continue
+        repo_path = file.relative_to(REPO).as_posix()
+        staged = subprocess.run(('git', 'show', ':' + repo_path), cwd=REPO,
+                                capture_output=True, check=False)
+        if staged.returncode:
+            raise RuntimeError(f'not staged: {repo_path}')
+        rows.append({'path': file.relative_to(ROOT).as_posix(),
+                     'worktree_size': file.stat().st_size,
+                     'worktree_sha256': digest(file),
+                     'git_blob_size': len(staged.stdout),
+                     'git_blob_sha256': hashlib.sha256(staged.stdout).hexdigest()})
+    (ROOT / 'FILE_HASHES_ALL.json').write_text(json.dumps(rows, indent=2),
+                                               encoding='utf-8')
+    return len(rows)
+
+
 def main() -> None:
+    if len(sys.argv) == 2 and sys.argv[1] == '--hash-only':
+        print(json.dumps({'hashed_files': hash_index()}, indent=2))
+        return
     env = os.environ.copy()
     env['PYTHONPATH'] = os.pathsep.join((str(REPO),
         str(REPO / 'GenericAgent-main'), str(PROJECT),
@@ -81,8 +104,8 @@ def main() -> None:
         rows = [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines()]
         examples.append(f'=== REAL HARBOR FAKE B {variant.upper()} PHASES ===\n'
                         + json.dumps(rows, ensure_ascii=False, indent=2))
-    (ROOT / 'REQUEST_SAMPLES.txt').write_text('\n\n'.join(examples) + '\n',
-                                              encoding='utf-8')
+    samples = '\n\n'.join(examples) + '\n'
+    (ROOT / 'REQUEST_SAMPLES.txt').write_text(samples, encoding='utf-8')
 
     results = []
     for variant in ('u', 'v1', 'd1'):
@@ -120,6 +143,9 @@ def main() -> None:
         'Host fixture: A and B for U/V1/D1 pass actual launcher/Harbor/Docker '
         'synthetic lifecycle; B has two fake PMA stages and reminder append '
         'into a subsequent GA request. No official benchmark evaluation.\n'
+        'First archived example system hashes (U/V1/D1): '
+        + ', '.join(f"{row['variant']}={hashlib.sha256(row['request']['system'].encode('utf-8')).hexdigest()}"
+                    for row in screen[:3]) + '\n' +
         'The first D1 B fixture failed before any container/request because '
         'offline_launcher only admitted v4; ec3de05b fixed that v5 routing. '
         'The first direct top-level test invocation failed module alias import; '
@@ -138,16 +164,12 @@ def main() -> None:
         '18-REQUEST UNAUTHORIZED DRAFT: screen_draft/manifest.json\n'
         '18 FAKE ACTUAL REQUESTS: screen_fake/actual_requests.json\n'
         'HARBOR FAKE RAW EVIDENCE: certification_fixture_{u,v1,d1}/\n')
+    summary += ('\n=== COMPLETE REQUEST SAMPLES ===\n' + samples +
+                '\n=== COMPLETE RAW TEST OUTPUT ===\n' + test_log.read_text(encoding='utf-8') +
+                '\n=== COMPLETE LIMITED CODE DIFF ===\n' + changed.stdout)
     (ROOT / 'AUDIT_D1_V1_OFFLINE.txt').write_text(summary, encoding='utf-8')
-    rows = []
-    for file in sorted(ROOT.rglob('*')):
-        if file.is_file() and file.name != 'FILE_HASHES_ALL.json':
-            rows.append({'path': file.relative_to(ROOT).as_posix(),
-                         'size': file.stat().st_size, 'sha256': digest(file)})
-    (ROOT / 'FILE_HASHES_ALL.json').write_text(json.dumps(rows, indent=2),
-                                               encoding='utf-8')
     print(json.dumps({'test_returncode': tested.returncode,
-                      'hashed_files': len(rows), 'audit_head': head}, indent=2))
+                      'audit_head': head}, indent=2))
 
 
 if __name__ == '__main__':
