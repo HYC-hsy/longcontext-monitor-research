@@ -70,10 +70,11 @@ def _committed_evidence_sha(checkout: Path, path: Path) -> str:
 def verify_evidence(evidence: Path, *, require_committed: bool = True,
                     research_candidate: str | None = None) -> dict:
     checkout = Path(__file__).resolve().parents[3]
-    current = source_identity(checkout, candidate=research_candidate is not None)
     outcomes = {}
     hashes = {}
     for condition in ('A', 'B'):
+        current = source_identity(checkout,
+            candidate=research_candidate is not None and condition == 'B')
         base = evidence / condition
         required = [name for name in EVIDENCE_FILES
                     if condition == 'B' or name != 'memory_payload.jsonl']

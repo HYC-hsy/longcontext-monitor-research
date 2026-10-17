@@ -61,12 +61,15 @@ def main() -> None:
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--task-profile-file', type=Path, required=True)
     parser.add_argument('--pma-profile-file', type=Path, required=True)
+    parser.add_argument('--research-candidate', choices=('U', 'V1', 'D1'), default='U')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     secrets = private_values(args.task_profile_file, args.pma_profile_file)
     files = collect('A', args.a, args.output / 'A', secrets)
     files += collect('B', args.b, args.output / 'B', secrets)
-    summary = verify_evidence(args.output, require_committed=False)
+    summary = verify_evidence(args.output, require_committed=False,
+                              research_candidate=(args.research_candidate
+                                  if args.research_candidate != 'U' else None))
     (args.output / 'FILE_HASHES.json').write_text(json.dumps({
         'schema': 'pma-ga-generic-fixture-redacted-index-v1', 'files': files,
         'certification': summary}, indent=2, ensure_ascii=False), encoding='utf-8')
