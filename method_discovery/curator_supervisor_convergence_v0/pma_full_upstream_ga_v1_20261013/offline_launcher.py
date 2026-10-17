@@ -86,13 +86,14 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
     manifest_path = (STAGE / "FOUR_RUN_MANIFEST_DRAFT.json" if fake_gateway
                      else Path(args.manifest).resolve(strict=True))
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    single = not fake_gateway and manifest.get('schema') == 'pma-ga-live-manifest-v4'
+    single = not fake_gateway and manifest.get('schema') in {
+        'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5'}
     if (args.task not in (manifest.get('assets', {}) if single else TASKS)):
         raise ValueError('task outside frozen PMA assets')
     task = root / "public_task"
     if not fake_gateway and manifest.get("schema") in {
             "pma-ga-live-manifest-v2", "pma-ga-live-manifest-v3",
-            "pma-ga-live-manifest-v4"}:
+            "pma-ga-live-manifest-v4", "pma-ga-live-manifest-v5"}:
         materialize_public(Path(args.official_source_git).resolve(strict=True),
                            args.task, task, manifest["assets"][args.task]["public_members"],
                            registered=single)
@@ -114,7 +115,8 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
                                    task_network_policy=("official" if not fake_gateway and
                                        manifest.get("schema") in {
                                            "pma-ga-live-manifest-v2", "pma-ga-live-manifest-v3",
-                                           "pma-ga-live-manifest-v4"}
+                                           "pma-ga-live-manifest-v4",
+                                           "pma-ga-live-manifest-v5"}
                                        else "isolated"))
     if fake_gateway:
         _offline_gateway(root, runtime, args.python_home)
@@ -156,7 +158,7 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
               "network_mode": ("official_requested" if not fake_gateway and
                   manifest.get("schema") in {
                       "pma-ga-live-manifest-v2", "pma-ga-live-manifest-v3",
-                      "pma-ga-live-manifest-v4"}
+                      "pma-ga-live-manifest-v4", "pma-ga-live-manifest-v5"}
                   else "none_requested"),
               "native_evaluator_calls": 0, "fake_provider_only": fake_gateway}
     (root / "archive" / "prepared.json").write_text(
