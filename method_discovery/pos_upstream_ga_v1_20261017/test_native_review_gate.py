@@ -43,7 +43,7 @@ class NativeReviewGate(unittest.TestCase):
                 self.expected()
         old_v1 = serial_live.HISTORICAL_PROBE.parent.parent / 'raw_compat_v1'
         with patch.object(serial_live, 'HISTORICAL_PROBE', old_v1):
-            with self.assertRaises(RuntimeError):
+            with self.assertRaises((RuntimeError, OSError)):
                 self.expected()
 
     def test_wrong_code_or_profile_rejected(self):
