@@ -18,21 +18,35 @@ class PoSBridgeError(RuntimeError):
 class PoSBridge:
     def __init__(self, *, worker_script, vendor, episode_module, archive,
                  mode, fake_replies=None, profile_file=None, profile_name=None,
-                 timeout=180, deadline_epoch=None):
+                 timeout=180, deadline_epoch=None, run_id=None, task_id=None,
+                 binding_file=None):
         if mode not in {'fake', 'profile'}:
             raise PoSBridgeError('explicit PoS transport mode required')
         argv = [sys.executable, '-B', '-u', str(Path(worker_script).resolve(strict=True)),
                 '--vendor', str(Path(vendor).resolve(strict=True)),
                 '--episode-module', str(Path(episode_module).resolve(strict=True)),
                 '--archive', str(Path(archive)), '--mode', mode]
+        if run_id: argv += ['--run-id', run_id]
+        if task_id: argv += ['--task-id', task_id]
         if mode == 'fake':
             argv += ['--fake-replies', str(Path(fake_replies).resolve(strict=True))]
         else:
+            if not binding_file:
+                raise PoSBridgeError('PoS profile requires frozen run binding')
+            binding_path = Path(binding_file).resolve(strict=True)
+            bound = json.loads(binding_path.read_text(encoding='utf-8'))
+            if (bound.get('schema') != 'pos-ga-transport-binding-v1' or
+                    bound.get('transport') != 'profile' or
+                    bound.get('run_id') != run_id or bound.get('task_id') != task_id or
+                    binding_path.parent != Path(archive).resolve(strict=False).parent):
+                raise PoSBridgeError('PoS profile binding identity differs')
             argv += ['--profile-file', str(Path(profile_file).resolve(strict=True)),
-                     '--profile-name', profile_name]
+                     '--profile-name', profile_name,
+                     '--binding-file', str(binding_path)]
         archive_path = Path(archive)
         archive_path.parent.mkdir(parents=True, exist_ok=True)
         self.archive_path = archive_path
+        self.run_id, self.task_id = run_id, task_id
         self._stderr = archive_path.with_suffix('.stderr.log').open('ab')
         try:
             self.process = subprocess.Popen(argv, stdin=subprocess.PIPE,
@@ -54,7 +68,7 @@ class PoSBridge:
         """Append original GA fact before auxiliary PoS processing."""
         row = {'kind': kind, 'payload': payload, 'worker_sent_commands': self.sent}
         with self.archive_path.with_suffix('.host.jsonl').open('ab') as stream:
-            stream.write((json.dumps(row, ensure_ascii=False, default=str) + '\n').encode('utf-8'))
+            stream.write((json.dumps(row, ensure_ascii=True, default=str) + '\n').encode('utf-8'))
             stream.flush()
             os.fsync(stream.fileno())
 
@@ -65,12 +79,6 @@ class PoSBridge:
         if any(not os.environ.get(name) for name in required):
             raise PoSBridgeError('PoS worker identity or archive missing')
         mode = os.environ['GA_POS_TRANSPORT']
-        if mode == 'profile':
-            # A boolean environment switch or an old A/B approval is not a
-            # frozen, one-use PoS authorization. The native-shared P path is
-            # intentionally closed until its identity/Harbor checks exist.
-            raise PoSBridgeError('PoS profile transport requires the unfinished '
-                                 'native-shared P authorization path')
         return cls(worker_script=os.environ['GA_POS_WORKER_SCRIPT'],
                    vendor=os.environ['GA_POS_VENDOR_ROOT'],
                    episode_module=os.environ['GA_POS_EPISODE_MODULE'],
@@ -79,7 +87,10 @@ class PoSBridge:
                    profile_file=os.environ.get('GA_POS_PROFILE_FILE'),
                    profile_name=os.environ.get('GA_POS_PROFILE_NAME'),
                    timeout=float(os.environ.get('GA_POS_TIMEOUT', '180')),
-                   deadline_epoch=os.environ.get('GA_POS_DEADLINE_EPOCH'))
+                   deadline_epoch=os.environ.get('GA_POS_DEADLINE_EPOCH'),
+                   run_id=os.environ.get('GA_BENCH_RUN_ID'),
+                   task_id=os.environ.get('GA_BENCH_TASK_ID'),
+                   binding_file=os.environ.get('GA_POS_BINDING_FILE'))
 
     def _read(self):
         try:
@@ -98,7 +109,7 @@ class PoSBridge:
         command = {'kind': kind, **fields}
         self.sent += 1
         try:
-            self.process.stdin.write(json.dumps(command, ensure_ascii=False) + '\n')
+            self.process.stdin.write(json.dumps(command, ensure_ascii=True) + '\n')
             self.process.stdin.flush()
         except (BrokenPipeError, OSError) as error:
             self.close()
@@ -146,3 +157,14 @@ class PoSBridge:
             self.process.stdout.close()
         self._stderr.close()
         self._reader.join(timeout=1)
+        target = self.archive_path.with_suffix('.close.json')
+        try:
+            with target.open('xb') as stream:
+                stream.write((json.dumps({'status': self.close_status,
+                    'worker_return_code': self.process.returncode,
+                    'commands_sent': self.sent, 'run_id': self.run_id,
+                    'task_id': self.task_id}) + '\n').encode('utf-8'))
+                stream.flush()
+                os.fsync(stream.fileno())
+        except OSError as error:
+            self.close_persist_error = type(error).__name__ + ': ' + str(error)

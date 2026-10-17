@@ -1,0 +1,195 @@
+PoS-on-GA native-SHARED offline handoff, 2026-10-18
+===================================================
+
+Scope and status
+----------------
+Base: f3fc55b3e00ab9cd04ec804aadf6e1e74773aaed on crs-v0-20261007.
+This is released-core PoS-on-GA transfer, not a reproduction of paper results.
+No real model request, formal four-task run, official evaluator, training or
+scoring-model call occurred. There was one successful synthetic Task trial:
+two fake Task responses, one real synthetic GA code_run (creating a file and
+starting a local HTTP service), seven finite fake PoS role calls, and one
+actual synthetic verifier invocation. Two additional independent Docker
+sentinel negative invocations both failed as required. These synthetic tool
+and verifier executions are real, not zero.
+
+Fixed public core: luoyu100/PoS at
+6818cfa6434dbc91fcf67f0b3eb12a91db47433f. vendor/ is unchanged;
+vendor/LICENSE and vendor/THIRD_PARTY_NOTICES.md are retained. The former
+release's goal interpretation, Sentinel audit/correction, candidate commit,
+progress, health/trapping, recovery and textualization remain in original
+code. No new judge, fusion with PMA, threshold change or role collapse.
+The PoS episode and worker are external adapters. GA keeps native tools,
+execution, Task termination, Harbor and evaluation lifecycle.
+
+Component map and scoped change
+-------------------------------
+- vendor/belief/manager.py, beliefSentinel.py, beliefStates.py,
+  worldStates.py, trappingDetection.py, progressScoring.py,
+  recoveryPlanning.py and textualizer.py: byte-preserved PoS core.
+- vendor/prompts/* and contexts/base.py: byte-preserved prompt and context
+  semantics. episode.py renders the original goal/belief/relevant subgraph,
+  active gap and recovery, replacing only LOCA-specific JSON action,
+  exactly-one-tool, claim_done and example wrapping with GA's native tools.
+- GenericAgent-main/llmcore.py: only PoS stateless requests strip textual
+  <think>/<thinking> before fallback tool parsing; native hidden thinking
+  remains separate, tool-only public text may be empty. Old GA/PMA ask path
+  is unchanged. This is checked at actual requests.post payload boundary.
+- GenericAgent-main/ga.py and agent_loop.py: PoS-only current-instruction
+  source/lifetime, public host receipts, batch action/observation mapping,
+  Task terminal preservation when auxiliary archive/update fails. Public
+  <summary> is a GA expression, not hidden native thinking. The actual GA
+  system asset and callback can still ask for summary; the HTTP test does
+  not pretend every summary request was removed.
+- pos_bridge.py, worker.py: exact run/task/transport binding, staged vendor
+  and profile hashes, bounded no-replay IPC, fsynced result/close receipts,
+  partial-state attempt after reset failure, explicit unknown/missing
+  identities. Escaped ASCII JSON preserves a lone surrogate present in the
+  shipped GA tools asset without changing its code point.
+- H/single_run.py -> six_task_plan -> batch_controller -> live_launcher ->
+  Harbor adapter -> NativeSharedTrialHooks -> NativeSharedVerifier is reused.
+  P/PoS has its own one-slot identity, not A/B. The same future real route
+  requires committed synthetic certification plus separately granted exact
+  one-use authorization. Profile transport uses the gateway-rewritten
+  container profile; the host private key file is not mounted into main.
+  `GA_POS_LIVE_AUTHORIZED=1`, old A/B grants and synthetic flags are not
+  real PoS authorization.
+- H/pilot_fake_gateway.py returns finite synthetic GA replies. The actual
+  synthetic task package has its own instruction and test.sh, not a formal
+  task's prompt/solution/tests. No new image or data set was built/pulled.
+
+The complete code/test diff is DIFF_V5.patch; the complete submitted-file
+byte hashes are PUBLIC_FILE_SHA256_V5.json. raw_v7/FILE_HASHES.json gives
+original-private and published-byte hashes for each copied record. New
+material is limited to the files in those indexes. Ignore existing unrelated
+monitor_agent_core/__pycache__ worktree files; they were not edited or staged.
+
+Method and host semantics
+-------------------------
+One GA decision plus its ordered tool batch is one joint-action PoS
+transition. Actual tool IDs/names/arguments/order and executed/rejected/
+not-executed states are action metadata; corresponding raw public results
+are observation and independent host receipts. A handler existence check
+determines unknown-tool rejection; this is not a complete mounted-schema
+permission check and does not change GA dispatch permissions. Eight tools
+inside one decision are one scored batch; K=8 means eight scored decisions,
+not eight tools. Unscored events are not synthetic zero-progress samples.
+For code_run, null exit code, timeout, truncation or background status stays
+as observed; a returned tool receipt is not a claim of process completion.
+
+The last real tool result is submitted before PoS finish. A no-tool finish
+records only public terminal content and runtime reason, not a fabricated
+action, progress, recovery or success. Host CURRENT_TASK_DONE is a legitimate
+runtime exit, not hidden evaluator success. Online success_known=false means
+no authoritative success signal. Active recovery at termination remains the
+last PoS core state; no fictitious recovered state is inserted. A PoS update,
+export, archive or fsync error is an auxiliary failure; an already-known
+Task terminal and tool receipt remain the host fact. Disk failure is not
+promised to be recoverable. Failure after an accepted or acceptance-unknown
+command never triggers an unrecorded replay or silent GA/PMA fallback.
+
+The upstream goal interpretation remains fixed, observed/source_type labels
+do not prove truth, Sentinel citation checks are not semantic entailment,
+and the published E/A persistence tie favors epistemic. Recovery is Task
+context, not an approval gate. Transport/profile, batch grain, GA model
+interface and Task set differ from the paper; no paper-score claim follows.
+
+Final synthetic native-SHARED run
+---------------------------------
+Run ID pos-4e0f687037da49f5, source dir originally
+E:\LongContext\pos_native_synthetic_20261018_dev10 (left intact).
+Published copy: raw_v7/normal/. The fixed existing image was
+alexgshaw/db-wal-recovery@sha256:0e33ea5ec823975d1bd6c3778395c9f94251dd88f571146057bff6adb7e4594e;
+fixed clean Harbor source 459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc.
+One main container ID 63a527544d401d5a005be461fd223a1d60bc8b205218de03f02fbd656b98a52e
+is present in agent start/end, control registry and verifier release. Task
+service PID 7971 was preserved while registered GA/PoS/transport writers
+and gateway were stopped. Control_remaining=[], verifier test.sh executed
+once with return code 0, reward=1 only after checking both exact file content
+and HTTP 200. Harbor return 0; source/task/evaluator upload checked; container
+and owned volume clearance clean; no remaining owned container. PoS worker
+result bound and close bound, status completed/graceful_exit, return code 0,
+completed_decision_batches=2, scored_transitions=1, success_known=false.
+
+Direct records: normal/fake_requests/0001.json and 0002.json are the actual
+fake transport payloads; normal/agent/research_events.jsonl is the Task
+request/response/action ledger; normal/events.jsonl holds 7 individual PoS
+role requests/responses and original manager events; normal/events.host.jsonl
+contains GA host facts; normal/events.result.json and events.close.json are
+fsynced worker receipts. normal/agent/task_terminal.json, agent_end_native,
+writer_termination_check, verification_released,
+native_evaluator_uploaded, native_test_execution, verifier/test-stdout.txt,
+verifier/reward.txt and live_result.json link stop, same main, upload,
+verifier and cleanup. The word evaluator in generic Harbor file names refers
+here only to the synthetic test.sh, not an official evaluator.
+
+Publication is an allowlist copy, not a rewrite of the private run tree.
+The 49 selected records underwent the documented secret/hidden-thinking
+projection; every row in FILE_HASHES.json records private-source hash,
+published-byte hash, length and redaction count. All selected dev10 rows
+needed zero field substitutions. The host private profile file, gateway
+configuration, mounted mykey.json and other non-allowlisted bundle files
+are not in the public directory because they contain transport material,
+not because task text, response errors or tool output was shortened. The
+complete model-visible fake Task request/response and PoS role records,
+public tool arguments and host receipts are retained. Any absent record in
+the source would have failed the collector rather than been fabricated.
+
+Two independent Docker negatives, preserved in sentinel_negative_v1/:
+missing_file and missing_service each exit 1. Their original stderr bytes
+are in corresponding *.stderr.txt. The second has the exact marker but no
+HTTP service, and fails with ConnectionRefusedError. Both use --pull never,
+the same fixed image and no network. This proves the sentinel cannot grant
+reward on file-only or service-only absence; it is not Task quality evidence.
+
+Tests and historical failures
+-----------------------------
+acceptance_v10 contains exact subprocess stdout/stderr and command/hash
+receipts for PoS core, PoS/GA seam, old single-run, old live wiring. Earlier
+acceptance_v5/v6/v9 failures are retained: wrong Python module invocation
+(relative import error), then an actual old v1 manifest compatibility failure
+(KeyError config), then an old A/B committed-fixture test rejecting the
+intentionally modified batch_controller before this new commit. The first
+two were corrected; the historical A/B fixture is not rewritten or used to
+certify the new P source. All other old single-run tests are run separately
+in acceptance_v10. None of these failures were rewritten into passes.
+PoS seam covers tagged thinking with native thinking, pseudo tool_call inside
+tagged thinking, native tool-only response, a three-decision actual
+GenericAgentHandler/system-asset/NativeToolClient/raw_ask to requests.post
+path with persistent user constraint and old history canaries, joint batch,
+terminal auxiliary failure, unknown tool, tool exception, no-replay and
+authorization identity negatives. The synthetic Harbor run verifies the
+future native-SHARED path, not merely the earlier disable-verification fake.
+
+Earlier Docker dev2-dev5 controller stdout/stderr are preserved under
+raw_v7/failures/. Dev2: existing fixed Harbor checkout had unrelated dirty
+changes and was preserved; a fresh clean same-commit worktree was used.
+Dev3: wrong bench-root argument. Dev4: egress sidecar image unavailable for
+the synthetic allow_internet=false fixture; only the synthetic task config
+was adjusted for the local fake gateway. Dev5: synthetic_shared hook was
+routed to the old PMA hook; repaired to native hook. Dev6-dev9 successful
+or intermediate original trees remain outside this repo; raw_v5/raw_v6 are
+optional intermediate public copies. No run ID was reused or retroactively
+changed. These are engineering diagnostics, not method-effect data.
+
+No real-path claim beyond the offline evidence: a real PoS profile request,
+formal four-task Task run, official evaluator and actual provider error
+behavior have not been exercised. Hidden Task success is unknown. No
+effectiveness conclusion is made. Existing U/PMA method, core, prompt,
+bank and observed historical inputs/results were not changed here. Its
+historical U input was GA-postprocessed public events and could contain host
+summary or working-memory copies; it was not necessarily a byte-for-byte
+provider public-text projection. This provenance clarification does not
+invalidate old results or silently create a new PMA input condition.
+
+Four-task plan and stop
+-----------------------
+plan_four/plan.json remains PoS-only: nginx-request-logging,
+adaptive-rejection-sampler, sqlite-with-gcov, write-compressor. It is an
+observed development set, not held-out. execution_authorized=false; no
+formal run or compatibility probe was started. The real draft retains the
+frozen 300-turn/14400-second budget, whereas only the synthetic fixture uses
+2 turns/180 seconds. Future runs require separately approved exact manifests,
+source/profile/vendor/task/evaluator/image/order/budget/run binding and
+one-use authorization. RUNNING_V5.md gives offline commands and the gate.
+Stop here for independent audit.

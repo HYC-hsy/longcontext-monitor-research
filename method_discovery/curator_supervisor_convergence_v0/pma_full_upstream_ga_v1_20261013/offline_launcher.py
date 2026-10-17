@@ -90,13 +90,21 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
     single = not fake_gateway and manifest.get('schema') in {
         'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5'}
     pos = args.condition == 'P'
-    if (pos and (manifest.get('schema') != 'pos-ga-prepared-v1' or
+    if (pos and (manifest.get('schema') not in {'pos-ga-prepared-v1',
+                                               'pos-ga-single-manifest-v1'} or
                 manifest.get('execution_authorized') is not False)):
         raise RuntimeError('PoS prepared identity missing or authorized')
     if (args.task not in (manifest.get('assets', {}) if single or pos else TASKS)):
         raise ValueError('task outside frozen PMA assets')
     task = root / "public_task"
-    if pos or not fake_gateway and manifest.get("schema") in {
+    if pos and manifest.get('zero_model_fixture_only') is True:
+        from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import ROOT, synthetic_members
+        expected = manifest['assets'][args.task]['synthetic_package_files']
+        if synthetic_members() != expected:
+            raise RuntimeError('PoS synthetic source package differs from freeze')
+        shutil.copytree(ROOT / 'synthetic_task', task,
+            ignore=shutil.ignore_patterns('tests', 'pos_replies.json', '__pycache__'))
+    elif pos or not fake_gateway and manifest.get("schema") in {
             "pma-ga-live-manifest-v2", "pma-ga-live-manifest-v3",
             "pma-ga-live-manifest-v4", "pma-ga-live-manifest-v5"}:
         materialize_public(Path(args.official_source_git).resolve(strict=True),
@@ -129,7 +137,8 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
                                        manifest.get("schema") in {
                                            "pma-ga-live-manifest-v2", "pma-ga-live-manifest-v3",
                                            "pma-ga-live-manifest-v4",
-                                           "pma-ga-live-manifest-v5"}
+                                           "pma-ga-live-manifest-v5",
+                                           "pos-ga-single-manifest-v1"}
                                        else "isolated"))
     if fake_gateway:
         _offline_gateway(root, runtime, args.python_home)
@@ -149,10 +158,12 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
             raise RuntimeError('PMA target image differs from frozen live manifest')
     for name in ("requests", "responses"):
         (root / "control" / "spool" / name).mkdir(parents=True, exist_ok=False)
-    if pos:
+    if pos and manifest.get('zero_model_fixture_only') is True:
         (root / 'control' / 'pos_archive').mkdir()
         shutil.copy2(Path(args.pos_fake_replies).resolve(strict=True),
                      root / 'control' / 'pos_fake_replies.json')
+    elif pos:
+        (root / 'control' / 'pos_archive').mkdir()
     config = json.loads(compose.read_text(encoding="utf-8"))
     if args.condition == "B":
         main = config["services"]["main"]
@@ -166,9 +177,11 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
         config['services']['main']['volumes'] += [
             {'type': 'bind', 'source': (root / 'control' / 'pos_archive').as_posix(),
              'target': '/run/pos-archive', 'read_only': False},
-            {'type': 'bind', 'source': (root / 'control' / 'pos_fake_replies.json').as_posix(),
-             'target': '/run/pos-fake-replies.json', 'read_only': True},
         ]
+        if manifest.get('zero_model_fixture_only') is True:
+            config['services']['main']['volumes'].append(
+                {'type': 'bind', 'source': (root / 'control' / 'pos_fake_replies.json').as_posix(),
+                 'target': '/run/pos-fake-replies.json', 'read_only': True})
     compose.write_text(json.dumps(config, indent=2), encoding="utf-8")
     record = {"schema": ("pma-ga-offline-harbor-v1" if fake_gateway else
                           "pma-ga-live-prepared-v1"), "execution_authorized": False,
@@ -182,7 +195,8 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
               "network_mode": ("official_requested" if not fake_gateway and
                   manifest.get("schema") in {
                       "pma-ga-live-manifest-v2", "pma-ga-live-manifest-v3",
-                      "pma-ga-live-manifest-v4", "pma-ga-live-manifest-v5"}
+                      "pma-ga-live-manifest-v4", "pma-ga-live-manifest-v5",
+                      "pos-ga-single-manifest-v1"}
                   else "none_requested"),
               "native_evaluator_calls": 0, "fake_provider_only": fake_gateway}
     (root / "archive" / "prepared.json").write_text(

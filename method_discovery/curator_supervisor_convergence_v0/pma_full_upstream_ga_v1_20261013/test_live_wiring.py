@@ -184,7 +184,7 @@ class LiveWiringTests(unittest.TestCase):
                   patch.object(live_launcher, 'clean_owned_containers', return_value=[]),
                   patch.object(live_launcher, 'capture_mounts', return_value=[])):
                 result = live_launcher.run_live(args)
-            self.assertEqual(result['harbor_return_code'], 0)
+            self.assertEqual(result['harbor_return_code'], 0, result)
             self.assertEqual(len(seen), 1)
             self.assertIn('pma_harbor_cli', ' '.join(seen[0]))
             self.assertIn('--enable-verification', seen[0])

@@ -437,6 +437,26 @@ class GenericAgent:
                 gen = wrap_generator(gen, identity, JsonlEventSink(event_path) if event_path else None)
             manual_inbox = None
             pma_finalization = {'status': 'not_enabled'}
+            def pos_finalization():
+                if os.environ.get('GA_POS_ENABLED') != '1':
+                    return None
+                from pathlib import Path
+                archive = Path(os.environ.get('GA_POS_ARCHIVE', ''))
+                try:
+                    result = json.loads(archive.with_suffix('.result.json').read_text(
+                        encoding='utf-8'))
+                    closed = json.loads(archive.with_suffix('.close.json').read_text(
+                        encoding='utf-8'))
+                    bound = (result.get('run_id') == os.environ.get('GA_BENCH_RUN_ID') and
+                             result.get('task_id') == os.environ.get('GA_BENCH_TASK_ID') and
+                             closed.get('run_id') == result.get('run_id') and
+                             closed.get('task_id') == result.get('task_id'))
+                    return {'status': result.get('status') if bound else 'identity_mismatch',
+                            'receipt_bound': bound, 'close_status': closed.get('status'),
+                            'worker_return_code': closed.get('worker_return_code')}
+                except (OSError, ValueError) as error:
+                    return {'status': 'missing_or_unknown',
+                            'error_type': type(error).__name__}
             def finalize_upstream_pma(terminal):
                 nonlocal pma_finalization
                 upstream_pma = getattr(self, 'pma_upstream_bridge', None)
@@ -488,7 +508,8 @@ class GenericAgent:
                 finalize_upstream_pma(task_terminal)
                 display_queue.put({'done': full_resp, 'source': source, 'turn': curr_turn,
                                    'outputs': turn_resps.copy(), 'task_terminal': task_terminal,
-                                   'pma_finalization': pma_finalization})
+                                   'pma_finalization': pma_finalization,
+                                   'pos_finalization': pos_finalization()})
                 self.history = handler.history_info
             except Exception as e:
                 print(f"Backend Error: {format_error(e)}")
@@ -497,7 +518,8 @@ class GenericAgent:
                 display_queue.put({'done': full_resp + f'\n```\n{format_error(e)}\n```', 'source': source,
                                    'turn': curr_turn, 'outputs': turn_resps.copy(),
                                    'task_terminal': task_terminal,
-                                   'pma_finalization': pma_finalization})
+                                   'pma_finalization': pma_finalization,
+                                   'pos_finalization': pos_finalization()})
             finally:
                 finalize_upstream_pma(task_terminal)
                 if manual_inbox is not None:
@@ -579,6 +601,9 @@ if __name__ == '__main__':
                     'result': terminal.get('result') if isinstance(terminal, dict) else None,
                     'pma_finalization': item.get('pma_finalization', {'status': 'not_enabled'}),
                 }
+                if os.environ.get('GA_POS_ENABLED') == '1':
+                    terminal_record['pos_finalization'] = item.get('pos_finalization') or {
+                        'status': 'missing_or_unknown'}
                 terminal_path = '/logs/agent/task_terminal.json'
                 with open(terminal_path + '.pending', 'x', encoding='utf-8') as f:
                     json.dump(terminal_record, f, sort_keys=True)

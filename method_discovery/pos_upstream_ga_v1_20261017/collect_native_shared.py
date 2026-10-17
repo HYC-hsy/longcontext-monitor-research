@@ -1,0 +1,120 @@
+"""Publish a narrow, redacted copy of a stopped synthetic native-SHARED run."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import runpy
+
+from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.archive_live_six_task import redact
+
+
+def secrets_from_profile(path: Path) -> list[str]:
+    profile = runpy.run_path(str(path))['native_claude_cc_vibe_opus48']
+    values = []
+    for key, value in profile.items():
+        if (isinstance(value, str) and len(value) >= 6 and any(word in key.lower()
+                for word in ('key', 'token', 'secret', 'password', 'base', 'url'))):
+            values.append(value)
+    return sorted(set(values), key=len, reverse=True)
+
+
+def mapping_for(source: Path) -> dict[str, Path]:
+    identity = json.loads((source / 'run_identity.json').read_text(encoding='utf-8'))
+    run = Path(identity['run_root']).resolve(strict=True)
+    if not run.is_relative_to(source.resolve(strict=True)):
+        raise RuntimeError('run root outside source')
+    if (source / 'authorization.json').exists():
+        raise RuntimeError('synthetic authorization remains live')
+    archive = run / 'archive'
+    selected = ('agent_start_identity.json', 'agent_end_native.json',
+                'control_process_registry.json', 'harbor.stderr.log',
+                'harbor.stdout.log', 'live_command_public.json',
+                'live_result.json', 'native_evaluator_uploaded.json',
+                'native_reports_checked.json', 'native_test_execution.json',
+                'pos_archive_status.json', 'prepared.json',
+                'verification_released.json', 'writer_termination_check.json')
+    mapping = {name: archive / name for name in selected}
+    for name in ('execution_identity.json', 'fake_authorization_removed.json',
+                 'run_identity.json', 'plan.json', 'manifest.json',
+                 'batch_result.json', 'controller.stdout.txt',
+                 'controller.stderr.txt'):
+        mapping[name] = source / name
+    for path in sorted((archive / 'fake_provider_requests').glob('*')):
+        if path.suffix in {'.json', '.sse'}:
+            mapping['fake_requests/' + path.name] = path
+    pos = run / 'control/pos_archive'
+    for name in ('events.jsonl', 'events.host.jsonl', 'events.result.json',
+                 'events.close.json', 'events.stderr.log'):
+        mapping[name] = pos / name
+    trial = list((run / 'jobs').glob('*/*'))
+    trial = [path for path in trial if (path / 'agent/research_events.jsonl').is_file()]
+    if len(trial) != 1:
+        raise RuntimeError('Task trial not unique')
+    task = trial[0]
+    for name in ('agent/research_events.jsonl', 'agent/task_terminal.json',
+                 'agent/agent_stdout.log', 'agent/agent_stderr.log',
+                 'agent/isolated_transport.log', 'agent/agent_process_return_code.txt',
+                 'verifier/test-stdout.txt', 'verifier/reward.txt',
+                 'result.json'):
+        mapping[name] = task / name
+    mapping['synthetic_test.sh'] = run / 'public_task/tests/test.sh'
+    mapping['synthetic_instruction.md'] = run / 'public_task/instruction.md'
+    mapping['synthetic_task.toml'] = run / 'public_task/task.toml'
+    return mapping
+
+
+def collect(source: Path, target: Path, secrets: list[str]) -> list[dict]:
+    mapping = mapping_for(source)
+    rows = []
+    for name, path in sorted(mapping.items()):
+        raw = path.read_bytes()
+        public, count = redact(raw, secrets)
+        destination = target / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with destination.open('xb') as stream:
+            stream.write(public)
+        rows.append({'path': 'normal/' + name, 'bytes': len(public),
+                     'sha256': hashlib.sha256(public).hexdigest(),
+                     'private_source_sha256': hashlib.sha256(raw).hexdigest(),
+                     'redactions': count})
+    return rows
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--source', type=Path, required=True)
+    parser.add_argument('--failure-source', type=Path, action='append', default=[])
+    parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--task-profile-file', type=Path, required=True)
+    args = parser.parse_args()
+    args.output.mkdir(parents=True, exist_ok=False)
+    secrets = secrets_from_profile(args.task_profile_file)
+    rows = collect(args.source, args.output / 'normal', secrets)
+    for source in args.failure_source:
+        for name in ('controller.stdout.txt', 'controller.stderr.txt'):
+            path = source / name
+            if not path.is_file():
+                continue
+            raw = path.read_bytes()
+            public, count = redact(raw, secrets)
+            destination = args.output / 'failures' / source.name / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with destination.open('xb') as stream:
+                stream.write(public)
+            rows.append({'path': destination.relative_to(args.output).as_posix(),
+                         'bytes': len(public), 'sha256': hashlib.sha256(public).hexdigest(),
+                         'private_source_sha256': hashlib.sha256(raw).hexdigest(),
+                         'redactions': count})
+    index = {'schema': 'pos-ga-native-shared-evidence-v1', 'files': rows,
+             'source_kind': 'redacted_copies_of_existing_run_records',
+             'new_real_model_calls': 0, 'official_evaluator_calls': 0}
+    (args.output / 'FILE_HASHES.json').write_text(json.dumps(index, ensure_ascii=False,
+        indent=2) + '\n', encoding='utf-8', newline='\n')
+    print(json.dumps({'files': len(rows), 'redactions': sum(x['redactions'] for x in rows),
+                      'real_model_calls': 0, 'official_evaluator_calls': 0}))
+
+
+if __name__ == '__main__':
+    main()

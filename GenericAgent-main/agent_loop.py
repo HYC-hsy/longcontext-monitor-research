@@ -33,6 +33,24 @@ class BaseHandler:
             return StepOutcome(None, next_prompt=f"未知工具 {tool_name}", should_exit=False)
 
 def json_default(o): return list(o) if isinstance(o, set) else str(o)
+
+def _pos_public_value(value):
+    """JSON-only host projection; never stringify a response object's repr."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_pos_public_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _pos_public_value(item) for key, item in value.items()}
+    return {'availability': 'non_json_host_value', 'type': type(value).__name__}
+
+def _pos_terminal_observation(turn, response, receipts, reason):
+    return json.dumps({'source': 'GA_terminal_observation', 'turn': turn,
+        'public_response_content': getattr(response, 'content', '') or '',
+        'tool_results': [_pos_public_value(item) for item in receipts],
+        'host_terminal': {'result': reason.get('result', 'CURRENT_TASK_DONE'),
+                          'public_data': _pos_public_value(reason.get('data'))}},
+        ensure_ascii=False)
 def exhaust(g):
     try: 
         while True: next(g)
@@ -61,6 +79,17 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
     pma_upstream = None
     pos = None
     pos_observation = initial_content
+    pos_auxiliary_errors = []
+    def pos_record(kind, payload):
+        if pos is None:
+            return
+        try:
+            pos.record_host(kind, payload)
+        except (OSError, TypeError, ValueError) as error:
+            # The host action/terminal is already known in memory. Archive
+            # failure is auxiliary, never a change to the Task result.
+            pos_auxiliary_errors.append({'kind': kind, 'error_type':
+                                         type(error).__name__, 'error': str(error)})
     if os.environ.get('GA_POS_ENABLED') == '1':
         if any(os.environ.get(name) == '1' for name in (
                 'GA_PMA_UPSTREAM_ENABLED', 'GA_PMA_ENABLED',
@@ -264,7 +293,7 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                         for index, call in enumerate(tool_calls)
                         if call['tool_name'] != 'no_tool'] if pos is not None else None)
         if pos is not None:
-            pos.record_host('decision_selected', {'turn': turn,
+            pos_record('decision_selected', {'turn': turn,
                 'content': response.content or '', 'actions': pos_actions,
                 'provider_error': provider_error_response})
        
@@ -293,7 +322,7 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
             handler.current_turn = turn
             if pos_actions is not None and tool_name != 'no_tool':
                 pos_actions[ii]['status'] = 'started'
-                pos.record_host('tool_started', {'turn': turn, 'id': tid,
+                pos_record('tool_started', {'turn': turn, 'id': tid,
                     'name': tool_name, 'order': ii, 'arguments': pos_actions[ii]['arguments']})
             if tool_name == 'no_tool' and completion_decision and completion_decision.decision not in ('ALLOW_COMPLETE', 'ERROR_FAIL_OPEN'):
                 outcome = StepOutcome(None, next_prompt=completion_decision.next_prompt,
@@ -309,7 +338,7 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                 except StopIteration as e: outcome = e.value
                 except BaseException as error:
                     if pos is not None and tool_name != 'no_tool':
-                        pos.record_host('tool_result_unknown_after_start', {
+                        pos_record('tool_result_unknown_after_start', {
                             'turn': turn, 'id': tid, 'name': tool_name,
                             'error_type': type(error).__name__, 'error': str(error)})
                     raise
@@ -318,9 +347,10 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                     not hasattr(handler, 'do_' + tool_name) else 'executed')
                 receipt = {'tool_use_id': tid, 'name': tool_name,
                            'status': pos_actions[ii]['status'],
-                           'result': outcome.data, 'next_prompt': outcome.next_prompt}
+                           'result': _pos_public_value(outcome.data),
+                           'next_prompt': outcome.next_prompt}
                 pos_receipts.append(receipt)
-                pos.record_host('tool_outcome', {'turn': turn, **receipt})
+                pos_record('tool_outcome', {'turn': turn, **receipt})
             
             if outcome.data is not None and tool_name != 'no_tool':
                 handler.observe_tool_outcome(outcome.data, turn)
@@ -334,9 +364,9 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                 tool_results.append({'tool_use_id': tid, 'content': datastr})
             next_prompts.add(outcome.next_prompt)
         if pos is not None:
-            pos.record_host('decision_batch_completed', {'turn': turn,
+            pos_record('decision_batch_completed', {'turn': turn,
                 'actions': pos_actions, 'tool_results': pos_receipts,
-                'host_exit_reason': exit_reason})
+                'host_exit_reason': _pos_public_value(exit_reason)})
             try:
                 pos.exchange('decision_completed', turn=turn,
                              action_count=len(pos_actions or []))
@@ -350,11 +380,9 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
         if len(next_prompts) == 0 or exit_reason:
             if len(handler._done_hooks) == 0 or exit_reason.get('result', '') == 'EXITED':
                 if pos is not None:
-                    terminal_observation = json.dumps({
-                        'source': 'GA_completed_joint_action', 'turn': turn,
-                        'tool_results': pos_receipts, 'response_content': response.content or '',
-                        'exit_reason': exit_reason or {'result': 'CURRENT_TASK_DONE'}},
-                        ensure_ascii=False, default=json_default)
+                    terminal_observation = _pos_terminal_observation(
+                        turn, response, pos_receipts,
+                        exit_reason or {'result': 'CURRENT_TASK_DONE'})
                     try:
                         if pos.closed:
                             raise RuntimeError('PoS decision receipt unavailable')
@@ -418,6 +446,9 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
         try: pos.exchange('finish', reason=final_outcome['result'],
                           observation=pos_observation)
         finally: pos.close()
+    if pos is not None and pos_auxiliary_errors:
+        final_outcome = {**final_outcome, 'pos_archive_incomplete': True,
+                         'pos_auxiliary_errors': pos_auxiliary_errors}
     _research_emit('termination', final_outcome, internal_turn=turn)
     _hook('agent_after', locals())
     return final_outcome

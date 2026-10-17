@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,13 +12,17 @@ import time
 
 
 def _json(value):
-    return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+    # GA's shipped tool-schema asset contains an escaped lone surrogate.
+    # JSON ASCII escaping preserves its exact code point across the pipe.
+    return json.dumps(value, ensure_ascii=True, separators=(',', ':'))
 
 
-def _persist_receipt(path, *, case_id, status, result=None, error=None):
+def _persist_receipt(path, *, case_id, status, result=None, error=None,
+                     run_id=None, task_id=None):
     """Durable episode receipt; never infer a missing core state as saved."""
     target = path.with_suffix('.result.json')
-    payload = {'case_id': case_id, 'status': status, 'result': result,
+    payload = {'case_id': case_id, 'run_id': run_id, 'task_id': task_id,
+               'status': status, 'result': result,
                'error': error, 'success_known': False}
     data = (_json(payload) + '\n').encode('utf-8')
     with target.open('wb') as stream:
@@ -132,10 +137,37 @@ def main():
     parser.add_argument('--fake-replies', type=Path)
     parser.add_argument('--profile-file', type=Path)
     parser.add_argument('--profile-name')
+    parser.add_argument('--run-id')
+    parser.add_argument('--task-id')
+    parser.add_argument('--binding-file', type=Path)
     args = parser.parse_args()
     if args.mode == 'profile':
-        raise RuntimeError('PoS profile mode remains unarmed until the native-shared '
-                           'P authorization and Harbor lifecycle are certified')
+        if not args.binding_file or not args.run_id or not args.task_id:
+            raise RuntimeError('PoS profile requires a frozen run/task binding')
+        binding = json.loads(args.binding_file.resolve(strict=True).read_text(
+            encoding='utf-8'))
+        if (binding.get('schema') != 'pos-ga-transport-binding-v1' or
+                binding.get('transport') != 'profile' or
+                binding.get('run_id') != args.run_id or
+                binding.get('task_id') != args.task_id or
+                args.binding_file.resolve().parent != args.archive.resolve().parent or
+                binding.get('upstream_commit') !=
+                    '6818cfa6434dbc91fcf67f0b3eb12a91db47433f' or
+                not all(isinstance(binding.get(key), str) and
+                        len(binding[key]) == 64 for key in
+                        ('manifest_sha256', 'authorization_sha256', 'config_sha256'))):
+            raise RuntimeError('PoS profile binding identity invalid')
+        def digest(path): return hashlib.sha256(path.read_bytes()).hexdigest()
+        for key, path in (('worker_sha256', Path(__file__)),
+                          ('episode_sha256', args.episode_module),
+                          ('profile_sha256', args.profile_file)):
+            if binding.get(key) != digest(path.resolve(strict=True)):
+                raise RuntimeError('PoS profile binding bytes differ: ' + key)
+        for relative, expected in binding.get('vendor_files_sha256', {}).items():
+            part = Path(relative)
+            if part.is_absolute() or '..' in part.parts or not part.parts or (
+                    digest((args.vendor / part).resolve(strict=True)) != expected):
+                raise RuntimeError('PoS vendor binding differs')
     sys.path.insert(0, str(args.vendor.resolve(strict=True)))
     # The GA source bundle contains llmcore.py as a sibling of pos_runtime.
     # This has no effect in fake mode and does not load the private profile.
@@ -196,7 +228,8 @@ def main():
                                            observation=command.get('observation'))
                     logger.log('pos_episode_result', result=value)
                     receipt = _persist_receipt(args.archive, case_id=episode.case_id,
-                                               status=value['status'], result=value)
+                                               status=value['status'], result=value,
+                                               run_id=args.run_id, task_id=args.task_id)
                     logger.log('pos_result_persisted', **receipt)
                     finished = True
                 elif kind == 'abort':
@@ -204,7 +237,8 @@ def main():
                     value = episode.get_result()
                     receipt = _persist_receipt(args.archive, case_id=episode.case_id,
                                                status='partial', result=value,
-                                               error=command.get('reason'))
+                                               error=command.get('reason'),
+                                               run_id=args.run_id, task_id=args.task_id)
                     logger.log('pos_result_persisted', **receipt)
                     finished = True
                 elif kind == 'get_result':
@@ -226,14 +260,17 @@ def main():
                 episode.manager.close()
                 if not finished:
                     try:
-                        partial = episode.get_result() if episode.started else None
+                        # reset() may have committed a core state before a
+                        # later initialization/textualization stage failed.
+                        partial = episode.get_result()
                     except BaseException as error:
                         partial = None
                         failure = {**(failure or {}), 'snapshot_error':
                                    type(error).__name__ + ': ' + str(error)}
                     receipt = _persist_receipt(args.archive, case_id=episode.case_id,
                                                status='partial' if partial else 'missing',
-                                               result=partial, error=failure or 'EOF')
+                                               result=partial, error=failure or 'EOF',
+                                               run_id=args.run_id, task_id=args.task_id)
                     logger.log('pos_partial_persisted', **receipt)
             except BaseException as error:
                 logger.log('pos_partial_missing', error_type=type(error).__name__,

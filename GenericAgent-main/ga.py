@@ -272,6 +272,7 @@ class GenericAgentHandler(BaseHandler):
         self.history_info = last_history if last_history else []
         self.code_stop_signal = []
         self._done_hooks = []
+        self._pos_persistent_constraints = []
         self.print = safe_print
         self.obligation_ledger = getattr(parent, 'obligation_ledger', None)
         if self.obligation_ledger is not None:
@@ -562,7 +563,7 @@ class GenericAgentHandler(BaseHandler):
         return prompt
 
     def consume_pos_current_instruction(self):
-        """Only newly delivered master input, never historical working memory."""
+        """Active source-labelled master constraints, not GA working memory."""
         if not getattr(self.parent, 'pos_decision_context', False):
             return ''
         direct = self.parent.extrakeyinfo
@@ -570,10 +571,14 @@ class GenericAgentHandler(BaseHandler):
         self.parent.extrakeyinfo = None
         parts = []
         if direct:
-            parts.append('[MASTER current instruction / extrakeyinfo] ' + direct)
+            parts.append('[MASTER instruction / extrakeyinfo] ' + direct)
         if file_note:
-            parts.append('[MASTER current instruction / _keyinfo] ' + file_note)
-        return '\n\n'.join(parts)
+            parts.append('[MASTER instruction / _keyinfo] ' + file_note)
+        if parts:
+            self.working['key_info'] = self.working.get('key_info', '') + ''.join(
+                '\n' + item for item in parts)
+        self._pos_persistent_constraints.extend(parts)
+        return '\n\n'.join(self._pos_persistent_constraints)
     
     def turn_end_callback(self, response, tool_calls, tool_results, turn, next_prompt, exit_reason):
         evidence_gate = getattr(self.parent, 'evidence_completion_kernel', None)
@@ -609,8 +614,10 @@ class GenericAgentHandler(BaseHandler):
         if injkeyinfo:
             self.working['key_info'] = self.working.get('key_info', '') + f"\n[MASTER] {injkeyinfo}"
             if getattr(self.parent, 'pos_decision_context', False):
-                # PoS intentionally suppresses old working memory; this *new*
-                # instruction must travel with the next actual observation.
+                # Mirror GA's persistent key_info lifespan without replaying
+                # unrelated historical working memory into stateless PoS.
+                self._pos_persistent_constraints.append(
+                    '[MASTER instruction / key_info] ' + injkeyinfo)
                 next_prompt += f"\n\n[MASTER current instruction / key_info] {injkeyinfo}\n"
         if injprompt: next_prompt += f"\n\n[MASTER] {injprompt}\n"
         self.parent.intervene = self.parent.extrakeyinfo = None

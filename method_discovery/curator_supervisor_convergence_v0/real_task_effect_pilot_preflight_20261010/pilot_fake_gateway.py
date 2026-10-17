@@ -28,6 +28,21 @@ class State:
             sequence = self.sequence
             if route != 'monitor':
                 self.task_responses += 1
+                if os.environ.get('POS_SYNTHETIC_FIXTURE') == '1' and self.task_responses == 1:
+                    return sequence, 'code_run', '<summary>Creating synthetic file and service.</summary>', {
+                        'script': ('printf "POS_FILE_OK\\n" > /app/pos-fixture-marker.txt; '
+                                   'setsid /opt/m4-runtime/python/'
+                                   'cpython-3.12.12-linux-x86_64-gnu/bin/python3.12 '
+                                   '-m http.server 19173 --bind 127.0.0.1 '
+                                   '>/tmp/pos_fixture_http.log 2>&1 </dev/null & '
+                                   'sleep 1; test "$(cat /app/pos-fixture-marker.txt)" = POS_FILE_OK; '
+                                   '/opt/m4-runtime/python/'
+                                   'cpython-3.12.12-linux-x86_64-gnu/bin/python3.12 '
+                                   "-c 'import urllib.request; "
+                                   'assert urllib.request.build_opener('
+                                   'urllib.request.ProxyHandler({})).open('
+                                   '"http://127.0.0.1:19173/", timeout=3).status == 200\''),
+                        'type': 'bash', 'timeout': 60}
                 if os.environ.get('PMA_MULTITURN_FIXTURE') == '1' and self.task_responses == 1:
                     if os.environ.get('PMA_SERVICE_FIXTURE') == '1':
                         return sequence, 'code_run', 'Start a harmless local test service.', {

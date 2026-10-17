@@ -103,7 +103,8 @@ class PoSEpisode:
                                                        'provider_cancelled', 'interrupted'} else
                                 'failed')
         self.lifecycle.append({'kind': 'finish', 'reason': reason,
-                               'success_known': False})
+                               'success_known': False,
+                               'terminal_observation': observation})
         return self.get_result()
 
     def get_context(self):
@@ -145,7 +146,9 @@ class PoSEpisode:
                 'context': context, 'adaptation': 'native_tool_envelope_only'}
 
     def get_result(self):
-        result = self.manager.get_result() if self.started else {}
+        # A failed reset can still leave a committed upstream initialization.
+        # Export whatever the core can provide, without asserting success.
+        result = self.manager.get_result()
         return {'status': self.terminal_status or 'partial',
                 'host_terminal_reason': (self.lifecycle[-1].get('reason')
                     if self.lifecycle and self.lifecycle[-1]['kind'] == 'finish' else None),

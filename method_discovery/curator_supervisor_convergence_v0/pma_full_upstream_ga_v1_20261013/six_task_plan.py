@@ -38,6 +38,35 @@ def _identity(row: dict) -> tuple:
 
 
 def validate_plan(manifest: dict, granted: dict) -> list[dict]:
+    if manifest.get('schema') == 'pos-ga-single-manifest-v1':
+        arms, bindings = manifest.get('planned_order'), granted.get('run_bindings')
+        if (manifest.get('execution_authorized') is not False or
+                granted.get('execution_authorized') is not True or
+                not isinstance(arms, list) or len(arms) != 1 or
+                not isinstance(bindings, list) or len(bindings) != 1 or
+                granted.get('approved_arms') != arms or
+                granted.get('config_sha256') != manifest.get('config_sha256') or
+                manifest.get('upstream_commit') !=
+                    '6818cfa6434dbc91fcf67f0b3eb12a91db47433f'):
+            raise RuntimeError('PoS single-run authorization incomplete')
+        row, bound = arms[0], bindings[0]
+        if (set(row) != {'order', 'task', 'repeat', 'condition', 'research_candidate'} or
+                row['order'] != 1 or type(row['repeat']) is not int or
+                row['repeat'] < 1 or row['condition'] != 'P' or
+                row['research_candidate'] != 'PoS' or
+                set(manifest.get('assets', {})) != {row['task']} or
+                _identity(bound) != _identity(row) or
+                bound.get('config_sha256') != manifest.get('config_sha256') or
+                bound.get('batch_id') != granted.get('batch_id') or
+                bound.get('run_id') != granted.get('run_id') or
+                not bound.get('run_id') or not bound.get('batch_id') or
+                Path(bound.get('run_root', '')).resolve(strict=False).parent !=
+                    Path(granted.get('output_root', '')).resolve(strict=False)):
+            raise RuntimeError('PoS run differs from frozen authorization')
+        synthetic = manifest.get('zero_model_fixture_only') is True
+        if synthetic != (row['task'] == 'pos-synthetic-file-http'):
+            raise RuntimeError('PoS synthetic identity differs')
+        return bindings
     if manifest.get('schema') in {'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5'}:
         arms = manifest.get('planned_order')
         bindings = granted.get('run_bindings')

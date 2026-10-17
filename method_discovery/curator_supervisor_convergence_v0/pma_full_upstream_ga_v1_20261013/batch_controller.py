@@ -56,7 +56,8 @@ def run_batch(args: argparse.Namespace) -> dict:
     native_plan = manifest.get("schema") in {"pma-ga-live-manifest-v2",
                                                 "pma-ga-live-manifest-v3",
                                                 "pma-ga-live-manifest-v4",
-                                                "pma-ga-live-manifest-v5"}
+                                                "pma-ga-live-manifest-v5",
+                                                "pos-ga-single-manifest-v1"}
     if native_plan:
         bindings = validate_plan(manifest, granted)
     else:
@@ -108,7 +109,8 @@ def run_batch(args: argparse.Namespace) -> dict:
             "--run-root", binding["run_root"]]
         if native_plan:
             command += ["--repeat", str(binding["repeat"])]
-        if manifest.get('schema') == 'pma-ga-live-manifest-v5':
+        if manifest.get('schema') in {'pma-ga-live-manifest-v5',
+                                      'pos-ga-single-manifest-v1'}:
             command += ['--research-candidate', binding['research_candidate']]
         if fixture:
             command += ['--zero-model-fixture']

@@ -49,6 +49,34 @@ def verify_live_spec(spec: dict) -> None:
         raise RuntimeError('PMA frozen manifest or authorization changed')
     frozen = json.loads(manifest.read_text(encoding='utf-8'))
     granted = json.loads(authorization.read_text(encoding='utf-8'))
+    if frozen.get('schema') == 'pos-ga-single-manifest-v1':
+        if granted.get('manifest_sha256') != spec['manifest_sha256']:
+            raise RuntimeError('PoS authorization does not bind manifest bytes')
+        binding = validate_plan(frozen, granted)[0]
+        for key in ('order', 'task', 'repeat', 'condition', 'run_id',
+                    'batch_id', 'config_sha256', 'research_candidate'):
+            if spec.get(key) != binding.get(key):
+                raise RuntimeError('PoS run outside exact authorized binding: ' + key)
+        if (spec.get('task_id') != binding['task'] or
+                Path(spec['run_root']).resolve() != Path(binding['run_root']).resolve() or
+                spec.get('condition') != 'P' or
+                spec.get('research_candidate') != 'PoS' or
+                (frozen.get('zero_model_fixture_only') is True) !=
+                (granted.get('zero_model_fixture_only') is True)):
+            raise RuntimeError('PoS method, root or fixture binding differs')
+        checkout = Path(__file__).resolve().parents[3]
+        head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=checkout,
+            capture_output=True, text=True, timeout=10, check=True).stdout.strip()
+        if head != granted.get('audited_code_commit') or head != spec.get('audited_code_commit'):
+            raise RuntimeError('PoS running code differs from authorized commit')
+        if frozen.get('zero_model_fixture_only') is not True and 'pos_binding_sha256' in spec:
+            binding = Path(spec['run_root']) / 'control/pos_archive/binding.json'
+            if (hashlib.sha256(binding.read_bytes()).hexdigest() !=
+                    spec['pos_binding_sha256'] or
+                    json.loads(binding.read_text(encoding='utf-8')).get(
+                        'authorization_sha256') != spec['authorization_sha256']):
+                raise RuntimeError('PoS profile binding differs from authorization')
+        return
     arms = frozen.get('arms')
     bindings = granted.get('run_bindings')
     if frozen.get('schema') in {'pma-ga-live-manifest-v2',
@@ -112,6 +140,14 @@ def verify_live_spec(spec: dict) -> None:
 class PMATrialHooks(PilotTrialHooks):
     def terminal_identity_valid(self, terminal):
         condition = self.spec.get('condition')
+        if condition == 'P':
+            return (isinstance(terminal, dict) and
+                set(terminal) == {'run_id', 'task_id', 'result',
+                                  'pma_finalization', 'pos_finalization'} and
+                terminal.get('run_id') == self.spec['run_id'] and
+                terminal.get('task_id') == self.spec['task_id'] and
+                terminal.get('pma_finalization') == {'status': 'not_enabled'} and
+                isinstance(terminal.get('pos_finalization'), dict))
         pma_status = {'A': 'not_enabled', 'B': 'saved'}.get(condition)
         return (pma_status is not None and isinstance(terminal, dict) and
                 set(terminal) == {'run_id', 'task_id', 'result', 'pma_finalization'} and
@@ -232,6 +268,18 @@ class NativeSharedTrialHooks(PMATrialHooks):
                     raise RuntimeError('native PMA spool mount identity differs')
         elif any(path.startswith('/run/pma-bridge') for path in mounts):
             raise RuntimeError('GA-only Task sees PMA spool')
+        if self.spec['condition'] == 'P':
+            actual = mounts.get('/run/pos-archive')
+            expected = Path(self.spec['run_root']) / 'control' / 'pos_archive'
+            if (actual is None or not actual.get('RW') or
+                    _source_identity(str(actual.get('Source'))) !=
+                    _source_identity(expected.as_posix())):
+                raise RuntimeError('PoS archive mount identity differs')
+            fake = mounts.get('/run/pos-fake-replies.json')
+            if (fake is not None) != bool(self.spec.get('zero_model_fixture_only')):
+                raise RuntimeError('PoS fake reply mount differs from fixture identity')
+        elif any(path.startswith('/run/pos-') for path in mounts):
+            raise RuntimeError('non-P Task sees PoS mount')
         result = await self.trial.agent_environment.exec(
             'test ! -e /solution && '
             '(test ! -e /tests || test -z "$(find /tests -mindepth 1 -print -quit)") && '
@@ -377,6 +425,26 @@ class NativeSharedTrialHooks(PMATrialHooks):
             'baseline_pids': sorted(self.baseline_pids),
             'agent_result_metadata': str(getattr(self.trial.result, 'agent_result', None)),
             'legal_agent_end_required': False})
+        if self.spec['condition'] == 'P':
+            result_path = self.control / 'pos_archive' / 'events.result.json'
+            close_path = self.control / 'pos_archive' / 'events.close.json'
+            def read_receipt(path):
+                try:
+                    return json.loads(path.read_text(encoding='utf-8'))
+                except (OSError, ValueError):
+                    return {'status': 'missing_or_unknown'}
+            result_receipt, close_receipt = read_receipt(result_path), read_receipt(close_path)
+            _atomic(self.archive / 'pos_archive_status.json', {
+                'run_id': self.spec['run_id'], 'task_id': self.spec['task_id'],
+                'result_status': result_receipt.get('status'),
+                'result_bound': (result_receipt.get('run_id') == self.spec['run_id'] and
+                                 result_receipt.get('task_id') == self.spec['task_id']),
+                'close_status': close_receipt.get('status'),
+                'close_bound': (close_receipt.get('run_id') == self.spec['run_id'] and
+                                close_receipt.get('task_id') == self.spec['task_id']),
+                'worker_return_code': close_receipt.get('worker_return_code'),
+                'archive_incomplete': result_receipt.get('status') in
+                    {'missing', 'missing_or_unknown', None}})
 
     async def verification_start(self, event):
         ended = json.loads((self.archive / 'agent_end_native.json').read_text(encoding='utf-8'))
@@ -409,7 +477,8 @@ def install_trial_hooks() -> None:
     async def create(cls, config):
         trial = await original(cls, config)
         hooks = (NativeSharedTrialHooks(trial, spec) if
-                 spec.get('evaluation_protocol') == 'official_shared_v2' else
+                 spec.get('evaluation_protocol') in {'official_shared_v2',
+                                                     'synthetic_shared_v1'} else
                  PMATrialHooks(trial, spec))
         trial.add_hook(TrialEvent.AGENT_START, hooks.agent_start)
         trial.add_hook(TrialEvent.AGENT_END, hooks.agent_end)

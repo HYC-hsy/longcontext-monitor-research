@@ -36,8 +36,15 @@ class NativeSharedVerifier(Verifier):
         if not spec_path:
             raise RuntimeError('native shared verifier has no run identity')
         spec = json.loads(Path(spec_path).read_text(encoding='utf-8'))
-        if spec.get('evaluation_protocol') != 'official_shared_v2':
+        if spec.get('evaluation_protocol') not in {'official_shared_v2',
+                                                    'synthetic_shared_v1'}:
             raise RuntimeError('native shared verifier protocol mismatch')
+        if (spec.get('evaluation_protocol') == 'synthetic_shared_v1' and
+                (spec.get('condition') != 'P' or
+                 spec.get('zero_model_fixture_only') is not True or
+                 spec.get('official_source_git_commit') !=
+                    'synthetic_no_official_evaluator')):
+            raise RuntimeError('synthetic verifier identity mismatch')
         sources, _, _ = self._resolve_tests()
         target = str(EnvironmentPaths.for_os(self.environment.os).tests_dir)
         for source in sources:

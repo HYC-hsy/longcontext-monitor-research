@@ -31,7 +31,8 @@ def _native_schema(manifest: dict) -> bool:
     return manifest.get('schema') in {'pma-ga-live-manifest-v2',
                                       'pma-ga-live-manifest-v3',
                                       'pma-ga-live-manifest-v4',
-                                      'pma-ga-live-manifest-v5'}
+                                      'pma-ga-live-manifest-v5',
+                                      'pos-ga-single-manifest-v1'}
 
 
 def _stage_verifier(root: Path, task: str, manifest: dict,
@@ -64,6 +65,30 @@ def _stage_verifier(root: Path, task: str, manifest: dict,
 
 def _require_evaluation_state_contract(manifest: dict) -> None:
     """Bind the native SHARED protocol to code and zero-model raw evidence."""
+    if manifest.get('schema') == 'pos-ga-single-manifest-v1':
+        from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import (
+            source_hashes, vendor_hashes, synthetic_members)
+        if (manifest.get('upstream_commit') !=
+                '6818cfa6434dbc91fcf67f0b3eb12a91db47433f' or
+                manifest.get('source_files_sha256') != source_hashes() or
+                manifest.get('vendor_files_sha256') != vendor_hashes()):
+            raise RuntimeError('PoS source/vendor freeze changed')
+        if manifest.get('zero_model_fixture_only') is True:
+            asset = next(iter(manifest['assets'].values()))
+            if asset.get('synthetic_package_files') != synthetic_members():
+                raise RuntimeError('PoS synthetic package freeze changed')
+            return
+        cert = manifest.get('native_shared_certification')
+        if not isinstance(cert, dict) or not cert.get('committed_evidence_sha256'):
+            raise RuntimeError('PoS native-SHARED synthetic certification absent')
+        from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import CHECKOUT
+        path = (CHECKOUT / cert.get('relative_path', '')).resolve(strict=True)
+        if not path.is_relative_to(CHECKOUT) or _sha(path) != cert['committed_evidence_sha256']:
+            raise RuntimeError('PoS native-SHARED certification bytes differ')
+        from method_discovery.pos_upstream_ga_v1_20261017.certification import verify_evidence
+        if verify_evidence(path.parent, require_committed=True) != cert.get('result'):
+            raise RuntimeError('PoS native-SHARED certification result differs')
+        return
     if manifest.get('schema') == 'pma-ga-live-manifest-v3':
         if manifest.get('zero_model_fixture_only') is True:
             return
@@ -282,7 +307,8 @@ def run_live(args) -> dict:
                                        'pma-ga-live-manifest-v2',
                                        'pma-ga-live-manifest-v3',
                                        'pma-ga-live-manifest-v4',
-                                       'pma-ga-live-manifest-v5'} or
+                                       'pma-ga-live-manifest-v5',
+                                       'pos-ga-single-manifest-v1'} or
             manifest.get('execution_authorized') is not False or
             authorized.get('execution_authorized') is not True or
             authorized.get('manifest_sha256') != _sha(manifest_path)):
@@ -293,12 +319,14 @@ def run_live(args) -> dict:
         raise RuntimeError('zero-model fixture identity does not match both records')
     candidate = getattr(args, 'research_candidate', 'U')
     expected_candidate = (manifest['planned_order'][0]['research_candidate']
-        if manifest['schema'] == 'pma-ga-live-manifest-v5' else 'U')
+        if manifest['schema'] in {'pma-ga-live-manifest-v5',
+                                  'pos-ga-single-manifest-v1'} else 'U')
     if candidate != expected_candidate or (args.condition == 'A' and candidate != 'U'):
         raise RuntimeError('PMA candidate differs from frozen plan')
     if (manifest.get('schema') in {'pma-ga-live-manifest-v3',
                                    'pma-ga-live-manifest-v4',
-                                   'pma-ga-live-manifest-v5'} and
+                                   'pma-ga-live-manifest-v5',
+                                   'pos-ga-single-manifest-v1'} and
             Path(args.ga_source).resolve(strict=True) !=
             (STAGE.parents[2] / 'GenericAgent-main').resolve(strict=True)):
         raise RuntimeError('V3 GA source is not the frozen repository bridge')
@@ -311,6 +339,12 @@ def run_live(args) -> dict:
             raise RuntimeError('PMA memory profile differs from frozen identity')
     if Path(args.run_root).exists():
         raise FileExistsError(args.run_root)
+    if args.condition == 'P':
+        if candidate != 'PoS' or fixture != (args.task == 'pos-synthetic-file-http'):
+            raise RuntimeError('PoS method or fixture identity differs')
+        if fixture:
+            from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import ROOT
+            args.pos_fake_replies = str(ROOT / 'synthetic_task/pos_replies.json')
     args.execution_authorized = False
     prepared = _prepare_common(args, fake_gateway=False)
     root = Path(args.run_root).resolve(strict=True)
@@ -325,7 +359,8 @@ def run_live(args) -> dict:
         compose = json.loads(compose_path.read_text(encoding='utf-8'))
         compose['services']['model-gateway']['environment'] = {
             'PMA_MULTITURN_FIXTURE': '1',
-            'PMA_SERVICE_FIXTURE': '1' if os.environ.get('PMA_SERVICE_FIXTURE') == '1' else '0'}
+            'PMA_SERVICE_FIXTURE': '1' if os.environ.get('PMA_SERVICE_FIXTURE') == '1' else '0',
+            'POS_SYNTHETIC_FIXTURE': '1' if args.condition == 'P' else '0'}
         if main_network is None:
             compose['services']['main'].pop('network_mode')
         else:
@@ -339,6 +374,7 @@ def run_live(args) -> dict:
         'execution_authorized': True, 'order': order, 'task': args.task,
         'task_id': args.task, 'condition': args.condition, 'run_id': args.run_id,
         'research_candidate': candidate,
+        'zero_model_fixture_only': fixture,
         'run_root': str(root), 'image_id': prepared['image_id'],
         'control_root': str(root / 'control'), 'archive_root': str(root / 'archive'),
         'manifest_path': str(manifest_path), 'manifest_sha256': _sha(manifest_path),
@@ -362,7 +398,13 @@ def run_live(args) -> dict:
         raise RuntimeError('PMA Task profile differs from frozen identity')
     # A zero-model lifecycle fixture never places official tests in the Task
     # tree. The live path still stages and byte-checks the fixed Git blobs.
-    if fixture:
+    if fixture and args.condition == 'P':
+        from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import ROOT
+        test_script = root / 'public_task/tests/test.sh'
+        test_script.write_bytes((ROOT / 'synthetic_task/tests/test.sh').read_bytes())
+        staged = {'native_tests_tree_sha256': digest_tree(test_script.parent),
+                  'native_test_sh_sha256': _sha(test_script)}
+    elif fixture:
         test_script = root / 'public_task/tests/test.sh'
         service_check = ("/opt/m4-runtime/python/cpython-3.12.12-linux-x86_64-gnu/"
                          "bin/python3.12 -c \"import urllib.request; "
@@ -385,10 +427,32 @@ def run_live(args) -> dict:
                     expected_native_reports=[],
                     official_evaluator_files=[{'relative': 'tests/test.sh',
                                                'sha256': staged['native_test_sh_sha256']}])
+        if args.condition == 'P':
+            spec['evaluation_protocol'] = 'synthetic_shared_v1'
     _require_evaluation_state_contract(manifest)
+    if args.condition == 'P' and not fixture:
+        staged_pos = root / 'bundle/source/pos_runtime'
+        binding = {
+            'schema': 'pos-ga-transport-binding-v1', 'transport': 'profile',
+            'run_id': args.run_id, 'task_id': args.task,
+            'upstream_commit': manifest['upstream_commit'],
+            'manifest_sha256': _sha(manifest_path),
+            'authorization_sha256': _sha(authorization_path),
+            'config_sha256': manifest['config_sha256'],
+            'worker_sha256': _sha(staged_pos / 'worker.py'),
+            'episode_sha256': _sha(staged_pos / 'episode.py'),
+            'profile_sha256': _sha(root / 'bundle/source/mykey.json'),
+            'vendor_files_sha256': manifest['vendor_files_sha256'],
+        }
+        binding_path = root / 'control/pos_archive/binding.json'
+        with binding_path.open('x', encoding='utf-8', newline='\n') as stream:
+            json.dump(binding, stream, sort_keys=True)
+            stream.write('\n')
+        spec['pos_binding_sha256'] = _sha(binding_path)
     spec_path = root / 'control' / 'harbor_spec.json'
     spec_path.write_text(json.dumps(spec, indent=2), encoding='utf-8')
-    deadline = time.time() + 14400
+    agent_seconds = manifest['config']['agent_wall_seconds'] if args.condition == 'P' else 14400
+    deadline = time.time() + agent_seconds
     worker = harbor = None
     worker_logs = []
     first_error = None
@@ -451,7 +515,7 @@ def run_live(args) -> dict:
             '--extra-docker-compose', str(root / 'bundle/isolation.compose.json'),
             '--n-concurrent', '1', '--max-retries', '0', '--yes',
             '--enable-verification',
-            '--agent-timeout-multiplier', str(14400 /
+            '--agent-timeout-multiplier', str(agent_seconds /
                 manifest['assets'][args.task]['native_agent_seconds'])
                 if _native_schema(manifest) else '16',
             '--verifier-timeout-multiplier', '1']
@@ -462,8 +526,8 @@ def run_live(args) -> dict:
         kwargs = {'llm_no': 0, 'run_id': args.run_id, 'task_id': args.task,
                   'expected_model': 'claude-opus-4-8', 'python_home': args.python_home,
                   'ga_source_sha256': prepared['ga_bundle_tree_sha256'],
-                  'timeout_sec': 180 if fixture else 14400,
-                  'max_turns': 2 if fixture else 300,
+                  'timeout_sec': 180 if fixture else agent_seconds,
+                  'max_turns': 2 if fixture else manifest.get('config', {}).get('task_turns_max', 300),
                   'llm_config_name': args.task_profile, 'condition_id': 'pma-neutral'}
         for key, value in kwargs.items():
             command += ['--ak', f'{key}={value}']
@@ -489,6 +553,21 @@ def run_live(args) -> dict:
                    GA_PMA_UPSTREAM_ENABLED='1' if args.condition == 'B' else '0',
                    GA_PMA_CAPTURE_TASK_REQUESTS='1',
                    GA_PMA_ENABLED='0', GA_MONITOR_ENABLED='0', GA_M0_MONITOR_ENABLED='0')
+        if args.condition == 'P':
+            env.update(GA_POS_ENABLED='1',
+                       GA_POS_TRANSPORT='fake' if fixture else 'profile',
+                       GA_POS_WORKER_SCRIPT='/opt/genericagent/pos_runtime/worker.py',
+                       GA_POS_VENDOR_ROOT='/opt/genericagent/pos_runtime/vendor',
+                       GA_POS_EPISODE_MODULE='/opt/genericagent/pos_runtime/episode.py',
+                       GA_POS_ARCHIVE='/run/pos-archive/events.jsonl',
+                       GA_POS_TIMEOUT=str(min(180, agent_seconds)),
+                       GA_POS_DEADLINE_EPOCH=str(deadline))
+            if fixture:
+                env['GA_POS_FAKE_REPLIES'] = '/run/pos-fake-replies.json'
+            else:
+                env['GA_POS_PROFILE_FILE'] = '/opt/genericagent/mykey.json'
+                env['GA_POS_PROFILE_NAME'] = manifest['config']['task_profile_name']
+                env['GA_POS_BINDING_FILE'] = '/run/pos-archive/binding.json'
         if args.condition == 'B':
             env.update(GA_PMA_UPSTREAM_REQUESTS='/run/pma-bridge/requests',
                        GA_PMA_UPSTREAM_RESPONSES='/run/pma-bridge/responses',
@@ -499,7 +578,7 @@ def run_live(args) -> dict:
             'agent_deadline_epoch': deadline,
             'evaluator_timeout_sec': manifest['assets'][args.task].get(
                 'native_verifier_seconds', 900),
-            'outer_timeout_sec': 14400 + manifest['assets'][args.task].get(
+            'outer_timeout_sec': agent_seconds + manifest['assets'][args.task].get(
                 'native_verifier_seconds', 900) + 600}, indent=2), encoding='utf-8')
         with (root / 'archive/harbor.stdout.log').open('wb') as out, (
                 root / 'archive/harbor.stderr.log').open('wb') as err:
@@ -511,7 +590,7 @@ def run_live(args) -> dict:
                     root, worker, deadline, pending_end_at, stop_requested_at)
                 _worker_clearance(root, worker, args.run_id)
                 if time.time() >= outer_deadline:
-                    raise subprocess.TimeoutExpired(command, 14400 +
+                    raise subprocess.TimeoutExpired(command, agent_seconds +
                         manifest['assets'][args.task].get('native_verifier_seconds', 900) + 600)
                 time.sleep(.25)
             result = harbor.returncode
@@ -569,6 +648,11 @@ def run_live(args) -> dict:
                      if worker is None or worker.poll() is not None else None)
         fake_requests = root / 'archive/fake_provider_requests'
         fake_captures = sorted(fake_requests.glob('*.json')) if fixture else []
+        try:
+            pos_archive = json.loads((root / 'archive/pos_archive_status.json').read_text(
+                encoding='utf-8')) if args.condition == 'P' else None
+        except (OSError, ValueError):
+            pos_archive = {'status': 'missing_or_unknown'}
         status = {'schema': manifest['schema'], 'run_id': args.run_id,
                   'task': args.task, 'condition': args.condition,
                   'research_candidate': candidate,
@@ -578,6 +662,7 @@ def run_live(args) -> dict:
                   'worker_return_code': None if worker is None else worker.poll(),
                   'pma_finalization': clearance.get('pma_finalization')
                       if isinstance(clearance, dict) else None,
+                  'pos_archive_status': pos_archive,
                   'sidecar_clearance': clearance,
                   'remaining_containers': None if remaining is None else [m['id'] for m in remaining],
                   'cleanup_errors': cleanup_errors,
@@ -606,6 +691,13 @@ def run_live(args) -> dict:
 
 
 def live_status_success(status: dict) -> bool:
+    if status.get('condition') == 'P':
+        archive = status.get('pos_archive_status') or {}
+        if (archive.get('result_bound') is not True or
+                archive.get('close_bound') is not True or
+                archive.get('close_status') != 'graceful_exit' or
+                archive.get('result_status') != 'completed'):
+            return False
     if status.get('zero_model_fixture_only') is True:
         return (status.get('primary_failure') is None and
                 status.get('harbor_return_code') == 0 and
@@ -645,8 +737,8 @@ def main() -> None:
     parser.add_argument('--order', type=int, required=True)
     parser.add_argument('--repeat', type=int)
     parser.add_argument('--task', required=True)
-    parser.add_argument('--condition', choices=('A', 'B'), required=True)
-    parser.add_argument('--research-candidate', choices=('U', 'V1', 'D1'), default='U')
+    parser.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
+    parser.add_argument('--research-candidate', choices=('U', 'V1', 'D1', 'PoS'), default='U')
     parser.add_argument('--task-profile', default='native_claude_cc_vibe_opus48')
     parser.add_argument('--pma-profile-file')
     parser.add_argument('--harbor-source-root')

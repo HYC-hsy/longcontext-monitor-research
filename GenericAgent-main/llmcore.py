@@ -1010,16 +1010,17 @@ class NativeClaudeSession(BaseSession):
         # no public text. Never synthesize it from a private thinking block.
         text_parts = [b['text'] for b in content_blocks if b.get('type') == 'text']
         content = '\n'.join(text_parts).strip()
+        # Textual reasoning is never public action text, even when the same
+        # response also has a native thinking block. Strip before XML fallback.
+        think_pattern = r'<(think|thinking)>(.*?)</\1>'
+        tagged_thinking = [m.group(2).strip() for m in re.finditer(
+            think_pattern, content, re.DOTALL)]
+        content = re.sub(think_pattern, '', content, flags=re.DOTALL).strip()
         tool_calls = [MockToolCall(b['name'], b.get('input', {}), id=b.get('id', ''))
                       for b in content_blocks if b.get('type') == 'tool_use']
         if not tool_calls: tool_calls, content = _parse_text_tool_calls(content)
-        thinking = '\n'.join(b['thinking'] for b in content_blocks if b.get('type') == 'thinking').strip()
-        if not thinking:
-            think_pattern = r'<think(?:ing)?>(.*?)</think(?:ing)?>'
-            match = re.search(think_pattern, content, re.DOTALL)
-            if match:
-                thinking = match.group(1).strip()
-                content = re.sub(think_pattern, '', content, flags=re.DOTALL).strip()
+        thinking = '\n'.join([b['thinking'] for b in content_blocks
+                              if b.get('type') == 'thinking'] + tagged_thinking).strip()
         return MockResponse(thinking, content, tool_calls, str(content_blocks))
 
 class NativeOAISession(NativeClaudeSession):

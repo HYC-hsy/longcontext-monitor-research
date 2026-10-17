@@ -1,0 +1,2358 @@
+diff --git a/GenericAgent-main/agent_loop.py b/GenericAgent-main/agent_loop.py
+index 503cfb82..41517a76 100644
+--- a/GenericAgent-main/agent_loop.py
++++ b/GenericAgent-main/agent_loop.py
+@@ -33,6 +33,24 @@ class BaseHandler:
+             return StepOutcome(None, next_prompt=f"未知工具 {tool_name}", should_exit=False)
+ 
+ def json_default(o): return list(o) if isinstance(o, set) else str(o)
++
++def _pos_public_value(value):
++    """JSON-only host projection; never stringify a response object's repr."""
++    if value is None or isinstance(value, (str, int, float, bool)):
++        return value
++    if isinstance(value, (list, tuple)):
++        return [_pos_public_value(item) for item in value]
++    if isinstance(value, dict):
++        return {str(key): _pos_public_value(item) for key, item in value.items()}
++    return {'availability': 'non_json_host_value', 'type': type(value).__name__}
++
++def _pos_terminal_observation(turn, response, receipts, reason):
++    return json.dumps({'source': 'GA_terminal_observation', 'turn': turn,
++        'public_response_content': getattr(response, 'content', '') or '',
++        'tool_results': [_pos_public_value(item) for item in receipts],
++        'host_terminal': {'result': reason.get('result', 'CURRENT_TASK_DONE'),
++                          'public_data': _pos_public_value(reason.get('data'))}},
++        ensure_ascii=False)
+ def exhaust(g):
+     try: 
+         while True: next(g)
+@@ -61,6 +79,17 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
+     pma_upstream = None
+     pos = None
+     pos_observation = initial_content
++    pos_auxiliary_errors = []
++    def pos_record(kind, payload):
++        if pos is None:
++            return
++        try:
++            pos.record_host(kind, payload)
++        except (OSError, TypeError, ValueError) as error:
++            # The host action/terminal is already known in memory. Archive
++            # failure is auxiliary, never a change to the Task result.
++            pos_auxiliary_errors.append({'kind': kind, 'error_type':
++                                         type(error).__name__, 'error': str(error)})
+     if os.environ.get('GA_POS_ENABLED') == '1':
+         if any(os.environ.get(name) == '1' for name in (
+                 'GA_PMA_UPSTREAM_ENABLED', 'GA_PMA_ENABLED',
+@@ -264,7 +293,7 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
+                         for index, call in enumerate(tool_calls)
+                         if call['tool_name'] != 'no_tool'] if pos is not None else None)
+         if pos is not None:
+-            pos.record_host('decision_selected', {'turn': turn,
++            pos_record('decision_selected', {'turn': turn,
+                 'content': response.content or '', 'actions': pos_actions,
+                 'provider_error': provider_error_response})
+        
+@@ -293,7 +322,7 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
+             handler.current_turn = turn
+             if pos_actions is not None and tool_name != 'no_tool':
+                 pos_actions[ii]['status'] = 'started'
+-                pos.record_host('tool_started', {'turn': turn, 'id': tid,
++                pos_record('tool_started', {'turn': turn, 'id': tid,
+                     'name': tool_name, 'order': ii, 'arguments': pos_actions[ii]['arguments']})
+             if tool_name == 'no_tool' and completion_decision and completion_decision.decision not in ('ALLOW_COMPLETE', 'ERROR_FAIL_OPEN'):
+                 outcome = StepOutcome(None, next_prompt=completion_decision.next_prompt,
+@@ -309,7 +338,7 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
+                 except StopIteration as e: outcome = e.value
+                 except BaseException as error:
+                     if pos is not None and tool_name != 'no_tool':
+-                        pos.record_host('tool_result_unknown_after_start', {
++                        pos_record('tool_result_unknown_after_start', {
+                             'turn': turn, 'id': tid, 'name': tool_name,
+                             'error_type': type(error).__name__, 'error': str(error)})
+                     raise
+@@ -318,9 +347,10 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
+                     not hasattr(handler, 'do_' + tool_name) else 'executed')
+                 receipt = {'tool_use_id': tid, 'name': tool_name,
+                            'status': pos_actions[ii]['status'],
+-                           'result': outcome.data, 'next_prompt': outcome.next_prompt}
++                           'result': _pos_public_value(outcome.data),
++                           'next_prompt': outcome.next_prompt}
+                 pos_receipts.append(receipt)
+-                pos.record_host('tool_outcome', {'turn': turn, **receipt})
++                pos_record('tool_outcome', {'turn': turn, **receipt})
+             
+             if outcome.data is not None and tool_name != 'no_tool':
+                 handler.observe_tool_outcome(outcome.data, turn)
+@@ -334,9 +364,9 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
+                 tool_results.append({'tool_use_id': tid, 'content': datastr})
+             next_prompts.add(outcome.next_prompt)
+         if pos is not None:
+-            pos.record_host('decision_batch_completed', {'turn': turn,
++            pos_record('decision_batch_completed', {'turn': turn,
+                 'actions': pos_actions, 'tool_results': pos_receipts,
+-                'host_exit_reason': exit_reason})
++                'host_exit_reason': _pos_public_value(exit_reason)})
+             try:
+                 pos.exchange('decision_completed', turn=turn,
+                              action_count=len(pos_actions or []))
+@@ -350,11 +380,9 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
+         if len(next_prompts) == 0 or exit_reason:
+             if len(handler._done_hooks) == 0 or exit_reason.get('result', '') == 'EXITED':
+                 if pos is not None:
+-                    terminal_observation = json.dumps({
+-                        'source': 'GA_completed_joint_action', 'turn': turn,
+-                        'tool_results': pos_receipts, 'response_content': response.content or '',
+-                        'exit_reason': exit_reason or {'result': 'CURRENT_TASK_DONE'}},
+-                        ensure_ascii=False, default=json_default)
++                    terminal_observation = _pos_terminal_observation(
++                        turn, response, pos_receipts,
++                        exit_reason or {'result': 'CURRENT_TASK_DONE'})
+                     try:
+                         if pos.closed:
+                             raise RuntimeError('PoS decision receipt unavailable')
+@@ -418,6 +446,9 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
+         try: pos.exchange('finish', reason=final_outcome['result'],
+                           observation=pos_observation)
+         finally: pos.close()
++    if pos is not None and pos_auxiliary_errors:
++        final_outcome = {**final_outcome, 'pos_archive_incomplete': True,
++                         'pos_auxiliary_errors': pos_auxiliary_errors}
+     _research_emit('termination', final_outcome, internal_turn=turn)
+     _hook('agent_after', locals())
+     return final_outcome
+diff --git a/GenericAgent-main/agentmain.py b/GenericAgent-main/agentmain.py
+index 29abdb4b..cddc0034 100644
+--- a/GenericAgent-main/agentmain.py
++++ b/GenericAgent-main/agentmain.py
+@@ -437,6 +437,26 @@ class GenericAgent:
+                 gen = wrap_generator(gen, identity, JsonlEventSink(event_path) if event_path else None)
+             manual_inbox = None
+             pma_finalization = {'status': 'not_enabled'}
++            def pos_finalization():
++                if os.environ.get('GA_POS_ENABLED') != '1':
++                    return None
++                from pathlib import Path
++                archive = Path(os.environ.get('GA_POS_ARCHIVE', ''))
++                try:
++                    result = json.loads(archive.with_suffix('.result.json').read_text(
++                        encoding='utf-8'))
++                    closed = json.loads(archive.with_suffix('.close.json').read_text(
++                        encoding='utf-8'))
++                    bound = (result.get('run_id') == os.environ.get('GA_BENCH_RUN_ID') and
++                             result.get('task_id') == os.environ.get('GA_BENCH_TASK_ID') and
++                             closed.get('run_id') == result.get('run_id') and
++                             closed.get('task_id') == result.get('task_id'))
++                    return {'status': result.get('status') if bound else 'identity_mismatch',
++                            'receipt_bound': bound, 'close_status': closed.get('status'),
++                            'worker_return_code': closed.get('worker_return_code')}
++                except (OSError, ValueError) as error:
++                    return {'status': 'missing_or_unknown',
++                            'error_type': type(error).__name__}
+             def finalize_upstream_pma(terminal):
+                 nonlocal pma_finalization
+                 upstream_pma = getattr(self, 'pma_upstream_bridge', None)
+@@ -488,7 +508,8 @@ class GenericAgent:
+                 finalize_upstream_pma(task_terminal)
+                 display_queue.put({'done': full_resp, 'source': source, 'turn': curr_turn,
+                                    'outputs': turn_resps.copy(), 'task_terminal': task_terminal,
+-                                   'pma_finalization': pma_finalization})
++                                   'pma_finalization': pma_finalization,
++                                   'pos_finalization': pos_finalization()})
+                 self.history = handler.history_info
+             except Exception as e:
+                 print(f"Backend Error: {format_error(e)}")
+@@ -497,7 +518,8 @@ class GenericAgent:
+                 display_queue.put({'done': full_resp + f'\n```\n{format_error(e)}\n```', 'source': source,
+                                    'turn': curr_turn, 'outputs': turn_resps.copy(),
+                                    'task_terminal': task_terminal,
+-                                   'pma_finalization': pma_finalization})
++                                   'pma_finalization': pma_finalization,
++                                   'pos_finalization': pos_finalization()})
+             finally:
+                 finalize_upstream_pma(task_terminal)
+                 if manual_inbox is not None:
+@@ -579,6 +601,9 @@ if __name__ == '__main__':
+                     'result': terminal.get('result') if isinstance(terminal, dict) else None,
+                     'pma_finalization': item.get('pma_finalization', {'status': 'not_enabled'}),
+                 }
++                if os.environ.get('GA_POS_ENABLED') == '1':
++                    terminal_record['pos_finalization'] = item.get('pos_finalization') or {
++                        'status': 'missing_or_unknown'}
+                 terminal_path = '/logs/agent/task_terminal.json'
+                 with open(terminal_path + '.pending', 'x', encoding='utf-8') as f:
+                     json.dump(terminal_record, f, sort_keys=True)
+diff --git a/GenericAgent-main/ga.py b/GenericAgent-main/ga.py
+index 8eebed81..76d2402a 100644
+--- a/GenericAgent-main/ga.py
++++ b/GenericAgent-main/ga.py
+@@ -272,6 +272,7 @@ class GenericAgentHandler(BaseHandler):
+         self.history_info = last_history if last_history else []
+         self.code_stop_signal = []
+         self._done_hooks = []
++        self._pos_persistent_constraints = []
+         self.print = safe_print
+         self.obligation_ledger = getattr(parent, 'obligation_ledger', None)
+         if self.obligation_ledger is not None:
+@@ -562,7 +563,7 @@ class GenericAgentHandler(BaseHandler):
+         return prompt
+ 
+     def consume_pos_current_instruction(self):
+-        """Only newly delivered master input, never historical working memory."""
++        """Active source-labelled master constraints, not GA working memory."""
+         if not getattr(self.parent, 'pos_decision_context', False):
+             return ''
+         direct = self.parent.extrakeyinfo
+@@ -570,10 +571,14 @@ class GenericAgentHandler(BaseHandler):
+         self.parent.extrakeyinfo = None
+         parts = []
+         if direct:
+-            parts.append('[MASTER current instruction / extrakeyinfo] ' + direct)
++            parts.append('[MASTER instruction / extrakeyinfo] ' + direct)
+         if file_note:
+-            parts.append('[MASTER current instruction / _keyinfo] ' + file_note)
+-        return '\n\n'.join(parts)
++            parts.append('[MASTER instruction / _keyinfo] ' + file_note)
++        if parts:
++            self.working['key_info'] = self.working.get('key_info', '') + ''.join(
++                '\n' + item for item in parts)
++        self._pos_persistent_constraints.extend(parts)
++        return '\n\n'.join(self._pos_persistent_constraints)
+     
+     def turn_end_callback(self, response, tool_calls, tool_results, turn, next_prompt, exit_reason):
+         evidence_gate = getattr(self.parent, 'evidence_completion_kernel', None)
+@@ -609,8 +614,10 @@ class GenericAgentHandler(BaseHandler):
+         if injkeyinfo:
+             self.working['key_info'] = self.working.get('key_info', '') + f"\n[MASTER] {injkeyinfo}"
+             if getattr(self.parent, 'pos_decision_context', False):
+-                # PoS intentionally suppresses old working memory; this *new*
+-                # instruction must travel with the next actual observation.
++                # Mirror GA's persistent key_info lifespan without replaying
++                # unrelated historical working memory into stateless PoS.
++                self._pos_persistent_constraints.append(
++                    '[MASTER instruction / key_info] ' + injkeyinfo)
+                 next_prompt += f"\n\n[MASTER current instruction / key_info] {injkeyinfo}\n"
+         if injprompt: next_prompt += f"\n\n[MASTER] {injprompt}\n"
+         self.parent.intervene = self.parent.extrakeyinfo = None
+diff --git a/GenericAgent-main/llmcore.py b/GenericAgent-main/llmcore.py
+index c233f60b..097b89c4 100644
+--- a/GenericAgent-main/llmcore.py
++++ b/GenericAgent-main/llmcore.py
+@@ -1010,16 +1010,17 @@ class NativeClaudeSession(BaseSession):
+         # no public text. Never synthesize it from a private thinking block.
+         text_parts = [b['text'] for b in content_blocks if b.get('type') == 'text']
+         content = '\n'.join(text_parts).strip()
++        # Textual reasoning is never public action text, even when the same
++        # response also has a native thinking block. Strip before XML fallback.
++        think_pattern = r'<(think|thinking)>(.*?)</\1>'
++        tagged_thinking = [m.group(2).strip() for m in re.finditer(
++            think_pattern, content, re.DOTALL)]
++        content = re.sub(think_pattern, '', content, flags=re.DOTALL).strip()
+         tool_calls = [MockToolCall(b['name'], b.get('input', {}), id=b.get('id', ''))
+                       for b in content_blocks if b.get('type') == 'tool_use']
+         if not tool_calls: tool_calls, content = _parse_text_tool_calls(content)
+-        thinking = '\n'.join(b['thinking'] for b in content_blocks if b.get('type') == 'thinking').strip()
+-        if not thinking:
+-            think_pattern = r'<think(?:ing)?>(.*?)</think(?:ing)?>'
+-            match = re.search(think_pattern, content, re.DOTALL)
+-            if match:
+-                thinking = match.group(1).strip()
+-                content = re.sub(think_pattern, '', content, flags=re.DOTALL).strip()
++        thinking = '\n'.join([b['thinking'] for b in content_blocks
++                              if b.get('type') == 'thinking'] + tagged_thinking).strip()
+         return MockResponse(thinking, content, tool_calls, str(content_blocks))
+ 
+ class NativeOAISession(NativeClaudeSession):
+diff --git a/GenericAgent-main/pos_bridge.py b/GenericAgent-main/pos_bridge.py
+index 92a8e830..8fa4bc25 100644
+--- a/GenericAgent-main/pos_bridge.py
++++ b/GenericAgent-main/pos_bridge.py
+@@ -18,21 +18,35 @@ class PoSBridgeError(RuntimeError):
+ class PoSBridge:
+     def __init__(self, *, worker_script, vendor, episode_module, archive,
+                  mode, fake_replies=None, profile_file=None, profile_name=None,
+-                 timeout=180, deadline_epoch=None):
++                 timeout=180, deadline_epoch=None, run_id=None, task_id=None,
++                 binding_file=None):
+         if mode not in {'fake', 'profile'}:
+             raise PoSBridgeError('explicit PoS transport mode required')
+         argv = [sys.executable, '-B', '-u', str(Path(worker_script).resolve(strict=True)),
+                 '--vendor', str(Path(vendor).resolve(strict=True)),
+                 '--episode-module', str(Path(episode_module).resolve(strict=True)),
+                 '--archive', str(Path(archive)), '--mode', mode]
++        if run_id: argv += ['--run-id', run_id]
++        if task_id: argv += ['--task-id', task_id]
+         if mode == 'fake':
+             argv += ['--fake-replies', str(Path(fake_replies).resolve(strict=True))]
+         else:
++            if not binding_file:
++                raise PoSBridgeError('PoS profile requires frozen run binding')
++            binding_path = Path(binding_file).resolve(strict=True)
++            bound = json.loads(binding_path.read_text(encoding='utf-8'))
++            if (bound.get('schema') != 'pos-ga-transport-binding-v1' or
++                    bound.get('transport') != 'profile' or
++                    bound.get('run_id') != run_id or bound.get('task_id') != task_id or
++                    binding_path.parent != Path(archive).resolve(strict=False).parent):
++                raise PoSBridgeError('PoS profile binding identity differs')
+             argv += ['--profile-file', str(Path(profile_file).resolve(strict=True)),
+-                     '--profile-name', profile_name]
++                     '--profile-name', profile_name,
++                     '--binding-file', str(binding_path)]
+         archive_path = Path(archive)
+         archive_path.parent.mkdir(parents=True, exist_ok=True)
+         self.archive_path = archive_path
++        self.run_id, self.task_id = run_id, task_id
+         self._stderr = archive_path.with_suffix('.stderr.log').open('ab')
+         try:
+             self.process = subprocess.Popen(argv, stdin=subprocess.PIPE,
+@@ -54,7 +68,7 @@ class PoSBridge:
+         """Append original GA fact before auxiliary PoS processing."""
+         row = {'kind': kind, 'payload': payload, 'worker_sent_commands': self.sent}
+         with self.archive_path.with_suffix('.host.jsonl').open('ab') as stream:
+-            stream.write((json.dumps(row, ensure_ascii=False, default=str) + '\n').encode('utf-8'))
++            stream.write((json.dumps(row, ensure_ascii=True, default=str) + '\n').encode('utf-8'))
+             stream.flush()
+             os.fsync(stream.fileno())
+ 
+@@ -65,12 +79,6 @@ class PoSBridge:
+         if any(not os.environ.get(name) for name in required):
+             raise PoSBridgeError('PoS worker identity or archive missing')
+         mode = os.environ['GA_POS_TRANSPORT']
+-        if mode == 'profile':
+-            # A boolean environment switch or an old A/B approval is not a
+-            # frozen, one-use PoS authorization. The native-shared P path is
+-            # intentionally closed until its identity/Harbor checks exist.
+-            raise PoSBridgeError('PoS profile transport requires the unfinished '
+-                                 'native-shared P authorization path')
+         return cls(worker_script=os.environ['GA_POS_WORKER_SCRIPT'],
+                    vendor=os.environ['GA_POS_VENDOR_ROOT'],
+                    episode_module=os.environ['GA_POS_EPISODE_MODULE'],
+@@ -79,7 +87,10 @@ class PoSBridge:
+                    profile_file=os.environ.get('GA_POS_PROFILE_FILE'),
+                    profile_name=os.environ.get('GA_POS_PROFILE_NAME'),
+                    timeout=float(os.environ.get('GA_POS_TIMEOUT', '180')),
+-                   deadline_epoch=os.environ.get('GA_POS_DEADLINE_EPOCH'))
++                   deadline_epoch=os.environ.get('GA_POS_DEADLINE_EPOCH'),
++                   run_id=os.environ.get('GA_BENCH_RUN_ID'),
++                   task_id=os.environ.get('GA_BENCH_TASK_ID'),
++                   binding_file=os.environ.get('GA_POS_BINDING_FILE'))
+ 
+     def _read(self):
+         try:
+@@ -98,7 +109,7 @@ class PoSBridge:
+         command = {'kind': kind, **fields}
+         self.sent += 1
+         try:
+-            self.process.stdin.write(json.dumps(command, ensure_ascii=False) + '\n')
++            self.process.stdin.write(json.dumps(command, ensure_ascii=True) + '\n')
+             self.process.stdin.flush()
+         except (BrokenPipeError, OSError) as error:
+             self.close()
+@@ -146,3 +157,14 @@ class PoSBridge:
+             self.process.stdout.close()
+         self._stderr.close()
+         self._reader.join(timeout=1)
++        target = self.archive_path.with_suffix('.close.json')
++        try:
++            with target.open('xb') as stream:
++                stream.write((json.dumps({'status': self.close_status,
++                    'worker_return_code': self.process.returncode,
++                    'commands_sent': self.sent, 'run_id': self.run_id,
++                    'task_id': self.task_id}) + '\n').encode('utf-8'))
++                stream.flush()
++                os.fsync(stream.fileno())
++        except OSError as error:
++            self.close_persist_error = type(error).__name__ + ': ' + str(error)
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/batch_controller.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/batch_controller.py
+index 2ba5c4fc..72bd4a96 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/batch_controller.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/batch_controller.py
+@@ -56,7 +56,8 @@ def run_batch(args: argparse.Namespace) -> dict:
+     native_plan = manifest.get("schema") in {"pma-ga-live-manifest-v2",
+                                                 "pma-ga-live-manifest-v3",
+                                                 "pma-ga-live-manifest-v4",
+-                                                "pma-ga-live-manifest-v5"}
++                                                "pma-ga-live-manifest-v5",
++                                                "pos-ga-single-manifest-v1"}
+     if native_plan:
+         bindings = validate_plan(manifest, granted)
+     else:
+@@ -108,7 +109,8 @@ def run_batch(args: argparse.Namespace) -> dict:
+             "--run-root", binding["run_root"]]
+         if native_plan:
+             command += ["--repeat", str(binding["repeat"])]
+-        if manifest.get('schema') == 'pma-ga-live-manifest-v5':
++        if manifest.get('schema') in {'pma-ga-live-manifest-v5',
++                                      'pos-ga-single-manifest-v1'}:
+             command += ['--research-candidate', binding['research_candidate']]
+         if fixture:
+             command += ['--zero-model-fixture']
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/harbor_adapter.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/harbor_adapter.py
+index 68cc3d6f..3ff31db3 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/harbor_adapter.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/harbor_adapter.py
+@@ -27,6 +27,7 @@ FORWARD = (
+     "GA_POS_FAKE_REPLIES",
+     "GA_POS_PROFILE_FILE",
+     "GA_POS_PROFILE_NAME",
++    "GA_POS_BINDING_FILE",
+     "GA_POS_LIVE_AUTHORIZED",
+     "GA_POS_TIMEOUT",
+     "GA_POS_DEADLINE_EPOCH",
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/live_launcher.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/live_launcher.py
+index 15a027dd..14b00679 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/live_launcher.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/live_launcher.py
+@@ -31,7 +31,8 @@ def _native_schema(manifest: dict) -> bool:
+     return manifest.get('schema') in {'pma-ga-live-manifest-v2',
+                                       'pma-ga-live-manifest-v3',
+                                       'pma-ga-live-manifest-v4',
+-                                      'pma-ga-live-manifest-v5'}
++                                      'pma-ga-live-manifest-v5',
++                                      'pos-ga-single-manifest-v1'}
+ 
+ 
+ def _stage_verifier(root: Path, task: str, manifest: dict,
+@@ -64,6 +65,30 @@ def _stage_verifier(root: Path, task: str, manifest: dict,
+ 
+ def _require_evaluation_state_contract(manifest: dict) -> None:
+     """Bind the native SHARED protocol to code and zero-model raw evidence."""
++    if manifest.get('schema') == 'pos-ga-single-manifest-v1':
++        from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import (
++            source_hashes, vendor_hashes, synthetic_members)
++        if (manifest.get('upstream_commit') !=
++                '6818cfa6434dbc91fcf67f0b3eb12a91db47433f' or
++                manifest.get('source_files_sha256') != source_hashes() or
++                manifest.get('vendor_files_sha256') != vendor_hashes()):
++            raise RuntimeError('PoS source/vendor freeze changed')
++        if manifest.get('zero_model_fixture_only') is True:
++            asset = next(iter(manifest['assets'].values()))
++            if asset.get('synthetic_package_files') != synthetic_members():
++                raise RuntimeError('PoS synthetic package freeze changed')
++            return
++        cert = manifest.get('native_shared_certification')
++        if not isinstance(cert, dict) or not cert.get('committed_evidence_sha256'):
++            raise RuntimeError('PoS native-SHARED synthetic certification absent')
++        from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import CHECKOUT
++        path = (CHECKOUT / cert.get('relative_path', '')).resolve(strict=True)
++        if not path.is_relative_to(CHECKOUT) or _sha(path) != cert['committed_evidence_sha256']:
++            raise RuntimeError('PoS native-SHARED certification bytes differ')
++        from method_discovery.pos_upstream_ga_v1_20261017.certification import verify_evidence
++        if verify_evidence(path.parent, require_committed=True) != cert.get('result'):
++            raise RuntimeError('PoS native-SHARED certification result differs')
++        return
+     if manifest.get('schema') == 'pma-ga-live-manifest-v3':
+         if manifest.get('zero_model_fixture_only') is True:
+             return
+@@ -282,7 +307,8 @@ def run_live(args) -> dict:
+                                        'pma-ga-live-manifest-v2',
+                                        'pma-ga-live-manifest-v3',
+                                        'pma-ga-live-manifest-v4',
+-                                       'pma-ga-live-manifest-v5'} or
++                                       'pma-ga-live-manifest-v5',
++                                       'pos-ga-single-manifest-v1'} or
+             manifest.get('execution_authorized') is not False or
+             authorized.get('execution_authorized') is not True or
+             authorized.get('manifest_sha256') != _sha(manifest_path)):
+@@ -293,12 +319,14 @@ def run_live(args) -> dict:
+         raise RuntimeError('zero-model fixture identity does not match both records')
+     candidate = getattr(args, 'research_candidate', 'U')
+     expected_candidate = (manifest['planned_order'][0]['research_candidate']
+-        if manifest['schema'] == 'pma-ga-live-manifest-v5' else 'U')
++        if manifest['schema'] in {'pma-ga-live-manifest-v5',
++                                  'pos-ga-single-manifest-v1'} else 'U')
+     if candidate != expected_candidate or (args.condition == 'A' and candidate != 'U'):
+         raise RuntimeError('PMA candidate differs from frozen plan')
+     if (manifest.get('schema') in {'pma-ga-live-manifest-v3',
+                                    'pma-ga-live-manifest-v4',
+-                                   'pma-ga-live-manifest-v5'} and
++                                   'pma-ga-live-manifest-v5',
++                                   'pos-ga-single-manifest-v1'} and
+             Path(args.ga_source).resolve(strict=True) !=
+             (STAGE.parents[2] / 'GenericAgent-main').resolve(strict=True)):
+         raise RuntimeError('V3 GA source is not the frozen repository bridge')
+@@ -311,6 +339,12 @@ def run_live(args) -> dict:
+             raise RuntimeError('PMA memory profile differs from frozen identity')
+     if Path(args.run_root).exists():
+         raise FileExistsError(args.run_root)
++    if args.condition == 'P':
++        if candidate != 'PoS' or fixture != (args.task == 'pos-synthetic-file-http'):
++            raise RuntimeError('PoS method or fixture identity differs')
++        if fixture:
++            from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import ROOT
++            args.pos_fake_replies = str(ROOT / 'synthetic_task/pos_replies.json')
+     args.execution_authorized = False
+     prepared = _prepare_common(args, fake_gateway=False)
+     root = Path(args.run_root).resolve(strict=True)
+@@ -325,7 +359,8 @@ def run_live(args) -> dict:
+         compose = json.loads(compose_path.read_text(encoding='utf-8'))
+         compose['services']['model-gateway']['environment'] = {
+             'PMA_MULTITURN_FIXTURE': '1',
+-            'PMA_SERVICE_FIXTURE': '1' if os.environ.get('PMA_SERVICE_FIXTURE') == '1' else '0'}
++            'PMA_SERVICE_FIXTURE': '1' if os.environ.get('PMA_SERVICE_FIXTURE') == '1' else '0',
++            'POS_SYNTHETIC_FIXTURE': '1' if args.condition == 'P' else '0'}
+         if main_network is None:
+             compose['services']['main'].pop('network_mode')
+         else:
+@@ -339,6 +374,7 @@ def run_live(args) -> dict:
+         'execution_authorized': True, 'order': order, 'task': args.task,
+         'task_id': args.task, 'condition': args.condition, 'run_id': args.run_id,
+         'research_candidate': candidate,
++        'zero_model_fixture_only': fixture,
+         'run_root': str(root), 'image_id': prepared['image_id'],
+         'control_root': str(root / 'control'), 'archive_root': str(root / 'archive'),
+         'manifest_path': str(manifest_path), 'manifest_sha256': _sha(manifest_path),
+@@ -362,7 +398,13 @@ def run_live(args) -> dict:
+         raise RuntimeError('PMA Task profile differs from frozen identity')
+     # A zero-model lifecycle fixture never places official tests in the Task
+     # tree. The live path still stages and byte-checks the fixed Git blobs.
+-    if fixture:
++    if fixture and args.condition == 'P':
++        from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import ROOT
++        test_script = root / 'public_task/tests/test.sh'
++        test_script.write_bytes((ROOT / 'synthetic_task/tests/test.sh').read_bytes())
++        staged = {'native_tests_tree_sha256': digest_tree(test_script.parent),
++                  'native_test_sh_sha256': _sha(test_script)}
++    elif fixture:
+         test_script = root / 'public_task/tests/test.sh'
+         service_check = ("/opt/m4-runtime/python/cpython-3.12.12-linux-x86_64-gnu/"
+                          "bin/python3.12 -c \"import urllib.request; "
+@@ -385,10 +427,32 @@ def run_live(args) -> dict:
+                     expected_native_reports=[],
+                     official_evaluator_files=[{'relative': 'tests/test.sh',
+                                                'sha256': staged['native_test_sh_sha256']}])
++        if args.condition == 'P':
++            spec['evaluation_protocol'] = 'synthetic_shared_v1'
+     _require_evaluation_state_contract(manifest)
++    if args.condition == 'P' and not fixture:
++        staged_pos = root / 'bundle/source/pos_runtime'
++        binding = {
++            'schema': 'pos-ga-transport-binding-v1', 'transport': 'profile',
++            'run_id': args.run_id, 'task_id': args.task,
++            'upstream_commit': manifest['upstream_commit'],
++            'manifest_sha256': _sha(manifest_path),
++            'authorization_sha256': _sha(authorization_path),
++            'config_sha256': manifest['config_sha256'],
++            'worker_sha256': _sha(staged_pos / 'worker.py'),
++            'episode_sha256': _sha(staged_pos / 'episode.py'),
++            'profile_sha256': _sha(root / 'bundle/source/mykey.json'),
++            'vendor_files_sha256': manifest['vendor_files_sha256'],
++        }
++        binding_path = root / 'control/pos_archive/binding.json'
++        with binding_path.open('x', encoding='utf-8', newline='\n') as stream:
++            json.dump(binding, stream, sort_keys=True)
++            stream.write('\n')
++        spec['pos_binding_sha256'] = _sha(binding_path)
+     spec_path = root / 'control' / 'harbor_spec.json'
+     spec_path.write_text(json.dumps(spec, indent=2), encoding='utf-8')
+-    deadline = time.time() + 14400
++    agent_seconds = manifest['config']['agent_wall_seconds'] if args.condition == 'P' else 14400
++    deadline = time.time() + agent_seconds
+     worker = harbor = None
+     worker_logs = []
+     first_error = None
+@@ -451,7 +515,7 @@ def run_live(args) -> dict:
+             '--extra-docker-compose', str(root / 'bundle/isolation.compose.json'),
+             '--n-concurrent', '1', '--max-retries', '0', '--yes',
+             '--enable-verification',
+-            '--agent-timeout-multiplier', str(14400 /
++            '--agent-timeout-multiplier', str(agent_seconds /
+                 manifest['assets'][args.task]['native_agent_seconds'])
+                 if _native_schema(manifest) else '16',
+             '--verifier-timeout-multiplier', '1']
+@@ -462,8 +526,8 @@ def run_live(args) -> dict:
+         kwargs = {'llm_no': 0, 'run_id': args.run_id, 'task_id': args.task,
+                   'expected_model': 'claude-opus-4-8', 'python_home': args.python_home,
+                   'ga_source_sha256': prepared['ga_bundle_tree_sha256'],
+-                  'timeout_sec': 180 if fixture else 14400,
+-                  'max_turns': 2 if fixture else 300,
++                  'timeout_sec': 180 if fixture else agent_seconds,
++                  'max_turns': 2 if fixture else manifest.get('config', {}).get('task_turns_max', 300),
+                   'llm_config_name': args.task_profile, 'condition_id': 'pma-neutral'}
+         for key, value in kwargs.items():
+             command += ['--ak', f'{key}={value}']
+@@ -489,6 +553,21 @@ def run_live(args) -> dict:
+                    GA_PMA_UPSTREAM_ENABLED='1' if args.condition == 'B' else '0',
+                    GA_PMA_CAPTURE_TASK_REQUESTS='1',
+                    GA_PMA_ENABLED='0', GA_MONITOR_ENABLED='0', GA_M0_MONITOR_ENABLED='0')
++        if args.condition == 'P':
++            env.update(GA_POS_ENABLED='1',
++                       GA_POS_TRANSPORT='fake' if fixture else 'profile',
++                       GA_POS_WORKER_SCRIPT='/opt/genericagent/pos_runtime/worker.py',
++                       GA_POS_VENDOR_ROOT='/opt/genericagent/pos_runtime/vendor',
++                       GA_POS_EPISODE_MODULE='/opt/genericagent/pos_runtime/episode.py',
++                       GA_POS_ARCHIVE='/run/pos-archive/events.jsonl',
++                       GA_POS_TIMEOUT=str(min(180, agent_seconds)),
++                       GA_POS_DEADLINE_EPOCH=str(deadline))
++            if fixture:
++                env['GA_POS_FAKE_REPLIES'] = '/run/pos-fake-replies.json'
++            else:
++                env['GA_POS_PROFILE_FILE'] = '/opt/genericagent/mykey.json'
++                env['GA_POS_PROFILE_NAME'] = manifest['config']['task_profile_name']
++                env['GA_POS_BINDING_FILE'] = '/run/pos-archive/binding.json'
+         if args.condition == 'B':
+             env.update(GA_PMA_UPSTREAM_REQUESTS='/run/pma-bridge/requests',
+                        GA_PMA_UPSTREAM_RESPONSES='/run/pma-bridge/responses',
+@@ -499,7 +578,7 @@ def run_live(args) -> dict:
+             'agent_deadline_epoch': deadline,
+             'evaluator_timeout_sec': manifest['assets'][args.task].get(
+                 'native_verifier_seconds', 900),
+-            'outer_timeout_sec': 14400 + manifest['assets'][args.task].get(
++            'outer_timeout_sec': agent_seconds + manifest['assets'][args.task].get(
+                 'native_verifier_seconds', 900) + 600}, indent=2), encoding='utf-8')
+         with (root / 'archive/harbor.stdout.log').open('wb') as out, (
+                 root / 'archive/harbor.stderr.log').open('wb') as err:
+@@ -511,7 +590,7 @@ def run_live(args) -> dict:
+                     root, worker, deadline, pending_end_at, stop_requested_at)
+                 _worker_clearance(root, worker, args.run_id)
+                 if time.time() >= outer_deadline:
+-                    raise subprocess.TimeoutExpired(command, 14400 +
++                    raise subprocess.TimeoutExpired(command, agent_seconds +
+                         manifest['assets'][args.task].get('native_verifier_seconds', 900) + 600)
+                 time.sleep(.25)
+             result = harbor.returncode
+@@ -569,6 +648,11 @@ def run_live(args) -> dict:
+                      if worker is None or worker.poll() is not None else None)
+         fake_requests = root / 'archive/fake_provider_requests'
+         fake_captures = sorted(fake_requests.glob('*.json')) if fixture else []
++        try:
++            pos_archive = json.loads((root / 'archive/pos_archive_status.json').read_text(
++                encoding='utf-8')) if args.condition == 'P' else None
++        except (OSError, ValueError):
++            pos_archive = {'status': 'missing_or_unknown'}
+         status = {'schema': manifest['schema'], 'run_id': args.run_id,
+                   'task': args.task, 'condition': args.condition,
+                   'research_candidate': candidate,
+@@ -578,6 +662,7 @@ def run_live(args) -> dict:
+                   'worker_return_code': None if worker is None else worker.poll(),
+                   'pma_finalization': clearance.get('pma_finalization')
+                       if isinstance(clearance, dict) else None,
++                  'pos_archive_status': pos_archive,
+                   'sidecar_clearance': clearance,
+                   'remaining_containers': None if remaining is None else [m['id'] for m in remaining],
+                   'cleanup_errors': cleanup_errors,
+@@ -606,6 +691,13 @@ def run_live(args) -> dict:
+ 
+ 
+ def live_status_success(status: dict) -> bool:
++    if status.get('condition') == 'P':
++        archive = status.get('pos_archive_status') or {}
++        if (archive.get('result_bound') is not True or
++                archive.get('close_bound') is not True or
++                archive.get('close_status') != 'graceful_exit' or
++                archive.get('result_status') != 'completed'):
++            return False
+     if status.get('zero_model_fixture_only') is True:
+         return (status.get('primary_failure') is None and
+                 status.get('harbor_return_code') == 0 and
+@@ -645,8 +737,8 @@ def main() -> None:
+     parser.add_argument('--order', type=int, required=True)
+     parser.add_argument('--repeat', type=int)
+     parser.add_argument('--task', required=True)
+-    parser.add_argument('--condition', choices=('A', 'B'), required=True)
+-    parser.add_argument('--research-candidate', choices=('U', 'V1', 'D1'), default='U')
++    parser.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
++    parser.add_argument('--research-candidate', choices=('U', 'V1', 'D1', 'PoS'), default='U')
+     parser.add_argument('--task-profile', default='native_claude_cc_vibe_opus48')
+     parser.add_argument('--pma-profile-file')
+     parser.add_argument('--harbor-source-root')
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/native_shared_verifier.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/native_shared_verifier.py
+index c2432d4f..27765eb0 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/native_shared_verifier.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/native_shared_verifier.py
+@@ -36,8 +36,15 @@ class NativeSharedVerifier(Verifier):
+         if not spec_path:
+             raise RuntimeError('native shared verifier has no run identity')
+         spec = json.loads(Path(spec_path).read_text(encoding='utf-8'))
+-        if spec.get('evaluation_protocol') != 'official_shared_v2':
++        if spec.get('evaluation_protocol') not in {'official_shared_v2',
++                                                    'synthetic_shared_v1'}:
+             raise RuntimeError('native shared verifier protocol mismatch')
++        if (spec.get('evaluation_protocol') == 'synthetic_shared_v1' and
++                (spec.get('condition') != 'P' or
++                 spec.get('zero_model_fixture_only') is not True or
++                 spec.get('official_source_git_commit') !=
++                    'synthetic_no_official_evaluator')):
++            raise RuntimeError('synthetic verifier identity mismatch')
+         sources, _, _ = self._resolve_tests()
+         target = str(EnvironmentPaths.for_os(self.environment.os).tests_dir)
+         for source in sources:
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py
+index 32e4b880..f9a2e475 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py
+@@ -90,13 +90,21 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
+     single = not fake_gateway and manifest.get('schema') in {
+         'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5'}
+     pos = args.condition == 'P'
+-    if (pos and (manifest.get('schema') != 'pos-ga-prepared-v1' or
++    if (pos and (manifest.get('schema') not in {'pos-ga-prepared-v1',
++                                               'pos-ga-single-manifest-v1'} or
+                 manifest.get('execution_authorized') is not False)):
+         raise RuntimeError('PoS prepared identity missing or authorized')
+     if (args.task not in (manifest.get('assets', {}) if single or pos else TASKS)):
+         raise ValueError('task outside frozen PMA assets')
+     task = root / "public_task"
+-    if pos or not fake_gateway and manifest.get("schema") in {
++    if pos and manifest.get('zero_model_fixture_only') is True:
++        from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import ROOT, synthetic_members
++        expected = manifest['assets'][args.task]['synthetic_package_files']
++        if synthetic_members() != expected:
++            raise RuntimeError('PoS synthetic source package differs from freeze')
++        shutil.copytree(ROOT / 'synthetic_task', task,
++            ignore=shutil.ignore_patterns('tests', 'pos_replies.json', '__pycache__'))
++    elif pos or not fake_gateway and manifest.get("schema") in {
+             "pma-ga-live-manifest-v2", "pma-ga-live-manifest-v3",
+             "pma-ga-live-manifest-v4", "pma-ga-live-manifest-v5"}:
+         materialize_public(Path(args.official_source_git).resolve(strict=True),
+@@ -129,7 +137,8 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
+                                        manifest.get("schema") in {
+                                            "pma-ga-live-manifest-v2", "pma-ga-live-manifest-v3",
+                                            "pma-ga-live-manifest-v4",
+-                                           "pma-ga-live-manifest-v5"}
++                                           "pma-ga-live-manifest-v5",
++                                           "pos-ga-single-manifest-v1"}
+                                        else "isolated"))
+     if fake_gateway:
+         _offline_gateway(root, runtime, args.python_home)
+@@ -149,10 +158,12 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
+             raise RuntimeError('PMA target image differs from frozen live manifest')
+     for name in ("requests", "responses"):
+         (root / "control" / "spool" / name).mkdir(parents=True, exist_ok=False)
+-    if pos:
++    if pos and manifest.get('zero_model_fixture_only') is True:
+         (root / 'control' / 'pos_archive').mkdir()
+         shutil.copy2(Path(args.pos_fake_replies).resolve(strict=True),
+                      root / 'control' / 'pos_fake_replies.json')
++    elif pos:
++        (root / 'control' / 'pos_archive').mkdir()
+     config = json.loads(compose.read_text(encoding="utf-8"))
+     if args.condition == "B":
+         main = config["services"]["main"]
+@@ -166,9 +177,11 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
+         config['services']['main']['volumes'] += [
+             {'type': 'bind', 'source': (root / 'control' / 'pos_archive').as_posix(),
+              'target': '/run/pos-archive', 'read_only': False},
+-            {'type': 'bind', 'source': (root / 'control' / 'pos_fake_replies.json').as_posix(),
+-             'target': '/run/pos-fake-replies.json', 'read_only': True},
+         ]
++        if manifest.get('zero_model_fixture_only') is True:
++            config['services']['main']['volumes'].append(
++                {'type': 'bind', 'source': (root / 'control' / 'pos_fake_replies.json').as_posix(),
++                 'target': '/run/pos-fake-replies.json', 'read_only': True})
+     compose.write_text(json.dumps(config, indent=2), encoding="utf-8")
+     record = {"schema": ("pma-ga-offline-harbor-v1" if fake_gateway else
+                           "pma-ga-live-prepared-v1"), "execution_authorized": False,
+@@ -182,7 +195,8 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
+               "network_mode": ("official_requested" if not fake_gateway and
+                   manifest.get("schema") in {
+                       "pma-ga-live-manifest-v2", "pma-ga-live-manifest-v3",
+-                      "pma-ga-live-manifest-v4", "pma-ga-live-manifest-v5"}
++                      "pma-ga-live-manifest-v4", "pma-ga-live-manifest-v5",
++                      "pos-ga-single-manifest-v1"}
+                   else "none_requested"),
+               "native_evaluator_calls": 0, "fake_provider_only": fake_gateway}
+     (root / "archive" / "prepared.json").write_text(
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py
+index 99c4435a..7ed5cb2f 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py
+@@ -49,6 +49,34 @@ def verify_live_spec(spec: dict) -> None:
+         raise RuntimeError('PMA frozen manifest or authorization changed')
+     frozen = json.loads(manifest.read_text(encoding='utf-8'))
+     granted = json.loads(authorization.read_text(encoding='utf-8'))
++    if frozen.get('schema') == 'pos-ga-single-manifest-v1':
++        if granted.get('manifest_sha256') != spec['manifest_sha256']:
++            raise RuntimeError('PoS authorization does not bind manifest bytes')
++        binding = validate_plan(frozen, granted)[0]
++        for key in ('order', 'task', 'repeat', 'condition', 'run_id',
++                    'batch_id', 'config_sha256', 'research_candidate'):
++            if spec.get(key) != binding.get(key):
++                raise RuntimeError('PoS run outside exact authorized binding: ' + key)
++        if (spec.get('task_id') != binding['task'] or
++                Path(spec['run_root']).resolve() != Path(binding['run_root']).resolve() or
++                spec.get('condition') != 'P' or
++                spec.get('research_candidate') != 'PoS' or
++                (frozen.get('zero_model_fixture_only') is True) !=
++                (granted.get('zero_model_fixture_only') is True)):
++            raise RuntimeError('PoS method, root or fixture binding differs')
++        checkout = Path(__file__).resolve().parents[3]
++        head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=checkout,
++            capture_output=True, text=True, timeout=10, check=True).stdout.strip()
++        if head != granted.get('audited_code_commit') or head != spec.get('audited_code_commit'):
++            raise RuntimeError('PoS running code differs from authorized commit')
++        if frozen.get('zero_model_fixture_only') is not True and 'pos_binding_sha256' in spec:
++            binding = Path(spec['run_root']) / 'control/pos_archive/binding.json'
++            if (hashlib.sha256(binding.read_bytes()).hexdigest() !=
++                    spec['pos_binding_sha256'] or
++                    json.loads(binding.read_text(encoding='utf-8')).get(
++                        'authorization_sha256') != spec['authorization_sha256']):
++                raise RuntimeError('PoS profile binding differs from authorization')
++        return
+     arms = frozen.get('arms')
+     bindings = granted.get('run_bindings')
+     if frozen.get('schema') in {'pma-ga-live-manifest-v2',
+@@ -112,6 +140,14 @@ def verify_live_spec(spec: dict) -> None:
+ class PMATrialHooks(PilotTrialHooks):
+     def terminal_identity_valid(self, terminal):
+         condition = self.spec.get('condition')
++        if condition == 'P':
++            return (isinstance(terminal, dict) and
++                set(terminal) == {'run_id', 'task_id', 'result',
++                                  'pma_finalization', 'pos_finalization'} and
++                terminal.get('run_id') == self.spec['run_id'] and
++                terminal.get('task_id') == self.spec['task_id'] and
++                terminal.get('pma_finalization') == {'status': 'not_enabled'} and
++                isinstance(terminal.get('pos_finalization'), dict))
+         pma_status = {'A': 'not_enabled', 'B': 'saved'}.get(condition)
+         return (pma_status is not None and isinstance(terminal, dict) and
+                 set(terminal) == {'run_id', 'task_id', 'result', 'pma_finalization'} and
+@@ -232,6 +268,18 @@ class NativeSharedTrialHooks(PMATrialHooks):
+                     raise RuntimeError('native PMA spool mount identity differs')
+         elif any(path.startswith('/run/pma-bridge') for path in mounts):
+             raise RuntimeError('GA-only Task sees PMA spool')
++        if self.spec['condition'] == 'P':
++            actual = mounts.get('/run/pos-archive')
++            expected = Path(self.spec['run_root']) / 'control' / 'pos_archive'
++            if (actual is None or not actual.get('RW') or
++                    _source_identity(str(actual.get('Source'))) !=
++                    _source_identity(expected.as_posix())):
++                raise RuntimeError('PoS archive mount identity differs')
++            fake = mounts.get('/run/pos-fake-replies.json')
++            if (fake is not None) != bool(self.spec.get('zero_model_fixture_only')):
++                raise RuntimeError('PoS fake reply mount differs from fixture identity')
++        elif any(path.startswith('/run/pos-') for path in mounts):
++            raise RuntimeError('non-P Task sees PoS mount')
+         result = await self.trial.agent_environment.exec(
+             'test ! -e /solution && '
+             '(test ! -e /tests || test -z "$(find /tests -mindepth 1 -print -quit)") && '
+@@ -377,6 +425,26 @@ class NativeSharedTrialHooks(PMATrialHooks):
+             'baseline_pids': sorted(self.baseline_pids),
+             'agent_result_metadata': str(getattr(self.trial.result, 'agent_result', None)),
+             'legal_agent_end_required': False})
++        if self.spec['condition'] == 'P':
++            result_path = self.control / 'pos_archive' / 'events.result.json'
++            close_path = self.control / 'pos_archive' / 'events.close.json'
++            def read_receipt(path):
++                try:
++                    return json.loads(path.read_text(encoding='utf-8'))
++                except (OSError, ValueError):
++                    return {'status': 'missing_or_unknown'}
++            result_receipt, close_receipt = read_receipt(result_path), read_receipt(close_path)
++            _atomic(self.archive / 'pos_archive_status.json', {
++                'run_id': self.spec['run_id'], 'task_id': self.spec['task_id'],
++                'result_status': result_receipt.get('status'),
++                'result_bound': (result_receipt.get('run_id') == self.spec['run_id'] and
++                                 result_receipt.get('task_id') == self.spec['task_id']),
++                'close_status': close_receipt.get('status'),
++                'close_bound': (close_receipt.get('run_id') == self.spec['run_id'] and
++                                close_receipt.get('task_id') == self.spec['task_id']),
++                'worker_return_code': close_receipt.get('worker_return_code'),
++                'archive_incomplete': result_receipt.get('status') in
++                    {'missing', 'missing_or_unknown', None}})
+ 
+     async def verification_start(self, event):
+         ended = json.loads((self.archive / 'agent_end_native.json').read_text(encoding='utf-8'))
+@@ -409,7 +477,8 @@ def install_trial_hooks() -> None:
+     async def create(cls, config):
+         trial = await original(cls, config)
+         hooks = (NativeSharedTrialHooks(trial, spec) if
+-                 spec.get('evaluation_protocol') == 'official_shared_v2' else
++                 spec.get('evaluation_protocol') in {'official_shared_v2',
++                                                     'synthetic_shared_v1'} else
+                  PMATrialHooks(trial, spec))
+         trial.add_hook(TrialEvent.AGENT_START, hooks.agent_start)
+         trial.add_hook(TrialEvent.AGENT_END, hooks.agent_end)
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run.py
+index 17434390..de7e82d7 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run.py
+@@ -28,24 +28,40 @@ def _write_new(path: Path, value: dict) -> None:
+ def prepare(args: argparse.Namespace) -> dict:
+     root = Path(args.output).resolve(strict=False)
+     root.mkdir(parents=True, exist_ok=False)
+-    plan = {'schema': 'pma-ga-single-plan-v1', 'execution_authorized': False,
++    pos = args.condition == 'P'
++    plan = {'schema': 'pos-ga-single-plan-v1' if pos else 'pma-ga-single-plan-v1',
++            'execution_authorized': False,
+             'official_source_git_commit': COMMIT, 'task': args.task,
+             'condition': args.condition, 'occurrence': args.occurrence}
++    if pos:
++        plan.update(method='PoS', synthetic_fixture=bool(
++            getattr(args, 'synthetic_pos_fixture', False)))
++        if plan['synthetic_fixture'] and not args.fake_only:
++            raise RuntimeError('synthetic PoS package is zero-model only')
+     candidate = getattr(args, 'research_candidate', 'U')
+-    if candidate != 'U':
++    if pos and candidate != 'PoS':
++        raise RuntimeError('PoS plan requires explicit PoS method identity')
++    if not pos and candidate != 'U':
+         plan['schema'] = 'pma-ga-single-plan-v2'
+         plan['research_candidate'] = candidate
+     _write_new(root / 'plan.json', plan)
+-    manifest = prepare_manifest(Path(args.official_source_git).resolve(strict=True),
+-        Path(args.task_profile_file).resolve(strict=True),
+-        Path(args.pma_profile_file).resolve(strict=True),
+-        evidence=(Path(args.certification_dir).resolve(strict=True)
+-                  if getattr(args, 'certification_dir', None) else None), plan=plan)
+-    if args.fake_only:
++    if pos:
++        from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import prepare as prepare_pos
++        manifest = prepare_pos(plan, Path(args.official_source_git).resolve(strict=True),
++                               Path(args.task_profile_file).resolve(strict=True),
++                               certification_dir=(Path(args.certification_dir)
++                                   if getattr(args, 'certification_dir', None) else None))
++    else:
++        manifest = prepare_manifest(Path(args.official_source_git).resolve(strict=True),
++            Path(args.task_profile_file).resolve(strict=True),
++            Path(args.pma_profile_file).resolve(strict=True),
++            evidence=(Path(args.certification_dir).resolve(strict=True)
++                      if getattr(args, 'certification_dir', None) else None), plan=plan)
++    if args.fake_only and not pos:
+         manifest['zero_model_fixture_only'] = True
+     _write_new(root / 'manifest.json', manifest)
+     # Keep Windows Harbor paths below MAX_PATH while retaining a fresh random ID.
+-    run_id = 'pma-' + uuid.uuid4().hex[:16]
++    run_id = ('pos-' if pos else 'pma-') + uuid.uuid4().hex[:16]
+     identity = {'run_id': run_id, 'run_root': str(root / 'runs' / run_id),
+                 'output_root': str(root / 'runs'), 'plan_sha256': hashlib.sha256(
+                     (root / 'plan.json').read_bytes()).hexdigest(),
+@@ -89,14 +105,15 @@ def main() -> None:
+     commands = parser.add_subparsers(dest='command', required=True)
+     prepared = commands.add_parser('prepare', help='fixed-Git asset and image check; no calls')
+     prepared.add_argument('--task', required=True)
+-    prepared.add_argument('--condition', choices=('A', 'B'), required=True)
+-    prepared.add_argument('--research-candidate', choices=('U', 'V1', 'D1'), default='U')
++    prepared.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
++    prepared.add_argument('--research-candidate', choices=('U', 'V1', 'D1', 'PoS'), default='U')
+     prepared.add_argument('--occurrence', type=int, default=1)
+     prepared.add_argument('--output', required=True)
+     prepared.add_argument('--official-source-git', required=True)
+     prepared.add_argument('--task-profile-file', required=True)
+-    prepared.add_argument('--pma-profile-file', required=True)
++    prepared.add_argument('--pma-profile-file')
+     prepared.add_argument('--fake-only', action='store_true')
++    prepared.add_argument('--synthetic-pos-fixture', action='store_true')
+     prepared.add_argument('--certification-dir',
+                           help='committed A/B Harbor evidence for future authorized use')
+     launched = commands.add_parser('run', help='requires an independent one-use approval')
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run_fixture.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run_fixture.py
+index 53ec653f..9d50d8a4 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run_fixture.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run_fixture.py
+@@ -16,19 +16,24 @@ from .single_run_certification import HARBOR_COMMIT, source_identity, vendor_ide
+ def main() -> None:
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('--task', required=True)
+-    parser.add_argument('--condition', choices=('A', 'B'), required=True)
+-    parser.add_argument('--research-candidate', choices=('U', 'V1', 'D1'), default='U')
++    parser.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
++    parser.add_argument('--research-candidate', choices=('U', 'V1', 'D1', 'PoS'), default='U')
+     parser.add_argument('--output', type=Path, required=True)
+-    for name in ('official-source-git', 'task-profile-file', 'pma-profile-file',
++    for name in ('official-source-git', 'task-profile-file',
+                  'ga-source', 'runtime-root', 'worker-python', 'harbor-python',
+                  'bench-root', 'harbor-source-root'):
+         parser.add_argument('--' + name, required=True)
++    parser.add_argument('--pma-profile-file')
+     parser.add_argument('--python-home', default='cpython-3.12.12-linux-x86_64-gnu')
+     parser.add_argument('--service-fixture', action='store_true')
+     args = parser.parse_args()
+     root = args.output.resolve(strict=False)
++    if args.condition == 'P' and (args.task != 'pos-synthetic-file-http' or
++                                   args.research_candidate != 'PoS'):
++        raise RuntimeError('PoS zero-model fixture must use the synthetic P identity')
+     identity = prepare(argparse.Namespace(output=str(root), task=args.task,
+         condition=args.condition, occurrence=1, fake_only=True,
++        synthetic_pos_fixture=args.condition == 'P',
+         research_candidate=args.research_candidate,
+         official_source_git=args.official_source_git,
+         task_profile_file=args.task_profile_file,
+@@ -44,11 +49,15 @@ def main() -> None:
+     if subprocess.run(['git', 'diff', '--quiet', 'HEAD'],
+                       cwd=args.harbor_source_root).returncode:
+         raise RuntimeError('fixture Harbor tracked source differs from commit')
+-    execution = {'code_commit': head, 'source_files': source_identity(checkout,
+-                     candidate=args.research_candidate != 'U'),
+-                 'vendor_files': vendor_identity(checkout),
++    execution = {'code_commit': head,
++                 'source_files': (manifest['source_files_sha256'] if args.condition == 'P'
++                                  else source_identity(checkout,
++                                      candidate=args.research_candidate != 'U')),
++                 'vendor_files': (manifest['vendor_files_sha256'] if args.condition == 'P'
++                                  else vendor_identity(checkout)),
+                  'harbor_commit': harbor_head,
+-                 'pma_vendor_commit': manifest['pma_vendor_commit']}
++                 **({'upstream_commit': manifest['upstream_commit']} if args.condition == 'P'
++                    else {'pma_vendor_commit': manifest['pma_vendor_commit']})}
+     (root / 'execution_identity.json').write_text(
+         json.dumps(execution, sort_keys=True, indent=2), encoding='utf-8')
+     binding = dict(manifest['planned_order'][0], run_id=identity['run_id'],
+@@ -70,12 +79,13 @@ def main() -> None:
+         '--authorization', str(authorization),
+         '--ga-source', args.ga_source, '--runtime-root', args.runtime_root,
+         '--task-profile-file', args.task_profile_file,
+-        '--pma-profile-file', args.pma_profile_file,
+         '--worker-python', args.worker_python, '--harbor-python', args.harbor_python,
+         '--bench-root', args.bench_root,
+         '--official-source-git', args.official_source_git,
+         '--harbor-source-root', args.harbor_source_root,
+         '--python-home', args.python_home]
++    if args.pma_profile_file:
++        command += ['--pma-profile-file', args.pma_profile_file]
+     try:
+         environment = dict(os.environ)
+         if args.service_fixture:
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/six_task_plan.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/six_task_plan.py
+index a89b21c4..1bdbd4bc 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/six_task_plan.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/six_task_plan.py
+@@ -38,6 +38,35 @@ def _identity(row: dict) -> tuple:
+ 
+ 
+ def validate_plan(manifest: dict, granted: dict) -> list[dict]:
++    if manifest.get('schema') == 'pos-ga-single-manifest-v1':
++        arms, bindings = manifest.get('planned_order'), granted.get('run_bindings')
++        if (manifest.get('execution_authorized') is not False or
++                granted.get('execution_authorized') is not True or
++                not isinstance(arms, list) or len(arms) != 1 or
++                not isinstance(bindings, list) or len(bindings) != 1 or
++                granted.get('approved_arms') != arms or
++                granted.get('config_sha256') != manifest.get('config_sha256') or
++                manifest.get('upstream_commit') !=
++                    '6818cfa6434dbc91fcf67f0b3eb12a91db47433f'):
++            raise RuntimeError('PoS single-run authorization incomplete')
++        row, bound = arms[0], bindings[0]
++        if (set(row) != {'order', 'task', 'repeat', 'condition', 'research_candidate'} or
++                row['order'] != 1 or type(row['repeat']) is not int or
++                row['repeat'] < 1 or row['condition'] != 'P' or
++                row['research_candidate'] != 'PoS' or
++                set(manifest.get('assets', {})) != {row['task']} or
++                _identity(bound) != _identity(row) or
++                bound.get('config_sha256') != manifest.get('config_sha256') or
++                bound.get('batch_id') != granted.get('batch_id') or
++                bound.get('run_id') != granted.get('run_id') or
++                not bound.get('run_id') or not bound.get('batch_id') or
++                Path(bound.get('run_root', '')).resolve(strict=False).parent !=
++                    Path(granted.get('output_root', '')).resolve(strict=False)):
++            raise RuntimeError('PoS run differs from frozen authorization')
++        synthetic = manifest.get('zero_model_fixture_only') is True
++        if synthetic != (row['task'] == 'pos-synthetic-file-http'):
++            raise RuntimeError('PoS synthetic identity differs')
++        return bindings
+     if manifest.get('schema') in {'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5'}:
+         arms = manifest.get('planned_order')
+         bindings = granted.get('run_bindings')
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_live_wiring.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_live_wiring.py
+index 7ce03c4c..e136dc07 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_live_wiring.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_live_wiring.py
+@@ -184,7 +184,7 @@ class LiveWiringTests(unittest.TestCase):
+                   patch.object(live_launcher, 'clean_owned_containers', return_value=[]),
+                   patch.object(live_launcher, 'capture_mounts', return_value=[])):
+                 result = live_launcher.run_live(args)
+-            self.assertEqual(result['harbor_return_code'], 0)
++            self.assertEqual(result['harbor_return_code'], 0, result)
+             self.assertEqual(len(seen), 1)
+             self.assertIn('pma_harbor_cli', ' '.join(seen[0]))
+             self.assertIn('--enable-verification', seen[0])
+diff --git a/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_fake_gateway.py b/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_fake_gateway.py
+index c41f3d26..79cebeb2 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_fake_gateway.py
++++ b/method_discovery/curator_supervisor_convergence_v0/real_task_effect_pilot_preflight_20261010/pilot_fake_gateway.py
+@@ -28,6 +28,21 @@ class State:
+             sequence = self.sequence
+             if route != 'monitor':
+                 self.task_responses += 1
++                if os.environ.get('POS_SYNTHETIC_FIXTURE') == '1' and self.task_responses == 1:
++                    return sequence, 'code_run', '<summary>Creating synthetic file and service.</summary>', {
++                        'script': ('printf "POS_FILE_OK\\n" > /app/pos-fixture-marker.txt; '
++                                   'setsid /opt/m4-runtime/python/'
++                                   'cpython-3.12.12-linux-x86_64-gnu/bin/python3.12 '
++                                   '-m http.server 19173 --bind 127.0.0.1 '
++                                   '>/tmp/pos_fixture_http.log 2>&1 </dev/null & '
++                                   'sleep 1; test "$(cat /app/pos-fixture-marker.txt)" = POS_FILE_OK; '
++                                   '/opt/m4-runtime/python/'
++                                   'cpython-3.12.12-linux-x86_64-gnu/bin/python3.12 '
++                                   "-c 'import urllib.request; "
++                                   'assert urllib.request.build_opener('
++                                   'urllib.request.ProxyHandler({})).open('
++                                   '"http://127.0.0.1:19173/", timeout=3).status == 200\''),
++                        'type': 'bash', 'timeout': 60}
+                 if os.environ.get('PMA_MULTITURN_FIXTURE') == '1' and self.task_responses == 1:
+                     if os.environ.get('PMA_SERVICE_FIXTURE') == '1':
+                         return sequence, 'code_run', 'Start a harmless local test service.', {
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/.gitattributes b/method_discovery/pos_upstream_ga_v1_20261017/.gitattributes
+index d2a38dee..0f8e56f9 100644
+--- a/method_discovery/pos_upstream_ga_v1_20261017/.gitattributes
++++ b/method_discovery/pos_upstream_ga_v1_20261017/.gitattributes
+@@ -3,6 +3,20 @@ raw/** -text
+ raw_v2/** -text
+ raw_v3/** -text
+ raw_v4/** -text
++raw_v5/** -text
++raw_v6/** -text
++raw_v7/** -text
++acceptance_v5/** -text
++acceptance_v6/** -text
++acceptance_v7/** -text
++acceptance_v8/** -text
++acceptance_v9/** -text
++acceptance_v10/** -text
++sentinel_negative_v1/** -text
++DIFF_V5.patch -text
++AUDIT_V5_NATIVE_SHARED.txt -text
++RUNNING_V5.md -text
++PUBLIC_FILE_SHA256_V5.json -text
+ AUDIT_V2.txt -text
+ AUDIT_V3.txt -text
+ plan_four/** -text
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/AUDIT_V5_NATIVE_SHARED.txt b/method_discovery/pos_upstream_ga_v1_20261017/AUDIT_V5_NATIVE_SHARED.txt
+new file mode 100644
+index 00000000..d9d8e4fa
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/AUDIT_V5_NATIVE_SHARED.txt
+@@ -0,0 +1,195 @@
++PoS-on-GA native-SHARED offline handoff, 2026-10-18
++===================================================
++
++Scope and status
++----------------
++Base: f3fc55b3e00ab9cd04ec804aadf6e1e74773aaed on crs-v0-20261007.
++This is released-core PoS-on-GA transfer, not a reproduction of paper results.
++No real model request, formal four-task run, official evaluator, training or
++scoring-model call occurred. There was one successful synthetic Task trial:
++two fake Task responses, one real synthetic GA code_run (creating a file and
++starting a local HTTP service), seven finite fake PoS role calls, and one
++actual synthetic verifier invocation. Two additional independent Docker
++sentinel negative invocations both failed as required. These synthetic tool
++and verifier executions are real, not zero.
++
++Fixed public core: luoyu100/PoS at
++6818cfa6434dbc91fcf67f0b3eb12a91db47433f. vendor/ is unchanged;
++vendor/LICENSE and vendor/THIRD_PARTY_NOTICES.md are retained. The former
++release's goal interpretation, Sentinel audit/correction, candidate commit,
++progress, health/trapping, recovery and textualization remain in original
++code. No new judge, fusion with PMA, threshold change or role collapse.
++The PoS episode and worker are external adapters. GA keeps native tools,
++execution, Task termination, Harbor and evaluation lifecycle.
++
++Component map and scoped change
++-------------------------------
++- vendor/belief/manager.py, beliefSentinel.py, beliefStates.py,
++  worldStates.py, trappingDetection.py, progressScoring.py,
++  recoveryPlanning.py and textualizer.py: byte-preserved PoS core.
++- vendor/prompts/* and contexts/base.py: byte-preserved prompt and context
++  semantics. episode.py renders the original goal/belief/relevant subgraph,
++  active gap and recovery, replacing only LOCA-specific JSON action,
++  exactly-one-tool, claim_done and example wrapping with GA's native tools.
++- GenericAgent-main/llmcore.py: only PoS stateless requests strip textual
++  <think>/<thinking> before fallback tool parsing; native hidden thinking
++  remains separate, tool-only public text may be empty. Old GA/PMA ask path
++  is unchanged. This is checked at actual requests.post payload boundary.
++- GenericAgent-main/ga.py and agent_loop.py: PoS-only current-instruction
++  source/lifetime, public host receipts, batch action/observation mapping,
++  Task terminal preservation when auxiliary archive/update fails. Public
++  <summary> is a GA expression, not hidden native thinking. The actual GA
++  system asset and callback can still ask for summary; the HTTP test does
++  not pretend every summary request was removed.
++- pos_bridge.py, worker.py: exact run/task/transport binding, staged vendor
++  and profile hashes, bounded no-replay IPC, fsynced result/close receipts,
++  partial-state attempt after reset failure, explicit unknown/missing
++  identities. Escaped ASCII JSON preserves a lone surrogate present in the
++  shipped GA tools asset without changing its code point.
++- H/single_run.py -> six_task_plan -> batch_controller -> live_launcher ->
++  Harbor adapter -> NativeSharedTrialHooks -> NativeSharedVerifier is reused.
++  P/PoS has its own one-slot identity, not A/B. The same future real route
++  requires committed synthetic certification plus separately granted exact
++  one-use authorization. Profile transport uses the gateway-rewritten
++  container profile; the host private key file is not mounted into main.
++  `GA_POS_LIVE_AUTHORIZED=1`, old A/B grants and synthetic flags are not
++  real PoS authorization.
++- H/pilot_fake_gateway.py returns finite synthetic GA replies. The actual
++  synthetic task package has its own instruction and test.sh, not a formal
++  task's prompt/solution/tests. No new image or data set was built/pulled.
++
++The complete code/test diff is DIFF_V5.patch; the complete submitted-file
++byte hashes are PUBLIC_FILE_SHA256_V5.json. raw_v7/FILE_HASHES.json gives
++original-private and published-byte hashes for each copied record. New
++material is limited to the files in those indexes. Ignore existing unrelated
++monitor_agent_core/__pycache__ worktree files; they were not edited or staged.
++
++Method and host semantics
++-------------------------
++One GA decision plus its ordered tool batch is one joint-action PoS
++transition. Actual tool IDs/names/arguments/order and executed/rejected/
++not-executed states are action metadata; corresponding raw public results
++are observation and independent host receipts. A handler existence check
++determines unknown-tool rejection; this is not a complete mounted-schema
++permission check and does not change GA dispatch permissions. Eight tools
++inside one decision are one scored batch; K=8 means eight scored decisions,
++not eight tools. Unscored events are not synthetic zero-progress samples.
++For code_run, null exit code, timeout, truncation or background status stays
++as observed; a returned tool receipt is not a claim of process completion.
++
++The last real tool result is submitted before PoS finish. A no-tool finish
++records only public terminal content and runtime reason, not a fabricated
++action, progress, recovery or success. Host CURRENT_TASK_DONE is a legitimate
++runtime exit, not hidden evaluator success. Online success_known=false means
++no authoritative success signal. Active recovery at termination remains the
++last PoS core state; no fictitious recovered state is inserted. A PoS update,
++export, archive or fsync error is an auxiliary failure; an already-known
++Task terminal and tool receipt remain the host fact. Disk failure is not
++promised to be recoverable. Failure after an accepted or acceptance-unknown
++command never triggers an unrecorded replay or silent GA/PMA fallback.
++
++The upstream goal interpretation remains fixed, observed/source_type labels
++do not prove truth, Sentinel citation checks are not semantic entailment,
++and the published E/A persistence tie favors epistemic. Recovery is Task
++context, not an approval gate. Transport/profile, batch grain, GA model
++interface and Task set differ from the paper; no paper-score claim follows.
++
++Final synthetic native-SHARED run
++---------------------------------
++Run ID pos-4e0f687037da49f5, source dir originally
++E:\LongContext\pos_native_synthetic_20261018_dev10 (left intact).
++Published copy: raw_v7/normal/. The fixed existing image was
++alexgshaw/db-wal-recovery@sha256:0e33ea5ec823975d1bd6c3778395c9f94251dd88f571146057bff6adb7e4594e;
++fixed clean Harbor source 459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc.
++One main container ID 63a527544d401d5a005be461fd223a1d60bc8b205218de03f02fbd656b98a52e
++is present in agent start/end, control registry and verifier release. Task
++service PID 7971 was preserved while registered GA/PoS/transport writers
++and gateway were stopped. Control_remaining=[], verifier test.sh executed
++once with return code 0, reward=1 only after checking both exact file content
++and HTTP 200. Harbor return 0; source/task/evaluator upload checked; container
++and owned volume clearance clean; no remaining owned container. PoS worker
++result bound and close bound, status completed/graceful_exit, return code 0,
++completed_decision_batches=2, scored_transitions=1, success_known=false.
++
++Direct records: normal/fake_requests/0001.json and 0002.json are the actual
++fake transport payloads; normal/agent/research_events.jsonl is the Task
++request/response/action ledger; normal/events.jsonl holds 7 individual PoS
++role requests/responses and original manager events; normal/events.host.jsonl
++contains GA host facts; normal/events.result.json and events.close.json are
++fsynced worker receipts. normal/agent/task_terminal.json, agent_end_native,
++writer_termination_check, verification_released,
++native_evaluator_uploaded, native_test_execution, verifier/test-stdout.txt,
++verifier/reward.txt and live_result.json link stop, same main, upload,
++verifier and cleanup. The word evaluator in generic Harbor file names refers
++here only to the synthetic test.sh, not an official evaluator.
++
++Publication is an allowlist copy, not a rewrite of the private run tree.
++The 49 selected records underwent the documented secret/hidden-thinking
++projection; every row in FILE_HASHES.json records private-source hash,
++published-byte hash, length and redaction count. All selected dev10 rows
++needed zero field substitutions. The host private profile file, gateway
++configuration, mounted mykey.json and other non-allowlisted bundle files
++are not in the public directory because they contain transport material,
++not because task text, response errors or tool output was shortened. The
++complete model-visible fake Task request/response and PoS role records,
++public tool arguments and host receipts are retained. Any absent record in
++the source would have failed the collector rather than been fabricated.
++
++Two independent Docker negatives, preserved in sentinel_negative_v1/:
++missing_file and missing_service each exit 1. Their original stderr bytes
++are in corresponding *.stderr.txt. The second has the exact marker but no
++HTTP service, and fails with ConnectionRefusedError. Both use --pull never,
++the same fixed image and no network. This proves the sentinel cannot grant
++reward on file-only or service-only absence; it is not Task quality evidence.
++
++Tests and historical failures
++-----------------------------
++acceptance_v10 contains exact subprocess stdout/stderr and command/hash
++receipts for PoS core, PoS/GA seam, old single-run, old live wiring. Earlier
++acceptance_v5/v6/v9 failures are retained: wrong Python module invocation
++(relative import error), then an actual old v1 manifest compatibility failure
++(KeyError config), then an old A/B committed-fixture test rejecting the
++intentionally modified batch_controller before this new commit. The first
++two were corrected; the historical A/B fixture is not rewritten or used to
++certify the new P source. All other old single-run tests are run separately
++in acceptance_v10. None of these failures were rewritten into passes.
++PoS seam covers tagged thinking with native thinking, pseudo tool_call inside
++tagged thinking, native tool-only response, a three-decision actual
++GenericAgentHandler/system-asset/NativeToolClient/raw_ask to requests.post
++path with persistent user constraint and old history canaries, joint batch,
++terminal auxiliary failure, unknown tool, tool exception, no-replay and
++authorization identity negatives. The synthetic Harbor run verifies the
++future native-SHARED path, not merely the earlier disable-verification fake.
++
++Earlier Docker dev2-dev5 controller stdout/stderr are preserved under
++raw_v7/failures/. Dev2: existing fixed Harbor checkout had unrelated dirty
++changes and was preserved; a fresh clean same-commit worktree was used.
++Dev3: wrong bench-root argument. Dev4: egress sidecar image unavailable for
++the synthetic allow_internet=false fixture; only the synthetic task config
++was adjusted for the local fake gateway. Dev5: synthetic_shared hook was
++routed to the old PMA hook; repaired to native hook. Dev6-dev9 successful
++or intermediate original trees remain outside this repo; raw_v5/raw_v6 are
++optional intermediate public copies. No run ID was reused or retroactively
++changed. These are engineering diagnostics, not method-effect data.
++
++No real-path claim beyond the offline evidence: a real PoS profile request,
++formal four-task Task run, official evaluator and actual provider error
++behavior have not been exercised. Hidden Task success is unknown. No
++effectiveness conclusion is made. Existing U/PMA method, core, prompt,
++bank and observed historical inputs/results were not changed here. Its
++historical U input was GA-postprocessed public events and could contain host
++summary or working-memory copies; it was not necessarily a byte-for-byte
++provider public-text projection. This provenance clarification does not
++invalidate old results or silently create a new PMA input condition.
++
++Four-task plan and stop
++-----------------------
++plan_four/plan.json remains PoS-only: nginx-request-logging,
++adaptive-rejection-sampler, sqlite-with-gcov, write-compressor. It is an
++observed development set, not held-out. execution_authorized=false; no
++formal run or compatibility probe was started. The real draft retains the
++frozen 300-turn/14400-second budget, whereas only the synthetic fixture uses
++2 turns/180 seconds. Future runs require separately approved exact manifests,
++source/profile/vendor/task/evaluator/image/order/budget/run binding and
++one-use authorization. RUNNING_V5.md gives offline commands and the gate.
++Stop here for independent audit.
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/RUNNING_V5.md b/method_discovery/pos_upstream_ga_v1_20261017/RUNNING_V5.md
+new file mode 100644
+index 00000000..255bc1b9
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/RUNNING_V5.md
+@@ -0,0 +1,58 @@
++# PoS-on-GA native-SHARED: offline entry and future gate
++
++This supersedes the older preparation-only `RUNNING.md`. The released PoS
++vendor remains fixed at `luoyu100/PoS@6818cfa6434dbc91fcf67f0b3eb12a91db47433f`.
++The four-task plan in `plan_four/plan.json` remains
++`execution_authorized=false`. This document does not authorize a real run.
++
++From the repository root, with Python 3.12+ and the already-installed GA
++dependencies:
++
++```
++python -B method_discovery/pos_upstream_ga_v1_20261017/test_offline.py
++python -B method_discovery/pos_upstream_ga_v1_20261017/test_ga_seam.py
++python -B -m method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.test_single_run_offline
++python -B -m method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.test_live_wiring
++python -B -c "from pathlib import Path; from method_discovery.pos_upstream_ga_v1_20261017.certification import verify_evidence; print(verify_evidence(Path('method_discovery/pos_upstream_ga_v1_20261017/raw_v7')))"
++```
++
++The synthetic Harbor/Docker fixture needs the fixed clean Harbor checkout at
++`459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc`, the existing
++`alexgshaw/db-wal-recovery:20251031` image and digest, the existing Linux
++runtime mount, the pinned official source checkout, and a local private GA
++profile. It uses a finite fake Task gateway and finite fake PoS role replies.
++The profile is hashed/re-written to the local gateway, not contacted as a
++provider. One complete offline command, with local paths supplied by the
++operator, is:
++
++```
++python -B -m method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.single_run_fixture \
++  --condition P --research-candidate PoS --task pos-synthetic-file-http \
++  --output NEW_EMPTY_DIRECTORY --official-source-git FIXED_OFFICIAL_CHECKOUT \
++  --task-profile-file PRIVATE_GA_PROFILE --ga-source GA_SOURCE \
++  --runtime-root EXISTING_LINUX_RUNTIME --worker-python PYTHON \
++  --harbor-python HARBOR_PYTHON --bench-root EXISTING_BENCH_ROOT \
++  --harbor-source-root CLEAN_FIXED_HARBOR_CHECKOUT
++```
++
++This intentionally runs synthetic `code_run` calls, creates a marker file and
++local HTTP service, then runs only the synthetic sentinel. It must not be
++confused with a formal Task or official evaluator invocation.
++
++For a future *separately authorized* real single run, the existing
++`single_run prepare --condition P --research-candidate PoS` accepts one of
++the four registered tasks and `--certification-dir` pointing at committed
++`raw_v7`. It freezes the actual profile/source/vendor/config/task/evaluator
++asset hashes and image identity. `single_run run` requires its existing
++one-use authorization file with exact run/source/profile/config/task/budget
++binding. The historical A/B authorization schema, an environment boolean,
++or the synthetic flag cannot enable profile transport. No such real
++authorization is created here; do not run the future command now.
++
++PoS uses a fresh decision request with current observation and original
++hybrid state view. GA native tools and termination remain authoritative.
++One GA decision with its ordered tool batch is one PoS transition. Online
++success stays unknown; `CURRENT_TASK_DONE` is not an evaluator verdict.
++GA's public `<summary>` can remain in its Task output; it is distinct from
++hidden native or tagged thinking. The actual GA system asset and callback
++still contain summary-style wording, as the final-payload tests document.
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/build_public_index_v5.py b/method_discovery/pos_upstream_ga_v1_20261017/build_public_index_v5.py
+new file mode 100644
+index 00000000..47dad70c
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/build_public_index_v5.py
+@@ -0,0 +1,36 @@
++"""Hash exact staged Git blob bytes for this handoff; index excludes itself."""
++from __future__ import annotations
++
++import hashlib
++import json
++from pathlib import Path
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[2]
++TARGET = Path(__file__).resolve().parent / 'PUBLIC_FILE_SHA256_V5.json'
++
++
++def git(*args: str) -> bytes:
++    return subprocess.run(['git', *args], cwd=ROOT, capture_output=True,
++                          check=True).stdout
++
++
++def main() -> None:
++    names = [item.decode('utf-8') for item in
++             git('diff', '--cached', '--name-only', '-z').split(b'\0') if item]
++    rows = []
++    for name in names:
++        if name == TARGET.relative_to(ROOT).as_posix():
++            continue
++        content = git('show', ':' + name)
++        rows.append({'path': name, 'bytes': len(content),
++                     'sha256': hashlib.sha256(content).hexdigest()})
++    TARGET.write_text(json.dumps({'schema': 'pos-ga-public-git-blob-index-v1',
++        'files': rows}, ensure_ascii=False, indent=2) + '\n',
++        encoding='utf-8', newline='\n')
++    print(json.dumps({'files': len(rows), 'index_sha256':
++        hashlib.sha256(TARGET.read_bytes()).hexdigest()}))
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/certification.py b/method_discovery/pos_upstream_ga_v1_20261017/certification.py
+new file mode 100644
+index 00000000..1b9a13a1
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/certification.py
+@@ -0,0 +1,93 @@
++"""Check committed, redacted native-SHARED synthetic evidence; never authorize a run."""
++from __future__ import annotations
++
++import hashlib
++import json
++from pathlib import Path
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[2]
++HARBOR_COMMIT = '459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc'
++UPSTREAM = '6818cfa6434dbc91fcf67f0b3eb12a91db47433f'
++
++
++def sha(path: Path) -> str:
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def verify_evidence(directory: Path, *, require_committed: bool = True) -> dict:
++    base = directory.resolve(strict=True)
++    index_path = base / 'FILE_HASHES.json'
++    index = json.loads(index_path.read_text(encoding='utf-8'))
++    if index.get('schema') != 'pos-ga-native-shared-evidence-v1':
++        raise RuntimeError('PoS evidence index schema differs')
++    files = index.get('files')
++    if not isinstance(files, list) or not files:
++        raise RuntimeError('PoS evidence files missing')
++    names = set()
++    for row in files:
++        name = row['path']
++        path = (base / name).resolve(strict=True)
++        if (name in names or not path.is_relative_to(base) or
++                path.stat().st_size != row['bytes'] or sha(path) != row['sha256']):
++            raise RuntimeError('PoS evidence member changed: ' + name)
++        names.add(name)
++        if require_committed:
++            relative = path.relative_to(ROOT).as_posix()
++            blob = subprocess.run(['git', 'show', 'HEAD:' + relative], cwd=ROOT,
++                                  capture_output=True, check=True).stdout
++            if hashlib.sha256(blob).hexdigest() != row['sha256']:
++                raise RuntimeError('PoS evidence differs from committed Git blob: ' + name)
++    if require_committed:
++        relative = index_path.relative_to(ROOT).as_posix()
++        blob = subprocess.run(['git', 'show', 'HEAD:' + relative], cwd=ROOT,
++                              capture_output=True, check=True).stdout
++        if hashlib.sha256(blob).hexdigest() != sha(index_path):
++            raise RuntimeError('PoS index differs from committed Git blob')
++    required = {'normal/execution_identity.json', 'normal/live_result.json',
++                'normal/pos_archive_status.json', 'normal/events.result.json',
++                'normal/events.close.json', 'normal/native_test_execution.json',
++                'normal/writer_termination_check.json',
++                'normal/verification_released.json',
++                'normal/fake_requests/0001.json', 'normal/fake_requests/0002.json',
++                'normal/verifier/test-stdout.txt', 'normal/verifier/reward.txt',
++                'normal/synthetic_test.sh'}
++    if not required <= names:
++        raise RuntimeError('PoS evidence missing required native receipts')
++    load = lambda name: json.loads((base / 'normal' / name).read_text(encoding='utf-8'))
++    identity, result, status = (load(name) for name in
++        ('execution_identity.json', 'live_result.json', 'pos_archive_status.json'))
++    worker, closed, test, writers = (load(name) for name in
++        ('events.result.json', 'events.close.json', 'native_test_execution.json',
++         'writer_termination_check.json'))
++    from .single_manifest import source_hashes, vendor_hashes
++    script = (base / 'normal/synthetic_test.sh').read_text(encoding='utf-8')
++    if (identity.get('harbor_commit') != HARBOR_COMMIT or
++            identity.get('upstream_commit') != UPSTREAM or
++            identity.get('source_files') != source_hashes() or
++            identity.get('vendor_files') != vendor_hashes() or
++            result.get('condition') != 'P' or
++            result.get('research_candidate') != 'PoS' or
++            result.get('zero_model_fixture_only') is not True or
++            result.get('harbor_return_code') != 0 or
++            result.get('cleanup_confirmed') is not True or
++            result.get('evaluation_released') is not True or
++            result.get('fake_provider_captures') != 2 or
++            result.get('native_result', {}).get('status') != 'native_recorded' or
++            result.get('native_result', {}).get('rewards', {}).get('reward') != 1 or
++            status.get('archive_incomplete') is not False or
++            status.get('result_bound') is not True or
++            status.get('close_bound') is not True or
++            worker.get('status') != 'completed' or
++            worker.get('result', {}).get('success_known') is not False or
++            closed.get('status') != 'graceful_exit' or
++            closed.get('worker_return_code') != 0 or
++            test.get('observed') is not True or
++            writers.get('control_remaining') != [] or
++            not writers.get('task_owned_pids_preserved') or
++            'pos-fixture-marker.txt' not in script or
++            'http://127.0.0.1:19173/' not in script):
++        raise RuntimeError('PoS native-SHARED lifecycle evidence incomplete')
++    return {'status': 'pass', 'run_id': result['run_id'],
++            'synthetic_task': result['task'], 'file_count': len(files),
++            'real_model_calls': 0, 'official_evaluator_calls': 0}
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/collect_native_shared.py b/method_discovery/pos_upstream_ga_v1_20261017/collect_native_shared.py
+new file mode 100644
+index 00000000..354f2eb4
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/collect_native_shared.py
+@@ -0,0 +1,120 @@
++"""Publish a narrow, redacted copy of a stopped synthetic native-SHARED run."""
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++from pathlib import Path
++import runpy
++
++from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.archive_live_six_task import redact
++
++
++def secrets_from_profile(path: Path) -> list[str]:
++    profile = runpy.run_path(str(path))['native_claude_cc_vibe_opus48']
++    values = []
++    for key, value in profile.items():
++        if (isinstance(value, str) and len(value) >= 6 and any(word in key.lower()
++                for word in ('key', 'token', 'secret', 'password', 'base', 'url'))):
++            values.append(value)
++    return sorted(set(values), key=len, reverse=True)
++
++
++def mapping_for(source: Path) -> dict[str, Path]:
++    identity = json.loads((source / 'run_identity.json').read_text(encoding='utf-8'))
++    run = Path(identity['run_root']).resolve(strict=True)
++    if not run.is_relative_to(source.resolve(strict=True)):
++        raise RuntimeError('run root outside source')
++    if (source / 'authorization.json').exists():
++        raise RuntimeError('synthetic authorization remains live')
++    archive = run / 'archive'
++    selected = ('agent_start_identity.json', 'agent_end_native.json',
++                'control_process_registry.json', 'harbor.stderr.log',
++                'harbor.stdout.log', 'live_command_public.json',
++                'live_result.json', 'native_evaluator_uploaded.json',
++                'native_reports_checked.json', 'native_test_execution.json',
++                'pos_archive_status.json', 'prepared.json',
++                'verification_released.json', 'writer_termination_check.json')
++    mapping = {name: archive / name for name in selected}
++    for name in ('execution_identity.json', 'fake_authorization_removed.json',
++                 'run_identity.json', 'plan.json', 'manifest.json',
++                 'batch_result.json', 'controller.stdout.txt',
++                 'controller.stderr.txt'):
++        mapping[name] = source / name
++    for path in sorted((archive / 'fake_provider_requests').glob('*')):
++        if path.suffix in {'.json', '.sse'}:
++            mapping['fake_requests/' + path.name] = path
++    pos = run / 'control/pos_archive'
++    for name in ('events.jsonl', 'events.host.jsonl', 'events.result.json',
++                 'events.close.json', 'events.stderr.log'):
++        mapping[name] = pos / name
++    trial = list((run / 'jobs').glob('*/*'))
++    trial = [path for path in trial if (path / 'agent/research_events.jsonl').is_file()]
++    if len(trial) != 1:
++        raise RuntimeError('Task trial not unique')
++    task = trial[0]
++    for name in ('agent/research_events.jsonl', 'agent/task_terminal.json',
++                 'agent/agent_stdout.log', 'agent/agent_stderr.log',
++                 'agent/isolated_transport.log', 'agent/agent_process_return_code.txt',
++                 'verifier/test-stdout.txt', 'verifier/reward.txt',
++                 'result.json'):
++        mapping[name] = task / name
++    mapping['synthetic_test.sh'] = run / 'public_task/tests/test.sh'
++    mapping['synthetic_instruction.md'] = run / 'public_task/instruction.md'
++    mapping['synthetic_task.toml'] = run / 'public_task/task.toml'
++    return mapping
++
++
++def collect(source: Path, target: Path, secrets: list[str]) -> list[dict]:
++    mapping = mapping_for(source)
++    rows = []
++    for name, path in sorted(mapping.items()):
++        raw = path.read_bytes()
++        public, count = redact(raw, secrets)
++        destination = target / name
++        destination.parent.mkdir(parents=True, exist_ok=True)
++        with destination.open('xb') as stream:
++            stream.write(public)
++        rows.append({'path': 'normal/' + name, 'bytes': len(public),
++                     'sha256': hashlib.sha256(public).hexdigest(),
++                     'private_source_sha256': hashlib.sha256(raw).hexdigest(),
++                     'redactions': count})
++    return rows
++
++
++def main() -> None:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--source', type=Path, required=True)
++    parser.add_argument('--failure-source', type=Path, action='append', default=[])
++    parser.add_argument('--output', type=Path, required=True)
++    parser.add_argument('--task-profile-file', type=Path, required=True)
++    args = parser.parse_args()
++    args.output.mkdir(parents=True, exist_ok=False)
++    secrets = secrets_from_profile(args.task_profile_file)
++    rows = collect(args.source, args.output / 'normal', secrets)
++    for source in args.failure_source:
++        for name in ('controller.stdout.txt', 'controller.stderr.txt'):
++            path = source / name
++            if not path.is_file():
++                continue
++            raw = path.read_bytes()
++            public, count = redact(raw, secrets)
++            destination = args.output / 'failures' / source.name / name
++            destination.parent.mkdir(parents=True, exist_ok=True)
++            with destination.open('xb') as stream:
++                stream.write(public)
++            rows.append({'path': destination.relative_to(args.output).as_posix(),
++                         'bytes': len(public), 'sha256': hashlib.sha256(public).hexdigest(),
++                         'private_source_sha256': hashlib.sha256(raw).hexdigest(),
++                         'redactions': count})
++    index = {'schema': 'pos-ga-native-shared-evidence-v1', 'files': rows,
++             'source_kind': 'redacted_copies_of_existing_run_records',
++             'new_real_model_calls': 0, 'official_evaluator_calls': 0}
++    (args.output / 'FILE_HASHES.json').write_text(json.dumps(index, ensure_ascii=False,
++        indent=2) + '\n', encoding='utf-8', newline='\n')
++    print(json.dumps({'files': len(rows), 'redactions': sum(x['redactions'] for x in rows),
++                      'real_model_calls': 0, 'official_evaluator_calls': 0}))
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/episode.py b/method_discovery/pos_upstream_ga_v1_20261017/episode.py
+index 1f204e47..222ee46a 100644
+--- a/method_discovery/pos_upstream_ga_v1_20261017/episode.py
++++ b/method_discovery/pos_upstream_ga_v1_20261017/episode.py
+@@ -103,7 +103,8 @@ class PoSEpisode:
+                                                        'provider_cancelled', 'interrupted'} else
+                                 'failed')
+         self.lifecycle.append({'kind': 'finish', 'reason': reason,
+-                               'success_known': False})
++                               'success_known': False,
++                               'terminal_observation': observation})
+         return self.get_result()
+ 
+     def get_context(self):
+@@ -145,7 +146,9 @@ class PoSEpisode:
+                 'context': context, 'adaptation': 'native_tool_envelope_only'}
+ 
+     def get_result(self):
+-        result = self.manager.get_result() if self.started else {}
++        # A failed reset can still leave a committed upstream initialization.
++        # Export whatever the core can provide, without asserting success.
++        result = self.manager.get_result()
+         return {'status': self.terminal_status or 'partial',
+                 'host_terminal_reason': (self.lifecycle[-1].get('reason')
+                     if self.lifecycle and self.lifecycle[-1]['kind'] == 'finish' else None),
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/run_offline_acceptance.py b/method_discovery/pos_upstream_ga_v1_20261017/run_offline_acceptance.py
+new file mode 100644
+index 00000000..9561804b
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/run_offline_acceptance.py
+@@ -0,0 +1,58 @@
++"""Run selected deterministic tests and preserve their exact stdout/stderr bytes."""
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++from pathlib import Path
++import subprocess
++import sys
++
++ROOT = Path(__file__).resolve().parents[2]
++P = 'method_discovery/pos_upstream_ga_v1_20261017/'
++H = ('method_discovery/curator_supervisor_convergence_v0/'
++     'pma_full_upstream_ga_v1_20261013/')
++TESTS = {'pos_core': P + 'test_offline.py',
++         'pos_ga_seam': P + 'test_ga_seam.py',
++         'legacy_single_run': H + 'test_single_run_offline.py',
++         'legacy_live_wiring': H + 'test_live_wiring.py'}
++LEGACY_SINGLE_METHODS = (
++    'test_stream_projection_removes_private_delta_and_preserves_public',
++    'test_preparation_and_run_receipts_are_distinct',
++    'test_single_run_exit_code_uses_disposition_not_reward',
++    'test_public_projection_removes_nested_hidden_thinking',
++    'test_selection_subsets_repeats_and_identity',
++    'test_single_binding_never_authorizes_changed_slot',
++    'test_registered_wrapper_stops_but_task_service_survives',
++)
++
++
++def main() -> None:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--output', type=Path, required=True)
++    args = parser.parse_args()
++    args.output.mkdir(parents=True, exist_ok=False)
++    results = []
++    for name, script in TESTS.items():
++        module = script[:-3].replace('/', '.')
++        command = ([sys.executable, '-B', '-m', 'unittest'] +
++                   ([module + '.SingleRunOfflineTests.' + method
++                     for method in LEGACY_SINGLE_METHODS]
++                    if name == 'legacy_single_run' else [module])
++                   if script.startswith(H) else [sys.executable, '-B', script])
++        run = subprocess.run(command, cwd=ROOT, capture_output=True, check=False)
++        for stream, content in (('stdout', run.stdout), ('stderr', run.stderr)):
++            (args.output / f'{name}.{stream}.txt').write_bytes(content)
++        results.append({'name': name, 'command': command,
++                        'exit_code': run.returncode,
++                        'stdout_sha256': hashlib.sha256(run.stdout).hexdigest(),
++                        'stderr_sha256': hashlib.sha256(run.stderr).hexdigest()})
++    (args.output / 'results.json').write_text(json.dumps(results, indent=2) + '\n',
++                                              encoding='utf-8', newline='\n')
++    print(json.dumps(results))
++    if any(row['exit_code'] for row in results):
++        raise SystemExit(1)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/run_sentinel_negative.py b/method_discovery/pos_upstream_ga_v1_20261017/run_sentinel_negative.py
+new file mode 100644
+index 00000000..fd83f3ae
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/run_sentinel_negative.py
+@@ -0,0 +1,42 @@
++"""Two independent Docker sentinel negatives using only the already-present image."""
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++from pathlib import Path
++import subprocess
++
++TESTS = Path(__file__).resolve().parent / 'synthetic_task/tests'
++IMAGE = 'alexgshaw/db-wal-recovery:20251031'
++
++
++def main() -> None:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--runtime-root', type=Path, required=True)
++    parser.add_argument('--output', type=Path, required=True)
++    args = parser.parse_args()
++    args.output.mkdir(parents=True, exist_ok=False)
++    rows = []
++    for name, command in (
++        ('missing_file', '/tests/test.sh'),
++        ('missing_service', 'printf POS_FILE_OK > /app/pos-fixture-marker.txt; /tests/test.sh')):
++        argv = ['docker', 'run', '--rm', '--pull', 'never', '--network', 'none',
++                '--entrypoint', '/bin/sh', '-v', f'{TESTS}:/tests:ro',
++                '-v', f'{args.runtime_root.resolve(strict=True)}:/opt/m4-runtime:ro',
++                IMAGE, '-c', command]
++        result = subprocess.run(argv, capture_output=True, check=False)
++        (args.output / f'{name}.stdout.txt').write_bytes(result.stdout)
++        (args.output / f'{name}.stderr.txt').write_bytes(result.stderr)
++        rows.append({'name': name, 'argv': argv, 'exit_code': result.returncode,
++                     'stdout_sha256': hashlib.sha256(result.stdout).hexdigest(),
++                     'stderr_sha256': hashlib.sha256(result.stderr).hexdigest()})
++    (args.output / 'results.json').write_text(json.dumps(rows, indent=2) + '\n',
++                                             encoding='utf-8', newline='\n')
++    print(json.dumps(rows))
++    if any(row['exit_code'] != 1 for row in rows):
++        raise SystemExit('synthetic sentinel failed to reject a missing condition')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/single_manifest.py b/method_discovery/pos_upstream_ga_v1_20261017/single_manifest.py
+new file mode 100644
+index 00000000..1755965c
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/single_manifest.py
+@@ -0,0 +1,158 @@
++"""One-slot PoS identity using the existing single-run controller, not an executor."""
++from __future__ import annotations
++
++import hashlib
++import json
++from pathlib import Path
++import runpy
++from tempfile import TemporaryDirectory
++
++from long_context_bench.scripts.isolated_run_bundle import digest_tree
++from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.export_official_evaluator import COMMIT, export_task
++from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.offline_launcher import image_identity
++from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.six_task_assets import descriptor, materialize_public
++
++ROOT = Path(__file__).resolve().parent
++CHECKOUT = ROOT.parents[1]
++UPSTREAM = '6818cfa6434dbc91fcf67f0b3eb12a91db47433f'
++SYNTHETIC_ID = 'pos-synthetic-file-http'
++FOUR = ('nginx-request-logging', 'adaptive-rejection-sampler',
++        'sqlite-with-gcov', 'write-compressor')
++SOURCE_FILES = (
++    'GenericAgent-main/agent_loop.py', 'GenericAgent-main/agentmain.py',
++    'GenericAgent-main/ga.py', 'GenericAgent-main/llmcore.py',
++    'GenericAgent-main/pos_bridge.py',
++    'method_discovery/pos_upstream_ga_v1_20261017/episode.py',
++    'method_discovery/pos_upstream_ga_v1_20261017/worker.py',
++    'method_discovery/curator_supervisor_convergence_v0/'
++    'pma_full_upstream_ga_v1_20261013/single_run.py',
++    'method_discovery/curator_supervisor_convergence_v0/'
++    'pma_full_upstream_ga_v1_20261013/batch_controller.py',
++    'method_discovery/curator_supervisor_convergence_v0/'
++    'pma_full_upstream_ga_v1_20261013/live_launcher.py',
++    'method_discovery/curator_supervisor_convergence_v0/'
++    'pma_full_upstream_ga_v1_20261013/offline_launcher.py',
++    'method_discovery/curator_supervisor_convergence_v0/'
++    'pma_full_upstream_ga_v1_20261013/harbor_adapter.py',
++    'method_discovery/curator_supervisor_convergence_v0/'
++    'pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py',
++    'method_discovery/curator_supervisor_convergence_v0/'
++    'pma_full_upstream_ga_v1_20261013/native_shared_verifier.py',
++    'method_discovery/curator_supervisor_convergence_v0/'
++    'pma_full_upstream_ga_v1_20261013/six_task_plan.py',
++    'method_discovery/pos_upstream_ga_v1_20261017/single_manifest.py',
++    'method_discovery/pos_upstream_ga_v1_20261017/certification.py',
++    'method_discovery/pos_upstream_ga_v1_20261017/collect_native_shared.py',
++    'method_discovery/curator_supervisor_convergence_v0/'
++    'real_task_effect_pilot_preflight_20261010/pilot_fake_gateway.py',
++)
++
++
++def sha(path: Path) -> str:
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def source_hashes() -> dict:
++    return {name: sha(CHECKOUT / name) for name in SOURCE_FILES}
++
++
++def vendor_hashes() -> dict:
++    return {p.relative_to(ROOT / 'vendor').as_posix(): sha(p)
++            for p in sorted((ROOT / 'vendor').rglob('*')) if p.is_file()
++            and '__pycache__' not in p.parts and p.suffix != '.pyc'}
++
++
++def synthetic_members() -> dict:
++    base = ROOT / 'synthetic_task'
++    return {p.relative_to(base).as_posix(): sha(p) for p in sorted(base.rglob('*'))
++            if p.is_file() and '__pycache__' not in p.parts}
++
++
++def prepare(plan: dict, source: Path, task_profile: Path,
++            certification_dir: Path | None = None) -> dict:
++    if (plan.get('schema') != 'pos-ga-single-plan-v1' or
++            plan.get('execution_authorized') is not False or
++            plan.get('official_source_git_commit') != COMMIT or
++            plan.get('condition') != 'P' or plan.get('method') != 'PoS' or
++            type(plan.get('occurrence')) is not int or plan['occurrence'] < 1):
++        raise RuntimeError('PoS single-run plan identity invalid')
++    task = plan['task']
++    synthetic = plan.get('synthetic_fixture') is True
++    if synthetic != (task == SYNTHETIC_ID) or (not synthetic and task not in FOUR):
++        raise RuntimeError('PoS task not in frozen four or synthetic fixture')
++    profile = runpy.run_path(str(task_profile))['native_claude_cc_vibe_opus48']
++    if profile.get('model') != 'claude-opus-4-8':
++        raise RuntimeError('PoS Task profile model changed')
++    if synthetic:
++        image_tag = 'alexgshaw/db-wal-recovery:20251031'
++        with TemporaryDirectory(prefix='pos-synthetic-public-') as tmp:
++            import shutil
++            public = Path(tmp) / 'public'
++            shutil.copytree(ROOT / 'synthetic_task', public,
++                            ignore=shutil.ignore_patterns('tests', 'pos_replies.json',
++                                                          '__pycache__'))
++            (public / 'tests').mkdir()
++            (public / 'solution').mkdir()
++            public_sha = digest_tree(public)
++        script = ROOT / 'synthetic_task/tests/test.sh'
++        asset = {'task': task, 'image_tag': image_tag, 'public_members': [],
++                 'public_task_tree_sha256': public_sha,
++                 'official_evaluator_members': [],
++                 'native_tests_tree_sha256': digest_tree(script.parent),
++                 'native_test_sh_sha256': sha(script),
++                 'expected_native_reports': [], 'native_agent_seconds': 180,
++                 'native_verifier_seconds': 120, 'synthetic_package_files': synthetic_members()}
++    else:
++        asset = descriptor(source, task, registered=True)
++        with TemporaryDirectory(prefix='pos-public-check-') as tmp:
++            public = Path(tmp) / 'public'
++            materialize_public(source, task, public, asset['public_members'], registered=True)
++            (public / 'tests').mkdir()
++            (public / 'solution').mkdir()
++            asset['public_task_tree_sha256'] = digest_tree(public)
++            tests = Path(tmp) / 'tests'
++            tests.mkdir()
++            export_task(source, task, tests, registered=True)
++            asset['native_tests_tree_sha256'] = digest_tree(tests)
++            asset['native_test_sh_sha256'] = sha(tests / 'test.sh')
++    image = image_identity(asset['image_tag'])
++    repo = asset['image_tag'].rsplit(':', 1)[0]
++    matches = [v for v in image['repo_digests'] if v.startswith(repo + '@sha256:')]
++    if len(matches) != 1:
++        raise RuntimeError('PoS fixed image digest missing or ambiguous')
++    asset.update(image_id=image['image_id'], repo_digest=matches[0],
++                 platform=image['platform'])
++    row = {'order': 1, 'task': task, 'repeat': plan['occurrence'],
++           'condition': 'P', 'research_candidate': 'PoS'}
++    method = {'name': 'released-core PoS-on-GA transfer',
++              'upstream_commit': UPSTREAM, 'task_turns_max': 2 if synthetic else 300,
++              'agent_wall_seconds': 180 if synthetic else 14400,
++              'harbor_whole_trial_retries': 0,
++              'task_profile_name': 'native_claude_cc_vibe_opus48',
++              'pos_roles': ('belief', 'consistency', 'progress'),
++              'role_max_tokens': {'belief': 4096, 'consistency': 512, 'progress': 512},
++              'role_transport_retries': 0, 'synthetic_fixture': synthetic}
++    config_sha = hashlib.sha256(json.dumps(method, sort_keys=True,
++        separators=(',', ':')).encode('utf-8')).hexdigest()
++    certification = None
++    if certification_dir is not None:
++        if synthetic:
++            raise RuntimeError('synthetic fixture does not accept live certification')
++        from .certification import verify_evidence
++        evidence = certification_dir.resolve(strict=True)
++        verified = verify_evidence(evidence, require_committed=True)
++        index = evidence / 'FILE_HASHES.json'
++        certification = {'relative_path': index.relative_to(CHECKOUT).as_posix(),
++                         'committed_evidence_sha256': sha(index),
++                         'result': verified}
++    return {'schema': 'pos-ga-single-manifest-v1', 'status': 'prepared_not_executed',
++            'execution_authorized': False, 'zero_model_fixture_only': synthetic,
++            'official_source_git_commit': COMMIT, 'upstream_commit': UPSTREAM,
++            'task_profile_sha256': sha(task_profile),
++            'profile_identity_status': 'private_bytes_hashed_not_exported',
++            'resolved_models_public': {'task': {key: profile.get(key) for key in
++                ('model', 'max_tokens', 'temperature', 'max_retries')}},
++            'source_files_sha256': source_hashes(), 'vendor_files_sha256': vendor_hashes(),
++            'config': method, 'config_sha256': config_sha,
++            'planned_order': [row], 'assets': {task: asset},
++            'native_shared_certification': certification}
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/synthetic_task/environment/README.txt b/method_discovery/pos_upstream_ga_v1_20261017/synthetic_task/environment/README.txt
+new file mode 100644
+index 00000000..80015338
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/synthetic_task/environment/README.txt
+@@ -0,0 +1 @@
++Synthetic task package only. No official task assets or solution are included.
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/synthetic_task/instruction.md b/method_discovery/pos_upstream_ga_v1_20261017/synthetic_task/instruction.md
+new file mode 100644
+index 00000000..71fdb9df
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/synthetic_task/instruction.md
+@@ -0,0 +1,3 @@
++# Synthetic PoS lifecycle fixture
++
++Create `/app/pos-fixture-marker.txt` with exactly `POS_FILE_OK` followed by a newline. Start an HTTP service on `127.0.0.1:19173` that returns status 200. This is a synthetic wiring check, not a benchmark Task.
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/synthetic_task/pos_replies.json b/method_discovery/pos_upstream_ga_v1_20261017/synthetic_task/pos_replies.json
+new file mode 100644
+index 00000000..8a8ee42f
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/synthetic_task/pos_replies.json
+@@ -0,0 +1,10 @@
++{
++  "belief": [
++    "{\"goal_specification\":\"Create POS_FILE_OK and keep HTTP 200\",\"entities\":[{\"entity_id\":\"file\",\"entity_type\":\"artifact\",\"name\":\"/app/pos-fixture-marker.txt\"}],\"states\":[],\"relations\":[],\"epistemic_gaps\":[],\"achievement_gaps\":[{\"target\":\"Create POS_FILE_OK and keep HTTP 200\",\"reason\":\"No completed tool result yet\"}],\"frontier\":{\"gap_type\":\"achievement\",\"target\":\"Create POS_FILE_OK and keep HTTP 200\"}}",
++    "{\"belief_text\":\"The synthetic file and service are not yet observed.\"}",
++    "{\"remove_state_ids\":[],\"remove_relation_ids\":[],\"upsert_entities\":[],\"upsert_states\":[],\"upsert_relations\":[],\"epistemic_gaps\":[],\"achievement_gaps\":[{\"target\":\"Create POS_FILE_OK and keep HTTP 200\",\"reason\":\"Await independent verifier\"}],\"frontier\":{\"gap_type\":\"achievement\",\"target\":\"Create POS_FILE_OK and keep HTTP 200\"}}",
++    "{\"belief_text\":\"The Task tool returned a file and service probe; independent verification remains separate.\"}"
++  ],
++  "consistency": ["{\"issues\":[]}", "{\"issues\":[]}"],
++  "progress": ["{\"progress\":0,\"score\":0.0,\"affected_record_ids\":[],\"reason\":\"Synthetic transition only.\"}"]
++}
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/synthetic_task/task.toml b/method_discovery/pos_upstream_ga_v1_20261017/synthetic_task/task.toml
+new file mode 100644
+index 00000000..9c4582fd
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/synthetic_task/task.toml
+@@ -0,0 +1,28 @@
++schema_version = "1.1"
++artifacts = []
++
++[task]
++name = "synthetic/pos-file-http"
++description = "Synthetic file and HTTP service lifecycle check."
++
++[verifier]
++timeout_sec = 120.0
++
++[agent]
++timeout_sec = 180.0
++
++[environment]
++build_timeout_sec = 600.0
++docker_image = "alexgshaw/db-wal-recovery:20251031"
++cpus = 1
++memory_mb = 2048
++storage_mb = 10240
++gpus = 0
++allow_internet = true
++mcp_servers = []
++
++[verifier.env]
++
++[environment.env]
++
++[solution.env]
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/synthetic_task/tests/test.sh b/method_discovery/pos_upstream_ga_v1_20261017/synthetic_task/tests/test.sh
+new file mode 100644
+index 00000000..69c52786
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/synthetic_task/tests/test.sh
+@@ -0,0 +1,6 @@
++#!/bin/sh
++set -eu
++test "$(cat /app/pos-fixture-marker.txt)" = POS_FILE_OK
++/opt/m4-runtime/python/cpython-3.12.12-linux-x86_64-gnu/bin/python3.12 -c 'import urllib.request; response = urllib.request.build_opener(urllib.request.ProxyHandler({})).open("http://127.0.0.1:19173/", timeout=5); assert response.status == 200'
++mkdir -p /logs/verifier
++printf '1\n' > /logs/verifier/reward.txt
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/test_ga_seam.py b/method_discovery/pos_upstream_ga_v1_20261017/test_ga_seam.py
+index 2a860eee..902da891 100644
+--- a/method_discovery/pos_upstream_ga_v1_20261017/test_ga_seam.py
++++ b/method_discovery/pos_upstream_ga_v1_20261017/test_ga_seam.py
+@@ -15,10 +15,11 @@ GA = HERE.parents[1] / 'GenericAgent-main'
+ sys.path.insert(0, str(GA))
+ from agent_loop import BaseHandler, StepOutcome, agent_runner_loop, exhaust
+ from ga import GenericAgentHandler
+-from llmcore import NativeClaudeSession, NativeToolClient
++from llmcore import MockResponse, NativeClaudeSession, NativeToolClient
+ from pos_bridge import PoSBridge, PoSBridgeError
+ from test_offline import replies, Recorder, callers
+ from episode import PoSEpisode, execution_config
++from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.six_task_plan import validate_plan
+ 
+ 
+ class Handler(BaseHandler):
+@@ -59,6 +60,108 @@ def response(content, tools=()):
+ 
+ 
+ class SeamTests(unittest.TestCase):
++    def test_pos_authorization_rejects_old_arm_and_identity_mismatch(self):
++        row = {'order': 1, 'task': 'pos-synthetic-file-http', 'repeat': 1,
++               'condition': 'P', 'research_candidate': 'PoS'}
++        manifest = {'schema': 'pos-ga-single-manifest-v1',
++            'execution_authorized': False, 'planned_order': [row],
++            'assets': {row['task']: {}}, 'config_sha256': 'frozen',
++            'zero_model_fixture_only': True,
++            'upstream_commit': '6818cfa6434dbc91fcf67f0b3eb12a91db47433f'}
++        with tempfile.TemporaryDirectory() as tmp:
++            auth = {'execution_authorized': True, 'approved_arms': [row],
++                'config_sha256': 'frozen', 'batch_id': 'batch', 'run_id': 'run',
++                'output_root': tmp, 'run_bindings': [dict(row, batch_id='batch',
++                    run_id='run', run_root=str(Path(tmp) / 'run'),
++                    config_sha256='frozen')]}
++            self.assertEqual(validate_plan(manifest, auth), auth['run_bindings'])
++            for change in (
++                lambda m, a: a.update(approved_arms=[dict(row, condition='B')]),
++                lambda m, a: a.update(config_sha256='other'),
++                lambda m, a: a['run_bindings'][0].update(run_id='other'),
++                lambda m, a: a['run_bindings'][0].update(run_root=str(Path(tmp) / 'wrong' / 'run')),
++                lambda m, a: m.update(zero_model_fixture_only=False),
++                lambda m, a: m.update(upstream_commit='wrong')):
++                import copy
++                altered_manifest, altered_auth = copy.deepcopy(manifest), copy.deepcopy(auth)
++                change(altered_manifest, altered_auth)
++                with self.assertRaises(RuntimeError):
++                    validate_plan(altered_manifest, altered_auth)
++
++    def test_real_ga_handler_three_http_decisions_keep_current_instruction(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root = Path(tmp)
++            fixed = root / 'replies.json'
++            fixed.write_text(json.dumps(replies(count=2)), encoding='utf-8')
++            (root / '_keyinfo').write_text('PERSISTENT_USER_CONSTRAINT', encoding='utf-8')
++            env = {'GA_POS_ENABLED': '1', 'GA_PMA_ENABLED': '0',
++                   'GA_PMA_UPSTREAM_ENABLED': '0', 'GA_MONITOR_ENABLED': '0',
++                   'GA_M0_MONITOR_ENABLED': '0', 'GA_POS_TRANSPORT': 'fake',
++                   'GA_POS_WORKER_SCRIPT': str(HERE / 'worker.py'),
++                   'GA_POS_VENDOR_ROOT': str(HERE / 'vendor'),
++                   'GA_POS_EPISODE_MODULE': str(HERE / 'episode.py'),
++                   'GA_POS_ARCHIVE': str(root / 'events.jsonl'),
++                   'GA_POS_FAKE_REPLIES': str(fixed), 'GA_LANG': 'en'}
++            parent = SimpleNamespace(task_dir=tmp, extrakeyinfo=None, intervene=None,
++                obligation_ledger=None, evidence_completion_kernel=None,
++                research_condition=None, monitor_runtime=None, _turn_end_hooks={},
++                verbose=False)
++            class ActualHandler(GenericAgentHandler):
++                def do_code_run(self, args, response):
++                    if False: yield None
++                    return StepOutcome({'stdout': 'CURRENT_OBSERVATION_MARKER',
++                        'exit_code': 0}, next_prompt='Synthetic completed tool receipt')
++            handler = ActualHandler(parent, cwd=tmp)
++            handler.history_info.append('OLD_WORKING_MEMORY_CANARY')
++            backend = NativeClaudeSession({'apibase': 'https://fixture.invalid',
++                'apikey': 'SYNTHETIC-NO-ACCESS', 'model': 'claude-opus-4-8',
++                'max_tokens': 64, 'max_retries': 0, 'stream': False})
++            backend.history = [{'role': 'user', 'content': [{'type': 'text',
++                'text': 'OLD_BACKEND_HISTORY_CANARY'}]}]
++            client = NativeToolClient(backend)
++            parent.llmclient = client
++            tools = json.loads((GA / 'assets/tools_schema.json').read_text(encoding='utf-8'))
++            system = (GA / 'assets/sys_prompt_en.txt').read_text(encoding='utf-8')
++            captured = []
++            responses = [
++                [{'type': 'thinking', 'thinking': 'NATIVE_PRIVATE_CANARY'},
++                 {'type': 'text', 'text': '<thinking>TAGGED_PRIVATE_CANARY</thinking>'},
++                 {'type': 'tool_use', 'name': 'code_run', 'id': 'one', 'input': {'type': 'python', 'script': 'print(1)'}},
++                 {'type': 'tool_use', 'name': 'code_run', 'id': 'two', 'input': {'type': 'python', 'script': 'print(2)'}}],
++                [{'type': 'text', 'text': '<summary>Second public tool step</summary>'},
++                 {'type': 'tool_use', 'name': 'code_run', 'id': 'three', 'input': {'type': 'python', 'script': 'print(3)'}}],
++                [{'type': 'text', 'text': '<summary>Public done</summary>'}]]
++            class HTTP:
++                status_code = 200
++                headers = {}
++                def __init__(self, blocks): self.blocks = blocks
++                def __enter__(self): return self
++                def __exit__(self, *args): return False
++                def json(self): return {'content': self.blocks,
++                                        'usage': {'input_tokens': 1, 'output_tokens': 1}}
++                def close(self): pass
++            def post(url, **kwargs):
++                captured.append(kwargs['json'])
++                return HTTP(responses[len(captured)-1])
++            with patch.dict(os.environ, env), patch('llmcore.requests.post', side_effect=post):
++                outcome = exhaust(agent_runner_loop(client, system,
++                    'ORIGINAL_TASK', handler, tools, max_turns=3, verbose=False))
++            self.assertEqual(outcome['result'], 'CURRENT_TASK_DONE')
++            self.assertEqual(len(captured), 3)
++            for payload in captured:
++                wire = json.dumps(payload, ensure_ascii=False)
++                self.assertIn('ORIGINAL_TASK', wire)
++                self.assertIn('PERSISTENT_USER_CONSTRAINT', wire)
++                self.assertIn('Active Gap', wire)
++                self.assertIn('code_run', wire)
++                self.assertNotIn('OLD_WORKING_MEMORY_CANARY', wire)
++                self.assertNotIn('OLD_BACKEND_HISTORY_CANARY', wire)
++                self.assertNotIn('NATIVE_PRIVATE_CANARY', wire)
++                self.assertNotIn('TAGGED_PRIVATE_CANARY', wire)
++            self.assertIn('CURRENT_OBSERVATION_MARKER', json.dumps(captured[1]))
++            self.assertIn('<summary>', json.dumps(captured[0]))
++            self.assertEqual(len(backend.history), 1)
++
+     def test_actual_ga_current_instruction_source_and_lifetime(self):
+         with tempfile.TemporaryDirectory() as tmp:
+             path = Path(tmp) / '_keyinfo'
+@@ -74,7 +177,36 @@ class SeamTests(unittest.TestCase):
+             self.assertNotIn('WORKING MEMORY', fresh)
+             self.assertIsNone(parent.extrakeyinfo)
+             self.assertFalse(path.exists())
+-            self.assertEqual(handler.consume_pos_current_instruction(), '')
++            self.assertEqual(handler.consume_pos_current_instruction(), fresh)
++
++    def test_tagged_reasoning_is_removed_before_text_tool_fallback(self):
++        backend = NativeClaudeSession({'apibase': 'https://fixture.invalid',
++            'apikey': 'SYNTHETIC-NO-ACCESS', 'model': 'claude-opus-4-8',
++            'max_tokens': 64, 'max_retries': 0})
++        def fake_raw(_messages):
++            if False: yield None
++            return [{'type': 'thinking', 'thinking': 'NATIVE_PRIVATE'},
++                    {'type': 'text', 'text': '<thinking>TAGGED_PRIVATE</thinking>public'}]
++        backend.raw_ask = fake_raw
++        result = exhaust(backend.ask_stateless({'role': 'user', 'content': []}))
++        self.assertEqual(result.content, 'public')
++        self.assertEqual(result.tool_calls, [])
++        self.assertIn('NATIVE_PRIVATE', result.thinking)
++        self.assertIn('TAGGED_PRIVATE', result.thinking)
++
++    def test_tagged_reasoning_cannot_create_fallback_tool(self):
++        backend = NativeClaudeSession({'apibase': 'https://fixture.invalid',
++            'apikey': 'SYNTHETIC-NO-ACCESS', 'model': 'claude-opus-4-8',
++            'max_tokens': 64, 'max_retries': 0})
++        def fake_raw(_messages):
++            if False: yield None
++            return [{'type': 'text', 'text':
++                     '<think><tool_call><function=probe><parameter=x>1</parameter>'
++                     '</function></tool_call></think>public'}]
++        backend.raw_ask = fake_raw
++        result = exhaust(backend.ask_stateless({'role': 'user', 'content': []}))
++        self.assertEqual(result.content, 'public')
++        self.assertEqual(result.tool_calls, [])
+ 
+     def test_http_boundary_hybrid_view_thinking_and_native_tools(self):
+         fixed = replies()
+@@ -176,9 +308,25 @@ class SeamTests(unittest.TestCase):
+                'GA_POS_EPISODE_MODULE': str(HERE / 'episode.py'),
+                'GA_POS_ARCHIVE': 'unused-events.jsonl'}
+         with patch.dict(os.environ, env):
+-            with self.assertRaisesRegex(PoSBridgeError, 'unfinished'):
++            with self.assertRaisesRegex(PoSBridgeError, 'binding'):
+                 PoSBridge.from_environment()
+ 
++    def test_profile_binding_rejects_wrong_run_task_before_worker_start(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root = Path(tmp)
++            profile = root / 'profile.json'
++            profile.write_text('{}', encoding='utf-8')
++            binding = root / 'binding.json'
++            binding.write_text(json.dumps({'schema': 'pos-ga-transport-binding-v1',
++                'transport': 'profile', 'run_id': 'other-run', 'task_id': 'task'}),
++                encoding='utf-8')
++            with self.assertRaisesRegex(PoSBridgeError, 'identity differs'):
++                PoSBridge(worker_script=HERE / 'worker.py', vendor=HERE / 'vendor',
++                    episode_module=HERE / 'episode.py', archive=root / 'events.jsonl',
++                    mode='profile', profile_file=profile, profile_name='unused',
++                    run_id='expected-run', task_id='task', binding_file=binding)
++            self.assertFalse((root / 'events.jsonl').exists())
++
+     def test_native_final_send_is_stateless_with_old_canaries(self):
+         backend = NativeClaudeSession({'apibase': 'https://fixture.invalid',
+             'apikey': 'SYNTHETIC-NO-ACCESS', 'model': 'claude-opus-4-8',
+@@ -325,6 +473,32 @@ class SeamTests(unittest.TestCase):
+             tool_outcome = next(row for row in host if row['kind'] == 'tool_outcome')
+             self.assertIsNone(tool_outcome['payload']['result']['exit_code'])
+ 
++    def test_terminal_host_archive_failure_is_auxiliary_and_public_only(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root = Path(tmp)
++            fixed = root / 'replies.json'
++            fixed.write_text(json.dumps(replies()), encoding='utf-8')
++            env = {'GA_POS_ENABLED': '1', 'GA_PMA_ENABLED': '0',
++                   'GA_PMA_UPSTREAM_ENABLED': '0', 'GA_MONITOR_ENABLED': '0',
++                   'GA_M0_MONITOR_ENABLED': '0', 'GA_POS_TRANSPORT': 'fake',
++                   'GA_POS_WORKER_SCRIPT': str(HERE / 'worker.py'),
++                   'GA_POS_VENDOR_ROOT': str(HERE / 'vendor'),
++                   'GA_POS_EPISODE_MODULE': str(HERE / 'episode.py'),
++                   'GA_POS_ARCHIVE': str(root / 'events.jsonl'),
++                   'GA_POS_FAKE_REPLIES': str(fixed)}
++            real_response = MockResponse('PRIVATE_NATIVE_CANARY', 'public done',
++                                         [], 'private raw is not an observation')
++            with patch.dict(os.environ, env), patch.object(PoSBridge, 'record_host',
++                    side_effect=OSError('synthetic archive failure')):
++                outcome = exhaust(agent_runner_loop(Client([real_response]),
++                    'system', 'task', Handler(), [], max_turns=1, verbose=False))
++            self.assertEqual(outcome['result'], 'CURRENT_TASK_DONE')
++            self.assertTrue(outcome['pos_archive_incomplete'])
++            receipt = json.loads((root / 'events.result.json').read_text(encoding='utf-8'))
++            self.assertIn('public done', json.dumps(receipt))
++            self.assertNotIn('PRIVATE_NATIVE_CANARY', json.dumps(receipt))
++            self.assertNotIn('private raw', json.dumps(receipt))
++
+     def test_unknown_tool_is_rejected_observation_not_scored_action(self):
+         with tempfile.TemporaryDirectory() as tmp:
+             root = Path(tmp)
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/worker.py b/method_discovery/pos_upstream_ga_v1_20261017/worker.py
+index dbf4bef8..19480803 100644
+--- a/method_discovery/pos_upstream_ga_v1_20261017/worker.py
++++ b/method_discovery/pos_upstream_ga_v1_20261017/worker.py
+@@ -3,6 +3,7 @@ from __future__ import annotations
+ 
+ import argparse
+ import contextlib
++import hashlib
+ import json
+ import os
+ from pathlib import Path
+@@ -11,13 +12,17 @@ import time
+ 
+ 
+ def _json(value):
+-    return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
++    # GA's shipped tool-schema asset contains an escaped lone surrogate.
++    # JSON ASCII escaping preserves its exact code point across the pipe.
++    return json.dumps(value, ensure_ascii=True, separators=(',', ':'))
+ 
+ 
+-def _persist_receipt(path, *, case_id, status, result=None, error=None):
++def _persist_receipt(path, *, case_id, status, result=None, error=None,
++                     run_id=None, task_id=None):
+     """Durable episode receipt; never infer a missing core state as saved."""
+     target = path.with_suffix('.result.json')
+-    payload = {'case_id': case_id, 'status': status, 'result': result,
++    payload = {'case_id': case_id, 'run_id': run_id, 'task_id': task_id,
++               'status': status, 'result': result,
+                'error': error, 'success_known': False}
+     data = (_json(payload) + '\n').encode('utf-8')
+     with target.open('wb') as stream:
+@@ -132,10 +137,37 @@ def main():
+     parser.add_argument('--fake-replies', type=Path)
+     parser.add_argument('--profile-file', type=Path)
+     parser.add_argument('--profile-name')
++    parser.add_argument('--run-id')
++    parser.add_argument('--task-id')
++    parser.add_argument('--binding-file', type=Path)
+     args = parser.parse_args()
+     if args.mode == 'profile':
+-        raise RuntimeError('PoS profile mode remains unarmed until the native-shared '
+-                           'P authorization and Harbor lifecycle are certified')
++        if not args.binding_file or not args.run_id or not args.task_id:
++            raise RuntimeError('PoS profile requires a frozen run/task binding')
++        binding = json.loads(args.binding_file.resolve(strict=True).read_text(
++            encoding='utf-8'))
++        if (binding.get('schema') != 'pos-ga-transport-binding-v1' or
++                binding.get('transport') != 'profile' or
++                binding.get('run_id') != args.run_id or
++                binding.get('task_id') != args.task_id or
++                args.binding_file.resolve().parent != args.archive.resolve().parent or
++                binding.get('upstream_commit') !=
++                    '6818cfa6434dbc91fcf67f0b3eb12a91db47433f' or
++                not all(isinstance(binding.get(key), str) and
++                        len(binding[key]) == 64 for key in
++                        ('manifest_sha256', 'authorization_sha256', 'config_sha256'))):
++            raise RuntimeError('PoS profile binding identity invalid')
++        def digest(path): return hashlib.sha256(path.read_bytes()).hexdigest()
++        for key, path in (('worker_sha256', Path(__file__)),
++                          ('episode_sha256', args.episode_module),
++                          ('profile_sha256', args.profile_file)):
++            if binding.get(key) != digest(path.resolve(strict=True)):
++                raise RuntimeError('PoS profile binding bytes differ: ' + key)
++        for relative, expected in binding.get('vendor_files_sha256', {}).items():
++            part = Path(relative)
++            if part.is_absolute() or '..' in part.parts or not part.parts or (
++                    digest((args.vendor / part).resolve(strict=True)) != expected):
++                raise RuntimeError('PoS vendor binding differs')
+     sys.path.insert(0, str(args.vendor.resolve(strict=True)))
+     # The GA source bundle contains llmcore.py as a sibling of pos_runtime.
+     # This has no effect in fake mode and does not load the private profile.
+@@ -196,7 +228,8 @@ def main():
+                                            observation=command.get('observation'))
+                     logger.log('pos_episode_result', result=value)
+                     receipt = _persist_receipt(args.archive, case_id=episode.case_id,
+-                                               status=value['status'], result=value)
++                                               status=value['status'], result=value,
++                                               run_id=args.run_id, task_id=args.task_id)
+                     logger.log('pos_result_persisted', **receipt)
+                     finished = True
+                 elif kind == 'abort':
+@@ -204,7 +237,8 @@ def main():
+                     value = episode.get_result()
+                     receipt = _persist_receipt(args.archive, case_id=episode.case_id,
+                                                status='partial', result=value,
+-                                               error=command.get('reason'))
++                                               error=command.get('reason'),
++                                               run_id=args.run_id, task_id=args.task_id)
+                     logger.log('pos_result_persisted', **receipt)
+                     finished = True
+                 elif kind == 'get_result':
+@@ -226,14 +260,17 @@ def main():
+                 episode.manager.close()
+                 if not finished:
+                     try:
+-                        partial = episode.get_result() if episode.started else None
++                        # reset() may have committed a core state before a
++                        # later initialization/textualization stage failed.
++                        partial = episode.get_result()
+                     except BaseException as error:
+                         partial = None
+                         failure = {**(failure or {}), 'snapshot_error':
+                                    type(error).__name__ + ': ' + str(error)}
+                     receipt = _persist_receipt(args.archive, case_id=episode.case_id,
+                                                status='partial' if partial else 'missing',
+-                                               result=partial, error=failure or 'EOF')
++                                               result=partial, error=failure or 'EOF',
++                                               run_id=args.run_id, task_id=args.task_id)
+                     logger.log('pos_partial_persisted', **receipt)
+             except BaseException as error:
+                 logger.log('pos_partial_missing', error_type=type(error).__name__,

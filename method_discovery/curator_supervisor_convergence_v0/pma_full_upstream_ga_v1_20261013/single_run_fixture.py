@@ -16,19 +16,24 @@ from .single_run_certification import HARBOR_COMMIT, source_identity, vendor_ide
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--task', required=True)
-    parser.add_argument('--condition', choices=('A', 'B'), required=True)
-    parser.add_argument('--research-candidate', choices=('U', 'V1', 'D1'), default='U')
+    parser.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
+    parser.add_argument('--research-candidate', choices=('U', 'V1', 'D1', 'PoS'), default='U')
     parser.add_argument('--output', type=Path, required=True)
-    for name in ('official-source-git', 'task-profile-file', 'pma-profile-file',
+    for name in ('official-source-git', 'task-profile-file',
                  'ga-source', 'runtime-root', 'worker-python', 'harbor-python',
                  'bench-root', 'harbor-source-root'):
         parser.add_argument('--' + name, required=True)
+    parser.add_argument('--pma-profile-file')
     parser.add_argument('--python-home', default='cpython-3.12.12-linux-x86_64-gnu')
     parser.add_argument('--service-fixture', action='store_true')
     args = parser.parse_args()
     root = args.output.resolve(strict=False)
+    if args.condition == 'P' and (args.task != 'pos-synthetic-file-http' or
+                                   args.research_candidate != 'PoS'):
+        raise RuntimeError('PoS zero-model fixture must use the synthetic P identity')
     identity = prepare(argparse.Namespace(output=str(root), task=args.task,
         condition=args.condition, occurrence=1, fake_only=True,
+        synthetic_pos_fixture=args.condition == 'P',
         research_candidate=args.research_candidate,
         official_source_git=args.official_source_git,
         task_profile_file=args.task_profile_file,
@@ -44,11 +49,15 @@ def main() -> None:
     if subprocess.run(['git', 'diff', '--quiet', 'HEAD'],
                       cwd=args.harbor_source_root).returncode:
         raise RuntimeError('fixture Harbor tracked source differs from commit')
-    execution = {'code_commit': head, 'source_files': source_identity(checkout,
-                     candidate=args.research_candidate != 'U'),
-                 'vendor_files': vendor_identity(checkout),
+    execution = {'code_commit': head,
+                 'source_files': (manifest['source_files_sha256'] if args.condition == 'P'
+                                  else source_identity(checkout,
+                                      candidate=args.research_candidate != 'U')),
+                 'vendor_files': (manifest['vendor_files_sha256'] if args.condition == 'P'
+                                  else vendor_identity(checkout)),
                  'harbor_commit': harbor_head,
-                 'pma_vendor_commit': manifest['pma_vendor_commit']}
+                 **({'upstream_commit': manifest['upstream_commit']} if args.condition == 'P'
+                    else {'pma_vendor_commit': manifest['pma_vendor_commit']})}
     (root / 'execution_identity.json').write_text(
         json.dumps(execution, sort_keys=True, indent=2), encoding='utf-8')
     binding = dict(manifest['planned_order'][0], run_id=identity['run_id'],
@@ -70,12 +79,13 @@ def main() -> None:
         '--authorization', str(authorization),
         '--ga-source', args.ga_source, '--runtime-root', args.runtime_root,
         '--task-profile-file', args.task_profile_file,
-        '--pma-profile-file', args.pma_profile_file,
         '--worker-python', args.worker_python, '--harbor-python', args.harbor_python,
         '--bench-root', args.bench_root,
         '--official-source-git', args.official_source_git,
         '--harbor-source-root', args.harbor_source_root,
         '--python-home', args.python_home]
+    if args.pma_profile_file:
+        command += ['--pma-profile-file', args.pma_profile_file]
     try:
         environment = dict(os.environ)
         if args.service_fixture:

@@ -28,24 +28,40 @@ def _write_new(path: Path, value: dict) -> None:
 def prepare(args: argparse.Namespace) -> dict:
     root = Path(args.output).resolve(strict=False)
     root.mkdir(parents=True, exist_ok=False)
-    plan = {'schema': 'pma-ga-single-plan-v1', 'execution_authorized': False,
+    pos = args.condition == 'P'
+    plan = {'schema': 'pos-ga-single-plan-v1' if pos else 'pma-ga-single-plan-v1',
+            'execution_authorized': False,
             'official_source_git_commit': COMMIT, 'task': args.task,
             'condition': args.condition, 'occurrence': args.occurrence}
+    if pos:
+        plan.update(method='PoS', synthetic_fixture=bool(
+            getattr(args, 'synthetic_pos_fixture', False)))
+        if plan['synthetic_fixture'] and not args.fake_only:
+            raise RuntimeError('synthetic PoS package is zero-model only')
     candidate = getattr(args, 'research_candidate', 'U')
-    if candidate != 'U':
+    if pos and candidate != 'PoS':
+        raise RuntimeError('PoS plan requires explicit PoS method identity')
+    if not pos and candidate != 'U':
         plan['schema'] = 'pma-ga-single-plan-v2'
         plan['research_candidate'] = candidate
     _write_new(root / 'plan.json', plan)
-    manifest = prepare_manifest(Path(args.official_source_git).resolve(strict=True),
-        Path(args.task_profile_file).resolve(strict=True),
-        Path(args.pma_profile_file).resolve(strict=True),
-        evidence=(Path(args.certification_dir).resolve(strict=True)
-                  if getattr(args, 'certification_dir', None) else None), plan=plan)
-    if args.fake_only:
+    if pos:
+        from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import prepare as prepare_pos
+        manifest = prepare_pos(plan, Path(args.official_source_git).resolve(strict=True),
+                               Path(args.task_profile_file).resolve(strict=True),
+                               certification_dir=(Path(args.certification_dir)
+                                   if getattr(args, 'certification_dir', None) else None))
+    else:
+        manifest = prepare_manifest(Path(args.official_source_git).resolve(strict=True),
+            Path(args.task_profile_file).resolve(strict=True),
+            Path(args.pma_profile_file).resolve(strict=True),
+            evidence=(Path(args.certification_dir).resolve(strict=True)
+                      if getattr(args, 'certification_dir', None) else None), plan=plan)
+    if args.fake_only and not pos:
         manifest['zero_model_fixture_only'] = True
     _write_new(root / 'manifest.json', manifest)
     # Keep Windows Harbor paths below MAX_PATH while retaining a fresh random ID.
-    run_id = 'pma-' + uuid.uuid4().hex[:16]
+    run_id = ('pos-' if pos else 'pma-') + uuid.uuid4().hex[:16]
     identity = {'run_id': run_id, 'run_root': str(root / 'runs' / run_id),
                 'output_root': str(root / 'runs'), 'plan_sha256': hashlib.sha256(
                     (root / 'plan.json').read_bytes()).hexdigest(),
@@ -89,14 +105,15 @@ def main() -> None:
     commands = parser.add_subparsers(dest='command', required=True)
     prepared = commands.add_parser('prepare', help='fixed-Git asset and image check; no calls')
     prepared.add_argument('--task', required=True)
-    prepared.add_argument('--condition', choices=('A', 'B'), required=True)
-    prepared.add_argument('--research-candidate', choices=('U', 'V1', 'D1'), default='U')
+    prepared.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
+    prepared.add_argument('--research-candidate', choices=('U', 'V1', 'D1', 'PoS'), default='U')
     prepared.add_argument('--occurrence', type=int, default=1)
     prepared.add_argument('--output', required=True)
     prepared.add_argument('--official-source-git', required=True)
     prepared.add_argument('--task-profile-file', required=True)
-    prepared.add_argument('--pma-profile-file', required=True)
+    prepared.add_argument('--pma-profile-file')
     prepared.add_argument('--fake-only', action='store_true')
+    prepared.add_argument('--synthetic-pos-fixture', action='store_true')
     prepared.add_argument('--certification-dir',
                           help='committed A/B Harbor evidence for future authorized use')
     launched = commands.add_parser('run', help='requires an independent one-use approval')
