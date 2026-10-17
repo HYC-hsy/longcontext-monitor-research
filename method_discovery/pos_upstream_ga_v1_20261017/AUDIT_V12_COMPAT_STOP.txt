@@ -1,0 +1,88 @@
+PoS-on-GA handoff v12: bounded compatibility stop (2026-10-18)
+
+Outcome: the scoped auxiliary-terminal fix and offline checks passed. The one
+authorized synthetic live compatibility probe failed during original PoS
+initialization. No formal four-task run was started. This is not a PoS-vs-PMA
+efficacy result, and the compatibility probe was not repeated.
+
+Frozen identities
+- Baseline: f1ea1d729a2476dfe59137ad8a68b92e6052eb3e.
+- Scoped code commit: ef065bd8 (full identity in git history).
+- Source-bound synthetic evidence commit: f676367debb143a09a9058682a9de70790b1cf74.
+- Public PoS vendor: luoyu100/PoS@6818cfa6434dbc91fcf67f0b3eb12a91db47433f, unchanged.
+- Official task source: 2fd12b88aafdd04a52c298e3940bcb189f9766d6; Harbor: 459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc.
+- Exact executed code-file and vendor content hashes are in raw_compat_v1/authorized_serial_scope.json. Profile is represented only by its SHA-256, not credentials or endpoint.
+
+Scoped change and offline acceptance
+- DIFF_V12.patch is the bounded diff. NativeSharedTrialHooks.agent_end still
+  requires the existing same-container, stopped-writer and evaluator-asset
+  checks. An unavailable/invalid/partial auxiliary task_terminal is marked
+  unknown and archive_incomplete, but does not itself suppress
+  verification_start. A readable conflicting run_id/task_id remains closed.
+- acceptance_v12/scoped_tests.txt covers the actual hook for normal,
+  host-journal incomplete, cat nonzero, invalid JSON, missing required
+  fields, and explicit identity conflict. The first five reach
+  verification_start; conflict is rejected. GA seam 18/18, live wiring 7/7,
+  PoS offline 6/6 also passed; see the adjacent original test output files.
+- One fresh zero-real-model Docker synthetic positive ran under the fixed
+  source. Its public, individually readable 43-file archive is raw_v9/. The
+  committed certification verifier returned pass for run
+  pos-df96b56d05004314, 43 files, zero real model calls and zero official
+  evaluator calls. This synthetic run executed one synthetic Task tool and
+  one synthetic sentinel; they are not formal task/evaluator calls. The
+  original synthetic sentinel negative cases were not rerun.
+- Four registered tasks were prepared in a separate external directory, not
+  started. Their order, 300-turn/14400-second Task budget, run IDs, images,
+  task/evaluator hashes, actual source and vendor hashes are frozen in
+  raw_compat_v1/authorized_serial_scope.json. Its formal_runs_started is 0.
+  No per-task active authorization was generated or consumed.
+
+Exactly one real compatibility probe
+- Synthetic inputs only; no formal task text, official evaluator content, or
+  actual Task tools. Task model requested and returned: claude-opus-4-8 on
+  all four observed HTTP attempts. Two GA stateless logical requests returned:
+  first a native probe tool call (not executed), then a public response to an
+  explicitly synthetic observation. The first response had hidden thinking;
+  only presence, not hidden content, is archived.
+- The original PoS episode then attempted reset. There were two belief-role
+  logical calls: initial belief and its original correction attempt. Both
+  returned public text containing fenced JSON. The fixed upstream parser
+  rejected both (belief_model_parse_error attempts 0 and 1); final error
+  class was JSONDecodeError. No consistency or progress call and no
+  nonterminal update occurred. The host did not strip the fences, invent a
+  state, replace the role answer, change the profile, or retry the episode.
+- Totals: 2 GA logical calls, 2 PoS belief logical calls, 4 observed HTTP
+  attempts, 0 Task tools executed, 0 official evaluator calls, 0 formal Task
+  runs. PoS-role provider usage is present in role_events.jsonl. GA usage
+  printed during the probe was not persisted as a structured public usage
+  ledger; do not infer a total cost from logical-call count.
+- Actual model-visible request payloads and safe HTTP status/model metadata
+  are in raw_compat_v1/http_attempts.json. Parsed public Task answers are in
+  result.json; original PoS role requests/responses and parse events are in
+  role_events.jsonl. The probe did not persist Task raw SSE bytes: this is an
+  evidence gap, not an invitation to regenerate them. Identity and model
+  request are in identity.json.
+
+Stop and remaining state
+- Compatibility status=failed, so the four prepared tasks were not launched.
+  No authorization for them exists. The historical four-task draft remains
+  unchanged; the new scope is a record of preparation, not live authority.
+- No code or PoS-method change was made after source-bound certification.
+  A future protocol change or another probe needs a new explicit scope and
+  fresh certification; this run cannot be relabeled as compatible.
+- Unrelated monitor __pycache__ was left untouched. There were no formal
+  task containers or volumes to clean up. The successful synthetic run's
+  cleanup is documented in raw_v9/normal/live_result.json.
+
+Public archive byte identities (copies, not regenerated responses)
+authorized_serial_scope.json  8471  2d9e7d46f8b2f05209fb85e74b90d1f0ba93d4c82a1d0a82f6d23cd2dc8869f9
+http_attempts.json            8693  56693aa4c5ddfd98b95668a8c161e8b1bf9beeb445dec36cc0c8ae1f715b872f
+identity.json                  236  5485d593e241946046246886e67bd1e77e5ca715ba4b18734587a3d8749b9cba
+result.json                   1055  856b071a797e3401daf54b1d927fa4f83daa1bf8d25ab0779c263ca979f50f05
+role_events.jsonl            20418  464303724f796536d5860c53659b519144fd49b5df4c6ff4cc697cecd90cbc78
+
+Public safety: the copied probe files contain no API key, auth header or
+private endpoint. The HTTP capture excludes transport metadata; role error
+logging strips private exception text. This is a field-level removal, not a
+claim that model prose is semantically correct. The original private profile
+and any hidden thinking were not copied into the archive.
