@@ -7,8 +7,57 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import time
+
+
+ROLE_JSON_CONTRACT_VERSION = 'pos-role-json-object-fence-v1'
+ROLE_THINKING_TYPE = 'disabled'
+ROLE_TEMPERATURE = 0
+ROLE_MAX_TOKENS = {'belief': 4096, 'consistency': 512, 'progress': 512}
+_JSON_FENCE = re.compile(
+    r'(?P<leading>[ \t\r\n]*)(?P<opening>```(?:json)?\r?\n)'
+    r'(?P<body>.*?)(?P<closing>\r?\n```)(?P<trailing>[ \t\r\n]*)',
+    re.DOTALL,
+)
+
+
+def _strict_object(raw):
+    """Check only the newly accepted fenced path; upstream owns all schemas."""
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('duplicate JSON key')
+            result[key] = value
+        return result
+    def reject_constant(_value):
+        raise ValueError('nonstandard JSON constant')
+    def finite_float(value):
+        number = float(value)
+        if not (float('-inf') < number < float('inf')):
+            raise ValueError('nonfinite JSON number')
+        return number
+    value = json.loads(raw, object_pairs_hook=unique,
+                       parse_constant=reject_constant, parse_float=finite_float)
+    if not isinstance(value, dict):
+        raise ValueError('JSON value is not an object')
+
+
+def _adapt_role_json(raw):
+    """Remove one enumerated outer fence only around one strict JSON object."""
+    match = _JSON_FENCE.fullmatch(raw)
+    if match is None:
+        return raw, 'unchanged', None
+    body = match.group('body')
+    try:
+        _strict_object(body)
+    except (ValueError, TypeError, RecursionError):
+        return raw, 'fence_rejected', None
+    boundary = {name: match.group(name) for name in
+                ('leading', 'opening', 'closing', 'trailing')}
+    return body, 'outer_fence_removed', boundary
 
 
 def _json(value):
@@ -68,7 +117,18 @@ class RoleTransport:
                 record.update(status='returned', response=response, usage=usage,
                               elapsed_seconds=time.monotonic() - started)
                 self.archive.log('pos_role_response', **record)
-                return response
+                parser_input, transform, boundary = _adapt_role_json(response)
+                self.archive.log('pos_role_json_adapter',
+                                 contract_version=ROLE_JSON_CONTRACT_VERSION,
+                                 role=role, attempt=record['attempt'],
+                                 call_identity=f"{role}:{record['attempt']}",
+                                 transform=transform, raw_response=response,
+                                 raw_sha256=hashlib.sha256(response.encode('utf-8')).hexdigest(),
+                                 parser_input=parser_input,
+                                 parser_input_sha256=hashlib.sha256(
+                                     parser_input.encode('utf-8')).hexdigest(),
+                                 removed_boundary=boundary)
+                return parser_input
             except BaseException as error:
                 record.update(status='failed', error_type=type(error).__name__,
                               error=str(error), elapsed_seconds=time.monotonic() - started)
@@ -82,7 +142,9 @@ class RoleTransport:
         if role not in self.sessions:
             cfg = dict(self.profile)
             cfg['max_retries'] = 0
-            cfg['max_tokens'] = 4096 if role == 'belief' else 512
+            cfg['max_tokens'] = ROLE_MAX_TOKENS[role]
+            cfg['thinking_type'] = ROLE_THINKING_TYPE
+            cfg['temperature'] = ROLE_TEMPERATURE
             self.sessions[role] = llmcore.NativeClaudeSession(cfg)
             self.sessions[role].max_retries = 0  # ignore Task retry env override
         session = self.sessions[role]
@@ -95,6 +157,7 @@ class RoleTransport:
                                              remaining)
         self.archive.log('pos_role_transport_resolved', role=role,
                          model=session.model, max_tokens=session.max_tokens,
+                         thinking_type=session.thinking_type,
                          temperature=session.temperature, max_retries=session.max_retries,
                          connect_timeout=session.connect_timeout,
                          read_timeout=session.read_timeout,

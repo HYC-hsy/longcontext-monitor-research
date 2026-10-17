@@ -9,6 +9,8 @@ import subprocess
 import sys
 
 from .single_manifest import CHECKOUT, FOUR, source_hashes, vendor_hashes
+from .worker import (ROLE_JSON_CONTRACT_VERSION, ROLE_MAX_TOKENS,
+                     ROLE_TEMPERATURE, ROLE_THINKING_TYPE)
 
 ENTRY = ('method_discovery.curator_supervisor_convergence_v0.'
          'pma_full_upstream_ga_v1_20261013.single_run')
@@ -57,6 +59,11 @@ def prepare(args):
     head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=CHECKOUT,
         capture_output=True, text=True, check=True).stdout.strip()
     prepared = []
+    role_generation = {'role_max_tokens': ROLE_MAX_TOKENS,
+        'role_thinking_type': ROLE_THINKING_TYPE,
+        'role_temperature': ROLE_TEMPERATURE,
+        'role_json_contract': ROLE_JSON_CONTRACT_VERSION,
+        'role_transport_retries': 0}
     for order, task in enumerate(tasks, 1):
         directory = root / f'{order:02d}_{task}'
         command = [sys.executable, '-B', '-m', ENTRY, 'prepare',
@@ -76,6 +83,8 @@ def prepare(args):
         identity = json.loads((directory / 'run_identity.json').read_text(encoding='utf-8'))
         if (manifest['config']['task_turns_max'] != 300 or
                 manifest['config']['agent_wall_seconds'] != 14400 or
+                any(manifest['config'].get(key) != value
+                    for key, value in role_generation.items()) or
                 manifest['source_files_sha256'] != source_hashes() or
                 manifest['vendor_files_sha256'] != vendor_hashes() or
                 manifest.get('zero_model_fixture_only') is not False):
@@ -94,6 +103,7 @@ def prepare(args):
         'code_commit': head, 'certification_sha256': sha(
             Path(args.certification) / 'FILE_HASHES.json'),
         'source_files_sha256': source_hashes(), 'vendor_files_sha256': vendor_hashes(),
+        'role_generation': role_generation,
         'prepared': prepared, 'task_turns_max': 300,
         'agent_wall_seconds': 14400, 'formal_runs_started': 0})
     print(json.dumps({'prepared': len(prepared), 'code_commit': head,
@@ -102,10 +112,47 @@ def prepare(args):
 
 def run(args):
     root = Path(args.output).resolve(strict=True)
-    scope = json.loads((root / 'authorized_serial_scope.json').read_text(encoding='utf-8'))
-    compat = json.loads(Path(args.compatibility_result).read_text(encoding='utf-8'))
-    if compat.get('status') != 'passed':
-        raise RuntimeError('real compatibility did not pass; no formal Task may start')
+    scope_path = root / 'authorized_serial_scope.json'
+    scope = json.loads(scope_path.read_text(encoding='utf-8'))
+    compat_path = Path(args.compatibility_result).resolve(strict=True)
+    compat = json.loads(compat_path.read_text(encoding='utf-8'))
+    wire = json.loads((compat_path.parent / 'http_attempts.json').read_text(
+        encoding='utf-8'))
+    role_events = [json.loads(line) for line in
+        (compat_path.parent / 'role_events.jsonl').read_text(
+            encoding='utf-8').splitlines()]
+    identity = compat.get('identity') or {}
+    if (compat.get('schema') != 'pos-ga-live-compatibility-result-v2' or
+            compat.get('status') != 'passed' or
+            identity.get('schema') != 'pos-ga-live-compatibility-v2' or
+            identity.get('scope_sha256') != sha(scope_path) or
+            identity.get('code_commit') != scope.get('code_commit') or
+            identity.get('source_files_sha256') != scope.get('source_files_sha256') or
+            identity.get('vendor_files_sha256') != scope.get('vendor_files_sha256') or
+            identity.get('certification_sha256') != scope.get('certification_sha256') or
+            identity.get('role_generation') != scope.get('role_generation') or
+            identity.get('profile_sha256') != sha(args.task_profile_file) or
+            identity.get('probe_sha256') != sha(Path(__file__).with_name(
+                'compatibility_probe.py')) or
+            identity.get('serial_sha256') != sha(__file__) or
+            compat.get('role_events_sha256') != sha(
+                compat_path.parent / 'role_events.jsonl') or
+            compat.get('http_attempts_sha256') != sha(
+                compat_path.parent / 'http_attempts.json') or
+            not wire or
+            compat.get('http_attempts') != len(wire) or
+            compat.get('pos_logical_calls') != len([
+                row for row in role_events if row.get('event') == 'pos_role_request']) or
+            not {'belief', 'consistency', 'progress'} <= set(compat.get('pos_roles', [])) or
+            not any(row.get('event') == 'belief_model_input' and
+                    row.get('operation') == 'textualize' for row in role_events) or
+            not compat.get('update_context', {}).get('belief_text') or
+            not all(row.get('http_status') == 200 and
+                    row.get('returned_model') == 'claude-opus-4-8' for row in wire) or
+            compat.get('task_logical_calls') != 0 or
+            compat.get('official_evaluator_calls') != 0 or
+            compat.get('task_tools_executed') != 0):
+        raise RuntimeError('current bound PoS compatibility did not pass')
     head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=CHECKOUT,
         capture_output=True, text=True, check=True).stdout.strip()
     if (scope['code_commit'] != head or scope['source_files_sha256'] != source_hashes() or
