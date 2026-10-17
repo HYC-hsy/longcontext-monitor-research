@@ -1,0 +1,158 @@
+Released-core PoS-on-GA transfer — bounded offline adapter repair, 2026-10-18
+
+STATUS: PARTIAL, NOT LIVE-READY. This is a safe, reviewable continuation of
+fc0a1e5a4febd8166d60ab538152d964f4d19e08, not a completed end-to-end
+acceptance or a reproduction of the PoS paper's results. The requested
+native-shared PoS authorization, real Docker synthetic service/file sentinel,
+and future live entry have NOT been certified. Profile transport is now
+explicitly fail-closed both at the bridge and direct worker CLI. No four-task
+run, real model/provider, official Task experiment, official evaluator,
+training, or scoring-model call was made. The tests execute fake Python tools
+and a synthetic HTTP *mock* at requests.post; they do not run Docker tools.
+
+IDENTITY AND SCOPE
+Repository: E:/longcontext-cqs-v0-20261005, branch crs-v0-20261007,
+initial HEAD fc0a1e5a4febd8166d60ab538152d964f4d19e08. The public PoS
+core is luoyu100/PoS at 6818cfa6434dbc91fcf67f0b3eb12a91db47433f.
+The existing vendor/ LICENSE and THIRD_PARTY_NOTICES.md are retained and
+byte-checked against that upstream commit in raw_v4/UPSTREAM_FILE_HASHES.json.
+No vendor file, PoS algorithm, or original prompt file was edited. Previous
+AUDIT.txt, raw/, plan_four/, and historical failure outputs remain untouched.
+The only changes are GA-side adapters/shared request seams, the PoS outer
+episode/worker, forwarding of timeout/deadline, and tests/archive material.
+
+UPSTREAM -> GA ADAPTER
+Original belief.manager.BeliefManager.reset/update/get_context/get_result and
+close remain the structured-state owner. Original Sentinel audit/revision,
+progress, trapping, recovery, and textualization order remains in that
+manager. episode.PoSEpisode maps one completed GA decision's ordered native
+tool batch to one transition; it does not create a PMA agent or memory bank.
+The original ReAct runner was exercised with a scalar synthetic action and
+the adapter with the corresponding GA batch shape; role call order, committed
+belief, recovery and scored state matched under fixed responses. Action
+transport representation differs and is not claimed byte-identical.
+
+The original prompts.react_prompt hybrid semantics — current observation,
+belief_text, goal plus frontier-relevant world subgraph, active gap, frontier
+selection contract and recovery — are rendered by the adapter using the
+upstream _frontier_relevant_world and FRONTIER_ACTION_SELECTION_CONTRACT.
+Only LOCA-specific JSON thought/action, exactly-one-tool/claim_done,
+unrelated Canvas example and redundant tool catalog are replaced by GA
+native action/termination protocol. The authoritative tool definitions are
+sent once as the provider's native tools payload. The original Task text and
+current observation remain in the request. This is a prompt-envelope
+adaptation, not evidence that Task decisions improve.
+
+GA NativeClaudeSession.ask_stateless now preserves empty public content for
+native tool-only responses; it never synthesizes a summary from a private
+thinking block. Text <think>/<thinking> is separated like the existing
+session path. The final requests.post-boundary fake test archives the actual
+serialized payload, response blocks and parsed public content in
+raw_v4/http_boundary_payload.json. It checks absent old backend history and
+working-memory canaries; present Task/current observation/new instruction,
+goal/gap and one native tools list. The fake native thinking canary is in
+the response fixture but absent from the request/public content.
+
+GA's new extrakeyinfo/_keyinfo is consumed with explicit source and one-use
+lifetime into the current PoS request. The prior turn's fresh key_info is
+carried in its actual next observation; old working memory is still
+suppressed. Pre-call resumable correction is sent as a current runtime
+instruction. pos_decision_context and bridge ownership are restored in a
+generator finally, including error and close, so the same parent can run
+PoS-on then off without residual PoS context.
+
+The action batch contains call ID/name/original parameters/order and actual
+status, never a duplicate result. Raw outcomes are logged separately before
+PoS processing in *.host.jsonl and the PoS observation has one tool_results
+receipt sequence. Unknown/unmounted tools are rejected observations, not
+executed environment actions and not scored PoS transitions. A started tool
+that raises is recorded as result-unknown, never replayed. A code_run
+exit_code=null and process_state=still_running are preserved without claiming
+command completion. No adapter result truncation threshold was added.
+
+PoSEpisode stores completed GA decisions separately from original manager
+transitions with valid progress in {0,1}; invalid progress is unscored, not
+zero. The K=8 parameters and upstream recovery mathematics are unchanged.
+One eight-tool batch remains one PoS update, not eight steps. Unknown online
+success remains success_known=false/task_success=null, and a host legal
+CURRENT_TASK_DONE is not evaluator success. Host terminal reason and core's
+last actual transition.done are separate. No-tool completion creates no
+terminal action. An active recovery at host termination remains the core's
+last active recovery, not a fabricated recovery release.
+
+The worker now fsyncs a case-bound *.result.json after finish/abort and
+attempts a partial snapshot after command error/EOF. If the snapshot itself
+fails it records missing, never saved. The bridge closes stdin and waits for
+normal worker exit before forced termination; forced termination status is
+separate. It does not resend commands after unknown acceptance/receipt.
+Terminal auxiliary update failure is logged and cannot overwrite an already
+observed host CURRENT_TASK_DONE; the independent host journal preserves the
+tool result and terminal event. Any PoS auxiliary failure before Task terminal
+still fails the run and never silently falls back to GA-only/PMA.
+
+METHOD AND TRANSPORT PARAMETERS
+The frozen public config remains vendor/configs/loca/pos.yaml, with execution
+mode, hybrid view, update_every_steps=1, local audit each update, global audit
+every 32, recent audit history=4, trapping window K=8, health threshold .25,
+recurrence epsilon .15, cycle threshold .75 and max cycle length 4. See the
+exact config in plan_four/manifest.json. Upstream Qwen/provider defaults are
+not asserted to equal GA. Future role draft is the existing rewritten Task
+profile for separate belief/consistency/progress calls, max_tokens 4096/512/512,
+transport retries zero, bounded GA_POS_TIMEOUT and overall deadline, with
+actual resolved role metadata logged sans credentials. No profile call was
+made in this round. The released code's E/A persistence tie favors epistemic;
+goal interpretation is fixed; source_type and Sentinel citations do not
+prove semantic truth. Recovery is Task context, not a completion gate.
+
+OFFLINE EVIDENCE
+raw_v4/core.stdout.txt: 6 tests including actual upstream ReAct runner path,
+candidate audit/revision, trapping/release, eight-tool batching, invalid
+progress unscored and no-tool finish. raw_v4/ga_seam.stdout.txt: 12 tests of
+GA request/worker seams, actual requests.post serialization, native thinking,
+parent on->off, actual GA key_info source/lifetime, terminal PoS failure,
+unknown tool, tool exception and profile boolean rejection.
+raw_v4/legacy_ga_pma.stdout.txt: 2 existing GA/PMA compatibility tests.
+raw_v4/normal_* contains full fake PoS requests/responses/host receipts,
+decision views and durable normal result. raw_v4/terminal_pos_failure_* retains
+the deliberate original fake reply exhaustion and partial result; no failure
+was replaced by a later success. All role replies, Task actions and outputs in
+these new traces are authored fixtures, not model behavior or Task efficacy.
+The HTTP mock represents the final serializer boundary but is not a provider
+wire capture. No network/API call was allowed in the test.
+The first archive-builder attempt failed while decoding a Windows diagnostic
+byte as strict UTF-8. Its partial raw_v2/ files and failure explanation are
+retained; raw_v3/ is the pre-summary-protocol-fix rerun with replacement
+decoding. It showed that GA's legacy summary instruction still entered the
+stateless PoS system, so the PoS-only send path was corrected; raw_v4/ is the
+latest rerun. None of these earlier artifacts was silently rewritten.
+
+INCOMPLETE ACCEPTANCE / HARD BLOCKERS
+The current fake-pos generic CLI still uses --disable-verification and a
+prepared real-task asset; it was not run or relabeled as a synthetic task.
+There is no true synthetic task package with a file+HTTP-service sentinel
+through the same native-shared Harbor lifecycle. PoS P identity is not yet
+supported by the generic live batch authorization, Harbor hooks and verifier
+all the way through writer stop, same-main freeze, evaluation and cleanup.
+The current four-task plan stays execution_authorized=false. An old A/B
+approval, GA_POS_LIVE_AUTHORIZED=1, or a matching label cannot arm PoS.
+Profile mode is intentionally closed, so a future real PoS command cannot
+start until new source/profile/task/run/budget-bound one-use authorization,
+PoS result and writer identities, and native-shared synthetic certification
+are implemented and independently approved. The direct profile worker is
+also closed, not just the bridge. No user-provided secret was copied into
+this archive. The original v1 raw/ evidence remains historical and does not
+certify this v2 request. Docker process/service preservation and official
+evaluation isolation are therefore unverified for PoS P.
+
+RUNNING / FUTURE BOUNDARY
+Safe offline commands (Python 3.12 with GA dependencies):
+  python -B method_discovery/pos_upstream_ga_v1_20261017/test_offline.py
+  python -B method_discovery/pos_upstream_ga_v1_20261017/test_ga_seam.py
+  python -B -m unittest method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.test_synthetic_compat -v
+The existing prepare-pos creates only an unarmed plan. Do not run fake-pos
+against the four registered tasks. There is currently no valid live PoS CLI;
+no future live command is represented as runnable in this report. The four
+intended serial IDs remain nginx-request-logging, adaptive-rejection-sampler,
+sqlite-with-gcov, write-compressor in plan_four/plan.json; no order/budget/task
+asset was changed. Completion requires the explicit blockers above, then a
+separate authorization to run real models/tasks. Stop here for audit.

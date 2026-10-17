@@ -28,6 +28,8 @@ FORWARD = (
     "GA_POS_PROFILE_FILE",
     "GA_POS_PROFILE_NAME",
     "GA_POS_LIVE_AUTHORIZED",
+    "GA_POS_TIMEOUT",
+    "GA_POS_DEADLINE_EPOCH",
 )
 
 actual = hashlib.sha256(Path(original.__file__).read_bytes()).hexdigest()

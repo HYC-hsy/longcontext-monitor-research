@@ -1,0 +1,10 @@
+First v2 archive generation failed before GA seam output was saved.
+Command: Python 3.12 -B build_archive_v2.py
+Cause: the Windows test process emitted a non-UTF-8 diagnostic byte (0xb0).
+The archive builder decoded stdout strictly as UTF-8; its subprocess reader
+raised UnicodeDecodeError and produced stdout=None, then the builder raised
+TypeError while trying to write that value. This is an archive decoding defect,
+not a PoS test result. The already created raw_v2 files are retained unchanged.
+The builder was amended to decode test output with replacement and target a
+new raw_v3 directory. The exact original failure was visible in the terminal;
+there was no full raw traceback file from that failed builder attempt.

@@ -13,9 +13,11 @@ import unittest
 HERE = Path(__file__).resolve().parent
 VENDOR = HERE / 'vendor'
 sys.path.insert(0, str(VENDOR))
+sys.path.insert(0, str(HERE / 'upstream'))
 from belief.manager import BeliefManager
 from prompts.react_prompt import build_belief_prompt
 from episode import PoSEpisode, execution_config
+from baselines.react import ReAct
 
 INITIAL = {
     'goal_specification': 'Mug 1 must be clean.',
@@ -63,6 +65,49 @@ def state(observation='Mug dirty.', done=False):
 
 
 class TransferTests(unittest.TestCase):
+    def test_original_react_runner_to_ga_episode_scalar_trace(self):
+        config = {**execution_config(), 'max_steps': 1}
+        one, two = replies(), replies()
+        role_events, adapter_events = [], []
+        reference = callers(one, role_events)
+        transferred = callers(two, adapter_events)
+        manager = BeliefManager(config, reference('belief'), Recorder(),
+            call_sentinel=reference('consistency'),
+            call_progress=reference('progress'))
+        action = {'name': 'inspect', 'arguments': {}}
+        class Environment:
+            def reset(self): return state()
+            def step(self, actual):
+                assert actual == action
+                return state('Still dirty.') | {'done': True}
+        actor_inputs = []
+        def actor(messages):
+            actor_inputs.append(messages)
+            return json.dumps({'thought': 'Inspect.', 'action': action})
+        runner = ReAct(config, actor, Recorder(), context_provider=manager)
+        original = runner.run(Environment())
+        episode = PoSEpisode(case_id='fixed/case', config=config, logger=Recorder(),
+            belief_call=transferred('belief'), consistency_call=transferred('consistency'),
+            progress_call=transferred('progress'))
+        episode.reset(task='Clean mug 1.', observation='Mug dirty.', actions=[])
+        native_view = episode.decision_view(current_observation='Mug dirty.', actions=[])
+        episode.decision_completed(turn=1, action_count=1)
+        episode.update(thought='Inspect.', action_batch=[{'id': 'native-1', **action,
+            'order': 0, 'status': 'executed'}], observation='Still dirty.', done=True)
+        transferred_result = episode.finish(reason='CURRENT_TASK_DONE')
+        self.assertEqual([x['role'] for x in role_events],
+                         [x['role'] for x in adapter_events])
+        self.assertEqual(original['belief_state'], transferred_result['belief_state'])
+        self.assertEqual(original['recovery_history'], transferred_result['recovery_history'])
+        self.assertEqual(len(original['health_transitions']), 1)
+        self.assertEqual(transferred_result['scored_transitions'], 1)
+        for section in ('Current observation:', 'Belief Text:',
+                        'Goal and Active-Gap structured subgraph:', 'Active Gap:'):
+            self.assertIn(section, actor_inputs[0][1]['content'])
+            self.assertIn(section, native_view['user'])
+        self.assertEqual(original['steps'], 1)
+        self.assertFalse(transferred_result['success_known'])
+
     def test_original_core_single_action_equivalence(self):
         config = execution_config()
         fixed1, fixed2 = replies(), replies()
@@ -76,7 +121,7 @@ class TransferTests(unittest.TestCase):
         core.reset(state())
         adapted.reset(task='Clean mug 1.', observation='Mug dirty.', actions=[])
         action = [{'id': 'c1', 'name': 'inspect', 'arguments': {}, 'order': 0,
-                   'status': 'executed', 'result': 'Still dirty.'}]
+                   'status': 'executed'}]
         transition = {'thought': 'Inspect.', 'action': action,
                       'observation': 'Still dirty.'}
         core.update(transition, state('Still dirty.'), 0)
@@ -89,7 +134,9 @@ class TransferTests(unittest.TestCase):
             self.assertEqual(core.get_result()[key], adapted.get_result()[key])
         view = adapted.decision_view(current_observation='Still dirty.', actions=[])
         original = build_belief_prompt(state('Still dirty.'), core.get_context(), config)
-        self.assertEqual(view['upstream_messages'], original)
+        self.assertIn(original[1]['content'].split('Belief Text:')[1].split('Goal and')[0].strip(), view['user'])
+        self.assertNotIn('claim_done', view['user'])
+        self.assertNotIn('exactly one', view['system'])
         self.assertIn('Mug dirty.', view['user'])
         self.assertFalse(adapted.get_result()['success_known'])
 
@@ -102,7 +149,7 @@ class TransferTests(unittest.TestCase):
                              progress_call=role('progress'))
         episode.reset(task='Clean mug 1.', observation='Mug dirty.', actions=[])
         batch = [{'id': str(i), 'name': 'inspect', 'arguments': {},
-                  'order': i, 'status': 'executed', 'result': 'dirty'} for i in range(8)]
+                  'order': i, 'status': 'executed'} for i in range(8)]
         episode.update(thought='Inspect eight.', action_batch=batch, observation='dirty')
         self.assertEqual(episode.step, 1)
         self.assertEqual(len(episode.get_result()['health_transitions']), 1)
@@ -111,6 +158,23 @@ class TransferTests(unittest.TestCase):
         self.assertEqual(episode.step, 8)
         self.assertEqual(len(episode.get_result()['health_transitions']), 8)
         self.assertIsNotNone(episode.get_context().get('recovery'))
+
+    def test_invalid_progress_is_unscored_not_zero(self):
+        fixed = replies()
+        fixed['progress'] = ['not json', 'still not json']
+        role = callers(fixed, [])
+        episode = PoSEpisode(case_id='unscored', config=execution_config(),
+            logger=Recorder(), belief_call=role('belief'),
+            consistency_call=role('consistency'), progress_call=role('progress'))
+        episode.reset(task='Clean mug 1.', observation='Mug dirty.', actions=[])
+        episode.decision_completed(turn=1, action_count=1)
+        episode.update(thought='Inspect.', action_batch=[{'id': 'x',
+            'name': 'inspect', 'arguments': {}, 'order': 0, 'status': 'executed'}],
+            observation='Still dirty.')
+        result = episode.get_result()
+        self.assertEqual(result['completed_decision_batches'], 1)
+        self.assertEqual(result['scored_transitions'], 0)
+        self.assertIsNone(result['health_transitions'][0]['progress'])
 
     def test_worker_framing_and_no_tool_finish(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -131,8 +195,12 @@ class TransferTests(unittest.TestCase):
             output = [json.loads(x) for x in run.stdout.splitlines()]
             self.assertEqual(len(output), 3)
             self.assertTrue(all(x['status'] == 'ok' for x in output))
-            self.assertEqual(output[-1]['result']['scored_decision_batches'], 0)
+            self.assertEqual(output[-1]['result']['completed_decision_batches'], 0)
+            self.assertEqual(output[-1]['result']['scored_transitions'], 0)
             self.assertFalse(output[-1]['result']['success_known'])
+            persisted = json.loads((root / 'events.result.json').read_text(encoding='utf-8'))
+            self.assertEqual(persisted['case_id'], 'fixed/case')
+            self.assertEqual(persisted['status'], 'completed')
 
     def test_sentinel_repair_before_commit_and_recovery_release(self):
         fixed = replies(9)
@@ -154,7 +222,7 @@ class TransferTests(unittest.TestCase):
             consistency_call=role('consistency'), progress_call=role('progress'))
         episode.reset(task='Clean mug 1.', observation='Mug dirty.', actions=[])
         action = [{'id': 'x', 'name': 'inspect', 'arguments': {}, 'order': 0,
-                   'status': 'executed', 'result': 'Still dirty.'}]
+                   'status': 'executed'}]
         for step in range(9):
             episode.update(thought='Inspect.', action_batch=action,
                            observation='Still dirty.')

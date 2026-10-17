@@ -14,6 +14,19 @@ def _json(value):
     return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
 
 
+def _persist_receipt(path, *, case_id, status, result=None, error=None):
+    """Durable episode receipt; never infer a missing core state as saved."""
+    target = path.with_suffix('.result.json')
+    payload = {'case_id': case_id, 'status': status, 'result': result,
+               'error': error, 'success_known': False}
+    data = (_json(payload) + '\n').encode('utf-8')
+    with target.open('wb') as stream:
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+    return {'path': str(target), 'bytes': len(data)}
+
+
 class RoleTransport:
     def __init__(self, *, mode, replies=None, profile=None, archive):
         self.mode = mode
@@ -66,7 +79,22 @@ class RoleTransport:
             cfg['max_retries'] = 0
             cfg['max_tokens'] = 4096 if role == 'belief' else 512
             self.sessions[role] = llmcore.NativeClaudeSession(cfg)
+            self.sessions[role].max_retries = 0  # ignore Task retry env override
         session = self.sessions[role]
+        overall = float(os.environ.get('GA_POS_DEADLINE_EPOCH', '0') or 0)
+        remaining = overall - time.time() if overall else float(
+            os.environ.get('GA_POS_TIMEOUT', '180'))
+        if remaining <= 0:
+            raise TimeoutError('PoS role deadline elapsed before send')
+        session.total_response_timeout = min(float(os.environ.get('GA_POS_TIMEOUT', '180')),
+                                             remaining)
+        self.archive.log('pos_role_transport_resolved', role=role,
+                         model=session.model, max_tokens=session.max_tokens,
+                         temperature=session.temperature, max_retries=session.max_retries,
+                         connect_timeout=session.connect_timeout,
+                         read_timeout=session.read_timeout,
+                         total_response_timeout=session.total_response_timeout,
+                         api_mode=session.api_mode)
         system = '\n'.join(item['content'] for item in messages if item['role'] == 'system')
         request = [
             {'role': item['role'], 'content': [{'type': 'text', 'text': item['content']}]}
@@ -105,6 +133,9 @@ def main():
     parser.add_argument('--profile-file', type=Path)
     parser.add_argument('--profile-name')
     args = parser.parse_args()
+    if args.mode == 'profile':
+        raise RuntimeError('PoS profile mode remains unarmed until the native-shared '
+                           'P authorization and Harbor lifecycle are certified')
     sys.path.insert(0, str(args.vendor.resolve(strict=True)))
     # The GA source bundle contains llmcore.py as a sibling of pos_runtime.
     # This has no effect in fake mode and does not load the private profile.
@@ -130,6 +161,8 @@ def main():
             profile = runpy.run_path(str(profile_path))[args.profile_name]
     transport = RoleTransport(mode=args.mode, replies=replies, profile=profile, archive=logger)
     episode = None
+    finished = False
+    failure = None
     try:
         for line in sys.stdin:
             command = json.loads(line)
@@ -155,16 +188,33 @@ def main():
                     value = episode.update(thought=command.get('thought', ''),
                         action_batch=command['action_batch'], observation=command['observation'],
                         done=command.get('done', False))
+                elif kind == 'decision_completed':
+                    value = episode.decision_completed(turn=command['turn'],
+                                                       action_count=command['action_count'])
                 elif kind == 'finish':
                     value = episode.finish(reason=command['reason'],
                                            observation=command.get('observation'))
                     logger.log('pos_episode_result', result=value)
+                    receipt = _persist_receipt(args.archive, case_id=episode.case_id,
+                                               status=value['status'], result=value)
+                    logger.log('pos_result_persisted', **receipt)
+                    finished = True
+                elif kind == 'abort':
+                    episode.manager.close()
+                    value = episode.get_result()
+                    receipt = _persist_receipt(args.archive, case_id=episode.case_id,
+                                               status='partial', result=value,
+                                               error=command.get('reason'))
+                    logger.log('pos_result_persisted', **receipt)
+                    finished = True
                 elif kind == 'get_result':
                     value = episode.get_result()
                 else:
                     raise ValueError('unknown PoS worker command')
                 print(_json({'status': 'ok', 'result': value}), flush=True)
             except BaseException as error:
+                failure = {'type': type(error).__name__, 'message': str(error),
+                           'command': kind}
                 logger.log('pos_worker_command_error', kind=kind,
                            error_type=type(error).__name__, error=str(error))
                 print(_json({'status': 'error', 'error_type': type(error).__name__,
@@ -172,7 +222,22 @@ def main():
                 break
     finally:
         if episode is not None:
-            episode.manager.close()
+            try:
+                episode.manager.close()
+                if not finished:
+                    try:
+                        partial = episode.get_result() if episode.started else None
+                    except BaseException as error:
+                        partial = None
+                        failure = {**(failure or {}), 'snapshot_error':
+                                   type(error).__name__ + ': ' + str(error)}
+                    receipt = _persist_receipt(args.archive, case_id=episode.case_id,
+                                               status='partial' if partial else 'missing',
+                                               result=partial, error=failure or 'EOF')
+                    logger.log('pos_partial_persisted', **receipt)
+            except BaseException as error:
+                logger.log('pos_partial_missing', error_type=type(error).__name__,
+                           error=str(error))
         logger.close()
 
 

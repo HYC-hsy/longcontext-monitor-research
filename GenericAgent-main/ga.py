@@ -560,6 +560,20 @@ class GenericAgentHandler(BaseHandler):
         if self.working.get('related_sop'): prompt += f"\n有不清晰的地方请再次读取{self.working.get('related_sop')}"
         if getattr(self.parent, 'verbose', False): self.print(prompt)
         return prompt
+
+    def consume_pos_current_instruction(self):
+        """Only newly delivered master input, never historical working memory."""
+        if not getattr(self.parent, 'pos_decision_context', False):
+            return ''
+        direct = self.parent.extrakeyinfo
+        file_note = consume_file(self.parent.task_dir, '_keyinfo')
+        self.parent.extrakeyinfo = None
+        parts = []
+        if direct:
+            parts.append('[MASTER current instruction / extrakeyinfo] ' + direct)
+        if file_note:
+            parts.append('[MASTER current instruction / _keyinfo] ' + file_note)
+        return '\n\n'.join(parts)
     
     def turn_end_callback(self, response, tool_calls, tool_results, turn, next_prompt, exit_reason):
         evidence_gate = getattr(self.parent, 'evidence_completion_kernel', None)
@@ -592,7 +606,12 @@ class GenericAgentHandler(BaseHandler):
 
         injkeyinfo = self.parent.extrakeyinfo or consume_file(self.parent.task_dir, '_keyinfo')
         injprompt = self.parent.intervene or consume_file(self.parent.task_dir, '_intervene')
-        if injkeyinfo: self.working['key_info'] = self.working.get('key_info', '') + f"\n[MASTER] {injkeyinfo}"
+        if injkeyinfo:
+            self.working['key_info'] = self.working.get('key_info', '') + f"\n[MASTER] {injkeyinfo}"
+            if getattr(self.parent, 'pos_decision_context', False):
+                # PoS intentionally suppresses old working memory; this *new*
+                # instruction must travel with the next actual observation.
+                next_prompt += f"\n\n[MASTER current instruction / key_info] {injkeyinfo}\n"
         if injprompt: next_prompt += f"\n\n[MASTER] {injprompt}\n"
         self.parent.intervene = self.parent.extrakeyinfo = None
         if self.obligation_ledger is not None:

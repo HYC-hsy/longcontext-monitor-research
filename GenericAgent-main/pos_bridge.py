@@ -18,7 +18,7 @@ class PoSBridgeError(RuntimeError):
 class PoSBridge:
     def __init__(self, *, worker_script, vendor, episode_module, archive,
                  mode, fake_replies=None, profile_file=None, profile_name=None,
-                 timeout=180):
+                 timeout=180, deadline_epoch=None):
         if mode not in {'fake', 'profile'}:
             raise PoSBridgeError('explicit PoS transport mode required')
         argv = [sys.executable, '-B', '-u', str(Path(worker_script).resolve(strict=True)),
@@ -32,6 +32,7 @@ class PoSBridge:
                      '--profile-name', profile_name]
         archive_path = Path(archive)
         archive_path.parent.mkdir(parents=True, exist_ok=True)
+        self.archive_path = archive_path
         self._stderr = archive_path.with_suffix('.stderr.log').open('ab')
         try:
             self.process = subprocess.Popen(argv, stdin=subprocess.PIPE,
@@ -41,11 +42,21 @@ class PoSBridge:
             self._stderr.close()
             raise
         self.timeout = float(timeout)
+        self.deadline_epoch = float(deadline_epoch) if deadline_epoch else None
         self.replies = queue.Queue()
         self._reader = threading.Thread(target=self._read, daemon=True)
         self._reader.start()
         self.sent = 0
         self.closed = False
+        self.close_status = None
+
+    def record_host(self, kind, payload):
+        """Append original GA fact before auxiliary PoS processing."""
+        row = {'kind': kind, 'payload': payload, 'worker_sent_commands': self.sent}
+        with self.archive_path.with_suffix('.host.jsonl').open('ab') as stream:
+            stream.write((json.dumps(row, ensure_ascii=False, default=str) + '\n').encode('utf-8'))
+            stream.flush()
+            os.fsync(stream.fileno())
 
     @classmethod
     def from_environment(cls):
@@ -54,8 +65,12 @@ class PoSBridge:
         if any(not os.environ.get(name) for name in required):
             raise PoSBridgeError('PoS worker identity or archive missing')
         mode = os.environ['GA_POS_TRANSPORT']
-        if mode == 'profile' and os.environ.get('GA_POS_LIVE_AUTHORIZED') != '1':
-            raise PoSBridgeError('PoS profile transport is not authorized')
+        if mode == 'profile':
+            # A boolean environment switch or an old A/B approval is not a
+            # frozen, one-use PoS authorization. The native-shared P path is
+            # intentionally closed until its identity/Harbor checks exist.
+            raise PoSBridgeError('PoS profile transport requires the unfinished '
+                                 'native-shared P authorization path')
         return cls(worker_script=os.environ['GA_POS_WORKER_SCRIPT'],
                    vendor=os.environ['GA_POS_VENDOR_ROOT'],
                    episode_module=os.environ['GA_POS_EPISODE_MODULE'],
@@ -63,7 +78,8 @@ class PoSBridge:
                    fake_replies=os.environ.get('GA_POS_FAKE_REPLIES'),
                    profile_file=os.environ.get('GA_POS_PROFILE_FILE'),
                    profile_name=os.environ.get('GA_POS_PROFILE_NAME'),
-                   timeout=float(os.environ.get('GA_POS_TIMEOUT', '180')))
+                   timeout=float(os.environ.get('GA_POS_TIMEOUT', '180')),
+                   deadline_epoch=os.environ.get('GA_POS_DEADLINE_EPOCH'))
 
     def _read(self):
         try:
@@ -75,6 +91,10 @@ class PoSBridge:
     def exchange(self, kind, **fields):
         if self.closed or self.process.poll() is not None:
             raise PoSBridgeError('PoS worker is unavailable')
+        remaining = (self.deadline_epoch - time.time()
+                     if self.deadline_epoch is not None else self.timeout)
+        if remaining <= 0:
+            raise PoSBridgeError('PoS overall deadline expired before command send')
         command = {'kind': kind, **fields}
         self.sent += 1
         try:
@@ -84,7 +104,7 @@ class PoSBridge:
             self.close()
             raise PoSBridgeError('PoS command acceptance unknown; never resend') from error
         try:
-            raw = self.replies.get(timeout=self.timeout)
+            raw = self.replies.get(timeout=min(self.timeout, remaining))
         except queue.Empty as error:
             self.close()
             raise PoSBridgeError('PoS command result unknown; never resend') from error
@@ -105,15 +125,23 @@ class PoSBridge:
         if self.closed:
             return
         self.closed = True
+        if self.process.stdin:
+            try: self.process.stdin.close()
+            except OSError: pass
         if self.process.poll() is None:
-            self.process.terminate()
             try:
                 self.process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                self.process.kill()
-                self.process.wait(timeout=5)
-        if self.process.stdin:
-            self.process.stdin.close()
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=5)
+                    self.close_status = 'forced_terminate_after_grace_timeout'
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                    self.process.wait(timeout=5)
+                    self.close_status = 'forced_kill_after_terminate_timeout'
+        if self.close_status is None:
+            self.close_status = 'graceful_exit' if self.process.returncode == 0 else 'worker_error_exit'
         if self.process.stdout:
             self.process.stdout.close()
         self._stderr.close()

@@ -43,7 +43,7 @@ def get_pretty_json(data):
         data = data.copy(); data["script"] = data["script"].replace("; ", ";\n  ")
     return json.dumps(data, indent=2, ensure_ascii=False).replace('\\n', '\n')
 
-def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema, 
+def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_schema,
                       max_turns=40, verbose=True, initial_user_content=None, yield_info=False,
                       turn_offset=0):
     initial_content = initial_user_content if initial_user_content is not None else user_input
@@ -70,6 +70,7 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             raise ValueError('PoS requires a fresh Task episode')
         from pos_bridge import PoSBridge
         pos = PoSBridge.from_environment()
+        handler.parent._pos_bridge = pos
         handler.parent.pos_decision_context = True
         pos.exchange('reset', case_id=os.environ.get('GA_BENCH_TASK_ID', 'offline-task'),
                      task=initial_content, observation=initial_content,
@@ -96,12 +97,14 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
         if note_task_turn is not None:
             note_task_turn(local_turn)
         consume_resume = getattr(handler.parent, 'consume_resumable_interruption', None)
+        current_correction = ''
         if consume_resume is not None:
             resumed = consume_resume()
             if resumed:
                 injection = "\n\n".join(
                     f"[MONITOR CORRECTION]\n{item['message']}" for item in resumed
                 )
+                current_correction = injection
                 if messages and messages[-1].get("role") == "user":
                     content = messages[-1].get("content", "")
                     if isinstance(content, str):
@@ -144,9 +147,15 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
                             pma_event_id=pma_upstream.last_event_id)
         _hook('llm_before', locals())
         if pos is not None:
+            consume_current = getattr(handler, 'consume_pos_current_instruction', None)
+            if consume_current is not None:
+                current_instruction = consume_current()
+                if current_instruction:
+                    current_correction = ('\n\n'.join(filter(None,
+                        (current_correction, current_instruction))))
             view = pos.exchange('decision_view', observation=pos_observation,
                                 actions=tools_schema,
-                                runtime_constraints='')
+                                runtime_constraints=current_correction)
             request_view = {'system': system_prompt + '\n\n' + view['system'],
                             'user': view['user']}
             response_gen = client.chat(messages=messages, tools=tools_schema,
@@ -254,8 +263,12 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
                          'status': 'not_executed'}
                         for index, call in enumerate(tool_calls)
                         if call['tool_name'] != 'no_tool'] if pos is not None else None)
+        if pos is not None:
+            pos.record_host('decision_selected', {'turn': turn,
+                'content': response.content or '', 'actions': pos_actions,
+                'provider_error': provider_error_response})
        
-        tool_results = []; next_prompts = set(); exit_reason = {}
+        tool_results = []; pos_receipts = []; next_prompts = set(); exit_reason = {}
         for ii, tc in enumerate(tool_calls):
             tool_name, args, tid = tc['tool_name'], tc['args'], tc.get('id', '')
             interruption = getattr(handler.parent, 'resumable_interruption', None)
@@ -280,6 +293,8 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             handler.current_turn = turn
             if pos_actions is not None and tool_name != 'no_tool':
                 pos_actions[ii]['status'] = 'started'
+                pos.record_host('tool_started', {'turn': turn, 'id': tid,
+                    'name': tool_name, 'order': ii, 'arguments': pos_actions[ii]['arguments']})
             if tool_name == 'no_tool' and completion_decision and completion_decision.decision not in ('ALLOW_COMPLETE', 'ERROR_FAIL_OPEN'):
                 outcome = StepOutcome(None, next_prompt=completion_decision.next_prompt,
                                       should_exit=completion_decision.decision in ('ABSTAIN', 'ERROR_FAIL_CLOSED'))
@@ -292,10 +307,20 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
                     outcome = (yield from proxy()) if verbose else exhaust(proxy())
                     if verbose: yield '`````\n'
                 except StopIteration as e: outcome = e.value
+                except BaseException as error:
+                    if pos is not None and tool_name != 'no_tool':
+                        pos.record_host('tool_result_unknown_after_start', {
+                            'turn': turn, 'id': tid, 'name': tool_name,
+                            'error_type': type(error).__name__, 'error': str(error)})
+                    raise
             if pos_actions is not None and tool_name != 'no_tool':
-                pos_actions[ii]['status'] = 'executed'
-                pos_actions[ii]['result'] = outcome.data
-                pos_actions[ii]['next_prompt'] = outcome.next_prompt
+                pos_actions[ii]['status'] = ('rejected' if tool_name == 'bad_json' or
+                    not hasattr(handler, 'do_' + tool_name) else 'executed')
+                receipt = {'tool_use_id': tid, 'name': tool_name,
+                           'status': pos_actions[ii]['status'],
+                           'result': outcome.data, 'next_prompt': outcome.next_prompt}
+                pos_receipts.append(receipt)
+                pos.record_host('tool_outcome', {'turn': turn, **receipt})
             
             if outcome.data is not None and tool_name != 'no_tool':
                 handler.observe_tool_outcome(outcome.data, turn)
@@ -308,23 +333,46 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
                 datastr = json.dumps(outcome.data, ensure_ascii=False, default=json_default) if type(outcome.data) in [dict, list] else str(outcome.data) 
                 tool_results.append({'tool_use_id': tid, 'content': datastr})
             next_prompts.add(outcome.next_prompt)
+        if pos is not None:
+            pos.record_host('decision_batch_completed', {'turn': turn,
+                'actions': pos_actions, 'tool_results': pos_receipts,
+                'host_exit_reason': exit_reason})
+            try:
+                pos.exchange('decision_completed', turn=turn,
+                             action_count=len(pos_actions or []))
+            except BaseException as error:
+                if not exit_reason:
+                    raise
+                _research_emit('pos_terminal_context_error', {
+                    'host_terminal': exit_reason, 'error_type': type(error).__name__,
+                    'error': str(error)}, internal_turn=turn)
+                pos.close()
         if len(next_prompts) == 0 or exit_reason:
             if len(handler._done_hooks) == 0 or exit_reason.get('result', '') == 'EXITED':
                 if pos is not None:
                     terminal_observation = json.dumps({
                         'source': 'GA_completed_joint_action', 'turn': turn,
-                        'tool_batch': pos_actions, 'response_content': response.content or '',
+                        'tool_results': pos_receipts, 'response_content': response.content or '',
                         'exit_reason': exit_reason or {'result': 'CURRENT_TASK_DONE'}},
                         ensure_ascii=False, default=json_default)
-                    if pos_actions and any(a['status'] == 'executed' for a in pos_actions):
-                        pos.exchange('update', thought=response.content or '',
-                            action_batch=pos_actions, observation=terminal_observation,
-                            done=True)
-                    pos.exchange('finish', reason=('PROVIDER_FAILURE' if
-                                 provider_error_response else (exit_reason or
-                                 {'result': 'CURRENT_TASK_DONE'})['result']),
-                                 observation=terminal_observation)
-                    pos.close()
+                    try:
+                        if pos.closed:
+                            raise RuntimeError('PoS decision receipt unavailable')
+                        if pos_actions and any(a['status'] == 'executed' for a in pos_actions):
+                            pos.exchange('update', thought=response.content or '',
+                                action_batch=pos_actions, observation=terminal_observation,
+                                done=True)
+                        pos.exchange('finish', reason=('PROVIDER_FAILURE' if
+                                     provider_error_response else (exit_reason or
+                                     {'result': 'CURRENT_TASK_DONE'})['result']),
+                                     observation=terminal_observation)
+                    except BaseException as error:
+                        _research_emit('pos_terminal_context_error', {
+                            'host_terminal': exit_reason or {'result': 'CURRENT_TASK_DONE'},
+                            'error_type': type(error).__name__, 'error': str(error)},
+                            internal_turn=turn)
+                    finally:
+                        pos.close()
                 if pma_upstream is not None:
                     pma_upstream.actor_step(
                         turn, status='completed', response=response.content or '',
@@ -336,7 +384,7 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
         if pos is not None:
             pos_observation = json.dumps({
                 'source': 'GA_completed_joint_action', 'turn': turn,
-                'tool_batch': pos_actions, 'tool_results': tool_results,
+                'tool_results': pos_receipts,
                 'current_runtime_instructions': next_prompt,
                 'response_content': response.content or '',
                 'exit_reason': exit_reason}, ensure_ascii=False, default=json_default)
@@ -373,6 +421,39 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
     _research_emit('termination', final_outcome, internal_turn=turn)
     _hook('agent_after', locals())
     return final_outcome
+
+
+def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
+                      max_turns=40, verbose=True, initial_user_content=None,
+                      yield_info=False, turn_offset=0):
+    """Keep PoS request scope and worker ownership even on generator close."""
+    parent = handler.parent
+    enabled = os.environ.get('GA_POS_ENABLED') == '1'
+    sentinel = object()
+    old_context = getattr(parent, 'pos_decision_context', sentinel)
+    old_bridge = getattr(parent, '_pos_bridge', sentinel)
+    try:
+        return (yield from _agent_runner_loop_impl(
+            client, system_prompt, user_input, handler, tools_schema,
+            max_turns=max_turns, verbose=verbose,
+            initial_user_content=initial_user_content, yield_info=yield_info,
+            turn_offset=turn_offset))
+    finally:
+        if enabled:
+            bridge = getattr(parent, '_pos_bridge', None)
+            if bridge is not None and bridge is not old_bridge:
+                try:
+                    if not bridge.closed and bridge.process.poll() is None:
+                        try: bridge.exchange('abort', reason='generator_closed_or_failed')
+                        except BaseException: pass
+                finally:
+                    bridge.close()
+            for name, previous in (('pos_decision_context', old_context),
+                                   ('_pos_bridge', old_bridge)):
+                if previous is sentinel:
+                    if hasattr(parent, name): delattr(parent, name)
+                else:
+                    setattr(parent, name, previous)
 
 def _clean_content(text):
     if not text: return ''

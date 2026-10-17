@@ -1,0 +1,74 @@
+{
+  "request_payload": {
+    "model": "claude-opus-4-8",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Current observation:\nCURRENT_OBSERVATION_MARKER\n\nBelief Text:\nMug dirty.\n\nGoal and Active-Gap structured subgraph:\n{\"goal\": {\"user_input\": \"ORIGINAL_TASK clean mug\", \"specification\": \"Mug 1 must be clean.\"}, \"world\": {\"entities\": {\"e1\": {\"entity_id\": \"e1\", \"entity_type\": \"mug\", \"name\": \"mug 1\"}}, \"states\": {\"s1\": {\"state_id\": \"s1\", \"entity_id\": \"e1\", \"description\": \"Mug 1 is dirty.\", \"probability\": 1.0, \"reason\": null, \"source_type\": \"observed\"}}, \"relations\": {}}}\n\nActive Gap:\n{\"gap_type\": \"achievement\", \"target\": \"Mug 1 must be clean\", \"reason\": \"Mug 1 is dirty.\"}\n\nChoose an action that directly resolves or\nnarrows the Active Gap; use a prerequisite action only when a required argument\nfor such an action is still unknown.\n\nCurrent runtime constraints and instructions:\n[MASTER] NEW_CURRENT_INSTRUCTION\n\nUse the mounted GA native tool schema; the provider request contains the single authoritative tool definition set.",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ]
+      }
+    ],
+    "max_tokens": 64,
+    "stream": false,
+    "context_management": {
+      "edits": [
+        {
+          "type": "clear_thinking_20251015",
+          "keep": "all"
+        }
+      ]
+    },
+    "metadata": {
+      "user_id": "{\"device_id\":\"4f4b6ec5935941f58fefad6996093088e7d36a115f01466aba5464e640311d0a\",\"account_uuid\":\"\",\"session_id\":\"743ba7ed-898e-4d71-a4f9-48ad0ec2bc2e\"}"
+    },
+    "tools": [
+      {
+        "name": "probe",
+        "description": "native probe",
+        "input_schema": {
+          "type": "object"
+        },
+        "cache_control": {
+          "type": "ephemeral"
+        }
+      }
+    ],
+    "system": [
+      {
+        "type": "text",
+        "text": "RUN_CONSTRAINT\nUse GA native mounted tools to pursue the task. Multiple native tool calls in one decision are allowed. Do not emit benchmark JSON thought/action. GA retains its original completion and tool protocols; PoS context is decision support, not an approval gate."
+      }
+    ]
+  },
+  "response_blocks": [
+    {
+      "type": "thinking",
+      "thinking": "HIDDEN_NATIVE_THINKING_CANARY"
+    },
+    {
+      "type": "tool_use",
+      "name": "probe",
+      "id": "a",
+      "input": {}
+    },
+    {
+      "type": "tool_use",
+      "name": "probe",
+      "id": "b",
+      "input": {}
+    }
+  ],
+  "parsed_public_content": "",
+  "parsed_tool_calls": [
+    "probe",
+    "probe"
+  ],
+  "hidden_thinking_excluded_from_request": true
+}

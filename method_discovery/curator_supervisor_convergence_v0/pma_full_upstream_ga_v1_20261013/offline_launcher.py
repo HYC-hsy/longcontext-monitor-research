@@ -276,7 +276,9 @@ def run_offline(args) -> dict:
                        GA_POS_VENDOR_ROOT='/opt/genericagent/pos_runtime/vendor',
                        GA_POS_EPISODE_MODULE='/opt/genericagent/pos_runtime/episode.py',
                        GA_POS_ARCHIVE='/run/pos-archive/events.jsonl',
-                       GA_POS_FAKE_REPLIES='/run/pos-fake-replies.json')
+                       GA_POS_FAKE_REPLIES='/run/pos-fake-replies.json',
+                       GA_POS_TIMEOUT=str(args.timeout_sec),
+                       GA_POS_DEADLINE_EPOCH=str(deadline))
         if args.condition == "B":
             env.update(GA_PMA_UPSTREAM_REQUESTS="/run/pma-bridge/requests",
                        GA_PMA_UPSTREAM_RESPONSES="/run/pma-bridge/responses",

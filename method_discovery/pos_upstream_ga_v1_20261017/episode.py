@@ -9,7 +9,7 @@ from copy import deepcopy
 import json
 
 from belief.manager import BeliefManager
-from prompts.react_prompt import build_belief_prompt
+from prompts.react_prompt import FRONTIER_ACTION_SELECTION_CONTRACT, _frontier_relevant_world
 
 
 def execution_config() -> dict:
@@ -48,6 +48,7 @@ class PoSEpisode:
         self.ended = False
         self.success_known = False
         self.step = 0
+        self.completed_decision_batches = 0
         self.state = None
         self.lifecycle = []
         self.terminal_status = None
@@ -80,6 +81,15 @@ class PoSEpisode:
             self.ended = True
         return self.get_context()
 
+    def decision_completed(self, *, turn, action_count):
+        """Count a GA decision independently of PoS scored transitions."""
+        if not self.started or self.ended:
+            raise RuntimeError('PoS episode is not active')
+        self.completed_decision_batches += 1
+        self.lifecycle.append({'kind': 'decision_completed', 'turn': turn,
+                               'action_count': action_count})
+        return {'completed_decision_batches': self.completed_decision_batches}
+
     def finish(self, *, reason, observation=None):
         if not self.started:
             return {'status': 'never_started', 'reason': reason}
@@ -102,26 +112,47 @@ class PoSEpisode:
         return self.manager.get_context()
 
     def decision_view(self, *, current_observation, actions, runtime_constraints=''):
-        """Use released hybrid builder; adapt only its JSON action envelope."""
+        """Render the released hybrid semantics with GA's native action envelope."""
         if not self.started or self.ended:
             raise RuntimeError('PoS decision unavailable')
         state = {**self.state, 'observation': current_observation,
                  'actions': deepcopy(actions)}
-        original = build_belief_prompt(state, self.get_context(), self.config)
-        system = (original[0]['content'] + '\n\nGA native-action envelope: use the mounted '
-                  'tool schema and emit native tool calls; the JSON thought/action format '
-                  'above is replaced only at the action-transport boundary. Do not treat '
-                  'a reminder, health score, or empty gap as permission to terminate.')
-        user = (original[1]['content'] + '\n\nFull mounted native tool schemas:\n' +
-                json.dumps(actions, ensure_ascii=False) +
-                ('\n\nCurrent runtime constraints and instructions:\n' +
-                 runtime_constraints if runtime_constraints else ''))
+        context = self.get_context()
+        gap = context.get('frontier_gap')
+        structured = {'goal': context.get('goal'),
+                      'world': _frontier_relevant_world(context.get('world', {}), gap)}
+        recovery = context.get('recovery')
+        system = ('Use GA native mounted tools to pursue the task. Multiple native tool '
+                  'calls in one decision are allowed. Do not emit benchmark JSON '
+                  'thought/action. GA retains its original completion '
+                  'and tool protocols; PoS context is decision support, not an approval gate.')
+        sections = [
+            'Current observation:\n' + str(state['observation']),
+            'Belief Text:\n' + str(context['belief_text']),
+            'Goal and Active-Gap structured subgraph:\n' +
+                json.dumps(structured, ensure_ascii=False),
+            'Active Gap:\n' + json.dumps(gap, ensure_ascii=False),
+            FRONTIER_ACTION_SELECTION_CONTRACT,
+        ]
+        if recovery is not None:
+            sections.append('Recovery constraint C_t:\n' + json.dumps(recovery, ensure_ascii=False))
+        if runtime_constraints:
+            sections.append('Current runtime constraints and instructions:\n' + runtime_constraints)
+        sections.append('Use the mounted GA native tool schema; the provider request '
+                        'contains the single authoritative tool definition set.')
+        user = '\n\n'.join(sections)
         return {'system': system, 'user': user,
-                'context': self.get_context(), 'upstream_messages': original}
+                'context': context, 'adaptation': 'native_tool_envelope_only'}
 
     def get_result(self):
         result = self.manager.get_result() if self.started else {}
         return {'status': self.terminal_status or 'partial',
+                'host_terminal_reason': (self.lifecycle[-1].get('reason')
+                    if self.lifecycle and self.lifecycle[-1]['kind'] == 'finish' else None),
+                'core_last_transition_done': (self.manager.health_transitions[-1].done
+                    if getattr(self.manager, 'health_transitions', []) else None),
                 'success_known': self.success_known, 'task_success': None,
-                'scored_decision_batches': self.step,
+                'completed_decision_batches': self.completed_decision_batches,
+                'scored_transitions': sum(item.progress in (0, 1) for item in
+                    getattr(self.manager, 'health_transitions', [])),
                 'lifecycle': deepcopy(self.lifecycle), **result}

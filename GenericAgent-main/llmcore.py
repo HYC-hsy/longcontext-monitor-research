@@ -1006,13 +1006,20 @@ class NativeClaudeSession(BaseSession):
         try:
             while True: yield next(gen)
         except StopIteration as e: content_blocks = e.value or []
-        if content_blocks and (_injected := _ensure_text_block(content_blocks)): yield _injected
+        # Unlike the historical session path, a native tool-only response has
+        # no public text. Never synthesize it from a private thinking block.
         text_parts = [b['text'] for b in content_blocks if b.get('type') == 'text']
         content = '\n'.join(text_parts).strip()
         tool_calls = [MockToolCall(b['name'], b.get('input', {}), id=b.get('id', ''))
                       for b in content_blocks if b.get('type') == 'tool_use']
         if not tool_calls: tool_calls, content = _parse_text_tool_calls(content)
         thinking = '\n'.join(b['thinking'] for b in content_blocks if b.get('type') == 'thinking').strip()
+        if not thinking:
+            think_pattern = r'<think(?:ing)?>(.*?)</think(?:ing)?>'
+            match = re.search(think_pattern, content, re.DOTALL)
+            if match:
+                thinking = match.group(1).strip()
+                content = re.sub(think_pattern, '', content, flags=re.DOTALL).strip()
         return MockResponse(thinking, content, tool_calls, str(content_blocks))
 
 class NativeOAISession(NativeClaudeSession):
@@ -1321,7 +1328,10 @@ class NativeToolClient:
             if set(request_view) != {'system', 'user'}:
                 raise ValueError('PoS request view must contain exact system/user fields')
             if tools: self.backend.tools = tools
-            self.set_system(request_view['system'])
+            # The legacy GA summary instruction describes a second decision
+            # memory and conflicts with native tool-only output. PoS supplies
+            # its complete current decision system without that appendage.
+            self.backend.system = request_view['system']
             # Actual lower-boundary payload is one new user text block. Never
             # attach pending tool_result blocks or replay backend.history.
             self._pending_tool_ids = []
