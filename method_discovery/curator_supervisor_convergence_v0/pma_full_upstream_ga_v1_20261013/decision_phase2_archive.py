@@ -9,6 +9,8 @@ from pathlib import Path
 import re
 from zipfile import ZipFile, ZIP_DEFLATED
 
+from decision_phase2_screen import LIVE_SCHEMA, VIEW_SCHEMA, slot_name
+
 
 def digest(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
@@ -45,7 +47,7 @@ def archive(run_root: Path, manifest_path: Path, public_root: Path) -> dict:
     if public_root.exists():
         raise FileExistsError('public archive root must be new')
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
-    if (manifest.get('schema') != 'pma-decision-phase2-once-v1' or
+    if (manifest.get('schema') not in (LIVE_SCHEMA, VIEW_SCHEMA) or
             manifest.get('output_root') != str(run_root.resolve())):
         raise PermissionError('private run and frozen Phase-2 manifest differ')
     public_root.mkdir(parents=True, exist_ok=False)
@@ -55,9 +57,12 @@ def archive(run_root: Path, manifest_path: Path, public_root: Path) -> dict:
                 if status_path.is_file() else [])
     if not statuses:
         for number, row in enumerate(manifest['planned_order'], 1):
-            slot = run_root / f'{number:02d}-{row["variant"].lower()}'
+            slot = run_root / slot_name(row, number, manifest['schema'])
             statuses.append({'order': number, 'arm': row['arm'],
                              'pma_step': row['pma_step'], 'variant': row['variant'],
+                             'input_view': row.get('input_view'),
+                             'occurrence': row.get('occurrence'),
+                             'run_id': row.get('run_id'),
                              'status': ('started_incomplete' if slot.exists() else
                                         'confirmed_not_started')})
     write(public_root / 'status_table.json', {'rows': statuses})
@@ -65,8 +70,10 @@ def archive(run_root: Path, manifest_path: Path, public_root: Path) -> dict:
     exclusions = []
     for status in statuses:
         number = status['order']
-        private = run_root / f'{number:02d}-{status["variant"].lower()}'
-        public = public_root / f'{number:02d}-{status["variant"].lower()}'
+        row = manifest['planned_order'][number - 1]
+        name = slot_name(row, number, manifest['schema'])
+        private = run_root / name
+        public = public_root / name
         if not private.exists():
             continue
         request = rows(private / 'requests.jsonl')
@@ -75,10 +82,19 @@ def archive(run_root: Path, manifest_path: Path, public_root: Path) -> dict:
         result_path = private / 'result.json'
         result = (json.loads(result_path.read_text(encoding='utf-8'))
                   if result_path.is_file() else None)
+        projection = private / 'projection_identity.json'
+        if projection.is_file():
+            write(public / 'projection_identity.json',
+                  json.loads(projection.read_text(encoding='utf-8')))
         if request:
             selected = {key: request[0].get(key) for key in
                         ('logical_call', 'phase', 'epoch', 'system', 'prompt',
                          'tools', 'prompt_sha256', 'system_sha256')}
+            for field in ('system', 'prompt'):
+                selected[field], note = safe_content(selected[field])
+                selected[field + '_projection'] = note
+                if note['status'].startswith('excluded') or note['status'] == 'thinking_removed':
+                    exclusions.append({'order': number, 'field': field, **note})
             write(public / 'request.json', selected)
             sample_parts.append(f'=== {number:02d} {status["variant"]} REQUEST ===\n'
                                 + json.dumps(selected, ensure_ascii=False, indent=2))
@@ -101,6 +117,7 @@ def archive(run_root: Path, manifest_path: Path, public_root: Path) -> dict:
             content, note = safe_content(result.get('raw_content'))
             projected = {key: result.get(key) for key in
                          ('order', 'arm', 'pma_step', 'variant', 'status',
+                          'input_view', 'occurrence', 'run_id',
                           'started_epoch', 'ended_epoch', 'logical_requests',
                           'observable_litellm_calls', 'deeper_network_attempts',
                           'output_class', 'returned_usage', 'error_type',
@@ -138,7 +155,7 @@ def archive(run_root: Path, manifest_path: Path, public_root: Path) -> dict:
                'redactions_or_exclusions': exclusions}
     write(public_root / 'SUMMARY.json', summary)
     (public_root / 'AUDIT.txt').write_text(
-        'PMA U/V1/D1 Phase-2-only archived-input comparison.\n'
+        'PMA Phase-2-only archived-input comparison; conditions as frozen in manifest.\n'
         'The private root retains original request/response/provider records; '
         'only allowlisted projections below are public.\n'
         'No Task delivery, Phase 1, native evaluation, training or scorer calls.\n'

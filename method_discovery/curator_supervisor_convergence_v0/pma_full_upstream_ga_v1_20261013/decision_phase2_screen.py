@@ -29,6 +29,7 @@ from memory_agent.memory.universal_memory import UniversalMemory
 from memory_agent.memory_enabled_agent import MemoryEnabledTerminus2
 
 from decision_reminder_agent import phase2_prompt, phase2_system
+from decision_phase2_views import project
 from episode import construct_upstream
 from static_source_live import profile_identity, public_value
 from worker_main import PMAAuditIntegrityError, append_private_audit, install_transport_audit
@@ -40,8 +41,11 @@ CASES = (('07', 235), ('14', 85), ('14', 105), ('22', 7),
          ('07', 161), ('18', 6))
 VARIANTS = ('U', 'V1', 'D1')
 LIVE_SCHEMA = 'pma-decision-phase2-once-v1'
+VIEW_SCHEMA = 'pma-decision-phase2-input-views-once-v2'
+VIEW_DRAFT_SCHEMA = 'pma-decision-phase2-input-views-draft-v2'
 PROFILE_SHA256 = 'cc5f784b069034f44bc4527d15acd70191b1f7fc5810556c087b7b35e0ae00f1'
-CODE_FILES = ('decision_phase2_screen.py', 'decision_reminder_agent.py',
+CODE_FILES = ('decision_phase2_screen.py', 'decision_phase2_views.py',
+              'decision_reminder_agent.py',
               'episode.py', 'worker_main.py', 'static_source_live.py',
               'vendor/pma_89e5c0d/src/memory_agent/memory_enabled_agent.py',
               'vendor/pma_89e5c0d/src/memory_agent/memory/universal_memory.py',
@@ -144,12 +148,81 @@ def requests() -> list[dict]:
     return rows
 
 
-def prepare(output: Path) -> dict:
+def view_requests() -> list[dict]:
+    rows = []
+    rotations = (('F', 'EB', 'E'), ('EB', 'E', 'F'), ('E', 'F', 'EB'))
+    for arm, step in CASES:
+        archive = read_case(arm, step)
+        full = phase2_prompt(archive['prompt'], 'D1')
+        for occurrence, rotation in enumerate(rotations, 1):
+            for view in rotation:
+                visible, identity = project(full, view)
+                rows.append({'arm': arm, 'pma_step': step, 'variant': 'D1',
+                             'input_view': view, 'occurrence': occurrence,
+                             'run_id': f'case-{arm}-{step}-r{occurrence}-{view.lower()}',
+                             'source_path': archive['source_path'],
+                             'source_file_sha256': archive['source_file_sha256'],
+                             'archive_index': archive['archive_index'],
+                             'original_prompt_sha256': archive['prompt_sha256'],
+                             'original_system_sha256': archive['system_sha256'],
+                             'request_prompt_sha256': sha(visible.encode('utf-8')),
+                             'request_system_sha256': sha(phase2_system('D1').encode('utf-8')),
+                             'projection_identity_sha256': sha(json.dumps(identity,
+                                 ensure_ascii=False, sort_keys=True).encode('utf-8')),
+                             'step_count': identity['step_count'], 'tools': None})
+    if len(rows) != 54 or sum(row['step_count'] for row in rows[::9]) != 43:
+        raise RuntimeError('fixed archived input-view asset count mismatch')
+    if len({row['run_id'] for row in rows}) != len(rows):
+        raise RuntimeError('duplicate run identity')
+    return rows
+
+
+def planned(schema: str) -> list[dict]:
+    if schema in (LIVE_SCHEMA, 'pma-decision-phase2-screen-draft-v1'):
+        return requests()
+    if schema in (VIEW_SCHEMA, VIEW_DRAFT_SCHEMA):
+        return view_requests()
+    raise ValueError('unknown Phase-2 plan schema')
+
+
+def slot_name(row: dict, number: int, schema: str) -> str:
+    if schema == VIEW_SCHEMA:
+        run_id = row['run_id']
+        if not re.fullmatch(r'case-\d+-\d+-r[1-3]-(?:f|eb|e)', run_id):
+            raise PermissionError('unsafe Phase-2 run identity')
+        return f'{number:02d}-{run_id}'
+    return f'{number:02d}-{row["variant"].lower()}'
+
+
+def request_for(row: dict) -> tuple[str, str, dict | None]:
+    source = read_case(row['arm'], row['pma_step'])
+    variant = row['variant']
+    full = (source['prompt'] if variant == 'U' else
+            phase2_prompt(source['prompt'], variant))
+    identity = None
+    if 'input_view' in row:
+        if variant != 'D1':
+            raise PermissionError('input views require D1')
+        full, identity = project(full, row['input_view'])
+        if (sha(json.dumps(identity, ensure_ascii=False, sort_keys=True).encode('utf-8'))
+                != row['projection_identity_sha256'] or
+                identity['step_count'] != row['step_count']):
+            raise PermissionError('projected field identity changed')
+    system = PHASE2_SYSTEM if variant == 'U' else phase2_system(variant)
+    if (sha(full.encode('utf-8')) != row['request_prompt_sha256'] or
+            sha(system.encode('utf-8')) != row['request_system_sha256'] or
+            row['source_file_sha256'] != source['source_file_sha256']):
+        raise PermissionError('archived Phase-2 request identity changed')
+    return full, system, identity
+
+
+def prepare(output: Path, *, input_views: bool = False) -> dict:
     output.mkdir(parents=True, exist_ok=False)
-    manifest = {'schema': 'pma-decision-phase2-screen-draft-v1',
+    schema = VIEW_DRAFT_SCHEMA if input_views else 'pma-decision-phase2-screen-draft-v1'
+    manifest = {'schema': schema,
                 'execution_authorized': False,
                 'scope': 'six_archived_Phase2_inputs_only_no_Task_no_Phase1',
-                'planned_order': requests()}
+                'planned_order': planned(schema)}
     (output / 'manifest.json').write_text(json.dumps(manifest, indent=2),
                                           encoding='utf-8')
     return {'requests': len(manifest['planned_order']),
@@ -157,24 +230,27 @@ def prepare(output: Path) -> dict:
             'manifest_sha256': sha((output / 'manifest.json').read_bytes())}
 
 
-def freeze(manifest_path: Path, output: Path, profile_path: Path) -> dict:
+def freeze(manifest_path: Path, output: Path, profile_path: Path,
+           *, input_views: bool = False) -> dict:
     if manifest_path.exists() or output.exists():
         raise FileExistsError('new manifest and output root are required')
     _, safe_profile = checked_profile(profile_path)
     identity = code_identity()
-    manifest = {'schema': LIVE_SCHEMA, 'execution_authorized': False,
+    schema = VIEW_SCHEMA if input_views else LIVE_SCHEMA
+    order = planned(schema)
+    manifest = {'schema': schema, 'execution_authorized': False,
                 'batch_id': 'd1v1-' + uuid.uuid4().hex[:20],
                 'code_identity': identity, 'profile_public': safe_profile,
                 'profile_sha256': PROFILE_SHA256,
                 'output_root': str(output.resolve()),
-                'planned_order': requests(),
-                'logical_requests': 18,
+                'planned_order': order,
+                'logical_requests': len(order),
                 'request_timeout_seconds': safe_profile['effective_timeout'],
                 'upstream_retry_attempts': 3,
                 'inner_network_attempts': 'unknown',
                 'scope': 'archived_public_Phase2_only_no_Task_no_Phase1'}
-    if len(manifest['planned_order']) != 18:
-        raise RuntimeError('fixed archived comparison no longer has 18 requests')
+    if len({row.get('run_id', str(index)) for index, row in enumerate(order)}) != len(order):
+        raise RuntimeError('duplicate planned run identity')
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     write_new(manifest_path, manifest)
     return {'batch_id': manifest['batch_id'],
@@ -187,16 +263,16 @@ def check_frozen(manifest_path: Path, profile_path: Path) -> tuple[dict, dict]:
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
     profile, safe_profile = checked_profile(profile_path)
     try:
-        current_requests = requests()
+        current_requests = planned(manifest.get('schema'))
     except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
         raise PermissionError('archived Phase-2 source or prompt identity invalid') from exc
-    if (manifest.get('schema') != LIVE_SCHEMA or
+    if (manifest.get('schema') not in (LIVE_SCHEMA, VIEW_SCHEMA) or
             manifest.get('execution_authorized') is not False or
             manifest.get('code_identity') != code_identity() or
             manifest.get('profile_public') != safe_profile or
             manifest.get('profile_sha256') != PROFILE_SHA256 or
             manifest.get('planned_order') != current_requests or
-            manifest.get('logical_requests') != 18 or
+            manifest.get('logical_requests') != len(current_requests) or
             manifest.get('request_timeout_seconds') != profile['read_timeout'] or
             manifest.get('upstream_retry_attempts') != 3 or
             not isinstance(manifest.get('batch_id'), str) or
@@ -211,7 +287,7 @@ def authorize(manifest_path: Path, auth_path: Path, profile_path: Path,
     if auth_path.exists() or not authorization_source.strip():
         raise PermissionError('new one-use approval and source are required')
     manifest, _ = check_frozen(manifest_path, profile_path)
-    auth = {'schema': LIVE_SCHEMA + '-authorization',
+    auth = {'schema': manifest['schema'] + '-authorization',
             'execution_authorized': True,
             'authorization_source': authorization_source,
             'batch_id': manifest['batch_id'],
@@ -232,7 +308,7 @@ def check_authorized(manifest_path: Path, auth_path: Path,
                      profile_path: Path) -> tuple[dict, dict, dict]:
     manifest, profile = check_frozen(manifest_path, profile_path)
     auth = json.loads(auth_path.read_text(encoding='utf-8'))
-    if (auth.get('schema') != LIVE_SCHEMA + '-authorization' or
+    if (auth.get('schema') != manifest['schema'] + '-authorization' or
             auth.get('execution_authorized') is not True or
             auth.get('batch_id') != manifest['batch_id'] or
             auth.get('manifest_sha256') != sha(manifest_path.read_bytes()) or
@@ -269,15 +345,10 @@ def classify_output(raw: str, parsed: str | None) -> str:
 async def execute_one(manifest: dict, row: dict, number: int, profile: dict,
                       directory: Path, *, fake_lower=None) -> dict:
     directory.mkdir(parents=True, exist_ok=False)
-    source = read_case(row['arm'], row['pma_step'])
     variant = row['variant']
-    prompt = (source['prompt'] if variant == 'U' else
-              phase2_prompt(source['prompt'], variant))
-    system = PHASE2_SYSTEM if variant == 'U' else phase2_system(variant)
-    if (sha(prompt.encode()) != row['request_prompt_sha256'] or
-            sha(system.encode()) != row['request_system_sha256'] or
-            row['source_file_sha256'] != source['source_file_sha256']):
-        raise PermissionError('archived Phase-2 request identity changed')
+    prompt, system, projection = request_for(row)
+    if projection is not None:
+        write_new(directory / 'projection_identity.json', projection)
     agent = construct_upstream(directory / 'upstream', memory_profile=profile,
                                research_candidate=variant)
     install_transport_audit(agent, directory)
@@ -291,7 +362,7 @@ async def execute_one(manifest: dict, row: dict, number: int, profile: dict,
     append_json(directory / 'started.jsonl', {
         'order': number, 'variant': variant, 'arm': row['arm'],
         'pma_step': row['pma_step'], 'started_epoch': started,
-        'source_file_sha256': source['source_file_sha256'],
+        'source_file_sha256': row['source_file_sha256'],
         'request_prompt_sha256': row['request_prompt_sha256'],
         'request_system_sha256': row['request_system_sha256']})
 
@@ -381,6 +452,9 @@ async def execute_one(manifest: dict, row: dict, number: int, profile: dict,
               'variant': variant, 'started_epoch': started,
               'model_prompt_sha256': row['request_prompt_sha256'],
               'model_system_sha256': row['request_system_sha256']}
+    if projection is not None:
+        result.update(input_view=row['input_view'], occurrence=row['occurrence'],
+                      run_id=row['run_id'])
     try:
         response = await agent._memory_agent._call_llm_phase2(prompt)
         parsed = agent._memory_agent._parse_phase2_response(response.content or '')
@@ -424,7 +498,7 @@ async def run_authorized(manifest_path: Path, auth_path: Path, profile_path: Pat
             check_frozen_after_start(manifest_path, manifest, profile_path,
                                      auth['manifest_sha256'])
             result = await execute_one(manifest, row, number, profile,
-                                       root / f'{number:02d}-{row["variant"].lower()}',
+                                       root / slot_name(row, number, manifest['schema']),
                                        fake_lower=fake_lower)
             results.append(result)
             append_json(root / 'summary.jsonl', result)
@@ -437,14 +511,16 @@ async def run_authorized(manifest_path: Path, auth_path: Path, profile_path: Pat
         try:
             statuses = []
             for number, row in enumerate(manifest['planned_order'], 1):
-                slot = root / f'{number:02d}-{row["variant"].lower()}'
+                slot = root / slot_name(row, number, manifest['schema'])
                 result_file = slot / 'result.json'
                 state = (json.loads(result_file.read_text(encoding='utf-8'))['status']
                          if result_file.is_file() else
                          'started_incomplete' if slot.exists() else 'confirmed_not_started')
                 statuses.append({'order': number, 'arm': row['arm'],
                                  'pma_step': row['pma_step'], 'variant': row['variant'],
-                                 'status': state})
+                                 'input_view': row.get('input_view'),
+                                 'occurrence': row.get('occurrence'),
+                                 'run_id': row.get('run_id'), 'status': state})
             write_new(root / 'status_table.json', {'rows': statuses})
             write_new(root / 'authorization_revoked.json', {
                 'batch_id': manifest['batch_id'], 'epoch': time.time(),
@@ -463,27 +539,27 @@ def check_frozen_after_start(manifest_path: Path, manifest: dict,
             json.loads(manifest_path.read_text(encoding='utf-8')) != manifest or
             manifest['code_identity'] != code_identity() or
             manifest['profile_public'] != safe or
-            manifest['planned_order'] != requests() or
+            manifest['planned_order'] != planned(manifest['schema']) or
             profile['read_timeout'] != manifest['request_timeout_seconds']):
         raise PermissionError('frozen Phase-2 identity changed during batch')
 
 
 async def fake(manifest_path: Path, output: Path) -> dict:
     frozen = json.loads(manifest_path.read_text(encoding='utf-8'))
-    if (frozen.get('schema') != 'pma-decision-phase2-screen-draft-v1' or
+    if (frozen.get('schema') not in
+            ('pma-decision-phase2-screen-draft-v1', VIEW_DRAFT_SCHEMA) or
             frozen.get('execution_authorized') is not False or
-            frozen.get('planned_order') != requests()):
+            frozen.get('planned_order') != planned(frozen['schema'])):
         raise RuntimeError('Phase 2 draft/source/variant identity changed')
     output.mkdir(parents=True, exist_ok=False)
     captures = []
     for number, row in enumerate(frozen['planned_order'], 1):
-        source = read_case(row['arm'], row['pma_step'])
         variant = row['variant']
-        expected_prompt = (source['prompt'] if variant == 'U' else
-                           phase2_prompt(source['prompt'], variant))
-        expected_system = PHASE2_SYSTEM if variant == 'U' else phase2_system(variant)
+        expected_prompt, expected_system, projection = request_for(row)
         slot = output / f'{number:02d}'
         slot.mkdir()
+        if projection is not None:
+            write_new(slot / 'projection_identity.json', projection)
         agent = construct_upstream(slot / 'upstream',
                                    research_candidate=variant)
         sent = []
@@ -500,6 +576,8 @@ async def fake(manifest_path: Path, output: Path) -> dict:
             raise RuntimeError('actual Phase 2 call/parser differs from draft')
         captures.append({'order': number, 'arm': row['arm'],
                          'pma_step': row['pma_step'], 'variant': variant,
+                         'input_view': row.get('input_view'),
+                         'occurrence': row.get('occurrence'),
                          'request': sent[0], 'raw_response': response.content,
                          'parsed_reminder': parsed})
     (output / 'actual_requests.json').write_text(json.dumps(captures, indent=2,
@@ -513,6 +591,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest='command', required=True)
     prepared = sub.add_parser('prepare')
     prepared.add_argument('--output', type=Path, required=True)
+    prepared.add_argument('--input-views', action='store_true')
     replay = sub.add_parser('fake')
     replay.add_argument('--manifest', type=Path, required=True)
     replay.add_argument('--output', type=Path, required=True)
@@ -520,6 +599,7 @@ def main() -> None:
     frozen.add_argument('--manifest', type=Path, required=True)
     frozen.add_argument('--output', type=Path, required=True)
     frozen.add_argument('--profile', type=Path, required=True)
+    frozen.add_argument('--input-views', action='store_true')
     approved = sub.add_parser('authorize', help='one-use approval after committed code freeze')
     approved.add_argument('--manifest', type=Path, required=True)
     approved.add_argument('--authorization', type=Path, required=True)
@@ -531,21 +611,23 @@ def main() -> None:
     launched.add_argument('--profile', type=Path, required=True)
     args = parser.parse_args()
     if args.command == 'prepare':
-        result = prepare(args.output)
+        result = prepare(args.output, input_views=args.input_views)
     elif args.command == 'fake':
         result = asyncio.run(fake(args.manifest, args.output))
     elif args.command == 'freeze':
-        result = freeze(args.manifest, args.output, args.profile)
+        result = freeze(args.manifest, args.output, args.profile,
+                        input_views=args.input_views)
     elif args.command == 'authorize':
         result = authorize(args.manifest, args.authorization, args.profile,
                            args.authorization_source)
     else:
         rows = asyncio.run(run_authorized(args.manifest, args.authorization,
                                           args.profile))
+        planned_count = len(json.loads(args.manifest.read_text(encoding='utf-8'))['planned_order'])
         result = {'completed': sum(row['status'] == 'completed' for row in rows),
-                  'started': len(rows), 'confirmed_not_started': 18 - len(rows)}
+                  'started': len(rows), 'confirmed_not_started': planned_count - len(rows)}
     print(json.dumps(result, indent=2))
-    if args.command == 'run' and result['completed'] != 18:
+    if args.command == 'run' and result['completed'] != planned_count:
         raise SystemExit(1)
 
 
