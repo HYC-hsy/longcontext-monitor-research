@@ -1,0 +1,1113 @@
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/batch_controller.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/batch_controller.py
+index 38d40d35..2ba5c4fc 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/batch_controller.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/batch_controller.py
+@@ -55,7 +55,8 @@ def run_batch(args: argparse.Namespace) -> dict:
+         raise RuntimeError('zero-model batch fixture identity mismatch')
+     native_plan = manifest.get("schema") in {"pma-ga-live-manifest-v2",
+                                                 "pma-ga-live-manifest-v3",
+-                                                "pma-ga-live-manifest-v4"}
++                                                "pma-ga-live-manifest-v4",
++                                                "pma-ga-live-manifest-v5"}
+     if native_plan:
+         bindings = validate_plan(manifest, granted)
+     else:
+@@ -107,6 +108,8 @@ def run_batch(args: argparse.Namespace) -> dict:
+             "--run-root", binding["run_root"]]
+         if native_plan:
+             command += ["--repeat", str(binding["repeat"])]
++        if manifest.get('schema') == 'pma-ga-live-manifest-v5':
++            command += ['--research-candidate', binding['research_candidate']]
+         if fixture:
+             command += ['--zero-model-fixture']
+         completed = subprocess.run(command, check=False)
+@@ -120,6 +123,7 @@ def run_batch(args: argparse.Namespace) -> dict:
+             outcome = "stop_batch_exit_status_disagrees"
+         record["arms"].append({"order": binding["order"], "run_id": binding["run_id"],
+                                "run_root": str(root), "launcher_exit": completed.returncode,
++                               "research_candidate": binding.get('research_candidate', 'U'),
+                                "disposition": outcome, "status": status})
+         output.write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
+         if outcome.startswith("stop_batch"):
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/collect_single_run_fixture.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/collect_single_run_fixture.py
+index e3f95cef..a6afc445 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/collect_single_run_fixture.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/collect_single_run_fixture.py
+@@ -61,12 +61,15 @@ def main() -> None:
+     parser.add_argument('--output', type=Path, required=True)
+     parser.add_argument('--task-profile-file', type=Path, required=True)
+     parser.add_argument('--pma-profile-file', type=Path, required=True)
++    parser.add_argument('--research-candidate', choices=('U', 'V1', 'D1'), default='U')
+     args = parser.parse_args()
+     args.output.mkdir(parents=True, exist_ok=False)
+     secrets = private_values(args.task_profile_file, args.pma_profile_file)
+     files = collect('A', args.a, args.output / 'A', secrets)
+     files += collect('B', args.b, args.output / 'B', secrets)
+-    summary = verify_evidence(args.output, require_committed=False)
++    summary = verify_evidence(args.output, require_committed=False,
++                              research_candidate=(args.research_candidate
++                                  if args.research_candidate != 'U' else None))
+     (args.output / 'FILE_HASHES.json').write_text(json.dumps({
+         'schema': 'pma-ga-generic-fixture-redacted-index-v1', 'files': files,
+         'certification': summary}, indent=2, ensure_ascii=False), encoding='utf-8')
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_phase2_screen.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_phase2_screen.py
+new file mode 100644
+index 00000000..5882d0d5
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_phase2_screen.py
+@@ -0,0 +1,141 @@
++"""Unarmed six-input U/V1/D1 archived Phase-2 comparison; fake transport only.
++
++This reuses the original recorded prompt, not historical memory or a new Task
++process. Labels remain in the host manifest and never enter the model prompt.
++"""
++
++from __future__ import annotations
++
++import argparse
++import asyncio
++import hashlib
++import json
++from pathlib import Path
++
++from harbor.llms.base import LLMResponse
++from memory_agent.memory.memory_agent import PHASE2_SYSTEM
++
++from decision_reminder_agent import phase2_prompt, phase2_system
++from episode import construct_upstream
++
++
++HERE = Path(__file__).resolve().parent
++PUBLIC = HERE / 'generic_single_run_20261015/real_12_r1_public_20261016'
++CASES = (('07', 235), ('14', 85), ('14', 105), ('22', 7),
++         ('07', 161), ('18', 6))
++VARIANTS = ('U', 'V1', 'D1')
++
++
++def sha(data: bytes) -> str:
++    return hashlib.sha256(data).hexdigest()
++
++
++def read_case(arm: str, step: int) -> dict:
++    path = PUBLIC / arm / 'pma_requests_public.json'
++    raw = path.read_bytes()
++    rows = json.loads(raw)
++    index = 2 * step - 1
++    if index >= len(rows):
++        raise RuntimeError('archived PMA step missing')
++    selected = rows[index]
++    if (selected.get('phase') != 'context_decision' or
++            selected.get('system') != PHASE2_SYSTEM or
++            selected.get('tools') is not None or
++            not selected.get('prompt', '').startswith(f'## Step {step}\n')):
++        raise RuntimeError('archived original Phase 2 identity mismatch')
++    return {'source_path': path.relative_to(HERE).as_posix(),
++            'source_file_sha256': sha(raw), 'prompt': selected['prompt'],
++            'prompt_sha256': sha(selected['prompt'].encode('utf-8')),
++            'system_sha256': sha(selected['system'].encode('utf-8')),
++            'archive_index': index}
++
++
++def requests() -> list[dict]:
++    rows = []
++    for arm, step in CASES:
++        archive = read_case(arm, step)
++        for variant in VARIANTS:
++            prompt = (archive['prompt'] if variant == 'U' else
++                      phase2_prompt(archive['prompt'], variant))
++            system = PHASE2_SYSTEM if variant == 'U' else phase2_system(variant)
++            rows.append({'arm': arm, 'pma_step': step, 'variant': variant,
++                         'source_path': archive['source_path'],
++                         'source_file_sha256': archive['source_file_sha256'],
++                         'archive_index': archive['archive_index'],
++                         'original_prompt_sha256': archive['prompt_sha256'],
++                         'original_system_sha256': archive['system_sha256'],
++                         'request_prompt_sha256': sha(prompt.encode('utf-8')),
++                         'request_system_sha256': sha(system.encode('utf-8')),
++                         'tools': None})
++    return rows
++
++
++def prepare(output: Path) -> dict:
++    output.mkdir(parents=True, exist_ok=False)
++    manifest = {'schema': 'pma-decision-phase2-screen-draft-v1',
++                'execution_authorized': False,
++                'scope': 'six_archived_Phase2_inputs_only_no_Task_no_Phase1',
++                'planned_order': requests()}
++    (output / 'manifest.json').write_text(json.dumps(manifest, indent=2),
++                                          encoding='utf-8')
++    return {'requests': len(manifest['planned_order']),
++            'execution_authorized': False,
++            'manifest_sha256': sha((output / 'manifest.json').read_bytes())}
++
++
++async def fake(manifest_path: Path, output: Path) -> dict:
++    frozen = json.loads(manifest_path.read_text(encoding='utf-8'))
++    if (frozen.get('schema') != 'pma-decision-phase2-screen-draft-v1' or
++            frozen.get('execution_authorized') is not False or
++            frozen.get('planned_order') != requests()):
++        raise RuntimeError('Phase 2 draft/source/variant identity changed')
++    output.mkdir(parents=True, exist_ok=False)
++    captures = []
++    for number, row in enumerate(frozen['planned_order'], 1):
++        source = read_case(row['arm'], row['pma_step'])
++        variant = row['variant']
++        expected_prompt = (source['prompt'] if variant == 'U' else
++                           phase2_prompt(source['prompt'], variant))
++        expected_system = PHASE2_SYSTEM if variant == 'U' else phase2_system(variant)
++        slot = output / f'{number:02d}'
++        slot.mkdir()
++        agent = construct_upstream(slot / 'upstream',
++                                   research_candidate=variant)
++        sent = []
++
++        async def fake_call(*, prompt, system, tools=None):
++            sent.append({'prompt': prompt, 'system': system, 'tools': tools})
++            return LLMResponse(content='<no_intervention/>')
++
++        agent._memory_llm.call = fake_call
++        response = await agent._memory_agent._call_llm_phase2(expected_prompt)
++        parsed = agent._memory_agent._parse_phase2_response(response.content)
++        if (sent != [{'prompt': expected_prompt, 'system': expected_system,
++                      'tools': None}] or parsed is not None):
++            raise RuntimeError('actual Phase 2 call/parser differs from draft')
++        captures.append({'order': number, 'arm': row['arm'],
++                         'pma_step': row['pma_step'], 'variant': variant,
++                         'request': sent[0], 'raw_response': response.content,
++                         'parsed_reminder': parsed})
++    (output / 'actual_requests.json').write_text(json.dumps(captures, indent=2,
++        ensure_ascii=False), encoding='utf-8')
++    return {'fake_requests': len(captures), 'provider_requests': 0,
++            'output_sha256': sha((output / 'actual_requests.json').read_bytes())}
++
++
++def main() -> None:
++    parser = argparse.ArgumentParser(description=__doc__)
++    sub = parser.add_subparsers(dest='command', required=True)
++    prepared = sub.add_parser('prepare')
++    prepared.add_argument('--output', type=Path, required=True)
++    replay = sub.add_parser('fake')
++    replay.add_argument('--manifest', type=Path, required=True)
++    replay.add_argument('--output', type=Path, required=True)
++    args = parser.parse_args()
++    result = (prepare(args.output) if args.command == 'prepare' else
++              asyncio.run(fake(args.manifest, args.output)))
++    print(json.dumps(result, indent=2))
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_reminder_agent.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_reminder_agent.py
+new file mode 100644
+index 00000000..4cf12f31
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_reminder_agent.py
+@@ -0,0 +1,99 @@
++"""Phase-2-only reminder strategies over the unchanged upstream PMA bank."""
++
++from memory_agent.memory.memory_agent import MemoryAgent, PHASE2_SYSTEM
++
++
++D1_SYSTEM = """You are a selective attention assistant for an Action Agent working on a task. Help it use relevant task requirements, observations, and past experience in its current decisions. The Action Agent remains the solver and chooses how to investigate, implement, and finish the task.
++
++You receive the task description, a memory bank, and recent trajectory. The bank is an assistant-maintained summary, not independent confirmation. A plan, interpretation, or prior reminder is not by itself evidence that its claim is true. Use available observations with their actual scope; distinguish what was required, what was observed, and what is inferred. Do not invent missing observations or assume you know the agent's next action.
++
++DECIDE WHETHER A NOTE WOULD HELP NOW:
++- Identify the current decision or ongoing activity using the visible trajectory.
++- Consider the task requirements or observations that are relevant to that activity, and how the activity relates to them.
++- A reminder can help when an important requirement or experience is missing from the agent's attention, when an ongoing action conflicts with it, or when a conclusion driving action goes beyond the available evidence.
++- Information being recently visible is not sufficient reason for silence if the agent's actual behavior is inconsistent with it. Conversely, merely mentioning a requirement again is not useful when the agent is already acting on it.
++- Preserve useful practical reminders, including a relevant past failure or environment fact. You do not need to accuse the agent of an error to provide useful context.
++- Distinguish a concrete mismatch from reasonable exploration or an unresolved possibility. Obtaining needed evidence or completing a plausible prerequisite can be progress even before the final output changes. Do not interrupt useful investigation merely because it has not finished. When evidence is insufficient, describe the specific uncertainty only if it matters to the present decision; do not present a guess as a correction.
++- Consider whether newer observations or a valid explanation from the agent undermine a stored interpretation or an earlier reminder. You may explicitly correct the part that no longer holds. Do not defend an earlier suggestion merely because it was saved or repeated.
++
++IF YOU INTERVENE:
++Give a concise, helpful context note. Make the relevant requirement or observation and its connection to the current activity understandable. Explain the particular discrepancy or uncertainty when needed. A small suggestion for what to distinguish or reconsider is allowed; leave implementation choices to the Action Agent. Avoid a full task plan, a general checklist, an unsupported completion verdict, or repeated demands for agreement. Do not claim an event, source identity, or successful test that is not established by the visible material.
++
++IF YOU STAY SILENT:
++Silence is appropriate when the agent is using the relevant information, is already investigating the issue, or you have no concrete useful context to add. Do not manufacture a discrepancy to justify a reminder.
++
++OUTPUT:
++For a useful note, output only:
++<context_for_action>
++Your context note.
++</context_for_action>
++
++Otherwise, output only:
++<no_intervention/>"""
++
++D1_TASK = "Review the memory bank and the visible task trajectory. Is there useful context that should change how the agent understands its current decision or activity? Consider both missing information and visible information that is not being applied correctly. If a concise, grounded note would help now, output it inside <context_for_action>. Otherwise output <no_intervention/>. Use only the supplied material and preserve uncertainty where it matters."
++
++UPSTREAM_TASK = """## Your Task
++Review the memory bank and the agent's recent trajectory. Decide:
++- Is the agent missing or forgetting something important from the memory bank?
++- Is the agent heading toward a pattern that matches a recorded failure?
++
++If yes, write a <context_for_action> note with the relevant context.
++If no, write <no_intervention/>.
++"""
++
++V1_SYSTEM_REPLACEMENTS = (
++    ("- The information you'd provide is already visible in the recent trajectory",
++     "- The information is already visible and the agent's recent behavior is consistent with it"),
++    ("- Don't include information already visible in the recent trajectory",
++     "- Information already visible may be repeated when the agent's recent behavior contradicts it; do not repeat it merely for emphasis"),
++    ("- You're not confident that a specific fact is being forgotten",
++     "- You're not confident that specific information is missing, forgotten, or not being applied appropriately"),
++)
++
++
++def _replace_once(text: str, old: str, new: str) -> str:
++    if text.count(old) != 1:
++        raise RuntimeError("upstream Phase 2 prompt contract changed")
++    return text.replace(old, new, 1)
++
++
++def phase2_system(variant: str) -> str:
++    if variant == "D1":
++        return D1_SYSTEM
++    if variant == "V1":
++        system = PHASE2_SYSTEM
++        for old, new in V1_SYSTEM_REPLACEMENTS:
++            system = _replace_once(system, old, new)
++        return system
++    raise ValueError("unknown decision reminder strategy")
++
++
++def phase2_prompt(prompt: str, variant: str) -> str:
++    if not prompt.endswith(UPSTREAM_TASK) or prompt.count(UPSTREAM_TASK) != 1:
++        raise RuntimeError("upstream Phase 2 task suffix changed")
++    if variant == "D1":
++        suffix = "## Your Task\n" + D1_TASK + "\n"
++    elif variant == "V1":
++        suffix = _replace_once(UPSTREAM_TASK,
++            "missing or forgetting something important",
++            "missing, forgetting, or failing to apply something important")
++    else:
++        raise ValueError("unknown decision reminder strategy")
++    return prompt[:-len(UPSTREAM_TASK)] + suffix
++
++
++class DecisionReminderAgent(MemoryAgent):
++    def __init__(self, *, variant: str, **kwargs):
++        if variant not in {"D1", "V1"}:
++            raise ValueError("unknown decision reminder strategy")
++        super().__init__(**kwargs)
++        self.variant = variant
++
++    async def _call_llm_phase2(self, user_prompt: str):
++        return await self.llm.call(prompt=user_prompt,
++                                   system=phase2_system(self.variant))
++
++    def _build_phase2_prompt(self, observation: str, step_count: int) -> str:
++        return phase2_prompt(super()._build_phase2_prompt(observation, step_count),
++                             self.variant)
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_reminder_v1_20261017/build_offline_audit.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_reminder_v1_20261017/build_offline_audit.py
+new file mode 100644
+index 00000000..59efbfc6
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_reminder_v1_20261017/build_offline_audit.py
+@@ -0,0 +1,176 @@
++"""Generate reviewable offline evidence from committed D1/V1 fixtures.
++
++This script makes no network or model calls. Generated files are mechanical
++copies/projections of the frozen source diff, local unit-test output, and
++already redacted synthetic fixture records.
++"""
++
++from __future__ import annotations
++
++import hashlib
++import json
++import os
++from pathlib import Path
++import subprocess
++import sys
++
++
++ROOT = Path(__file__).resolve().parent
++PROJECT = ROOT.parent
++REPO = next(parent for parent in PROJECT.parents if (parent / '.git').exists())
++BASELINE = '793a08abc570209c0781074c13f43b951142c51d'
++TESTS = (
++    'test_decision_reminder_agent', 'test_episode',
++    'test_live_wiring', 'test_single_run_offline',
++)
++
++
++def command(*args: str) -> subprocess.CompletedProcess[str]:
++    return subprocess.run(args, cwd=REPO, capture_output=True, text=True,
++                          encoding='utf-8', errors='replace', check=False)
++
++
++def digest(path: Path) -> str:
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def hash_index() -> int:
++    rows = []
++    for file in sorted(ROOT.rglob('*')):
++        if not file.is_file() or file.name == 'FILE_HASHES_ALL.json':
++            continue
++        repo_path = file.relative_to(REPO).as_posix()
++        staged = subprocess.run(('git', 'show', ':' + repo_path), cwd=REPO,
++                                capture_output=True, check=False)
++        if staged.returncode:
++            raise RuntimeError(f'not staged: {repo_path}')
++        rows.append({'path': file.relative_to(ROOT).as_posix(),
++                     'worktree_size': file.stat().st_size,
++                     'worktree_sha256': digest(file),
++                     'git_blob_size': len(staged.stdout),
++                     'git_blob_sha256': hashlib.sha256(staged.stdout).hexdigest()})
++    (ROOT / 'FILE_HASHES_ALL.json').write_text(json.dumps(rows, indent=2),
++                                               encoding='utf-8')
++    return len(rows)
++
++
++def main() -> None:
++    if len(sys.argv) == 2 and sys.argv[1] == '--hash-only':
++        print(json.dumps({'hashed_files': hash_index()}, indent=2))
++        return
++    env = os.environ.copy()
++    env['PYTHONPATH'] = os.pathsep.join((str(REPO),
++        str(REPO / 'GenericAgent-main'), str(PROJECT),
++        str(PROJECT / 'vendor/pma_89e5c0d/src'),
++        str(PROJECT / 'vendor/pma_89e5c0d/external/harbor/src')))
++    env['LITELLM_LOCAL_MODEL_COST_MAP'] = 'True'
++    names = [f'method_discovery.curator_supervisor_convergence_v0.'
++             f'pma_full_upstream_ga_v1_20261013.{name}' for name in TESTS]
++    runner = ("import sys,unittest; import method_discovery."
++        "curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013."
++        "offline_launcher as m; sys.modules['offline_launcher']=m; "
++        f"x=unittest.defaultTestLoader.loadTestsFromNames({names!r}); "
++        "y=unittest.TextTestRunner(verbosity=1).run(x); "
++        "sys.exit(not y.wasSuccessful())")
++    tested = subprocess.run((sys.executable, '-c', runner), cwd=REPO,
++                            env=env, capture_output=True, text=True,
++                            encoding='utf-8', errors='replace', check=False)
++    test_log = ROOT / 'TEST_RAW.txt'
++    test_log.write_text('COMMAND: python -c <package-alias unittest runner>\n'
++        'TEST MODULES: ' + ', '.join(TESTS) + '\n'
++        f'EXIT CODE: {tested.returncode}\n\nSTDOUT:\n{tested.stdout}'
++        f'\nSTDERR:\n{tested.stderr}', encoding='utf-8')
++    if tested.returncode:
++        raise RuntimeError('targeted offline regressions failed; raw output saved')
++
++    changed = command('git', 'diff', '--binary', BASELINE, 'HEAD', '--',
++                      'method_discovery/curator_supervisor_convergence_v0/'
++                      'pma_full_upstream_ga_v1_20261013/*.py')
++    if changed.returncode:
++        raise RuntimeError(changed.stderr)
++    patch = ROOT / 'IMPLEMENTATION_DIFF.patch'
++    patch.write_text(changed.stdout, encoding='utf-8')
++
++    screen = json.loads((ROOT / 'screen_fake/actual_requests.json').read_text(
++        encoding='utf-8'))
++    examples = []
++    for variant in ('U', 'V1', 'D1'):
++        row = next(row for row in screen if row['arm'] == '07' and
++                   row['pma_step'] == 235 and row['variant'] == variant)
++        examples.append(f'=== ARCHIVED PHASE2 {variant}, ARM 07 STEP 235 ===\n'
++                        + json.dumps(row['request'], ensure_ascii=False, indent=2))
++    for variant in ('u', 'v1', 'd1'):
++        path = ROOT / f'certification_fixture_{variant}/B/memory_payload.jsonl'
++        rows = [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines()]
++        examples.append(f'=== REAL HARBOR FAKE B {variant.upper()} PHASES ===\n'
++                        + json.dumps(rows, ensure_ascii=False, indent=2))
++    samples = '\n\n'.join(examples) + '\n'
++    (ROOT / 'REQUEST_SAMPLES.txt').write_text(samples, encoding='utf-8')
++
++    results = []
++    for variant in ('u', 'v1', 'd1'):
++        base = ROOT / f'certification_fixture_{variant}'
++        arms = {}
++        for condition in ('A', 'B'):
++            live = json.loads((base / condition / 'live_result.json').read_text(
++                encoding='utf-8'))
++            arms[condition] = {'research_candidate': live.get('research_candidate'),
++                               'harbor_return_code': live.get('harbor_return_code'),
++                               'worker_return_code': live.get('worker_return_code'),
++                               'primary_failure': live.get('primary_failure'),
++                               'fake_provider_captures': live.get('fake_provider_captures'),
++                               'cleanup_confirmed': live.get('cleanup_confirmed')}
++        results.append({'fixture': variant, 'arms': arms})
++    head = command('git', 'rev-parse', 'HEAD').stdout.strip()
++    summary = ('PMA D1/V1 OFFLINE AUDIT — 2026-10-17\n\n'
++        f'Baseline: {BASELINE}\nAudit-generator HEAD: {head}\n'
++        'Real Task/PMA/provider/native-evaluator/training/scoring calls: 0.\n'
++        'Synthetic Harbor tests use fake transport and synthetic test.sh only.\n'
++        'Original U PMA remains the default; D1/V1 are B-only, opt-in strategies.\n'
++        'Original vendor files and GA model-visible task inputs were not edited.\n\n'
++        'Reuse: upstream PMA 89e5c0d6aadfe531a1aee42fd290d48be89973dd '
++        '(Apache-2.0) MemoryAgent.process, Phase 1/tool dispatch, UniversalMemory, '
++        'BM25, parser, transport; local subclass overrides only Phase 2 call/prompt.\n'
++        'PoS d6acb430, LivePlan 3c72ab7a, ReflAct EMNLP 2025 are design '
++        'references only, no code copied or extra dependency installed.\n\n'
++        'D1 changes Phase 2 system and final task instruction. V1 changes '
++        'exactly three system lines and one task phrase. U untouched. '
++        'Phase 1, bank, context order, model call count, output parser remain upstream.\n'
++        'Historical Phase 2 screen: six archived redacted public prompts, '
++        'U/V1/D1 once each, 18 fake calls. This is a fixed-string-input '
++        'diagnostic, not a reconstruction of live post-bank state or an '
++        'authorized 18-call real experiment.\n'
++        'Host fixture: A and B for U/V1/D1 pass actual launcher/Harbor/Docker '
++        'synthetic lifecycle; B has two fake PMA stages and reminder append '
++        'into a subsequent GA request. No official benchmark evaluation.\n'
++        'First archived example system hashes (U/V1/D1): '
++        + ', '.join(f"{row['variant']}={hashlib.sha256(row['request']['system'].encode('utf-8')).hexdigest()}"
++                    for row in screen[:3]) + '\n' +
++        'The first D1 B fixture failed before any container/request because '
++        'offline_launcher only admitted v4; ec3de05b fixed that v5 routing. '
++        'The first direct top-level test invocation failed module alias import; '
++        'the supported package-alias command is captured in TEST_RAW.\n'
++        'Historical fixture_v5 is now rejected for changed source identity; '
++        'new U/V1/D1 evidence is separately committed.\n\n'
++        'Fixture mechanical results:\n'
++        + json.dumps(results, ensure_ascii=False, indent=2)
++        + '\n\nLimitations: no real endpoint compatibility or D1/V1 quality claim; '
++        'archived prompts may contain prior PMA-influenced Task context; '
++        'synthetic fake responses do not establish semantic usefulness.\n'
++        'Private profile bytes, credentials and endpoints are excluded.\n\n'
++        'PROMPTS AND EXAMPLES: REQUEST_SAMPLES.txt\n'
++        'RAW TEST OUTPUT: TEST_RAW.txt\n'
++        'FULL LIMITED CODE DIFF: IMPLEMENTATION_DIFF.patch\n'
++        '18-REQUEST UNAUTHORIZED DRAFT: screen_draft/manifest.json\n'
++        '18 FAKE ACTUAL REQUESTS: screen_fake/actual_requests.json\n'
++        'HARBOR FAKE RAW EVIDENCE: certification_fixture_{u,v1,d1}/\n')
++    summary += ('\n=== COMPLETE REQUEST SAMPLES ===\n' + samples +
++                '\n=== COMPLETE RAW TEST OUTPUT ===\n' + test_log.read_text(encoding='utf-8') +
++                '\n=== COMPLETE LIMITED CODE DIFF ===\n' + changed.stdout)
++    (ROOT / 'AUDIT_D1_V1_OFFLINE.txt').write_text(summary, encoding='utf-8')
++    print(json.dumps({'test_returncode': tested.returncode,
++                      'audit_head': head}, indent=2))
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/episode.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/episode.py
+index fe3348b8..3d628c3b 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/episode.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/episode.py
+@@ -45,7 +45,7 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
+                        memory_api_key: str | None = None,
+                        memory_profile: dict[str, Any] | None = None,
+                        research_candidate: str = "U") -> MemoryEnabledTerminus2:
+-    if research_candidate not in {"U", "S", "R", "S2", "R2"}:
++    if research_candidate not in {"U", "V1", "D1", "S", "R", "S2", "R2"}:
+         raise ValueError("unknown research candidate")
+     if memory_profile is not None:
+         if (memory_profile.get("provider"), memory_profile.get("api_mode"),
+@@ -74,7 +74,18 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
+     )
+     if agent._llm is not actor:
+         raise RuntimeError("upstream actor backend was not disabled")
+-    if research_candidate != "U":
++    if research_candidate in {"V1", "D1"}:
++        from decision_reminder_agent import DecisionReminderAgent
++        original = agent._memory_agent
++        agent._memory_agent = DecisionReminderAgent(
++            variant=research_candidate, llm=agent._memory_llm,
++            memory=agent._memory,
++            max_memory_in_prompt=original.max_memory_in_prompt,
++            use_bm25_prefilter=original.use_bm25_prefilter,
++            keep_thinking=original.keep_thinking,
++            use_structured_tools=original.use_structured_tools)
++        agent._research_candidate = research_candidate
++    elif research_candidate != "U":
+         # Preserve the original trigger, process, two provider calls, BM25 and
+         # reminder consumption. Only the bank and prompt/tool adapters differ.
+         from source_agent import SourceMemoryAgent
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/live_launcher.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/live_launcher.py
+index 3d2049de..15a027dd 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/live_launcher.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/live_launcher.py
+@@ -30,7 +30,8 @@ def _sha(path: Path) -> str:
+ def _native_schema(manifest: dict) -> bool:
+     return manifest.get('schema') in {'pma-ga-live-manifest-v2',
+                                       'pma-ga-live-manifest-v3',
+-                                      'pma-ga-live-manifest-v4'}
++                                      'pma-ga-live-manifest-v4',
++                                      'pma-ga-live-manifest-v5'}
+ 
+ 
+ def _stage_verifier(root: Path, task: str, manifest: dict,
+@@ -45,11 +46,13 @@ def _stage_verifier(root: Path, task: str, manifest: dict,
+     source = official_source_git.resolve(strict=True)
+     members = [{k: v for k, v in item.items() if k != 'raw'}
+                for item in official_members(source, task,
+-                   registered=manifest.get('schema') == 'pma-ga-live-manifest-v4')]
++                   registered=manifest.get('schema') in {
++                       'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5'})]
+     if members != expected.get('official_evaluator_members'):
+         raise RuntimeError('PMA official evaluator members differ from frozen manifest')
+     export_task(source, task, target,
+-                registered=manifest.get('schema') == 'pma-ga-live-manifest-v4')
++                registered=manifest.get('schema') in {
++                    'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5'})
+     identity = {'native_tests_tree_sha256': digest_tree(target),
+                 'native_test_sh_sha256': _sha(target / 'test.sh')}
+     if any(identity[key] != expected[key] for key in identity):
+@@ -79,20 +82,27 @@ def _require_evaluation_state_contract(manifest: dict) -> None:
+         if verify_evidence(evidence, checkout, manifest['planned_order']) != cert.get('evidence'):
+             raise RuntimeError('V3 zero-model evidence changed')
+         return
+-    if manifest.get('schema') == 'pma-ga-live-manifest-v4':
++    if manifest.get('schema') in {'pma-ga-live-manifest-v4',
++                                  'pma-ga-live-manifest-v5'}:
+         if manifest.get('zero_model_fixture_only') is True:
+             return
+         from .single_run_certification import (HARBOR_COMMIT, SOURCE_FILES,
++                                               CANDIDATE_SOURCE_FILES,
+                                                source_identity, verify_evidence)
+         cert = manifest.get('native_shared_certification')
+         checkout = STAGE.parents[2]
++        research = (manifest['planned_order'][0]['research_candidate']
++                    if manifest['schema'] == 'pma-ga-live-manifest-v5' else None)
++        expected_files = CANDIDATE_SOURCE_FILES if research is not None else SOURCE_FILES
+         if (manifest.get('status') != 'prepared_not_executed' or
+                 not isinstance(cert, dict) or cert.get('harbor_commit') != HARBOR_COMMIT or
+-                set(cert.get('source_files', {})) != set(SOURCE_FILES) or
+-                cert.get('source_files') != source_identity(checkout)):
++                set(cert.get('source_files', {})) != set(expected_files) or
++                cert.get('source_files') != source_identity(checkout,
++                    candidate=research is not None)):
+             raise RuntimeError('single-run native lifecycle source certification differs')
+         evidence = (checkout / cert.get('evidence_path', '')).resolve(strict=True)
+-        if not evidence.is_relative_to(checkout) or verify_evidence(evidence) != cert.get('evidence'):
++        if (not evidence.is_relative_to(checkout) or
++                verify_evidence(evidence, research_candidate=research) != cert.get('evidence')):
+             raise RuntimeError('single-run native lifecycle evidence differs')
+         return
+     if manifest.get('schema') == 'pma-ga-live-manifest-v2':
+@@ -271,7 +281,8 @@ def run_live(args) -> dict:
+     if (manifest.get('schema') not in {'pma-ga-live-manifest-v1',
+                                        'pma-ga-live-manifest-v2',
+                                        'pma-ga-live-manifest-v3',
+-                                       'pma-ga-live-manifest-v4'} or
++                                       'pma-ga-live-manifest-v4',
++                                       'pma-ga-live-manifest-v5'} or
+             manifest.get('execution_authorized') is not False or
+             authorized.get('execution_authorized') is not True or
+             authorized.get('manifest_sha256') != _sha(manifest_path)):
+@@ -280,8 +291,14 @@ def run_live(args) -> dict:
+     if fixture != (manifest.get('zero_model_fixture_only') is True and
+                    authorized.get('zero_model_fixture_only') is True):
+         raise RuntimeError('zero-model fixture identity does not match both records')
++    candidate = getattr(args, 'research_candidate', 'U')
++    expected_candidate = (manifest['planned_order'][0]['research_candidate']
++        if manifest['schema'] == 'pma-ga-live-manifest-v5' else 'U')
++    if candidate != expected_candidate or (args.condition == 'A' and candidate != 'U'):
++        raise RuntimeError('PMA candidate differs from frozen plan')
+     if (manifest.get('schema') in {'pma-ga-live-manifest-v3',
+-                                   'pma-ga-live-manifest-v4'} and
++                                   'pma-ga-live-manifest-v4',
++                                   'pma-ga-live-manifest-v5'} and
+             Path(args.ga_source).resolve(strict=True) !=
+             (STAGE.parents[2] / 'GenericAgent-main').resolve(strict=True)):
+         raise RuntimeError('V3 GA source is not the frozen repository bridge')
+@@ -321,6 +338,7 @@ def run_live(args) -> dict:
+         'schema': 'pma-ga-live-run-v1', 'mode': 'authorized_live',
+         'execution_authorized': True, 'order': order, 'task': args.task,
+         'task_id': args.task, 'condition': args.condition, 'run_id': args.run_id,
++        'research_candidate': candidate,
+         'run_root': str(root), 'image_id': prepared['image_id'],
+         'control_root': str(root / 'control'), 'archive_root': str(root / 'archive'),
+         'manifest_path': str(manifest_path), 'manifest_sha256': _sha(manifest_path),
+@@ -398,6 +416,7 @@ def run_live(args) -> dict:
+                 '--requests', str(root / 'control' / 'spool' / 'requests'),
+                 '--responses', str(root / 'control' / 'spool' / 'responses'),
+                 '--deadline-epoch', str(deadline),
++                '--research-candidate', candidate,
+                 *(['--fake-memory', '--fake-memory-update'] if fixture else [])],
+                 cwd=STAGE, env=worker_env,
+                 stdout=worker_logs[0], stderr=worker_logs[1])
+@@ -409,7 +428,8 @@ def run_live(args) -> dict:
+                 time.sleep(.05)
+             ready_data = json.loads(ready.read_text(encoding='utf-8'))
+             if (ready_data.get('run_id'), ready_data.get('task_id'),
+-                    ready_data.get('fake_memory')) != (args.run_id, args.task, fixture):
++                    ready_data.get('fake_memory'), ready_data.get('research_candidate')) != (
++                    args.run_id, args.task, fixture, candidate):
+                 raise RuntimeError('PMA worker identity or transport mode mismatch')
+         else:
+             _worker_clearance(root, None, args.run_id)
+@@ -551,6 +571,7 @@ def run_live(args) -> dict:
+         fake_captures = sorted(fake_requests.glob('*.json')) if fixture else []
+         status = {'schema': manifest['schema'], 'run_id': args.run_id,
+                   'task': args.task, 'condition': args.condition,
++                  'research_candidate': candidate,
+                   'zero_model_fixture_only': fixture,
+                   'fake_provider_captures': len(fake_captures) if fixture else None,
+                   'harbor_return_code': result, 'primary_failure': first_error,
+@@ -625,6 +646,7 @@ def main() -> None:
+     parser.add_argument('--repeat', type=int)
+     parser.add_argument('--task', required=True)
+     parser.add_argument('--condition', choices=('A', 'B'), required=True)
++    parser.add_argument('--research-candidate', choices=('U', 'V1', 'D1'), default='U')
+     parser.add_argument('--task-profile', default='native_claude_cc_vibe_opus48')
+     parser.add_argument('--pma-profile-file')
+     parser.add_argument('--harbor-source-root')
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py
+index b644f741..e69a6901 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py
+@@ -86,13 +86,14 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
+     manifest_path = (STAGE / "FOUR_RUN_MANIFEST_DRAFT.json" if fake_gateway
+                      else Path(args.manifest).resolve(strict=True))
+     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+-    single = not fake_gateway and manifest.get('schema') == 'pma-ga-live-manifest-v4'
++    single = not fake_gateway and manifest.get('schema') in {
++        'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5'}
+     if (args.task not in (manifest.get('assets', {}) if single else TASKS)):
+         raise ValueError('task outside frozen PMA assets')
+     task = root / "public_task"
+     if not fake_gateway and manifest.get("schema") in {
+             "pma-ga-live-manifest-v2", "pma-ga-live-manifest-v3",
+-            "pma-ga-live-manifest-v4"}:
++            "pma-ga-live-manifest-v4", "pma-ga-live-manifest-v5"}:
+         materialize_public(Path(args.official_source_git).resolve(strict=True),
+                            args.task, task, manifest["assets"][args.task]["public_members"],
+                            registered=single)
+@@ -114,7 +115,8 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
+                                    task_network_policy=("official" if not fake_gateway and
+                                        manifest.get("schema") in {
+                                            "pma-ga-live-manifest-v2", "pma-ga-live-manifest-v3",
+-                                           "pma-ga-live-manifest-v4"}
++                                           "pma-ga-live-manifest-v4",
++                                           "pma-ga-live-manifest-v5"}
+                                        else "isolated"))
+     if fake_gateway:
+         _offline_gateway(root, runtime, args.python_home)
+@@ -156,7 +158,7 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
+               "network_mode": ("official_requested" if not fake_gateway and
+                   manifest.get("schema") in {
+                       "pma-ga-live-manifest-v2", "pma-ga-live-manifest-v3",
+-                      "pma-ga-live-manifest-v4"}
++                      "pma-ga-live-manifest-v4", "pma-ga-live-manifest-v5"}
+                   else "none_requested"),
+               "native_evaluator_calls": 0, "fake_provider_only": fake_gateway}
+     (root / "archive" / "prepared.json").write_text(
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py
+index 6d4444b9..99c4435a 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py
+@@ -53,7 +53,8 @@ def verify_live_spec(spec: dict) -> None:
+     bindings = granted.get('run_bindings')
+     if frozen.get('schema') in {'pma-ga-live-manifest-v2',
+                                 'pma-ga-live-manifest-v3',
+-                                'pma-ga-live-manifest-v4'}:
++                                'pma-ga-live-manifest-v4',
++                                'pma-ga-live-manifest-v5'}:
+         if granted.get('manifest_sha256') != spec['manifest_sha256']:
+             raise RuntimeError('six-task approval does not bind manifest bytes')
+         bindings = validate_plan(frozen, granted)
+@@ -64,7 +65,9 @@ def verify_live_spec(spec: dict) -> None:
+                     and Path(b['run_root']).resolve() == Path(spec['run_root']).resolve()]
+         if (len(matching) != 1 or spec.get('task_id') != spec.get('task') or
+                 spec.get('batch_id') != granted['batch_id'] or
+-                spec.get('config_sha256') != frozen['config_sha256']):
++                spec.get('config_sha256') != frozen['config_sha256'] or
++                spec.get('research_candidate', 'U') !=
++                matching[0].get('research_candidate', 'U')):
+             raise RuntimeError('six-task run outside exact authorized binding')
+         checkout = Path(__file__).resolve().parents[3]
+         head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=checkout,
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/prepare_six_task_manifest.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/prepare_six_task_manifest.py
+index d20e0076..dd114f61 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/prepare_six_task_manifest.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/prepare_six_task_manifest.py
+@@ -96,24 +96,35 @@ def _committed_source_sha(checkout: Path, name: str) -> str:
+ 
+ def prepare(source: Path, task_profile: Path, pma_profile: Path,
+             evidence: Path | None = None, plan: dict | None = None) -> dict:
+-    single = plan is not None and plan.get('schema') == 'pma-ga-single-plan-v1'
++    single = plan is not None and plan.get('schema') in {
++        'pma-ga-single-plan-v1', 'pma-ga-single-plan-v2'}
++    candidate = plan.get('research_candidate', 'U') if single else 'U'
+     if plan is None:
+         slots = [dict(order=o, task=t, repeat=r, condition=c)
+                  for o, t, r, c in ORDER]
+         schema = 'pma-ga-live-manifest-v2'
+     elif single:
+-        if (set(plan) != {'schema', 'execution_authorized',
+-                          'official_source_git_commit', 'task', 'condition', 'occurrence'} or
++        versioned = plan['schema'] == 'pma-ga-single-plan-v2'
++        required = {'schema', 'execution_authorized',
++                    'official_source_git_commit', 'task', 'condition', 'occurrence'}
++        if versioned:
++            required.add('research_candidate')
++        if (set(plan) != required or
+                 plan['execution_authorized'] is not False or
+                 plan['official_source_git_commit'] !=
+                 '2fd12b88aafdd04a52c298e3940bcb189f9766d6' or
+                 not isinstance(plan['task'], str) or
+                 plan['condition'] not in {'A', 'B'} or
++                candidate not in ({'U', 'V1', 'D1'} if versioned else {'U'}) or
++                (plan['condition'] == 'A' and candidate != 'U') or
+                 type(plan['occurrence']) is not int or plan['occurrence'] < 1):
+             raise RuntimeError('single-run plan schema mismatch')
+-        slots = [dict(order=1, task=plan['task'],
+-                      repeat=plan['occurrence'], condition=plan['condition'])]
+-        schema = 'pma-ga-live-manifest-v4'
++        slot = dict(order=1, task=plan['task'],
++                    repeat=plan['occurrence'], condition=plan['condition'])
++        if versioned:
++            slot['research_candidate'] = candidate
++        slots = [slot]
++        schema = 'pma-ga-live-manifest-v5' if versioned else 'pma-ga-live-manifest-v4'
+     else:
+         if (plan.get('schema') != 'pma-ga-live-plan-v3' or
+                 plan.get('execution_authorized') is not False or
+@@ -181,6 +192,8 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
+               'pma_profile_name': 'claude_monitor_opus48',
+               'network': 'official_task_network_with_host_credential_gateway',
+               'evaluation': 'native_Harbor_SHARED_pending_lifecycle_certification'}
++    if schema == 'pma-ga-live-manifest-v5':
++        method['research_candidate'] = candidate
+     config_hash = hashlib.sha256(json.dumps(method, sort_keys=True,
+         separators=(',', ':')).encode('utf-8')).hexdigest()
+     certification = None
+@@ -205,16 +218,20 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
+             'source_identity_kind': 'HEAD_Git_blob_bytes_SHA256_with_clean_worktree',
+             'evidence': verify_evidence(evidence, checkout, slots),
+             'harbor_commit': '459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc'}
+-    elif evidence is not None and schema == 'pma-ga-live-manifest-v4':
++    elif evidence is not None and schema in {'pma-ga-live-manifest-v4',
++                                             'pma-ga-live-manifest-v5'}:
+         from .single_run_certification import (HARBOR_COMMIT, source_identity,
+                                                verify_evidence)
+         checkout = STAGE.parents[2]
+         evidence = evidence.resolve(strict=True)
+         if not evidence.is_relative_to(checkout):
+             raise RuntimeError('single-run certification must be committed in repository')
+-        certification = {'source_files': source_identity(checkout),
++        research = candidate if schema == 'pma-ga-live-manifest-v5' else None
++        certification = {'source_files': source_identity(checkout,
++                             candidate=research is not None),
+                          'evidence_path': evidence.relative_to(checkout).as_posix(),
+-                         'evidence': verify_evidence(evidence),
++                         'evidence': verify_evidence(evidence,
++                             research_candidate=research),
+                          'harbor_commit': HARBOR_COMMIT}
+     return {'schema': schema,
+             'status': ('prepared_not_executed' if certification else
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run.py
+index d619c603..88df3ac9 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run.py
+@@ -31,6 +31,10 @@ def prepare(args: argparse.Namespace) -> dict:
+     plan = {'schema': 'pma-ga-single-plan-v1', 'execution_authorized': False,
+             'official_source_git_commit': COMMIT, 'task': args.task,
+             'condition': args.condition, 'occurrence': args.occurrence}
++    candidate = getattr(args, 'research_candidate', 'U')
++    if candidate != 'U':
++        plan['schema'] = 'pma-ga-single-plan-v2'
++        plan['research_candidate'] = candidate
+     _write_new(root / 'plan.json', plan)
+     manifest = prepare_manifest(Path(args.official_source_git).resolve(strict=True),
+         Path(args.task_profile_file).resolve(strict=True),
+@@ -86,6 +90,7 @@ def main() -> None:
+     prepared = commands.add_parser('prepare', help='fixed-Git asset and image check; no calls')
+     prepared.add_argument('--task', required=True)
+     prepared.add_argument('--condition', choices=('A', 'B'), required=True)
++    prepared.add_argument('--research-candidate', choices=('U', 'V1', 'D1'), default='U')
+     prepared.add_argument('--occurrence', type=int, default=1)
+     prepared.add_argument('--output', required=True)
+     prepared.add_argument('--official-source-git', required=True)
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run_certification.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run_certification.py
+index 637025e9..232661d7 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run_certification.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run_certification.py
+@@ -38,6 +38,12 @@ SOURCE_FILES = tuple(dict.fromkeys(V3_SOURCE_FILES + (
+     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+     'harbor_adapter.py',
+ )))
++CANDIDATE_SOURCE_FILES = SOURCE_FILES + (
++    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
++    'episode.py',
++    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
++    'decision_reminder_agent.py',
++)
+ EVIDENCE_FILES = (
+     'execution_identity.json',
+     'live_result.json', 'agent_start_identity.json', 'agent_end_native.json',
+@@ -61,12 +67,14 @@ def _committed_evidence_sha(checkout: Path, path: Path) -> str:
+     return digest
+ 
+ 
+-def verify_evidence(evidence: Path, *, require_committed: bool = True) -> dict:
++def verify_evidence(evidence: Path, *, require_committed: bool = True,
++                    research_candidate: str | None = None) -> dict:
+     checkout = Path(__file__).resolve().parents[3]
+-    current = source_identity(checkout)
+     outcomes = {}
+     hashes = {}
+     for condition in ('A', 'B'):
++        current = source_identity(checkout,
++            candidate=research_candidate is not None and condition == 'B')
+         base = evidence / condition
+         required = [name for name in EVIDENCE_FILES
+                     if condition == 'B' or name != 'memory_payload.jsonl']
+@@ -92,6 +100,10 @@ def verify_evidence(evidence: Path, *, require_committed: bool = True) -> dict:
+             raise RuntimeError(f'generic {condition} fixture execution identity differs')
+         execution = load('native_test_execution.json')
+         synthetic_script = (base / 'synthetic_test.sh').read_bytes()
++        expected_candidate = research_candidate if condition == 'B' else 'U'
++        if (research_candidate is not None and
++                result.get('research_candidate') != expected_candidate):
++            raise RuntimeError('candidate fixture ran a different strategy')
+         if (result.get('condition') != condition or
+                 result.get('zero_model_fixture_only') is not True or
+                 result.get('harbor_return_code') != 0 or
+@@ -148,8 +160,9 @@ def verify_evidence(evidence: Path, *, require_committed: bool = True) -> dict:
+     return {'outcomes': outcomes, 'file_sha256': hashes}
+ 
+ 
+-def source_identity(checkout: Path) -> dict:
+-    return {name: _committed_source_sha(checkout, name) for name in SOURCE_FILES}
++def source_identity(checkout: Path, *, candidate: bool = False) -> dict:
++    files = CANDIDATE_SOURCE_FILES if candidate else SOURCE_FILES
++    return {name: _committed_source_sha(checkout, name) for name in files}
+ 
+ 
+ def vendor_identity(checkout: Path) -> dict:
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run_fixture.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run_fixture.py
+index 8fbeec34..53ec653f 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run_fixture.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run_fixture.py
+@@ -17,6 +17,7 @@ def main() -> None:
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('--task', required=True)
+     parser.add_argument('--condition', choices=('A', 'B'), required=True)
++    parser.add_argument('--research-candidate', choices=('U', 'V1', 'D1'), default='U')
+     parser.add_argument('--output', type=Path, required=True)
+     for name in ('official-source-git', 'task-profile-file', 'pma-profile-file',
+                  'ga-source', 'runtime-root', 'worker-python', 'harbor-python',
+@@ -28,6 +29,7 @@ def main() -> None:
+     root = args.output.resolve(strict=False)
+     identity = prepare(argparse.Namespace(output=str(root), task=args.task,
+         condition=args.condition, occurrence=1, fake_only=True,
++        research_candidate=args.research_candidate,
+         official_source_git=args.official_source_git,
+         task_profile_file=args.task_profile_file,
+         pma_profile_file=args.pma_profile_file))
+@@ -42,7 +44,8 @@ def main() -> None:
+     if subprocess.run(['git', 'diff', '--quiet', 'HEAD'],
+                       cwd=args.harbor_source_root).returncode:
+         raise RuntimeError('fixture Harbor tracked source differs from commit')
+-    execution = {'code_commit': head, 'source_files': source_identity(checkout),
++    execution = {'code_commit': head, 'source_files': source_identity(checkout,
++                     candidate=args.research_candidate != 'U'),
+                  'vendor_files': vendor_identity(checkout),
+                  'harbor_commit': harbor_head,
+                  'pma_vendor_commit': manifest['pma_vendor_commit']}
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/six_task_plan.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/six_task_plan.py
+index 21e1fad0..a89b21c4 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/six_task_plan.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/six_task_plan.py
+@@ -33,11 +33,12 @@ ORDER = (
+ 
+ 
+ def _identity(row: dict) -> tuple:
+-    return tuple(row.get(k) for k in ("order", "task", "repeat", "condition"))
++    return tuple(row.get(k) for k in ("order", "task", "repeat", "condition",
++                                      "research_candidate"))
+ 
+ 
+ def validate_plan(manifest: dict, granted: dict) -> list[dict]:
+-    if manifest.get('schema') == 'pma-ga-live-manifest-v4':
++    if manifest.get('schema') in {'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5'}:
+         arms = manifest.get('planned_order')
+         bindings = granted.get('run_bindings')
+         if (manifest.get('execution_authorized') is not False or
+@@ -48,9 +49,17 @@ def validate_plan(manifest: dict, granted: dict) -> list[dict]:
+                 not isinstance(granted.get('output_root'), str)):
+             raise RuntimeError('single-run authorization incomplete')
+         row, bound = arms[0], bindings[0]
+-        if (set(row) != {'order', 'task', 'repeat', 'condition'} or
++        versioned = manifest['schema'] == 'pma-ga-live-manifest-v5'
++        expected = {'order', 'task', 'repeat', 'condition'}
++        if versioned:
++            expected.add('research_candidate')
++        if (set(row) != expected or
+                 row['order'] != 1 or type(row['repeat']) is not int or
+                 row['repeat'] < 1 or row['condition'] not in {'A', 'B'} or
++                row.get('research_candidate', 'U') not in {'U', 'V1', 'D1'} or
++                (row['condition'] == 'A' and row.get('research_candidate', 'U') != 'U') or
++                (versioned and manifest.get('config', {}).get('research_candidate') !=
++                 row['research_candidate']) or
+                 set(manifest.get('assets', {})) != {row['task']} or
+                 _identity(bound) != _identity(row) or
+                 bound.get('run_id') != granted.get('run_id') or
+@@ -113,8 +122,8 @@ def validate_plan(manifest: dict, granted: dict) -> list[dict]:
+     arms = manifest.get("planned_order")
+     bindings = granted.get("run_bindings")
+     if (not isinstance(arms, list) or not isinstance(bindings, list) or
+-            tuple(map(_identity, arms)) != ORDER or
+-            tuple(map(_identity, bindings)) != ORDER or
++            tuple(_identity(row)[:4] for row in arms) != ORDER or
++            tuple(_identity(row)[:4] for row in bindings) != ORDER or
+             granted.get("approved_arms") != arms):
+         raise RuntimeError("six-task order or complete approval differs")
+     batch_id = granted.get("batch_id")
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_decision_reminder_agent.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_decision_reminder_agent.py
+new file mode 100644
+index 00000000..a4e56743
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_decision_reminder_agent.py
+@@ -0,0 +1,123 @@
++"""No-provider checks for the U/V1/D1 Phase-2-only comparison."""
++
++import asyncio
++import copy
++from pathlib import Path
++from tempfile import TemporaryDirectory
++from types import SimpleNamespace
++import unittest
++from unittest.mock import patch
++
++from harbor.llms.base import LLMResponse
++from memory_agent.memory.memory_agent import (BANK_TOOLS, PHASE1_SYSTEM,
++                                              PHASE2_SYSTEM, MemoryAgent)
++from memory_agent.memory.universal_memory import UniversalMemory
++
++from decision_reminder_agent import (D1_SYSTEM, D1_TASK, DecisionReminderAgent,
++                                     UPSTREAM_TASK, V1_SYSTEM_REPLACEMENTS,
++                                     phase2_prompt, phase2_system)
++from episode import construct_upstream
++from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.six_task_plan import validate_plan
++
++
++class DecisionReminderTest(unittest.TestCase):
++    def test_candidate_binding_rejects_tampering(self):
++        slot = {'order': 1, 'task': 'fixed-task', 'repeat': 1,
++                'condition': 'B', 'research_candidate': 'D1'}
++        manifest = {'schema': 'pma-ga-live-manifest-v5',
++                    'execution_authorized': False, 'planned_order': [slot],
++                    'assets': {'fixed-task': {}}, 'config_sha256': 'a' * 64,
++                    'config': {'research_candidate': 'D1'}}
++        with TemporaryDirectory() as temporary:
++            bound = {**slot, 'run_id': 'one', 'run_root': str(Path(temporary) / 'one'),
++                     'batch_id': 'batch', 'config_sha256': 'a' * 64}
++            granted = {'execution_authorized': True, 'approved_arms': [slot],
++                       'run_bindings': [bound], 'run_id': 'one',
++                       'batch_id': 'batch', 'config_sha256': 'a' * 64,
++                       'output_root': temporary}
++            self.assertEqual(validate_plan(manifest, granted), [bound])
++            for change in ({'research_candidate': 'V1'},
++                           {'research_candidate': 'unknown'},
++                           {'condition': 'A'}):
++                altered = copy.deepcopy(manifest)
++                altered['planned_order'][0].update(change)
++                with self.assertRaises(RuntimeError):
++                    validate_plan(altered, granted)
++            legacy = copy.deepcopy(manifest)
++            legacy['schema'] = 'pma-ga-live-manifest-v4'
++            legacy['planned_order'][0].pop('research_candidate')
++            legacy['config'].pop('research_candidate')
++            old_grant = copy.deepcopy(granted)
++            old_grant['approved_arms'][0].pop('research_candidate')
++            old_grant['run_bindings'][0].pop('research_candidate')
++            self.assertEqual(validate_plan(legacy, old_grant), old_grant['run_bindings'])
++
++    def test_exact_phase2_contract(self):
++        upstream = MemoryAgent(memory=UniversalMemory())
++        original = upstream._build_phase2_prompt('visible trajectory', 7)
++        self.assertTrue(original.endswith(UPSTREAM_TASK))
++        d1 = phase2_prompt(original, 'D1')
++        v1 = phase2_prompt(original, 'V1')
++        self.assertEqual(d1[:-len('## Your Task\n' + D1_TASK + '\n')],
++                         original[:-len(UPSTREAM_TASK)])
++        self.assertEqual(v1.count('failing to apply'), 1)
++        self.assertEqual(phase2_system('D1'), D1_SYSTEM)
++        expected = PHASE2_SYSTEM
++        for old, new in V1_SYSTEM_REPLACEMENTS:
++            self.assertEqual(expected.count(old), 1)
++            expected = expected.replace(old, new, 1)
++        self.assertEqual(phase2_system('V1'), expected)
++        self.assertEqual(PHASE2_SYSTEM.count('already visible in the recent trajectory'), 2)
++        with self.assertRaises(RuntimeError):
++            phase2_prompt(original + ' extra', 'D1')
++        with self.assertRaises(RuntimeError):
++            phase2_prompt(UPSTREAM_TASK + original, 'D1')
++
++    def test_real_constructor_and_two_phase_requests(self):
++        all_requests = {}
++        banks = {}
++        with TemporaryDirectory() as temporary:
++            for index, variant in enumerate(('U', 'D1', 'V1', 'U')):
++                agent = construct_upstream(Path(temporary) / str(index),
++                                           research_candidate=variant)
++                self.assertIs(agent._memory_agent.memory, agent._memory)
++                self.assertIsInstance(agent._memory_agent,
++                    MemoryAgent if variant == 'U' else DecisionReminderAgent)
++                self.assertNotIn('SourceMemory', type(agent._memory).__name__)
++                calls = []
++
++                async def fake_call(*, prompt, system, tools=None):
++                    calls.append({'prompt': prompt, 'system': system, 'tools': tools})
++                    if tools:
++                        tool = SimpleNamespace(function=SimpleNamespace(
++                            name='memory_save_knowledge',
++                            arguments={'content': 'Remember the public constraint.'}))
++                        return LLMResponse(content='', tool_calls=[tool])
++                    return LLMResponse(content='<context_for_action>Check the public constraint.</context_for_action>')
++
++                agent._memory_llm.call = fake_call
++                with patch.object(agent._memory, '_generate_id', return_value='same-id'):
++                    result = asyncio.run(agent._memory_agent.process('public task and trace', 2))
++                self.assertTrue(result.should_inject)
++                self.assertEqual(len(calls), 2)
++                self.assertEqual(calls[0]['system'], PHASE1_SYSTEM)
++                self.assertEqual(calls[0]['tools'], BANK_TOOLS)
++                self.assertIsNone(calls[1]['tools'])
++                self.assertIn('[same-id] Remember the public constraint.', calls[1]['prompt'])
++                self.assertEqual(calls[1]['system'],
++                    PHASE2_SYSTEM if variant == 'U' else phase2_system(variant))
++                all_requests[f'{index}-{variant}'] = calls
++                banks[f'{index}-{variant}'] = agent._memory.to_dict()
++        self.assertEqual(all_requests['0-U'], all_requests['3-U'])
++        self.assertEqual(all_requests['0-U'][0], all_requests['1-D1'][0])
++        self.assertEqual(all_requests['0-U'][0], all_requests['2-V1'][0])
++        self.assertEqual(banks['0-U']['knowledge'][0]['content'],
++                         banks['1-D1']['knowledge'][0]['content'])
++        self.assertEqual(all_requests['1-D1'][1]['prompt'],
++                         phase2_prompt(all_requests['0-U'][1]['prompt'], 'D1'))
++        self.assertEqual(all_requests['2-V1'][1]['prompt'],
++                         phase2_prompt(all_requests['0-U'][1]['prompt'], 'V1'))
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_single_run_offline.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_single_run_offline.py
+index daca0b41..a3d7cf10 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_single_run_offline.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_single_run_offline.py
+@@ -22,8 +22,12 @@ class SingleRunOfflineTests(unittest.TestCase):
+     def test_committed_fixture_binds_executed_source_and_bytes(self):
+         from tempfile import TemporaryDirectory
+         from unittest.mock import patch
+-        fixture = (Path(__file__).parent / 'generic_single_run_20261015' /
+-                   'certification_fixture_v5')
++        old_fixture = (Path(__file__).parent / 'generic_single_run_20261015' /
++                       'certification_fixture_v5')
++        with self.assertRaises(RuntimeError):
++            verify_evidence(old_fixture)
++        fixture = (Path(__file__).parent / 'decision_reminder_v1_20261017' /
++                   'certification_fixture_u')
+         self.assertEqual(set(verify_evidence(fixture)['outcomes']), {'A', 'B'})
+         with patch('method_discovery.curator_supervisor_convergence_v0.'
+                    'pma_full_upstream_ga_v1_20261013.single_run_certification.'
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/worker_main.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/worker_main.py
+index 9c2be14f..2c3f3517 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/worker_main.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/worker_main.py
+@@ -175,7 +175,7 @@ def main() -> None:
+     parser.add_argument("--deadline-epoch", type=float, required=True)
+     parser.add_argument("--fake-memory", action="store_true")
+     parser.add_argument("--fake-memory-update", action="store_true")
+-    parser.add_argument("--research-candidate", choices=("U", "S", "R"), default="U")
++    parser.add_argument("--research-candidate", choices=("U", "V1", "D1", "S", "R", "S2", "R2"), default="U")
+     asyncio.run(serve(parser.parse_args()))
+ 
+ 
