@@ -39,9 +39,17 @@ def _docker_top_pids(output: str) -> set[str]:
     return pids
 
 
-def pos_archive_summary(run_id: str, task_id: str, terminal: dict,
-                        result_receipt: dict, close_receipt: dict) -> dict:
+def pos_archive_summary(run_id: str, task_id: str, terminal: dict | None,
+                        result_receipt: dict, close_receipt: dict,
+                        terminal_error_category: str | None = None) -> dict:
     """Summarize bound receipts without conflating Task completion and archive health."""
+    known = terminal is not None
+    finalization = terminal.get('pos_finalization') if known else None
+    finalization = finalization if isinstance(finalization, dict) else {}
+    errors = terminal.get('pos_auxiliary_errors') if known else None
+    errors = ([{'kind': item.get('kind'), 'error_type': item.get('error_type')}
+               for item in errors if isinstance(item, dict)]
+              if isinstance(errors, list) else [])
     return {
         'run_id': run_id, 'task_id': task_id,
         'result_status': result_receipt.get('status'),
@@ -51,11 +59,18 @@ def pos_archive_summary(run_id: str, task_id: str, terminal: dict,
         'close_bound': (close_receipt.get('run_id') == run_id and
                         close_receipt.get('task_id') == task_id),
         'worker_return_code': close_receipt.get('worker_return_code'),
-        'task_result': terminal['result'],
-        'task_archive_incomplete': terminal['pos_archive_incomplete'],
-        'auxiliary_errors': terminal['pos_auxiliary_errors'],
-        'archive_incomplete': (terminal['pos_archive_incomplete'] or
-            terminal['pos_finalization'].get('archive_incomplete') is True or
+        'task_terminal_status': ('partial' if terminal_error_category == 'missing_fields'
+                                 else 'available' if known else 'unavailable'),
+        'task_terminal_error_category': terminal_error_category,
+        'task_result': (terminal.get('result') if isinstance(terminal.get('result'), str)
+                        else None) if known else None,
+        'task_archive_incomplete': (terminal.get('pos_archive_incomplete') if
+                                    type(terminal.get('pos_archive_incomplete')) is bool
+                                    else None) if known else None,
+        'auxiliary_errors': errors,
+        'archive_incomplete': (not known or terminal_error_category is not None or
+            terminal.get('pos_archive_incomplete') is True or
+            finalization.get('archive_incomplete') is True or
             result_receipt.get('status') in {'missing', 'missing_or_unknown', None}),
     }
 
@@ -458,16 +473,33 @@ class NativeSharedTrialHooks(PMATrialHooks):
                 except (OSError, ValueError):
                     return {'status': 'missing_or_unknown'}
             result_receipt, close_receipt = read_receipt(result_path), read_receipt(close_path)
-            terminal_read = await self.trial.agent_environment.exec(
-                'cat /logs/agent/task_terminal.json', timeout_sec=30, user='root')
-            if terminal_read.return_code:
-                raise RuntimeError('PoS Task terminal receipt unavailable')
-            terminal = json.loads(terminal_read.stdout)
-            if not self.terminal_identity_valid(terminal):
-                raise RuntimeError('PoS Task terminal identity unavailable')
+            terminal, terminal_error = None, None
+            try:
+                terminal_read = await self.trial.agent_environment.exec(
+                    'cat /logs/agent/task_terminal.json', timeout_sec=30, user='root')
+                if terminal_read.return_code:
+                    terminal_error = 'cat_nonzero'
+                else:
+                    try:
+                        candidate = json.loads(terminal_read.stdout)
+                    except (TypeError, ValueError):
+                        terminal_error = 'invalid_json'
+                    else:
+                        if not isinstance(candidate, dict):
+                            terminal_error = 'invalid_shape'
+                        elif (candidate.get('run_id') not in (None, self.spec['run_id']) or
+                              candidate.get('task_id') not in (None, self.spec['task_id'])):
+                            raise RuntimeError('PoS Task terminal identity conflict')
+                        elif self.terminal_identity_valid(candidate):
+                            terminal = candidate
+                        else:
+                            terminal = candidate
+                            terminal_error = 'missing_fields'
+            except (OSError, TimeoutError):
+                terminal_error = 'read_error'
             _atomic(self.archive / 'pos_archive_status.json', pos_archive_summary(
                 self.spec['run_id'], self.spec['task_id'], terminal,
-                result_receipt, close_receipt))
+                result_receipt, close_receipt, terminal_error))
 
     async def verification_start(self, event):
         ended = json.loads((self.archive / 'agent_end_native.json').read_text(encoding='utf-8'))
