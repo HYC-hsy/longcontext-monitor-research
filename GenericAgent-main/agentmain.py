@@ -93,6 +93,22 @@ def checkpoint_turn_offset(checkpoint_dir):
 # agent = GenericAgent(); threading.Thread(target=agent.run, daemon=True).start()
 # output1_queue = agent.put_task(prompt1)
 # output2_queue = agent.put_task(prompt2)
+def build_task_terminal_record(run_id, task_id, terminal, pma_finalization,
+                               pos_finalization=None):
+    record = {'run_id': run_id, 'task_id': task_id,
+              'result': terminal.get('result') if isinstance(terminal, dict) else None,
+              'pma_finalization': pma_finalization}
+    if pos_finalization is not None:
+        errors = (terminal or {}).get('pos_auxiliary_errors', [])
+        record.update(pos_finalization=pos_finalization,
+            pos_archive_incomplete=bool((terminal or {}).get('pos_archive_incomplete') or
+                                        pos_finalization.get('archive_incomplete')),
+            pos_auxiliary_errors=[{'kind': row.get('kind'),
+                                   'error_type': row.get('error_type')}
+                                  for row in errors])
+    return record
+
+
 class GenericAgent:
     def __init__(self):
         os.makedirs(os.path.join(script_dir, 'temp'), exist_ok=True)
@@ -437,7 +453,7 @@ class GenericAgent:
                 gen = wrap_generator(gen, identity, JsonlEventSink(event_path) if event_path else None)
             manual_inbox = None
             pma_finalization = {'status': 'not_enabled'}
-            def pos_finalization():
+            def pos_finalization(terminal=None):
                 if os.environ.get('GA_POS_ENABLED') != '1':
                     return None
                 from pathlib import Path
@@ -453,10 +469,14 @@ class GenericAgent:
                              closed.get('task_id') == result.get('task_id'))
                     return {'status': result.get('status') if bound else 'identity_mismatch',
                             'receipt_bound': bound, 'close_status': closed.get('status'),
-                            'worker_return_code': closed.get('worker_return_code')}
+                            'worker_return_code': closed.get('worker_return_code'),
+                            'archive_incomplete': bool((terminal or {}).get('pos_archive_incomplete')),
+                            'auxiliary_errors': (terminal or {}).get('pos_auxiliary_errors', [])}
                 except (OSError, ValueError) as error:
                     return {'status': 'missing_or_unknown',
-                            'error_type': type(error).__name__}
+                            'error_type': type(error).__name__,
+                            'archive_incomplete': True,
+                            'auxiliary_errors': (terminal or {}).get('pos_auxiliary_errors', [])}
             def finalize_upstream_pma(terminal):
                 nonlocal pma_finalization
                 upstream_pma = getattr(self, 'pma_upstream_bridge', None)
@@ -509,7 +529,7 @@ class GenericAgent:
                 display_queue.put({'done': full_resp, 'source': source, 'turn': curr_turn,
                                    'outputs': turn_resps.copy(), 'task_terminal': task_terminal,
                                    'pma_finalization': pma_finalization,
-                                   'pos_finalization': pos_finalization()})
+                                   'pos_finalization': pos_finalization(task_terminal)})
                 self.history = handler.history_info
             except Exception as e:
                 print(f"Backend Error: {format_error(e)}")
@@ -519,7 +539,7 @@ class GenericAgent:
                                    'turn': curr_turn, 'outputs': turn_resps.copy(),
                                    'task_terminal': task_terminal,
                                    'pma_finalization': pma_finalization,
-                                   'pos_finalization': pos_finalization()})
+                                   'pos_finalization': pos_finalization(task_terminal)})
             finally:
                 finalize_upstream_pma(task_terminal)
                 if manual_inbox is not None:
@@ -595,15 +615,12 @@ if __name__ == '__main__':
                     with open(outfile, 'w', encoding='utf-8') as f: f.write(item.get('next', ''))
             if args.task and os.environ.get('GA_BENCH_RUN_ID') and os.path.isdir('/logs/agent'):
                 terminal = item.get('task_terminal')
-                terminal_record = {
-                    'run_id': os.environ['GA_BENCH_RUN_ID'],
-                    'task_id': os.environ.get('GA_BENCH_TASK_ID'),
-                    'result': terminal.get('result') if isinstance(terminal, dict) else None,
-                    'pma_finalization': item.get('pma_finalization', {'status': 'not_enabled'}),
-                }
-                if os.environ.get('GA_POS_ENABLED') == '1':
-                    terminal_record['pos_finalization'] = item.get('pos_finalization') or {
-                        'status': 'missing_or_unknown'}
+                terminal_record = build_task_terminal_record(
+                    os.environ['GA_BENCH_RUN_ID'], os.environ.get('GA_BENCH_TASK_ID'),
+                    terminal, item.get('pma_finalization', {'status': 'not_enabled'}),
+                    (item.get('pos_finalization') or {'status': 'missing_or_unknown',
+                      'archive_incomplete': True})
+                    if os.environ.get('GA_POS_ENABLED') == '1' else None)
                 terminal_path = '/logs/agent/task_terminal.json'
                 with open(terminal_path + '.pending', 'x', encoding='utf-8') as f:
                     json.dump(terminal_record, f, sort_keys=True)

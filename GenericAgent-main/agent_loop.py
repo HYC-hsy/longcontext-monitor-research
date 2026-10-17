@@ -89,7 +89,7 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
             # The host action/terminal is already known in memory. Archive
             # failure is auxiliary, never a change to the Task result.
             pos_auxiliary_errors.append({'kind': kind, 'error_type':
-                                         type(error).__name__, 'error': str(error)})
+                                         type(error).__name__})
     if os.environ.get('GA_POS_ENABLED') == '1':
         if any(os.environ.get(name) == '1' for name in (
                 'GA_PMA_UPSTREAM_ENABLED', 'GA_PMA_ENABLED',

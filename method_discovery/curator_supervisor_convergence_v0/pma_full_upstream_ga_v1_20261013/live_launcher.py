@@ -48,12 +48,14 @@ def _stage_verifier(root: Path, task: str, manifest: dict,
     members = [{k: v for k, v in item.items() if k != 'raw'}
                for item in official_members(source, task,
                    registered=manifest.get('schema') in {
-                       'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5'})]
+                       'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5',
+                       'pos-ga-single-manifest-v1'})]
     if members != expected.get('official_evaluator_members'):
         raise RuntimeError('PMA official evaluator members differ from frozen manifest')
     export_task(source, task, target,
                 registered=manifest.get('schema') in {
-                    'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5'})
+                    'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5',
+                    'pos-ga-single-manifest-v1'})
     identity = {'native_tests_tree_sha256': digest_tree(target),
                 'native_test_sh_sha256': _sha(target / 'test.sh')}
     if any(identity[key] != expected[key] for key in identity):

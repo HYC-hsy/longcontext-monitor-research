@@ -39,6 +39,27 @@ def _docker_top_pids(output: str) -> set[str]:
     return pids
 
 
+def pos_archive_summary(run_id: str, task_id: str, terminal: dict,
+                        result_receipt: dict, close_receipt: dict) -> dict:
+    """Summarize bound receipts without conflating Task completion and archive health."""
+    return {
+        'run_id': run_id, 'task_id': task_id,
+        'result_status': result_receipt.get('status'),
+        'result_bound': (result_receipt.get('run_id') == run_id and
+                         result_receipt.get('task_id') == task_id),
+        'close_status': close_receipt.get('status'),
+        'close_bound': (close_receipt.get('run_id') == run_id and
+                        close_receipt.get('task_id') == task_id),
+        'worker_return_code': close_receipt.get('worker_return_code'),
+        'task_result': terminal['result'],
+        'task_archive_incomplete': terminal['pos_archive_incomplete'],
+        'auxiliary_errors': terminal['pos_auxiliary_errors'],
+        'archive_incomplete': (terminal['pos_archive_incomplete'] or
+            terminal['pos_finalization'].get('archive_incomplete') is True or
+            result_receipt.get('status') in {'missing', 'missing_or_unknown', None}),
+    }
+
+
 def verify_live_spec(spec: dict) -> None:
     if spec.get('schema') != 'pma-ga-live-run-v1' or spec.get('mode') != 'authorized_live':
         raise RuntimeError('PMA live Harbor spec is not authorized')
@@ -143,11 +164,14 @@ class PMATrialHooks(PilotTrialHooks):
         if condition == 'P':
             return (isinstance(terminal, dict) and
                 set(terminal) == {'run_id', 'task_id', 'result',
-                                  'pma_finalization', 'pos_finalization'} and
+                                  'pma_finalization', 'pos_finalization',
+                                  'pos_archive_incomplete', 'pos_auxiliary_errors'} and
                 terminal.get('run_id') == self.spec['run_id'] and
                 terminal.get('task_id') == self.spec['task_id'] and
                 terminal.get('pma_finalization') == {'status': 'not_enabled'} and
-                isinstance(terminal.get('pos_finalization'), dict))
+                isinstance(terminal.get('pos_finalization'), dict) and
+                isinstance(terminal.get('pos_archive_incomplete'), bool) and
+                isinstance(terminal.get('pos_auxiliary_errors'), list))
         pma_status = {'A': 'not_enabled', 'B': 'saved'}.get(condition)
         return (pma_status is not None and isinstance(terminal, dict) and
                 set(terminal) == {'run_id', 'task_id', 'result', 'pma_finalization'} and
@@ -434,17 +458,16 @@ class NativeSharedTrialHooks(PMATrialHooks):
                 except (OSError, ValueError):
                     return {'status': 'missing_or_unknown'}
             result_receipt, close_receipt = read_receipt(result_path), read_receipt(close_path)
-            _atomic(self.archive / 'pos_archive_status.json', {
-                'run_id': self.spec['run_id'], 'task_id': self.spec['task_id'],
-                'result_status': result_receipt.get('status'),
-                'result_bound': (result_receipt.get('run_id') == self.spec['run_id'] and
-                                 result_receipt.get('task_id') == self.spec['task_id']),
-                'close_status': close_receipt.get('status'),
-                'close_bound': (close_receipt.get('run_id') == self.spec['run_id'] and
-                                close_receipt.get('task_id') == self.spec['task_id']),
-                'worker_return_code': close_receipt.get('worker_return_code'),
-                'archive_incomplete': result_receipt.get('status') in
-                    {'missing', 'missing_or_unknown', None}})
+            terminal_read = await self.trial.agent_environment.exec(
+                'cat /logs/agent/task_terminal.json', timeout_sec=30, user='root')
+            if terminal_read.return_code:
+                raise RuntimeError('PoS Task terminal receipt unavailable')
+            terminal = json.loads(terminal_read.stdout)
+            if not self.terminal_identity_valid(terminal):
+                raise RuntimeError('PoS Task terminal identity unavailable')
+            _atomic(self.archive / 'pos_archive_status.json', pos_archive_summary(
+                self.spec['run_id'], self.spec['task_id'], terminal,
+                result_receipt, close_receipt))
 
     async def verification_start(self, event):
         ended = json.loads((self.archive / 'agent_end_native.json').read_text(encoding='utf-8'))

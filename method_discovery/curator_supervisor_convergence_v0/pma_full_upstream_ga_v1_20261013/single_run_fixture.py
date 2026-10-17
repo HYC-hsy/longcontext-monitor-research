@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -58,6 +59,13 @@ def main() -> None:
                  'harbor_commit': harbor_head,
                  **({'upstream_commit': manifest['upstream_commit']} if args.condition == 'P'
                     else {'pma_vendor_commit': manifest['pma_vendor_commit']})}
+    if args.condition == 'P':
+        from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import SOURCE_FILES
+        execution['git_blob_source_files'] = {
+            name: hashlib.sha256(subprocess.run(
+                ['git', 'cat-file', 'blob', f'{head}:{name}'], cwd=checkout,
+                capture_output=True, check=True).stdout).hexdigest()
+            for name in SOURCE_FILES}
     (root / 'execution_identity.json').write_text(
         json.dumps(execution, sort_keys=True, indent=2), encoding='utf-8')
     binding = dict(manifest['planned_order'][0], run_id=identity['run_id'],

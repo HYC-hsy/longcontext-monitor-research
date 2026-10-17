@@ -161,6 +161,18 @@ class SeamTests(unittest.TestCase):
             self.assertIn('CURRENT_OBSERVATION_MARKER', json.dumps(captured[1]))
             self.assertIn('<summary>', json.dumps(captured[0]))
             self.assertEqual(len(backend.history), 1)
+            capture_path = os.environ.get('POS_AUDIT_THREE_HTTP_CAPTURE')
+            if capture_path:
+                public = {'schema': 'pos-three-http-fake-capture-v1',
+                          'transport': 'patched_requests_post_no_provider',
+                          'requests': captured, 'fixture_response_blocks': responses,
+                          'parsed_outcome': outcome,
+                          'assertions': {'requests': 3,
+                              'persistent_constraint_each_request': True,
+                              'old_history_and_working_memory_absent': True,
+                              'hidden_thinking_absent_from_requests': True}}
+                Path(capture_path).write_text(json.dumps(public, ensure_ascii=False,
+                    indent=2, default=str), encoding='utf-8')
 
     def test_actual_ga_current_instruction_source_and_lifetime(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -495,6 +507,25 @@ class SeamTests(unittest.TestCase):
             self.assertEqual(outcome['result'], 'CURRENT_TASK_DONE')
             self.assertTrue(outcome['pos_archive_incomplete'])
             receipt = json.loads((root / 'events.result.json').read_text(encoding='utf-8'))
+            closed = json.loads((root / 'events.close.json').read_text(encoding='utf-8'))
+            self.assertEqual(receipt['status'], 'completed')
+            self.assertEqual(closed['status'], 'graceful_exit')
+            from agentmain import build_task_terminal_record
+            from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.pma_harbor_hooks import pos_archive_summary
+            final = {'status': receipt['status'], 'close_status': closed['status'],
+                     'worker_return_code': closed['worker_return_code'],
+                     'archive_incomplete': outcome['pos_archive_incomplete'],
+                     'auxiliary_errors': outcome['pos_auxiliary_errors']}
+            terminal = build_task_terminal_record('run', 'task', outcome,
+                {'status': 'not_enabled'}, final)
+            summary = pos_archive_summary('run', 'task', terminal,
+                {**receipt, 'run_id': 'run', 'task_id': 'task'},
+                {**closed, 'run_id': 'run', 'task_id': 'task'})
+            self.assertEqual(terminal['result'], 'CURRENT_TASK_DONE')
+            self.assertTrue(terminal['pos_archive_incomplete'])
+            self.assertTrue(summary['archive_incomplete'])
+            self.assertEqual(summary['task_result'], 'CURRENT_TASK_DONE')
+            self.assertEqual(summary['auxiliary_errors'], outcome['pos_auxiliary_errors'])
             self.assertIn('public done', json.dumps(receipt))
             self.assertNotIn('PRIVATE_NATIVE_CANARY', json.dumps(receipt))
             self.assertNotIn('private raw', json.dumps(receipt))

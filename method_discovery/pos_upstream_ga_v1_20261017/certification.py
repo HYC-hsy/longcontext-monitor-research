@@ -61,8 +61,24 @@ def verify_evidence(directory: Path, *, require_committed: bool = True) -> dict:
         ('events.result.json', 'events.close.json', 'native_test_execution.json',
          'writer_termination_check.json'))
     from .single_manifest import source_hashes, vendor_hashes
+    from .single_manifest import SOURCE_FILES
+    committed_sources = {name: hashlib.sha256(subprocess.run(
+        ['git', 'cat-file', 'blob', f"{identity.get('code_commit')}:{name}"],
+        cwd=ROOT, capture_output=True, check=True).stdout).hexdigest()
+        for name in SOURCE_FILES}
+    prepared = load('prepared.json')
+    bundled = prepared.get('executed_pos_source_sha256')
+    executed_names = ('agent_loop.py', 'agentmain.py', 'ga.py', 'llmcore.py',
+                      'pos_bridge.py', 'pos_runtime/worker.py',
+                      'pos_runtime/episode.py')
+    expected_executed = {name: identity['source_files'][
+        ('method_discovery/pos_upstream_ga_v1_20261017/' + Path(name).name)
+        if name.startswith('pos_runtime/') else 'GenericAgent-main/' + name]
+        for name in executed_names}
     script = (base / 'normal/synthetic_test.sh').read_text(encoding='utf-8')
-    if (identity.get('harbor_commit') != HARBOR_COMMIT or
+    if (identity.get('git_blob_source_files') != committed_sources or
+            bundled != expected_executed or
+            identity.get('harbor_commit') != HARBOR_COMMIT or
             identity.get('upstream_commit') != UPSTREAM or
             identity.get('source_files') != source_hashes() or
             identity.get('vendor_files') != vendor_hashes() or

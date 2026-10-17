@@ -140,6 +140,20 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
                                            "pma-ga-live-manifest-v5",
                                            "pos-ga-single-manifest-v1"}
                                        else "isolated"))
+    executed_pos_sources = {}
+    if pos:
+        for name in ('agent_loop.py', 'agentmain.py', 'ga.py', 'llmcore.py',
+                     'pos_bridge.py', 'pos_runtime/worker.py',
+                     'pos_runtime/episode.py'):
+            staged = source / name
+            actual = hashlib.sha256(staged.read_bytes()).hexdigest()
+            frozen_name = ('method_discovery/pos_upstream_ga_v1_20261017/' +
+                           Path(name).name if name.startswith('pos_runtime/') else
+                           'GenericAgent-main/' + name)
+            expected = manifest['source_files_sha256'][frozen_name]
+            if actual != expected:
+                raise RuntimeError('PoS bundled execution source differs: ' + name)
+            executed_pos_sources[name] = actual
     if fake_gateway:
         _offline_gateway(root, runtime, args.python_home)
     if fake_gateway and getattr(args, "multiturn_fixture", False):
@@ -189,6 +203,7 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
               "image": image_tag, **identity,
               "public_task_tree_sha256": digest_tree(task),
               "ga_bundle_tree_sha256": digest_tree(source),
+              **({"executed_pos_source_sha256": executed_pos_sources} if pos else {}),
               "source_profile_file_sha256": hashlib.sha256(
                   Path(args.task_profile_file).read_bytes()).hexdigest(),
               "worker_private_mounted": "not_yet_inspected",
