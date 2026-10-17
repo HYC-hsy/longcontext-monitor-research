@@ -1,0 +1,505 @@
+﻿diff --git a/.gitattributes b/.gitattributes
+index b23d95ca..a95ef03f 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -1,3 +1,5 @@
+ method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/posthoc_20261014/** -text
+ method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/posthoc_official_20261014/** -text
+ method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/six_task_live_batch_20261014_r1/** -text
++method_discovery/pos_upstream_ga_v1_20261017/acceptance_v11/** -text
++method_discovery/pos_upstream_ga_v1_20261017/raw_v8/** -text
+diff --git a/GenericAgent-main/agent_loop.py b/GenericAgent-main/agent_loop.py
+index 41517a76..7e6689cd 100644
+--- a/GenericAgent-main/agent_loop.py
++++ b/GenericAgent-main/agent_loop.py
+@@ -89,7 +89,7 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
+             # The host action/terminal is already known in memory. Archive
+             # failure is auxiliary, never a change to the Task result.
+             pos_auxiliary_errors.append({'kind': kind, 'error_type':
+-                                         type(error).__name__, 'error': str(error)})
++                                         type(error).__name__})
+     if os.environ.get('GA_POS_ENABLED') == '1':
+         if any(os.environ.get(name) == '1' for name in (
+                 'GA_PMA_UPSTREAM_ENABLED', 'GA_PMA_ENABLED',
+diff --git a/GenericAgent-main/agentmain.py b/GenericAgent-main/agentmain.py
+index cddc0034..6ebfb35b 100644
+--- a/GenericAgent-main/agentmain.py
++++ b/GenericAgent-main/agentmain.py
+@@ -93,6 +93,22 @@ def checkpoint_turn_offset(checkpoint_dir):
+ # agent = GenericAgent(); threading.Thread(target=agent.run, daemon=True).start()
+ # output1_queue = agent.put_task(prompt1)
+ # output2_queue = agent.put_task(prompt2)
++def build_task_terminal_record(run_id, task_id, terminal, pma_finalization,
++                               pos_finalization=None):
++    record = {'run_id': run_id, 'task_id': task_id,
++              'result': terminal.get('result') if isinstance(terminal, dict) else None,
++              'pma_finalization': pma_finalization}
++    if pos_finalization is not None:
++        errors = (terminal or {}).get('pos_auxiliary_errors', [])
++        record.update(pos_finalization=pos_finalization,
++            pos_archive_incomplete=bool((terminal or {}).get('pos_archive_incomplete') or
++                                        pos_finalization.get('archive_incomplete')),
++            pos_auxiliary_errors=[{'kind': row.get('kind'),
++                                   'error_type': row.get('error_type')}
++                                  for row in errors])
++    return record
++
++
+ class GenericAgent:
+     def __init__(self):
+         os.makedirs(os.path.join(script_dir, 'temp'), exist_ok=True)
+@@ -437,7 +453,7 @@ class GenericAgent:
+                 gen = wrap_generator(gen, identity, JsonlEventSink(event_path) if event_path else None)
+             manual_inbox = None
+             pma_finalization = {'status': 'not_enabled'}
+-            def pos_finalization():
++            def pos_finalization(terminal=None):
+                 if os.environ.get('GA_POS_ENABLED') != '1':
+                     return None
+                 from pathlib import Path
+@@ -453,10 +469,14 @@ class GenericAgent:
+                              closed.get('task_id') == result.get('task_id'))
+                     return {'status': result.get('status') if bound else 'identity_mismatch',
+                             'receipt_bound': bound, 'close_status': closed.get('status'),
+-                            'worker_return_code': closed.get('worker_return_code')}
++                            'worker_return_code': closed.get('worker_return_code'),
++                            'archive_incomplete': bool((terminal or {}).get('pos_archive_incomplete')),
++                            'auxiliary_errors': (terminal or {}).get('pos_auxiliary_errors', [])}
+                 except (OSError, ValueError) as error:
+                     return {'status': 'missing_or_unknown',
+-                            'error_type': type(error).__name__}
++                            'error_type': type(error).__name__,
++                            'archive_incomplete': True,
++                            'auxiliary_errors': (terminal or {}).get('pos_auxiliary_errors', [])}
+             def finalize_upstream_pma(terminal):
+                 nonlocal pma_finalization
+                 upstream_pma = getattr(self, 'pma_upstream_bridge', None)
+@@ -509,7 +529,7 @@ class GenericAgent:
+                 display_queue.put({'done': full_resp, 'source': source, 'turn': curr_turn,
+                                    'outputs': turn_resps.copy(), 'task_terminal': task_terminal,
+                                    'pma_finalization': pma_finalization,
+-                                   'pos_finalization': pos_finalization()})
++                                   'pos_finalization': pos_finalization(task_terminal)})
+                 self.history = handler.history_info
+             except Exception as e:
+                 print(f"Backend Error: {format_error(e)}")
+@@ -519,7 +539,7 @@ class GenericAgent:
+                                    'turn': curr_turn, 'outputs': turn_resps.copy(),
+                                    'task_terminal': task_terminal,
+                                    'pma_finalization': pma_finalization,
+-                                   'pos_finalization': pos_finalization()})
++                                   'pos_finalization': pos_finalization(task_terminal)})
+             finally:
+                 finalize_upstream_pma(task_terminal)
+                 if manual_inbox is not None:
+@@ -595,15 +615,12 @@ if __name__ == '__main__':
+                     with open(outfile, 'w', encoding='utf-8') as f: f.write(item.get('next', ''))
+             if args.task and os.environ.get('GA_BENCH_RUN_ID') and os.path.isdir('/logs/agent'):
+                 terminal = item.get('task_terminal')
+-                terminal_record = {
+-                    'run_id': os.environ['GA_BENCH_RUN_ID'],
+-                    'task_id': os.environ.get('GA_BENCH_TASK_ID'),
+-                    'result': terminal.get('result') if isinstance(terminal, dict) else None,
+-                    'pma_finalization': item.get('pma_finalization', {'status': 'not_enabled'}),
+-                }
+-                if os.environ.get('GA_POS_ENABLED') == '1':
+-                    terminal_record['pos_finalization'] = item.get('pos_finalization') or {
+-                        'status': 'missing_or_unknown'}
++                terminal_record = build_task_terminal_record(
++                    os.environ['GA_BENCH_RUN_ID'], os.environ.get('GA_BENCH_TASK_ID'),
++                    terminal, item.get('pma_finalization', {'status': 'not_enabled'}),
++                    (item.get('pos_finalization') or {'status': 'missing_or_unknown',
++                      'archive_incomplete': True})
++                    if os.environ.get('GA_POS_ENABLED') == '1' else None)
+                 terminal_path = '/logs/agent/task_terminal.json'
+                 with open(terminal_path + '.pending', 'x', encoding='utf-8') as f:
+                     json.dump(terminal_record, f, sort_keys=True)
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/live_launcher.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/live_launcher.py
+index 14b00679..f28ba80e 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/live_launcher.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/live_launcher.py
+@@ -48,12 +48,14 @@ def _stage_verifier(root: Path, task: str, manifest: dict,
+     members = [{k: v for k, v in item.items() if k != 'raw'}
+                for item in official_members(source, task,
+                    registered=manifest.get('schema') in {
+-                       'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5'})]
++                       'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5',
++                       'pos-ga-single-manifest-v1'})]
+     if members != expected.get('official_evaluator_members'):
+         raise RuntimeError('PMA official evaluator members differ from frozen manifest')
+     export_task(source, task, target,
+                 registered=manifest.get('schema') in {
+-                    'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5'})
++                    'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5',
++                    'pos-ga-single-manifest-v1'})
+     identity = {'native_tests_tree_sha256': digest_tree(target),
+                 'native_test_sh_sha256': _sha(target / 'test.sh')}
+     if any(identity[key] != expected[key] for key in identity):
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py
+index f9a2e475..2168f335 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py
+@@ -140,6 +140,20 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
+                                            "pma-ga-live-manifest-v5",
+                                            "pos-ga-single-manifest-v1"}
+                                        else "isolated"))
++    executed_pos_sources = {}
++    if pos:
++        for name in ('agent_loop.py', 'agentmain.py', 'ga.py', 'llmcore.py',
++                     'pos_bridge.py', 'pos_runtime/worker.py',
++                     'pos_runtime/episode.py'):
++            staged = source / name
++            actual = hashlib.sha256(staged.read_bytes()).hexdigest()
++            frozen_name = ('method_discovery/pos_upstream_ga_v1_20261017/' +
++                           Path(name).name if name.startswith('pos_runtime/') else
++                           'GenericAgent-main/' + name)
++            expected = manifest['source_files_sha256'][frozen_name]
++            if actual != expected:
++                raise RuntimeError('PoS bundled execution source differs: ' + name)
++            executed_pos_sources[name] = actual
+     if fake_gateway:
+         _offline_gateway(root, runtime, args.python_home)
+     if fake_gateway and getattr(args, "multiturn_fixture", False):
+@@ -189,6 +203,7 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
+               "image": image_tag, **identity,
+               "public_task_tree_sha256": digest_tree(task),
+               "ga_bundle_tree_sha256": digest_tree(source),
++              **({"executed_pos_source_sha256": executed_pos_sources} if pos else {}),
+               "source_profile_file_sha256": hashlib.sha256(
+                   Path(args.task_profile_file).read_bytes()).hexdigest(),
+               "worker_private_mounted": "not_yet_inspected",
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py
+index 7ed5cb2f..8e965dbf 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py
+@@ -39,6 +39,27 @@ def _docker_top_pids(output: str) -> set[str]:
+     return pids
+ 
+ 
++def pos_archive_summary(run_id: str, task_id: str, terminal: dict,
++                        result_receipt: dict, close_receipt: dict) -> dict:
++    """Summarize bound receipts without conflating Task completion and archive health."""
++    return {
++        'run_id': run_id, 'task_id': task_id,
++        'result_status': result_receipt.get('status'),
++        'result_bound': (result_receipt.get('run_id') == run_id and
++                         result_receipt.get('task_id') == task_id),
++        'close_status': close_receipt.get('status'),
++        'close_bound': (close_receipt.get('run_id') == run_id and
++                        close_receipt.get('task_id') == task_id),
++        'worker_return_code': close_receipt.get('worker_return_code'),
++        'task_result': terminal['result'],
++        'task_archive_incomplete': terminal['pos_archive_incomplete'],
++        'auxiliary_errors': terminal['pos_auxiliary_errors'],
++        'archive_incomplete': (terminal['pos_archive_incomplete'] or
++            terminal['pos_finalization'].get('archive_incomplete') is True or
++            result_receipt.get('status') in {'missing', 'missing_or_unknown', None}),
++    }
++
++
+ def verify_live_spec(spec: dict) -> None:
+     if spec.get('schema') != 'pma-ga-live-run-v1' or spec.get('mode') != 'authorized_live':
+         raise RuntimeError('PMA live Harbor spec is not authorized')
+@@ -143,11 +164,14 @@ class PMATrialHooks(PilotTrialHooks):
+         if condition == 'P':
+             return (isinstance(terminal, dict) and
+                 set(terminal) == {'run_id', 'task_id', 'result',
+-                                  'pma_finalization', 'pos_finalization'} and
++                                  'pma_finalization', 'pos_finalization',
++                                  'pos_archive_incomplete', 'pos_auxiliary_errors'} and
+                 terminal.get('run_id') == self.spec['run_id'] and
+                 terminal.get('task_id') == self.spec['task_id'] and
+                 terminal.get('pma_finalization') == {'status': 'not_enabled'} and
+-                isinstance(terminal.get('pos_finalization'), dict))
++                isinstance(terminal.get('pos_finalization'), dict) and
++                isinstance(terminal.get('pos_archive_incomplete'), bool) and
++                isinstance(terminal.get('pos_auxiliary_errors'), list))
+         pma_status = {'A': 'not_enabled', 'B': 'saved'}.get(condition)
+         return (pma_status is not None and isinstance(terminal, dict) and
+                 set(terminal) == {'run_id', 'task_id', 'result', 'pma_finalization'} and
+@@ -434,17 +458,16 @@ class NativeSharedTrialHooks(PMATrialHooks):
+                 except (OSError, ValueError):
+                     return {'status': 'missing_or_unknown'}
+             result_receipt, close_receipt = read_receipt(result_path), read_receipt(close_path)
+-            _atomic(self.archive / 'pos_archive_status.json', {
+-                'run_id': self.spec['run_id'], 'task_id': self.spec['task_id'],
+-                'result_status': result_receipt.get('status'),
+-                'result_bound': (result_receipt.get('run_id') == self.spec['run_id'] and
+-                                 result_receipt.get('task_id') == self.spec['task_id']),
+-                'close_status': close_receipt.get('status'),
+-                'close_bound': (close_receipt.get('run_id') == self.spec['run_id'] and
+-                                close_receipt.get('task_id') == self.spec['task_id']),
+-                'worker_return_code': close_receipt.get('worker_return_code'),
+-                'archive_incomplete': result_receipt.get('status') in
+-                    {'missing', 'missing_or_unknown', None}})
++            terminal_read = await self.trial.agent_environment.exec(
++                'cat /logs/agent/task_terminal.json', timeout_sec=30, user='root')
++            if terminal_read.return_code:
++                raise RuntimeError('PoS Task terminal receipt unavailable')
++            terminal = json.loads(terminal_read.stdout)
++            if not self.terminal_identity_valid(terminal):
++                raise RuntimeError('PoS Task terminal identity unavailable')
++            _atomic(self.archive / 'pos_archive_status.json', pos_archive_summary(
++                self.spec['run_id'], self.spec['task_id'], terminal,
++                result_receipt, close_receipt))
+ 
+     async def verification_start(self, event):
+         ended = json.loads((self.archive / 'agent_end_native.json').read_text(encoding='utf-8'))
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run_fixture.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run_fixture.py
+index 9d50d8a4..073c7a32 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run_fixture.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run_fixture.py
+@@ -3,6 +3,7 @@
+ from __future__ import annotations
+ 
+ import argparse
++import hashlib
+ import json
+ import os
+ from pathlib import Path
+@@ -58,6 +59,13 @@ def main() -> None:
+                  'harbor_commit': harbor_head,
+                  **({'upstream_commit': manifest['upstream_commit']} if args.condition == 'P'
+                     else {'pma_vendor_commit': manifest['pma_vendor_commit']})}
++    if args.condition == 'P':
++        from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import SOURCE_FILES
++        execution['git_blob_source_files'] = {
++            name: hashlib.sha256(subprocess.run(
++                ['git', 'cat-file', 'blob', f'{head}:{name}'], cwd=checkout,
++                capture_output=True, check=True).stdout).hexdigest()
++            for name in SOURCE_FILES}
+     (root / 'execution_identity.json').write_text(
+         json.dumps(execution, sort_keys=True, indent=2), encoding='utf-8')
+     binding = dict(manifest['planned_order'][0], run_id=identity['run_id'],
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/certification.py b/method_discovery/pos_upstream_ga_v1_20261017/certification.py
+index 1b9a13a1..7d9ced5e 100644
+--- a/method_discovery/pos_upstream_ga_v1_20261017/certification.py
++++ b/method_discovery/pos_upstream_ga_v1_20261017/certification.py
+@@ -61,8 +61,24 @@ def verify_evidence(directory: Path, *, require_committed: bool = True) -> dict:
+         ('events.result.json', 'events.close.json', 'native_test_execution.json',
+          'writer_termination_check.json'))
+     from .single_manifest import source_hashes, vendor_hashes
++    from .single_manifest import SOURCE_FILES
++    committed_sources = {name: hashlib.sha256(subprocess.run(
++        ['git', 'cat-file', 'blob', f"{identity.get('code_commit')}:{name}"],
++        cwd=ROOT, capture_output=True, check=True).stdout).hexdigest()
++        for name in SOURCE_FILES}
++    prepared = load('prepared.json')
++    bundled = prepared.get('executed_pos_source_sha256')
++    executed_names = ('agent_loop.py', 'agentmain.py', 'ga.py', 'llmcore.py',
++                      'pos_bridge.py', 'pos_runtime/worker.py',
++                      'pos_runtime/episode.py')
++    expected_executed = {name: identity['source_files'][
++        ('method_discovery/pos_upstream_ga_v1_20261017/' + Path(name).name)
++        if name.startswith('pos_runtime/') else 'GenericAgent-main/' + name]
++        for name in executed_names}
+     script = (base / 'normal/synthetic_test.sh').read_text(encoding='utf-8')
+-    if (identity.get('harbor_commit') != HARBOR_COMMIT or
++    if (identity.get('git_blob_source_files') != committed_sources or
++            bundled != expected_executed or
++            identity.get('harbor_commit') != HARBOR_COMMIT or
+             identity.get('upstream_commit') != UPSTREAM or
+             identity.get('source_files') != source_hashes() or
+             identity.get('vendor_files') != vendor_hashes() or
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/source_identity_audit.py b/method_discovery/pos_upstream_ga_v1_20261017/source_identity_audit.py
+new file mode 100644
+index 00000000..784c5b91
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/source_identity_audit.py
+@@ -0,0 +1,60 @@
++"""Read-only Git/blob/worktree/bundle byte comparison for a retained run."""
++import argparse
++import difflib
++import hashlib
++import json
++from pathlib import Path
++import subprocess
++
++from .single_manifest import SOURCE_FILES
++
++
++def sha(raw):
++    return hashlib.sha256(raw).hexdigest()
++
++
++def compare(checkout: Path, commit: str, bundle: Path):
++    rows = []
++    for name in SOURCE_FILES:
++        found = subprocess.run(['git', 'cat-file', 'blob', f'{commit}:{name}'],
++            cwd=checkout, capture_output=True)
++        if found.returncode:
++            continue
++        blob = found.stdout
++        worktree = (checkout / name).read_bytes()
++        staged = bundle / 'source' / Path(name).name
++        if not staged.is_file():
++            continue
++        actual = staged.read_bytes()
++        normalized = actual.replace(b'\r\n', b'\n')
++        diff = list(difflib.unified_diff(
++            blob.decode('utf-8', 'replace').splitlines(),
++            normalized.decode('utf-8', 'replace').splitlines(),
++            fromfile='git_blob', tofile='bundle_normalized', lineterm=''))
++        rows.append({'path': name, 'git_blob_sha256': sha(blob),
++            'worktree_sha256': sha(worktree), 'bundle_sha256': sha(actual),
++            'git_blob_bytes': len(blob), 'worktree_bytes': len(worktree),
++            'bundle_bytes': len(actual), 'bundle_crlf_count': actual.count(b'\r\n'),
++            'bundle_lf_count': actual.count(b'\n'),
++            'bundle_equals_worktree': actual == worktree,
++            'bundle_equals_blob_after_crlf_normalization': normalized == blob,
++            'normalized_content_diff': diff[:100]})
++    return rows
++
++
++def main():
++    parser = argparse.ArgumentParser()
++    parser.add_argument('--checkout', type=Path, required=True)
++    parser.add_argument('--commit', required=True)
++    parser.add_argument('--bundle', type=Path, required=True)
++    parser.add_argument('--output', type=Path, required=True)
++    args = parser.parse_args()
++    rows = compare(args.checkout, args.commit, args.bundle)
++    args.output.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding='utf-8')
++    print(json.dumps({'compared': len(rows), 'content_differences':
++        [row['path'] for row in rows if row['normalized_content_diff']]},
++        ensure_ascii=False))
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/test_ga_seam.py b/method_discovery/pos_upstream_ga_v1_20261017/test_ga_seam.py
+index 902da891..685b838e 100644
+--- a/method_discovery/pos_upstream_ga_v1_20261017/test_ga_seam.py
++++ b/method_discovery/pos_upstream_ga_v1_20261017/test_ga_seam.py
+@@ -161,6 +161,18 @@ class SeamTests(unittest.TestCase):
+             self.assertIn('CURRENT_OBSERVATION_MARKER', json.dumps(captured[1]))
+             self.assertIn('<summary>', json.dumps(captured[0]))
+             self.assertEqual(len(backend.history), 1)
++            capture_path = os.environ.get('POS_AUDIT_THREE_HTTP_CAPTURE')
++            if capture_path:
++                public = {'schema': 'pos-three-http-fake-capture-v1',
++                          'transport': 'patched_requests_post_no_provider',
++                          'requests': captured, 'fixture_response_blocks': responses,
++                          'parsed_outcome': outcome,
++                          'assertions': {'requests': 3,
++                              'persistent_constraint_each_request': True,
++                              'old_history_and_working_memory_absent': True,
++                              'hidden_thinking_absent_from_requests': True}}
++                Path(capture_path).write_text(json.dumps(public, ensure_ascii=False,
++                    indent=2, default=str), encoding='utf-8')
+ 
+     def test_actual_ga_current_instruction_source_and_lifetime(self):
+         with tempfile.TemporaryDirectory() as tmp:
+@@ -495,6 +507,25 @@ class SeamTests(unittest.TestCase):
+             self.assertEqual(outcome['result'], 'CURRENT_TASK_DONE')
+             self.assertTrue(outcome['pos_archive_incomplete'])
+             receipt = json.loads((root / 'events.result.json').read_text(encoding='utf-8'))
++            closed = json.loads((root / 'events.close.json').read_text(encoding='utf-8'))
++            self.assertEqual(receipt['status'], 'completed')
++            self.assertEqual(closed['status'], 'graceful_exit')
++            from agentmain import build_task_terminal_record
++            from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.pma_harbor_hooks import pos_archive_summary
++            final = {'status': receipt['status'], 'close_status': closed['status'],
++                     'worker_return_code': closed['worker_return_code'],
++                     'archive_incomplete': outcome['pos_archive_incomplete'],
++                     'auxiliary_errors': outcome['pos_auxiliary_errors']}
++            terminal = build_task_terminal_record('run', 'task', outcome,
++                {'status': 'not_enabled'}, final)
++            summary = pos_archive_summary('run', 'task', terminal,
++                {**receipt, 'run_id': 'run', 'task_id': 'task'},
++                {**closed, 'run_id': 'run', 'task_id': 'task'})
++            self.assertEqual(terminal['result'], 'CURRENT_TASK_DONE')
++            self.assertTrue(terminal['pos_archive_incomplete'])
++            self.assertTrue(summary['archive_incomplete'])
++            self.assertEqual(summary['task_result'], 'CURRENT_TASK_DONE')
++            self.assertEqual(summary['auxiliary_errors'], outcome['pos_auxiliary_errors'])
+             self.assertIn('public done', json.dumps(receipt))
+             self.assertNotIn('PRIVATE_NATIVE_CANARY', json.dumps(receipt))
+             self.assertNotIn('private raw', json.dumps(receipt))
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/test_scoped_fixes.py b/method_discovery/pos_upstream_ga_v1_20261017/test_scoped_fixes.py
+new file mode 100644
+index 00000000..fc8cf546
+--- /dev/null
++++ b/method_discovery/pos_upstream_ga_v1_20261017/test_scoped_fixes.py
+@@ -0,0 +1,81 @@
++"""Fixed-blob verifier staging and PoS terminal/archive propagation; no model calls."""
++import json
++import os
++from pathlib import Path
++import sys
++import tempfile
++import unittest
++from unittest.mock import patch
++
++from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.export_official_evaluator import COMMIT, official_members
++from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.live_launcher import _stage_verifier
++from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.pma_harbor_hooks import pos_archive_summary
++from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import FOUR
++
++GA = Path(__file__).resolve().parents[2] / 'GenericAgent-main'
++sys.path.insert(0, str(GA))
++from agentmain import build_task_terminal_record
++
++
++class ScopedFixes(unittest.TestCase):
++    def test_four_registered_evaluators_stage_from_fixed_blobs(self):
++        source = Path(os.environ.get('POS_OFFICIAL_SOURCE_GIT',
++                                    'E:/pma_d1_tb2_source_20261017'))
++        if not source.is_dir():
++            self.fail('fixed official Git source unavailable: ' + str(source))
++        for task in FOUR:
++            with self.subTest(task=task), tempfile.TemporaryDirectory() as tmp:
++                root = Path(tmp)
++                members = [{k: v for k, v in row.items() if k != 'raw'}
++                           for row in official_members(source, task, registered=True)]
++                from long_context_bench.scripts.isolated_run_bundle import digest_tree
++                from hashlib import sha256
++                import tempfile as _tempfile
++                with _tempfile.TemporaryDirectory() as staged:
++                    tests = Path(staged)
++                    from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.export_official_evaluator import export_task
++                    export_task(source, task, tests, registered=True)
++                    expected_tree = digest_tree(tests)
++                    expected_sh = sha256((tests / 'test.sh').read_bytes()).hexdigest()
++                manifest = {'schema': 'pos-ga-single-manifest-v1',
++                    'official_source_git_commit': COMMIT,
++                    'assets': {task: {'official_evaluator_members': members,
++                        'native_tests_tree_sha256': expected_tree,
++                        'native_test_sh_sha256': expected_sh}}}
++                (root / 'public_task/tests').mkdir(parents=True)
++                self.assertEqual(_stage_verifier(root, task, manifest, source)
++                                 ['native_tests_tree_sha256'], expected_tree)
++                with self.assertRaises((KeyError, RuntimeError, ValueError)):
++                    _stage_verifier(root, 'not-the-registered-task', manifest, source)
++                with tempfile.TemporaryDirectory() as bad:
++                    (Path(bad) / 'public_task/tests').mkdir(parents=True)
++                    corrupt = json.loads(json.dumps(manifest))
++                    corrupt['assets'][task]['official_evaluator_members'][0]['sha256'] = '0' * 64
++                    with self.assertRaises(RuntimeError):
++                        _stage_verifier(Path(bad), task, corrupt, source)
++
++    def test_host_archive_failure_reaches_persisted_terminal_and_native_summary(self):
++        for failure in (False, True):
++            with self.subTest(failure=failure):
++                errors = [{'kind': 'terminal', 'error_type': 'OSError'}] if failure else []
++                outcome = {'result': 'CURRENT_TASK_DONE',
++                           'pos_archive_incomplete': failure,
++                           'pos_auxiliary_errors': errors}
++                final = {'status': 'completed', 'receipt_bound': True,
++                         'close_status': 'graceful_exit', 'worker_return_code': 0,
++                         'archive_incomplete': failure, 'auxiliary_errors': errors}
++                terminal = build_task_terminal_record('run', 'task', outcome,
++                    {'status': 'not_enabled'}, final)
++                result = {'run_id': 'run', 'task_id': 'task', 'status': 'completed'}
++                closed = {'run_id': 'run', 'task_id': 'task',
++                          'status': 'graceful_exit', 'worker_return_code': 0}
++                summary = pos_archive_summary('run', 'task', terminal, result, closed)
++                self.assertEqual(terminal['result'], 'CURRENT_TASK_DONE')
++                self.assertEqual(summary['task_result'], 'CURRENT_TASK_DONE')
++                self.assertIs(summary['archive_incomplete'], failure)
++                self.assertEqual(summary['auxiliary_errors'], errors)
++                self.assertTrue(summary['result_bound'] and summary['close_bound'])
++
++
++if __name__ == '__main__':
++    unittest.main(verbosity=2)

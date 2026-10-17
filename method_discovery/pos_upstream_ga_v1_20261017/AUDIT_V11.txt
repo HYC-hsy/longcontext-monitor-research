@@ -1,0 +1,103 @@
+PoS-on-GA scoped offline closure (2026-10-18)
+
+Baseline b853a955ea1b87670499620a2037feb6e21fd636. Bound code commit
+9b2a4c22e6842425eebfc45909f59154057df3a8. This is an archive and
+adapter correction, not a new PoS method or a formal experiment. Vendor,
+algorithm, core prompts, model roles/budgets, and PMA were not changed.
+
+1. Registered official evaluator staging
+
+live_launcher._stage_verifier now recognizes pos-ga-single-manifest-v1 at
+both official_members and export_task, leaving the old SIX_TASKS unchanged.
+test_scoped_fixes.py staged the fixed Git blobs for nginx-request-logging,
+adaptive-rejection-sampler, sqlite-with-gcov, and write-compressor through
+the actual function and checked the frozen member and tree/file hashes.
+Wrong task and altered member SHA were rejected. No evaluator script ran.
+Raw test output: acceptance_v11/asset_and_summary_tests.txt (2/2).
+
+2. Auxiliary archive failure through Task terminal and native summary
+
+agent_loop records only the safe event kind and exception type. agentmain
+propagates pos_archive_incomplete and pos_auxiliary_errors through
+pos_finalization into the persisted task_terminal.json. NativeSharedTrialHooks
+reads that real container terminal and writes pos_archive_status.json through
+the same pos_archive_summary function exercised by the regression. The test
+forces host journal OSError while the worker result is completed and close is
+graceful_exit: Task result stays CURRENT_TASK_DONE; terminal and summary
+mark archive_incomplete=true. The normal summary marks it false. Stop-writer
+and Task completion predicates are unchanged. Raw GA seam output:
+acceptance_v11/ga_seam_tests.txt (18/18).
+
+3. Actual final-send fake HTTP capture
+
+acceptance_v11/three_http_capture.json was exported by the existing
+three-decision GenericAgentHandler -> NativeToolClient -> raw_ask -> patched
+requests.post test. It contains all three serialized request payloads, fake
+response blocks, parsed public outcome, and checked assertions. The persistent
+user constraint appears in each request. The old backend-history and working-
+memory canaries do not appear. Hidden native/tagged thinking is excluded before
+fallback tool parsing. Public <summary> text is intentionally retained. The
+capture uses a synthetic endpoint and no provider request. See test_ga_seam.py
+for the exact assertions; this is a protocol check, not model behavior evidence.
+
+4. Retained raw_v7 source identity
+
+The retained run's bundle/source/agentmain.py SHA-256 is
+f15ba67e34b7b575c74d94e9e306a3767d51df487091faf45b065e193adcc92d,
+exactly its old execution_identity source_files entry. Its normalized LF
+content equals the b853a955 Git blob with SHA-256
+d948e59d99f4d052daca6d49bb8b0e109ff585a40b059c89681449358a479071.
+It is not the blob at the older recorded code_commit f3fc55b3: the latter
+contains substantive content differences, including later-added PoS
+finalization code. The same distinction appears for the other four staged GA
+files. Exact lengths, hashes, CRLF counts and normalized diffs are in
+acceptance_v11/raw_v7_vs_b853_source.json and
+acceptance_v11/raw_v7_vs_recorded_head_source.json. Old raw_v7 is untouched.
+For the new run, execution_identity.json separately records code_commit,
+Git blob SHA-256 per source file, and worktree SHA-256. prepared.json records
+the actual staged GA/PoS execution-file SHA-256; staging verifies these bytes
+against the frozen manifest. Certification checks all three identities, not a
+newline-insensitive substitute.
+
+5. Fresh one-time Docker synthetic lifecycle and archive
+
+Private source run: E:\LongContext\pos_native_synthetic_20261018_v11,
+run_id pos-b28e7b68a9d74c72. One complete fixture command exited 0; no
+automatic rerun. Public per-file archive is raw_v8/ with 43 members, indexed
+by raw_v8/FILE_HASHES.json (SHA-256
+e43aa5c7cd99d60f9f9d2553b80703b74f5a553d955fe287ce4a48cb9c6bdbf8).
+Certification against the bound code returned pass. The normal trace has two
+fake Task HTTP captures, one actual synthetic code_run tool outcome, two
+PoS decision batches (one scored transition), and one synthetic sentinel
+execution. The tool created /app/pos-fixture-marker.txt and started the
+local HTTP service. The sentinel checked both file content and HTTP 200 and
+reported reward 1.0. It did not run an official task evaluator. The same
+main container ID 11561ee051287d3e561d5ce188a7f7a09cba62bea2923b33f31af3e82398c8d9
+appears at agent start, agent end and verifier release. Control processes and
+gateway stopped; Task-owned service PID was preserved until verification.
+Owned containers/volumes were cleaned; worker closed with return code 0.
+Task terminal CURRENT_TASK_DONE, archive_incomplete=false, and PoS result
+completed are distinct from online task success, which remains unknown.
+
+raw_v8/FILE_HASHES.json records both private-source SHA-256 and public-copy
+SHA-256 for each file. Redactions=0 means no configured secret value was
+replaced; it does NOT mean raw bytes are unchanged. JSON reserialization
+changed 20 of the 43 public copies' bytes. No secret original values are
+published. Historical sentinel negative cases are in raw_v7; not rerun.
+
+6. Verification, limits, and authorization
+
+The full scoped code/test diff is acceptance_v11/DIFF_V11.patch. The new
+source-bound certification directory is raw_v8 (not raw_v7). The P plan at
+plan_four/plan.json still has execution_authorized=false and the same four
+tasks. No real Task, model, PoS/PMA provider, official evaluator, training or
+scoring-model calls were made. Synthetic tool and sentinel counts are above.
+The combined old single_run_offline suite recorded one expected historical
+fixture-identity failure because it binds pre-change source bytes; it is not
+claimed as a pass. Its other results include a skip. See
+acceptance_v11/shared_regression_tests.txt. The unchanged live-wiring suite
+passed 7/7 in acceptance_v11/live_wiring_regression_tests.txt. No legacy
+fixture was overwritten to conceal the identity mismatch.
+
+RUNNING_V11.md gives the offline command and future authorization conditions.
+This delivery stops here for independent audit; it does not launch four tasks.
