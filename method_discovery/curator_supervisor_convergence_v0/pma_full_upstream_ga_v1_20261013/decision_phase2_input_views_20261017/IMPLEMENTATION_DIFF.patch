@@ -1,0 +1,904 @@
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_phase2_archive.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_phase2_archive.py
+index cd788dd8..0364f315 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_phase2_archive.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_phase2_archive.py
+@@ -9,6 +9,8 @@ from pathlib import Path
+ import re
+ from zipfile import ZipFile, ZIP_DEFLATED
+ 
++from decision_phase2_screen import LIVE_SCHEMA, VIEW_SCHEMA, slot_name
++
+ 
+ def digest(raw: bytes) -> str:
+     return hashlib.sha256(raw).hexdigest()
+@@ -45,7 +47,7 @@ def archive(run_root: Path, manifest_path: Path, public_root: Path) -> dict:
+     if public_root.exists():
+         raise FileExistsError('public archive root must be new')
+     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+-    if (manifest.get('schema') != 'pma-decision-phase2-once-v1' or
++    if (manifest.get('schema') not in (LIVE_SCHEMA, VIEW_SCHEMA) or
+             manifest.get('output_root') != str(run_root.resolve())):
+         raise PermissionError('private run and frozen Phase-2 manifest differ')
+     public_root.mkdir(parents=True, exist_ok=False)
+@@ -55,9 +57,12 @@ def archive(run_root: Path, manifest_path: Path, public_root: Path) -> dict:
+                 if status_path.is_file() else [])
+     if not statuses:
+         for number, row in enumerate(manifest['planned_order'], 1):
+-            slot = run_root / f'{number:02d}-{row["variant"].lower()}'
++            slot = run_root / slot_name(row, number, manifest['schema'])
+             statuses.append({'order': number, 'arm': row['arm'],
+                              'pma_step': row['pma_step'], 'variant': row['variant'],
++                             'input_view': row.get('input_view'),
++                             'occurrence': row.get('occurrence'),
++                             'run_id': row.get('run_id'),
+                              'status': ('started_incomplete' if slot.exists() else
+                                         'confirmed_not_started')})
+     write(public_root / 'status_table.json', {'rows': statuses})
+@@ -65,8 +70,10 @@ def archive(run_root: Path, manifest_path: Path, public_root: Path) -> dict:
+     exclusions = []
+     for status in statuses:
+         number = status['order']
+-        private = run_root / f'{number:02d}-{status["variant"].lower()}'
+-        public = public_root / f'{number:02d}-{status["variant"].lower()}'
++        row = manifest['planned_order'][number - 1]
++        name = slot_name(row, number, manifest['schema'])
++        private = run_root / name
++        public = public_root / name
+         if not private.exists():
+             continue
+         request = rows(private / 'requests.jsonl')
+@@ -75,10 +82,19 @@ def archive(run_root: Path, manifest_path: Path, public_root: Path) -> dict:
+         result_path = private / 'result.json'
+         result = (json.loads(result_path.read_text(encoding='utf-8'))
+                   if result_path.is_file() else None)
++        projection = private / 'projection_identity.json'
++        if projection.is_file():
++            write(public / 'projection_identity.json',
++                  json.loads(projection.read_text(encoding='utf-8')))
+         if request:
+             selected = {key: request[0].get(key) for key in
+                         ('logical_call', 'phase', 'epoch', 'system', 'prompt',
+                          'tools', 'prompt_sha256', 'system_sha256')}
++            for field in ('system', 'prompt'):
++                selected[field], note = safe_content(selected[field])
++                selected[field + '_projection'] = note
++                if note['status'].startswith('excluded') or note['status'] == 'thinking_removed':
++                    exclusions.append({'order': number, 'field': field, **note})
+             write(public / 'request.json', selected)
+             sample_parts.append(f'=== {number:02d} {status["variant"]} REQUEST ===\n'
+                                 + json.dumps(selected, ensure_ascii=False, indent=2))
+@@ -101,6 +117,7 @@ def archive(run_root: Path, manifest_path: Path, public_root: Path) -> dict:
+             content, note = safe_content(result.get('raw_content'))
+             projected = {key: result.get(key) for key in
+                          ('order', 'arm', 'pma_step', 'variant', 'status',
++                          'input_view', 'occurrence', 'run_id',
+                           'started_epoch', 'ended_epoch', 'logical_requests',
+                           'observable_litellm_calls', 'deeper_network_attempts',
+                           'output_class', 'returned_usage', 'error_type',
+@@ -138,7 +155,7 @@ def archive(run_root: Path, manifest_path: Path, public_root: Path) -> dict:
+                'redactions_or_exclusions': exclusions}
+     write(public_root / 'SUMMARY.json', summary)
+     (public_root / 'AUDIT.txt').write_text(
+-        'PMA U/V1/D1 Phase-2-only archived-input comparison.\n'
++        'PMA Phase-2-only archived-input comparison; conditions as frozen in manifest.\n'
+         'The private root retains original request/response/provider records; '
+         'only allowlisted projections below are public.\n'
+         'No Task delivery, Phase 1, native evaluation, training or scorer calls.\n'
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_phase2_input_views_20261017/RUNNING.md b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_phase2_input_views_20261017/RUNNING.md
+new file mode 100644
+index 00000000..d9dea8a7
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_phase2_input_views_20261017/RUNNING.md
+@@ -0,0 +1,66 @@
++# D1 archived Phase-2 input-source diagnostic
++
++This is a host-only, Phase-2-only comparison, not a Task run. The only model
++strategy is the already frozen D1 Phase-2 system, suffix and parser. Six
++archived public inputs appear in fixed order: 07/235, 14/85, 14/105, 22/7,
++07/161, 18/6. Each has three independent occurrences in rotations F/EB/E,
++EB/E/F, E/F/EB. A plan has 54 rows; the execution loop and archive iterate the
++plan rather than a fixed count. `execution_authorized=false` in all prepared
++manifests; preparation never sends a model request.
++
++F is byte-identical to the previous D1 request for the same case. EB retains
++the original bank and task description plus each archived command JSON value
++and the full `Terminal Output.tool_results` array. E differs only by replacing
++the bank block with `Memory bank withheld in this diagnostic condition.`.
++EB/E remove `Agent Analysis` and only the *outer* `Terminal Output.content`
++field, the GA working-memory wrapper. No nested text is recursively decoded or
++filtered: tool stdout/stderr, code comments, echoed text and mistakes remain.
++The strict JSON boundary reader rejects unknown fields, missing independent
++tool results or unparsed event text. The original window, step numbers and
++suffix remain. Forty-three visible steps is an input-asset check, not a loop
++constant. `projection_identity.json` records per-field source paths/step
++positions, retained/deleted hashes, IDs and counts; `requests.jsonl` holds the
++actual prompt before each send.
++
++Run from research directory P using installed PMA Python 3.12. Set PYTHONPATH
++to repo root, P, P/vendor/pma_89e5c0d/src, and
++P/vendor/pma_89e5c0d/external/harbor/src. No Docker/Harbor task container is
++used. The existing `decision_phase2_screen` CLI is used throughout:
++
++```powershell
++python -m decision_phase2_screen prepare --input-views --output <new-draft-directory>
++python -m decision_phase2_screen fake --manifest <draft>/manifest.json --output <new-fake-directory>
++python -m decision_phase2_screen freeze --input-views --manifest <new-private-manifest.json> --output <new-private-output-root> --profile <approved-private-PMA-profile>
++python -m decision_phase2_screen authorize --manifest <manifest> --authorization <new-private-authorization.json> --profile <same-profile> --authorization-source <this-approval-identity>
++python -m decision_phase2_screen run --manifest <manifest> --authorization <authorization> --profile <same-profile>
++python -m decision_phase2_archive --run-root <private-output-root> --manifest <manifest> --public-root <new-public-root>
++```
++
++The previous 18-row schema/authorization remains separate and cannot authorize
++this plan. The new one-use authorization binds the exact manifest bytes, code,
++dependencies, private profile fingerprint, all rows and new output root. The
++run checks these again before every request. The actual provider is the
++existing vendor LiteLLM route: Anthropic/messages, Opus 4.8, adaptive/high,
++max_tokens 8192, temperature 1, read_timeout 300; the original per-call retry
++decorator allows up to three attempts. There is no outer retry. Deeper network
++attempts not visible at the LiteLLM boundary remain unknown. The first real F
++request is the compatibility observation; there is no probe.
++
++Private source and raw provider records remain in the private output root.
++`decision_phase2_archive` emits an allowlisted public projection, per-item
++request/response/result/provenance files, status table, readable TXT, hashes
++and ZIP; thinking or sensitive-looking content is excluded with explicit
++projection notes. Review the public projection before pushing. No reminder is
++delivered to Task and no Phase 1, native evaluator, training or scoring model
++is invoked. Static responses do not establish Task benefit.
++
++Reuse: project `decision_phase2_screen`, `decision_phase2_archive`,
++`episode.construct_upstream`, `decision_reminder_agent`, and fixed Apache-2.0
++PMA vendor are directly used. `decision_phase2_views` is new field projection
++adapting their archived requests. Memory-Collapse-Eval commit
++`adf347f67a81a19fc71d2529d09108c71a1f9712` (MIT code / CC BY 4.0 data)
++was consulted for the structural distinction between update and consumption
++and for code-enforced visibility; no code/data was copied. STALE commit
++`ea7d391103a151927cd29d2f01d87597a782bdcb` was consulted for separating
++recognition, resistance and behavior in later human review; no code was
++copied and no judge is run here.
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_phase2_input_views_20261017/TEST_RAW_FINAL.txt b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_phase2_input_views_20261017/TEST_RAW_FINAL.txt
+new file mode 100644
+index 00000000..2e4f61b8
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_phase2_input_views_20261017/TEST_RAW_FINAL.txt
+@@ -0,0 +1,94 @@
++﻿test_authorization_and_order_tamper_zero_send (test_decision_phase2_views.InputViewTests.test_authorization_and_order_tamper_zero_send) ... ok
++{"order": 1, "status": "transport_final_failure", "observable_litellm_calls": 3}
++test_first_final_failure_stops_and_partial_archive (test_decision_phase2_views.InputViewTests.test_first_final_failure_stops_and_partial_archive) ... ok
++test_invalid_projection_structure_and_view_refused (test_decision_phase2_views.InputViewTests.test_invalid_projection_structure_and_view_refused) ... ok
++{"order": 1, "status": "completed", "observable_litellm_calls": 1}
++{"order": 2, "status": "completed", "observable_litellm_calls": 1}
++{"order": 3, "status": "completed", "observable_litellm_calls": 1}
++{"order": 4, "status": "completed", "observable_litellm_calls": 1}
++{"order": 5, "status": "completed", "observable_litellm_calls": 1}
++{"order": 6, "status": "completed", "observable_litellm_calls": 1}
++{"order": 7, "status": "completed", "observable_litellm_calls": 1}
++{"order": 8, "status": "completed", "observable_litellm_calls": 1}
++{"order": 9, "status": "completed", "observable_litellm_calls": 1}
++{"order": 10, "status": "completed", "observable_litellm_calls": 1}
++{"order": 11, "status": "completed", "observable_litellm_calls": 1}
++{"order": 12, "status": "completed", "observable_litellm_calls": 1}
++{"order": 13, "status": "completed", "observable_litellm_calls": 1}
++{"order": 14, "status": "completed", "observable_litellm_calls": 1}
++{"order": 15, "status": "completed", "observable_litellm_calls": 1}
++{"order": 16, "status": "completed", "observable_litellm_calls": 1}
++{"order": 17, "status": "completed", "observable_litellm_calls": 1}
++{"order": 18, "status": "completed", "observable_litellm_calls": 1}
++{"order": 19, "status": "completed", "observable_litellm_calls": 1}
++{"order": 20, "status": "completed", "observable_litellm_calls": 1}
++{"order": 21, "status": "completed", "observable_litellm_calls": 1}
++{"order": 22, "status": "completed", "observable_litellm_calls": 1}
++{"order": 23, "status": "completed", "observable_litellm_calls": 1}
++{"order": 24, "status": "completed", "observable_litellm_calls": 1}
++{"order": 25, "status": "completed", "observable_litellm_calls": 1}
++{"order": 26, "status": "completed", "observable_litellm_calls": 1}
++{"order": 27, "status": "completed", "observable_litellm_calls": 1}
++{"order": 28, "status": "completed", "observable_litellm_calls": 1}
++{"order": 29, "status": "completed", "observable_litellm_calls": 1}
++{"order": 30, "status": "completed", "observable_litellm_calls": 1}
++{"order": 31, "status": "completed", "observable_litellm_calls": 1}
++{"order": 32, "status": "completed", "observable_litellm_calls": 1}
++{"order": 33, "status": "completed", "observable_litellm_calls": 1}
++{"order": 34, "status": "completed", "observable_litellm_calls": 1}
++{"order": 35, "status": "completed", "observable_litellm_calls": 1}
++{"order": 36, "status": "completed", "observable_litellm_calls": 1}
++{"order": 37, "status": "completed", "observable_litellm_calls": 1}
++{"order": 38, "status": "completed", "observable_litellm_calls": 1}
++{"order": 39, "status": "completed", "observable_litellm_calls": 1}
++{"order": 40, "status": "completed", "observable_litellm_calls": 1}
++{"order": 41, "status": "completed", "observable_litellm_calls": 1}
++{"order": 42, "status": "completed", "observable_litellm_calls": 1}
++{"order": 43, "status": "completed", "observable_litellm_calls": 1}
++{"order": 44, "status": "completed", "observable_litellm_calls": 1}
++{"order": 45, "status": "completed", "observable_litellm_calls": 1}
++{"order": 46, "status": "completed", "observable_litellm_calls": 1}
++{"order": 47, "status": "completed", "observable_litellm_calls": 1}
++{"order": 48, "status": "completed", "observable_litellm_calls": 1}
++{"order": 49, "status": "completed", "observable_litellm_calls": 1}
++{"order": 50, "status": "completed", "observable_litellm_calls": 1}
++{"order": 51, "status": "completed", "observable_litellm_calls": 1}
++{"order": 52, "status": "completed", "observable_litellm_calls": 1}
++{"order": 53, "status": "completed", "observable_litellm_calls": 1}
++{"order": 54, "status": "completed", "observable_litellm_calls": 1}
++test_profiled_fifty_four_sends_and_archive (test_decision_phase2_views.InputViewTests.test_profiled_fifty_four_sends_and_archive) ... ok
++test_six_exact_F_and_field_projection (test_decision_phase2_views.InputViewTests.test_six_exact_F_and_field_projection) ... ok
++{"order": 1, "status": "capture_integrity_failure", "observable_litellm_calls": 1}
++test_accepted_response_capture_failure_is_not_resent (test_decision_phase2_live.DecisionPhase2LiveTests.test_accepted_response_capture_failure_is_not_resent) ... ok
++test_binding_mismatches_never_send (test_decision_phase2_live.DecisionPhase2LiveTests.test_binding_mismatches_never_send) ... ok
++{"order": 1, "status": "transport_final_failure", "observable_litellm_calls": 3}
++test_final_provider_failure_stops_remaining_requests_without_outer_retry (test_decision_phase2_live.DecisionPhase2LiveTests.test_final_provider_failure_stops_remaining_requests_without_outer_retry) ... ok
++test_parser_projection_does_not_change_upstream_decision (test_decision_phase2_live.DecisionPhase2LiveTests.test_parser_projection_does_not_change_upstream_decision) ... ok
++{"order": 1, "status": "completed", "observable_litellm_calls": 1}
++{"order": 2, "status": "completed", "observable_litellm_calls": 1}
++{"order": 3, "status": "completed", "observable_litellm_calls": 1}
++{"order": 4, "status": "completed", "observable_litellm_calls": 1}
++{"order": 5, "status": "completed", "observable_litellm_calls": 1}
++{"order": 6, "status": "completed", "observable_litellm_calls": 1}
++{"order": 7, "status": "completed", "observable_litellm_calls": 1}
++{"order": 8, "status": "completed", "observable_litellm_calls": 1}
++{"order": 9, "status": "completed", "observable_litellm_calls": 1}
++{"order": 10, "status": "completed", "observable_litellm_calls": 1}
++{"order": 11, "status": "completed", "observable_litellm_calls": 1}
++{"order": 12, "status": "completed", "observable_litellm_calls": 1}
++{"order": 13, "status": "completed", "observable_litellm_calls": 1}
++{"order": 14, "status": "completed", "observable_litellm_calls": 1}
++{"order": 15, "status": "completed", "observable_litellm_calls": 1}
++{"order": 16, "status": "completed", "observable_litellm_calls": 1}
++{"order": 17, "status": "completed", "observable_litellm_calls": 1}
++{"order": 18, "status": "completed", "observable_litellm_calls": 1}
++test_profiled_actual_route_and_eighteen_ordered_fake_requests (test_decision_phase2_live.DecisionPhase2LiveTests.test_profiled_actual_route_and_eighteen_ordered_fake_requests) ... ok
++test_public_projection_excludes_thinking_and_secret_sentinels (test_decision_phase2_live.DecisionPhase2LiveTests.test_public_projection_excludes_thinking_and_secret_sentinels) ... ok
++test_candidate_binding_rejects_tampering (test_decision_reminder_agent.DecisionReminderTest.test_candidate_binding_rejects_tampering) ... ok
++test_exact_phase2_contract (test_decision_reminder_agent.DecisionReminderTest.test_exact_phase2_contract) ... ok
++test_real_constructor_and_two_phase_requests (test_decision_reminder_agent.DecisionReminderTest.test_real_constructor_and_two_phase_requests) ... ok
++System.Management.Automation.RemoteException
++----------------------------------------------------------------------
++Ran 14 tests in 164.102s
++System.Management.Automation.RemoteException
++OK
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_phase2_screen.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_phase2_screen.py
+index fe64ce8e..a8e18f00 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_phase2_screen.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_phase2_screen.py
+@@ -29,6 +29,7 @@ from memory_agent.memory.universal_memory import UniversalMemory
+ from memory_agent.memory_enabled_agent import MemoryEnabledTerminus2
+ 
+ from decision_reminder_agent import phase2_prompt, phase2_system
++from decision_phase2_views import project
+ from episode import construct_upstream
+ from static_source_live import profile_identity, public_value
+ from worker_main import PMAAuditIntegrityError, append_private_audit, install_transport_audit
+@@ -40,8 +41,11 @@ CASES = (('07', 235), ('14', 85), ('14', 105), ('22', 7),
+          ('07', 161), ('18', 6))
+ VARIANTS = ('U', 'V1', 'D1')
+ LIVE_SCHEMA = 'pma-decision-phase2-once-v1'
++VIEW_SCHEMA = 'pma-decision-phase2-input-views-once-v2'
++VIEW_DRAFT_SCHEMA = 'pma-decision-phase2-input-views-draft-v2'
+ PROFILE_SHA256 = 'cc5f784b069034f44bc4527d15acd70191b1f7fc5810556c087b7b35e0ae00f1'
+-CODE_FILES = ('decision_phase2_screen.py', 'decision_reminder_agent.py',
++CODE_FILES = ('decision_phase2_screen.py', 'decision_phase2_views.py',
++              'decision_reminder_agent.py',
+               'episode.py', 'worker_main.py', 'static_source_live.py',
+               'vendor/pma_89e5c0d/src/memory_agent/memory_enabled_agent.py',
+               'vendor/pma_89e5c0d/src/memory_agent/memory/universal_memory.py',
+@@ -144,12 +148,81 @@ def requests() -> list[dict]:
+     return rows
+ 
+ 
+-def prepare(output: Path) -> dict:
++def view_requests() -> list[dict]:
++    rows = []
++    rotations = (('F', 'EB', 'E'), ('EB', 'E', 'F'), ('E', 'F', 'EB'))
++    for arm, step in CASES:
++        archive = read_case(arm, step)
++        full = phase2_prompt(archive['prompt'], 'D1')
++        for occurrence, rotation in enumerate(rotations, 1):
++            for view in rotation:
++                visible, identity = project(full, view)
++                rows.append({'arm': arm, 'pma_step': step, 'variant': 'D1',
++                             'input_view': view, 'occurrence': occurrence,
++                             'run_id': f'case-{arm}-{step}-r{occurrence}-{view.lower()}',
++                             'source_path': archive['source_path'],
++                             'source_file_sha256': archive['source_file_sha256'],
++                             'archive_index': archive['archive_index'],
++                             'original_prompt_sha256': archive['prompt_sha256'],
++                             'original_system_sha256': archive['system_sha256'],
++                             'request_prompt_sha256': sha(visible.encode('utf-8')),
++                             'request_system_sha256': sha(phase2_system('D1').encode('utf-8')),
++                             'projection_identity_sha256': sha(json.dumps(identity,
++                                 ensure_ascii=False, sort_keys=True).encode('utf-8')),
++                             'step_count': identity['step_count'], 'tools': None})
++    if len(rows) != 54 or sum(row['step_count'] for row in rows[::9]) != 43:
++        raise RuntimeError('fixed archived input-view asset count mismatch')
++    if len({row['run_id'] for row in rows}) != len(rows):
++        raise RuntimeError('duplicate run identity')
++    return rows
++
++
++def planned(schema: str) -> list[dict]:
++    if schema in (LIVE_SCHEMA, 'pma-decision-phase2-screen-draft-v1'):
++        return requests()
++    if schema in (VIEW_SCHEMA, VIEW_DRAFT_SCHEMA):
++        return view_requests()
++    raise ValueError('unknown Phase-2 plan schema')
++
++
++def slot_name(row: dict, number: int, schema: str) -> str:
++    if schema == VIEW_SCHEMA:
++        run_id = row['run_id']
++        if not re.fullmatch(r'case-\d+-\d+-r[1-3]-(?:f|eb|e)', run_id):
++            raise PermissionError('unsafe Phase-2 run identity')
++        return f'{number:02d}-{run_id}'
++    return f'{number:02d}-{row["variant"].lower()}'
++
++
++def request_for(row: dict) -> tuple[str, str, dict | None]:
++    source = read_case(row['arm'], row['pma_step'])
++    variant = row['variant']
++    full = (source['prompt'] if variant == 'U' else
++            phase2_prompt(source['prompt'], variant))
++    identity = None
++    if 'input_view' in row:
++        if variant != 'D1':
++            raise PermissionError('input views require D1')
++        full, identity = project(full, row['input_view'])
++        if (sha(json.dumps(identity, ensure_ascii=False, sort_keys=True).encode('utf-8'))
++                != row['projection_identity_sha256'] or
++                identity['step_count'] != row['step_count']):
++            raise PermissionError('projected field identity changed')
++    system = PHASE2_SYSTEM if variant == 'U' else phase2_system(variant)
++    if (sha(full.encode('utf-8')) != row['request_prompt_sha256'] or
++            sha(system.encode('utf-8')) != row['request_system_sha256'] or
++            row['source_file_sha256'] != source['source_file_sha256']):
++        raise PermissionError('archived Phase-2 request identity changed')
++    return full, system, identity
++
++
++def prepare(output: Path, *, input_views: bool = False) -> dict:
+     output.mkdir(parents=True, exist_ok=False)
+-    manifest = {'schema': 'pma-decision-phase2-screen-draft-v1',
++    schema = VIEW_DRAFT_SCHEMA if input_views else 'pma-decision-phase2-screen-draft-v1'
++    manifest = {'schema': schema,
+                 'execution_authorized': False,
+                 'scope': 'six_archived_Phase2_inputs_only_no_Task_no_Phase1',
+-                'planned_order': requests()}
++                'planned_order': planned(schema)}
+     (output / 'manifest.json').write_text(json.dumps(manifest, indent=2),
+                                           encoding='utf-8')
+     return {'requests': len(manifest['planned_order']),
+@@ -157,24 +230,27 @@ def prepare(output: Path) -> dict:
+             'manifest_sha256': sha((output / 'manifest.json').read_bytes())}
+ 
+ 
+-def freeze(manifest_path: Path, output: Path, profile_path: Path) -> dict:
++def freeze(manifest_path: Path, output: Path, profile_path: Path,
++           *, input_views: bool = False) -> dict:
+     if manifest_path.exists() or output.exists():
+         raise FileExistsError('new manifest and output root are required')
+     _, safe_profile = checked_profile(profile_path)
+     identity = code_identity()
+-    manifest = {'schema': LIVE_SCHEMA, 'execution_authorized': False,
++    schema = VIEW_SCHEMA if input_views else LIVE_SCHEMA
++    order = planned(schema)
++    manifest = {'schema': schema, 'execution_authorized': False,
+                 'batch_id': 'd1v1-' + uuid.uuid4().hex[:20],
+                 'code_identity': identity, 'profile_public': safe_profile,
+                 'profile_sha256': PROFILE_SHA256,
+                 'output_root': str(output.resolve()),
+-                'planned_order': requests(),
+-                'logical_requests': 18,
++                'planned_order': order,
++                'logical_requests': len(order),
+                 'request_timeout_seconds': safe_profile['effective_timeout'],
+                 'upstream_retry_attempts': 3,
+                 'inner_network_attempts': 'unknown',
+                 'scope': 'archived_public_Phase2_only_no_Task_no_Phase1'}
+-    if len(manifest['planned_order']) != 18:
+-        raise RuntimeError('fixed archived comparison no longer has 18 requests')
++    if len({row.get('run_id', str(index)) for index, row in enumerate(order)}) != len(order):
++        raise RuntimeError('duplicate planned run identity')
+     manifest_path.parent.mkdir(parents=True, exist_ok=True)
+     write_new(manifest_path, manifest)
+     return {'batch_id': manifest['batch_id'],
+@@ -187,16 +263,16 @@ def check_frozen(manifest_path: Path, profile_path: Path) -> tuple[dict, dict]:
+     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+     profile, safe_profile = checked_profile(profile_path)
+     try:
+-        current_requests = requests()
++        current_requests = planned(manifest.get('schema'))
+     except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
+         raise PermissionError('archived Phase-2 source or prompt identity invalid') from exc
+-    if (manifest.get('schema') != LIVE_SCHEMA or
++    if (manifest.get('schema') not in (LIVE_SCHEMA, VIEW_SCHEMA) or
+             manifest.get('execution_authorized') is not False or
+             manifest.get('code_identity') != code_identity() or
+             manifest.get('profile_public') != safe_profile or
+             manifest.get('profile_sha256') != PROFILE_SHA256 or
+             manifest.get('planned_order') != current_requests or
+-            manifest.get('logical_requests') != 18 or
++            manifest.get('logical_requests') != len(current_requests) or
+             manifest.get('request_timeout_seconds') != profile['read_timeout'] or
+             manifest.get('upstream_retry_attempts') != 3 or
+             not isinstance(manifest.get('batch_id'), str) or
+@@ -211,7 +287,7 @@ def authorize(manifest_path: Path, auth_path: Path, profile_path: Path,
+     if auth_path.exists() or not authorization_source.strip():
+         raise PermissionError('new one-use approval and source are required')
+     manifest, _ = check_frozen(manifest_path, profile_path)
+-    auth = {'schema': LIVE_SCHEMA + '-authorization',
++    auth = {'schema': manifest['schema'] + '-authorization',
+             'execution_authorized': True,
+             'authorization_source': authorization_source,
+             'batch_id': manifest['batch_id'],
+@@ -232,7 +308,7 @@ def check_authorized(manifest_path: Path, auth_path: Path,
+                      profile_path: Path) -> tuple[dict, dict, dict]:
+     manifest, profile = check_frozen(manifest_path, profile_path)
+     auth = json.loads(auth_path.read_text(encoding='utf-8'))
+-    if (auth.get('schema') != LIVE_SCHEMA + '-authorization' or
++    if (auth.get('schema') != manifest['schema'] + '-authorization' or
+             auth.get('execution_authorized') is not True or
+             auth.get('batch_id') != manifest['batch_id'] or
+             auth.get('manifest_sha256') != sha(manifest_path.read_bytes()) or
+@@ -269,15 +345,10 @@ def classify_output(raw: str, parsed: str | None) -> str:
+ async def execute_one(manifest: dict, row: dict, number: int, profile: dict,
+                       directory: Path, *, fake_lower=None) -> dict:
+     directory.mkdir(parents=True, exist_ok=False)
+-    source = read_case(row['arm'], row['pma_step'])
+     variant = row['variant']
+-    prompt = (source['prompt'] if variant == 'U' else
+-              phase2_prompt(source['prompt'], variant))
+-    system = PHASE2_SYSTEM if variant == 'U' else phase2_system(variant)
+-    if (sha(prompt.encode()) != row['request_prompt_sha256'] or
+-            sha(system.encode()) != row['request_system_sha256'] or
+-            row['source_file_sha256'] != source['source_file_sha256']):
+-        raise PermissionError('archived Phase-2 request identity changed')
++    prompt, system, projection = request_for(row)
++    if projection is not None:
++        write_new(directory / 'projection_identity.json', projection)
+     agent = construct_upstream(directory / 'upstream', memory_profile=profile,
+                                research_candidate=variant)
+     install_transport_audit(agent, directory)
+@@ -291,7 +362,7 @@ async def execute_one(manifest: dict, row: dict, number: int, profile: dict,
+     append_json(directory / 'started.jsonl', {
+         'order': number, 'variant': variant, 'arm': row['arm'],
+         'pma_step': row['pma_step'], 'started_epoch': started,
+-        'source_file_sha256': source['source_file_sha256'],
++        'source_file_sha256': row['source_file_sha256'],
+         'request_prompt_sha256': row['request_prompt_sha256'],
+         'request_system_sha256': row['request_system_sha256']})
+ 
+@@ -381,6 +452,9 @@ async def execute_one(manifest: dict, row: dict, number: int, profile: dict,
+               'variant': variant, 'started_epoch': started,
+               'model_prompt_sha256': row['request_prompt_sha256'],
+               'model_system_sha256': row['request_system_sha256']}
++    if projection is not None:
++        result.update(input_view=row['input_view'], occurrence=row['occurrence'],
++                      run_id=row['run_id'])
+     try:
+         response = await agent._memory_agent._call_llm_phase2(prompt)
+         parsed = agent._memory_agent._parse_phase2_response(response.content or '')
+@@ -424,7 +498,7 @@ async def run_authorized(manifest_path: Path, auth_path: Path, profile_path: Pat
+             check_frozen_after_start(manifest_path, manifest, profile_path,
+                                      auth['manifest_sha256'])
+             result = await execute_one(manifest, row, number, profile,
+-                                       root / f'{number:02d}-{row["variant"].lower()}',
++                                       root / slot_name(row, number, manifest['schema']),
+                                        fake_lower=fake_lower)
+             results.append(result)
+             append_json(root / 'summary.jsonl', result)
+@@ -437,14 +511,16 @@ async def run_authorized(manifest_path: Path, auth_path: Path, profile_path: Pat
+         try:
+             statuses = []
+             for number, row in enumerate(manifest['planned_order'], 1):
+-                slot = root / f'{number:02d}-{row["variant"].lower()}'
++                slot = root / slot_name(row, number, manifest['schema'])
+                 result_file = slot / 'result.json'
+                 state = (json.loads(result_file.read_text(encoding='utf-8'))['status']
+                          if result_file.is_file() else
+                          'started_incomplete' if slot.exists() else 'confirmed_not_started')
+                 statuses.append({'order': number, 'arm': row['arm'],
+                                  'pma_step': row['pma_step'], 'variant': row['variant'],
+-                                 'status': state})
++                                 'input_view': row.get('input_view'),
++                                 'occurrence': row.get('occurrence'),
++                                 'run_id': row.get('run_id'), 'status': state})
+             write_new(root / 'status_table.json', {'rows': statuses})
+             write_new(root / 'authorization_revoked.json', {
+                 'batch_id': manifest['batch_id'], 'epoch': time.time(),
+@@ -463,27 +539,27 @@ def check_frozen_after_start(manifest_path: Path, manifest: dict,
+             json.loads(manifest_path.read_text(encoding='utf-8')) != manifest or
+             manifest['code_identity'] != code_identity() or
+             manifest['profile_public'] != safe or
+-            manifest['planned_order'] != requests() or
++            manifest['planned_order'] != planned(manifest['schema']) or
+             profile['read_timeout'] != manifest['request_timeout_seconds']):
+         raise PermissionError('frozen Phase-2 identity changed during batch')
+ 
+ 
+ async def fake(manifest_path: Path, output: Path) -> dict:
+     frozen = json.loads(manifest_path.read_text(encoding='utf-8'))
+-    if (frozen.get('schema') != 'pma-decision-phase2-screen-draft-v1' or
++    if (frozen.get('schema') not in
++            ('pma-decision-phase2-screen-draft-v1', VIEW_DRAFT_SCHEMA) or
+             frozen.get('execution_authorized') is not False or
+-            frozen.get('planned_order') != requests()):
++            frozen.get('planned_order') != planned(frozen['schema'])):
+         raise RuntimeError('Phase 2 draft/source/variant identity changed')
+     output.mkdir(parents=True, exist_ok=False)
+     captures = []
+     for number, row in enumerate(frozen['planned_order'], 1):
+-        source = read_case(row['arm'], row['pma_step'])
+         variant = row['variant']
+-        expected_prompt = (source['prompt'] if variant == 'U' else
+-                           phase2_prompt(source['prompt'], variant))
+-        expected_system = PHASE2_SYSTEM if variant == 'U' else phase2_system(variant)
++        expected_prompt, expected_system, projection = request_for(row)
+         slot = output / f'{number:02d}'
+         slot.mkdir()
++        if projection is not None:
++            write_new(slot / 'projection_identity.json', projection)
+         agent = construct_upstream(slot / 'upstream',
+                                    research_candidate=variant)
+         sent = []
+@@ -500,6 +576,8 @@ async def fake(manifest_path: Path, output: Path) -> dict:
+             raise RuntimeError('actual Phase 2 call/parser differs from draft')
+         captures.append({'order': number, 'arm': row['arm'],
+                          'pma_step': row['pma_step'], 'variant': variant,
++                         'input_view': row.get('input_view'),
++                         'occurrence': row.get('occurrence'),
+                          'request': sent[0], 'raw_response': response.content,
+                          'parsed_reminder': parsed})
+     (output / 'actual_requests.json').write_text(json.dumps(captures, indent=2,
+@@ -513,6 +591,7 @@ def main() -> None:
+     sub = parser.add_subparsers(dest='command', required=True)
+     prepared = sub.add_parser('prepare')
+     prepared.add_argument('--output', type=Path, required=True)
++    prepared.add_argument('--input-views', action='store_true')
+     replay = sub.add_parser('fake')
+     replay.add_argument('--manifest', type=Path, required=True)
+     replay.add_argument('--output', type=Path, required=True)
+@@ -520,6 +599,7 @@ def main() -> None:
+     frozen.add_argument('--manifest', type=Path, required=True)
+     frozen.add_argument('--output', type=Path, required=True)
+     frozen.add_argument('--profile', type=Path, required=True)
++    frozen.add_argument('--input-views', action='store_true')
+     approved = sub.add_parser('authorize', help='one-use approval after committed code freeze')
+     approved.add_argument('--manifest', type=Path, required=True)
+     approved.add_argument('--authorization', type=Path, required=True)
+@@ -531,21 +611,23 @@ def main() -> None:
+     launched.add_argument('--profile', type=Path, required=True)
+     args = parser.parse_args()
+     if args.command == 'prepare':
+-        result = prepare(args.output)
++        result = prepare(args.output, input_views=args.input_views)
+     elif args.command == 'fake':
+         result = asyncio.run(fake(args.manifest, args.output))
+     elif args.command == 'freeze':
+-        result = freeze(args.manifest, args.output, args.profile)
++        result = freeze(args.manifest, args.output, args.profile,
++                        input_views=args.input_views)
+     elif args.command == 'authorize':
+         result = authorize(args.manifest, args.authorization, args.profile,
+                            args.authorization_source)
+     else:
+         rows = asyncio.run(run_authorized(args.manifest, args.authorization,
+                                           args.profile))
++        planned_count = len(json.loads(args.manifest.read_text(encoding='utf-8'))['planned_order'])
+         result = {'completed': sum(row['status'] == 'completed' for row in rows),
+-                  'started': len(rows), 'confirmed_not_started': 18 - len(rows)}
++                  'started': len(rows), 'confirmed_not_started': planned_count - len(rows)}
+     print(json.dumps(result, indent=2))
+-    if args.command == 'run' and result['completed'] != 18:
++    if args.command == 'run' and result['completed'] != planned_count:
+         raise SystemExit(1)
+ 
+ 
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_phase2_views.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_phase2_views.py
+new file mode 100644
+index 00000000..72037aca
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/decision_phase2_views.py
+@@ -0,0 +1,123 @@
++"""Strict, archived-input-only projections for the D1 Phase-2 source diagnostic.
++
++The JSON decoder determines the command/output boundaries.  No JSON-looking
++text inside a command, tool result, or task instruction is recursively decoded.
++"""
++
++from __future__ import annotations
++
++import hashlib
++import json
++import re
++
++
++PLACEHOLDER = 'Memory bank withheld in this diagnostic condition.'
++CONTEXT = '## Context (Task Description + Recent Trajectory)\n'
++RECENT = re.compile(r'\[Recent Trajectory \(last (\d+) steps\)\]\n\n')
++STEP = re.compile(r'(?m)^\[Step (\d+)\]\n')
++TASK_END = '\n\n## Your Task\n'
++DECODER = json.JSONDecoder()
++
++
++def digest(value: str) -> str:
++    return hashlib.sha256(value.encode('utf-8')).hexdigest()
++
++
++def _json_at(text: str, start: int) -> tuple[object, str, int]:
++    value, end = DECODER.raw_decode(text, start)
++    return value, text[start:end], end
++
++
++def project(original: str, view: str) -> tuple[str, dict]:
++    """Return the exact F prompt or field-only EB/E projection and provenance."""
++    if view not in ('F', 'EB', 'E'):
++        raise ValueError('unknown input view')
++    if original.count(CONTEXT) != 1 or original.count(TASK_END) != 1:
++        raise ValueError('ambiguous archived context or task boundary')
++    context_at = original.index(CONTEXT)
++    task_at = original.index(TASK_END)
++    if context_at >= task_at:
++        raise ValueError('context occurs after task suffix')
++    prefix = original[:context_at]
++    context = original[context_at + len(CONTEXT):task_at]
++    task_suffix = original[task_at:]
++    if prefix.count('<memory_bank>') != 1 or prefix.count('</memory_bank>') != 1:
++        raise ValueError('ambiguous memory bank')
++    before, bank_tail = prefix.split('<memory_bank>', 1)
++    bank, after = bank_tail.split('</memory_bank>', 1)
++    if '<memory_bank>' in bank or '</memory_bank>' in after:
++        raise ValueError('nested memory bank')
++    recent = list(RECENT.finditer(context))
++    if len(recent) != 1:
++        raise ValueError('ambiguous recent trajectory header')
++    task_text = context[:recent[0].start()]
++    recent_header = context[recent[0].start():recent[0].end()]
++    trajectory = context[recent[0].end():]
++    matches = list(STEP.finditer(trajectory))
++    if not matches or trajectory[:matches[0].start()] or len(matches) > int(recent[0].group(1)):
++        raise ValueError('unexpected step count or unparsed trajectory prefix')
++    projected_steps = []
++    provenance = []
++    for index, match in enumerate(matches):
++        limit = matches[index + 1].start() if index + 1 < len(matches) else len(trajectory)
++        block = trajectory[match.end():limit]
++        if not block.startswith('Agent Analysis: '):
++            raise ValueError('missing Agent Analysis')
++        boundary = '\nCommands Executed: '
++        if block.count(boundary) != 1:
++            raise ValueError('ambiguous command boundary')
++        analysis, remainder = block[len('Agent Analysis: '):].split(boundary, 1)
++        command, command_raw, end = _json_at(remainder, 0)
++        output_label = '\nTerminal Output: '
++        if not isinstance(command, dict) or not remainder[end:].startswith(output_label):
++            raise ValueError('invalid command object or output boundary')
++        output_text = remainder[end + len(output_label):]
++        output, output_raw, end = _json_at(output_text, 0)
++        separator = output_text[end:]
++        if separator not in ('', '\n\n'):
++            raise ValueError('unparsed trailing step material')
++        if (not isinstance(output, dict) or set(output) != {'content', 'tool_results'} or
++                not isinstance(output['content'], str) or
++                not isinstance(output['tool_results'], list)):
++            raise ValueError('unexpected Terminal Output fields')
++        results = output['tool_results']
++        if not results or any(not isinstance(item, dict) or 'tool_use_id' not in item
++                              for item in results):
++            raise ValueError('missing independently identified tool result')
++        raw_results = json.dumps(results, ensure_ascii=False)
++        provenance.append({'step': int(match.group(1)), 'position': index,
++                           'analysis': {'source_field': 'Agent Analysis',
++                                        'sha256': digest(analysis), 'removed': view != 'F'},
++                           'commands': {'source_field': 'Commands Executed',
++                                        'sha256': digest(command_raw), 'preserved': True},
++                           'output_content': {'source_field': 'Terminal Output.content',
++                                              'sha256': digest(output['content']),
++                                              'removed': view != 'F'},
++                           'tool_results': {'source_field': 'Terminal Output.tool_results',
++                                            'sha256_canonical': digest(raw_results),
++                                            'count': len(results),
++                                            'ids': [item['tool_use_id'] for item in results],
++                                            'preserved': True},
++                           'raw_output_sha256': digest(output_raw)})
++        if view == 'F':
++            projected_steps.append(trajectory[match.start():limit])
++        else:
++            output_new = json.dumps({'tool_results': results}, ensure_ascii=False)
++            projected_steps.append(f'[Step {match.group(1)}]\n'
++                                   f'Commands Executed: {command_raw}\n'
++                                   f'Terminal Output: {output_new}{separator}')
++    if view == 'E':
++        prefix = before + '<memory_bank>\n' + PLACEHOLDER + '\n</memory_bank>' + after
++    projected = (prefix + CONTEXT + task_text + recent_header + ''.join(projected_steps)
++                 + task_suffix)
++    if view == 'F' and projected != original:
++        raise ValueError('F projection changed archived prompt')
++    identity = {'view': view, 'original_prompt_sha256': digest(original),
++                'projected_prompt_sha256': digest(projected),
++                'bank_original_sha256': digest(bank),
++                'bank_projected_sha256': digest(bank if view != 'E' else '\n' + PLACEHOLDER + '\n'),
++                'task_description_sha256': digest(task_text),
++                'recent_header_sha256': digest(recent_header),
++                'task_suffix_sha256': digest(task_suffix),
++                'step_count': len(matches), 'steps': provenance}
++    return projected, identity
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_decision_phase2_views.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_decision_phase2_views.py
+new file mode 100644
+index 00000000..b239a0af
+--- /dev/null
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/test_decision_phase2_views.py
+@@ -0,0 +1,175 @@
++"""Offline checks of the archived D1 input-source diagnostic."""
++
++import asyncio
++import json
++from pathlib import Path
++from tempfile import TemporaryDirectory
++import unittest
++from unittest.mock import patch
++
++import litellm
++
++import decision_phase2_screen as screen
++from decision_phase2_views import PLACEHOLDER, project
++import decision_phase2_archive as archive
++
++
++PROFILE = Path('E:/LongContext/monitor_config/models.local.json')
++OLD = screen.HERE / 'decision_phase2_live18_20261017/public_run'
++
++
++class InputViewTests(unittest.TestCase):
++    def fixture(self, root):
++        manifest, auth, output = root / 'manifest.json', root / 'auth.json', root / 'out'
++        identity = {'commit': 'forced-fake-only', 'files': {'screen': 'forced-fake-only'}}
++        mocked = patch.object(screen, 'code_identity', return_value=identity)
++        mocked.start()
++        self.addCleanup(mocked.stop)
++        screen.freeze(manifest, output, PROFILE, input_views=True)
++        screen.authorize(manifest, auth, PROFILE, 'isolated forced-fake diagnostic')
++        return manifest, auth, output
++
++    @staticmethod
++    def response(content='<no_intervention/>'):
++        return litellm.ModelResponse(model='claude-opus-4-8', choices=[{
++            'message': {'content': content}, 'finish_reason': 'stop'}],
++            usage={'prompt_tokens': 9, 'completion_tokens': 2})
++
++    def test_six_exact_F_and_field_projection(self):
++        self.assertEqual(len(screen.view_requests()), 54)
++        total_steps = 0
++        for case_index, (arm, step) in enumerate(screen.CASES):
++            full = screen.phase2_prompt(screen.read_case(arm, step)['prompt'], 'D1')
++            previous = json.loads((OLD / f'{case_index * 3 + 3:02d}-d1/request.json')
++                                  .read_text(encoding='utf-8'))
++            self.assertEqual(full, previous['prompt'])
++            self.assertEqual(screen.phase2_system('D1'), previous['system'])
++            f, f_id = project(full, 'F')
++            eb, eb_id = project(full, 'EB')
++            e, e_id = project(full, 'E')
++            self.assertEqual(full, f)
++            self.assertEqual(eb_id['step_count'], e_id['step_count'])
++            total_steps += f_id['step_count']
++            self.assertEqual(eb_id['bank_original_sha256'], f_id['bank_original_sha256'])
++            self.assertEqual(eb.split('</memory_bank>', 1)[1],
++                             e.split('</memory_bank>', 1)[1])
++            self.assertIn(PLACEHOLDER, e)
++            self.assertNotIn(PLACEHOLDER, eb)
++            for step_id in eb_id['steps']:
++                self.assertTrue(step_id['analysis']['removed'])
++                self.assertTrue(step_id['output_content']['removed'])
++                self.assertTrue(step_id['commands']['preserved'])
++                self.assertTrue(step_id['tool_results']['preserved'])
++                self.assertGreater(step_id['tool_results']['count'], 0)
++            self.assertNotIn('Agent Analysis: ', eb)
++            self.assertNotIn('"content": "\\n### [WORKING MEMORY]', eb)
++        self.assertEqual(total_steps, 43)
++
++    def test_invalid_projection_structure_and_view_refused(self):
++        full = screen.phase2_prompt(screen.read_case('07', 235)['prompt'], 'D1')
++        for changed in (full.replace('Commands Executed: ', 'Commands: ', 1),
++                        full.replace('"tool_results":', '"other_results":', 1),
++                        full.replace('[Step 228]', '[Step 228]\nunknown event', 1)):
++            with self.assertRaises(ValueError):
++                project(changed, 'EB')
++        with self.assertRaises(ValueError):
++            project(full, '')
++
++    def test_profiled_fifty_four_sends_and_archive(self):
++        with TemporaryDirectory() as temporary:
++            manifest, auth, root = self.fixture(Path(temporary))
++            expected = screen.view_requests()
++            sends = []
++
++            async def lower(**kwargs):
++                number = len(sends) + 1
++                row = expected[number - 1]
++                slot = root / screen.slot_name(row, number, screen.VIEW_SCHEMA)
++                self.assertTrue((slot / 'requests.jsonl').is_file())
++                sends.append(kwargs)
++                return self.response()
++
++            results = asyncio.run(screen.run_authorized(manifest, auth, PROFILE,
++                                                         fake_lower=lower))
++            self.assertEqual(len(sends), 54)
++            self.assertEqual(len(results), 54)
++            self.assertFalse(auth.exists())
++            self.assertTrue(all(row['status'] == 'completed' for row in results))
++            self.assertEqual([row['input_view'] for row in results],
++                             [row['input_view'] for row in expected])
++            for number, row in enumerate(expected, 1):
++                content = sends[number - 1]['messages'][-1]['content']
++                actual = content if isinstance(content, str) else ''.join(
++                    part['text'] for part in content)
++                prompt, _, _ = screen.request_for(row)
++                self.assertEqual(actual, prompt)
++                self.assertEqual(sends[number - 1]['timeout'], 300)
++            public = Path(temporary) / 'public'
++            self.assertEqual(archive.archive(root, manifest, public)['completed'], 54)
++            self.assertEqual(len(list(public.glob('*/request.json'))), 54)
++            self.assertEqual(len(list(public.glob('*/projection_identity.json'))), 54)
++
++    def test_first_final_failure_stops_and_partial_archive(self):
++        with TemporaryDirectory() as temporary:
++            manifest, auth, root = self.fixture(Path(temporary))
++            attempts = []
++
++            async def final_failure(**kwargs):
++                attempts.append(kwargs)
++                raise ConnectionError('synthetic final transport failure')
++
++            rows = asyncio.run(screen.run_authorized(manifest, auth, PROFILE,
++                                                     fake_lower=final_failure))
++            self.assertEqual(len(rows), 1)
++            self.assertEqual(rows[0]['status'], 'transport_final_failure')
++            self.assertEqual(len(attempts), 3)  # original internal retry only
++            status = json.loads((root / 'status_table.json').read_text(encoding='utf-8'))['rows']
++            self.assertEqual(sum(r['status'] == 'confirmed_not_started' for r in status), 53)
++            self.assertFalse(auth.exists())
++            self.assertEqual(archive.archive(root, manifest, Path(temporary) / 'public')
++                             ['confirmed_not_started'], 53)
++
++    def test_authorization_and_order_tamper_zero_send(self):
++        with TemporaryDirectory() as temporary:
++            manifest, auth, root = self.fixture(Path(temporary))
++            original = manifest.read_bytes()
++            frozen = json.loads(original)
++            frozen['planned_order'][0], frozen['planned_order'][1] = (
++                frozen['planned_order'][1], frozen['planned_order'][0])
++            manifest.write_text(json.dumps(frozen), encoding='utf-8')
++            with self.assertRaises(PermissionError):
++                asyncio.run(screen.run_authorized(manifest, auth, PROFILE))
++            self.assertFalse(root.exists())
++            manifest.write_bytes(original)
++            with patch.object(screen, 'code_identity', return_value={'commit': 'wrong'}):
++                with self.assertRaises(PermissionError):
++                    asyncio.run(screen.run_authorized(manifest, auth, PROFILE))
++            self.assertFalse(root.exists())
++            for field, changed in (
++                    ('run_id', 'case-07-235-r1-f'),
++                    ('request_prompt_sha256', '0' * 64),
++                    ('source_file_sha256', '0' * 64)):
++                altered = json.loads(original)
++                altered['planned_order'][1][field] = changed
++                manifest.write_text(json.dumps(altered), encoding='utf-8')
++                with self.assertRaises(PermissionError):
++                    asyncio.run(screen.run_authorized(manifest, auth, PROFILE))
++                self.assertFalse(root.exists())
++            altered = json.loads(original)
++            altered['output_root'] = str(Path(temporary).parent / 'escaped-output')
++            manifest.write_text(json.dumps(altered), encoding='utf-8')
++            with self.assertRaises(PermissionError):
++                asyncio.run(screen.run_authorized(manifest, auth, PROFILE))
++            manifest.write_bytes(original)
++            wrong_profile = Path(temporary) / 'wrong-profile.json'
++            wrong_profile.write_text('{}', encoding='utf-8')
++            with self.assertRaises(PermissionError):
++                screen.check_authorized(manifest, auth, wrong_profile)
++            self.assertFalse(root.exists())
++            root.mkdir()
++            with self.assertRaises(PermissionError):
++                screen.check_authorized(manifest, auth, PROFILE)
++
++
++if __name__ == '__main__':
++    unittest.main()
