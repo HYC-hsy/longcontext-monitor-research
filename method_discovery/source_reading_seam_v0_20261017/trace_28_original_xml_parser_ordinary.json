@@ -1,0 +1,235 @@
+{
+  "scenario": "original_xml_parser",
+  "arm": "ordinary",
+  "requests": [
+    {
+      "prompt": "## Step 7\n\n## Current Memory Bank\n<memory_bank>\n<status>BANK_ONLY_SENTINEL</status>\n<knowledge>\n[older001] OLDER_SUPPORTED_DISCOVERY with an old receipt outside current window.\n</knowledge>\n<procedural>\n(empty)\n</procedural>\n</memory_bank>\n\n## Context (Task Description + Recent Trajectory)\n[Task Description]\nSYNTHETIC task: preserve the density callback interface.\n\n\n[Recent Trajectory (last 1 steps)]\n\n[Step 7]\nAgent Analysis: OUTER_ANALYSIS_SENTINEL\nCommands Executed: {\"tool_name\": \"file_write\", \"arguments\": {\"content\": \"RAW_AUTHORED_CLAIM: all tests passed. Agent Analysis: nested text stays.\"}}\nTerminal Output: {\"content\": \"OUTER_WORKING_MEMORY_SENTINEL\", \"tool_results\": [{\"tool_use_id\": \"synthetic-tool-1\", \"content\": \"RAW_RESULT_CLAIM: all tests passed; actual probe printed 180.\"}]}\n\n## Your Task\nAnalyze the trajectory and update the memory bank. Save important facts, record experiences, delete outdated entries. Be selective — only save what would be lost as the agent's context scrolls.\n\n\n## Authorized user updates (immutable source, in order)\n\n[Update 1]\nREAL-UPDATE-SHAPED synthetic first update\n\n[Update 2]\nREAL-UPDATE-SHAPED synthetic second update\n",
+      "system": "You are a Memory Bank Manager. Your job is to maintain a lean, accurate knowledge bank.\n\n## Your Tools\n- memory_save_knowledge: Save important FACTS (task requirements, env details, API constraints, file paths)\n- memory_save_procedural: Record EXPERIENCES (failed approaches, error patterns, successful fixes)\n- memory_update_status: Track progress internally (not shown to action agent)\n- memory_delete: Remove outdated/incorrect entries\n\n## Guidelines\n1. **Be selective**: Only save information that would be LOST if the action agent's context window scrolls past it\n2. **Prioritize task requirements**: API signatures, output formats, specific constraints from the task description\n3. **Record failures**: What was tried, why it failed, what the error was — so it's not repeated\n4. **Keep it lean**: Delete entries that are superseded by newer information\n5. **Don't save obvious things**: Terminal output the agent just saw, general knowledge about tools\n\n## What to save at Step 1 (task description):\n- Specific API requirements (function signatures, argument orders, input types)\n- Required output files and formats\n- Constraints that are easy to forget mid-task\n- Key domain-specific details\n\n## What to save at later steps:\n- Environment discoveries (package versions, tool availability)\n- Error patterns and fixes\n- Approach changes and why\n- Performance or score tracking\n",
+      "tools": [
+        {
+          "function": {
+            "description": "Save an important fact to the knowledge bank. Use for: task requirements, environment facts, file paths, API details, key constraints from the task description.",
+            "name": "memory_save_knowledge",
+            "parameters": {
+              "properties": {
+                "content": {
+                  "description": "The fact to save. Be precise and specific.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "content"
+              ],
+              "type": "object"
+            }
+          },
+          "type": "function"
+        },
+        {
+          "function": {
+            "description": "Record a debugging experience, failed approach, or solution. Use for: error patterns, things that didn't work and why, successful fixes, performance observations.",
+            "name": "memory_save_procedural",
+            "parameters": {
+              "properties": {
+                "content": {
+                  "description": "The experience to record. Include what was tried and what happened.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "content"
+              ],
+              "type": "object"
+            }
+          },
+          "type": "function"
+        },
+        {
+          "function": {
+            "description": "Update your internal tracking of task progress. This is for YOUR reference only, not shown to the action agent.",
+            "name": "memory_update_status",
+            "parameters": {
+              "properties": {
+                "content": {
+                  "description": "Current task status/progress summary.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "content"
+              ],
+              "type": "object"
+            }
+          },
+          "type": "function"
+        },
+        {
+          "function": {
+            "description": "Delete an outdated or incorrect memory entry by its ID.",
+            "name": "memory_delete",
+            "parameters": {
+              "properties": {
+                "memory_id": {
+                  "description": "The ID of the memory to delete.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "memory_id"
+              ],
+              "type": "object"
+            }
+          },
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "prompt": "## Step 7\n\n## Memory Bank (just updated)\n<memory_bank>\n<status>XML_COMMITTED</status>\n<knowledge>\n[older001] OLDER_SUPPORTED_DISCOVERY with an old receipt outside current window.\n</knowledge>\n<procedural>\n(empty)\n</procedural>\n</memory_bank>\n\n## Context (Task Description + Recent Trajectory)\n[Task Description]\nSYNTHETIC task: preserve the density callback interface.\n\n\n[Recent Trajectory (last 1 steps)]\n\n[Step 7]\nAgent Analysis: OUTER_ANALYSIS_SENTINEL\nCommands Executed: {\"tool_name\": \"file_write\", \"arguments\": {\"content\": \"RAW_AUTHORED_CLAIM: all tests passed. Agent Analysis: nested text stays.\"}}\nTerminal Output: {\"content\": \"OUTER_WORKING_MEMORY_SENTINEL\", \"tool_results\": [{\"tool_use_id\": \"synthetic-tool-1\", \"content\": \"RAW_RESULT_CLAIM: all tests passed; actual probe printed 180.\"}]}\n\n## Your Task\nReview the memory bank and the agent's recent trajectory. Decide:\n- Is the agent missing or forgetting something important from the memory bank?\n- Is the agent heading toward a pattern that matches a recorded failure?\n\nIf yes, write a <context_for_action> note with the relevant context.\nIf no, write <no_intervention/>.\n\n\n## Authorized user updates (immutable source, in order)\n\n[Update 1]\nREAL-UPDATE-SHAPED synthetic first update\n\n[Update 2]\nREAL-UPDATE-SHAPED synthetic second update\n",
+      "system": "You are a Selective Attention module for an Action Agent working on a coding task.\n\nYour role is like selective attention — when the agent's working memory (context window) has scrolled past important information, you can restore that context. But you also know when things are fine and the agent doesn't need help.\n\n## PROCESS:\n1. Review the memory bank contents\n2. Review the agent's recent trajectory (what it's doing now)\n3. DECIDE: Does the agent need a context reminder right now?\n\n## WHEN TO INTERVENE (output <context_for_action>):\n- The agent has forgotten a key requirement or constraint stored in memory\n- The agent is about to repeat a recorded failure pattern\n- The agent's current approach contradicts a specific fact in the memory bank\n- A format requirement, API detail, or constraint from the task seems forgotten\n\n## WHEN NOT TO INTERVENE (output <no_intervention/>):\n- The agent's actions are consistent with memory bank contents\n- You're not confident that a specific fact is being forgotten\n- The information you'd provide is already visible in the recent trajectory\n- You'd only be restating what the agent already knows\n\n## OUTPUT FORMAT:\nIf intervention needed, write:\n<context_for_action>\nYour synthesized context note here. You can:\n- Highlight requirements that seem forgotten\n- Note relevant past experiences from memory\n- Connect dots between memory entries and current behavior\n- Flag patterns that match recorded failures\nWrite as helpful observations, not commands.\n</context_for_action>\n\nIf no intervention needed, write:\n<no_intervention/>\n\n## GUIDELINES:\n- Your DEFAULT is <no_intervention/> — only intervene when you see a real gap\n- When you do intervene, be thoughtful: synthesize, don't just dump memory entries\n- Frame as observations: \"The task requires X\" not \"You MUST do X\"\n- Don't include information already visible in the recent trajectory\n- Be calibrated: don't pass things you're not sure about\n- You CAN connect dots and highlight patterns — not limited to verbatim copies from bank\n- The action agent is a strong model — help it remember, don't try to control it\n",
+      "tools": null
+    }
+  ],
+  "scripted_replies": {
+    "reader": [],
+    "pma": [
+      {
+        "content": "<tool_call><function=memory_update_status><parameter=content>XML_COMMITTED</parameter></function></tool_call>",
+        "tool_calls": []
+      },
+      {
+        "content": "<think>ignored</think><no_intervention/>",
+        "tool_calls": []
+      }
+    ]
+  },
+  "response_and_receipts": {
+    "reading": {
+      "status": "not_called",
+      "text": null,
+      "raw_output": null,
+      "projection": null
+    },
+    "result": {
+      "operations": [
+        {
+          "action": "update_status",
+          "memory_id": null,
+          "content": "XML_COMMITTED",
+          "success": true,
+          "error": null
+        }
+      ],
+      "should_inject": false,
+      "context_for_action": null,
+      "raw_response_phase1": "<tool_call><function=memory_update_status><parameter=content>XML_COMMITTED</parameter></function></tool_call>",
+      "raw_response_phase2": "<think>ignored</think><no_intervention/>",
+      "reasoning_phase1": null,
+      "reasoning_phase2": null,
+      "user_prompt_phase1": "## Step 7\n\n## Current Memory Bank\n<memory_bank>\n<status>BANK_ONLY_SENTINEL</status>\n<knowledge>\n[older001] OLDER_SUPPORTED_DISCOVERY with an old receipt outside current window.\n</knowledge>\n<procedural>\n(empty)\n</procedural>\n</memory_bank>\n\n## Context (Task Description + Recent Trajectory)\n[Task Description]\nSYNTHETIC task: preserve the density callback interface.\n\n\n[Recent Trajectory (last 1 steps)]\n\n[Step 7]\nAgent Analysis: OUTER_ANALYSIS_SENTINEL\nCommands Executed: {\"tool_name\": \"file_write\", \"arguments\": {\"content\": \"RAW_AUTHORED_CLAIM: all tests passed. Agent Analysis: nested text stays.\"}}\nTerminal Output: {\"content\": \"OUTER_WORKING_MEMORY_SENTINEL\", \"tool_results\": [{\"tool_use_id\": \"synthetic-tool-1\", \"content\": \"RAW_RESULT_CLAIM: all tests passed; actual probe printed 180.\"}]}\n\n## Your Task\nAnalyze the trajectory and update the memory bank. Save important facts, record experiences, delete outdated entries. Be selective — only save what would be lost as the agent's context scrolls.\n",
+      "user_prompt_phase2": "## Step 7\n\n## Memory Bank (just updated)\n<memory_bank>\n<status>XML_COMMITTED</status>\n<knowledge>\n[older001] OLDER_SUPPORTED_DISCOVERY with an old receipt outside current window.\n</knowledge>\n<procedural>\n(empty)\n</procedural>\n</memory_bank>\n\n## Context (Task Description + Recent Trajectory)\n[Task Description]\nSYNTHETIC task: preserve the density callback interface.\n\n\n[Recent Trajectory (last 1 steps)]\n\n[Step 7]\nAgent Analysis: OUTER_ANALYSIS_SENTINEL\nCommands Executed: {\"tool_name\": \"file_write\", \"arguments\": {\"content\": \"RAW_AUTHORED_CLAIM: all tests passed. Agent Analysis: nested text stays.\"}}\nTerminal Output: {\"content\": \"OUTER_WORKING_MEMORY_SENTINEL\", \"tool_results\": [{\"tool_use_id\": \"synthetic-tool-1\", \"content\": \"RAW_RESULT_CLAIM: all tests passed; actual probe printed 180.\"}]}\n\n## Your Task\nReview the memory bank and the agent's recent trajectory. Decide:\n- Is the agent missing or forgetting something important from the memory bank?\n- Is the agent heading toward a pattern that matches a recorded failure?\n\nIf yes, write a <context_for_action> note with the relevant context.\nIf no, write <no_intervention/>.\n"
+    },
+    "bank_before_runtime": {
+      "knowledge": [
+        {
+          "access_count": 0,
+          "content": "OLDER_SUPPORTED_DISCOVERY with an old receipt outside current window.",
+          "created_at": "2026-10-18T03:02:46.211016",
+          "id": "older001",
+          "last_accessed": null
+        }
+      ],
+      "procedural": [],
+      "status": "BANK_ONLY_SENTINEL"
+    },
+    "bank_after": {
+      "knowledge": [
+        {
+          "access_count": 0,
+          "content": "OLDER_SUPPORTED_DISCOVERY with an old receipt outside current window.",
+          "created_at": "2026-10-18T03:02:46.211016",
+          "id": "older001",
+          "last_accessed": null
+        }
+      ],
+      "procedural": [],
+      "status": "XML_COMMITTED"
+    },
+    "commit_receipt": {
+      "status": "reported_operations_applied",
+      "operations": [
+        {
+          "action": "update_status",
+          "memory_id": null,
+          "content": "XML_COMMITTED",
+          "success": true,
+          "error": null
+        }
+      ],
+      "semantics": "not_evaluated",
+      "atomic_transaction": false
+    },
+    "snapshots": {
+      "phase1_bank": {
+        "knowledge": [
+          {
+            "access_count": 0,
+            "content": "OLDER_SUPPORTED_DISCOVERY with an old receipt outside current window.",
+            "created_at": "2026-10-18T03:02:46.211016",
+            "id": "older001",
+            "last_accessed": null
+          }
+        ],
+        "procedural": [],
+        "status": "BANK_ONLY_SENTINEL"
+      },
+      "before_crud": {
+        "knowledge": [
+          {
+            "access_count": 0,
+            "content": "OLDER_SUPPORTED_DISCOVERY with an old receipt outside current window.",
+            "created_at": "2026-10-18T03:02:46.211016",
+            "id": "older001",
+            "last_accessed": null
+          }
+        ],
+        "procedural": [],
+        "status": "BANK_ONLY_SENTINEL"
+      },
+      "after_crud": {
+        "knowledge": [
+          {
+            "access_count": 0,
+            "content": "OLDER_SUPPORTED_DISCOVERY with an old receipt outside current window.",
+            "created_at": "2026-10-18T03:02:46.211016",
+            "id": "older001",
+            "last_accessed": null
+          }
+        ],
+        "procedural": [],
+        "status": "XML_COMMITTED"
+      },
+      "phase2_bank": {
+        "knowledge": [
+          {
+            "access_count": 0,
+            "content": "OLDER_SUPPORTED_DISCOVERY with an old receipt outside current window.",
+            "created_at": "2026-10-18T03:02:46.211016",
+            "id": "older001",
+            "last_accessed": null
+          }
+        ],
+        "procedural": [],
+        "status": "XML_COMMITTED"
+      }
+    },
+    "stage_failures": [],
+    "transport_failures": [],
+    "failure_policy": "upstream_phase2_fallthrough_preserved_and_logged",
+    "task_execution": "not_run",
+    "task_gate": "none",
+    "advisory_delivered": false,
+    "semantic_quality": "not_tested"
+  },
+  "note": "All responses are scripted; this trace is not an LLM semantic test."
+}
