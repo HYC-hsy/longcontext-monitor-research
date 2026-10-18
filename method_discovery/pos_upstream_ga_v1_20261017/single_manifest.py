@@ -85,6 +85,9 @@ def prepare(plan: dict, source: Path, task_profile: Path,
         raise RuntimeError('PoS single-run plan identity invalid')
     task = plan['task']
     synthetic = plan.get('synthetic_fixture') is True
+    policy = plan.get('task_complete_response_policy', 'disabled')
+    if policy not in {'disabled', 'complete-response-v1'} or (synthetic and policy != 'disabled'):
+        raise RuntimeError('PoS Task response policy invalid')
     if synthetic != (task == SYNTHETIC_ID) or (not synthetic and task not in FOUR):
         raise RuntimeError('PoS task not in frozen four or synthetic fixture')
     profile = runpy.run_path(str(task_profile))['native_claude_cc_vibe_opus48']
@@ -145,6 +148,8 @@ def prepare(plan: dict, source: Path, task_profile: Path,
               'role_object_instruction': ROLE_OBJECT_INSTRUCTION,
               'role_update_fields_instruction': ROLE_UPDATE_FIELDS_INSTRUCTION,
               'role_transport_retries': 0, 'synthetic_fixture': synthetic}
+    if 'task_complete_response_policy' in plan:
+        method['task_complete_response_policy'] = policy
     config_sha = hashlib.sha256(json.dumps(method, sort_keys=True,
         separators=(',', ':')).encode('utf-8')).hexdigest()
     certification = None

@@ -341,6 +341,14 @@ def run_live(args) -> dict:
             authorized.get('execution_authorized') is not True or
             authorized.get('manifest_sha256') != _sha(manifest_path)):
         raise RuntimeError('PMA authorization absent or changed')
+    task_policy = manifest.get('config', {}).get('task_complete_response_policy', 'disabled')
+    actual_task_policy = ('complete-response-v1' if
+        os.environ.get('GA_TASK_COMPLETE_RESPONSE') == '1' else 'disabled')
+    if manifest.get('schema') == 'pos-ga-single-manifest-v1' and (
+            task_policy not in {'disabled', 'complete-response-v1'} or
+            authorized.get('task_complete_response_policy', 'disabled') != task_policy or
+            actual_task_policy != task_policy):
+        raise RuntimeError('Task response policy differs from PoS manifest/authorization')
     fixture = bool(getattr(args, 'zero_model_fixture', False))
     if fixture != (manifest.get('zero_model_fixture_only') is True and
                    authorized.get('zero_model_fixture_only') is True):
@@ -581,8 +589,13 @@ def run_live(args) -> dict:
                    GA_PMA_UPSTREAM_ENABLED='1' if args.condition == 'B' else '0',
                    GA_PMA_CAPTURE_TASK_REQUESTS='1',
                    GA_PMA_ENABLED='0', GA_MONITOR_ENABLED='0', GA_M0_MONITOR_ENABLED='0')
-        if env.get('GA_TASK_COMPLETE_RESPONSE') == '1':
+        if task_policy == 'complete-response-v1' or (
+                args.condition != 'P' and env.get('GA_TASK_COMPLETE_RESPONSE') == '1'):
+            env['GA_TASK_COMPLETE_RESPONSE'] = '1'
             env['GA_TASK_DEADLINE_EPOCH'] = str(deadline)
+        elif manifest.get('schema') == 'pos-ga-single-manifest-v1':
+            env.pop('GA_TASK_COMPLETE_RESPONSE', None)
+            env.pop('GA_TASK_DEADLINE_EPOCH', None)
         if args.condition == 'P':
             env.update(GA_POS_ENABLED='1',
                        GA_POS_TRANSPORT='fake' if fixture else 'profile',

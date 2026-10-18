@@ -40,12 +40,15 @@ def _identity(row: dict) -> tuple:
 def validate_plan(manifest: dict, granted: dict) -> list[dict]:
     if manifest.get('schema') == 'pos-ga-single-manifest-v1':
         arms, bindings = manifest.get('planned_order'), granted.get('run_bindings')
+        task_policy = manifest.get('config', {}).get('task_complete_response_policy', 'disabled')
         if (manifest.get('execution_authorized') is not False or
                 granted.get('execution_authorized') is not True or
                 not isinstance(arms, list) or len(arms) != 1 or
                 not isinstance(bindings, list) or len(bindings) != 1 or
                 granted.get('approved_arms') != arms or
                 granted.get('config_sha256') != manifest.get('config_sha256') or
+                task_policy not in {'disabled', 'complete-response-v1'} or
+                granted.get('task_complete_response_policy', 'disabled') != task_policy or
                 manifest.get('upstream_commit') !=
                     '6818cfa6434dbc91fcf67f0b3eb12a91db47433f'):
             raise RuntimeError('PoS single-run authorization incomplete')

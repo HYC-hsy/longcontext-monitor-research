@@ -1,4 +1,4 @@
-"""Four real prepared PoS manifests through run_live, stopped before Harbor Popen.
+"""Selected real prepared PoS manifests through run_live, stopped before Harbor Popen.
 
 This uses no synthetic task manifest, provider, official evaluator, or Task run.
 """
@@ -37,11 +37,13 @@ def run_boundary(args):
     head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=CHECKOUT,
         capture_output=True, text=True, check=True).stdout.strip()
     records = []
-    for order, task in enumerate(FOUR, 1):
+    tasks = tuple(args.task or FOUR)
+    for order, task in enumerate(tasks, 1):
         directory = root / f'{order:02d}_{task}'
         identity = single_run.prepare(argparse.Namespace(output=str(directory),
             task=task, condition='P', research_candidate='PoS', occurrence=1,
             fake_only=False, synthetic_pos_fixture=False,
+            task_complete_response=args.task_complete_response,
             official_source_git=args.official_source_git,
             task_profile_file=args.task_profile_file, pma_profile_file=None,
             certification_dir=args.certification))
@@ -60,7 +62,9 @@ def run_boundary(args):
             'audited_code_commit': head, 'approved_arms': [row],
             'run_bindings': [binding], 'run_id': identity['run_id'],
             'batch_id': identity['run_id'], 'config_sha256': manifest['config_sha256'],
-            'output_root': identity['output_root']})
+            'output_root': identity['output_root'],
+            'task_complete_response_policy': ('complete-response-v1' if
+                args.task_complete_response else 'disabled')})
         test_authorization_bytes = auth_path.read_bytes()
         launch_args = argparse.Namespace(manifest=str(manifest_path),
             authorization=str(auth_path), task=task, condition='P', order=1,
@@ -75,13 +79,17 @@ def run_boundary(args):
             task_profile='native_claude_cc_vibe_opus48')
         original_popen = subprocess.Popen
         observed = []
+        observed_env = []
         def stop_only_harbor(command, *positional, **keywords):
             if isinstance(command, list) and any('pma_harbor_cli' in str(x) for x in command):
                 observed.append(command)
+                observed_env.append(keywords['env'])
                 raise HarborBoundaryReached('test-only pre-Harbor boundary')
             return original_popen(command, *positional, **keywords)
         try:
-            with patch.object(subprocess, 'Popen', side_effect=stop_only_harbor):
+            with patch.dict(os.environ, {'GA_TASK_COMPLETE_RESPONSE':
+                    '1' if args.task_complete_response else '0'}), \
+                 patch.object(subprocess, 'Popen', side_effect=stop_only_harbor):
                 status = live_launcher.run_live(launch_args)
         finally:
             auth_path.unlink(missing_ok=True)
@@ -91,6 +99,18 @@ def run_boundary(args):
             encoding='utf-8'))
         staged = run / 'public_task/tests'
         assert len(observed) == 1 and public_command['argv'] == observed[0]
+        policy = 'complete-response-v1' if args.task_complete_response else 'disabled'
+        assert public_command['task_complete_response_policy'] == policy
+        assert manifest['config'].get('task_complete_response_policy', 'disabled') == policy
+        if args.task_complete_response:
+            assert observed_env[0]['GA_TASK_COMPLETE_RESPONSE'] == '1'
+            assert observed_env[0]['GA_TASK_DEADLINE_EPOCH'] == \
+                observed_env[0]['GA_POS_DEADLINE_EPOCH'] == str(
+                    public_command['agent_deadline_epoch'])
+        else:
+            assert 'GA_TASK_COMPLETE_RESPONSE' not in observed_env[0]
+        packed_llmcore = run / 'bundle/source/llmcore.py'
+        assert sha(packed_llmcore) == sha(CHECKOUT / 'GenericAgent-main/llmcore.py')
         assert status['primary_failure']['type'] == 'HarborBoundaryReached'
         assert status['harbor_return_code'] is None
         assert spec['official_evaluator_files'] == [{
@@ -163,7 +183,9 @@ if __name__ == '__main__':
                  'task-profile-file', 'ga-source', 'runtime-root', 'worker-python',
                  'harbor-python', 'bench-root', 'harbor-source-root'):
         parser.add_argument('--' + name, required=True)
+    parser.add_argument('--task', action='append', choices=FOUR)
+    parser.add_argument('--task-complete-response', action='store_true')
     rows = run_boundary(parser.parse_args())
-    print(json.dumps({'status': 'pass', 'four_boundaries': len(rows),
+    print(json.dumps({'status': 'pass', 'boundaries': len(rows),
                       'members': {r['task']: r['member_count'] for r in rows},
                       'model_calls': 0, 'official_evaluator_calls': 0}))

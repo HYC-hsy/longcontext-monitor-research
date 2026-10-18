@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import uuid
 
@@ -36,6 +37,10 @@ def prepare(args: argparse.Namespace) -> dict:
     if pos:
         plan.update(method='PoS', synthetic_fixture=bool(
             getattr(args, 'synthetic_pos_fixture', False)))
+        if getattr(args, 'task_complete_response', False):
+            if plan['synthetic_fixture']:
+                raise RuntimeError('synthetic PoS fixture cannot authorize Task response policy')
+            plan['task_complete_response_policy'] = 'complete-response-v1'
         if plan['synthetic_fixture'] and not args.fake_only:
             raise RuntimeError('synthetic PoS package is zero-model only')
     candidate = getattr(args, 'research_candidate', 'U')
@@ -83,6 +88,13 @@ def run(args: argparse.Namespace) -> dict:
             granted.get('manifest_sha256') != identity['manifest_sha256'] or
             bool(args.zero_model_fixture) != (manifest.get('zero_model_fixture_only') is True)):
         raise RuntimeError('single-run identity or fixture mode differs from approval')
+    if manifest.get('schema') == 'pos-ga-single-manifest-v1':
+        policy = manifest.get('config', {}).get('task_complete_response_policy', 'disabled')
+        actual = 'complete-response-v1' if os.environ.get('GA_TASK_COMPLETE_RESPONSE') == '1' else 'disabled'
+        if (policy not in {'disabled', 'complete-response-v1'} or
+                granted.get('task_complete_response_policy', 'disabled') != policy or
+                actual != policy):
+            raise RuntimeError('Task response policy differs from frozen PoS authorization')
     if (root / 'batch_result.json').exists() or Path(identity['run_root']).exists():
         raise FileExistsError('single-run result or run root already exists')
     options = argparse.Namespace(
@@ -114,6 +126,8 @@ def main() -> None:
     prepared.add_argument('--pma-profile-file')
     prepared.add_argument('--fake-only', action='store_true')
     prepared.add_argument('--synthetic-pos-fixture', action='store_true')
+    prepared.add_argument('--task-complete-response', action='store_true',
+                          help='bind complete-response-v1 for the Task only')
     prepared.add_argument('--certification-dir',
                           help='committed A/B Harbor evidence for future authorized use')
     launched = commands.add_parser('run', help='requires an independent one-use approval')

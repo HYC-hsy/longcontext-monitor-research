@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -17,6 +18,7 @@ ROOT = Path(__file__).resolve().parent
 TASKS = ('adaptive-rejection-sampler', 'write-compressor')
 ORDERS = (1, 2)
 OLD_TWO = ROOT / 'raw_final_two_v2'
+OLD_RETRY = ROOT / 'raw_retry_stop_v1/01/serial_result.json'
 PREFLIGHT = ROOT / 'raw_retry_preflight_v2'
 REVIEW = ROOT / 'raw_review_v3/compatibility_review.json'
 
@@ -30,9 +32,24 @@ def head() -> str:
 
 
 def prior_identity() -> dict:
-    reviewed = previous.prior_identity()
+    # The old review describes the *old* deployed bytes. Do not compare its
+    # source map with the current Task transport after complete-response-v1.
+    review = json.loads(REVIEW.read_text(encoding='utf-8'))
+    if (review.get('decision') !=
+            'fixed_native_unscored_fallback_accepted_for_discovery' or
+            review.get('historical_status') != 'failed' or
+            review.get('accepted_failure') !=
+            'progress_affected_record_ids_unchanged_e1_only' or
+            review.get('initial_audit') != 'completed_once' or
+            review.get('update_audit') != 'completed_twice_repaired' or
+            review.get('progress') != 'invalid_unscored_not_zero'):
+        raise RuntimeError('historical PoS review identity changed')
+    reviewed = {'review_sha256': sha(REVIEW),
+                'reviewed_code_commit': review['current_code_commit'],
+                'reviewed_source_files_sha256': review['current_source_files_sha256']}
     sqlite = json.loads((OLD_TWO / '03/serial_result.json').read_text(encoding='utf-8'))
     compressor = json.loads((OLD_TWO / '04/serial_result.json').read_text(encoding='utf-8'))
+    sampler_retry = json.loads(OLD_RETRY.read_text(encoding='utf-8'))
     if (sqlite.get('task') != 'sqlite-with-gcov' or
             sqlite.get('task_terminal_result') != 'CURRENT_TASK_DONE' or
             sqlite.get('native_reward', {}).get('reward') != 1.0 or
@@ -45,6 +62,13 @@ def prior_identity() -> dict:
             compressor.get('cleanup_confirmed') is not True or
             compressor.get('provider_capture', {}).get('capture_complete') is not True):
         raise RuntimeError('historical completed/failed tasks differ')
+    if (sampler_retry.get('task') != 'adaptive-rejection-sampler' or
+            sampler_retry.get('run_id') != 'pos-7c969aa45b944db5' or
+            sampler_retry.get('task_terminal_result') != 'PROVIDER_FAILURE' or
+            sampler_retry.get('native_reward', {}).get('reward') != 0.0 or
+            sampler_retry.get('continue_safe') is not False or
+            sampler_retry.get('cleanup_confirmed') is not True):
+        raise RuntimeError('historical retry failure differs')
     index_path = PREFLIGHT / 'SOURCE_AND_PUBLIC_HASHES.json'
     index = json.loads(index_path.read_text(encoding='utf-8'))
     for row in index['files']:
@@ -89,9 +113,7 @@ def prior_identity() -> dict:
             classification.get('final_call', {}).get('category') !=
                 'incomplete_stream_marker' or
             result.get('source_sha256') != {
-                name: sha(CHECKOUT / ('GenericAgent-main/' + name)
-                          if name in ('llmcore.py', 'research_runtime.py') else
-                          ROOT / name.replace('pos_runtime/', ''))
+                name: index['v4_actual_bundle'][name]['source_sha256']
                 for name in ('llmcore.py', 'research_runtime.py',
                              'pos_runtime/worker.py', 'pos_runtime/episode.py')}):
         raise RuntimeError('old final call or retained packed-worker v4 differs')
@@ -106,6 +128,7 @@ def prior_identity() -> dict:
     return {'historical_review': reviewed,
             'sqlite_serial_sha256': sha(OLD_TWO / '03/serial_result.json'),
             'compressor_serial_sha256': sha(OLD_TWO / '04/serial_result.json'),
+            'sampler_retry_serial_sha256': sha(OLD_RETRY),
             'preflight_index_sha256': sha(index_path)}
 
 
@@ -113,6 +136,7 @@ def validate(args) -> tuple[Path, dict]:
     root = Path(args.output).resolve(strict=True)
     scope = json.loads((root / 'scope.json').read_text(encoding='utf-8'))
     if (scope.get('schema') != 'pos-ga-sampler-compressor-retry-scope-v1' or
+            scope.get('task_complete_response_policy') != 'complete-response-v1' or
             scope.get('code_commit') != head() or
             scope.get('launcher_sha256') != sha(Path(__file__)) or
             scope.get('plan_sha256') != sha(Path(args.plan)) or
@@ -148,6 +172,8 @@ def validate(args) -> tuple[Path, dict]:
                 manifest['task_profile_sha256'] != scope['profile_sha256'] or
                 manifest['config']['task_turns_max'] != 300 or
                 manifest['config']['agent_wall_seconds'] != 14400 or
+                manifest['config'].get('task_complete_response_policy') !=
+                    'complete-response-v1' or
                 manifest.get('zero_model_fixture_only') is not False or
                 manifest.get('execution_authorized') is not False or
                 manifest['assets'][row['task']]['image_id'] != row['image_id'] or
@@ -160,6 +186,7 @@ def validate(args) -> tuple[Path, dict]:
 def prepare(args) -> None:
     plan = json.loads(Path(args.plan).read_text(encoding='utf-8'))
     if (plan.get('schema') != 'pos-ga-sampler-compressor-retry-plan-v1' or
+            plan.get('task_complete_response_policy') != 'complete-response-v1' or
             plan.get('execution_authorized') is not False or
             plan.get('historical_not_repeated') !=
                 ['nginx-request-logging', 'sqlite-with-gcov'] or
@@ -184,6 +211,7 @@ def prepare(args) -> None:
                    '--certification-dir', str(Path(args.certification).resolve()),
                    '--official-source-git', args.official_source_git,
                    '--task-profile-file', args.task_profile_file]
+        command.append('--task-complete-response')
         completed = subprocess.run(command, cwd=CHECKOUT, capture_output=True,
                                    text=True, check=False)
         write_new(root / f'prepare_{order:02d}.json', dict(task=task,
@@ -209,7 +237,8 @@ def prepare(args) -> None:
         profile_sha256=sha(Path(args.task_profile_file)),
         certification_sha256=sha(Path(args.certification) / 'FILE_HASHES.json'),
         prior=prior, prepared=prepared, task_turns_max=300,
-        agent_wall_seconds=14400))
+        agent_wall_seconds=14400,
+        task_complete_response_policy='complete-response-v1'))
     validate(args)
     print(json.dumps({'prepared':len(prepared), 'code_commit':head(),
                       'scope':str(root / 'scope.json')}), flush=True)
@@ -230,6 +259,7 @@ def run(args) -> None:
                        batch_id=row['run_id'], config_sha256=row['config_sha256'])
         identity = json.loads((directory / 'run_identity.json').read_text(encoding='utf-8'))
         authorization = dict(execution_authorized=True,
+            task_complete_response_policy='complete-response-v1',
             zero_model_fixture_only=False, manifest_sha256=row['manifest_sha256'],
             audited_code_commit=scope['code_commit'], approved_arms=[arm],
             run_bindings=[binding], run_id=row['run_id'], batch_id=row['run_id'],
@@ -246,7 +276,9 @@ def run(args) -> None:
         try:
             with (directory / 'serial_stdout.txt').open('xb') as out, (
                     directory / 'serial_stderr.txt').open('xb') as err:
-                completed = subprocess.run(command, cwd=CHECKOUT,
+                task_env = dict(os.environ)
+                task_env['GA_TASK_COMPLETE_RESPONSE'] = '1'
+                completed = subprocess.run(command, cwd=CHECKOUT, env=task_env,
                                            stdout=out, stderr=err, check=False)
         finally:
             auth_path.unlink(missing_ok=True)
