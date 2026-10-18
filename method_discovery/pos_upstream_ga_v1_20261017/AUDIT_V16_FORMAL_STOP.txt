@@ -1,0 +1,37 @@
+PoS-on-GA formal serial run: first-task stop audit (2026-10-18)
+
+The visible terminal was launched with a PTY. It is no longer marked running because serial_live exited with code 1 after task 1. This is not a missing terminal launch. The stop was required by the frozen serial gate; no restart, configuration change, or second formal attempt was made.
+
+Frozen pre-run public commit: d023c42c5a06e437a502ced1f9cc810fe0c6383b. Run root: E:\LongContext\pos_four_live_20261018_v5. Task 1: nginx-request-logging, run_id pos-9f6e02a7c5b4482f. The prepared directories for tasks 2-4 have no runs or consumed authorization. Task 1's one-time authorization was removed, as recorded in authorization_removed.json.
+
+Outcome: PoS reset/initialization failed on its first belief role call. The worker logged the full public belief input and input-contract event, then resolved claude-opus-4-8, thinking disabled, temperature 0, max_tokens 4096 and zero transport retries. It raised RuntimeError("required research request capture unavailable before send") before the HTTP send. There is no pos_role_response, provider attempt, or Task request/response. The isolated transport log is empty; Harbor's agent metadata reports llm_no=0. The worker persisted status=missing with a snapshot error because BeliefManager was not initialized, then closed gracefully. One logical PoS belief call was attempted; observable provider and Task model calls were zero. No Task tool action occurred.
+
+The exact pre-send guard is in GenericAgent-main/llmcore.py: _stream_with_retry requires a research event sink when GA_PMA_CAPTURE_TASK_REQUESTS=1. The shared launcher sets this flag for the P run. research_runtime.emit returns None when no sink is installed. The observed failure is consistent with this sink mismatch in the separate PoS worker; this is a diagnosis, not a claim that a repair was tested. Run code was not modified after freeze.
+
+The Task terminal is EXCEPTION, not CURRENT_TASK_DONE. PoS result_status=missing and archive_incomplete=true, despite close_status=graceful_exit and worker_return_code=0. These are distinct facts. The original native-SHARED handoff nevertheless confirmed registered control writers stopped, evaluator assets/source matched, and evaluation was released in the same main container. The official evaluator executed once and recorded reward 0.0. That zero is the result of this failed task attempt, not evidence of completed PoS task behavior. Native upload/report checks passed; cleanup_confirmed=true, remaining_containers=[], owned volume clean. A direct post-run docker ps/volume check found no named residue.
+
+The serial gate required both a completed PoS archive and a legitimate Task terminal. Both failed; reward=0 alone was not the stop criterion. The serial process stopped tasks 2-4. No compatibility probe or formal task was retried. Do not interpret their prepared manifests as executed runs.
+
+Raw evidence: raw_formal_stop_v1/ contains byte-identical copies of the selected source records. No JSON reserialization was used. Security scan found no key, authorization header, private endpoint, or hidden-thinking pattern in these selected files; none was redacted. Private bundle/profile/source and any private credential paths were not copied. The complete live run directory remains at the above local root. The publicly copied verifier stdout and CTRF are the actually executed official evaluator output, not a synthetic fixture.
+
+Selected SHA-256 (source bytes = public copy bytes):
+serial_start.json f77dbd3d209d9a212c2ed8a01f37cc440e23f7c45c8b88cec78127b5572cf493
+serial_result.json 9661fd4d958cdb1e1c0451b646e208f46489f6705856b3f037de18caa26939e0
+authorization_removed.json 13ae092c6961172314b29bb2650ad09c0fadb0f19048ecda810105a2da1732d8
+batch_result.json 22c405e4109209dd2bc3626c93e1d066c6a48b8cd034858bf17812f9736fd274
+live_result.json 0329cde14183cbee3ed95614a2aeaf9179b2de3f44e81b08eabb86ef3ff0dbb5
+task_terminal.json 0801fc63661438dfcb77b9f9ac70581472299fd2b028e7401c72a4dfa40e6b8a
+pos_events.jsonl acb28ce853a3749490c2ffa33d7ca3f60aca84b1d4f10c1eba0c7ceb78c7cb6f
+pos_events.result.json 8639608fa1ef04068207ae9687dcd622f1ffc1785896055deb65838341d4c5e6
+pos_events.close.json 20da1a215eda6e842e755c2711f37a6f035b82b61870fc18a6c4d76b8e83c31f
+pos_archive_status.json c417420ea0a023f4e1c8c6a2accd33b75f8671143e8d6e44f65172fa6cbc24f0
+writer_termination_check.json b58e54cd9a2d1c39c62fcd6fa0370c4bfbf8a686235749a246d0398d6c19941b
+verification_released.json 67ce4097a7154dff542f42487374323fa5174f5aec70ef4ca2eaee99f00fb4f6
+native_evaluator_uploaded.json b9eb78a5e1459c77204fc4a967a1bd75072e97f540c7bafa43a015a972bc7aeb
+native_reports_checked.json 4b385056b43cf42660cb6ee8893c05842a05a55688a775855d447754def9a498
+native_test_execution.json e8198043cf2392632552700e7960d9625065ed9f165785bbe2738f2d1da3188b
+reward.txt 9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa
+test-stdout.txt 5ac19b41db6b0345a2f5edd010cb3448cc4dffe2a0844049d73a14fb50209ae8
+ctrf.json 1b3bd16c962ac4af344fef3dadc63f7855b3754a367d693b2839947dfa2ca08c
+
+Before launch, the bounded evaluator schema fix, four actual formal manifests to pre-Harbor Popen, and the independent source-bound zero-model Docker certification were reported in AUDIT_V16_PRELAUNCH.txt and raw_formal_boundary_v1/raw_v17. This audit does not relabel the stopped first task as a successful four-task run. No new method, vendor, prompt, model, or profile change was introduced during the formal run.
