@@ -41,7 +41,7 @@ REVIEWED_SOURCE_CHANGES = {
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py': ('b1201866b460d182124f0dbeca141f8eaf95be03b48df7237b8029c9e8633e7a', '54da093ecf7c2305b4bb3b19f9cc7eee2444d0cf020117b17d9816bd0dea7c05'),
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py': ('30c571b862767b1949ebae742d8b5b86fb570de2868d9a79c232975c6d788005', '20013d876e774173bddbbbd0ae34642c454d1cb12b91f20d87be6e536f80a997'),
     'method_discovery/pos_upstream_ga_v1_20261017/single_manifest.py': ('0b13b0b20efa45c0455bbde69a06bacf795a21f5912658e7cf1b6cd712e55b20', '8b4e0e73ad0847a449aac868249525ba965e06b433f12dfc24bfd88923eb875f'),
-    'method_discovery/pos_upstream_ga_v1_20261017/certification.py': ('ce89d06ea419b2b260200a245b3bb7326471c147c1439ac06390f4e57b37a190', '195ba28bef94a5bf356cadedff8fd7ca5b717bbe7087c1e98eeb98e2658aa039'),
+    'method_discovery/pos_upstream_ga_v1_20261017/certification.py': ('7e9e7018669419eabaecda0f0ecd4083a7a3b2c8e05bd45daa2a29f68c5edb6c', '6e8f12e4b26a6a60d391b594e36650837f68c16f40f8618f316c1b94c76b1a81'),
     'method_discovery/pos_upstream_ga_v1_20261017/collect_native_shared.py': ('cb318a59652379127becd8ea80bedff7f751d922d5317fddae0e687b901b8bd6', '4e29bb6d82a9af82416573b17c89c498950e5adde37df37a6d2bced393e77603'),
 }
 
