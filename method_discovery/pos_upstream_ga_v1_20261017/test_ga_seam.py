@@ -315,6 +315,7 @@ class SeamTests(unittest.TestCase):
 
     def test_profile_env_boolean_cannot_authorize_pos(self):
         env = {'GA_POS_TRANSPORT': 'profile', 'GA_POS_LIVE_AUTHORIZED': '1',
+               'GA_POS_DEADLINE_EPOCH': '9999999999',
                'GA_POS_WORKER_SCRIPT': str(HERE / 'worker.py'),
                'GA_POS_VENDOR_ROOT': str(HERE / 'vendor'),
                'GA_POS_EPISODE_MODULE': str(HERE / 'episode.py'),
@@ -336,7 +337,8 @@ class SeamTests(unittest.TestCase):
                 PoSBridge(worker_script=HERE / 'worker.py', vendor=HERE / 'vendor',
                     episode_module=HERE / 'episode.py', archive=root / 'events.jsonl',
                     mode='profile', profile_file=profile, profile_name='unused',
-                    run_id='expected-run', task_id='task', binding_file=binding)
+                    run_id='expected-run', task_id='task', binding_file=binding,
+                    deadline_epoch=9999999999)
             self.assertFalse((root / 'events.jsonl').exists())
 
     def test_native_final_send_is_stateless_with_old_canaries(self):

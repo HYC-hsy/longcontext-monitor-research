@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 import queue
@@ -9,6 +10,8 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
+from datetime import datetime, timezone
 
 
 class PoSBridgeError(RuntimeError):
@@ -22,6 +25,18 @@ class PoSBridge:
                  binding_file=None):
         if mode not in {'fake', 'profile'}:
             raise PoSBridgeError('explicit PoS transport mode required')
+        timeout = float(timeout)
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise PoSBridgeError('invalid PoS per-provider timeout')
+        if mode == 'profile' and deadline_epoch is None:
+            raise PoSBridgeError('PoS profile requires a fixed overall deadline')
+        deadline_epoch = (float(deadline_epoch) if deadline_epoch is not None
+                          else time.time() + timeout)  # bounded fake-only fixture
+        remaining = deadline_epoch - time.time()
+        if not math.isfinite(deadline_epoch) or remaining <= 0:
+            raise PoSBridgeError('PoS overall deadline invalid or expired before worker start')
+        # Convert the frozen wall deadline once; polling never refreshes the budget.
+        deadline_monotonic = time.monotonic() + remaining
         argv = [sys.executable, '-B', '-u', str(Path(worker_script).resolve(strict=True)),
                 '--vendor', str(Path(vendor).resolve(strict=True)),
                 '--episode-module', str(Path(episode_module).resolve(strict=True)),
@@ -55,14 +70,28 @@ class PoSBridge:
         except BaseException:
             self._stderr.close()
             raise
-        self.timeout = float(timeout)
-        self.deadline_epoch = float(deadline_epoch) if deadline_epoch else None
+        self.timeout = timeout  # individual provider call, not IPC command budget
+        self.deadline_epoch = deadline_epoch
+        self.deadline_monotonic = deadline_monotonic
         self.replies = queue.Queue()
         self._reader = threading.Thread(target=self._read, daemon=True)
         self._reader.start()
         self.sent = 0
         self.closed = False
         self.close_status = None
+        self.diagnostic_persist_error_type = None
+
+    def _diagnose(self, **fields):
+        """Best-effort bounded metadata only; never record prompts or raw errors."""
+        row = {'time': datetime.now(timezone.utc).isoformat(),
+               'run_id': self.run_id, 'task_id': self.task_id, **fields}
+        try:
+            with self.archive_path.with_suffix('.bridge.jsonl').open('ab') as stream:
+                stream.write((json.dumps(row, ensure_ascii=True) + '\n').encode('utf-8'))
+                stream.flush()
+                os.fsync(stream.fileno())
+        except (OSError, TypeError, ValueError) as error:
+            self.diagnostic_persist_error_type = type(error).__name__
 
     def record_host(self, kind, payload):
         """Append original GA fact before auxiliary PoS processing."""
@@ -100,37 +129,76 @@ class PoSBridge:
             self.replies.put(None)
 
     def exchange(self, kind, **fields):
-        if self.closed or self.process.poll() is not None:
-            raise PoSBridgeError('PoS worker is unavailable')
-        remaining = (self.deadline_epoch - time.time()
-                     if self.deadline_epoch is not None else self.timeout)
-        if remaining <= 0:
-            raise PoSBridgeError('PoS overall deadline expired before command send')
-        command = {'kind': kind, **fields}
-        self.sent += 1
+        command_id = 'cmd-' + str(self.sent + 1).zfill(6)
+        start = time.monotonic()
+        sent = False
+        send_started = False
+        received = False
+        self._diagnose(event='command_started', command_id=command_id,
+                       command_type=kind, overall_deadline_epoch=self.deadline_epoch,
+                       provider_timeout_seconds=self.timeout)
         try:
-            self.process.stdin.write(json.dumps(command, ensure_ascii=True) + '\n')
-            self.process.stdin.flush()
-        except (BrokenPipeError, OSError) as error:
-            self.close()
-            raise PoSBridgeError('PoS command acceptance unknown; never resend') from error
-        try:
-            raw = self.replies.get(timeout=min(self.timeout, remaining))
-        except queue.Empty as error:
-            self.close()
-            raise PoSBridgeError('PoS command result unknown; never resend') from error
-        if raw is None:
-            self.close()
-            raise PoSBridgeError('PoS worker exited without receipt')
-        try:
-            receipt = json.loads(raw)
-        except (ValueError, TypeError) as error:
-            self.close()
-            raise PoSBridgeError('PoS receipt malformed; never resend') from error
-        if receipt.get('status') != 'ok' or not isinstance(receipt.get('result'), dict):
-            self.close()
-            raise PoSBridgeError('PoS worker failed: ' + str(receipt.get('error')))
-        return receipt['result']
+            if self.closed or self.process.poll() is not None:
+                raise PoSBridgeError('PoS worker is unavailable')
+            if self.deadline_monotonic - time.monotonic() <= 0:
+                raise PoSBridgeError('PoS overall deadline expired before command send')
+            command = {'kind': kind, **fields}
+            self.sent += 1
+            send_started = True
+            try:
+                self.process.stdin.write(json.dumps(command, ensure_ascii=True) + '\n')
+                self.process.stdin.flush()
+            except (BrokenPipeError, OSError) as error:
+                raise PoSBridgeError('PoS command acceptance unknown; never resend') from error
+            sent = True
+            self._diagnose(event='command_sent', command_id=command_id,
+                           command_type=kind, request_sent=True)
+            while True:
+                if self.closed:
+                    raise PoSBridgeError('PoS command cancelled or bridge closed; never resend')
+                remaining = self.deadline_monotonic - time.monotonic()
+                if remaining <= 0:
+                    raise PoSBridgeError('PoS overall deadline expired while awaiting command; never resend')
+                try:
+                    raw = self.replies.get(timeout=min(0.5, remaining))
+                    break
+                except queue.Empty:
+                    if self.process.poll() is not None and not self._reader.is_alive():
+                        raise PoSBridgeError('PoS worker exited without receipt')
+                    # Empty during a short poll is not a command failure.
+            if raw is None:
+                raise PoSBridgeError('PoS worker exited without receipt')
+            received = True
+            try:
+                receipt = json.loads(raw)
+            except (ValueError, TypeError) as error:
+                raise PoSBridgeError('PoS receipt malformed; never resend') from error
+            if not isinstance(receipt, dict):
+                raise PoSBridgeError('PoS receipt malformed; never resend')
+            if receipt.get('status') != 'ok' or not isinstance(receipt.get('result'), dict):
+                raise PoSBridgeError('PoS worker failed: ' + str(receipt.get('error')))
+            self._diagnose(event='command_finished', command_id=command_id,
+                           command_type=kind, outcome='receipt_ok', request_sent=sent,
+                           result_unknown=False, elapsed_seconds=time.monotonic()-start)
+            return receipt['result']
+        except BaseException as error:
+            message = str(error) if isinstance(error, PoSBridgeError) else '[redacted]'
+            if message.startswith('PoS worker failed:'):
+                message = 'PoS worker failed; private receipt details redacted'
+            frames = [{'file': Path(frame.filename).name, 'function': frame.name,
+                       'line': frame.lineno} for frame in traceback.extract_tb(error.__traceback__)]
+            self._diagnose(event='command_finished', command_id=command_id,
+                           command_type=kind, outcome='exception', request_sent=sent,
+                           result_unknown=send_started and not received,
+                           exception_type=type(error).__name__, message=message,
+                           stack=frames, elapsed_seconds=time.monotonic()-start)
+            try:
+                self.close()
+            except BaseException as cleanup_error:
+                self._diagnose(event='cleanup_failed', command_id=command_id,
+                               command_type=kind,
+                               exception_type=type(cleanup_error).__name__)
+            raise
 
     def close(self):
         if self.closed:
@@ -158,12 +226,17 @@ class PoSBridge:
         self._stderr.close()
         self._reader.join(timeout=1)
         target = self.archive_path.with_suffix('.close.json')
+        self._diagnose(event='bridge_closed', close_status=self.close_status,
+                       worker_return_code=self.process.returncode,
+                       commands_sent=self.sent)
         try:
             with target.open('xb') as stream:
                 stream.write((json.dumps({'status': self.close_status,
                     'worker_return_code': self.process.returncode,
                     'commands_sent': self.sent, 'run_id': self.run_id,
-                    'task_id': self.task_id}) + '\n').encode('utf-8'))
+                    'task_id': self.task_id,
+                    'diagnostic_persist_error_type':
+                        self.diagnostic_persist_error_type}) + '\n').encode('utf-8'))
                 stream.flush()
                 os.fsync(stream.fileno())
         except OSError as error:

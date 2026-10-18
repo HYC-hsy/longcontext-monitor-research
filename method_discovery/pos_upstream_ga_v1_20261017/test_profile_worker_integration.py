@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 
 HERE = Path(__file__).resolve().parent
@@ -54,6 +55,7 @@ def container_main():
     vendor = source / 'pos_runtime/vendor'
     responses = fixture_replies()
     received = []
+    stall_mode = {'on':False}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_): pass
@@ -62,6 +64,8 @@ def container_main():
             payload = json.loads(body)
             received.append({'path':self.path,'payload':payload,
                              'stream':payload.get('stream')})
+            if len(received) >= 4 and not stall_mode['on']:
+                time.sleep(0.9)  # four sequential update roles exceed 3s in total
             if not responses:
                 self.send_error(500)
                 return
@@ -84,7 +88,12 @@ def container_main():
             self.send_header('Content-Type','text/event-stream')
             self.send_header('Content-Length',str(len(data)))
             self.end_headers()
-            self.wfile.write(data)
+            if stall_mode['on']:
+                time.sleep(4.0)  # exceeds the scaled 3s single-provider cap
+            try:
+                self.wfile.write(data)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -104,14 +113,17 @@ def container_main():
         'config_sha256':'3'*64, 'worker_sha256':digest(worker),
         'episode_sha256':digest(episode), 'profile_sha256':digest(profile),
         'vendor_files_sha256':vendor_hashes}), encoding='utf-8')
-    command = [sys.executable, '-B', str(worker), '--vendor',str(vendor),
-        '--episode-module',str(episode), '--archive',str(archive/'events.jsonl'),
-        '--mode','profile','--profile-file',str(profile),'--profile-name','fixture',
-        '--run-id',RUN_ID,'--task-id',TASK_ID,'--binding-file',str(binding)]
-    process = subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE,text=True,
-                               env={**os.environ,'GA_PMA_CAPTURE_TASK_REQUESTS':'1',
-                                    'PYTHONDONTWRITEBYTECODE':'1'})
+    sys.path.insert(0, str(source))
+    from pos_bridge import PoSBridge
+    overall_deadline = time.time() + 60
+    os.environ.update(GA_PMA_CAPTURE_TASK_REQUESTS='1', GA_POS_TIMEOUT='3',
+                      GA_POS_DEADLINE_EPOCH=str(overall_deadline),
+                      PYTHONDONTWRITEBYTECODE='1')
+    bridge = PoSBridge(worker_script=worker, vendor=vendor,
+        episode_module=episode, archive=archive/'events.jsonl', mode='profile',
+        profile_file=profile, profile_name='fixture', run_id=RUN_ID,
+        task_id=TASK_ID, binding_file=binding, timeout=3,
+        deadline_epoch=overall_deadline)
     commands = [
         {'kind':'reset','case_id':TASK_ID,'task':'Clean mug.',
          'observation':'Mug dirty.','actions':[]},
@@ -120,12 +132,19 @@ def container_main():
          'observation':'Still dirty.','done':False},
         {'kind':'finish','reason':'CURRENT_TASK_DONE','observation':'Still dirty.'},
     ]
-    stdout, stderr = process.communicate(''.join(json.dumps(row)+'\n' for row in commands),
-                                         timeout=120)
-    server.shutdown()
-    rows = [json.loads(line) for line in stdout.splitlines() if line]
-    assert process.returncode == 0 and len(rows) == 3, (process.returncode, rows, stderr)
-    assert all(row['status'] == 'ok' for row in rows), (rows, stderr)
+    rows = []
+    update_elapsed = None
+    try:
+        for row in commands:
+            started = time.monotonic()
+            rows.append(bridge.exchange(row.pop('kind'), **row))
+            if 'action_batch' in row:
+                update_elapsed = time.monotonic() - started
+    finally:
+        bridge.close()
+    assert bridge.process.returncode == 0 and len(rows) == 3, (
+        bridge.process.returncode, rows)
+    assert update_elapsed > 3, update_elapsed
     assert len(received) == 7 and not responses, (len(received), responses)
     assert all(row['stream'] is True for row in received)
     assert [row['payload']['max_tokens'] for row in received] == [4096,512,4096,4096,512,512,4096]
@@ -148,9 +167,57 @@ def container_main():
         assert hashlib.sha256(public_bytes).hexdigest() == row['public_sha256']
         assert FAKE_KEY.encode() not in public_bytes
         assert b'HIDDEN_SYNTHETIC_THOUGHT_CANARY' not in public_bytes
+    diagnostics = [json.loads(line) for line in
+                   (archive/'events.bridge.jsonl').read_text(encoding='utf-8').splitlines()]
+    assert [row['outcome'] for row in diagnostics if row['event']=='command_finished'] == [
+        'receipt_ok'] * 3
+    assert json.loads((archive/'events.close.json').read_text())['status'] == 'graceful_exit'
+    timeout_archive = archive/'timeout_case'
+    timeout_archive.mkdir()
+    timeout_run = RUN_ID + '-timeout'
+    timeout_binding = timeout_archive/'binding.json'
+    bound = json.loads(binding.read_text(encoding='utf-8'))
+    bound['run_id'] = timeout_run
+    timeout_binding.write_text(json.dumps(bound), encoding='utf-8')
+    responses.extend([fixture_replies()[0]] * 3)  # correction is allowed, not transport replay
+    stall_mode['on'] = True
+    timeout_bridge = PoSBridge(worker_script=worker, vendor=vendor,
+        episode_module=episode, archive=timeout_archive/'events.jsonl',
+        mode='profile', profile_file=profile, profile_name='fixture',
+        run_id=timeout_run, task_id=TASK_ID, binding_file=timeout_binding,
+        timeout=3, deadline_epoch=time.time()+30)
+    try:
+        try:
+            timeout_bridge.exchange('reset', case_id=TASK_ID,
+                task='Clean mug.', observation='Mug dirty.', actions=[])
+        except Exception:
+            pass  # original worker/parser failure is examined in the ledgers below
+    finally:
+        timeout_bridge.close()
+    timeout_provider = [json.loads(line) for line in
+        (timeout_archive/'events.provider.jsonl').read_text(encoding='utf-8').splitlines()]
+    attempts_by_call = {}
+    for item in timeout_provider:
+        if item['event_type'] == 'provider_request_attempt':
+            attempts_by_call[item['llm_call_id']] = (
+                attempts_by_call.get(item['llm_call_id'], 0) + 1)
+    assert attempts_by_call and max(attempts_by_call.values()) == 1, attempts_by_call
+    assert any(item['event_type']=='provider_response' and
+               item['payload'].get('outcome')=='transport_error' and
+               item['payload'].get('error_type')=='Timeout'
+               for item in timeout_provider), timeout_provider[-5:]
+    timeout_diagnostics = [json.loads(line) for line in
+        (timeout_archive/'events.bridge.jsonl').read_text().splitlines()]
+    assert any(row['event']=='command_finished' and row['outcome']=='exception' and
+               row['request_sent'] is True and row['result_unknown'] is False
+               for row in timeout_diagnostics)
+    assert any(row['event']=='bridge_closed' for row in timeout_diagnostics)
+    server.shutdown()
     result = {'status':'pass','model_calls':0,'fake_http_requests':len(received),
-              'worker_exit':process.returncode,'worker_stdout':rows,
-              'worker_stderr':stderr,'provider_capture':capture,
+              'worker_exit':bridge.process.returncode,'worker_receipts':rows,
+              'update_elapsed_seconds':update_elapsed,
+              'provider_timeout_seconds':3,'provider_capture':capture,
+              'timeout_case_attempts_by_call':attempts_by_call,
               'collected_provider':collected,
               'source_sha256':{name:digest(source/name) for name in
                 ('llmcore.py','research_runtime.py','pos_runtime/worker.py',
@@ -158,6 +225,7 @@ def container_main():
     (archive/'profile_integration_result.json').write_text(
         json.dumps(result,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
     print(json.dumps({'status':'pass','fake_http_requests':len(received),
+                      'update_elapsed_seconds':update_elapsed,
                       'provider_capture':capture},ensure_ascii=False))
 
 

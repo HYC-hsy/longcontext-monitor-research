@@ -1,4 +1,4 @@
-"""Thin one-use serial launcher for the three v6 tasks not yet started.
+"""Thin one-use serial launcher for the two tasks not yet started.
 
 It calls the existing single_run prepare/run entry. It does not alter PoS,
 Task, Harbor, provider, evaluator, or cleanup behavior. No repository commits
@@ -18,10 +18,20 @@ from .single_manifest import CHECKOUT, source_hashes, vendor_hashes
 from .serial_live import ENTRY, common, write_new
 
 ROOT = Path(__file__).resolve().parent
-TASKS = ('adaptive-rejection-sampler', 'sqlite-with-gcov', 'write-compressor')
-ORDERS = (2, 3, 4)
-PRIOR = ROOT / 'raw_formal_stop_v3'
+TASKS = ('sqlite-with-gcov', 'write-compressor')
+ORDERS = (3, 4)
+FIRST = ROOT / 'raw_formal_stop_v3'
+PRIOR = ROOT / 'raw_remaining_stop_v1'
 REVIEW = ROOT / 'raw_review_v3/compatibility_review.json'
+BASELINE_COMMIT = '61706289bd0386bafa80adc60c64a2fbe897fce2'
+RUNTIME_CHANGED = ('GenericAgent-main/pos_bridge.py',
+    'method_discovery/pos_upstream_ga_v1_20261017/collect_native_shared.py')
+RUNTIME_AFTER_SHA256 = {
+    'GenericAgent-main/pos_bridge.py':
+        'c2315dfdc913d34a2b9e62d0bb4dae53f91538e41dd15739312ac51b7eac8284',
+    'method_discovery/pos_upstream_ga_v1_20261017/collect_native_shared.py':
+        '5056bde5b2aa320e4f2c5d610f9234ca7e6bbf331d9268b83907a974ebc1c260',
+}
 
 
 def sha(path: Path) -> str:
@@ -34,19 +44,28 @@ def head() -> str:
 
 
 def prior_identity() -> dict:
-    one = json.loads((PRIOR / '01/serial_result.json').read_text(encoding='utf-8'))
+    one = json.loads((FIRST / '01/serial_result.json').read_text(encoding='utf-8'))
     two = json.loads((PRIOR / '02/serial_result.json').read_text(encoding='utf-8'))
-    failure = (PRIOR / '02/serial_stderr.txt').read_text(encoding='utf-8')
     review = json.loads(REVIEW.read_text(encoding='utf-8'))
+    previous_sources = review.get('current_source_files_sha256') or {}
+    current_sources = source_hashes()
+    changed = tuple(name for name in current_sources
+                    if current_sources[name] != previous_sources.get(name))
     if (one.get('task') != 'nginx-request-logging' or
             one.get('continue_safe') is not True or
-            one.get('native_reward', {}).get('reward') != 1.0 or
+            (one.get('native_reward') or {}).get('reward') != 1.0 or
             one.get('cleanup_confirmed') is not True or
             one.get('provider_capture', {}).get('capture_complete') is not True or
-            two.get('task') != TASKS[0] or two.get('status_available') is not False or
-            two.get('provider_capture', {}).get('status') != 'role_ledger_unavailable' or
-            two.get('native_reward') is not None or
-            'PoS running code differs from authorized commit' not in failure or
+            two.get('task') != 'adaptive-rejection-sampler' or
+            two.get('run_id') != 'pos-9e38d8d543ca4008' or
+            two.get('status_available') is not True or
+            two.get('task_terminal_result') != 'EXCEPTION' or
+            two.get('native_reward', {}).get('reward') != 0.0 or
+            two.get('cleanup_confirmed') is not True or
+            two.get('continue_safe') is not False or
+            (two.get('pos_archive_status') or {}).get('archive_incomplete') is not True or
+            ((two.get('pos_archive_status') or {}).get('provider_capture') or {}).get('observable_attempts') != 401 or
+            ((two.get('pos_archive_status') or {}).get('provider_capture') or {}).get('observable_returns') != 400 or
             review.get('decision') !=
                 'fixed_native_unscored_fallback_accepted_for_discovery' or
             review.get('historical_status') != 'failed' or
@@ -55,21 +74,30 @@ def prior_identity() -> dict:
             review.get('initial_audit') != 'completed_once' or
             review.get('update_audit') != 'completed_twice_repaired' or
             review.get('progress') != 'invalid_unscored_not_zero' or
-            review.get('current_source_files_sha256') != source_hashes() or
+            changed != RUNTIME_CHANGED or
+            any(current_sources[name] != RUNTIME_AFTER_SHA256[name]
+                for name in RUNTIME_CHANGED) or
             review.get('current_vendor_files_sha256') != vendor_hashes()):
         raise RuntimeError('prior completion/stop/review is outside this scope')
-    names = ('01/serial_result.json', '01/task/task_terminal.json',
-             '01/archive/live_result.json', '02/serial_result.json',
-             '02/serial_stderr.txt')
-    return {'prior_files_sha256': {name: sha(PRIOR / name) for name in names},
+    first_names = ('01/serial_result.json', '01/task/task_terminal.json',
+                   '01/archive/live_result.json')
+    second_names = ('02/serial_result.json', '02/task/task_terminal.json',
+                    '02/archive/live_result.json')
+    return {'first_files_sha256': {name: sha(FIRST / name) for name in first_names},
+            'sampler_files_sha256': {name: sha(PRIOR / name) for name in second_names},
             'review_sha256': sha(REVIEW),
-            'first_run_id': one['run_id'], 'blocked_second_run_id': two['run_id']}
+            'reviewed_source_before_sha256': {name: previous_sources[name]
+                for name in RUNTIME_CHANGED},
+            'reviewed_source_after_sha256': {name: current_sources[name]
+                for name in RUNTIME_CHANGED},
+            'baseline_commit': BASELINE_COMMIT,
+            'first_run_id': one['run_id'], 'sampler_run_id': two['run_id']}
 
 
 def validate_scope(args) -> tuple[Path, dict]:
     root = Path(args.output).resolve(strict=True)
     scope = json.loads((root / 'scope.json').read_text(encoding='utf-8'))
-    if (scope.get('schema') != 'pos-ga-remaining-scope-v1' or
+    if (scope.get('schema') != 'pos-ga-final-two-scope-v1' or
             scope.get('code_commit') != head() or
             scope.get('launcher_sha256') != sha(Path(__file__)) or
             scope.get('plan_sha256') != sha(Path(args.plan)) or
@@ -81,6 +109,7 @@ def validate_scope(args) -> tuple[Path, dict]:
             scope.get('certification_sha256') !=
                 sha(Path(args.certification) / 'FILE_HASHES.json') or
             scope.get('prior') != prior_identity() or
+            scope.get('non_executed_prior_orders') != [1, 2] or
             tuple(row['task'] for row in scope['prepared']) != TASKS or
             tuple(row['order'] for row in scope['prepared']) != ORDERS):
         raise RuntimeError('remaining serial scope differs from frozen identity')
@@ -114,9 +143,9 @@ def validate_scope(args) -> tuple[Path, dict]:
 
 def prepare(args) -> None:
     plan = json.loads(Path(args.plan).read_text(encoding='utf-8'))
-    if (plan.get('schema') != 'pos-ga-remaining-plan-v1' or
+    if (plan.get('schema') != 'pos-ga-final-two-plan-v1' or
             plan.get('execution_authorized') is not False or
-            plan.get('prior_completed_task') != 'nginx-request-logging' or
+            plan.get('non_executed_prior_orders') != [1, 2] or
             plan.get('method') != 'PoS' or
             plan.get('official_source_git_commit') !=
                 '2fd12b88aafdd04a52c298e3940bcb189f9766d6' or
@@ -154,8 +183,9 @@ def prepare(args) -> None:
             image_id=manifest['assets'][task]['image_id'],
             native_tests_tree_sha256=manifest['assets'][task][
                 'native_tests_tree_sha256']))
-    write_new(root / 'scope.json', dict(schema='pos-ga-remaining-scope-v1',
-        authorization_basis='user requested only the three not-started tasks',
+    write_new(root / 'scope.json', dict(schema='pos-ga-final-two-scope-v1',
+        authorization_basis='user requested only sqlite and compressor once each',
+        non_executed_prior_orders=[1, 2],
         code_commit=head(), launcher_sha256=sha(Path(__file__)),
         plan_sha256=sha(Path(args.plan)),
         source_files_sha256=source_hashes(), vendor_files_sha256=vendor_hashes(),

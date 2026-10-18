@@ -51,6 +51,8 @@ def mapping_for(source: Path) -> dict[str, Path]:
         mapping[name] = pos / name
     if (pos / 'events.provider.jsonl').is_file():
         mapping['events.provider.jsonl'] = pos / 'events.provider.jsonl'
+    if (pos / 'events.bridge.jsonl').is_file():
+        mapping['events.bridge.jsonl'] = pos / 'events.bridge.jsonl'
     trial = list((run / 'jobs').glob('*/*'))
     trial = [path for path in trial if (path / 'agent/research_events.jsonl').is_file()]
     if len(trial) != 1:
@@ -90,9 +92,32 @@ def collect_provider_capture(source: Path, target: Path, secrets: list[str],
     """Copy stopped worker ledgers, retaining source and public byte identities."""
     capture = inspect_provider_capture(source, run_id, task_id,
                                        profile_mode=profile_mode)
+    if profile_mode and not (source / 'events.bridge.jsonl').is_file():
+        raise RuntimeError('PoS IPC diagnostic ledger missing')
+    if profile_mode:
+        started, finished, closed = set(), set(), 0
+        for raw in (source / 'events.bridge.jsonl').read_text(
+                encoding='utf-8').splitlines():
+            row = json.loads(raw)
+            if row.get('run_id') != run_id or row.get('task_id') != task_id:
+                raise RuntimeError('PoS IPC diagnostic identity differs')
+            event, command_id = row.get('event'), row.get('command_id')
+            if event == 'command_started':
+                if command_id in started:
+                    raise RuntimeError('PoS IPC command identity reused')
+                started.add(command_id)
+            elif event == 'command_finished':
+                finished.add(command_id)
+            elif event == 'bridge_closed':
+                closed += 1
+        if not started or started != finished or closed != 1:
+            raise RuntimeError('PoS IPC diagnostic ledger incomplete')
+        close = json.loads((source / 'events.close.json').read_text(encoding='utf-8'))
+        if close.get('diagnostic_persist_error_type') is not None:
+            raise RuntimeError('PoS IPC diagnostic persistence incomplete')
     target.mkdir(parents=True, exist_ok=False)
     files = []
-    names = ['events.jsonl', 'events.provider.jsonl', 'events.result.json',
+    names = ['events.jsonl', 'events.provider.jsonl', 'events.bridge.jsonl', 'events.result.json',
              'events.close.json']
     if not profile_mode:
         names.append('events.stderr.log')
