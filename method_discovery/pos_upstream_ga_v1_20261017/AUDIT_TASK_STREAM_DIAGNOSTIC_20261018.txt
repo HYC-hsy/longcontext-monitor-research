@@ -1,0 +1,157 @@
+Task incomplete-stream targeted diagnostic (offline only, 2026-10-18)
+
+Conclusion
+----------
+The two historical failures are Task calls, not PoS role calls. Each has one
+observable HTTP attempt, HTTP 200, some parsed public content (the new sampler
+has ordinary text), then the local incomplete-stream marker and a Task
+PROVIDER_FAILURE terminal. The provider_response outcome=success event means
+the parser generator returned to _stream_with_retry; it is NOT a certificate of
+a complete answer. Neither underlying response Content-Type, first raw SSE
+event time, raw message_stop/stop_reason, upstream request ID nor pre-parser
+frames were saved. A missing terminal marker is a LOCAL PARSER OBSERVATION:
+the historical source cannot prove whether an upstream server failed to send
+it, a proxy/client interrupted it, or the parser ignored a frame.
+
+All eight selected Task calls used the same endpoint fingerprint
+b6262b54fa2488ae34b4ddfaa8aae0fac288f4cdc61708bdc29b518d9464d5aa,
+the same staged Task profile SHA-256
+ed09a811b654b83097bee77942704eae2539d67291bf55aa34476692081ff02e,
+model claude-opus-4-8, stream=true, adaptive thinking, max_tokens=64000,
+temperature=1 in config but omitted from the actual payload, and the same
+captured native tool schema SHA-256
+f079d031209943dd636d2a028b66144f423d7ed9246aa7586bf837d5368c3135.
+Configured connect/read/total-response timeouts were 60/300/0 seconds;
+max_retries=4. These are per-Task-transport settings, not PoS role settings.
+PoS's separate auxiliary-role disabled-thinking/temperature contract must not
+be attributed to Task calls. Every selected call has one observable attempt;
+actual lower-layer relay attempts, if any, were not captured.
+
+Selection, without response-content cherry-picking
+----------------------------------------------
+Failure IDs were fixed in the request. Their immediately prior calls are
+selected by request order. For PoS nginx and sqlite, the last parser-accepted
+complete Task call was selected. For original PMA, the same-task native-reward-1
+B runs were available, so their last parser-accepted complete Task calls were
+selected; no auxiliary PMA call is counted. All eight per-call files, each
+about 5 KB, are in raw_task_stream_diagnostic_v2, with original private file
+path, complete original file size/SHA-256, exact JSONL line numbers, public
+response tail and safe metadata. "Complete" here is parser-accepted and lacks
+the incomplete marker, not a claim to have recovered raw terminal SSE frames.
+
+  new sampler pos-7c969aa45b944db5: last
+    llm_52fed9b17c3b46d385e71b64abee390e, source lines 97-102;
+    previous llm_a9fefd95b03b49c8874a04bb7d1a24b9, lines 91-96.
+  old compressor pos-390e3b64fc144eba: last
+    llm_bc687359ba8e48069a30003b28066867, lines 745-750;
+    previous llm_5f0930a5708f409287c38c5c979ce1f3, lines 739-744.
+  PoS nginx pos-5439517d8b2d43fb:
+    llm_6d00e279fce04716b07a32005a3c4496, lines 103-108.
+  PoS sqlite pos-bcb35740d2314ef1:
+    llm_e4f0cf19f70a4d22a22df24be3d12fd7, lines 61-66.
+  PMA nginx pma-d951f2473d2f49f0:
+    llm_f8c06449c33d428c9a04d87e9a43883e, lines 99-104.
+  PMA sqlite pma-ec85f2d04c1c46fb:
+    llm_134a0616b7494d90891067d553d30329, lines 127-132.
+
+Task payload shape differs: the selected PoS calls each sent one current-view
+message, whereas the selected PMA nginx/sqlite Task calls sent 25/31 messages
+of cumulative GA history. This is a method-side decision-context difference,
+not a different Task HTTP protocol. Exact request-capture sizes, tool hashes,
+timestamps, attempts, safe response tails and terminal outcomes are in the
+eight files. A response-record HTTP 200 plus combined output_tokens=0 in the
+two failures cannot establish that no text was generated: the sampler visibly
+contains text, and no final message_delta usage was retained. The parser
+merges message_start input/cache counters with possible message_delta counters;
+the archived combined usage does not preserve per-field raw-frame provenance.
+
+Deployed code identity and source path
+--------------------------------------
+The four PoS runs' staged Task llmcore.py has SHA-256
+a5a8fbc99f10b9f2f430254963b2a541b0ace7d7f9d9a29b2527d1d48eb16d9d;
+their staged agent_loop.py is
+04b85b0ff77ff9f809535f24c06e8e6ea1a5ef76b5a09695f23d9c4fb841faff.
+PMA's two staged files are respectively
+cb833b158705742e9d100a2f4ab4a3af5fe79882b4d61347c79953d693d77841
+and cc4f81ac8248496e7cc5fb8b9dc9acb48ba3811618eb5cd38ee0763779b4ca81.
+These are actual ga_stage bytes, not inferred from current Git HEAD. Recorded
+run-code commits: new sampler 6f5c40ed, old compressor/sqlite 202f01f7,
+PoS nginx 0fd4395a, PMA 5f585523. Their run-specific source hashes are in
+the call files. Despite whole-file differences, the deployed Task
+_parse_claude_sse (llmcore.py lines 144-221), _stream_with_retry (453-619),
+NativeClaudeSession.raw_ask (932-971) and ask (973-999) have equal function
+source hashes across sampled PoS and PMA packages. The Task provider-error
+predicate also has equal source hash, though it sits at agent_loop.py:503-506
+in PoS and :314-317 in PMA. This rules out a DIFFERENT parser/retry function
+in these packages; it does not isolate a network, relay or payload-size cause.
+
+Path: agent_loop.py PoS :190 / PMA :131 calls NativeToolClient.chat;
+llmcore.py NativeClaudeSession.raw_ask :932-971 builds Anthropic messages,
+then _stream_with_retry :453-619 sends requests.post :497-498, parses SSE
+through _parse_claude_sse :144-221, and records a returned parser result at
+:556 as outcome=success. agent_loop.py checks the resulting public marker and
+finally assigns PROVIDER_FAILURE (PoS :443-444; PMA :294-295). PoS changes the
+request view and has an additional worker/finish path; it does not substitute
+the auxiliary RoleTransport for the Task transport.
+
+Why one attempt despite max_retries=4: in the observed history the parser
+inserted an incomplete marker and RETURNED normally. No retryable HTTP status
+or thrown requests transport exception entered the retry branches at
+llmcore.py:519-527 or :570-604. This is a code-path explanation, not evidence
+of the original EOF/close source. Configured max_retries means up to four
+additional attempts only when an eligible branch is taken. The Task profile
+contains no 180-second response cap; PoS's 180-second per-role limit is not
+the Task setting.
+
+Pre-parser evidence inventory
+-----------------------------
+No raw Task .sse file was found under any of the six original run roots.
+Each isolated_transport.log is present but zero bytes. The retained
+research_events.jsonl holds post-parser request/visible-response summaries,
+HTTP status and local times, not raw SSE event frames or response headers.
+agent_stdout.log exists privately, but did not supply event-level raw SSE or
+a saved terminal frame for these calls; the per-call files include its byte
+hash and parser-debug line-number inventory without publishing the large log.
+No scoped proxy raw-stream log was found in these run roots. An external
+provider/relay log outside the retained run roots was not established here.
+Thus a historical message_delta, message_stop, [DONE], multiline data frame,
+ignored line, deadline/cancel, EOF or response.close sequence CANNOT be
+recovered from these originals. Do not reverse-engineer a fictional stream
+from a parsed response. The exact Content-Type and upstream request ID remain
+unknown. The local llm_call_id is not an upstream HTTP request ID.
+
+Zero-network synthetic tests and a separate policy risk
+-------------------------------------------------------
+synthetic_test_output.txt records seven passing tests against the staged
+Task llmcore.py parser/HTTP wrapper and GA classifier/loop, with requests.post
+replaced by a local fake. Tests cover complete text+tool, text then EOF without
+terminal frame, partial tool then EOF, explicit SSE error, max_tokens, malformed
+JSON/multiline data, and actual GA loop dispatch. This demonstrates current
+code behavior, NOT the historical network failure. The parser uses per-line
+data: JSON, ignores non-data lines, prints-and-skips malformed JSON, and does
+not reassemble multiline data fields. Without raw frames we cannot determine
+whether any of these happened in the historical calls.
+
+A substantive synthetic finding: a partial tool-use block can survive an
+incomplete stream, and the GA loop dispatches that synthetic tool before its
+final PROVIDER_FAILURE classification. The two historical failed calls had
+zero parsed/selected tools, so there is no evidence of partial-tool execution
+in those attempts. max_tokens is marked by the parser but is not recognized by
+the same provider-error predicate. These are classification/dispatch policy
+observations requiring separate change authorization; production behavior was
+NOT modified under this diagnostic-only request.
+
+Boundaries and next step
+------------------------
+The available data cannot choose among upstream truncation, proxy/client
+interruption and parser frame loss. The smallest evidentiary next step is a
+separately authorized, privacy-safe pre-parser event-metadata capture on FUTURE
+runs (timestamp/type/length/hash/parse outcome/close reason; never raw hidden
+thinking or credentials), plus an independently scoped decision on handling
+partial tool blocks and max_tokens. Do not retry either historical call to
+answer this question. All old scores, terminals and events remain unchanged.
+
+raw_task_stream_diagnostic_v2/INDEX.json lists each public file size and hash,
+its source SHA-256, selection rule and test output. Index SHA-256:
+4d69a25fed5335820bdb4f4665f611671cd4e2a3f42e670e7ab6334ef82a3b27.
+No real model, Task or official evaluator call was made in this diagnostic.
