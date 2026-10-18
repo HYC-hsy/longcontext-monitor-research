@@ -449,7 +449,8 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
         messages = [{"role": "user", "content": next_prompt, "tool_results": tool_results}]   # just new message, history is kept in *Session
     if exit_reason: handler.turn_end_callback(response, tool_calls, tool_results, turn, '', exit_reason)
     final_outcome = exit_reason or {'result': 'MAX_TURNS_EXCEEDED'}
-    if response is not None and _is_provider_error_response(response):
+    if response is not None and not (complete_policy and getattr(
+            response, 'complete_response_accepted', False)) and _is_provider_error_response(response):
         final_outcome = {'result': 'PROVIDER_FAILURE', 'error': response.content}
     if pos is not None and not pos.closed:
         try: pos.exchange('finish', reason=final_outcome['result'],

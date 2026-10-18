@@ -23,16 +23,17 @@ def stream(*, text='', tools=(), stop='tool_use', message_stop=True, done=False,
            open_tool=False, bad_tool=False, malformed=False):
     data = [frame('message_start', message={'usage': {'input_tokens': 2, 'output_tokens': 0}})]
     if text:
-        data += [frame('content_block_start', content_block={'type': 'text'}),
-                 frame('content_block_delta', delta={'type': 'text_delta', 'text': text}),
-                 frame('content_block_stop')]
+        data += [frame('content_block_start', index=0, content_block={'type': 'text'}),
+                 frame('content_block_delta', index=0, delta={'type': 'text_delta', 'text': text}),
+                 frame('content_block_stop', index=0)]
     for index, name in enumerate(tools):
-        data.append(frame('content_block_start', content_block={
+        block_index = index + int(bool(text))
+        data.append(frame('content_block_start', index=block_index, content_block={
             'type': 'tool_use', 'id': f't{index}', 'name': name}))
-        data.append(frame('content_block_delta', delta={
+        data.append(frame('content_block_delta', index=block_index, delta={
             'type': 'input_json_delta', 'partial_json': '{bad' if bad_tool else '{}'}))
         if not open_tool or index < len(tools) - 1:
-            data.append(frame('content_block_stop'))
+            data.append(frame('content_block_stop', index=block_index))
     if malformed: data.append(b'data: {broken\n\n')
     if stop is not None:
         data.append(frame('message_delta', delta={'stop_reason': stop},
@@ -151,6 +152,172 @@ class CompleteResponseTests(unittest.TestCase):
                 self.assertEqual(len(handler.calls), int(b'tool_use' in script))
                 self.assertEqual(client.backend.last_response_acceptance, 'complete')
                 self.assertEqual(len(server.payloads), 1)
+
+    def test_accepted_error_marker_literals_are_not_provider_failures(self):
+        literals = ('!!!Error: quoted task data', '[Error: quoted task data',
+                    'ordinary text [!!! 流异常中断 quoted task data')
+        for literal in literals:
+            for with_tool in (False, True):
+                with self.subTest(literal=literal, with_tool=with_tool), \
+                     ScriptedServer([stream(text=literal,
+                                            tools=['touch'] if with_tool else (),
+                                            stop='tool_use' if with_tool else 'end_turn')]) as server:
+                    client = self.client(server.url)
+                    handler, outcome = self.run_loop(client)
+                    self.assertNotEqual(outcome['result'], 'PROVIDER_FAILURE')
+                    self.assertEqual(len(handler.calls), int(with_tool))
+                    self.assertEqual([m['role'] for m in client.backend.history],
+                                     ['user', 'assistant'])
+                    self.assertIn(literal, client.backend.history[-1]['content'][0]['text'])
+                    self.assertEqual(len(server.payloads), 1)
+
+    def test_late_cancel_or_deadline_after_success_receipt(self):
+        import pos_bridge
+        class Bridge:
+            def __init__(self): self.calls = []; self.closed = False
+            def exchange(self, kind, **kwargs):
+                self.calls.append(kind)
+                if kind == 'decision_view':
+                    return {'system': 'synthetic PoS view', 'user': 'current observation'}
+                return {}
+            def record_host(self, *_): pass
+            def close(self): self.closed = True
+        for mode in ('cancel', 'deadline'):
+            with self.subTest(mode=mode), ScriptedServer([stream(text='accepted',
+                                                        tools=['touch'])]) as server:
+                os.environ['GA_TASK_DEADLINE_EPOCH'] = str(time.time() + 120)
+                client = self.client(server.url, retries=4)
+                def late(kind, payload, **kwargs):
+                    result = self.emit(kind, payload, **kwargs)
+                    if kind == 'provider_response' and payload.get('outcome') == 'success':
+                        if mode == 'cancel': client.backend._cancel_response.set()
+                        else: os.environ['GA_TASK_DEADLINE_EPOCH'] = str(time.time() - 1)
+                    return result
+                handler = CountingHandler()
+                bridge = Bridge()
+                with mock.patch.dict(os.environ, {'GA_POS_ENABLED': '1'}), \
+                     mock.patch.object(pos_bridge.PoSBridge, 'from_environment', return_value=bridge), \
+                     mock.patch.object(llmcore, '_research_emit', side_effect=late), \
+                     self.assertRaises((llmcore.ProviderResponseCancelled,
+                                        llmcore.TaskResponseRejected)):
+                    agent_loop.exhaust(agent_loop.agent_runner_loop(
+                        client, 'system', 'task', handler, client.backend.tools,
+                        max_turns=1, verbose=False))
+                self.assertEqual(len(server.payloads), 1)
+                self.assertEqual(handler.calls, [])
+                self.assertEqual(client.backend.history, [])
+                self.assertNotIn('decision_completed', bridge.calls)
+                self.assertNotIn('update', bridge.calls)
+
+    def test_late_deadline_does_not_send_pma_actor_step(self):
+        import pma_upstream_bridge
+        class PMA:
+            def __init__(self): self.actor = 0
+            def before_actor_call(self, turn): return None
+            def actor_step(self, *_args, **_kwargs): self.actor += 1
+        with ScriptedServer([stream(text='complete', tools=['touch'])]) as server:
+            client = self.client(server.url, retries=4)
+            pma = PMA()
+            def late(kind, payload, **kwargs):
+                result = self.emit(kind, payload, **kwargs)
+                if kind == 'provider_response' and payload.get('outcome') == 'success':
+                    os.environ['GA_TASK_DEADLINE_EPOCH'] = str(time.time() - 1)
+                return result
+            with mock.patch.dict(os.environ, {'GA_PMA_UPSTREAM_ENABLED': '1'}), \
+                 mock.patch.object(pma_upstream_bridge.UpstreamPMAClient,
+                                   'from_environment', return_value=pma), \
+                 mock.patch.object(llmcore, '_research_emit', side_effect=late), \
+                 self.assertRaises(llmcore.TaskResponseRejected):
+                self.run_loop(client)
+            self.assertEqual(pma.actor, 0)
+            self.assertEqual(len(server.payloads), 1)
+            self.assertEqual(client.backend.history, [])
+
+    def test_cancel_or_deadline_while_buffered_generator_is_paused(self):
+        for mode in ('cancel', 'deadline'):
+            with self.subTest(mode=mode), ScriptedServer([stream(text='visible',
+                                                        tools=['touch'])]) as server:
+                os.environ['GA_TASK_DEADLINE_EPOCH'] = str(time.time() + 120)
+                client = self.client(server.url, retries=4)
+                gen = client.backend.ask({'role': 'user', 'content': [
+                    {'type': 'text', 'text': 'synthetic'}]})
+                self.assertEqual(next(gen), 'visible')
+                if mode == 'cancel': client.backend._cancel_response.set()
+                else: os.environ['GA_TASK_DEADLINE_EPOCH'] = str(time.time() - 1)
+                with self.assertRaises((llmcore.ProviderResponseCancelled,
+                                        llmcore.TaskResponseRejected)):
+                    exhaust(gen)
+                self.assertEqual(len(server.payloads), 1)
+                self.assertEqual(client.backend.history, [])
+
+    def test_strict_block_index_identity(self):
+        with ScriptedServer([stream(text='visible', tools=['touch', 'touch'])]) as server:
+            client = self.client(server.url)
+            _, response = self.direct(client)
+            self.assertTrue(response.complete_response_accepted)
+            self.assertEqual(len(response.tool_calls), 2)
+            self.assertEqual(len(server.payloads), 1)
+        start = frame('message_start', message={'usage': {'input_tokens': 1}})
+        open_tool = frame('content_block_start', index=0, content_block={
+            'type': 'tool_use', 'id': 't0', 'name': 'touch'})
+        args = frame('content_block_delta', index=0, delta={
+            'type': 'input_json_delta', 'partial_json': '{}'})
+        finish = frame('message_delta', delta={'stop_reason': 'tool_use'}) + \
+            frame('message_stop')
+        cases = (
+            frame('content_block_delta', index=1, delta={
+                'type': 'input_json_delta', 'partial_json': '{}'}) + frame('content_block_stop', index=0),
+            frame('content_block_delta', index=0, delta={
+                'type': 'text_delta', 'text': 'not tool JSON'}) + args +
+                frame('content_block_stop', index=0),
+            args + frame('content_block_stop', index=1),
+            args + frame('content_block_stop'),
+            args + frame('content_block_stop', index='0'),
+            args + frame('content_block_stop', index=True),
+            open_tool + args + frame('content_block_stop', index=0),
+        )
+        for extra in cases:
+            with self.subTest(extra=extra[-55:]), ScriptedServer([start + open_tool + extra + finish]) as server:
+                client = self.client(server.url, retries=4)
+                handler = CountingHandler()
+                with self.assertRaises(llmcore.TaskResponseRejected) as error:
+                    agent_loop.exhaust(agent_loop.agent_runner_loop(
+                        client, 'system', 'task', handler, client.backend.tools,
+                        max_turns=1, verbose=False))
+                self.assertEqual(error.exception.category, 'invalid_frame')
+                self.assertEqual(len(server.payloads), 1)
+                self.assertEqual(handler.calls, [])
+                self.assertEqual(client.backend.history, [])
+        for bad_start in (frame('content_block_start', content_block={
+                                  'type': 'tool_use', 'id': 't0', 'name': 'touch'}),
+                          frame('content_block_start', index='0', content_block={
+                                  'type': 'tool_use', 'id': 't0', 'name': 'touch'}),
+                          frame('content_block_start', index=0, content_block={
+                                  'type': 'unsupported'})):
+            with self.subTest(bad_start=bad_start), ScriptedServer([
+                    start + bad_start + args + frame('content_block_stop', index=0) + finish]) as server:
+                client = self.client(server.url, retries=0)
+                with self.assertRaises(llmcore.TaskResponseRejected) as error:
+                    self.direct(client)
+                self.assertEqual(error.exception.category, 'invalid_frame')
+                self.assertEqual(len(server.payloads), 1)
+                self.assertEqual(client.backend.history, [])
+        with ScriptedServer([start + open_tool + frame('content_block_delta',
+                delta={'type': 'input_json_delta', 'partial_json': '{}'}) +
+                frame('content_block_stop', index=0) + finish]) as server:
+            client = self.client(server.url, retries=0)
+            with self.assertRaises(llmcore.TaskResponseRejected) as error:
+                self.direct(client)
+            self.assertEqual(error.exception.category, 'invalid_frame')
+            self.assertEqual(len(server.payloads), 1)
+        reused = (start + open_tool + args + frame('content_block_stop', index=0) +
+                  open_tool + args + frame('content_block_stop', index=0) + finish)
+        with ScriptedServer([reused]) as server:
+            client = self.client(server.url, retries=4)
+            with self.assertRaises(llmcore.TaskResponseRejected) as error:
+                self.direct(client)
+            self.assertEqual(error.exception.category, 'invalid_frame')
+            self.assertEqual(len(server.payloads), 1)
 
     def test_incomplete_never_commits_partial_tool_or_history(self):
         for script in (stream(text='partial', stop=None, message_stop=False),
@@ -360,12 +527,12 @@ class CompleteResponseTests(unittest.TestCase):
     def test_diagnostic_excludes_hidden_content_and_endpoint(self):
         secret = 'SYNTHETIC_HIDDEN_SECRET_DO_NOT_ARCHIVE'
         script = (frame('message_start', message={'usage': {'input_tokens': 1}}) +
-                  frame('content_block_start', content_block={'type': 'thinking'}) +
-                  frame('content_block_delta', delta={'type': 'thinking_delta', 'thinking': secret}) +
-                  frame('content_block_stop') +
-                  frame('content_block_start', content_block={'type': 'text'}) +
-                  frame('content_block_delta', delta={'type': 'text_delta', 'text': 'public'}) +
-                  frame('content_block_stop') +
+                  frame('content_block_start', index=0, content_block={'type': 'thinking'}) +
+                  frame('content_block_delta', index=0, delta={'type': 'thinking_delta', 'thinking': secret}) +
+                  frame('content_block_stop', index=0) +
+                  frame('content_block_start', index=1, content_block={'type': 'text'}) +
+                  frame('content_block_delta', index=1, delta={'type': 'text_delta', 'text': 'public'}) +
+                  frame('content_block_stop', index=1) +
                   frame('message_delta', delta={'stop_reason': 'end_turn'}, usage={'output_tokens': 3}) +
                   frame('message_stop'))
         with ScriptedServer([script]) as server:
@@ -387,6 +554,14 @@ class CompleteResponseTests(unittest.TestCase):
             _, response = self.direct(client)
             self.assertFalse(response.complete_response_accepted)
             self.assertIn('partial', response.content)
+        with mock.patch.dict(os.environ, {'GA_TASK_COMPLETE_RESPONSE': '0'}), \
+             ScriptedServer([stream(text='!!!Error: quoted task data',
+                                    stop='end_turn')]) as server:
+            client = self.client(server.url)
+            handler, outcome = self.run_loop(client)
+            self.assertEqual(outcome['result'], 'PROVIDER_FAILURE')
+            self.assertEqual([m['role'] for m in client.backend.history], ['user'])
+            self.assertEqual(handler.calls, [])
         aux = llmcore.NativeClaudeSession({'apikey': 'synthetic', 'apibase': 'http://127.0.0.1:1',
                                            'model': 'claude-synthetic'})
         self.assertFalse(getattr(aux, 'task_complete_response', False))

@@ -199,6 +199,7 @@ def _parse_claude_sse(resp_lines, *, strict=False):
     start_usage = {}; delta_usage = {}
     event_counts = {}; parse_errors = 0; invalid_tool_json = 0
     unclosed_blocks = 0; end_reason = 'eof'; response_bytes = 0
+    active_index = None; next_index = 0
     for line in resp_lines:
         if not line: continue
         response_bytes += len(line)
@@ -224,7 +225,13 @@ def _parse_claude_sse(resp_lines, *, strict=False):
         if evt_type == "message_start":
             start_usage = dict(evt.get("message", {}).get("usage", {}) or {})
         elif evt_type == "content_block_start":
+            block_index = evt.get('index')
+            if strict and (type(block_index) is not int or block_index != next_index or
+                           current_block is not None):
+                parse_errors += 1
+                continue
             if current_block is not None: parse_errors += 1
+            if strict: active_index = block_index
             block = evt.get("content_block", {})
             if block.get("type") == "text": current_block = {"type": "text", "text": ""}
             elif block.get("type") == "thinking": current_block = {"type": "thinking", "thinking": "", "signature": ""}
@@ -235,6 +242,10 @@ def _parse_claude_sse(resp_lines, *, strict=False):
                 tool_json_buf = ""
             else: parse_errors += 1
         elif evt_type == "content_block_delta":
+            if strict and (type(evt.get('index')) is not int or
+                           evt['index'] != active_index or current_block is None):
+                parse_errors += 1
+                continue
             if current_block is None: parse_errors += 1
             delta = evt.get("delta", {})
             if delta.get("type") == "text_delta":
@@ -255,6 +266,10 @@ def _parse_claude_sse(resp_lines, *, strict=False):
                 else: parse_errors += 1
             else: parse_errors += 1
         elif evt_type == "content_block_stop":
+            if strict and (type(evt.get('index')) is not int or
+                           evt['index'] != active_index or current_block is None):
+                parse_errors += 1
+                continue
             if current_block is None: parse_errors += 1
             if current_block:
                 if current_block["type"] == "tool_use":
@@ -267,6 +282,9 @@ def _parse_claude_sse(resp_lines, *, strict=False):
                         current_block["input"] = {"_raw": tool_json_buf}
                 content_blocks.append(current_block)
                 current_block = None
+                if strict:
+                    active_index = None
+                    next_index += 1
         elif evt_type == "message_delta":
             delta = evt.get("delta", {})
             stop_reason = delta.get("stop_reason", stop_reason)
@@ -692,7 +710,8 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                             raise requests.Timeout(
                                 f"provider response exceeded {total_timeout:g}s wall deadline"
                             )
-                        if not e.value and not streamed: raise requests.ConnectionError("empty response")
+                        if not strict and not e.value and not streamed:
+                            raise requests.ConnectionError("empty response")
                         if strict:
                             _task_check_wait(sess, deadline)
                             category = _task_response_category(e.value)
@@ -751,8 +770,16 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                                 sess.last_response_acceptance = 'capture_failed'
                                 raise TaskResponseRejected('capture_failed')
                         if strict:
+                            # The required success receipt may itself trigger a
+                            # late cancel/deadline. A paused consumer can do so
+                            # between buffered yields as well.
+                            _task_check_wait(sess, deadline)
+                            for chunk in buffered:
+                                _task_check_wait(sess, deadline)
+                                yield chunk
+                                _task_check_wait(sess, deadline)
+                            _task_check_wait(sess, deadline)
                             sess.last_response_acceptance = 'complete'
-                            for chunk in buffered: yield chunk
                         return e.value or []
                 finally:
                     clear_active = getattr(sess, '_clear_active_response', None)
@@ -1222,11 +1249,29 @@ class NativeClaudeSession(BaseSession):
             if strict:
                 with self.lock: self.history = prior_history
             raise
-        if strict and self.last_response_acceptance != 'complete':
-            with self.lock: self.history = prior_history
-            raise TaskResponseRejected('acceptance_missing')
-        if content_blocks and (_injected := _ensure_text_block(content_blocks)): yield _injected
-        if content_blocks and not (len(content_blocks) == 1 and content_blocks[0].get("text", "").startswith("!!!Error:")):
+        if strict:
+            try:
+                _task_check_wait(self, _task_deadline(self))
+                if self.last_response_acceptance != 'complete':
+                    raise TaskResponseRejected('acceptance_missing')
+            except BaseException:
+                with self.lock: self.history = prior_history
+                raise
+        if content_blocks and (_injected := _ensure_text_block(content_blocks)):
+            try:
+                yield _injected
+                if strict: _task_check_wait(self, _task_deadline(self))
+            except BaseException:
+                if strict:
+                    with self.lock: self.history = prior_history
+                raise
+        if strict or (content_blocks and not (len(content_blocks) == 1 and
+                content_blocks[0].get("text", "").startswith("!!!Error:"))):
+            if strict:
+                try: _task_check_wait(self, _task_deadline(self))
+                except BaseException:
+                    with self.lock: self.history = prior_history
+                    raise
             self.history.append({"role": "assistant", "content": content_blocks})
         text_parts = [b["text"] for b in content_blocks if b.get("type") == "text"]
         content = "\n".join(text_parts).strip()
@@ -1267,8 +1312,10 @@ class NativeClaudeSession(BaseSession):
         if not tool_calls: tool_calls, content = _parse_text_tool_calls(content)
         thinking = '\n'.join([b['thinking'] for b in content_blocks
                               if b.get('type') == 'thinking'] + tagged_thinking).strip()
-        if getattr(self, 'task_complete_response', False) and self.last_response_acceptance != 'complete':
-            raise TaskResponseRejected('acceptance_missing')
+        if getattr(self, 'task_complete_response', False):
+            _task_check_wait(self, _task_deadline(self))
+            if self.last_response_acceptance != 'complete':
+                raise TaskResponseRejected('acceptance_missing')
         response = MockResponse(thinking, content, tool_calls, str(content_blocks))
         response.complete_response_accepted = bool(getattr(self, 'task_complete_response', False)
             and self.last_response_acceptance == 'complete')

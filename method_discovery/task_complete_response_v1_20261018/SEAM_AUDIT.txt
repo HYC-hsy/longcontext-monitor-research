@@ -1,0 +1,61 @@
+Task complete-response v1: three strict-mode seams, offline closeout
+2026-10-18; base 269ed8cda327ee969b7c62343c0c5f25972d0661
+
+Scope
+-----
+The policy remains opt-in via GA_TASK_COMPLETE_RESPONSE=1 on the GA Task
+NativeClaudeSession. PMA/PoS role transports, provider parameters, prompts,
+tools, task assets, and the default-off legacy path were not changed. No real
+provider, Task, auxiliary role, or official evaluator call was made. This
+changes infrastructure response acceptance, not the PoS/PMA methods, and does
+not establish the cause of any historical incomplete stream.
+
+Three corrections
+-----------------
+1. NativeClaudeSession.ask appends an accepted strict response to assistant
+history even if its legal public text contains !!!Error: or another historical
+marker. The loop's final outcome uses complete_response_accepted before applying
+the legacy text-marker failure heuristic. With the switch off, the old heuristic
+remains. Synthetic text-only and text-plus-tool loop runs cover marker prefixes
+and the historical interruption marker, history, tool count, and terminal type.
+
+2. The strict sender checks the same fixed Task deadline and cancellation after
+the required provider_response success receipt, before each buffered delivery,
+and again after a resumed generator. ask checks again before history commit;
+ask_stateless checks before returning. Late failures do not retry or dispatch
+tools. The normal monitor-correction cancellation path still exists; a PoS
+decision is not advanced, and a PMA normal actor_step is not sent. A response
+chunk already yielded to a paused consumer may have been displayed, but is not
+committed to assistant history or used for a Task action after late rejection.
+
+3. Strict SSE parsing binds each active content block to the next sequential
+nonnegative integer index (bool is not an integer index). Start/delta/stop with
+missing, invalid, repeated or wrong index, duplicate start, or wrong block type increments parser errors and
+cannot close an unrelated tool block. A malformed frame yielding zero parsed
+blocks is classified from parser integrity, not converted to a retryable empty
+transport response. All such index errors reject without an automatic retry.
+Non-strict parsing retains the old behavior. This is not a general SSE rewrite.
+
+Executed offline checks
+-----------------------
+raw/seam_unittest_stdout_stderr.txt: 27 unittest tests passed, including 20
+current Task-policy tests and seven legacy synthetic SSE tests. This used the
+real ask/ask_stateless/agent_loop paths and a local scripted HTTP server.
+raw/seam_pos_ga_stdout_stderr.txt: 18 PoS/GA seam tests passed.
+raw/seam_pma_stdout_stderr.txt: 14 PMA capture/bridge tests passed.
+The Task suite retained the five-POST mixed budget, frozen request bytes,
+stop_reason-only acceptance, and capture-failure-no-resend assertions.
+
+An initial targeted index test exposed an erroneous transport_error category
+for a malformed stream with no parsed blocks; it failed before the additional
+strict empty-response check was corrected. A first PMA invocation used the
+wrong Python environment (pytest unavailable, then PYTHONPATH absent); the
+recorded final invocation used D:/python/python.exe with the repo module path.
+Neither preliminary failure represents a provider request. The three files
+above are final test-command output, not model captures.
+
+Public byte identities
+----------------------
+raw/SEAM_HASHES.json lists public Git-blob bytes and any differing Windows
+working-tree bytes separately. The commit diff is the complete scoped diff.
+The prior AUDIT.txt and prior raw outputs remain unchanged.
