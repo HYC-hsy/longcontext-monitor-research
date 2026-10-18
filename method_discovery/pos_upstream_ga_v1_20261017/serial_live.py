@@ -32,17 +32,17 @@ CAPTURE_BASELINE_COMMIT = 'db2d10c5d439c61b456dd6b9015076afd4ed664e'
 CAPTURE_PATH = 'method_discovery/pos_upstream_ga_v1_20261017/worker.py'
 HISTORICAL_WORKER_SHA256 = 'c49d1ffd712cce1e84ada7490c2aaee90bfdc777af11b6827518276b6c45378d'
 CAPTURE_BEFORE_SHA256 = '09c0ef92d4a76a64d016f647f112ead3459dd61ef1d207b442678fbe0162ab1f'
-CAPTURE_AFTER_SHA256 = 'PENDING_FINAL_CAPTURE_SHA256'
-CAPTURE_DIFF_SHA256 = 'PENDING_FINAL_CAPTURE_DIFF_SHA256'
+CAPTURE_AFTER_SHA256 = '75ae2e1f1c072ab5e3cd46b6e732403630c58657a69eef75f5170e6bfbca30e0'
+CAPTURE_DIFF_SHA256 = '166862bffd8dd4873d22f266ee9913fbe1980c62473f4c8e6ade0e18aeeae58e'
 REVIEW_BASELINE_COMMIT = CAPTURE_BASELINE_COMMIT
 REVIEWED_SOURCE_CHANGES = {
-    'GenericAgent-main/research_runtime.py': ('PENDING', 'PENDING'),
-    'method_discovery/pos_upstream_ga_v1_20261017/provider_capture.py': ('PENDING', 'PENDING'),
-    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py': ('PENDING', 'PENDING'),
-    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py': ('PENDING', 'PENDING'),
-    'method_discovery/pos_upstream_ga_v1_20261017/single_manifest.py': ('PENDING', 'PENDING'),
-    'method_discovery/pos_upstream_ga_v1_20261017/certification.py': ('PENDING', 'PENDING'),
-    'method_discovery/pos_upstream_ga_v1_20261017/collect_native_shared.py': ('PENDING', 'PENDING'),
+    'GenericAgent-main/research_runtime.py': ('b2372a50f1c8d7498c47e0555dc299d85e5986905ae5409982ec058a5a6daeba', 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'),
+    'method_discovery/pos_upstream_ga_v1_20261017/provider_capture.py': ('5ee9ab377c98d7a7059404d14a3c69b4a4466c46553b0cce990e5ebb8294f36a', '5887f32b0aa782654a4f073b5de6c22c3e7d7f0704c18238a217cd692064cc86'),
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py': ('b1201866b460d182124f0dbeca141f8eaf95be03b48df7237b8029c9e8633e7a', '54da093ecf7c2305b4bb3b19f9cc7eee2444d0cf020117b17d9816bd0dea7c05'),
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py': ('30c571b862767b1949ebae742d8b5b86fb570de2868d9a79c232975c6d788005', '20013d876e774173bddbbbd0ae34642c454d1cb12b91f20d87be6e536f80a997'),
+    'method_discovery/pos_upstream_ga_v1_20261017/single_manifest.py': ('0b13b0b20efa45c0455bbde69a06bacf795a21f5912658e7cf1b6cd712e55b20', '8b4e0e73ad0847a449aac868249525ba965e06b433f12dfc24bfd88923eb875f'),
+    'method_discovery/pos_upstream_ga_v1_20261017/certification.py': ('ce89d06ea419b2b260200a245b3bb7326471c147c1439ac06390f4e57b37a190', '195ba28bef94a5bf356cadedff8fd7ca5b717bbe7087c1e98eeb98e2658aa039'),
+    'method_discovery/pos_upstream_ga_v1_20261017/collect_native_shared.py': ('cb318a59652379127becd8ea80bedff7f751d922d5317fddae0e687b901b8bd6', '4e29bb6d82a9af82416573b17c89c498950e5adde37df37a6d2bced393e77603'),
 }
 
 
