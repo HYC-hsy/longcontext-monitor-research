@@ -1,0 +1,86 @@
+PoS-on-GA formal v6: stopped-run audit (2026-10-18)
+
+Outcome
+The authorized serial process ended with exit 1 after attempting task 2. Task 1,
+nginx-request-logging (run pos-5439517d8b2d43fb), completed and received one
+native evaluation with reward 1.0. Task 2, adaptive-rejection-sampler (run
+pos-0231c24370734de0), was rejected by the exact audited-code-commit check
+before Harbor, Task, PoS worker, provider HTTP, tools or evaluator started. Task
+3 sqlite-with-gcov and task 4 write-compressor were not started. No task was
+rerun. The second task has no score; it is not a 0.
+
+Cause and chronology
+The serial runner froze its authorization to the HEAD it read at launch,
+5a0d9b6a9903118c314af9cdd24e04bf0ab9e087. While task 1 was active, a
+subsequent evidence-only commit f5c7792c460b3ed16097ee0081f95f259239ea36
+advanced HEAD. The only files changed between those commits were .gitattributes
+and AUDIT_V21_PRELAUNCH.txt under this research directory; the runtime method
+code did not change. Nevertheless the existing policy compares exact HEAD, so
+task 2's verify_live_spec raised "PoS running code differs from authorized
+commit". The serial runner removed task 2's one-use authorization and stopped.
+The scheduling error was committing evidence during an active four-task batch;
+the identity guard correctly prevented continuation. The earlier audit commit
+and this stop are both retained; no old record was rewritten to conceal it.
+
+Task 1 evidence
+Task result CURRENT_TASK_DONE; Harbor return 0; PoS worker graceful exit;
+archive_incomplete=false. Task event ledger records 18 provider requests and
+18 responses and 17 selected native tool calls (11 code_run, 3 file_write,
+2 file_read, 1 file_patch). "Selected" is not independently asserted to be
+the exact count of successful environment actions. PoS ledger records 78 role
+calls: belief 38, consistency 23, progress 17. Its provider capture records
+78 observable attempts and 78 returns, all matched. There were 11 valid
+progress completions and 6 progress_failed/unscored events; these are not
+zero scores. Two Sentinel audit_failed events and four candidate_rejected
+events are preserved, not recast as successful revisions. Eleven health update
+events occurred; no recovery event appears in the recorded event names.
+The Task usage fields sum to input 21,564, output 8,045, cache creation
+36,019 and cache read 21,996 tokens. PoS provider usage fields sum to input
+16,848, output 27,055, cache creation 283,296 and cache read 32,527 tokens.
+These are observed API fields, not a dollar estimate.
+
+The stop-writer receipt shows all registered GA/PoS/transport processes exited
+while the nginx Task service remained alive for evaluation. The native test
+script executed once; uploaded evaluator bytes matched the fixed official
+members. Result reward=1.0, verifier report checked, evaluation released in
+the same main container. The live result reports no remaining owned containers,
+no cleanup errors, owned volume clearance clean, and cleanup_confirmed=true.
+No current run-specific Docker container, volume, activity authorization or
+process was found in the post-run check. Older unrelated exited containers
+were left untouched. Reward 1.0 is this task's native result only, not a PoS
+versus PMA conclusion.
+
+Task 2 and remaining scope
+serial_result.json records run_exit=1, status unavailable, provider capture
+role_ledger_unavailable, reward null and continue_safe=false. serial_stderr.txt
+contains the exact identity exception. No run root, Harbor status, Task terminal,
+provider ledger or evaluator result was generated for task 2. The task 3 and 4
+directories contain prepared plans/manifests only. No further formal execution
+was attempted after the prescribed stop condition.
+
+Public evidence and redaction
+raw_formal_stop_v3/ contains 45 individually readable files. FILE_HASHES.json
+lists each private source byte count/hash and public byte count/hash, plus
+redaction counts. The public projection removes private profile values and
+provider-generated user_id metadata; 96 field occurrences were redacted.
+Model-visible public prompts, responses, tool schemas, tool observations and
+native evaluator output remain in the selected ledgers. The existing redactor
+also excludes hidden-thinking fields where present. JSON serialization and
+redaction change public bytes: source and public SHA-256 are deliberately
+separate, and redactions=0 never means byte identity. The previously produced
+provider_public/CAPTURE_INDEX.json retains independent original worker source
+hashes and public capture hashes.
+
+One 8,382-byte agent_stdout.log source was withheld because the established
+structured redactor could not safely project a mixed-format stream. Its source
+SHA-256 and precise omission are in FILE_HASHES.json. Agent stderr, public
+Task event ledger, Task terminal, PoS role/provider ledgers, native verifier
+stdout/CTRF/reward, live status and both serial results are available. This
+omission limits completeness of the public stdout copy; it does not change
+the private original or claim that the original was empty.
+
+This handoff adds only an archival script, public projections, hash index and
+audit text. It does not modify PoS vendor, runtime method, Task inputs,
+profiles, evaluation assets or historical runs. The completed first task is a
+single discovery observation. The unstarted tasks require a separately frozen
+and authorized future batch; this handoff does not grant one.
