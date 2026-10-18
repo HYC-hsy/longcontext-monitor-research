@@ -1,0 +1,19 @@
+PoS worker pre-send capture repair — offline only (2026-10-18)
+
+Parent failure remains immutable: AUDIT_V16_FORMAL_STOP.txt and raw_formal_stop_v1. The first formal nginx task failed before its first provider HTTP send. It was not rerun; tasks 2-4 were not started.
+
+Diagnosis: shared live_launcher sets GA_PMA_CAPTURE_TASK_REQUESTS=1 for every arm. llmcore._stream_with_retry therefore requires provider_request_ready to reach a research_runtime sink before requests.post. The PoS role executes in a separate worker process; its RoleTransport had no research_context/sink. The first belief initialization reached the guard, so the intended fail-closed capture policy aborted before sending. The prior native evaluation's reward 0 belongs to that failed run, not a normal PoS completion.
+
+Bounded change: worker.py now binds a separate append-only provider-event JSONL sink for each profile-mode role call when the required-capture flag is active. It binds P, role, run_id, and task_id, covers the full raw_ask generator lifetime, and writes beside the existing PoS episode archive as events.provider.jsonl. The existing llmcore pre-send guard remains intact. If the capture path or run/task binding is missing, the call still fails before HTTP. Fake mode, Task transport, original PoS vendor, roles, prompts, parameters, and retry settings were not changed. Provider request content and visible response capture use the existing llmcore redaction and hidden-thinking exclusion path; the private profile and endpoint are not copied to this audit.
+
+Verification, all with fake/patched transport and zero real model calls:
+- C:\Python313\python.exe -B -m unittest method_discovery.pos_upstream_ga_v1_20261017.test_role_contract -v: 12/12 pass. The new test uses actual NativeClaudeSession.raw_ask and a requests.post interception, with GA_PMA_CAPTURE_TASK_REQUESTS=1. It confirms request-ready precedes attempt/response, exactly one fake HTTP call occurs, run/task binding is present, and the fixture secret and endpoint do not enter the capture. Missing binding rejects before requests.post.
+- From the research directory, C:\Python313\python.exe -B test_offline.py: 6/6 pass.
+- From the research directory, C:\Python313\python.exe -B test_ga_seam.py: 18/18 pass. Existing harmless tool-schema/ResourceWarning output remained; no test failed.
+- An initial root-level unittest invocation of test_offline and test_ga_seam failed at import because those historical scripts use directory-local imports. Both were then run via their supported script entry points as above; this was a test invocation issue, not a product failure.
+
+Actual working-tree SHA-256 before commit:
+worker.py 09c0ef92d4a76a64d016f647f112ead3459dd61ef1d207b442678fbe0162ab1f
+test_role_contract.py 4d18bd1ee82ad3bb855e0f1b6fcdc9d4056adbc8e79dee2e4aba6c89c2670e8a
+
+This is an offline code repair, not fresh source-bound Docker certification or authorization to restart the formal tasks. The old authorization is removed. Any later live attempt needs its own frozen source/package identity, certification as required by the existing gate, new scope and one-time authorization. No code was changed in the stopped run directory or its archived results.

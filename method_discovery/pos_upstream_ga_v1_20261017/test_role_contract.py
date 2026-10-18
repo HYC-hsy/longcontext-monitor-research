@@ -303,6 +303,52 @@ class RoleContractTests(unittest.TestCase):
                            'payloads': payloads}, stream, ensure_ascii=False, indent=2)
                 stream.write('\n')
 
+    def test_required_pos_provider_capture_binds_worker_request_before_send(self):
+        class HTTP:
+            status_code = 200
+            headers = {}
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def close(self): pass
+            def json(self): return {'content': [{'type': 'text',
+                'text': '{"issues":[]}'}],
+                'usage': {'input_tokens': 1, 'output_tokens': 1}}
+        profile = {'apibase': 'https://fixture.invalid', 'apikey': 'OFFLINE-SECRET',
+                   'model': 'claude-opus-4-8', 'max_tokens': 1000,
+                   'thinking_type': 'adaptive', 'max_retries': 0, 'stream': False}
+        with tempfile.TemporaryDirectory() as tmp:
+            capture_path = Path(tmp) / 'role.provider.jsonl'
+            transport = RoleTransport(mode='profile', profile=profile,
+                archive=Recorder(), capture_path=capture_path,
+                run_id='fixture-run', task_id='fixture-task')
+            with patch.dict(os.environ, {'GA_PMA_CAPTURE_TASK_REQUESTS': '1'}), \
+                 patch('llmcore.requests.post', return_value=HTTP()) as post:
+                self.assertEqual(transport.caller('belief')([
+                    {'role': 'user', 'content': 'Synthetic role request.'}]),
+                    '{"issues":[]}')
+                self.assertEqual(post.call_count, 1)
+            rows = [json.loads(line) for line in capture_path.read_text(
+                encoding='utf-8').splitlines()]
+            kinds = [row['event_type'] for row in rows]
+            self.assertLess(kinds.index('provider_request_ready'),
+                            kinds.index('provider_request_attempt'))
+            self.assertLess(kinds.index('provider_request_attempt'),
+                            kinds.index('provider_response'))
+            self.assertTrue(all(row['run_id'] == 'fixture-run' and
+                                row['task_id'] == 'fixture-task' for row in rows))
+            public = capture_path.read_text(encoding='utf-8')
+            self.assertNotIn('OFFLINE-SECRET', public)
+            self.assertNotIn('https://fixture.invalid', public)
+            missing = RoleTransport(mode='profile', profile=profile,
+                archive=Recorder(), run_id='fixture-run', task_id='fixture-task')
+            with patch.dict(os.environ, {'GA_PMA_CAPTURE_TASK_REQUESTS': '1'}), \
+                 patch('llmcore.requests.post') as post:
+                with self.assertRaisesRegex(RuntimeError,
+                                            'capture binding unavailable before send'):
+                    missing.caller('belief')([{'role': 'user',
+                        'content': 'Synthetic role request.'}])
+                post.assert_not_called()
+
     def test_old_status_bit_cannot_authorize_new_serial_run(self):
         old = HERE / 'raw_compat_v1'
         with tempfile.TemporaryDirectory() as tmp:

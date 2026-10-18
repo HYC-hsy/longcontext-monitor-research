@@ -124,13 +124,17 @@ def _persist_receipt(path, *, case_id, status, result=None, error=None,
 
 
 class RoleTransport:
-    def __init__(self, *, mode, replies=None, profile=None, archive):
+    def __init__(self, *, mode, replies=None, profile=None, archive,
+                 capture_path=None, run_id=None, task_id=None):
         self.mode = mode
         self.replies = {key: list(value) for key, value in (replies or {}).items()}
         self.profile = profile
         self.archive = archive
         self.calls = []
         self.sessions = {}
+        self.capture_path = Path(capture_path) if capture_path is not None else None
+        self.run_id = run_id
+        self.task_id = task_id
         if mode not in {'fake', 'profile'}:
             raise ValueError('PoS transport must explicitly be fake or profile')
         if mode == 'profile':
@@ -227,7 +231,17 @@ class RoleTransport:
             return original(value, api_mode)
         llmcore._record_usage = capture
         try:
-            with contextlib.redirect_stdout(sys.stderr):
+            capture_context = contextlib.nullcontext()
+            if os.environ.get('GA_PMA_CAPTURE_TASK_REQUESTS') == '1':
+                if self.capture_path is None or not self.run_id or not self.task_id:
+                    raise RuntimeError('PoS provider capture binding unavailable before send')
+                from research_runtime import JsonlEventSink, research_context
+                capture_context = research_context(
+                    {'experiment_id': 'pos-ga', 'condition_id': 'P',
+                     'task_id': self.task_id, 'run_id': self.run_id,
+                     'branch_id': 'pos-role-' + role},
+                    JsonlEventSink(self.capture_path))
+            with capture_context, contextlib.redirect_stdout(sys.stderr):
                 generator = session.raw_ask(request)
                 try:
                     while True:
@@ -305,7 +319,10 @@ def main():
             # profile; the GA bundle uses its gateway-rewritten mykey.json.
             import runpy
             profile = runpy.run_path(str(profile_path))[args.profile_name]
-    transport = RoleTransport(mode=args.mode, replies=replies, profile=profile, archive=logger)
+    transport = RoleTransport(mode=args.mode, replies=replies, profile=profile,
+                              archive=logger,
+                              capture_path=args.archive.with_suffix('.provider.jsonl'),
+                              run_id=args.run_id, task_id=args.task_id)
     episode = None
     finished = False
     failure = None
