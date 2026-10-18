@@ -1,0 +1,136 @@
+PoS-on-GA final-two continuation — stopped-run audit (2026-10-18)
+
+Scope and identity
+==================
+This is the already authorized continuation of the two previously unstarted
+tasks, not a repeat of nginx or sampler. The historical sampler remains
+EXCEPTION, archive_incomplete, native reward 0, with 401 sends / 400 returns;
+the IPC wait change is not retroactive proof of its root cause. The fixed PoS
+vendor, role prompts, Task model/profile, official task/evaluation assets,
+300-turn / 14400-second Task limits, and per-provider 180-second cap did not
+change. The explicitly changed runtime behavior is that one PoS IPC command
+waits against the frozen total Task deadline rather than the 180-second
+single-provider cap. No additional compatibility probe or repeat run occurred.
+
+Code frozen before live execution at
+202f01f769692e33caad1b36c709b3239c168883. The limited implementation
+diff from baseline 61706289bd0386bafa80adc60c64a2fbe897fce2 is contained
+in commits c0ac984a, f20af802 and 202f01f7: pos_bridge.py separates the
+clocks, checks EOF/exit/cancel and records safe bridge diagnostics;
+collect_native_shared.py validates those diagnostics; resume_remaining.py is
+the thin two-task entry; the remaining tracked additions are tests and
+source-bound synthetic evidence. The exact complete diff is available via
+Git comparison of those two commits. No live runtime source was changed after
+freezing and before either task.
+
+Offline gate
+============
+The local fake-clock/queue suite passed 3 cases. The actual packed worker
+with local fake streaming HTTP passed reset/update/finish: one update took
+3.8029 seconds, exceeding the scaled 3-second per-request cap while its
+sequential requests remained individually within that cap. The separate
+provider-timeout test retained the per-request timeout and no replay. The
+remaining targeted regressions passed: GA seam 18, role contract 13, provider
+capture 2. These are zero-real-model checks; the v4 integration used 9 local
+fake HTTP requests. An initial v1 test-import failure was retained outside
+the public source-bound acceptance and corrected before the final run.
+
+The committed Docker/native-SHARED synthetic acceptance is
+acceptance_ipc_v1, run pos-8188b35483ed43c1. Its 44 evidence files pass
+certification.verify_evidence(require_committed=True). Real model calls 0;
+official evaluator calls 0. This source-bound synthetic certification and
+the packed-worker/local fake-HTTP integration are distinct checks.
+
+Live results (each task was started once)
+=========================================
+03 sqlite-with-gcov, run pos-bcb35740d2314ef1:
+  Task CURRENT_TASK_DONE; Task provider requests/attempts/responses 11/11/11;
+  actual tool starts/outcomes 10/10. PoS role calls and observable returns
+  47/47: belief 24, consistency 13, progress 10. Original progress completed
+  9, progress_failed/unscored 1; recovery started/finished 0/0. The ten PoS
+  update command receipts were all successful; longest wait 44.213 seconds.
+  Native verifier ran once; official reward 1.0. PoS result completed,
+  graceful worker exit, provider capture complete, archive_incomplete=false,
+  stopped-writer and same-main release recorded, owned resources cleaned.
+  Serial continue_safe=true.
+
+04 write-compressor, run pos-390e3b64fc144eba:
+  Task PROVIDER_FAILURE, not a normal completion. Task provider requests /
+  observable attempts / responses 125/125/125; tool starts/outcomes 207/207.
+  PoS role calls and observable returns 594/594: belief 299, consistency 171,
+  progress 124. Original progress completed 72, progress_failed/unscored 52;
+  recovery started/finished 57/56. These are event counts, not semantic
+  correctness claims. The 124 PoS update command receipts were successful;
+  longest wait 98.790 seconds. Bridge finish receipt and graceful worker exit
+  were recorded. The Task terminal record is PROVIDER_FAILURE, while PoS
+  result is failed; neither is rewritten as a normal ending. Native verifier
+  ran once against safely stopped artifacts; official reward 0.0. Provider
+  capture complete, archive_incomplete=false, evaluation/reports/cleanup
+  complete, owned resources cleaned. Serial continue_safe=false because of
+  the Task terminal failure; the thin driver exited 1 after writing results.
+  This is not evidence that the 180-second IPC wait recurred: no live update
+  exceeded 180 seconds. The precise upstream cause of the Task provider
+  failure is not established by the bridge diagnostics alone. Telemetry
+  export warnings must not be substituted for a causal explanation.
+
+Both task-specific authorization files were removed after use. The frozen
+scope and each removal receipt are in raw_final_two_v2. The first two orders
+of the historical four-task sequence were explicitly non-executed and
+unauthorized in this continuation. No further task was started or replayed.
+
+Observable usage (not billing)
+==============================
+For sqlite, Task reported input/output/cache-creation/cache-read tokens
+13,178/5,481/21,903/13,442; PoS roles reported
+10,152/12,689/182,190/9,626. For compressor, Task reported
+149,750/338,557/1,513,660/152,750; PoS roles reported
+128,304/285,312/9,417,917/379,773. Values sum the captured provider
+usage fields; absent cost fields were not estimated. A failed or unscored
+progress event was not filled with zero.
+
+Public evidence and gaps
+========================
+raw_final_two_v2/FILE_HASHES.json maps 81 source files to public files with
+separate source and public SHA-256/byte counts, 777 redaction replacements,
+and four unsafe-public-projection omissions. The omitted entire files are
+03/task/agent_stdout.log, 04/task/agent_stdout.log, and each run's private
+PoS events.stderr.log; they remain in the private run originals. The public
+Task research_events, Task stderr, tool host events, PoS role/provider/bridge
+events, result/close receipts, terminal, Harbor/native evaluation, and
+cleanup records remain available individually. Large JSONL files are split
+on original record boundaries into bounded readable parts; part numbering
+preserves order. No missing private file is inferred from a public omission.
+
+Provider-public files had already undergone the collector's redaction and
+JSON serialization. This final archive applies the public projection again,
+so redactions=0 for an individual file does not mean byte identity. The
+collector CAPTURE_INDEX also records hashes of its private provider sources.
+The public read-back hashes were checked. The final public index SHA-256 is
+81a6649cae232f005b27eed4b282d2bb8b483b389bb5160562223f1224d0ecfb.
+The archive is an evidence copy, not a modification of original run files.
+No hidden thinking, private endpoint, credential or authentication header is
+intended for publication; a pattern scan found no matching token/header URL
+patterns, but this is not a proof of absence of all sensitive prose.
+
+Source bytes
+============
+Windows worktree SHA-256 at post-run audit:
+  GenericAgent-main/pos_bridge.py
+    c2315dfdc913d34a2b9e62d0bb4dae53f91538e41dd15739312ac51b7eac8284
+  method_discovery/pos_upstream_ga_v1_20261017/collect_native_shared.py
+    5056bde5b2aa320e4f2c5d610f9234ca7e6bbf331d9268b83907a974ebc1c260
+  method_discovery/pos_upstream_ga_v1_20261017/resume_remaining.py
+    a82de10b037ac64ad6368f5825c06aaae32276b70bafe0a2496e51baa4a9e70c
+Git blob IDs at the frozen commit respectively:
+  43f08cba1b2bb82c33bad55e849196f4039c4e63
+  2cde48be4a39a247ae70f6ca64d0b403830a3dd5
+  374a912cb66c10b2240cd3cf9ec0a66a646221d1
+Git blob identity and Windows worktree bytes are separate representations;
+the frozen scope, manifest and stage checks bind the actual packed source.
+
+Reproduction/read pointers
+==========================
+The source-bound offline acceptance is in acceptance_ipc_v1/. The new public
+run files are in raw_final_two_v2/03 and /04. The original run roots, which
+were not edited, are under E:\LongContext\pos_final_two_20261018_v1. This
+audit is a descriptive index only; do not rerun live tasks from it.
