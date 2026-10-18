@@ -1,0 +1,85 @@
+PoS-on-GA sampler/compressor bounded retry: stopped-run audit (2026-10-18)
+
+Outcome first
+-------------
+The newly authorized sampler attempt ran once as pos-7c969aa45b944db5. Its
+actual Task terminal is PROVIDER_FAILURE, not normal completion. The official
+native evaluator ran once and recorded reward=0.0. PoS archive and provider
+capture are complete; writer stop, evaluation handoff, container/volume cleanup
+are confirmed. Under the frozen suffix-stop rule, the prepared compressor run
+pos-a14d8537023a4d45 was NOT started or authorized. No rerun was made.
+
+Run identity and preflight
+--------------------------
+Execution HEAD: 6f5c40ed345f9189673bc0949506a14a35cf4eb1. Scope,
+source/vendor/profile hashes, task assets, 300-turn and 14400-second budgets,
+and independent run IDs are in raw_retry_stop_v1/scope/scope.json. The retained
+v4 packed-worker fake-streaming-HTTP result, old compressor final-call fragment,
+archive-only return classifier and its five passing tests are in
+raw_retry_preflight_v2 and AUDIT_RETRY_PREFLIGHT_20261018.txt. This batch changed
+no Task/PoS runtime source or model/profile configuration. The sampler used the
+new outer IPC wait strategy (per-provider 180 s, bounded by fixed Task deadline),
+unlike the older sampler attempt. Historical nginx and sqlite successes and
+historical sampler/compressor failure attempts remain unchanged.
+
+Sampler original-event boundary
+-------------------------------
+Task research_events.jsonl: 17 logical Task calls and 17 HTTP attempt/return
+records. The last call ID is llm_52fed9b17c3b46d385e71b64abee390e. Its
+attempt was recorded at 2026-10-18T13:18:44.997302Z; usage at
+13:19:05.179970Z (input=1198, output=0, cache creation=4177, cache read=1222).
+The captured public text contains ordinary text followed by the parser's
+incomplete-stream marker. A provider_response event at 13:19:05.193090Z says
+HTTP 200/outcome=success, which denotes a returned capture, not a complete
+model answer. action_selected at 13:19:05.203597Z has no tool calls;
+termination at 13:19:05.328129Z is PROVIDER_FAILURE. Raw stop_reason,
+message_stop, and underlying stream-break cause are unknown in this record.
+Do not infer a PoS IPC timeout from this Task-side error.
+
+The host ledger records 17 completed decision batches and 18 tool outcomes.
+The PoS role ledger records 85 logical calls, 85 observable attempts/returns,
+16 state updates after initialization, 25 Sentinel audit completions, 8 valid
+progress applications and 8 progress failures, with one recovery start.
+These are observed event counts, not quality judgments; unscored transitions
+were not assigned zero by this audit. The PoS worker finish receipt was obtained
+and close was graceful (worker exit 0). Full traces are in raw_retry_stop_v1,
+including the actual request/response and host timelines.
+
+Native evaluation and stop safety
+---------------------------------
+The Task terminal file says PROVIDER_FAILURE; pos_archive_incomplete=false.
+serial_result.json reports native_recorded reward=0.0, Harbor return 0,
+evaluation released, native reports checked, provider_capture complete,
+cleanup_confirmed=true. Writer termination check shows registered GA, PoS,
+wrapper and transport control PIDs exited before evaluator release. The owned
+container and volume were removed afterward. authorization_removed.json records
+the consumed sampler authorization removal. In 02_prepared_only there is no
+authorization.json, serial_start.json, serial_result.json or runs directory.
+The driver therefore returned nonzero after recording continue_safe=false;
+the zero reward was not used as the stopping condition.
+
+Public evidence and limits
+--------------------------
+raw_retry_stop_v1/FILE_HASHES.json maps 45 selected private originals to
+readable public files, original byte count/SHA-256, public byte count/SHA-256,
+redaction counts and omissions. The public index SHA-256 is
+b2a6f28a4b487386c0e611cb52c39d36c0e5ad74eb4513e6c6d34dacb60a3633.
+All emitted public files were read back and hashed. JSON may be reserialized;
+redactions=0 does not assert source/public byte identity. There were 102
+field/string redactions. Two private logs, pos_host/events.stderr.log and
+task/agent_stdout.log, failed safe public projection and are explicitly omitted;
+their private originals remain untouched. Thus public omission does not mean
+private evidence was absent. No credential, private endpoint or hidden thinking
+is intentionally included in the public copy. Public provider captures are
+separate from raw private role logs.
+
+Historical result status
+------------------------
+nginx: historical completed result, not rerun. sqlite-with-gcov: historical
+completed result, not rerun. Old sampler: EXCEPTION, archive incomplete,
+official reward 0, retained. Old compressor: PROVIDER_FAILURE, official reward 0,
+retained; its observed oversized/crashing decompression and final incomplete
+Task stream were not overwritten. New sampler: PROVIDER_FAILURE, official
+reward 0, clean evaluation/archival/cleanup, not a normal-PoS success datum.
+New compressor: not started; no reward exists. These attempts must not be
+reduced to a best-result-only success-rate denominator.
