@@ -28,6 +28,11 @@ INFRA_PATH = ('method_discovery/curator_supervisor_convergence_v0/'
 INFRA_BEFORE_SHA256 = 'b415b93d70a163bd261bf5aab2a429e953562fea614aa2de30c54c396dedf184'
 INFRA_AFTER_SHA256 = '58f091cd4a83c90c693e5ae2742bfdd8c1365e449b6a78b1d8fbfe6e9300e81c'
 INFRA_DIFF_SHA256 = '00d2924654f799bf91fef8e031469ff228b008c30f900a01b52df6f18e3bf755'
+CAPTURE_BASELINE_COMMIT = '2c7e31ecc03596406cbe79342d4e7b220c29aad7'
+CAPTURE_PATH = 'method_discovery/pos_upstream_ga_v1_20261017/worker.py'
+CAPTURE_BEFORE_SHA256 = 'c49d1ffd712cce1e84ada7490c2aaee90bfdc777af11b6827518276b6c45378d'
+CAPTURE_AFTER_SHA256 = '09c0ef92d4a76a64d016f647f112ead3459dd61ef1d207b442678fbe0162ab1f'
+CAPTURE_DIFF_SHA256 = '95147f09ff9f0a08f8daf955e96187d10fa803a4e8619c0da6873effe5be1d20'
 
 
 def sha(path):
@@ -77,6 +82,25 @@ def _reviewed_infrastructure_diff():
             diff_sha != INFRA_DIFF_SHA256):
         raise RuntimeError('shared launcher change differs from reviewed exact diff')
     return {'baseline_commit': INFRA_BASELINE_COMMIT, 'path': INFRA_PATH,
+        'before_sha256': before, 'after_sha256': after, 'diff_sha256': diff_sha}
+
+
+def _reviewed_capture_diff():
+    if not _ancestor(CAPTURE_BASELINE_COMMIT):
+        raise RuntimeError('reviewed PoS capture baseline not in history')
+    previous = subprocess.run(['git', 'show',
+        CAPTURE_BASELINE_COMMIT + ':' + CAPTURE_PATH], cwd=CHECKOUT,
+        capture_output=True, check=True).stdout
+    delta = subprocess.run(['git', 'diff', '--no-ext-diff', '--binary',
+        CAPTURE_BASELINE_COMMIT, 'HEAD', '--', CAPTURE_PATH], cwd=CHECKOUT,
+        capture_output=True, check=True).stdout
+    before = hashlib.sha256(previous).hexdigest()
+    after = sha(CHECKOUT / CAPTURE_PATH)
+    diff_sha = hashlib.sha256(delta).hexdigest()
+    if (before != CAPTURE_BEFORE_SHA256 or after != CAPTURE_AFTER_SHA256 or
+            diff_sha != CAPTURE_DIFF_SHA256):
+        raise RuntimeError('PoS worker capture repair differs from reviewed exact diff')
+    return {'baseline_commit': CAPTURE_BASELINE_COMMIT, 'path': CAPTURE_PATH,
         'before_sha256': before, 'after_sha256': after, 'diff_sha256': diff_sha}
 
 
@@ -178,8 +202,12 @@ def native_unscored_review(scope_path, certification, profile_path, continuity_p
     changed = [name for name in current_sources if
                current_sources[name] != previous_sources.get(name)]
     infra = _reviewed_infrastructure_diff()
-    if (changed != ['method_discovery/pos_upstream_ga_v1_20261017/serial_live.py',
+    capture = _reviewed_capture_diff()
+    if (changed != [CAPTURE_PATH,
+                    'method_discovery/pos_upstream_ga_v1_20261017/serial_live.py',
                     INFRA_PATH] or
+            previous_sources.get(CAPTURE_PATH) != CAPTURE_BEFORE_SHA256 or
+            current_sources[CAPTURE_PATH] != CAPTURE_AFTER_SHA256 or
             previous_sources.get(INFRA_PATH) != INFRA_BEFORE_SHA256 or
             current_sources[INFRA_PATH] != INFRA_AFTER_SHA256 or
             scope.get('schema') != 'pos-ga-user-authorized-serial-scope-v1' or
@@ -237,6 +265,7 @@ def native_unscored_review(scope_path, certification, profile_path, continuity_p
         'current_code_commit': scope['code_commit'],
         'current_source_files_sha256': current_sources,
         'reviewed_infrastructure_diff': infra,
+        'reviewed_capture_diff': capture,
         'current_vendor_files_sha256': vendor_hashes(),
         'input_contract_version': note['role_input_contract'],
         'object_instruction': note['role_object_instruction'],

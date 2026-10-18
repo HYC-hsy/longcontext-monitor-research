@@ -59,6 +59,11 @@ class NativeReviewGate(unittest.TestCase):
                 serial_live.native_unscored_review(
                     self.scope, self.cert, wrong_profile, self.continuity)
 
+    def test_worker_repair_requires_exact_reviewed_diff(self):
+        with patch.object(serial_live, 'CAPTURE_DIFF_SHA256', '0' * 64):
+            with self.assertRaisesRegex(RuntimeError, 'capture repair differs'):
+                self.expected()
+
     def test_unreviewed_and_tampered_review_never_authorize(self):
         args = SimpleNamespace(output=str(self.scope.parent),
             certification=str(self.cert), task_profile_file=str(self.profile),
