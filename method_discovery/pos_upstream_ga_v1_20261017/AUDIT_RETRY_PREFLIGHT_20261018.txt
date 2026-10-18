@@ -1,0 +1,98 @@
+PoS-on-GA sampler/compressor retry preflight — offline only
+===========================================================
+
+This supplement does not alter either historical run. nginx and sqlite remain
+normally completed; the old sampler run pos-9e38d8d543ca4008 remains
+EXCEPTION, archive_incomplete, official reward 0; the old compressor run
+pos-390e3b64fc144eba remains PROVIDER_FAILURE, official reward 0. Their
+Task actions, PoS states and official evaluations are retained in the
+earlier raw archives. The old compressor also observed a single-'A'
+compressed artifact of 3475 bytes, then a decompressor segmentation fault
+and 0 decoded bytes (agent_stdout original lines 5319–5323). That observation
+is not erased by the final incomplete stream.
+
+Last old compressor Task call
+-----------------------------
+The private Task research_events.jsonl is 7,195,800 bytes, SHA-256
+cae8ae2a7074bc7c4c803de690a08467e3a421ae602b501a0f5a616f7d3845de.
+Original lines 745–751 all bind to Task call
+llm_bc687359ba8e48069a30003b28066867, except the terminal event which
+has no call ID. Request-ready at 2026-10-18T12:25:55.532753Z; HTTP attempt
+at 12:25:55.535462Z. Captured usage at 12:26:45.849169Z: input 1198,
+output 0, cache creation 26819, cache read 1222. The parsed-visible-block
+record at 12:26:45.851723Z contains only the explicit incomplete-stream
+marker. HTTP status 200 and captured outcome=success appear at
+12:26:45.860102Z. Those fields mean the llmcore generator returned and the
+capture wrote a return record; they do not prove a complete valid answer.
+action_selected at 12:26:45.869878Z has empty tool names/IDs. The separate
+PoS host receipt lines 663–664 record turn 125, provider_error=true, zero
+actions/results. Task termination at 12:26:46.561980Z is PROVIDER_FAILURE.
+The old bridge separately shows PoS final update/finish receipts and a
+graceful worker close; this is not a PoS IPC wait timeout.
+
+Raw stop_reason and message_stop were not archived as separate fields and
+remain unknown. The parser's incomplete-stream sentinel is evidence of its
+own incomplete-termination branch, not a recovered raw SSE transcript or a
+diagnosis of the provider/network's lower-level cause. No request was sent
+to investigate that cause. The small public projection, with exact original
+line numbers, per-line hashes, source-file hashes and public-copy hashes, is
+raw_retry_preflight_v2/old_compressor/final_task_call.json.
+
+Return-count clarification
+--------------------------
+llmcore.py's _parse_claude_sse inserts a warning text block when it has
+neither message_stop nor stop_reason, and also marks max_tokens separately.
+The request wrapper emits provider_response outcome=success after the parser
+returns its blocks, even when those blocks are the incomplete-stream warning.
+This is a capture/outcome convention, not permission to execute an invented
+answer. agent_loop identifies the warning as provider_error, selects no
+action and records PROVIDER_FAILURE. No runtime parser/transport change was
+made. In the old compressor Task archive there are 125 logical requests,
+125 observable attempts and 125 return records. Offline classification
+finds one explicit incomplete-stream marker. The other 124 lack separately
+captured stop_reason/message_stop, so their terminal completeness is
+conservatively unknown in this archive-only classification; their actual
+tools/observations remain in the original records. The five zero-model
+classification tests cover explicit complete termination, missing terminal
+proof, incomplete sentinel despite outcome=success, provider error and
+max_tokens. Test command/stdout/stderr and aggregate result are in
+raw_retry_preflight_v2/offline_tests and old_compressor/return_classification.json.
+Historical outcome=success events were not rewritten.
+
+Retained v4 packed-worker evidence
+----------------------------------
+The v4 original was found at E:\LongContext\pos_ipc_offline_20261018_v4;
+it was not rerun. docker.stdout.txt reports status=pass, 9 local fake HTTP
+requests, update_elapsed_seconds=3.802907634, 7 role returns in the normal
+reset/update/finish episode, zero real model calls. The test scales only its
+own per-provider cap to 3 seconds: four sequential update roles collectively
+exceeded 3 seconds without any individual request exceeding that cap. The
+remaining 2 fake HTTP calls are the timeout branch's original request and a
+distinct original-correction call, each with one observed attempt and a
+Timeout transport_error. They are not a replay of one call ID. The normal
+worker exit was 0; capture was complete. The original test source and output
+are separate from the source-bound Docker/native-SHARED synthetic acceptance.
+The fixed production run still uses per-provider 180 seconds and its frozen
+14400-second Task total deadline; the 3-second value was never put into the
+formal profile. The actual packed bundle source hashes and the v4 original
+and public bytes are in raw_retry_preflight_v2/SOURCE_AND_PUBLIC_HASHES.json.
+The v4 result, Docker stdout/stderr, normal bridge diagnostic, timeout bridge
+and provider events, isolation identity, and collector index are individually
+readable there. The fake key, local test endpoint and synthetic hidden-thinking
+canary were excluded from the public copy. This is no claim of new real-model
+compatibility.
+
+Launch boundary
+---------------
+Only the archive-only classifier/tests, bounded evidence exporter,
+this audit and a thin new two-task plan/serial entry were added. PoS vendor,
+Task/PoS methods, parser acceptance, role prompts, profile/model/endpoint,
+temperature/thinking settings, budgets and retry settings were not changed.
+The frozen runtime source hashes must match the prior committed source-bound
+acceptance. The new plan is execution_authorized=false and lists only
+adaptive-rejection-sampler then write-compressor. nginx/sqlite have no new
+authorization. Each formal run, if started, gets a new run ID/root and a
+per-task one-use authorization through the existing single_run pathway.
+Normal reward 0 may continue only with a normal terminal, complete archive,
+one safe native evaluation and confirmed cleanup. Unhandled provider failure
+stops the suffix, even if native evaluation was legally obtained.
