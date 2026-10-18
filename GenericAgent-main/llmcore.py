@@ -1,4 +1,4 @@
-import os, json, re, time, requests, sys, threading, urllib3, base64, importlib, uuid, pathlib, hashlib
+import os, json, re, time, requests, sys, threading, urllib3, base64, importlib, uuid, pathlib, hashlib, copy
 from datetime import datetime
 from research_runtime import emit as _research_emit, new_id as _research_id, payload_summary as _payload_summary, sha256_json as _sha256_json, telemetry_enabled as _telemetry_enabled, consume_pending_intervention as _consume_pending_intervention, consume_pending_pma_reminder as _consume_pending_pma_reminder, register_provider_call as _register_provider_call, current_provider_call as _current_provider_call
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -133,15 +133,63 @@ def auto_make_url(base, path):
     if b.endswith(p): return b
     return f"{b}/{p}" if re.search(r'/v\d+(/|$)', b) else f"{b}/v1/{p}"
 
-def _parse_claude_json(data):
+def _parse_claude_json(data, *, strict=False):
     content_blocks = data.get("content", [])
+    reason = data.get('stop_reason')
+    safe_reason = reason if reason in (
+        None, 'end_turn', 'tool_use', 'max_tokens', 'stop_sequence',
+        'pause_turn', 'refusal', 'model_context_window_exceeded'
+    ) else 'unsupported'
+    invalid_tool_json = sum(1 for b in content_blocks if b.get('type') == 'tool_use'
+        and (not b.get('id') or not b.get('name') or not isinstance(b.get('input'), dict)))
     _record_usage(data.get("usage", {}), "messages")
     for b in content_blocks:
         if b.get("type") == "text": yield b.get("text", "")
         elif b.get("type") == "thinking": yield ""
-    return content_blocks
+    if not strict: return content_blocks
+    return ParsedProviderBlocks(content_blocks, {
+        'end_reason': 'json_response', 'event_counts': {},
+        'parse_errors': int(safe_reason == 'unsupported'),
+        'unclosed_blocks': 0, 'invalid_tool_json': invalid_tool_json,
+        'stop_reason': safe_reason, 'message_stop': True,
+        'usage_final': bool(data.get('usage')),
+    })
 
-def _parse_claude_sse(resp_lines):
+
+class ParsedProviderBlocks(list):
+    """Content plus parser evidence; no raw SSE or hidden block text in evidence."""
+    def __init__(self, blocks, integrity):
+        super().__init__(blocks)
+        self.integrity = integrity
+
+
+class TaskResponseRejected(RuntimeError):
+    def __init__(self, category):
+        self.category = category
+        super().__init__('Task response not committed: ' + category)
+
+
+def _task_response_category(blocks):
+    evidence = getattr(blocks, 'integrity', None)
+    if evidence is None:
+        return 'unsupported_parser'
+    if evidence.get('end_reason') == 'error':
+        return 'provider_error'
+    if evidence.get('stop_reason') == 'max_tokens':
+        return 'token_limit'
+    if evidence.get('parse_errors'):
+        return 'invalid_frame'
+    if evidence.get('unclosed_blocks'):
+        return 'incomplete_stream'
+    if evidence.get('invalid_tool_json'):
+        return 'invalid_tool_arguments'
+    if evidence.get('end_reason') == 'json_response':
+        return 'complete' if evidence.get('stop_reason') else 'incomplete_stream'
+    if evidence.get('message_stop') or evidence.get('stop_reason'):
+        return 'complete'
+    return 'incomplete_stream'
+
+def _parse_claude_sse(resp_lines, *, strict=False):
     """Parse Anthropic SSE stream. Yields text chunks, returns list[content_block]."""
     content_blocks = []; current_block = None; tool_json_buf = ""
     stop_reason = None; got_message_stop = False; warn = None
@@ -149,43 +197,74 @@ def _parse_claude_sse(resp_lines):
     # message_delta (output). Emit one complete usage record per provider call
     # after the stream ends instead of an input-only record at message_start.
     start_usage = {}; delta_usage = {}
+    event_counts = {}; parse_errors = 0; invalid_tool_json = 0
+    unclosed_blocks = 0; end_reason = 'eof'; response_bytes = 0
     for line in resp_lines:
         if not line: continue
+        response_bytes += len(line)
         line = line.decode('utf-8') if isinstance(line, bytes) else line
         if not line.startswith("data:"): continue
         data_str = line[5:].lstrip()
-        if data_str == "[DONE]": break
+        if data_str == "[DONE]": end_reason = 'done'; break
         try: evt = json.loads(data_str)
         except Exception as e:
-            print(f"[SSE] JSON parse error: {e}, line: {data_str[:200]}")
+            parse_errors += 1
+            if strict: print(f"[SSE] JSON parse error: {type(e).__name__}")
+            else: print(f"[SSE] JSON parse error: {e}, line: {data_str[:200]}")
+            continue
+        if not isinstance(evt, dict):
+            parse_errors += 1
             continue
         evt_type = evt.get("type", "")
+        safe_type = evt_type if evt_type in (
+            'message_start', 'content_block_start', 'content_block_delta',
+            'content_block_stop', 'message_delta', 'message_stop', 'error', 'ping'
+        ) else 'unsupported'
+        event_counts[safe_type] = event_counts.get(safe_type, 0) + 1
         if evt_type == "message_start":
             start_usage = dict(evt.get("message", {}).get("usage", {}) or {})
         elif evt_type == "content_block_start":
+            if current_block is not None: parse_errors += 1
             block = evt.get("content_block", {})
             if block.get("type") == "text": current_block = {"type": "text", "text": ""}
             elif block.get("type") == "thinking": current_block = {"type": "thinking", "thinking": "", "signature": ""}
             elif block.get("type") == "tool_use":
                 current_block = {"type": "tool_use", "id": block.get("id", ""), "name": block.get("name", ""), "input": {}}
+                if not current_block['id'] or not current_block['name']:
+                    invalid_tool_json += 1
                 tool_json_buf = ""
+            else: parse_errors += 1
         elif evt_type == "content_block_delta":
+            if current_block is None: parse_errors += 1
             delta = evt.get("delta", {})
             if delta.get("type") == "text_delta":
                 text = delta.get("text", "")
                 if current_block and current_block.get("type") == "text": current_block["text"] += text
+                else: parse_errors += 1
                 if text: yield text
             elif delta.get("type") == "thinking_delta":
                 if current_block and current_block.get("type") == "thinking": current_block["thinking"] += delta.get("thinking", "")
+                else: parse_errors += 1
             elif delta.get("type") == "signature_delta":
                 if current_block and current_block.get("type") == "thinking":
                     current_block["signature"] = current_block.get("signature", "") + delta.get("signature", "")
-            elif delta.get("type") == "input_json_delta": tool_json_buf += delta.get("partial_json", "")
+                else: parse_errors += 1
+            elif delta.get("type") == "input_json_delta":
+                if current_block and current_block.get('type') == 'tool_use':
+                    tool_json_buf += delta.get("partial_json", "")
+                else: parse_errors += 1
+            else: parse_errors += 1
         elif evt_type == "content_block_stop":
+            if current_block is None: parse_errors += 1
             if current_block:
                 if current_block["type"] == "tool_use":
-                    try: current_block["input"] = json.loads(tool_json_buf) if tool_json_buf else {}
-                    except: current_block["input"] = {"_raw": tool_json_buf}
+                    try:
+                        parsed_input = json.loads(tool_json_buf) if tool_json_buf else current_block.get('input', {})
+                        if not isinstance(parsed_input, dict): invalid_tool_json += 1
+                        current_block["input"] = parsed_input
+                    except (ValueError, TypeError):
+                        invalid_tool_json += 1
+                        current_block["input"] = {"_raw": tool_json_buf}
                 content_blocks.append(current_block)
                 current_block = None
         elif evt_type == "message_delta":
@@ -198,14 +277,24 @@ def _parse_claude_sse(resp_lines):
         elif evt_type == "error":
             err = evt.get("error", {})
             emsg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
-            warn = f"\n\n!!!Error: SSE {emsg}"; break
+            warn = ("\n\n!!!Error: SSE provider_error" if strict else
+                    f"\n\n!!!Error: SSE {emsg}")
+            end_reason = 'error'; break
+        elif evt_type not in ('ping',):
+            parse_errors += 1
     if not warn:
         if not got_message_stop and not stop_reason: warn = "\n\n[!!! 流异常中断，未收到完整响应 !!!]"
         elif stop_reason == "max_tokens": warn = "\n\n[!!! Response truncated: max_tokens !!!]"
     if current_block:
+        unclosed_blocks += 1
         if current_block["type"] == "tool_use":
-            try: current_block["input"] = json.loads(tool_json_buf) if tool_json_buf else {}
-            except: current_block["input"] = {"_raw": tool_json_buf}
+            try:
+                parsed_input = json.loads(tool_json_buf) if tool_json_buf else current_block.get('input', {})
+                if not isinstance(parsed_input, dict): invalid_tool_json += 1
+                current_block["input"] = parsed_input
+            except (ValueError, TypeError):
+                invalid_tool_json += 1
+                current_block["input"] = {"_raw": tool_json_buf}
         content_blocks.append(current_block); current_block = None
     combined_usage = dict(start_usage)
     for key, value in delta_usage.items():
@@ -218,7 +307,19 @@ def _parse_claude_sse(resp_lines):
         print(f"[WARN] {warn.strip()}")
         insert_at = next((i for i,b in enumerate(content_blocks) if b.get("type") == "tool_use"), len(content_blocks))
         content_blocks.insert(insert_at, {"type": "text", "text": warn}); yield warn
-    return content_blocks
+    safe_stop_reason = stop_reason if stop_reason in (
+        None, 'end_turn', 'tool_use', 'max_tokens', 'stop_sequence',
+        'pause_turn', 'refusal', 'model_context_window_exceeded'
+    ) else 'unsupported'
+    if safe_stop_reason == 'unsupported': parse_errors += 1
+    if not strict: return content_blocks
+    return ParsedProviderBlocks(content_blocks, {
+        'end_reason': end_reason, 'event_counts': event_counts,
+        'parse_errors': parse_errors, 'unclosed_blocks': unclosed_blocks,
+        'invalid_tool_json': invalid_tool_json, 'stop_reason': safe_stop_reason,
+        'message_stop': got_message_stop, 'response_line_bytes': response_bytes,
+        'usage_final': bool(delta_usage),
+    })
 
 def _try_parse_tool_args(raw):
     """Parse tool args string; split concatenated JSON objects like {..}{..} if needed.
@@ -450,28 +551,63 @@ class ProviderResponseCancelled(Exception):
     """The caller intentionally cancelled an in-flight provider response."""
 
 
+def _task_deadline(sess):
+    raw = (os.environ.get('GA_TASK_DEADLINE_EPOCH') or
+           os.environ.get('GA_POS_DEADLINE_EPOCH') or
+           os.environ.get('GA_PMA_UPSTREAM_DEADLINE_EPOCH') or
+           os.environ.get('GA_MONITOR_RUN_DEADLINE_EPOCH'))
+    try: deadline = float(raw)
+    except (TypeError, ValueError):
+        sess.last_response_acceptance = 'missing_task_deadline'
+        raise TaskResponseRejected('missing_task_deadline')
+    if not 0 < deadline < float('inf'):
+        sess.last_response_acceptance = 'missing_task_deadline'
+        raise TaskResponseRejected('missing_task_deadline')
+    return deadline
+
+
+def _task_check_wait(sess, deadline, seconds=0):
+    until = time.monotonic() + seconds
+    while True:
+        consume_cancel = getattr(sess, '_consume_cancel_request', None)
+        if consume_cancel is not None and consume_cancel():
+            sess.last_response_acceptance = 'cancelled'
+            raise ProviderResponseCancelled('provider response cancelled')
+        if time.time() >= deadline:
+            sess.last_response_acceptance = 'task_deadline'
+            raise TaskResponseRejected('task_deadline')
+        remaining = until - time.monotonic()
+        if remaining <= 0: return
+        time.sleep(min(0.1, remaining, max(0.0, deadline - time.time())))
+
+
 def _stream_with_retry(sess, url, headers, payload, parse_fn):
     if getattr(sess, '_research_capture_failed', False):
         raise RuntimeError('required research capture failed after an accepted response')
     pma_capture = os.environ.get('GA_PMA_CAPTURE_TASK_REQUESTS') == '1'
-    observing = _telemetry_enabled() or pma_capture
+    strict = bool(getattr(sess, 'task_complete_response', False))
+    capture_required = pma_capture or strict
+    deadline = _task_deadline(sess) if strict else None
+    payload_sha256 = _sha256_json(payload) if strict else None
+    if strict: sess.last_response_acceptance = 'pending'
+    observing = _telemetry_enabled() or capture_required
     llm_call_id = _research_id('llm') if observing else None
     if observing:
         intervention_link = _consume_pending_intervention()
         reminder_link = _consume_pending_pma_reminder()
-        capture = bool(getattr(sess, 'research_capture_payload', False)) or pma_capture
-        secrets = (str(getattr(sess, 'api_key', '') or ''), url.split('?', 1)[0]) if pma_capture else ()
+        capture = bool(getattr(sess, 'research_capture_payload', False)) or capture_required
+        secrets = (str(getattr(sess, 'api_key', '') or ''), url.split('?', 1)[0]) if capture_required else ()
         request_info = _payload_summary(payload, capture_content=capture, secrets=secrets)
         call_type = str(getattr(sess, 'research_call_type', 'task_agent'))
-        request_info.update({'provider_url': '[REDACTED]' if pma_capture else url.split('?', 1)[0],
-                             'provider_url_sha256': hashlib.sha256(url.split('?', 1)[0].encode()).hexdigest() if pma_capture else None,
+        request_info.update({'provider_url': '[REDACTED]' if capture_required else url.split('?', 1)[0],
+                             'provider_url_sha256': hashlib.sha256(url.split('?', 1)[0].encode()).hexdigest() if capture_required else None,
                              'max_retries': sess.max_retries,
                              'call_type': call_type})
         if intervention_link: request_info.update(intervention_link)
         if reminder_link: request_info.update(reminder_link)
         request_event = _research_emit('provider_request_ready', request_info,
-                                       llm_call_id=llm_call_id, required_sink=pma_capture)
-        if pma_capture and request_event is None:
+                                       llm_call_id=llm_call_id, required_sink=capture_required)
+        if capture_required and request_event is None:
             raise RuntimeError('required research request capture unavailable before send')
         _register_provider_call({
             'llm_call_id': llm_call_id,
@@ -485,14 +621,19 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
         except: ra = None
         return max(0.5, ra if ra is not None else min(30.0, 1.5 * (2 ** attempt)))
     for attempt in range(sess.max_retries + 1):
+        if strict: _task_check_wait(sess, deadline)
+        attempt_started = time.monotonic()
         consume_cancel = getattr(sess, '_consume_cancel_request', None)
         if consume_cancel is not None and consume_cancel():
             raise ProviderResponseCancelled("provider response cancelled before retry")
         streamed = False
         attempt_event = _research_emit('provider_request_attempt', {'attempt': attempt + 1},
-                                       llm_call_id=llm_call_id, required_sink=pma_capture)
-        if pma_capture and attempt_event is None:
+                                       llm_call_id=llm_call_id, required_sink=capture_required)
+        if capture_required and attempt_event is None:
             raise RuntimeError('required research attempt capture unavailable before send')
+        if strict and _sha256_json(payload) != payload_sha256:
+            raise TaskResponseRejected('payload_changed')
+        response_deadline_hit = None
         try:
             with requests.post(url, headers=headers, json=payload, stream=sess.stream, 
                                timeout=(sess.connect_timeout, sess.read_timeout), proxies=sess.proxies, verify=sess.verify) as r:
@@ -518,29 +659,74 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                     except: body = ""
                     if _retryable_http_error(r.status_code, body) and attempt < sess.max_retries:
                         d = _delay(r, attempt)
-                        _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code,
+                        retry_event = _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code,
                                        'outcome': 'retryable_http_error', 'retry_delay_seconds': d,
-                                       'relay_wrapped_upstream_error': r.status_code == 400}, llm_call_id=llm_call_id)
+                                       'relay_wrapped_upstream_error': r.status_code == 400},
+                                       llm_call_id=llm_call_id, required_sink=strict)
+                        if strict and retry_event is None:
+                            sess._research_capture_failed = True
+                            raise TaskResponseRejected('capture_failed')
                         print(f"[LLM Retry] HTTP {r.status_code}, retry in {d:.1f}s ({attempt+1}/{sess.max_retries+1})")
-                        time.sleep(d); continue
+                        if strict: _task_check_wait(sess, deadline, d)
+                        else: time.sleep(d)
+                        continue
                     err = f"!!!Error: HTTP {r.status_code}" + (f": {body}" if body else "")
                     _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code, 'outcome': 'http_error'}, llm_call_id=llm_call_id)
+                    if strict:
+                        sess.last_response_acceptance = 'http_error'
+                        raise TaskResponseRejected('http_error')
                     yield err; return [{"type": "text", "text": err}]
                 try:
                     gen = parse_fn(r)
+                    buffered = []
                     try:
                         while True:
                             consume_cancel = getattr(sess, '_consume_cancel_request', None)
                             if consume_cancel is not None and consume_cancel():
                                 raise ProviderResponseCancelled("provider response cancelled")
-                            chunk = next(gen); streamed = True; yield chunk
+                            chunk = next(gen)
+                            if strict: buffered.append(chunk)
+                            else: streamed = True; yield chunk
                     except StopIteration as e:
                         if response_deadline_hit.is_set():
                             raise requests.Timeout(
                                 f"provider response exceeded {total_timeout:g}s wall deadline"
                             )
                         if not e.value and not streamed: raise requests.ConnectionError("empty response")
-                        if pma_capture:
+                        if strict:
+                            _task_check_wait(sess, deadline)
+                            category = _task_response_category(e.value)
+                            evidence = dict(getattr(e.value, 'integrity', {}) or {})
+                            content_type = (r.headers or {}).get('Content-Type', '').split(';', 1)[0].strip().lower()
+                            evidence.update({'attempt': attempt + 1,
+                                             'category': category,
+                                             'payload_sha256': payload_sha256,
+                                             'status_code': r.status_code,
+                                             'elapsed_seconds': round(time.monotonic() - attempt_started, 6),
+                                             'content_type': content_type if content_type in (
+                                                 'text/event-stream', 'application/json') else None})
+                            diagnostic = _research_emit('task_response_integrity', evidence,
+                                llm_call_id=llm_call_id, required_sink=capture_required)
+                            if capture_required and diagnostic is None:
+                                sess._research_capture_failed = True
+                                sess.last_response_acceptance = 'capture_failed'
+                                raise TaskResponseRejected('capture_failed')
+                            if category != 'complete':
+                                sess.last_response_acceptance = category
+                                retry = category == 'incomplete_stream' and attempt < sess.max_retries
+                                outcome_event = _research_emit('provider_response', {
+                                    'attempt': attempt + 1, 'status_code': r.status_code,
+                                    'outcome': 'retry_incomplete_stream' if retry else 'rejected_' + category},
+                                    llm_call_id=llm_call_id, required_sink=capture_required)
+                                if capture_required and outcome_event is None:
+                                    sess._research_capture_failed = True
+                                    sess.last_response_acceptance = 'capture_failed'
+                                    raise TaskResponseRejected('capture_failed')
+                                if retry:
+                                    _task_check_wait(sess, deadline, _delay(r, attempt))
+                                    continue
+                                raise TaskResponseRejected(category)
+                        if capture_required:
                             visible = [block for block in (e.value or [])
                                        if isinstance(block, dict) and
                                        block.get('type') in ('text', 'tool_use')]
@@ -553,17 +739,40 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                             }, llm_call_id=llm_call_id, required_sink=True)
                             if content_event is None:
                                 sess._research_capture_failed = True
+                                if strict:
+                                    sess.last_response_acceptance = 'capture_failed'
+                                    raise TaskResponseRejected('capture_failed')
+                        if strict: _task_check_wait(sess, deadline)
                         success_event = _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code, 'outcome': 'success'},
-                                                       llm_call_id=llm_call_id, required_sink=pma_capture)
-                        if pma_capture and success_event is None:
+                                                       llm_call_id=llm_call_id, required_sink=capture_required)
+                        if capture_required and success_event is None:
                             sess._research_capture_failed = True
+                            if strict:
+                                sess.last_response_acceptance = 'capture_failed'
+                                raise TaskResponseRejected('capture_failed')
+                        if strict:
+                            sess.last_response_acceptance = 'complete'
+                            for chunk in buffered: yield chunk
                         return e.value or []
                 finally:
                     clear_active = getattr(sess, '_clear_active_response', None)
                     if clear_active is not None: clear_active(r)
                     if response_deadline is not None:
                         response_deadline.cancel()
+        except TaskResponseRejected as error:
+            if strict:
+                _research_emit('task_response_terminal', {
+                    'attempt': attempt + 1, 'category': error.category,
+                    'elapsed_seconds': round(time.monotonic() - attempt_started, 6),
+                    'payload_sha256': payload_sha256}, llm_call_id=llm_call_id)
+            raise
         except ProviderResponseCancelled:
+            if strict: sess.last_response_acceptance = 'cancelled'
+            if strict:
+                _research_emit('task_response_terminal', {
+                    'attempt': attempt + 1, 'category': 'cancelled',
+                    'elapsed_seconds': round(time.monotonic() - attempt_started, 6),
+                    'payload_sha256': payload_sha256}, llm_call_id=llm_call_id)
             _research_emit('provider_response', {
                 'attempt': attempt + 1, 'outcome': 'cancelled',
                 'streamed_before_cancel': streamed,
@@ -589,17 +798,33 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
             partial_retry_safe = getattr(sess, 'transactional_response', False)
             if attempt < sess.max_retries and (not streamed or partial_retry_safe):
                 d = _delay(None, attempt)
-                _research_emit('provider_response', {'attempt': attempt + 1, 'outcome': 'retryable_transport_error',
+                retry_event = _research_emit('provider_response', {'attempt': attempt + 1, 'outcome': 'retryable_transport_error',
                                'error_type': type(e).__name__, 'retry_delay_seconds': d,
-                               'streamed_before_error': streamed}, llm_call_id=llm_call_id)
+                                'streamed_before_error': streamed}, llm_call_id=llm_call_id,
+                                required_sink=strict)
+                if strict and retry_event is None:
+                    sess._research_capture_failed = True
+                    raise TaskResponseRejected('capture_failed') from None
                 print(f"[LLM Retry] {type(e).__name__}, retry in {d:.1f}s ({attempt+1}/{sess.max_retries+1})")
                 if streamed:
                     yield "\n[Transport interrupted: partial response discarded; retrying.]\n"
-                time.sleep(d); continue
+                if strict: _task_check_wait(sess, deadline, d)
+                else: time.sleep(d)
+                continue
             _research_emit('provider_response', {
                 'attempt': attempt + 1, 'outcome': 'transport_error',
                 'error_type': type(e).__name__, 'streamed_before_error': streamed,
             }, llm_call_id=llm_call_id)
+            if strict:
+                category = ('response_deadline' if response_deadline_hit is not None and
+                            response_deadline_hit.is_set() else 'transport_error')
+                sess.last_response_acceptance = category
+                _research_emit('task_response_terminal', {
+                    'attempt': attempt + 1, 'category': category,
+                    'exception_type': type(e).__name__,
+                    'elapsed_seconds': round(time.monotonic() - attempt_started, 6),
+                    'payload_sha256': payload_sha256}, llm_call_id=llm_call_id)
+                raise TaskResponseRejected(category) from None
             yield err; return [{"type": "text", "text": err}]
         except Exception as e:
             # Cross-thread response.close() can surface from requests/urllib3
@@ -616,6 +841,14 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                     "provider response cancelled"
                 ) from e
             err = f"\n\n[!!! 流异常中断 {type(e).__name__}: {e} !!!]" if streamed else f"!!!Error: {type(e).__name__}: {e}"
+            if strict:
+                sess.last_response_acceptance = 'parser_exception'
+                _research_emit('task_response_terminal', {
+                    'attempt': attempt + 1, 'category': 'parser_exception',
+                    'exception_type': type(e).__name__,
+                    'elapsed_seconds': round(time.monotonic() - attempt_started, 6),
+                    'payload_sha256': payload_sha256}, llm_call_id=llm_call_id)
+                raise TaskResponseRejected('parser_exception') from None
             yield err; return [{"type": "text", "text": err}]
 
 def _openai_stream(sess, messages):
@@ -967,12 +1200,16 @@ class NativeClaudeSession(BaseSession):
             messages[idx] = {**messages[idx], "content": list(messages[idx]["content"])}
             messages[idx]["content"][-1] = dict(messages[idx]["content"][-1], cache_control={"type": "ephemeral"})
         url = auto_make_url(self.api_base, "messages") + '?beta=true'
-        parse_fn = (lambda r: _parse_claude_sse(r.iter_lines())) if self.stream else (lambda r: _parse_claude_json(r.json()))
+        parse_fn = (lambda r: _parse_claude_sse(r.iter_lines(), strict=bool(
+            getattr(self, 'task_complete_response', False)))) if self.stream else (lambda r: _parse_claude_json(
+                r.json(), strict=bool(getattr(self, 'task_complete_response', False))))
         return (yield from _stream_with_retry(self, url, headers, payload, parse_fn))
 
     def ask(self, msg):
         assert type(msg) is dict
+        strict = bool(getattr(self, 'task_complete_response', False))
         with self.lock:
+            prior_history = copy.deepcopy(self.history) if strict else None
             self.history.append(msg)
             trim_messages_history(self.history, self)
             messages = [{"role": m["role"], "content": list(m["content"])} for m in self.history]
@@ -981,6 +1218,13 @@ class NativeClaudeSession(BaseSession):
         try:
             while True: yield next(gen)
         except StopIteration as e: content_blocks = e.value or []
+        except BaseException:
+            if strict:
+                with self.lock: self.history = prior_history
+            raise
+        if strict and self.last_response_acceptance != 'complete':
+            with self.lock: self.history = prior_history
+            raise TaskResponseRejected('acceptance_missing')
         if content_blocks and (_injected := _ensure_text_block(content_blocks)): yield _injected
         if content_blocks and not (len(content_blocks) == 1 and content_blocks[0].get("text", "").startswith("!!!Error:")):
             self.history.append({"role": "assistant", "content": content_blocks})
@@ -996,7 +1240,9 @@ class NativeClaudeSession(BaseSession):
             if think_match:
                 thinking = think_match.group(1).strip()
                 content = re.sub(think_pattern, "", content, flags=re.DOTALL)
-        return MockResponse(thinking, content, tool_calls, str(content_blocks))
+        response = MockResponse(thinking, content, tool_calls, str(content_blocks))
+        response.complete_response_accepted = bool(strict and self.last_response_acceptance == 'complete')
+        return response
 
     def ask_stateless(self, msg):
         """PoS-only one-decision request: do not read or append session history."""
@@ -1021,7 +1267,12 @@ class NativeClaudeSession(BaseSession):
         if not tool_calls: tool_calls, content = _parse_text_tool_calls(content)
         thinking = '\n'.join([b['thinking'] for b in content_blocks
                               if b.get('type') == 'thinking'] + tagged_thinking).strip()
-        return MockResponse(thinking, content, tool_calls, str(content_blocks))
+        if getattr(self, 'task_complete_response', False) and self.last_response_acceptance != 'complete':
+            raise TaskResponseRejected('acceptance_missing')
+        response = MockResponse(thinking, content, tool_calls, str(content_blocks))
+        response.complete_response_accepted = bool(getattr(self, 'task_complete_response', False)
+            and self.last_response_acceptance == 'complete')
+        return response
 
 class NativeOAISession(NativeClaudeSession):
     native_ua = "codex_exec/0.139.0 (Windows 10.0.26200; x86_64) unknown (codex_exec; 0.139.0)"
@@ -1310,6 +1561,11 @@ class NativeToolClient:
     def _thinking_prompt(): return THINKING_PROMPT_EN if os.environ.get('GA_LANG') == 'en' else THINKING_PROMPT_ZH
     def __init__(self, backend):
         self.backend = backend
+        enabled = os.environ.get('GA_TASK_COMPLETE_RESPONSE') == '1'
+        if enabled:
+            if type(backend) is not NativeClaudeSession:
+                raise RuntimeError('Complete-response policy requires the native Claude Task backend')
+        self.backend.task_complete_response = enabled
         self.backend.system = self._thinking_prompt()
         self.name = self.backend.name
         self._pending_tool_ids = []

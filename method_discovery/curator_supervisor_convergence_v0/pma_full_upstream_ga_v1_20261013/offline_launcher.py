@@ -300,6 +300,8 @@ def run_offline(args) -> dict:
         env['GA_POS_ENABLED'] = '1' if args.condition == 'P' else '0'
         env["GA_PMA_ENABLED"] = env["GA_MONITOR_ENABLED"] = "0"
         env["GA_M0_MONITOR_ENABLED"] = "0"
+        if env.get('GA_TASK_COMPLETE_RESPONSE') == '1':
+            env['GA_TASK_DEADLINE_EPOCH'] = str(deadline)
         if args.condition == 'P':
             env.update(GA_POS_TRANSPORT='fake',
                        GA_POS_WORKER_SCRIPT='/opt/genericagent/pos_runtime/worker.py',

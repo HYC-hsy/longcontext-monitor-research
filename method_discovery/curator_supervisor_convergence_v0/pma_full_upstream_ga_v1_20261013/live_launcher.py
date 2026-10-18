@@ -581,6 +581,8 @@ def run_live(args) -> dict:
                    GA_PMA_UPSTREAM_ENABLED='1' if args.condition == 'B' else '0',
                    GA_PMA_CAPTURE_TASK_REQUESTS='1',
                    GA_PMA_ENABLED='0', GA_MONITOR_ENABLED='0', GA_M0_MONITOR_ENABLED='0')
+        if env.get('GA_TASK_COMPLETE_RESPONSE') == '1':
+            env['GA_TASK_DEADLINE_EPOCH'] = str(deadline)
         if args.condition == 'P':
             env.update(GA_POS_ENABLED='1',
                        GA_POS_TRANSPORT='fake' if fixture else 'profile',
@@ -604,6 +606,8 @@ def run_live(args) -> dict:
             'argv': command, 'public_env': {name: env[name] for name in (
                 'GA_RUN_ISOLATION', 'GA_PMA_UPSTREAM_ENABLED', 'GA_MONITOR_ENABLED')},
             'agent_deadline_epoch': deadline,
+            'task_complete_response_policy': ('complete-response-v1' if
+                env.get('GA_TASK_COMPLETE_RESPONSE') == '1' else 'disabled'),
             'evaluator_timeout_sec': manifest['assets'][args.task].get(
                 'native_verifier_seconds', 900),
             'outer_timeout_sec': agent_seconds + manifest['assets'][args.task].get(

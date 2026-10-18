@@ -191,12 +191,20 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                                        request_view=request_view)
         else:
             response_gen = client.chat(messages=messages, tools=tools_schema)
+        complete_policy = bool(getattr(getattr(client, 'backend', None),
+                                       'task_complete_response', False))
         try:
             if verbose:
                 response = yield from response_gen
+                if complete_policy and not getattr(
+                        response, 'complete_response_accepted', False):
+                    raise RuntimeError('Task response lacked complete-response acceptance')
                 yield '\n\n'
             else:
                 response = exhaust(response_gen)
+                if complete_policy and not getattr(
+                        response, 'complete_response_accepted', False):
+                    raise RuntimeError('Task response lacked complete-response acceptance')
                 cleaned = _clean_content(response.content)
                 if cleaned: yield cleaned + '\n'
         except ProviderResponseCancelled:
@@ -251,7 +259,8 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
             })
 
         completion_decision = None
-        provider_error_response = _is_provider_error_response(response)
+        provider_error_response = (False if complete_policy
+            else _is_provider_error_response(response))
         if not response.tool_calls and not provider_error_response:
             if (_telemetry_enabled() or hasattr(handler, 'completion_gate') or
                     getattr(handler.parent, 'completion_decision_callback', None) is not None):

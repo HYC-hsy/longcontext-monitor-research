@@ -1,0 +1,90 @@
+Task complete-response commit and bounded stream recovery - offline v1
+2026-10-18
+
+Scope
+-----
+This is a default-off shared GA Task transport policy, not a PoS/PMA method
+change and not a diagnosis of the two historical incomplete streams. It makes
+Task response acceptance/recovery behavior different when enabled; any future
+method comparison must use the same setting for every arm. No real provider,
+Task experiment, or official evaluator was invoked in this delivery.
+
+Activation and wiring
+---------------------
+GA_TASK_COMPLETE_RESPONSE=1 is read only when constructing NativeToolClient
+for the native Claude Task backend. Direct PMA/PoS auxiliary NativeClaudeSession
+objects do not acquire this property. The research Harbor adapter forwards the
+flag and GA_TASK_DEADLINE_EPOCH. The shared live/offline launchers set that
+deadline to their already-fixed Task deadline only if the flag is explicitly
+enabled. With the flag off, their old Task request path remains selected.
+The strict path requires durable research request/attempt/response capture;
+missing capture or a missing finite Task deadline rejects before HTTP send.
+Non-Claude native clients fail fast if the new flag is selected rather than
+silently claiming the guarantee.
+
+Acceptance boundary
+-------------------
+The Claude SSE parser returns ordinary content blocks plus separate integrity
+metadata: EOF/DONE/error, safe event-type counts, malformed-frame count,
+unclosed-block count, invalid native tool-JSON count, stop_reason,
+message_stop, byte count, and final-usage availability. No raw SSE frames,
+thinking, signatures, credential, endpoint, or error-frame text enter this
+metadata. A stop_reason without message_stop is accepted when all blocks are
+closed, no parser/tool error occurred, and it is not max_tokens. A closing
+marker never makes malformed or unclosed content valid. max_tokens and closed
+invalid tool JSON reject without automatic retry.
+
+One logical call has one frozen payload hash and the existing max_retries
+budget (4 means at most 5 POSTs total across HTTP, socket, and incomplete
+stream retries). Each attempt buffers its chunks/blocks. Only after integrity,
+fixed deadline, and required capture succeed does it release the response to
+ask/ask_stateless and the GA loop. Rejected attempts do not enter assistant
+history, llm_after/action_selected, tool dispatch, normal PMA actor_step, or
+PoS decision update. No outer retry or extra Task turn is introduced. A
+capture failure after response receipt is terminal and never resent. The
+agent_loop has a second acceptance check before its normal post-LLM events.
+Strict acceptance uses the structured result rather than the legacy textual
+error-marker search. The legacy path retains its existing behavior when off.
+
+Test evidence
+-------------
+raw/test_unittest_stdout_stderr.txt: actual local scripted HTTP test command
+and unittest output. The test server binds only 127.0.0.1, uses synthetic
+responses and fake credentials. Assertions include POST counts, identical
+payload bytes across retries, no failed assistant history, no failed tool
+side effects, event categories, no normal action event on rejection, strict
+stateless path, deadline/cancel, required capture, and default-off behavior.
+This run: 22 passed (15 new-policy tests plus 7 prior SSE tests).
+raw/request_event_sample.json: a full synthetic Task request payload and
+safe event sample from two local fake HTTP POSTs, with identical payload bytes
+and one committed response. It is not a provider capture.
+raw/test_pos_ga_seam_stdout_stderr.txt: existing PoS/GA seam tests, 18 passed.
+raw/test_pma_regression_stdout_stderr.txt: existing PMA capture/bridge tests,
+14 passed.
+raw/test_legacy_sse_stdout_stderr.txt: original synthetic SSE tests; their
+legacy partial-tool behavior remains an explicit default-off control (7 passed).
+
+Limitations
+-----------
+The local SSE test proves the client boundary, not historical upstream or
+proxy behavior. The old network streams cannot be reconstructed. A live
+deployment would require a separately frozen manifest/authorization and
+source-bound certification for this changed infrastructure; none was created
+or used here. The response line-byte count is parser input metadata, not a
+raw wire capture. Existing Task overall process termination remains the hard
+backstop when an HTTP read blocks beyond the fixed deadline; the strict path
+also refuses to commit a response received after that deadline.
+
+Review commands
+---------------
+git show --stat --oneline HEAD
+git show --format=fuller HEAD
+py -3.13 -m unittest GenericAgent-main/tests/test_task_complete_response.py method_discovery/pos_upstream_ga_v1_20261017/test_task_sse_diagnosis.py -v
+py -3.13 method_discovery/pos_upstream_ga_v1_20261017/test_ga_seam.py
+python -m pytest -q GenericAgent-main/tests/test_pma_capture_boundary.py GenericAgent-main/tests/test_pma_upstream_ga_bridge.py
+
+Hash index: raw/HASHES.json records staged public Git-blob bytes and, where
+different, Windows working-tree bytes separately. The differing source/log
+files were checked to have equal split lines; their byte differences are line
+endings, not changed line content. The index does not identify historical
+private run artifacts. The commit diff is the complete scoped diff.

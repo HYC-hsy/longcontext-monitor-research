@@ -31,6 +31,8 @@ FORWARD = (
     "GA_POS_LIVE_AUTHORIZED",
     "GA_POS_TIMEOUT",
     "GA_POS_DEADLINE_EPOCH",
+    "GA_TASK_COMPLETE_RESPONSE",
+    "GA_TASK_DEADLINE_EPOCH",
 )
 
 actual = hashlib.sha256(Path(original.__file__).read_bytes()).hexdigest()
