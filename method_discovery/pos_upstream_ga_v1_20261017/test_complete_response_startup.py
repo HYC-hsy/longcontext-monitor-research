@@ -5,11 +5,13 @@ import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013 import single_run
 from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.six_task_plan import validate_plan
+from . import retry_two
 from .retry_two import prior_identity
 
 
@@ -73,6 +75,43 @@ class CompleteResponseStartupTests(unittest.TestCase):
         self.assertEqual(len(old['preflight_index_sha256']), 64)
         self.assertEqual(old['historical_review']['reviewed_code_commit'],
                          '0fd4395a029dd3fb801a25eba0148249bcfa7321')
+
+    def test_first_final_failure_never_starts_second_task(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            rows = []
+            for number, task in enumerate(retry_two.TASKS, 1):
+                directory = root / f'{number:02d}_{task}'
+                directory.mkdir()
+                (directory / 'manifest.json').write_text(json.dumps({
+                    'planned_order': [{'order': 1, 'task': task, 'repeat': 1,
+                        'condition': 'P', 'research_candidate': 'PoS'}]}), encoding='utf-8')
+                (directory / 'run_identity.json').write_text(json.dumps({
+                    'output_root': str(directory / 'runs')}), encoding='utf-8')
+                rows.append({'order': number, 'task': task,
+                    'directory': str(directory), 'run_id': f'pos-test-{number}',
+                    'run_root': str(directory / 'runs' / f'pos-test-{number}'),
+                    'manifest_sha256': 'a' * 64, 'config_sha256': 'b' * 64})
+            args = SimpleNamespace(output=str(root), task_profile_file='test-only',
+                official_source_git='test-only', ga_source='test-only',
+                runtime_root='test-only', worker_python='test-only',
+                harbor_python='test-only', bench_root='test-only',
+                harbor_source_root='test-only')
+            scope = {'code_commit': 'test-commit', 'prepared': rows}
+            with patch.object(retry_two, 'validate', return_value=(root, scope)), \
+                 patch.object(retry_two.subprocess, 'run', return_value=SimpleNamespace(
+                     returncode=1)) as run_task, \
+                 patch('method_discovery.pos_upstream_ga_v1_20261017.'
+                       'collect_native_shared.secrets_from_profile', return_value=[]), \
+                 patch('method_discovery.pos_upstream_ga_v1_20261017.'
+                       'collect_native_shared.collect_provider_capture',
+                       side_effect=RuntimeError('synthetic capture missing')):
+                with self.assertRaisesRegex(RuntimeError, 'later task stopped'):
+                    retry_two.run(args)
+            run_task.assert_called_once()
+            self.assertFalse((Path(rows[0]['directory']) / 'authorization.json').exists())
+            self.assertFalse((Path(rows[1]['directory']) / 'authorization.json').exists())
+            self.assertFalse((Path(rows[1]['directory']) / 'serial_start.json').exists())
 
 
 if __name__ == '__main__':

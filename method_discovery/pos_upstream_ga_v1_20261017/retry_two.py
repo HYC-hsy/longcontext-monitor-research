@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -20,6 +21,7 @@ ORDERS = (1, 2)
 OLD_TWO = ROOT / 'raw_final_two_v2'
 OLD_RETRY = ROOT / 'raw_retry_stop_v1/01/serial_result.json'
 PREFLIGHT = ROOT / 'raw_retry_preflight_v2'
+NEW_PREFLIGHT = ROOT / 'raw_complete_response_preflight_v1'
 REVIEW = ROOT / 'raw_review_v3/compatibility_review.json'
 
 
@@ -29,6 +31,42 @@ def sha(path: Path) -> str:
 
 def head() -> str:
     return previous.head()
+
+
+def complete_response_preflight() -> str:
+    path = NEW_PREFLIGHT / 'FILE_HASHES.json'
+    index = json.loads(path.read_text(encoding='utf-8'))
+    if (index.get('schema') != 'pos-ga-complete-response-preflight-v1' or
+            index.get('status') != 'pass' or
+            index.get('task_complete_response_policy') != 'complete-response-v1' or
+            index.get('real_model_calls') != 0 or
+            index.get('official_evaluator_calls') != 0 or
+            index.get('test_return_code') != 0 or
+            index.get('source_files_sha256') != source_hashes() or
+            index.get('vendor_files_sha256') != vendor_hashes() or
+            index.get('certification_index_sha256') !=
+                sha(ROOT / 'raw_complete_response_cert_v1/FILE_HASHES.json') or
+            tuple(row['task'] for row in json.loads((NEW_PREFLIGHT /
+                'boundary_result.json').read_text(encoding='utf-8'))['runs']) != TASKS):
+        raise RuntimeError('new Task response preflight differs from source')
+    if subprocess.run(['git', 'merge-base', '--is-ancestor',
+                       index['code_commit'], 'HEAD'], cwd=CHECKOUT,
+                      check=False).returncode:
+        raise RuntimeError('preflight code commit not in current history')
+    for row in index['files']:
+        member = (NEW_PREFLIGHT / row['path']).resolve(strict=True)
+        if (not member.is_relative_to(NEW_PREFLIGHT.resolve()) or
+                member.stat().st_size != row['bytes'] or sha(member) != row['sha256'] or
+                hashlib.sha256(subprocess.run(['git', 'show',
+                    'HEAD:' + member.relative_to(CHECKOUT).as_posix()],
+                    cwd=CHECKOUT, capture_output=True, check=True).stdout).hexdigest()
+                    != row['sha256']):
+            raise RuntimeError('committed preflight member changed: ' + row['path'])
+    if hashlib.sha256(subprocess.run(['git', 'show',
+            'HEAD:' + path.relative_to(CHECKOUT).as_posix()], cwd=CHECKOUT,
+            capture_output=True, check=True).stdout).hexdigest() != sha(path):
+        raise RuntimeError('committed preflight index changed')
+    return sha(path)
 
 
 def prior_identity() -> dict:
@@ -147,6 +185,8 @@ def validate(args) -> tuple[Path, dict]:
                 encoding='utf-8')).get('profile_sha256') or
             scope.get('certification_sha256') !=
                 sha(Path(args.certification) / 'FILE_HASHES.json') or
+            scope.get('complete_response_preflight_sha256') !=
+                complete_response_preflight() or
             scope.get('prior') != prior_identity() or
             scope.get('historical_not_repeated') !=
                 ['nginx-request-logging', 'sqlite-with-gcov'] or
@@ -199,6 +239,7 @@ def prepare(args) -> None:
         raise RuntimeError('not the authorized fixed two-task retry')
     if verify_evidence(Path(args.certification), require_committed=True).get('status') != 'pass':
         raise RuntimeError('source-bound synthetic certification failed')
+    new_preflight = complete_response_preflight()
     prior = prior_identity()
     root = Path(args.output).resolve(strict=False)
     root.mkdir(parents=True, exist_ok=False)
@@ -236,6 +277,7 @@ def prepare(args) -> None:
         source_files_sha256=source_hashes(), vendor_files_sha256=vendor_hashes(),
         profile_sha256=sha(Path(args.task_profile_file)),
         certification_sha256=sha(Path(args.certification) / 'FILE_HASHES.json'),
+        complete_response_preflight_sha256=new_preflight,
         prior=prior, prepared=prepared, task_turns_max=300,
         agent_wall_seconds=14400,
         task_complete_response_policy='complete-response-v1'))
