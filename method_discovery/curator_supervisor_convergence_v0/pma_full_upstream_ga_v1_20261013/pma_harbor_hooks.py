@@ -41,7 +41,8 @@ def _docker_top_pids(output: str) -> set[str]:
 
 def pos_archive_summary(run_id: str, task_id: str, terminal: dict | None,
                         result_receipt: dict, close_receipt: dict,
-                        terminal_error_category: str | None = None) -> dict:
+              terminal_error_category: str | None = None,
+              provider_capture: dict | None = None) -> dict:
     """Summarize bound receipts without conflating Task completion and archive health."""
     known = terminal is not None
     finalization = terminal.get('pos_finalization') if known else None
@@ -68,10 +69,13 @@ def pos_archive_summary(run_id: str, task_id: str, terminal: dict | None,
                                     type(terminal.get('pos_archive_incomplete')) is bool
                                     else None) if known else None,
         'auxiliary_errors': errors,
+        'provider_capture': provider_capture,
         'archive_incomplete': (not known or terminal_error_category is not None or
             terminal.get('pos_archive_incomplete') is True or
             finalization.get('archive_incomplete') is True or
-            result_receipt.get('status') in {'missing', 'missing_or_unknown', None}),
+                  result_receipt.get('status') in {'missing', 'missing_or_unknown', None} or
+                  (provider_capture is not None and
+                   provider_capture.get('capture_complete') is not True)),
     }
 
 
@@ -497,9 +501,15 @@ class NativeSharedTrialHooks(PMATrialHooks):
                             terminal_error = 'missing_fields'
             except (OSError, TimeoutError):
                 terminal_error = 'read_error'
+            from method_discovery.pos_upstream_ga_v1_20261017.provider_capture import inspect_provider_capture
+            provider_capture = inspect_provider_capture(
+                self.control / 'pos_archive', self.spec['run_id'],
+                self.spec['task_id'],
+                profile_mode=self.spec.get('zero_model_fixture_only') is not True)
             _atomic(self.archive / 'pos_archive_status.json', pos_archive_summary(
                 self.spec['run_id'], self.spec['task_id'], terminal,
-                result_receipt, close_receipt, terminal_error))
+                result_receipt, close_receipt, terminal_error,
+                provider_capture))
 
     async def verification_start(self, event):
         ended = json.loads((self.archive / 'agent_end_native.json').read_text(encoding='utf-8'))

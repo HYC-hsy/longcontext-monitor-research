@@ -349,6 +349,44 @@ class RoleContractTests(unittest.TestCase):
                         'content': 'Synthetic role request.'}])
                 post.assert_not_called()
 
+    def test_required_capture_pre_send_write_failure_and_after_acceptance(self):
+        import worker as worker_module
+        class HTTP:
+            status_code = 200
+            headers = {}
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def close(self): pass
+            def json(self): return {'content':[{'type':'text','text':'{"issues":[]}'}],
+                                    'usage':{'input_tokens':1,'output_tokens':1}}
+        profile = {'apibase':'https://fixture.invalid','apikey':'OFFLINE-SECRET',
+                   'model':'claude-opus-4-8','max_tokens':512,
+                   'thinking_type':'adaptive','max_retries':0,'stream':False}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pre = RoleTransport(mode='profile', profile=profile, archive=Recorder(),
+                capture_path=root, run_id='r', task_id='t')
+            with patch.dict(os.environ, {'GA_PMA_CAPTURE_TASK_REQUESTS':'1'}), \
+                 patch('llmcore.requests.post') as post:
+                with self.assertRaisesRegex(RuntimeError,
+                                            'required research request capture unavailable'):
+                    pre.caller('belief')([{'role':'user','content':'fixture'}])
+                post.assert_not_called()
+            accepted = RoleTransport(mode='profile', profile=profile, archive=Recorder(),
+                capture_path=root/'events.provider.jsonl',run_id='r',task_id='t')
+            original = worker_module._DurableProviderSink.__call__
+            def fail_after_send(sink, event):
+                if event['event_type'] == 'provider_response_content':
+                    raise OSError('synthetic disk failure')
+                return original(sink,event)
+            with patch.dict(os.environ, {'GA_PMA_CAPTURE_TASK_REQUESTS':'1'}), \
+                 patch.object(worker_module._DurableProviderSink,'__call__',fail_after_send), \
+                 patch('llmcore.requests.post',return_value=HTTP()) as post:
+                with self.assertRaisesRegex(RuntimeError,
+                                            'provider capture incomplete after accepted response'):
+                    accepted.caller('belief')([{'role':'user','content':'fixture'}])
+                self.assertEqual(post.call_count,1)
+
     def test_old_status_bit_cannot_authorize_new_serial_run(self):
         old = HERE / 'raw_compat_v1'
         with tempfile.TemporaryDirectory() as tmp:

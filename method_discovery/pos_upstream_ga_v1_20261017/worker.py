@@ -123,6 +123,20 @@ def _persist_receipt(path, *, case_id, status, result=None, error=None,
     return {'path': str(target), 'bytes': len(data)}
 
 
+class _DurableProviderSink:
+    """The required pre-send record must survive a completed write before HTTP."""
+    def __init__(self, path):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def __call__(self, event):
+        data = (_json(event) + '\n').encode('utf-8')
+        with self.path.open('ab') as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+
+
 class RoleTransport:
     def __init__(self, *, mode, replies=None, profile=None, archive,
                  capture_path=None, run_id=None, task_id=None):
@@ -235,12 +249,12 @@ class RoleTransport:
             if os.environ.get('GA_PMA_CAPTURE_TASK_REQUESTS') == '1':
                 if self.capture_path is None or not self.run_id or not self.task_id:
                     raise RuntimeError('PoS provider capture binding unavailable before send')
-                from research_runtime import JsonlEventSink, research_context
+                from research_runtime import research_context
                 capture_context = research_context(
                     {'experiment_id': 'pos-ga', 'condition_id': 'P',
                      'task_id': self.task_id, 'run_id': self.run_id,
                      'branch_id': 'pos-role-' + role},
-                    JsonlEventSink(self.capture_path))
+                    _DurableProviderSink(self.capture_path))
             with capture_context, contextlib.redirect_stdout(sys.stderr):
                 generator = session.raw_ask(request)
                 try:
@@ -250,6 +264,8 @@ class RoleTransport:
                     blocks = done.value or []
         finally:
             llmcore._record_usage = original
+        if getattr(session, '_research_capture_failed', False):
+            raise RuntimeError('PoS provider capture incomplete after accepted response')
         response = '\n'.join(block['text'] for block in blocks if block.get('type') == 'text')
         if not response:
             raise RuntimeError('PoS role returned no text; never fabricate JSON')

@@ -143,6 +143,7 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
     executed_pos_sources = {}
     if pos:
         for name in ('agent_loop.py', 'agentmain.py', 'ga.py', 'llmcore.py',
+                     'research_runtime.py',
                      'pos_bridge.py', 'pos_runtime/worker.py',
                      'pos_runtime/episode.py'):
             staged = source / name

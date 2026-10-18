@@ -68,7 +68,8 @@ def verify_evidence(directory: Path, *, require_committed: bool = True) -> dict:
         for name in SOURCE_FILES}
     prepared = load('prepared.json')
     bundled = prepared.get('executed_pos_source_sha256')
-    executed_names = ('agent_loop.py', 'agentmain.py', 'ga.py', 'llmcore.py',
+      executed_names = ('agent_loop.py', 'agentmain.py', 'ga.py', 'llmcore.py',
+                        'research_runtime.py',
                       'pos_bridge.py', 'pos_runtime/worker.py',
                       'pos_runtime/episode.py')
     expected_executed = {name: identity['source_files'][

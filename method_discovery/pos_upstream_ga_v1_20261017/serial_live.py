@@ -28,11 +28,22 @@ INFRA_PATH = ('method_discovery/curator_supervisor_convergence_v0/'
 INFRA_BEFORE_SHA256 = 'b415b93d70a163bd261bf5aab2a429e953562fea614aa2de30c54c396dedf184'
 INFRA_AFTER_SHA256 = '58f091cd4a83c90c693e5ae2742bfdd8c1365e449b6a78b1d8fbfe6e9300e81c'
 INFRA_DIFF_SHA256 = '00d2924654f799bf91fef8e031469ff228b008c30f900a01b52df6f18e3bf755'
-CAPTURE_BASELINE_COMMIT = '2c7e31ecc03596406cbe79342d4e7b220c29aad7'
+CAPTURE_BASELINE_COMMIT = 'db2d10c5d439c61b456dd6b9015076afd4ed664e'
 CAPTURE_PATH = 'method_discovery/pos_upstream_ga_v1_20261017/worker.py'
-CAPTURE_BEFORE_SHA256 = 'c49d1ffd712cce1e84ada7490c2aaee90bfdc777af11b6827518276b6c45378d'
-CAPTURE_AFTER_SHA256 = '09c0ef92d4a76a64d016f647f112ead3459dd61ef1d207b442678fbe0162ab1f'
-CAPTURE_DIFF_SHA256 = '95147f09ff9f0a08f8daf955e96187d10fa803a4e8619c0da6873effe5be1d20'
+HISTORICAL_WORKER_SHA256 = 'c49d1ffd712cce1e84ada7490c2aaee90bfdc777af11b6827518276b6c45378d'
+CAPTURE_BEFORE_SHA256 = '09c0ef92d4a76a64d016f647f112ead3459dd61ef1d207b442678fbe0162ab1f'
+CAPTURE_AFTER_SHA256 = 'PENDING_FINAL_CAPTURE_SHA256'
+CAPTURE_DIFF_SHA256 = 'PENDING_FINAL_CAPTURE_DIFF_SHA256'
+REVIEW_BASELINE_COMMIT = CAPTURE_BASELINE_COMMIT
+REVIEWED_SOURCE_CHANGES = {
+    'GenericAgent-main/research_runtime.py': ('PENDING', 'PENDING'),
+    'method_discovery/pos_upstream_ga_v1_20261017/provider_capture.py': ('PENDING', 'PENDING'),
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py': ('PENDING', 'PENDING'),
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py': ('PENDING', 'PENDING'),
+    'method_discovery/pos_upstream_ga_v1_20261017/single_manifest.py': ('PENDING', 'PENDING'),
+    'method_discovery/pos_upstream_ga_v1_20261017/certification.py': ('PENDING', 'PENDING'),
+    'method_discovery/pos_upstream_ga_v1_20261017/collect_native_shared.py': ('PENDING', 'PENDING'),
+}
 
 
 def sha(path):
@@ -102,6 +113,22 @@ def _reviewed_capture_diff():
         raise RuntimeError('PoS worker capture repair differs from reviewed exact diff')
     return {'baseline_commit': CAPTURE_BASELINE_COMMIT, 'path': CAPTURE_PATH,
         'before_sha256': before, 'after_sha256': after, 'diff_sha256': diff_sha}
+
+
+def _reviewed_source_changes():
+    if not _ancestor(REVIEW_BASELINE_COMMIT):
+        raise RuntimeError('provider capture review baseline not in history')
+    rows = []
+    for path, (expected_after, expected_diff) in REVIEWED_SOURCE_CHANGES.items():
+        delta = subprocess.run(['git','diff','--no-ext-diff','--binary',
+            REVIEW_BASELINE_COMMIT,'HEAD','--',path],cwd=CHECKOUT,
+            capture_output=True,check=True).stdout
+        after = sha(CHECKOUT/path)
+        diff_sha = hashlib.sha256(delta).hexdigest()
+        if after != expected_after or diff_sha != expected_diff:
+            raise RuntimeError('provider capture infrastructure differs: '+path)
+        rows.append({'path':path,'after_sha256':after,'diff_sha256':diff_sha})
+    return rows
 
 
 def native_unscored_review(scope_path, certification, profile_path, continuity_path):
@@ -203,10 +230,17 @@ def native_unscored_review(scope_path, certification, profile_path, continuity_p
                current_sources[name] != previous_sources.get(name)]
     infra = _reviewed_infrastructure_diff()
     capture = _reviewed_capture_diff()
-    if (changed != [CAPTURE_PATH,
+    source_changes = _reviewed_source_changes()
+    if (changed != ['GenericAgent-main/research_runtime.py', CAPTURE_PATH,
+                    'method_discovery/pos_upstream_ga_v1_20261017/provider_capture.py',
                     'method_discovery/pos_upstream_ga_v1_20261017/serial_live.py',
-                    INFRA_PATH] or
-            previous_sources.get(CAPTURE_PATH) != CAPTURE_BEFORE_SHA256 or
+                    INFRA_PATH,
+                    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py',
+                    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py',
+                    'method_discovery/pos_upstream_ga_v1_20261017/single_manifest.py',
+                    'method_discovery/pos_upstream_ga_v1_20261017/certification.py',
+                    'method_discovery/pos_upstream_ga_v1_20261017/collect_native_shared.py'] or
+            previous_sources.get(CAPTURE_PATH) != HISTORICAL_WORKER_SHA256 or
             current_sources[CAPTURE_PATH] != CAPTURE_AFTER_SHA256 or
             previous_sources.get(INFRA_PATH) != INFRA_BEFORE_SHA256 or
             current_sources[INFRA_PATH] != INFRA_AFTER_SHA256 or
@@ -266,6 +300,7 @@ def native_unscored_review(scope_path, certification, profile_path, continuity_p
         'current_source_files_sha256': current_sources,
         'reviewed_infrastructure_diff': infra,
         'reviewed_capture_diff': capture,
+        'reviewed_provider_capture_sources': source_changes,
         'current_vendor_files_sha256': vendor_hashes(),
         'input_contract_version': note['role_input_contract'],
         'object_instruction': note['role_object_instruction'],
@@ -476,6 +511,17 @@ def run(args):
                         if len(terminal_paths) == 1 else None)
         except (OSError, ValueError):
             terminal = None
+        from .collect_native_shared import collect_provider_capture, secrets_from_profile
+        provider_public = None
+        provider_collection_error = None
+        try:
+            provider_public = collect_provider_capture(
+                Path(row['run_root']) / 'control/pos_archive',
+                directory / 'provider_public',
+                secrets_from_profile(Path(args.task_profile_file)),
+                row['run_id'], task, profile_mode=True)
+        except (OSError, ValueError, RuntimeError) as error:
+            provider_collection_error = type(error).__name__
         summary = {'order': order, 'task': task, 'run_id': row['run_id'],
                    'run_exit': completed.returncode,
                    'status_available': status is not None,
@@ -487,7 +533,9 @@ def run(args):
                    'native_reward': ((status.get('native_result') or {}).get('rewards') or {})
                        if status else None,
                    'task_terminal_result': terminal.get('result') if terminal else None,
-                   'pos_archive_status': status.get('pos_archive_status') if status else None}
+                   'pos_archive_status': status.get('pos_archive_status') if status else None,
+                   'provider_collection_error_type':provider_collection_error,
+                   'provider_capture':provider_public.get('capture') if provider_public else None}
         safe = bool(status and not status.get('primary_failure') and
             status.get('cleanup_confirmed') is True and
             status.get('remaining_containers') == [] and
@@ -502,6 +550,8 @@ def run(args):
             (status.get('pos_archive_status') or {}).get('result_bound') is True and
             (status.get('pos_archive_status') or {}).get('close_bound') is True and
             (status.get('pos_archive_status') or {}).get('archive_incomplete') is False and
+            provider_collection_error is None and provider_public is not None and
+            provider_public['capture']['capture_complete'] is True and
             (status.get('pos_archive_status') or {}).get('close_status') == 'graceful_exit' and
             terminal and terminal.get('run_id') == row['run_id'] and
             terminal.get('task_id') == task and

@@ -8,6 +8,7 @@ from pathlib import Path
 import runpy
 
 from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.archive_live_six_task import redact
+from .provider_capture import inspect_provider_capture
 
 
 def secrets_from_profile(path: Path) -> list[str]:
@@ -48,6 +49,8 @@ def mapping_for(source: Path) -> dict[str, Path]:
     for name in ('events.jsonl', 'events.host.jsonl', 'events.result.json',
                  'events.close.json', 'events.stderr.log'):
         mapping[name] = pos / name
+    if (pos / 'events.provider.jsonl').is_file():
+        mapping['events.provider.jsonl'] = pos / 'events.provider.jsonl'
     trial = list((run / 'jobs').glob('*/*'))
     trial = [path for path in trial if (path / 'agent/research_events.jsonl').is_file()]
     if len(trial) != 1:
@@ -80,6 +83,42 @@ def collect(source: Path, target: Path, secrets: list[str]) -> list[dict]:
                      'private_source_sha256': hashlib.sha256(raw).hexdigest(),
                      'redactions': count})
     return rows
+
+
+def collect_provider_capture(source: Path, target: Path, secrets: list[str],
+                             run_id: str, task_id: str, *, profile_mode: bool) -> dict:
+    """Copy stopped worker ledgers, retaining source and public byte identities."""
+    capture = inspect_provider_capture(source, run_id, task_id,
+                                       profile_mode=profile_mode)
+    target.mkdir(parents=True, exist_ok=False)
+    files = []
+    names = ['events.jsonl', 'events.provider.jsonl', 'events.result.json',
+             'events.close.json']
+    if not profile_mode:
+        names.append('events.stderr.log')
+    for name in names:
+        path = source / name
+        if not path.is_file():
+            continue
+        raw = path.read_bytes()
+        public, count = redact(raw, secrets)
+        destination = target / name
+        with destination.open('xb') as stream:
+            stream.write(public)
+        if destination.read_bytes() != public:
+            raise RuntimeError('published provider file readback differs')
+        files.append({'path':name, 'source_bytes':len(raw),
+            'source_sha256':hashlib.sha256(raw).hexdigest(),
+            'public_bytes':len(public),
+            'public_sha256':hashlib.sha256(public).hexdigest(),
+            'redactions':count})
+    report = {'schema':'pos-ga-provider-capture-archive-v1',
+        'run_id':run_id,'task_id':task_id,'capture':capture,'files':files,
+        'public_copy_is_byte_identical_to_source':all(
+            row['source_sha256'] == row['public_sha256'] for row in files)}
+    (target/'CAPTURE_INDEX.json').write_text(json.dumps(report,ensure_ascii=False,
+        indent=2)+'\n',encoding='utf-8',newline='\n')
+    return report
 
 
 def main() -> None:

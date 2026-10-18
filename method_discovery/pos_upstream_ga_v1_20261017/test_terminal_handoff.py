@@ -62,6 +62,7 @@ class TerminalHandoffTests(unittest.TestCase):
                 hook = object.__new__(NativeSharedTrialHooks)
                 hook.archive, hook.control = archive, control
                 hook.spec = {'run_id': 'run', 'task_id': 'task', 'condition': 'P',
+                    'zero_model_fixture_only': True,
                     'native_tests_tree_sha256': _tree_sha256(tests),
                     'native_test_sh_sha256': hashlib.sha256(
                         (tests / 'test.sh').read_bytes()).hexdigest()}

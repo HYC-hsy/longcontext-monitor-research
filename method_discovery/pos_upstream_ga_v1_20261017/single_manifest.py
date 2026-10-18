@@ -24,9 +24,11 @@ FOUR = ('nginx-request-logging', 'adaptive-rejection-sampler',
 SOURCE_FILES = (
     'GenericAgent-main/agent_loop.py', 'GenericAgent-main/agentmain.py',
     'GenericAgent-main/ga.py', 'GenericAgent-main/llmcore.py',
+    'GenericAgent-main/research_runtime.py',
     'GenericAgent-main/pos_bridge.py',
     'method_discovery/pos_upstream_ga_v1_20261017/episode.py',
     'method_discovery/pos_upstream_ga_v1_20261017/worker.py',
+    'method_discovery/pos_upstream_ga_v1_20261017/provider_capture.py',
     'method_discovery/pos_upstream_ga_v1_20261017/compatibility_probe.py',
     'method_discovery/pos_upstream_ga_v1_20261017/serial_live.py',
     'method_discovery/curator_supervisor_convergence_v0/'
