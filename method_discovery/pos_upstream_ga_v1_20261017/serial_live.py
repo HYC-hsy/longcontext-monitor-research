@@ -26,8 +26,8 @@ INFRA_BASELINE_COMMIT = 'cfc06c5e0a8a14631ffd65fcddf9cba742e1dbbf'
 INFRA_PATH = ('method_discovery/curator_supervisor_convergence_v0/'
               'pma_full_upstream_ga_v1_20261013/live_launcher.py')
 INFRA_BEFORE_SHA256 = 'b415b93d70a163bd261bf5aab2a429e953562fea614aa2de30c54c396dedf184'
-INFRA_AFTER_SHA256 = 'fa467f8eb527e4d9ec0fcbbb990b69ef169c13c8a4b40a8ea2c4a85dc100e55a'
-INFRA_DIFF_SHA256 = '574aac4917e4dc43b45775cc4a653cfbd6200b76ddc8133de3c149a2444421dd'
+INFRA_AFTER_SHA256 = '58f091cd4a83c90c693e5ae2742bfdd8c1365e449b6a78b1d8fbfe6e9300e81c'
+INFRA_DIFF_SHA256 = '00d2924654f799bf91fef8e031469ff228b008c30f900a01b52df6f18e3bf755'
 
 
 def sha(path):

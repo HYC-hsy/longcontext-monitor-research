@@ -38,8 +38,9 @@ def _native_schema(manifest: dict) -> bool:
 def _evaluator_members(manifest: dict, task: str) -> list[dict]:
     """Resolve the frozen evaluator member schema without losing either alias."""
     asset = manifest['assets'][task]
-    primary = ('evaluator_members' if manifest.get('schema') ==
-               'pos-ga-single-manifest-v1' else 'official_evaluator_members')
+    pos_formal = (manifest.get('schema') == 'pos-ga-single-manifest-v1' and
+                  manifest.get('zero_model_fixture_only') is not True)
+    primary = 'evaluator_members' if pos_formal else 'official_evaluator_members'
     alternate = ('official_evaluator_members' if primary == 'evaluator_members'
                  else 'evaluator_members')
     for name in (primary, alternate):
