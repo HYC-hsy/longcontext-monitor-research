@@ -35,6 +35,31 @@ def _native_schema(manifest: dict) -> bool:
                                       'pos-ga-single-manifest-v1'}
 
 
+def _evaluator_members(manifest: dict, task: str) -> list[dict]:
+    """Resolve the frozen evaluator member schema without losing either alias."""
+    asset = manifest['assets'][task]
+    primary = ('evaluator_members' if manifest.get('schema') ==
+               'pos-ga-single-manifest-v1' else 'official_evaluator_members')
+    alternate = ('official_evaluator_members' if primary == 'evaluator_members'
+                 else 'evaluator_members')
+    for name in (primary, alternate):
+        if name in asset and (not isinstance(asset[name], list) or
+                any(not isinstance(item, dict) or
+                    not isinstance(item.get('path'), str) or not item['path'] or
+                    not isinstance(item.get('sha256'), str) or not item['sha256']
+                    for item in asset[name])):
+            raise RuntimeError('invalid frozen evaluator members: ' + name)
+    if primary not in asset:
+        raise RuntimeError('frozen evaluator members missing: ' + primary)
+    members = asset[primary]
+    if alternate in asset and asset[alternate] != members:
+        raise RuntimeError('conflicting frozen evaluator member aliases')
+    if not members and not (manifest.get('zero_model_fixture_only') is True and
+                            task == 'pos-synthetic-file-http'):
+        raise RuntimeError('formal evaluator member list is empty')
+    return members
+
+
 def _stage_verifier(root: Path, task: str, manifest: dict,
                     official_source_git: Path) -> dict:
     target = root / 'public_task' / 'tests'
@@ -50,7 +75,7 @@ def _stage_verifier(root: Path, task: str, manifest: dict,
                    registered=manifest.get('schema') in {
                        'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5',
                        'pos-ga-single-manifest-v1'})]
-    if members != expected.get('official_evaluator_members'):
+    if members != _evaluator_members(manifest, task):
         raise RuntimeError('PMA official evaluator members differ from frozen manifest')
     export_task(source, task, target,
                 registered=manifest.get('schema') in {
@@ -394,7 +419,7 @@ def run_live(args) -> dict:
                     official_evaluator_files=[{
                         'relative': '/'.join(item['path'].split('/')[1:]),
                         'sha256': item['sha256']}
-                        for item in manifest['assets'][args.task]['official_evaluator_members']])
+                        for item in _evaluator_members(manifest, args.task)])
     verify_live_spec(spec)
     if _sha(Path(args.task_profile_file)) != manifest['task_profile_sha256']:
         raise RuntimeError('PMA Task profile differs from frozen identity')

@@ -22,6 +22,12 @@ HISTORICAL_PROBE_HASHES = {
     'http_attempts.json': '94be22e76da39c547fddf300e2b5f157efd2c9e00a0a63d610e86d8cbd09834d',
 }
 HISTORICAL_SCOPE_SHA256 = 'f1294c085f7cb5d945180e0326280e5380c9568d14340bbab766d08a940931ea'
+INFRA_BASELINE_COMMIT = 'cfc06c5e0a8a14631ffd65fcddf9cba742e1dbbf'
+INFRA_PATH = ('method_discovery/curator_supervisor_convergence_v0/'
+              'pma_full_upstream_ga_v1_20261013/live_launcher.py')
+INFRA_BEFORE_SHA256 = 'b415b93d70a163bd261bf5aab2a429e953562fea614aa2de30c54c396dedf184'
+INFRA_AFTER_SHA256 = 'fa467f8eb527e4d9ec0fcbbb990b69ef169c13c8a4b40a8ea2c4a85dc100e55a'
+INFRA_DIFF_SHA256 = '574aac4917e4dc43b45775cc4a653cfbd6200b76ddc8133de3c149a2444421dd'
 
 
 def sha(path):
@@ -54,6 +60,24 @@ def common(args):
 def _ancestor(commit):
     return subprocess.run(['git', 'merge-base', '--is-ancestor', commit, 'HEAD'],
                           cwd=CHECKOUT, check=False).returncode == 0
+
+
+def _reviewed_infrastructure_diff():
+    if not _ancestor(INFRA_BASELINE_COMMIT):
+        raise RuntimeError('reviewed infrastructure baseline not in history')
+    previous = subprocess.run(['git', 'show', INFRA_BASELINE_COMMIT + ':' + INFRA_PATH],
+        cwd=CHECKOUT, capture_output=True, check=True).stdout
+    delta = subprocess.run(['git', 'diff', '--no-ext-diff', '--binary',
+        INFRA_BASELINE_COMMIT, 'HEAD', '--', INFRA_PATH],
+        cwd=CHECKOUT, capture_output=True, check=True).stdout
+    before = hashlib.sha256(previous).hexdigest()
+    after = sha(CHECKOUT / INFRA_PATH)
+    diff_sha = hashlib.sha256(delta).hexdigest()
+    if (before != INFRA_BEFORE_SHA256 or after != INFRA_AFTER_SHA256 or
+            diff_sha != INFRA_DIFF_SHA256):
+        raise RuntimeError('shared launcher change differs from reviewed exact diff')
+    return {'baseline_commit': INFRA_BASELINE_COMMIT, 'path': INFRA_PATH,
+        'before_sha256': before, 'after_sha256': after, 'diff_sha256': diff_sha}
 
 
 def native_unscored_review(scope_path, certification, profile_path, continuity_path):
@@ -153,7 +177,11 @@ def native_unscored_review(scope_path, certification, profile_path, continuity_p
     previous_sources = old_identity['source_files_sha256']
     changed = [name for name in current_sources if
                current_sources[name] != previous_sources.get(name)]
-    if (changed != ['method_discovery/pos_upstream_ga_v1_20261017/serial_live.py'] or
+    infra = _reviewed_infrastructure_diff()
+    if (changed != ['method_discovery/pos_upstream_ga_v1_20261017/serial_live.py',
+                    INFRA_PATH] or
+            previous_sources.get(INFRA_PATH) != INFRA_BEFORE_SHA256 or
+            current_sources[INFRA_PATH] != INFRA_AFTER_SHA256 or
             scope.get('schema') != 'pos-ga-user-authorized-serial-scope-v1' or
             not _ancestor(scope.get('code_commit', '')) or
             scope.get('source_files_sha256') != current_sources or
@@ -208,6 +236,7 @@ def native_unscored_review(scope_path, certification, profile_path, continuity_p
         'current_scope_sha256': sha(scope_path),
         'current_code_commit': scope['code_commit'],
         'current_source_files_sha256': current_sources,
+        'reviewed_infrastructure_diff': infra,
         'current_vendor_files_sha256': vendor_hashes(),
         'input_contract_version': note['role_input_contract'],
         'object_instruction': note['role_object_instruction'],

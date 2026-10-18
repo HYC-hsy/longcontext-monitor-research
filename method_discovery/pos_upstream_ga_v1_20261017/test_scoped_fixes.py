@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.export_official_evaluator import COMMIT, official_members
-from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.live_launcher import _stage_verifier
+from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.live_launcher import _evaluator_members, _stage_verifier
 from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.pma_harbor_hooks import pos_archive_summary
 from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import FOUR
 
@@ -18,6 +18,33 @@ from agentmain import build_task_terminal_record
 
 
 class ScopedFixes(unittest.TestCase):
+    def test_evaluator_member_schema_rejects_missing_conflicting_or_malformed(self):
+        member = {'path': 'tests/test.sh', 'sha256': 'a' * 64, 'bytes': 12}
+        for schema, primary in (('pos-ga-single-manifest-v1', 'evaluator_members'),
+                                ('pma-ga-live-manifest-v5', 'official_evaluator_members')):
+            with self.subTest(schema=schema):
+                other = 'official_evaluator_members' if primary == 'evaluator_members' else 'evaluator_members'
+                manifest = {'schema': schema, 'zero_model_fixture_only': False,
+                            'assets': {'task': {primary: [member]}}}
+                self.assertEqual(_evaluator_members(manifest, 'task'), [member])
+                manifest['assets']['task'][other] = [dict(member)]
+                self.assertEqual(_evaluator_members(manifest, 'task'), [member])
+                manifest['assets']['task'][other][0]['sha256'] = 'b' * 64
+                with self.assertRaises(RuntimeError): _evaluator_members(manifest, 'task')
+                del manifest['assets']['task'][other]
+                for bad in (None, {}, 'text', [], [None], [{}],
+                            [{'path': 'tests/test.sh', 'sha256': None}]):
+                    manifest['assets']['task'][primary] = bad
+                    with self.assertRaises(RuntimeError): _evaluator_members(manifest, 'task')
+                del manifest['assets']['task'][primary]
+                manifest['assets']['task'][other] = [member]
+                with self.assertRaises(RuntimeError): _evaluator_members(manifest, 'task')
+        synthetic = {'schema': 'pos-ga-single-manifest-v1',
+                     'zero_model_fixture_only': True,
+                     'assets': {'pos-synthetic-file-http': {'official_evaluator_members': [],
+                         'evaluator_members': []}}}
+        self.assertEqual(_evaluator_members(synthetic, 'pos-synthetic-file-http'), [])
+
     def test_four_registered_evaluators_stage_from_fixed_blobs(self):
         source = Path(os.environ.get('POS_OFFICIAL_SOURCE_GIT',
                                     'E:/pma_d1_tb2_source_20261017'))
@@ -39,7 +66,7 @@ class ScopedFixes(unittest.TestCase):
                     expected_sh = sha256((tests / 'test.sh').read_bytes()).hexdigest()
                 manifest = {'schema': 'pos-ga-single-manifest-v1',
                     'official_source_git_commit': COMMIT,
-                    'assets': {task: {'official_evaluator_members': members,
+                    'assets': {task: {'evaluator_members': members,
                         'native_tests_tree_sha256': expected_tree,
                         'native_test_sh_sha256': expected_sh}}}
                 (root / 'public_task/tests').mkdir(parents=True)
@@ -50,7 +77,7 @@ class ScopedFixes(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as bad:
                     (Path(bad) / 'public_task/tests').mkdir(parents=True)
                     corrupt = json.loads(json.dumps(manifest))
-                    corrupt['assets'][task]['official_evaluator_members'][0]['sha256'] = '0' * 64
+                    corrupt['assets'][task]['evaluator_members'][0]['sha256'] = '0' * 64
                     with self.assertRaises(RuntimeError):
                         _stage_verifier(Path(bad), task, corrupt, source)
 
