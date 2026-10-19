@@ -114,7 +114,9 @@ def verify_evidence(directory: Path, *, require_committed: bool = True,
             status.get('result_bound') is not True or
             status.get('close_bound') is not True or
             worker.get('status') != 'completed' or
-            worker.get('result', {}).get('success_known') is not False or
+            (worker.get('result', {}).get('pos', {}).get('success_known')
+             if research_candidate == 'pos_pma_complement_v1' else
+             worker.get('result', {}).get('success_known')) is not False or
             closed.get('status') != 'graceful_exit' or
             closed.get('worker_return_code') != 0 or
             test.get('observed') is not True or
