@@ -798,7 +798,9 @@ def main() -> None:
     parser.add_argument('--repeat', type=int)
     parser.add_argument('--task', required=True)
     parser.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
-    parser.add_argument('--research-candidate', choices=('U', 'V1', 'D1', 'PoS'), default='U')
+    parser.add_argument('--research-candidate', choices=(
+        'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
+        'pos_pma_complement_v1'), default='U')
     parser.add_argument('--task-profile', default='native_claude_cc_vibe_opus48')
     parser.add_argument('--pma-profile-file')
     parser.add_argument('--harbor-source-root')
