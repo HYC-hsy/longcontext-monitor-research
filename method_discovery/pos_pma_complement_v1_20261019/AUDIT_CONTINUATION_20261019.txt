@@ -1,0 +1,169 @@
+POS/PMA COMPLEMENT v0.1 — continuation and offline handoff (2026-10-19)
+
+Scope and truth boundary
+------------------------
+This is a default-off research candidate on the existing single_run/Harbor
+path. No real Task model, PMA/PoS provider, formal Task, official evaluator,
+training, or scoring-model call was made in this continuation. The Docker
+checks did run a synthetic code_run and a synthetic file-plus-HTTP sentinel.
+Their reward=1 is not a formal benchmark score or a PoS/PMA efficacy result.
+No live authorization was created; PLAN_UNAUTHORIZED.json remains false.
+The fixed PoS vendor is luoyu100/PoS@6818cfa6434dbc91fcf67f0b3eb12a91db47433f;
+the fixed PMA vendor is yifannnwu/proactive-memory-agent@
+89e5c0d6aadfe531a1aee42fd290d48be89973dd. Neither vendor tree changed.
+
+Runtime chain and method differences
+------------------------------------
+The original Task and public GA history remain stateful. PoS reset commits
+before the configured first PMA trigger. One completed actor decision/tool
+batch becomes one PoS joint-action transition. At a wake, PMA Phase 1 sees
+the original task plus the configured recent actor-step window, not PoS
+interpretation; Phase 2 alone sees the revisable current state and the last
+delivered suggestion with actual subsequent results. The candidate's PMA
+status tool is absent from its schema, fallback dispatch and bank rendering;
+original U is unchanged. Knowledge/procedural CRUD, search, parser and trigger
+remain pinned upstream. PoS update/audit/revision remain pinned upstream;
+candidate changes are explicit in candidate.py/memory_adapter.py.
+
+Each new bank entry has a sidecar content hash, bank version and input-visible
+event IDs. The actual Phase-2 bank formatter records selected IDs; no extra
+BM25 search is run. These IDs mean input availability, not sentence support.
+Old entries with no sidecar have unknown provenance. A suggestion freezes at
+most four selected old events, each with bounded visible tool-return segments,
+and binds that package to the suggestion text/hash only when the advice enters
+an accepted Task request. On the next real transition the same frozen package
+is visible to updater and audit; consuming its cursor does not erase the
+record used by the next PMA Phase 2. No advice is re-sent automatically.
+accepted_revision changes only on an accepted structural state change;
+upstream belief.step retains its own scheduling semantics. A rejected update
+leaves the prior accepted revision marked as retained; a no-change commit is
+separate. Task remains free to act or finish, regardless of gaps/advice.
+
+Independent citation repair is `visible_tool_fields_v2` (5d00c352 and later
+configuration binding). Only a field/segment actually shown in the audit
+request can justify a literal quote. Host next_prompt, tool arguments, model
+advice and metadata do not acquire tool-return provenance. Decoded text is not
+unescaped again: literal backslash-n is not a real newline. Head/tail segments
+cannot be stitched across omitted middle content. Original PoS mode remains
+selectable. This is source-literal checking, not semantic entailment.
+
+Transport and budget
+--------------------
+Profile candidate PMA calls are not routed through the Task sink. A separate
+host-side worker loads the existing private PMA profile by exact SHA-256 and
+reuses construct_upstream's pinned LiteLLM adapter, including its 3-attempt
+decorator and profile parameters. The candidate bank remains in the isolated
+PoS worker; Phase 1/2 each uses one bound event-spool command ID and no spool
+replay. The host worker participates in the existing ready/stop/exit barrier.
+Actual profile resolution in the no-network test: claude-opus-4-8,
+adaptive thinking, temperature 1, max_tokens 8192, read_timeout 300 seconds.
+PoS role profile path retains its existing belief 4096 and consistency/
+progress 512 output caps, disabled thinking, temperature 0 and zero transport
+retries. Task profile and complete-response policy are not changed here.
+The future profile path is implemented, not authorized or provider-tested.
+
+The resolved candidate trigger is interval=1, first_step=true, recent actor
+window=8, step=actor_attempt+1. Frozen config and worker binding must match.
+Task panel and Phase-2 advisory caps are 16,000 Unicode characters each;
+revision_context 12,000; up to four historical events x 2,000 characters and
+eight direct related state records. Optional overlong advice is dropped whole.
+The additional candidate-only complete-request guard is 90,000 UTF-8 bytes:
+the final serialized Task/PoS payload is checked before POST and the PMA
+prompt+system+tools input is checked before its model call. Task history is
+pre-trimmed with a 4,096-byte engineering margin, preserving the existing
+native tool-pair rules; the final guard still rejects required overflow.
+Existing max_tokens remains the output reservation. These byte checks are
+not a tokenizer or proof of provider context-fit; actual token/cost parity is
+unknown. No limit is imposed on original GA-only/U/PoS modes by this guard.
+
+Typed stopping and known facts
+------------------------------
+Candidate-only required host journal failure closes the bridge before later
+Task/auxiliary sends. A known executed tool result or CURRENT_TASK_DONE stays
+the Task fact; auxiliary archive_incomplete/error remains distinct. PMA
+per-operation malformed parameters retain the upstream per-item behavior;
+fatal bank/capture failures propagate after retaining already committed
+operations and skip Phase 2. PoS semantic rejection, format repair exhaustion,
+and role transport failure have separate candidate outcomes. An accepted or
+acceptance-unknown request is never re-sent by the spool. Original U and PoS
+exception behavior is not retroactively changed. None of these checks gives
+the auxiliary method a Task-completion veto or an evaluator approval role.
+
+Offline execution and retained failures
+---------------------------------------
+The focused current candidate/citation/worker fake suite: 24 tests passed.
+The separate host PMA profile-spool suite: 3 tests passed; the final LiteLLM
+network hop was patched with a finite synthetic response, and actual resolved
+model/temperature/thinking/max_tokens/timeout kwargs were asserted. The
+existing PoS GA seam script: 18 passed. Historical PMA test_episode was
+collected with its pinned package aliases/dependencies and ran 13 tests OK;
+its printed scripted Phase-1/2 exceptions are deliberate test stimuli.
+The native-review-gate suite was not counted as pass: it needs five absent
+POS_REVIEW_* historical fixture variables. The formal-evaluator-boundary plus
+candidate fake-worker tests ran 2 OK. These are mechanical checks, not model
+judgment or a proof that semantic advice is sound.
+
+The new isolated Docker worker profile check, using the actual packaged
+worker/GA modules and local stream=true fake PoS HTTP, ended with:
+{"status":"pass","mode":"profile","fake_http_pos_roles":5,
+ "host_fake_pma_roles":4,"worker_exit":0,"pma_request_rows":4,
+ "candidate_panel_advice_delivered":true}
+It did not launch the host profile worker as a separate process: host PMA
+spool dispatch used finite fake returns. The separate original LiteLLM
+last-hop test verifies profile construction/kwargs, not real provider
+acceptance. The first Docker test attempt stopped before Docker because its
+synthetic staged gateway base used HTTP; build_bundle required HTTPS. That
+error was retained at E:\LongContext\candidate_profile_docker_20261019_v1.
+The test-only staged gateway base was corrected to a fake HTTPS placeholder;
+the actual PoS role calls still used only the in-container local fake HTTP.
+Independent v2 and final v3 both passed; v3 docker.stdout.txt is 174 bytes,
+SHA-256 a4a9dc50ffa419c1baac1995df1c65f8dfb71067f9b980ae8883a33a5eaff7aa.
+
+The full existing single_run -> batch_controller -> live_launcher -> Harbor
+native-SHARED synthetic lifecycle ran in fresh v6, v7 and final v8 roots.
+v6/v7 both ran successfully, but exposed two certification schema issues:
+the old verifier assumed original PoS identity/partial bundle fields, and
+then read candidate success_known at the original PoS result location.
+Those verifier-only issues were corrected in dc10ba8b/c985ac8d; no old run
+or result was overwritten. Final v8 ran at runtime-code commit
+c985ac8d27f23e3395d3483d13fc029677b21fe6, run
+pos-ccf2ac842dff4b62, under E:\LongContext\pos_pma_synthetic_20261019_v8.
+Controller/Harbor exit 0, two synthetic Task HTTP replies, one synthetic
+code_run decision batch, one synthetic sentinel execution, Task
+CURRENT_TASK_DONE, candidate result/close bound, no archive gap, writers
+stopped, same Task HTTP service retained for sentinel, verifier reward 1,
+owned containers/volume cleared, fake authorization removed. Task
+success_known=false is not inferred from that synthetic reward.
+The private v8 batch_result.json is 3,589 bytes, SHA-256
+e7e8e1b1a07aa8e94234c4e5a538356fedd058785ae4ef6644e27653a115d2ca.
+
+Public evidence and byte identities
+-----------------------------------
+raw_native_shared_v1/v2/v3 contain 44 separately readable derived public
+files each; raw_offline_v4 contains six smaller selected-event files from
+v6. v1/v2 are earlier successful run evidence, not the final certification.
+The v3 FILE_HASHES.json is 12,712 bytes, SHA-256
+4319ddb0746cda93a1af181cb1a0dcaafe7f8aad7d72f59fffaedf9cea0d157b.
+After .gitattributes disabled text conversion for these raw directories,
+verify_public_evidence.py re-read all 138 files and confirmed both each
+published byte count/hash and exact committed Git blob bytes. Public copies
+are redacted/re-serialized derivatives; `redactions=0` does not assert
+original private bytes are identical. The local public-pattern scan found
+no key-shaped value, external URL, Bearer header or hidden-thinking field.
+The original source path/byte/hash and public byte/hash remain separate in
+each FILE_HASHES.json. The committed v3 evidence passed
+certification.verify_evidence(require_committed=True,
+research_candidate='pos_pma_complement_v1'): 44 files, zero real model and
+zero official evaluator calls. execution_identity.json in v3 distinguishes
+Git blob hashes, actual Windows source hashes and actual bundled hashes;
+newline differences are not labelled content tampering.
+
+The bounded source-to-adapter mapping is in REUSE_MAP.md; RUNNING.md has
+offline commands. Full scoped source diff is the public Git comparison from
+7590675d3f064ab758d602a0b0b8608e5b141bcc through this handoff commit,
+covering 5d00c352, f42ffdfe, baf175cc, f5b19221, d511e116,
+dc10ba8b and c985ac8d plus evidence-only commits. Earlier AUDIT*.txt and
+raw_offline_v1-v3 are retained untouched. No new real execution authority
+or compatibility probe was created. Residual work is semantic model/Task
+evaluation under separate approval, finer source entailment, exact provider
+token accounting and deeper failure-matrix coverage; none is claimed here.
