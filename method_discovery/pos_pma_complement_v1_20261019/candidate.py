@@ -22,6 +22,17 @@ def _digest(value):
     return hashlib.sha256(value.encode('utf-8')).hexdigest()
 
 
+def _visible_parts(value, budget):
+    """Return separate, non-stitchable visible field segments within budget."""
+    if budget <= 0:
+        return [], bool(value)
+    if len(value) <= budget:
+        return [value], False
+    head = (budget + 1) // 2
+    tail = budget - head
+    return [part for part in (value[:head], value[-tail:] if tail else '') if part], True
+
+
 class CandidateRoleTransportFailure(Exception):
     """Do not let released PoS treat a failed role transport as a rejected idea."""
 
@@ -216,6 +227,7 @@ def revision_packet(*, delivered, completed_transition_id, source_events):
               'generated_state_version': delivered['state_version'],
               'delivery_event_id': delivered['delivery_event_id'],
               'suggestion': delivered['advice'],
+              'advice_sha256': delivered.get('advice_sha256') or _digest(delivered['advice']),
               'completed_transition_id': completed_transition_id,
               'source_events': excerpts,
               'frozen_memory_sources': delivered.get('source_pack', []),
@@ -252,6 +264,8 @@ class ComplementEpisode:
         if type(recent_window) is not int or recent_window < 1:
             raise ValueError('candidate PMA recent window invalid')
         self.recent_window = recent_window
+        self.memory.on_render = lambda row: self.events.append({
+            'kind': 'bank_rendered', **deepcopy(row)})
 
     def _context(self):
         context = self.pos.get_context()
@@ -365,6 +379,16 @@ class ComplementEpisode:
             if len(value) + len(recap) > LIMITS['phase2_advisory_chars']:
                 raise ValueError('advice consequence exceeds Phase 2 advisory budget')
             value += recap
+        transition = (self.manager.health_transitions[-1]
+                      if self.manager.health_transitions else None)
+        signal = {'health': asdict(self.manager._current().health),
+                  'progress': (asdict(transition) if transition is not None else None),
+                  'progress_status': ('scored' if transition is not None and
+                                      transition.progress in (0, 1) else 'unscored')}
+        signal_text = '\nExisting PoS health/progress (unscored is not zero): ' + _json(signal)
+        if len(value) + len(signal_text) > LIMITS['phase2_advisory_chars']:
+            raise ValueError('PoS health/progress exceeds Phase 2 advisory budget')
+        value += signal_text
         return value
 
     def decision_panel(self, *, observation):
@@ -388,6 +412,7 @@ class ComplementEpisode:
                 'bank_version': self.memory.bank_version,
                 'delivery_event_id': event_id,
                 'panel_sha256': panel['panel_sha256'],
+                'advice_sha256': panel['advice_sha256'],
                 'source_pack': deepcopy(getattr(self, 'pending_source_pack', []))}
             self.advice_history.append(deepcopy(self.delivered))
         self.events.append({'kind': 'request_accepted', 'event_id': event_id,
@@ -410,9 +435,7 @@ class ComplementEpisode:
                 for path, value in fields:
                     if remaining <= 0:
                         break
-                    truncated = len(value) > remaining
-                    half = remaining // 2
-                    parts = [value[:half], value[-half:]] if truncated else [value]
+                    parts, truncated = _visible_parts(value, remaining)
                     for segment_no, text in enumerate(parts):
                         if text:
                             segments.append({'source_path': path, 'segment': segment_no,
@@ -451,6 +474,8 @@ class ComplementEpisode:
         self.events.append({'kind': 'transition_processed', 'id': transition_id,
                             'update_outcome': outcome,
                             'accepted_revision': self.accepted_revision,
+                            'advice_sha256': (self.delivered.get('advice_sha256')
+                                if self.delivered else None),
                             'revision_sha256': _digest(revision) if revision else None})
         self.recent_steps.append({'step': actor_attempt + 1, 'analysis': str(thought or ''),
             'commands': [str(action) for action in action_batch],
@@ -494,6 +519,7 @@ class ComplementEpisode:
                 'bank': self.memory.memory.to_dict(), 'events': deepcopy(self.events),
                 'advice_history': deepcopy(self.advice_history),
                 'entry_sources': deepcopy(self.memory.entry_sources),
+                'rendered_bank_entries': deepcopy(self.memory.rendered_entry_ids),
                 'last_phase1_operations': [asdict(operation) for operation in
                     self.memory.last_phase1_operations]}
 
@@ -503,6 +529,7 @@ class ComplementEpisode:
                 'events': deepcopy(self.events),
                 'advice_history': deepcopy(self.advice_history),
                 'entry_sources': deepcopy(self.memory.entry_sources),
+                'rendered_bank_entries': deepcopy(self.memory.rendered_entry_ids),
                 'last_phase1_operations': [asdict(operation) for operation in
                     self.memory.last_phase1_operations]}
 

@@ -203,6 +203,28 @@ class LiveWiringTests(unittest.TestCase):
         self.assertFalse(live_launcher.live_status_success({**base, 'condition': 'B',
                                                             'worker_return_code': 1}))
 
+    def test_complement_candidate_requires_known_complete_archive(self):
+        archive = dict(result_bound=True, close_bound=True,
+                       close_status='graceful_exit', result_status='completed',
+                       task_terminal_status='available',
+                       task_archive_incomplete=False, archive_incomplete=False)
+        base = dict(condition='P', research_candidate='pos_pma_complement_v1',
+                    pos_archive_status=archive, primary_failure=None,
+                    harbor_return_code=0, cleanup_confirmed=True,
+                    frozen_product=True, evaluation_released=True)
+        self.assertTrue(live_launcher.live_status_success(base))
+        for change in ({'archive_incomplete': True},
+                       {'archive_incomplete': None},
+                       {'task_archive_incomplete': True},
+                       {'task_archive_incomplete': None},
+                       {'task_terminal_status': 'unavailable'}):
+            self.assertFalse(live_launcher.live_status_success({**base,
+                'pos_archive_status': {**archive, **change}}))
+        # Existing PoS has no new candidate-only qualification requirement.
+        self.assertTrue(live_launcher.live_status_success({**base,
+            'research_candidate': 'PoS', 'pos_archive_status': {**archive,
+                'archive_incomplete': True}}))
+
     def test_serial_disposition_requires_identity_and_cleanup(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

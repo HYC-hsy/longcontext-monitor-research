@@ -768,6 +768,11 @@ def live_status_success(status: dict) -> bool:
                 archive.get('close_status') != 'graceful_exit' or
                 archive.get('result_status') != 'completed'):
             return False
+        if status.get('research_candidate') == 'pos_pma_complement_v1' and (
+                archive.get('archive_incomplete') is not False or
+                archive.get('task_archive_incomplete') is not False or
+                archive.get('task_terminal_status') != 'available'):
+            return False
     if status.get('zero_model_fixture_only') is True:
         return (status.get('primary_failure') is None and
                 status.get('harbor_return_code') == 0 and

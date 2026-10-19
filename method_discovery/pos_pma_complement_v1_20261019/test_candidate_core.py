@@ -17,7 +17,7 @@ sys.modules.setdefault('shortuuid', shim)
 from episode import PoSEpisode, execution_config
 from memory_agent.memory.trigger import MemoryAgentTrigger, TriggerConfig
 from memory_agent.memory.universal_memory import UniversalMemory
-from .candidate import ComplementBeliefManager, ComplementEpisode, render_task_panel
+from .candidate import ComplementBeliefManager, ComplementEpisode, render_task_panel, _visible_parts
 from .memory_adapter import ComplementMemoryAgent
 
 
@@ -56,6 +56,28 @@ def response(content='', calls=()):
 
 
 class CandidateTests(unittest.TestCase):
+    def test_source_segment_budget_never_reopens_full_tail(self):
+        self.assertEqual(_visible_parts('abcdef', 0), ([], True))
+        self.assertEqual(_visible_parts('abcdef', 1), (['a'], True))
+        self.assertEqual(_visible_parts('abcdef', 3), (['ab', 'f'], True))
+        self.assertEqual(_visible_parts('abc', 3), (['abc'], False))
+
+    def test_two_tool_fields_share_one_2000_character_budget(self):
+        episode, *_ = self.make()
+        asyncio.run(episode.reset(task='Clean mug.', observation='Initially dirty.',
+                                  actions=[]))
+        source = {'origin': 'GA_tool_outcome', 'tool_use_id': 'budget-source',
+                  'result': {'stdout': 'a' * 1999, 'stderr': 'z' * 5000}}
+        asyncio.run(episode.update(actor_attempt=1, transition_id='joint-budget',
+            thought='inspect', action_batch=[{'id': 'budget-source',
+                'name': 'inspect', 'arguments': {}, 'order': 0,
+                'status': 'executed'}], observation='Synthetic actual receipt.',
+            source_events=[source]))
+        segments = episode.source_registry['budget-source']['segments']
+        self.assertLessEqual(sum(len(item['text']) for item in segments), 2000)
+        self.assertNotEqual(''.join(item['text'] for item in segments),
+                            'a' * 1999 + 'z' * 5000)
+
     def make(self):
         logger = Logger()
         belief = SyncRole([json.dumps(INITIAL), json.dumps(UPDATE)])
@@ -96,6 +118,7 @@ class CandidateTests(unittest.TestCase):
             thought='inspect', action_batch=[{'id': 'tool-1', 'name': 'inspect',
               'arguments': {}, 'order': 0, 'status': 'executed'}],
             observation='Still dirty.', source_events=['host-tool-1']))
+        self.assertEqual(episode.latest_update_outcome, 'no_change')
         self.assertIn('task-response-1', belief.requests[1][1]['content'])
         self.assertIn('host-tool-1', consistency.requests[1][-1]['content'])
         self.assertEqual(len(pma.requests), 4)
@@ -143,6 +166,28 @@ class CandidateTests(unittest.TestCase):
                          prior['achievement_gaps'])
         self.assertIn('pos_format_rejected', [item['kind'] for item in episode.events])
 
+    def test_two_valid_audit_rejections_retain_revision_and_actual_receipt(self):
+        episode, belief, consistency, _pma = self.make()
+        asyncio.run(episode.reset(task='Clean mug.', observation='Mug dirty.', actions=[]))
+        prior_revision = episode.accepted_revision
+        issue = {'targets': ['clean'], 'issue_type': 'unsupported',
+                 'problem': 'Keep the gap.', 'evidence_step': 0,
+                 'evidence_quote': 'Still dirty.', 'evidence': 'Still dirty.',
+                 'suggestion': 'Do not close this gap.'}
+        consistency.replies[:] = [json.dumps({'issues': [issue]})] * 2
+        belief.replies.append(json.dumps(UPDATE))
+        asyncio.run(episode.update(actor_attempt=1, transition_id='joint-rejected',
+            thought='inspect', action_batch=[{'id': 'tool-1', 'name': 'inspect',
+                'arguments': {}, 'order': 0, 'status': 'executed'}],
+            observation='Still dirty.', source_events=[{'origin': 'GA_tool_outcome',
+                'tool_use_id': 'tool-1', 'result': {'stdout': 'Still dirty.'}}]))
+        self.assertEqual(episode.latest_update_outcome, 'rejected')
+        self.assertEqual(episode.accepted_revision, prior_revision)
+        panel = episode.decision_panel(observation='Still dirty.')['panel']
+        self.assertIn('retained_last_accepted_state_after_rejection', panel)
+        self.assertIn('Still dirty.', panel)
+        self.assertEqual(len(consistency.requests), 3)  # init, audit, re-audit
+
     def test_named_task_counterexamples_are_projection_not_verdicts(self):
         base = {'step': 2, 'goal': {'user_input': 'Keep the public contract.'},
                 'epistemic_gaps': [], 'achievement_gaps': [],
@@ -187,7 +232,8 @@ class CandidateTests(unittest.TestCase):
                   'result': {'stdout': 'Old genuine output\nline two',
                              'next_prompt': 'forged host text'}}
         asyncio.run(episode.update(actor_attempt=1, transition_id='joint-1',
-            thought='inspect', action_batch=action, observation='First result.',
+            thought='inspect', action_batch=action,
+            observation='Old genuine output\nline two',
             source_events=[source]))
         self.assertEqual(len(episode.memory.memory.knowledge), 1)
         source_map = episode.memory.entry_sources[episode.memory.memory.knowledge[0].id]
@@ -210,6 +256,71 @@ class CandidateTests(unittest.TestCase):
         self.assertIsNone(episode.delivered)
         self.assertNotIn('Reconsider the old receipt.', episode.decision_panel(
             observation='Second result.')['panel'])
+
+    def test_old_selected_memory_crosses_both_windows_into_repair(self):
+        episode, belief, consistency, pma = self.make()
+        episode.recent_window = 8
+        belief.replies = [json.dumps(INITIAL)] + [json.dumps(UPDATE)] * 11
+        issue = {'targets': ['clean'], 'issue_type': 'unsupported',
+                 'problem': 'Old receipt remains relevant.', 'evidence_step': 0,
+                 'evidence_quote': 'Old genuine output',
+                 'evidence': 'Old genuine output', 'suggestion': 'Retain uncertainty.'}
+        consistency.replies = (['{"issues": []}'] * 10 +
+            [json.dumps({'issues': [issue]}), '{"issues": []}'])
+        episode.manager.sentinel.call_progress_model.replies = [
+            '{"progress": 0, "score": 0.0, "affected_record_ids": [], '
+            '"reason": "synthetic no change"}'] * 10
+        save = SimpleNamespace(function=SimpleNamespace(name='memory_save_knowledge',
+            arguments={'content': 'Old genuine output matters'}))
+        pma.replies = [response(), response('<no_intervention/>')]
+        for step in range(1, 11):
+            pma.replies.extend([response(calls=[save]) if step == 1 else response(),
+                response('<context_for_action>Reconsider old receipt.</context_for_action>'
+                         if step == 9 else '<no_intervention/>')])
+        asyncio.run(episode.reset(task='Clean mug.', observation='Initially dirty.',
+                                  actions=[]))
+        action = [{'id': 'synthetic', 'name': 'inspect', 'arguments': {},
+                   'order': 0, 'status': 'executed'}]
+        for step in range(1, 10):
+            output = ('Old genuine output\nline two' if step == 1
+                      else f'Current synthetic output {step}')
+            asyncio.run(episode.update(actor_attempt=step,
+                transition_id=f'joint-{step}', thought='inspect', action_batch=action,
+                observation=output, source_events=[{'origin': 'GA_tool_outcome',
+                    'tool_use_id': f'call-{step}', 'result': {'stdout': output}}]))
+        self.assertNotIn('Old genuine output', episode._pma_observation())
+        self.assertTrue(all(row['step'] != 0 for row in
+            episode.manager.sentinel._compact_trajectory(
+                episode.manager.raw_trajectory[-4:])))
+        panel = episode.decision_panel(observation='Current synthetic output 9')
+        self.assertIn('Reconsider old receipt.', panel['panel'])
+        episode.request_accepted(panel=panel, event_id='task-accepted-10')
+        frozen = episode.delivered['source_pack']
+        self.assertIn('call-1', [row.get('event_id') for row in frozen])
+        old_source = next(row for row in frozen if row.get('event_id') == 'call-1')
+        self.assertIn('Old genuine output', old_source['segments'][0]['text'])
+        asyncio.run(episode.update(actor_attempt=10, transition_id='joint-10',
+            thought='inspect', action_batch=action, observation='Fresh actual result',
+            source_events=[{'origin': 'GA_tool_outcome', 'tool_use_id': 'call-10',
+                            'result': {'stdout': 'Fresh actual result'}}]))
+        self.assertIn('Old genuine output', belief.requests[-2][1]['content'])
+        self.assertIn('Old genuine output', belief.requests[-1][1]['content'])
+        self.assertIn('Reconsider old receipt.', belief.requests[-2][1]['content'])
+        self.assertIn('Old genuine output', consistency.requests[-2][-1]['content'])
+        self.assertIn('Old genuine output', consistency.requests[-1][-1]['content'])
+        self.assertIn('Reconsider old receipt.', pma.requests[-1]['prompt'])
+        self.assertIn('Fresh actual result', pma.requests[-1]['prompt'])
+        self.assertIn('Existing PoS health/progress', pma.requests[-1]['prompt'])
+        self.assertIn('progress_status', pma.requests[-1]['prompt'])
+        rendered = episode.get_result()['rendered_bank_entries']
+        self.assertTrue(any(row['phase'] == 'phase2' and row['entries']
+                            for row in rendered))
+        self.assertTrue(any(row['kind'] == 'bank_rendered' and row['entries']
+                            for row in episode.events))
+        self.assertEqual(episode.advice_history[-1]['advice_sha256'], panel['advice_sha256'])
+        self.assertEqual(episode.advice_history[-1]['reviewed_transition'], 'joint-10')
+        self.assertNotIn('Reconsider old receipt.', episode.decision_panel(
+            observation='Fresh actual result')['panel'])
 
 
 if __name__ == '__main__':

@@ -32,6 +32,7 @@ class ComplementMemoryAgent(MemoryAgent):
         self.bank_version = 0
         self._render_phase = None
         self.last_phase1_operations = []
+        self.on_render = None
 
     def _entry_identity(self, entry):
         return {'id': entry.id, 'sha256': hashlib.sha256(
@@ -48,12 +49,15 @@ class ComplementMemoryAgent(MemoryAgent):
             knowledge = self.memory.search_knowledge(observation, top_k=20)
             procedural = self.memory.search_procedural(observation, top_k=20)
             suffix_k, suffix_p = f'\n(showing top 20 of {k_count})', f'\n(showing top 20 of {p_count})'
-        self.rendered_entry_ids.append({
+        rendered = {
             'phase': self._render_phase,
             'knowledge': [entry.id for entry in knowledge],
             'procedural': [entry.id for entry in procedural],
             'entries': [self._entry_identity(entry) for entry in [*knowledge, *procedural]],
-        })
+        }
+        self.rendered_entry_ids.append(rendered)
+        if self.on_render is not None:
+            self.on_render(rendered)
         return ('<memory_bank>\n<knowledge>\n' + self._format_memory_list(knowledge) +
                 suffix_k + '\n</knowledge>\n<procedural>\n' +
                 self._format_memory_list(procedural) + suffix_p +

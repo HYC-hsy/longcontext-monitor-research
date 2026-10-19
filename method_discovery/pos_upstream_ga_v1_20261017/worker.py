@@ -209,8 +209,8 @@ class RoleTransport:
     def _profile_call(self, role, messages):
         """Reuse GA native transport and private profile; zero hidden transport retries."""
         import llmcore
+        cfg = dict(self.profile)
         if role not in self.sessions:
-            cfg = dict(self.profile)
             cfg['max_retries'] = 0
             cfg['max_tokens'] = ROLE_MAX_TOKENS[role]
             cfg['thinking_type'] = ROLE_THINKING_TYPE
@@ -220,6 +220,7 @@ class RoleTransport:
         session = self.sessions[role]
         if getattr(self, 'candidate_mode', False):
             session.candidate_request_byte_limit = 90000
+            session.candidate_auxiliary_integrity = True
         overall = float(os.environ.get('GA_POS_DEADLINE_EPOCH', '0') or 0)
         remaining = overall - time.time() if overall else float(
             os.environ.get('GA_POS_TIMEOUT', '180'))
@@ -229,6 +230,9 @@ class RoleTransport:
                                              remaining)
         self.archive.log('pos_role_transport_resolved', role=role,
                          model=session.model, max_tokens=session.max_tokens,
+                         ga_history_context_win=session.context_win,
+                         provider_context_limit_tokens=cfg.get('model_context_limit_tokens'),
+                         budget_basis='serialized_utf8_bytes_not_provider_tokens',
                          thinking_type=session.thinking_type,
                          temperature=session.temperature, max_retries=session.max_retries,
                          connect_timeout=session.connect_timeout,

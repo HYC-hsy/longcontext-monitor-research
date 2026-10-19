@@ -98,7 +98,13 @@ async def serve(args):
                                  deadline_epoch=args.deadline_epoch)
     (private / 'worker_ready.json').write_text(json.dumps({
         'run_id': args.run_id, 'task_id': args.task_id, 'fake_memory': False,
-        'research_candidate': 'pos_pma_complement_v1'}, sort_keys=True), encoding='utf-8')
+        'research_candidate': 'pos_pma_complement_v1',
+        'pma_budget': {'input_limit_utf8_bytes': 90000,
+            'ga_history_context_win': profile.get('context_win', 30000),
+            'provider_context_limit_tokens': profile.get('model_context_limit_tokens'),
+            'output_reserve_max_tokens': profile.get('max_tokens'),
+            'basis': 'serialized_utf8_bytes_not_provider_token_limit'}},
+        sort_keys=True), encoding='utf-8')
     reason = 'host_stop'
     active = None
     try:

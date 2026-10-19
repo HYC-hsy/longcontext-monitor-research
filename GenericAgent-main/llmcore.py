@@ -176,6 +176,14 @@ class TaskResponseRejected(RuntimeError):
         super().__init__('Task response not committed: ' + category)
 
 
+class AuxiliaryResponseRejected(Exception):
+    """Candidate-only provider failure; never reinterpret as bad model JSON."""
+
+    def __init__(self, category):
+        self.category = category
+        super().__init__(category)
+
+
 def _task_response_category(blocks):
     evidence = getattr(blocks, 'integrity', None)
     if evidence is None:
@@ -611,6 +619,7 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
         raise RuntimeError('required research capture failed after an accepted response')
     pma_capture = os.environ.get('GA_PMA_CAPTURE_TASK_REQUESTS') == '1'
     strict = bool(getattr(sess, 'task_complete_response', False))
+    auxiliary_integrity = bool(getattr(sess, 'candidate_auxiliary_integrity', False))
     capture_required = pma_capture or strict
     deadline = _task_deadline(sess) if strict else None
     payload_sha256 = _sha256_json(payload) if strict else None
@@ -700,6 +709,8 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                     if strict:
                         sess.last_response_acceptance = 'http_error'
                         raise TaskResponseRejected('http_error')
+                    if auxiliary_integrity:
+                        raise AuxiliaryResponseRejected('http_error')
                     yield err; return [{"type": "text", "text": err}]
                 try:
                     gen = parse_fn(r)
@@ -752,6 +763,11 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                                     _task_check_wait(sess, deadline, _delay(r, attempt))
                                     continue
                                 raise TaskResponseRejected(category)
+                        elif auxiliary_integrity:
+                            category = _task_response_category(e.value)
+                            sess.last_response_acceptance = category
+                            if category != 'complete':
+                                raise AuxiliaryResponseRejected(category)
                         if capture_required:
                             visible = [block for block in (e.value or [])
                                        if isinstance(block, dict) and
@@ -768,6 +784,8 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                                 if strict:
                                     sess.last_response_acceptance = 'capture_failed'
                                     raise TaskResponseRejected('capture_failed')
+                                if auxiliary_integrity:
+                                    raise AuxiliaryResponseRejected('capture_failed')
                         if strict: _task_check_wait(sess, deadline)
                         success_event = _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code, 'outcome': 'success'},
                                                        llm_call_id=llm_call_id, required_sink=capture_required)
@@ -776,6 +794,8 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                             if strict:
                                 sess.last_response_acceptance = 'capture_failed'
                                 raise TaskResponseRejected('capture_failed')
+                            if auxiliary_integrity:
+                                raise AuxiliaryResponseRejected('capture_failed')
                         if strict:
                             # The required success receipt may itself trigger a
                             # late cancel/deadline. A paused consumer can do so
@@ -799,6 +819,8 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                     'attempt': attempt + 1, 'category': error.category,
                     'elapsed_seconds': round(time.monotonic() - attempt_started, 6),
                     'payload_sha256': payload_sha256}, llm_call_id=llm_call_id)
+            raise
+        except AuxiliaryResponseRejected:
             raise
         except ProviderResponseCancelled:
             if strict: sess.last_response_acceptance = 'cancelled'
@@ -859,6 +881,10 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                     'elapsed_seconds': round(time.monotonic() - attempt_started, 6),
                     'payload_sha256': payload_sha256}, llm_call_id=llm_call_id)
                 raise TaskResponseRejected(category) from None
+            if auxiliary_integrity:
+                category = ('response_deadline' if response_deadline_hit is not None and
+                            response_deadline_hit.is_set() else 'transport_error')
+                raise AuxiliaryResponseRejected(category) from None
             yield err; return [{"type": "text", "text": err}]
         except Exception as e:
             # Cross-thread response.close() can surface from requests/urllib3
@@ -883,6 +909,8 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                     'elapsed_seconds': round(time.monotonic() - attempt_started, 6),
                     'payload_sha256': payload_sha256}, llm_call_id=llm_call_id)
                 raise TaskResponseRejected('parser_exception') from None
+            if auxiliary_integrity:
+                raise AuxiliaryResponseRejected('parser_exception') from None
             yield err; return [{"type": "text", "text": err}]
 
 def _openai_stream(sess, messages):
@@ -1239,9 +1267,10 @@ class NativeClaudeSession(BaseSession):
             if payload_bytes > candidate_limit:
                 raise ValueError('candidate complete Task/PoS request exceeds frozen byte budget')
         url = auto_make_url(self.api_base, "messages") + '?beta=true'
-        parse_fn = (lambda r: _parse_claude_sse(r.iter_lines(), strict=bool(
-            getattr(self, 'task_complete_response', False)))) if self.stream else (lambda r: _parse_claude_json(
-                r.json(), strict=bool(getattr(self, 'task_complete_response', False))))
+        integrity_parser = bool(getattr(self, 'task_complete_response', False) or
+                                getattr(self, 'candidate_auxiliary_integrity', False))
+        parse_fn = (lambda r: _parse_claude_sse(r.iter_lines(), strict=integrity_parser)) if self.stream else (lambda r: _parse_claude_json(
+                r.json(), strict=integrity_parser))
         return (yield from _stream_with_retry(self, url, headers, payload, parse_fn))
 
     def ask(self, msg):
@@ -1657,6 +1686,13 @@ class NativeToolClient:
             self.backend.system = original_system + '\n\n' + system_overlay
             previous_limit = getattr(self.backend, 'candidate_request_byte_limit', None)
             self.backend.candidate_request_byte_limit = 90000
+            _research_emit('candidate_task_budget_resolved', {
+                'complete_request_byte_limit': 90000,
+                'panel_utf8_bytes': len(system_overlay.encode('utf-8')),
+                'ga_history_context_win': self.backend.context_win,
+                'output_reserve_max_tokens': self.backend.max_tokens,
+                'basis': 'serialized_utf8_bytes_not_provider_token_limit',
+            })
             generator = self.chat(scoped_messages, tools=tools)
             try:
                 while True:

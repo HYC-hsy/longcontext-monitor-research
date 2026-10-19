@@ -58,9 +58,11 @@ def container_main():
             answer = scripted.pop(0)
             events = [
                 {'type': 'message_start', 'message': {'usage': {'input_tokens': 2}}},
-                {'type': 'content_block_start', 'content_block': {'type': 'text', 'text': ''}},
-                {'type': 'content_block_delta', 'delta': {'type': 'text_delta', 'text': answer}},
-                {'type': 'content_block_stop'},
+                {'type': 'content_block_start', 'index': 0,
+                 'content_block': {'type': 'text', 'text': ''}},
+                {'type': 'content_block_delta', 'index': 0,
+                 'delta': {'type': 'text_delta', 'text': answer}},
+                {'type': 'content_block_stop', 'index': 0},
                 {'type': 'message_delta', 'delta': {'stop_reason': 'end_turn'},
                  'usage': {'output_tokens': 3}}, {'type': 'message_stop'}]
             data = ''.join('data: ' + json.dumps(row) + '\n\n' for row in events).encode()
@@ -150,11 +152,7 @@ def container_main():
 
 def host_main():
     from long_context_bench.scripts.isolated_run_bundle import build_bundle
-    for path in (PMA / 'vendor/pma_89e5c0d/external/harbor/src',
-                 PMA / 'vendor/pma_89e5c0d/src', PMA):
-        sys.path.insert(0, str(path))
-    from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.candidate_transport_worker import TransportEpisode
-    from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.event_spool import EventDispatcher
+    from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.event_spool import EventClient, SpoolError
     root = Path(os.environ['CANDIDATE_PROFILE_TEST_ROOT']).resolve()
     root.mkdir(parents=True, exist_ok=False)
     stage = root / 'stage'
@@ -184,28 +182,30 @@ def host_main():
     requests.mkdir(parents=True)
     responses.mkdir()
     private = root / 'host_private'
-    private.mkdir()
-    class FakeLLM:
-        def __init__(self): self.calls = 0
-        async def call(self, **kwargs):
-            self.calls += 1
-            if kwargs['tools'] is not None:
-                return SimpleNamespace(content='', tool_calls=[])
-            content = ('<context_for_action>Synthetic PMA advice.</context_for_action>'
-                       if self.calls == 2 else '<no_intervention/>')
-            return SimpleNamespace(content=content, tool_calls=[])
-    fake = FakeLLM()
-    episode = TransportEpisode(fake, run_id=RUN_ID, task_id=TASK_ID, archive=private)
-    dispatcher = EventDispatcher(episode, requests, responses, deadline_epoch=time.time()+120)
-    stop = threading.Event()
-    errors = []
-    def dispatch():
-        while not stop.is_set():
-            try: asyncio.run(dispatcher.serve_once())
-            except BaseException as error: errors.append(type(error).__name__); break
-            time.sleep(.01)
-    thread = threading.Thread(target=dispatch, daemon=True)
-    thread.start()
+    profile = root / 'fake_pma_profile.json'
+    profile.write_text(json.dumps({'claude_monitor_opus48': {
+        'provider': 'anthropic', 'api_mode': 'messages',
+        'model': 'claude-opus-4-8', 'thinking_type': 'adaptive',
+        'apibase': 'https://fake.invalid/no-network',
+        'apikey': 'SYNTHETIC_TEST_ONLY', 'temperature': 1,
+        'max_tokens': 8192, 'reasoning_effort': 'high',
+        'read_timeout': 300}}), encoding='utf-8')
+    fake_calls = root / 'fake_host_calls.jsonl'
+    host_env = dict(os.environ, PMA_MEMORY_PROFILE_FILE=str(profile),
+        PMA_MEMORY_PROFILE_SHA256=digest(profile),
+        CANDIDATE_FAKE_HOST_CAPTURE=str(fake_calls))
+    host = subprocess.Popen([sys.executable, '-B', str(HERE / 'test_fake_host_entry.py'),
+        '--run-id', RUN_ID, '--task-id', TASK_ID,
+        '--private-root', str(private), '--requests', str(requests),
+        '--responses', str(responses), '--deadline-epoch', str(time.time()+120)],
+        env=host_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    ready = private / 'worker_ready.json'
+    for _ in range(300):
+        if ready.is_file() or host.poll() is not None:
+            break
+        time.sleep(.1)
+    assert ready.is_file(), f'independent host worker did not become ready: {host.poll()}'
+    assert json.loads(ready.read_text(encoding='utf-8'))['run_id'] == RUN_ID
     command = ['docker', 'run', '--rm', '--network', 'none',
         '--mount', f'type=bind,source={source},target=/opt/genericagent,readonly',
         '--mount', f'type=bind,source={archive},target=/run/pos-archive',
@@ -220,12 +220,40 @@ def host_main():
     try:
         completed = subprocess.run(command, capture_output=True, text=True, timeout=180)
     finally:
-        stop.set()
-        thread.join(timeout=5)
+        (private / 'stop.request').write_text('synthetic stop', encoding='utf-8')
+        host_stdout, host_stderr = host.communicate(timeout=15)
+        (root / 'host.stdout.txt').write_text(host_stdout, encoding='utf-8')
+        (root / 'host.stderr.txt').write_text(host_stderr, encoding='utf-8')
     (root / 'docker.stdout.txt').write_text(completed.stdout, encoding='utf-8')
     (root / 'docker.stderr.txt').write_text(completed.stderr, encoding='utf-8')
     assert completed.returncode == 0, (completed.returncode, completed.stderr[-3000:])
-    assert fake.calls == 4 and not errors, (fake.calls, errors)
+    calls = [json.loads(line) for line in fake_calls.read_text(
+        encoding='utf-8').splitlines()]
+    assert len(calls) == 4 and host.returncode == 0, (calls, host.returncode)
+    assert [item['phase'] for item in calls] == [
+        'phase1', 'phase2', 'phase1', 'phase2']
+    assert json.loads((private / 'worker_exit.json').read_text(
+        encoding='utf-8'))['reason'] == 'host_stop'
+    archive_rows = [json.loads(line) for line in (private / 'archive/requests.jsonl').read_text(
+        encoding='utf-8').splitlines()]
+    response_rows = [json.loads(line) for line in (private / 'archive/responses.jsonl').read_text(
+        encoding='utf-8').splitlines()]
+    assert len(archive_rows) == len(response_rows) == 4
+    assert [item['event_id'] for item in archive_rows] == [
+        item['event_id'] for item in response_rows]
+    # A command sent after the independent host has exited remains unknown;
+    # the client does not replay it or turn it into a successful model result.
+    after_exit = EventClient(requests, responses, RUN_ID, TASK_ID,
+        deadline_monotonic=time.monotonic() + .3)
+    try:
+        after_exit.exchange('candidate_pma_call', role='pma_phase2',
+            prompt='synthetic-after-exit', system='synthetic', tools=None)
+    except SpoolError as error:
+        assert 'unknown' in str(error)
+    else:
+        raise AssertionError('host exit was mistaken for a PMA reply')
+    assert len(list(requests.glob('*.json'))) == 5
+    assert len(list(responses.glob('*.json'))) == 4
     print(completed.stdout)
 
 
