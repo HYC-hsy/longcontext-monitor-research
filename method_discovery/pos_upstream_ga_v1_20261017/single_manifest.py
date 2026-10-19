@@ -159,7 +159,7 @@ def prepare(plan: dict, source: Path, task_profile: Path,
     }[plan['method']]
     method = {'name': method_name,
               'citation_mode': ('released_core' if plan['method'] == 'PoS' else
-                                'decoded_source_fields_v1'),
+                                'visible_tool_fields_v2'),
               'upstream_commit': UPSTREAM, 'task_turns_max': 2 if synthetic else 300,
               'agent_wall_seconds': 180 if synthetic else 14400,
               'harbor_whole_trial_retries': 0,

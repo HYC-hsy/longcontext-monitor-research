@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,6 +45,21 @@ class ProfileSpoolTests(unittest.TestCase):
             self.assertEqual(agent._memory_llm._model_name,
                              'anthropic/claude-opus-4-8')
             self.assertEqual(agent._memory_llm._reasoning_effort, 'high')
+            captured = []
+            async def last_hop(**kwargs):
+                captured.append(kwargs)
+                return {'choices': [{'message': {'content': '<no_intervention/>',
+                    'tool_calls': None}, 'finish_reason': 'stop'}]}
+            with patch('litellm.acompletion', side_effect=last_hop):
+                reply = asyncio.run(agent._memory_llm.call(prompt='synthetic observation',
+                    system='pinned PMA phase', tools=None))
+            self.assertEqual(reply.content, '<no_intervention/>')
+            self.assertEqual(len(captured), 1)
+            self.assertEqual(captured[0]['model'], 'anthropic/claude-opus-4-8')
+            self.assertEqual(captured[0]['temperature'], 1)
+            self.assertEqual(captured[0]['max_tokens'], 8192)
+            self.assertEqual(captured[0]['thinking'], {'type': 'adaptive'})
+            self.assertEqual(captured[0]['timeout'], 300)
 
     def test_bound_two_phase_exchange_uses_one_host_transport(self):
         from event_spool import EventClient, EventDispatcher

@@ -440,6 +440,22 @@ def main():
                         from memory_adapter import ComplementMemoryAgent
                         from memory_agent.memory.trigger import MemoryAgentTrigger, TriggerConfig
                         from memory_agent.memory.universal_memory import UniversalMemory
+                        trigger_config = {'interval': 1, 'first_step': True,
+                                          'sliding_window_size': 8,
+                                          'actor_step_mapping': 'actor_attempt_plus_one'}
+                        if args.mode == 'profile':
+                            frozen = binding.get('candidate_config')
+                            expected_limits = {**candidate_module.LIMITS,
+                                'complete_request_bytes': 90000,
+                                'byte_budget_basis': 'conservative_engineering_cap_not_token_context',
+                                'output_reserve': 'existing_frozen_max_tokens_per_role'}
+                            if (not isinstance(frozen, dict) or
+                                    frozen.get('candidate_limits') != expected_limits or
+                                    not isinstance(frozen.get('pma_profile_sha256'), str) or
+                                    len(frozen['pma_profile_sha256']) != 64 or
+                                    frozen.get('pma_trigger') != trigger_config):
+                                raise RuntimeError('candidate resolved configuration differs')
+                            trigger_config = frozen['pma_trigger']
                         pma = ComplementMemoryAgent(llm=CandidatePMATransport(
                             role_transport=transport, profile_client=profile_client),
                             memory=UniversalMemory())
@@ -468,7 +484,10 @@ def main():
                         episode = candidate_module.ComplementEpisode(
                             pos_episode=pos_episode, memory_agent=pma,
                             trigger=MemoryAgentTrigger(TriggerConfig(
-                                interval=1, trigger_on_first_step=True)), logger=logger)
+                                interval=trigger_config['interval'],
+                                trigger_on_first_step=trigger_config['first_step'])),
+                            recent_window=trigger_config['sliding_window_size'],
+                            logger=logger)
                         value = asyncio.run(episode.reset(task=command['task'],
                             observation=command['observation'], actions=command['actions']))
                     else:

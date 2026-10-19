@@ -61,9 +61,12 @@ def validate_plan(manifest: dict, granted: dict) -> list[dict]:
                 (row['research_candidate'] == 'pos_pma_complement_v1' and
                  manifest.get('config', {}).get('name') !=
                     'pos_pma_complement_v1') or
+                (row['research_candidate'] == 'pos_pma_complement_v1' and
+                 manifest.get('config', {}).get('citation_mode') !=
+                    'visible_tool_fields_v2') or
                 (row['research_candidate'] == 'PoS-citation-fixed' and
                  manifest.get('config', {}).get('citation_mode') !=
-                    'decoded_source_fields_v1') or
+                    'visible_tool_fields_v2') or
                 set(manifest.get('assets', {})) != {row['task']} or
                 _identity(bound) != _identity(row) or
                 bound.get('config_sha256') != manifest.get('config_sha256') or

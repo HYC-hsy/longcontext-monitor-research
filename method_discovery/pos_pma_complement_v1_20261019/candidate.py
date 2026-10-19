@@ -229,7 +229,8 @@ def revision_packet(*, delivered, completed_transition_id, source_events):
 class ComplementEpisode:
     """One PoS graph, one PMA bank, one advice cursor per fresh Task episode."""
 
-    def __init__(self, *, pos_episode, memory_agent, trigger, logger):
+    def __init__(self, *, pos_episode, memory_agent, trigger, logger,
+                 recent_window=8):
         self.pos = pos_episode
         self.manager = pos_episode.manager
         self.case_id = pos_episode.case_id
@@ -248,6 +249,9 @@ class ComplementEpisode:
         self.accepted_revision = 0
         self.latest_update_outcome = 'not_run'
         self.latest_actor_transition = None
+        if type(recent_window) is not int or recent_window < 1:
+            raise ValueError('candidate PMA recent window invalid')
+        self.recent_window = recent_window
 
     def _context(self):
         context = self.pos.get_context()
@@ -297,7 +301,7 @@ class ComplementEpisode:
     def _pma_observation(self):
         """Original PMA task + eight actor-step window, without PoS prose."""
         parts = [f'[Task Description]\n{self.original_task}']
-        window = self.recent_steps[-8:]
+        window = self.recent_steps[-self.recent_window:]
         if window:
             parts.append(f'[Recent Trajectory (last {len(window)} steps)]')
             for item in window:
@@ -453,7 +457,7 @@ class ComplementEpisode:
             'observation': str(observation),
             'source_ids': [str(source.get('tool_use_id') or source.get('event_id'))
                 for source in source_events if isinstance(source, dict)]})
-        self.recent_steps = self.recent_steps[-8:]
+        self.recent_steps = self.recent_steps[-self.recent_window:]
         if self.delivered:
             self.advice_history[-1]['reviewed_transition'] = transition_id
             self.advice_history[-1]['review_outcome'] = outcome

@@ -492,6 +492,11 @@ def run_live(args) -> dict:
             'vendor_files_sha256': manifest['vendor_files_sha256'],
             'pma_vendor_files_sha256': manifest['pma_vendor_files_sha256'],
         }
+        if candidate_profile:
+            binding['candidate_config'] = {
+                'pma_trigger': manifest['config']['pma_trigger'],
+                'candidate_limits': manifest['config']['candidate_limits'],
+                'pma_profile_sha256': manifest['pma_profile_sha256']}
         binding_path = root / 'control/pos_archive/binding.json'
         with binding_path.open('x', encoding='utf-8', newline='\n') as stream:
             json.dump(binding, stream, sort_keys=True)
