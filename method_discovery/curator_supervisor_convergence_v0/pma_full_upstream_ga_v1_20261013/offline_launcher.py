@@ -135,6 +135,10 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
         pma_source = STAGE / 'vendor' / 'pma_89e5c0d'
         shutil.copytree(pma_source / 'src', pos_stage / 'pma_vendor' / 'src',
                         ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '.git'))
+        # Profile binding hashes include the pinned Harbor adapter sources.
+        shutil.copytree(pma_source / 'external' / 'harbor' / 'src',
+                        pos_stage / 'pma_vendor' / 'external' / 'harbor' / 'src',
+                        ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '.git'))
         shutil.copy2(pma_source / 'LICENSE', pos_stage / 'pma_vendor' / 'LICENSE')
         shutil.copytree(pos_source / 'vendor', pos_stage / 'vendor',
                         ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '.git'))
@@ -188,7 +192,8 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
             raise RuntimeError('PMA target image differs from frozen live manifest')
     for name in ("requests", "responses"):
         (root / "control" / "spool" / name).mkdir(parents=True, exist_ok=False)
-    if pos and manifest.get('zero_model_fixture_only') is True:
+    if (pos and manifest.get('zero_model_fixture_only') is True and
+            manifest.get('candidate_profile_fixture_only') is not True):
         (root / 'control' / 'pos_archive').mkdir()
         shutil.copy2(Path(args.pos_fake_replies).resolve(strict=True),
                      root / 'control' / 'pos_fake_replies.json')
@@ -197,7 +202,8 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
     config = json.loads(compose.read_text(encoding="utf-8"))
     if args.condition == "B" or (pos and manifest.get('config', {}).get('name') ==
                                   'pos_pma_complement_v1' and
-                                  manifest.get('zero_model_fixture_only') is False):
+                                  (manifest.get('zero_model_fixture_only') is False or
+                                   manifest.get('candidate_profile_fixture_only') is True)):
         main = config["services"]["main"]
         main["volumes"] += [
             {"type": "bind", "source": (root / "control" / "spool" / "requests").as_posix(),
@@ -210,7 +216,8 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
             {'type': 'bind', 'source': (root / 'control' / 'pos_archive').as_posix(),
              'target': '/run/pos-archive', 'read_only': False},
         ]
-        if manifest.get('zero_model_fixture_only') is True:
+        if (manifest.get('zero_model_fixture_only') is True and
+                manifest.get('candidate_profile_fixture_only') is not True):
             config['services']['main']['volumes'].append(
                 {'type': 'bind', 'source': (root / 'control' / 'pos_fake_replies.json').as_posix(),
                  'target': '/run/pos-fake-replies.json', 'read_only': True})
