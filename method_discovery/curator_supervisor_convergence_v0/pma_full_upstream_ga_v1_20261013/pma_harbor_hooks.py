@@ -100,7 +100,8 @@ def verify_live_spec(spec: dict) -> None:
         if (spec.get('task_id') != binding['task'] or
                 Path(spec['run_root']).resolve() != Path(binding['run_root']).resolve() or
                 spec.get('condition') != 'P' or
-                spec.get('research_candidate') != 'PoS' or
+                spec.get('research_candidate') not in {'PoS', 'PoS-citation-fixed',
+                    'pos_pma_complement_v1'} or
                 (frozen.get('zero_model_fixture_only') is True) !=
                 (granted.get('zero_model_fixture_only') is True)):
             raise RuntimeError('PoS method, root or fixture binding differs')
