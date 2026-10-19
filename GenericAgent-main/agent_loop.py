@@ -78,6 +78,9 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
     pma = None
     pma_upstream = None
     pos = None
+    complement = os.environ.get('GA_POS_PMA_COMPLEMENT') == '1'
+    if complement and os.environ.get('GA_POS_ENABLED') != '1':
+        raise ValueError('complement requires an explicit PoS worker')
     pos_observation = initial_content
     pos_auxiliary_errors = []
     def pos_record(kind, payload):
@@ -100,11 +103,12 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
         from pos_bridge import PoSBridge
         pos = PoSBridge.from_environment()
         handler.parent._pos_bridge = pos
-        handler.parent.pos_decision_context = True
+        handler.parent.pos_decision_context = not complement
         pos.exchange('reset', case_id=os.environ.get('GA_BENCH_TASK_ID', 'offline-task'),
                      task=initial_content, observation=initial_content,
                      actions=tools_schema,
-                     citation_fixed=os.environ.get('GA_POS_CITATION_FIXED') == '1')
+                     citation_fixed=os.environ.get('GA_POS_CITATION_FIXED') == '1',
+                     candidate=complement)
     if os.environ.get('GA_PMA_UPSTREAM_ENABLED') == '1':
         if (os.environ.get('GA_PMA_ENABLED') == '1' or
                 os.environ.get('GA_MONITOR_ENABLED') == '1' or
@@ -177,19 +181,24 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                             pma_event_id=pma_upstream.last_event_id)
         _hook('llm_before', locals())
         if pos is not None:
-            consume_current = getattr(handler, 'consume_pos_current_instruction', None)
-            if consume_current is not None:
-                current_instruction = consume_current()
-                if current_instruction:
-                    current_correction = ('\n\n'.join(filter(None,
-                        (current_correction, current_instruction))))
-            view = pos.exchange('decision_view', observation=pos_observation,
-                                actions=tools_schema,
-                                runtime_constraints=current_correction)
-            request_view = {'system': system_prompt + '\n\n' + view['system'],
-                            'user': view['user']}
-            response_gen = client.chat(messages=messages, tools=tools_schema,
-                                       request_view=request_view)
+            if complement:
+                panel = pos.exchange('decision_panel', observation=pos_observation)
+                response_gen = client.chat(messages=messages, tools=tools_schema,
+                                           system_overlay=panel['panel'])
+            else:
+                consume_current = getattr(handler, 'consume_pos_current_instruction', None)
+                if consume_current is not None:
+                    current_instruction = consume_current()
+                    if current_instruction:
+                        current_correction = ('\n\n'.join(filter(None,
+                            (current_correction, current_instruction))))
+                view = pos.exchange('decision_view', observation=pos_observation,
+                                    actions=tools_schema,
+                                    runtime_constraints=current_correction)
+                request_view = {'system': system_prompt + '\n\n' + view['system'],
+                                'user': view['user']}
+                response_gen = client.chat(messages=messages, tools=tools_schema,
+                                           request_view=request_view)
         else:
             response_gen = client.chat(messages=messages, tools=tools_schema)
         complete_policy = bool(getattr(getattr(client, 'backend', None),
@@ -231,6 +240,12 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
         _hook('llm_after', locals())
 
         provider_link = _consume_provider_call() if _telemetry_enabled() else None
+        if complement:
+            # Complete Task acceptance is a conservative delivery boundary;
+            # merely preparing a panel cannot produce revisable advice.
+            delivery_id = ((provider_link or {}).get('llm_call_id') or
+                f'accepted-turn-{turn}-{_sha256_json(response.content or "")}')
+            pos.exchange('request_accepted', panel=panel, event_id=delivery_id)
         if provider_link:
             _research_emit('action_selected', {
                 'provider_request_event_id': provider_link.get('provider_request_event_id'),
@@ -397,9 +412,18 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                         if pos.closed:
                             raise RuntimeError('PoS decision receipt unavailable')
                         if pos_actions and any(a['status'] == 'executed' for a in pos_actions):
+                            extra = ({'actor_attempt': turn,
+                                      'transition_id': f'actor-transition-{turn}',
+                                      'source_events': [
+                                          {'origin': 'GA_tool_outcome', 'turn': turn,
+                                           'tool_use_id': receipt['tool_use_id'],
+                                           'status': receipt['status'],
+                                           'result': receipt['result']}
+                                          for receipt in pos_receipts]
+                                      } if complement else {})
                             pos.exchange('update', thought=response.content or '',
                                 action_batch=pos_actions, observation=terminal_observation,
-                                done=True)
+                                done=True, **extra)
                         pos.exchange('finish', reason=('PROVIDER_FAILURE' if
                                      provider_error_response else (exit_reason or
                                      {'result': 'CURRENT_TASK_DONE'})['result']),
@@ -427,9 +451,18 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                 'response_content': response.content or '',
                 'exit_reason': exit_reason}, ensure_ascii=False, default=json_default)
             if pos_actions and any(a['status'] == 'executed' for a in pos_actions):
+                extra = ({'actor_attempt': turn,
+                          'transition_id': f'actor-transition-{turn}',
+                          'source_events': [
+                              {'origin': 'GA_tool_outcome', 'turn': turn,
+                               'tool_use_id': receipt['tool_use_id'],
+                               'status': receipt['status'],
+                               'result': receipt['result']}
+                              for receipt in pos_receipts]
+                          } if complement else {})
                 pos.exchange('update', thought=response.content or '',
                              action_batch=pos_actions, observation=pos_observation,
-                             done=False)
+                             done=False, **extra)
         _hook('turn_after', locals())
         if pma is not None:
             pma.observe(response.content or '',

@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import sys
 import time
+from types import SimpleNamespace
 
 
 ROLE_JSON_CONTRACT_VERSION = 'pos-role-json-object-fence-v1'
@@ -272,6 +273,35 @@ class RoleTransport:
         return response, {'provider_usage': usages, 'status': 'captured' if usages else 'unavailable'}
 
 
+class CandidatePMATransport:
+    """Finite fake PMA responses; profile use requires a separately frozen route."""
+
+    def __init__(self, *, role_transport):
+        self.role_transport = role_transport
+
+    async def call(self, *, prompt, system, tools=None):
+        transport = self.role_transport
+        role = 'pma_phase1' if tools is not None else 'pma_phase2'
+        transport.archive.log('candidate_pma_request', role=role, prompt=prompt,
+                              system=system, tools=tools)
+        if transport.mode != 'fake':
+            raise RuntimeError('candidate PMA profile route is not frozen; reject before send')
+        if not transport.replies.get(role):
+            raise RuntimeError('candidate PMA fake reply exhausted: ' + role)
+        payload = transport.replies[role].pop(0)
+        if isinstance(payload, dict) and 'raise' in payload:
+            raise RuntimeError(str(payload['raise']))
+        if not isinstance(payload, dict):
+            raise TypeError('candidate PMA fixture must be an object')
+        calls = [SimpleNamespace(function=SimpleNamespace(
+            name=call['name'], arguments=call.get('arguments', {})))
+            for call in payload.get('tool_calls', [])]
+        response = SimpleNamespace(content=payload.get('content', ''), tool_calls=calls)
+        transport.archive.log('candidate_pma_response', role=role,
+                              content=response.content, tool_calls=payload.get('tool_calls', []))
+        return response
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--vendor', type=Path, required=True)
@@ -305,6 +335,8 @@ def main():
         for key, path in (('worker_sha256', Path(__file__)),
                           ('episode_sha256', args.episode_module),
                           ('citation_fix_sha256', args.episode_module.with_name('citation_fix.py')),
+                          ('candidate_sha256', args.episode_module.with_name('candidate.py')),
+                          ('memory_adapter_sha256', args.episode_module.with_name('memory_adapter.py')),
                           ('profile_sha256', args.profile_file)):
             if binding.get(key) != digest(path.resolve(strict=True)):
                 raise RuntimeError('PoS profile binding bytes differ: ' + key)
@@ -313,10 +345,17 @@ def main():
             if part.is_absolute() or '..' in part.parts or not part.parts or (
                     digest((args.vendor / part).resolve(strict=True)) != expected):
                 raise RuntimeError('PoS vendor binding differs')
+        for relative, expected in binding.get('pma_vendor_files_sha256', {}).items():
+            part = Path(relative)
+            if part.is_absolute() or '..' in part.parts or not part.parts or (
+                    digest((args.episode_module.parent / 'pma_vendor' / part)
+                           .resolve(strict=True)) != expected):
+                raise RuntimeError('PMA vendor binding differs')
     sys.path.insert(0, str(args.vendor.resolve(strict=True)))
     # The GA source bundle contains llmcore.py as a sibling of pos_runtime.
     # This has no effect in fake mode and does not load the private profile.
     sys.path.insert(0, str(args.episode_module.resolve(strict=True).parent.parent))
+    sys.path.insert(0, str(args.episode_module.resolve(strict=True).parent))
     import importlib.util
     spec = importlib.util.spec_from_file_location('pos_ga_episode', args.episode_module)
     module = importlib.util.module_from_spec(spec)
@@ -351,24 +390,81 @@ def main():
                 if kind == 'reset':
                     if episode is not None:
                         raise RuntimeError('PoS episode already constructed')
-                    episode = module.PoSEpisode(case_id=command['case_id'],
-                        config=module.execution_config(), logger=logger,
-                        belief_call=transport.caller('belief'),
-                        consistency_call=transport.caller('consistency'),
-                        progress_call=transport.caller('progress'),
-                        citation_fixed=command.get('citation_fixed', False))
-                    value = episode.reset(task=command['task'],
-                        observation=command['observation'], actions=command['actions'])
+                    if command.get('candidate'):
+                        if args.mode != 'fake':
+                            raise RuntimeError('candidate profile route unavailable before send')
+                        pma_root = args.episode_module.parent / 'pma_vendor' / 'src'
+                        sys.path.insert(0, str(pma_root.resolve(strict=True)))
+                        import asyncio
+                        from types import ModuleType
+                        if 'shortuuid' not in sys.modules:
+                            fixture_uuid = ModuleType('shortuuid')
+                            counter = iter(range(1, 1000000))
+                            fixture_uuid.uuid = lambda: f'{next(counter):08d}'
+                            fixture_uuid.__fixture_only__ = True
+                            sys.modules['shortuuid'] = fixture_uuid
+                        import candidate as candidate_module
+                        from memory_adapter import ComplementMemoryAgent
+                        from memory_agent.memory.trigger import MemoryAgentTrigger, TriggerConfig
+                        from memory_agent.memory.universal_memory import UniversalMemory
+                        pma = ComplementMemoryAgent(llm=CandidatePMATransport(
+                            role_transport=transport), memory=UniversalMemory())
+                        manager_slot = {}
+                        def candidate_consistency(messages):
+                            manager = manager_slot.get('manager')
+                            if manager is not None and manager.revision_context:
+                                messages = [*messages, {'role': 'system',
+                                    'content': 'Previously delivered fallible advice, '
+                                    'not an external observation:\n' + manager.revision_context}]
+                            return transport.caller('consistency')(messages)
+                        pos_episode = module.PoSEpisode(case_id=command['case_id'],
+                            config=module.execution_config(), logger=logger,
+                            belief_call=transport.caller('belief'),
+                            consistency_call=candidate_consistency,
+                            progress_call=transport.caller('progress'),
+                            manager_class=candidate_module.ComplementBeliefManager)
+                        manager_slot['manager'] = pos_episode.manager
+                        episode = candidate_module.ComplementEpisode(
+                            pos_episode=pos_episode, memory_agent=pma,
+                            trigger=MemoryAgentTrigger(TriggerConfig(
+                                interval=1, trigger_on_first_step=True)), logger=logger)
+                        value = asyncio.run(episode.reset(task=command['task'],
+                            observation=command['observation'], actions=command['actions']))
+                    else:
+                        episode = module.PoSEpisode(case_id=command['case_id'],
+                            config=module.execution_config(), logger=logger,
+                            belief_call=transport.caller('belief'),
+                            consistency_call=transport.caller('consistency'),
+                            progress_call=transport.caller('progress'),
+                            citation_fixed=command.get('citation_fixed', False))
+                        value = episode.reset(task=command['task'],
+                            observation=command['observation'], actions=command['actions'])
                 elif episode is None:
                     raise RuntimeError('PoS episode has not reset')
                 elif kind == 'decision_view':
                     value = episode.decision_view(current_observation=command['observation'],
                         actions=command['actions'],
                         runtime_constraints=command.get('runtime_constraints', ''))
+                elif kind == 'decision_panel':
+                    value = episode.decision_panel(observation=command['observation'])
+                elif kind == 'request_accepted':
+                    episode.request_accepted(panel=command['panel'],
+                                             event_id=command['event_id'])
+                    value = {'status': 'recorded'}
                 elif kind == 'update':
-                    value = episode.update(thought=command.get('thought', ''),
-                        action_batch=command['action_batch'], observation=command['observation'],
-                        done=command.get('done', False))
+                    if isinstance(episode, module.PoSEpisode):
+                        value = episode.update(thought=command.get('thought', ''),
+                            action_batch=command['action_batch'], observation=command['observation'],
+                            done=command.get('done', False))
+                    else:
+                        value = asyncio.run(episode.update(
+                            actor_attempt=command['actor_attempt'],
+                            transition_id=command['transition_id'],
+                            thought=command.get('thought', ''),
+                            action_batch=command['action_batch'],
+                            observation=command['observation'],
+                            source_events=command.get('source_events', []),
+                            done=command.get('done', False)))
                 elif kind == 'decision_completed':
                     value = episode.decision_completed(turn=command['turn'],
                                                        action_count=command['action_count'])

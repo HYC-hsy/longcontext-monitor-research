@@ -56,7 +56,14 @@ def validate_plan(manifest: dict, granted: dict) -> list[dict]:
         if (set(row) != {'order', 'task', 'repeat', 'condition', 'research_candidate'} or
                 row['order'] != 1 or type(row['repeat']) is not int or
                 row['repeat'] < 1 or row['condition'] != 'P' or
-                row['research_candidate'] != 'PoS' or
+                row['research_candidate'] not in {'PoS', 'PoS-citation-fixed',
+                                                  'pos_pma_complement_v1'} or
+                (row['research_candidate'] == 'pos_pma_complement_v1' and
+                 manifest.get('config', {}).get('name') !=
+                    'pos_pma_complement_v1') or
+                (row['research_candidate'] == 'PoS-citation-fixed' and
+                 manifest.get('config', {}).get('citation_mode') !=
+                    'decoded_source_fields_v1') or
                 set(manifest.get('assets', {})) != {row['task']} or
                 _identity(bound) != _identity(row) or
                 bound.get('config_sha256') != manifest.get('config_sha256') or

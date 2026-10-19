@@ -47,11 +47,11 @@ class PoSEpisode:
     """One completed GA decision/batch becomes one PoS transition."""
 
     def __init__(self, *, case_id, config, logger, belief_call, consistency_call,
-                 progress_call, citation_fixed=False):
+                 progress_call, citation_fixed=False, manager_class=None):
         self.case_id = case_id
         self.config = deepcopy(config)
         self.logger = logger
-        manager_class = _citation_fixed_manager() if citation_fixed else BeliefManager
+        manager_class = manager_class or (_citation_fixed_manager() if citation_fixed else BeliefManager)
         self.manager = manager_class(self.config, belief_call, logger,
                                      call_sentinel=consistency_call,
                                      call_progress=progress_call)

@@ -95,11 +95,12 @@ def _require_evaluation_state_contract(manifest: dict) -> None:
     """Bind the native SHARED protocol to code and zero-model raw evidence."""
     if manifest.get('schema') == 'pos-ga-single-manifest-v1':
         from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import (
-            source_hashes, vendor_hashes, synthetic_members)
+            source_hashes, vendor_hashes, pma_vendor_hashes, synthetic_members)
         if (manifest.get('upstream_commit') !=
                 '6818cfa6434dbc91fcf67f0b3eb12a91db47433f' or
                 manifest.get('source_files_sha256') != source_hashes() or
-                manifest.get('vendor_files_sha256') != vendor_hashes()):
+                manifest.get('vendor_files_sha256') != vendor_hashes() or
+                manifest.get('pma_vendor_files_sha256') != pma_vendor_hashes()):
             raise RuntimeError('PoS source/vendor freeze changed')
         if manifest.get('zero_model_fixture_only') is True:
             asset = next(iter(manifest['assets'].values()))
@@ -376,11 +377,17 @@ def run_live(args) -> dict:
     if Path(args.run_root).exists():
         raise FileExistsError(args.run_root)
     if args.condition == 'P':
-        if candidate != 'PoS' or fixture != (args.task == 'pos-synthetic-file-http'):
+        if candidate not in {'PoS', 'PoS-citation-fixed',
+                             'pos_pma_complement_v1'} or fixture != (
+                             args.task == 'pos-synthetic-file-http'):
             raise RuntimeError('PoS method or fixture identity differs')
+        if candidate == 'pos_pma_complement_v1' and not fixture:
+            raise RuntimeError('candidate profile transport is not yet frozen')
         if fixture:
             from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import ROOT
-            args.pos_fake_replies = str(ROOT / 'synthetic_task/pos_replies.json')
+            args.pos_fake_replies = str((ROOT.parent / 'pos_pma_complement_v1_20261019' /
+                'synthetic_replies.json') if candidate == 'pos_pma_complement_v1' else
+                (ROOT / 'synthetic_task/pos_replies.json'))
     args.execution_authorized = False
     prepared = _prepare_common(args, fake_gateway=False)
     root = Path(args.run_root).resolve(strict=True)
@@ -478,8 +485,11 @@ def run_live(args) -> dict:
             'worker_sha256': _sha(staged_pos / 'worker.py'),
             'episode_sha256': _sha(staged_pos / 'episode.py'),
             'citation_fix_sha256': _sha(staged_pos / 'citation_fix.py'),
+            'candidate_sha256': _sha(staged_pos / 'candidate.py'),
+            'memory_adapter_sha256': _sha(staged_pos / 'memory_adapter.py'),
             'profile_sha256': _sha(root / 'bundle/source/mykey.json'),
             'vendor_files_sha256': manifest['vendor_files_sha256'],
+            'pma_vendor_files_sha256': manifest['pma_vendor_files_sha256'],
         }
         binding_path = root / 'control/pos_archive/binding.json'
         with binding_path.open('x', encoding='utf-8', newline='\n') as stream:
@@ -599,6 +609,10 @@ def run_live(args) -> dict:
             env.pop('GA_TASK_DEADLINE_EPOCH', None)
         if args.condition == 'P':
             env.update(GA_POS_ENABLED='1',
+                       GA_POS_CITATION_FIXED=('0' if manifest['config'].get('citation_mode') ==
+                           'released_core' else '1'),
+                       GA_POS_PMA_COMPLEMENT=('1' if manifest['config']['name'] ==
+                           'pos_pma_complement_v1' else '0'),
                        GA_POS_TRANSPORT='fake' if fixture else 'profile',
                        GA_POS_WORKER_SCRIPT='/opt/genericagent/pos_runtime/worker.py',
                        GA_POS_VENDOR_ROOT='/opt/genericagent/pos_runtime/vendor',

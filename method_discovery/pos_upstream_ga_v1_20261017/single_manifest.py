@@ -17,6 +17,7 @@ from .worker import (ROLE_JSON_CONTRACT_VERSION, ROLE_INPUT_CONTRACT_VERSION,
 
 ROOT = Path(__file__).resolve().parent
 CHECKOUT = ROOT.parents[1]
+PMA_VENDOR = CHECKOUT / 'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/vendor/pma_89e5c0d'
 UPSTREAM = '6818cfa6434dbc91fcf67f0b3eb12a91db47433f'
 SYNTHETIC_ID = 'pos-synthetic-file-http'
 FOUR = ('nginx-request-logging', 'adaptive-rejection-sampler',
@@ -28,6 +29,9 @@ SOURCE_FILES = (
     'GenericAgent-main/pos_bridge.py',
     'method_discovery/pos_upstream_ga_v1_20261017/episode.py',
     'method_discovery/pos_upstream_ga_v1_20261017/citation_fix.py',
+    'method_discovery/pos_pma_complement_v1_20261019/candidate.py',
+    'method_discovery/pos_pma_complement_v1_20261019/memory_adapter.py',
+    'method_discovery/pos_pma_complement_v1_20261019/synthetic_replies.json',
     'method_discovery/pos_upstream_ga_v1_20261017/worker.py',
     'method_discovery/pos_upstream_ga_v1_20261017/provider_capture.py',
     'method_discovery/pos_upstream_ga_v1_20261017/compatibility_probe.py',
@@ -70,6 +74,13 @@ def vendor_hashes() -> dict:
             and '__pycache__' not in p.parts and p.suffix != '.pyc'}
 
 
+def pma_vendor_hashes() -> dict:
+    return {p.relative_to(PMA_VENDOR).as_posix(): sha(p)
+            for p in sorted(PMA_VENDOR.rglob('*')) if p.is_file() and
+            (p.name == 'LICENSE' or 'src' in p.relative_to(PMA_VENDOR).parts) and
+            '__pycache__' not in p.parts and p.suffix != '.pyc'}
+
+
 def synthetic_members() -> dict:
     base = ROOT / 'synthetic_task'
     return {p.relative_to(base).as_posix(): sha(p) for p in sorted(base.rglob('*'))
@@ -81,7 +92,8 @@ def prepare(plan: dict, source: Path, task_profile: Path,
     if (plan.get('schema') != 'pos-ga-single-plan-v1' or
             plan.get('execution_authorized') is not False or
             plan.get('official_source_git_commit') != COMMIT or
-            plan.get('condition') != 'P' or plan.get('method') != 'PoS' or
+            plan.get('condition') != 'P' or plan.get('method') not in
+                {'PoS', 'PoS-citation-fixed', 'pos_pma_complement_v1'} or
             type(plan.get('occurrence')) is not int or plan['occurrence'] < 1):
         raise RuntimeError('PoS single-run plan identity invalid')
     task = plan['task']
@@ -134,8 +146,15 @@ def prepare(plan: dict, source: Path, task_profile: Path,
     asset.update(image_id=image['image_id'], repo_digest=matches[0],
                  platform=image['platform'])
     row = {'order': 1, 'task': task, 'repeat': plan['occurrence'],
-           'condition': 'P', 'research_candidate': 'PoS'}
-    method = {'name': 'released-core PoS-on-GA transfer',
+           'condition': 'P', 'research_candidate': plan['method']}
+    method_name = {
+        'PoS': 'released-core PoS-on-GA transfer',
+        'PoS-citation-fixed': 'released-core PoS-on-GA transfer + decoded citation fix',
+        'pos_pma_complement_v1': 'pos_pma_complement_v1',
+    }[plan['method']]
+    method = {'name': method_name,
+              'citation_mode': ('released_core' if plan['method'] == 'PoS' else
+                                'decoded_source_fields_v1'),
               'upstream_commit': UPSTREAM, 'task_turns_max': 2 if synthetic else 300,
               'agent_wall_seconds': 180 if synthetic else 14400,
               'harbor_whole_trial_retries': 0,
@@ -149,6 +168,15 @@ def prepare(plan: dict, source: Path, task_profile: Path,
               'role_object_instruction': ROLE_OBJECT_INSTRUCTION,
               'role_update_fields_instruction': ROLE_UPDATE_FIELDS_INSTRUCTION,
               'role_transport_retries': 0, 'synthetic_fixture': synthetic}
+    if plan['method'] == 'pos_pma_complement_v1':
+        method['pma_trigger'] = {'interval': 1, 'first_step': True,
+                                 'sliding_window_size': 8,
+                                 'actor_step_mapping': 'actor_attempt_plus_one'}
+        method['candidate_limits'] = {'task_panel_chars': 16000,
+            'phase2_advisory_chars': 16000, 'revision_chars': 12000,
+            'history_events': 4, 'history_event_chars': 2000,
+            'related_records': 8}
+        method['candidate_profile_status'] = 'not_authorized_fake_only'
     if 'task_complete_response_policy' in plan:
         method['task_complete_response_policy'] = policy
     config_sha = hashlib.sha256(json.dumps(method, sort_keys=True,
@@ -172,6 +200,7 @@ def prepare(plan: dict, source: Path, task_profile: Path,
             'resolved_models_public': {'task': {key: profile.get(key) for key in
                 ('model', 'max_tokens', 'temperature', 'max_retries')}},
             'source_files_sha256': source_hashes(), 'vendor_files_sha256': vendor_hashes(),
+            'pma_vendor_files_sha256': pma_vendor_hashes(),
             'config': method, 'config_sha256': config_sha,
             'planned_order': [row], 'assets': {task: asset},
             'native_shared_certification': certification}

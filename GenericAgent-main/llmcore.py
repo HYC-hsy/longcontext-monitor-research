@@ -1625,7 +1625,36 @@ class NativeToolClient:
         combined = f"{extra_system}\n\n{protocol}" if extra_system and protocol else (extra_system or protocol)
         if combined != self.backend.system: print(f"[Debug] Updated system prompt, length {len(combined)} chars.")
         self.backend.system = combined
-    def chat(self, messages, tools=None, request_view=None):
+    def chat(self, messages, tools=None, request_view=None, system_overlay=None):
+        if system_overlay is not None:
+            if request_view is not None or not isinstance(self.backend, NativeClaudeSession):
+                raise ValueError('transient system overlay requires stateful native Task path')
+            if not isinstance(system_overlay, str) or not system_overlay:
+                raise ValueError('transient system overlay must be nonempty text')
+            # Drive the original stateful request assembly unchanged. Only this
+            # generator's sent system copy carries the fallible auxiliary panel.
+            scoped_messages = []
+            for message in messages:
+                if message.get('role') == 'system':
+                    self.set_system(message.get('content', ''))
+                else:
+                    scoped_messages.append(message)
+            original_system = self.backend.system
+            if not original_system:
+                raise ValueError('transient system overlay requires original system')
+            self.backend.system = original_system + '\n\n' + system_overlay
+            generator = self.chat(scoped_messages, tools=tools)
+            try:
+                while True:
+                    try:
+                        chunk = next(generator)
+                    except StopIteration as done:
+                        return done.value
+                    yield chunk
+            finally:
+                self.backend.system = original_system
+                generator.close()
+            return
         if request_view is not None:
             if not isinstance(self.backend, NativeClaudeSession):
                 raise RuntimeError('PoS stateless request requires native GA backend')

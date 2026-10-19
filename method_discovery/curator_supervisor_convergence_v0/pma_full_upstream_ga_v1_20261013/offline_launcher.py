@@ -128,6 +128,13 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
         pos_stage.mkdir()
         for name in ('worker.py', 'episode.py', 'citation_fix.py'):
             shutil.copy2(pos_source / name, pos_stage / name)
+        candidate_source = STAGE.parents[1] / 'pos_pma_complement_v1_20261019'
+        for name in ('candidate.py', 'memory_adapter.py'):
+            shutil.copy2(candidate_source / name, pos_stage / name)
+        pma_source = STAGE / 'vendor' / 'pma_89e5c0d'
+        shutil.copytree(pma_source / 'src', pos_stage / 'pma_vendor' / 'src',
+                        ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '.git'))
+        shutil.copy2(pma_source / 'LICENSE', pos_stage / 'pma_vendor' / 'LICENSE')
         shutil.copytree(pos_source / 'vendor', pos_stage / 'vendor',
                         ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '.git'))
     runtime = Path(args.runtime_root).resolve(strict=True)
@@ -145,10 +152,14 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
         for name in ('agent_loop.py', 'agentmain.py', 'ga.py', 'llmcore.py',
                      'research_runtime.py',
                      'pos_bridge.py', 'pos_runtime/worker.py',
-                     'pos_runtime/episode.py', 'pos_runtime/citation_fix.py'):
+                     'pos_runtime/episode.py', 'pos_runtime/citation_fix.py',
+                     'pos_runtime/candidate.py', 'pos_runtime/memory_adapter.py'):
             staged = source / name
             actual = hashlib.sha256(staged.read_bytes()).hexdigest()
-            frozen_name = ('method_discovery/pos_upstream_ga_v1_20261017/' +
+            frozen_name = ('method_discovery/' +
+                           ('pos_pma_complement_v1_20261019/' if
+                            Path(name).name in {'candidate.py', 'memory_adapter.py'} else
+                            'pos_upstream_ga_v1_20261017/') +
                            Path(name).name if name.startswith('pos_runtime/') else
                            'GenericAgent-main/' + name)
             expected = manifest['source_files_sha256'][frozen_name]
@@ -298,6 +309,10 @@ def run_offline(args) -> dict:
         env["CI"] = "1"
         env["GA_PMA_UPSTREAM_ENABLED"] = "1" if args.condition == "B" else "0"
         env['GA_POS_ENABLED'] = '1' if args.condition == 'P' else '0'
+        env['GA_POS_PMA_COMPLEMENT'] = ('1' if args.condition == 'P' and
+            manifest['config']['name'] == 'pos_pma_complement_v1' else '0')
+        env['GA_POS_CITATION_FIXED'] = ('1' if args.condition == 'P' and
+            manifest['config'].get('citation_mode') == 'decoded_source_fields_v1' else '0')
         env["GA_PMA_ENABLED"] = env["GA_MONITOR_ENABLED"] = "0"
         env["GA_M0_MONITOR_ENABLED"] = "0"
         if env.get('GA_TASK_COMPLETE_RESPONSE') == '1':

@@ -18,7 +18,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--task', required=True)
     parser.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
-    parser.add_argument('--research-candidate', choices=('U', 'V1', 'D1', 'PoS'), default='U')
+    parser.add_argument('--research-candidate', choices=(
+        'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
+        'pos_pma_complement_v1'), default='U')
     parser.add_argument('--output', type=Path, required=True)
     for name in ('official-source-git', 'task-profile-file',
                  'ga-source', 'runtime-root', 'worker-python', 'harbor-python',
@@ -30,7 +32,8 @@ def main() -> None:
     args = parser.parse_args()
     root = args.output.resolve(strict=False)
     if args.condition == 'P' and (args.task != 'pos-synthetic-file-http' or
-                                   args.research_candidate != 'PoS'):
+                                   args.research_candidate not in {'PoS',
+                                       'PoS-citation-fixed', 'pos_pma_complement_v1'}):
         raise RuntimeError('PoS zero-model fixture must use the synthetic P identity')
     identity = prepare(argparse.Namespace(output=str(root), task=args.task,
         condition=args.condition, occurrence=1, fake_only=True,

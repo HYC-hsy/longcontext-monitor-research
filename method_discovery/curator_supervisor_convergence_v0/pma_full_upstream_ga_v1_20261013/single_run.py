@@ -35,7 +35,7 @@ def prepare(args: argparse.Namespace) -> dict:
             'official_source_git_commit': COMMIT, 'task': args.task,
             'condition': args.condition, 'occurrence': args.occurrence}
     if pos:
-        plan.update(method='PoS', synthetic_fixture=bool(
+        plan.update(method=getattr(args, 'research_candidate', 'PoS'), synthetic_fixture=bool(
             getattr(args, 'synthetic_pos_fixture', False)))
         if getattr(args, 'task_complete_response', False):
             if plan['synthetic_fixture']:
@@ -44,8 +44,8 @@ def prepare(args: argparse.Namespace) -> dict:
         if plan['synthetic_fixture'] and not args.fake_only:
             raise RuntimeError('synthetic PoS package is zero-model only')
     candidate = getattr(args, 'research_candidate', 'U')
-    if pos and candidate != 'PoS':
-        raise RuntimeError('PoS plan requires explicit PoS method identity')
+    if pos and candidate not in {'PoS', 'PoS-citation-fixed', 'pos_pma_complement_v1'}:
+        raise RuntimeError('PoS plan requires explicit fixed method identity')
     if not pos and candidate != 'U':
         plan['schema'] = 'pma-ga-single-plan-v2'
         plan['research_candidate'] = candidate
@@ -80,6 +80,9 @@ def prepare(args: argparse.Namespace) -> dict:
 def run(args: argparse.Namespace) -> dict:
     root = Path(args.output).resolve(strict=True)
     manifest = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))
+    if (manifest.get('config', {}).get('name') == 'pos_pma_complement_v1' and
+            manifest.get('zero_model_fixture_only') is not True):
+        raise RuntimeError('candidate private PMA role route is not frozen; no live send')
     identity = json.loads((root / 'run_identity.json').read_text(encoding='utf-8'))
     granted = json.loads(Path(args.authorization).read_text(encoding='utf-8'))
     bindings = validate_plan(manifest, granted)
@@ -118,7 +121,9 @@ def main() -> None:
     prepared = commands.add_parser('prepare', help='fixed-Git asset and image check; no calls')
     prepared.add_argument('--task', required=True)
     prepared.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
-    prepared.add_argument('--research-candidate', choices=('U', 'V1', 'D1', 'PoS'), default='U')
+    prepared.add_argument('--research-candidate', choices=(
+        'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
+        'pos_pma_complement_v1'), default='U')
     prepared.add_argument('--occurrence', type=int, default=1)
     prepared.add_argument('--output', required=True)
     prepared.add_argument('--official-source-git', required=True)
