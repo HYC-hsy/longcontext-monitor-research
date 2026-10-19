@@ -103,14 +103,18 @@ def verify_live_spec(spec: dict) -> None:
                 spec.get('research_candidate') not in {'PoS', 'PoS-citation-fixed',
                     'pos_pma_complement_v1'} or
                 (frozen.get('zero_model_fixture_only') is True) !=
-                (granted.get('zero_model_fixture_only') is True)):
+                (granted.get('zero_model_fixture_only') is True) or
+                (spec.get('candidate_profile_fixture_only') is True) !=
+                (frozen.get('candidate_profile_fixture_only') is True and
+                 granted.get('candidate_profile_fixture_only') is True)):
             raise RuntimeError('PoS method, root or fixture binding differs')
         checkout = Path(__file__).resolve().parents[3]
         head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=checkout,
             capture_output=True, text=True, timeout=10, check=True).stdout.strip()
         if head != granted.get('audited_code_commit') or head != spec.get('audited_code_commit'):
             raise RuntimeError('PoS running code differs from authorized commit')
-        if frozen.get('zero_model_fixture_only') is not True and 'pos_binding_sha256' in spec:
+        if (frozen.get('zero_model_fixture_only') is not True or
+                spec.get('candidate_profile_fixture_only') is True) and 'pos_binding_sha256' in spec:
             binding = Path(spec['run_root']) / 'control/pos_archive/binding.json'
             if (hashlib.sha256(binding.read_bytes()).hexdigest() !=
                     spec['pos_binding_sha256'] or
@@ -512,7 +516,8 @@ class NativeSharedTrialHooks(PMATrialHooks):
             provider_capture = inspect_provider_capture(
                 self.control / 'pos_archive', self.spec['run_id'],
                 self.spec['task_id'],
-                profile_mode=self.spec.get('zero_model_fixture_only') is not True)
+                profile_mode=(self.spec.get('zero_model_fixture_only') is not True or
+                              self.spec.get('candidate_profile_fixture_only') is True))
             _atomic(self.archive / 'pos_archive_status.json', pos_archive_summary(
                 self.spec['run_id'], self.spec['task_id'], terminal,
                 result_receipt, close_receipt, terminal_error,
