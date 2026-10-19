@@ -10,7 +10,7 @@ from belief.manager import BeliefManager
 def _fields(value, *, depth=0):
     """Return individual decoded source fields, never a concatenated wrapper."""
     if isinstance(value, dict):
-        if value.get('role') in {'assistant', 'system', 'user'}:
+        if isinstance(value.get('role'), str) and value['role'] in {'assistant', 'system', 'user'}:
             return
         for item in value.values():
             yield from _fields(item, depth=depth + 1)
@@ -40,9 +40,18 @@ def _normal(text: str) -> str:
 class CitationFixedSentinel(BeliefSentinel):
     @staticmethod
     def _trajectory_text(item: dict) -> tuple[str, ...]:
-        # The original JSON serialization escaped newlines and joined action
-        # and observation, allowing a false quote across their boundary.
-        return tuple(_fields(item.get('action'))) + tuple(_fields(item.get('observation')))
+        # Action arguments and a host's next-prompt prose are not tool results.
+        # The original JSON serialization escaped newlines and joined these
+        # origins, allowing a false quote across a field boundary.
+        observation = item.get('observation')
+        if isinstance(observation, str):
+            try:
+                envelope = json.loads(observation)
+            except json.JSONDecodeError:
+                envelope = None
+            if isinstance(envelope, dict) and isinstance(envelope.get('tool_results'), list):
+                return tuple(_fields(envelope['tool_results']))
+        return tuple(_fields(observation))
 
     @staticmethod
     def _valid_issue(issue, valid_targets, evidence_by_step) -> bool:

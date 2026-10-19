@@ -56,6 +56,13 @@ class CitationTests(unittest.TestCase):
         self.assertFalse(self.valid(row, 'alpha beta'))
         self.assertFalse(self.valid(row, 'beta gamma'))
         self.assertFalse(self.valid(row, 'delta'))
+        self.assertFalse(self.valid(row, 'alpha'))
+        wrapped = {'step': 64, 'action': {'arguments': {'text': 'not a receipt'}},
+                   'observation': json.dumps({'content': 'host prose only',
+                       'tool_results': [{'content': 'actual receipt'}]})}
+        self.assertTrue(self.valid(wrapped, 'actual receipt'))
+        self.assertFalse(self.valid(wrapped, 'host prose only'))
+        self.assertFalse(self.valid(wrapped, 'not a receipt'))
 
     def test_target_step_and_cropped_scope(self):
         row = trajectory('short retained fragment')
