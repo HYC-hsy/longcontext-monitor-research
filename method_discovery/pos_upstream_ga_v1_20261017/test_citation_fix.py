@@ -44,9 +44,11 @@ class CitationTests(unittest.TestCase):
                          {64: BeliefSentinel._trajectory_text(row)}))
 
     def test_literal_backslash_n_quotes_unicode_and_case(self):
-        self.assertTrue(self.valid(trajectory('alpha\\nbeta'), 'ALPHA\nbeta'))
+        # Earlier test incorrectly treated a literal backslash-n as a newline.
+        self.assertFalse(self.valid(trajectory('alpha\\nbeta'), 'ALPHA\nbeta'))
+        self.assertTrue(self.valid(trajectory('alpha\\nbeta'), 'ALPHA\\nbeta'))
         self.assertTrue(self.valid(trajectory('He said "你好".\nDone.'),
-                                   'he said \\"你好\\".\\nDONE.'))
+                                   'he said "你好".\nDONE.'))
 
     def test_single_field_and_no_cross_field_stitching(self):
         row = {'step': 64, 'action': {'arguments': {'left': 'alpha'}},
@@ -63,6 +65,28 @@ class CitationTests(unittest.TestCase):
         self.assertTrue(self.valid(wrapped, 'actual receipt'))
         self.assertFalse(self.valid(wrapped, 'host prose only'))
         self.assertFalse(self.valid(wrapped, 'not a receipt'))
+
+    def test_nested_host_fields_never_become_tool_evidence(self):
+        row = trajectory({'stdout': 'actual\nline', 'next_prompt': 'fake quote',
+                          'arguments': {'text': 'argument quote'},
+                          'metadata': {'content': 'metadata quote'}})
+        self.assertTrue(self.valid(row, 'actual\nline'))
+        for quote in ('fake quote', 'argument quote', 'metadata quote'):
+            self.assertFalse(self.valid(row, quote))
+
+    def test_truncated_wrapper_and_segment_boundary(self):
+        row = trajectory('HEAD' + 'x' * 100 + 'TAIL')
+        sentinel = CitationFixedSentinel({'consistency_enabled': True,
+            'audit_observation_max_chars': 20}, lambda messages: '{}', Recorder())
+        compact = sentinel._compact_trajectory([row])[0]
+        fields = sentinel._trajectory_text(compact)
+        self.assertTrue(any('HEAD' in field for field in fields))
+        self.assertTrue(any('TAIL' in field for field in fields))
+        self.assertFalse(any('HEADTAIL' in field for field in fields))
+        self.assertFalse(any('x' * 50 in field for field in fields))
+        broken = {'step': 64, 'observation': '{"tool_results": [{"result": "fake"',
+                  'action': {'name': 'code_run'}}
+        self.assertFalse(self.valid(broken, 'fake'))
 
     def test_target_step_and_cropped_scope(self):
         row = trajectory('short retained fragment')

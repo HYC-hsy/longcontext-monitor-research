@@ -7,51 +7,81 @@ from belief.beliefSentinel import BeliefSentinel
 from belief.manager import BeliefManager
 
 
-def _fields(value, *, depth=0):
-    """Return individual decoded source fields, never a concatenated wrapper."""
-    if isinstance(value, dict):
-        if isinstance(value.get('role'), str) and value['role'] in {'assistant', 'system', 'user'}:
-            return
-        for item in value.values():
-            yield from _fields(item, depth=depth + 1)
+TOOL_TEXT_KEYS = ('stdout', 'stderr', 'output', 'content', 'text', 'result', 'error')
+
+
+def _result_fields(value, path):
+    """Only explicit tool-return fields; never traverse host or model metadata."""
+    if isinstance(value, str):
+        yield path, value
+    elif isinstance(value, dict):
+        for key in TOOL_TEXT_KEYS:
+            if key in value:
+                yield from _result_fields(value[key], f'{path}.{key}')
     elif isinstance(value, list):
-        for item in value:
-            yield from _fields(item, depth=depth + 1)
-    elif isinstance(value, str):
-        if depth < 8 and value.lstrip().startswith(('{', '[')):
-            try:
-                nested = json.loads(value)
-            except json.JSONDecodeError:
-                pass
-            else:
-                yield from _fields(nested, depth=depth + 1)
-                return
-        yield value
+        for index, part in enumerate(value):
+            yield from _result_fields(part, f'{path}[{index}]')
+
+
+def _source_fields(item):
+    observation = item.get('observation')
+    if not isinstance(observation, str):
+        return ()
+    try:
+        envelope = json.loads(observation)
+    except json.JSONDecodeError:
+        # An incomplete JSON wrapper is not an unstructured tool receipt.
+        return () if observation.lstrip().startswith(('{', '[')) else (('observation', observation),)
+    if isinstance(envelope, dict) and isinstance(envelope.get('tool_results'), list):
+        fields = []
+        for index, receipt in enumerate(envelope['tool_results']):
+            if not isinstance(receipt, dict):
+                continue
+            if 'result' in receipt:
+                fields.extend(_result_fields(receipt['result'], f'tool_results[{index}].result'))
+            elif 'content' in receipt:
+                fields.extend(_result_fields(receipt['content'], f'tool_results[{index}].content'))
+        return tuple(fields)
+    return ()
 
 
 def _normal(text: str) -> str:
-    # JSON transport may leave literal escapes in a source field; compare
-    # their decoded spelling without changing case/whitespace policy.
-    text = text.replace('\\r\\n', '\n').replace('\\n', '\n').replace('\\t', '\t')
-    text = text.replace('\\"', '"')
+    # JSON decoding occurred exactly once at the transport wrapper. A literal
+    # backslash-n in a tool result is not a newline in that result.
     return ' '.join(text.casefold().split())
 
 
 class CitationFixedSentinel(BeliefSentinel):
+    def _compact_trajectory(self, trajectory):
+        compact = super()._compact_trajectory(trajectory)
+        for original, shown in zip(trajectory, compact):
+            remaining = self.audit_observation_max_chars
+            citable = []
+            for path, value in _source_fields(original):
+                if remaining <= 0:
+                    break
+                if len(value) > remaining:
+                    half = remaining // 2
+                    segments = [value[:half], value[-half:]] if half else []
+                    truncated = True
+                else:
+                    segments = [value]
+                    truncated = False
+                for segment_no, segment in enumerate(segments):
+                    if segment:
+                        citable.append({'source_path': path, 'segment': segment_no,
+                                        'text': segment, 'truncated': truncated})
+                        remaining -= len(segment)
+            # These exact, separately bounded source fields are included in
+            # the audit request. The validator never cites hidden middle text.
+            shown['citable_sources'] = citable
+        return compact
+
     @staticmethod
     def _trajectory_text(item: dict) -> tuple[str, ...]:
-        # Action arguments and a host's next-prompt prose are not tool results.
-        # The original JSON serialization escaped newlines and joined these
-        # origins, allowing a false quote across a field boundary.
-        observation = item.get('observation')
-        if isinstance(observation, str):
-            try:
-                envelope = json.loads(observation)
-            except json.JSONDecodeError:
-                envelope = None
-            if isinstance(envelope, dict) and isinstance(envelope.get('tool_results'), list):
-                return tuple(_fields(envelope['tool_results']))
-        return tuple(_fields(observation))
+        if 'citable_sources' in item:
+            return tuple(source['text'] for source in item['citable_sources'])
+        return tuple(value for _path, value in _source_fields(item))
 
     @staticmethod
     def _valid_issue(issue, valid_targets, evidence_by_step) -> bool:
