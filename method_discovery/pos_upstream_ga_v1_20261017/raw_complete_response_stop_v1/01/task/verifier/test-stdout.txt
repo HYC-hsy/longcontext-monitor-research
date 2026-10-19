@@ -1,0 +1,130 @@
+Hit:1 http://security.ubuntu.com/ubuntu noble-security InRelease
+Hit:2 http://archive.ubuntu.com/ubuntu noble InRelease
+Get:3 http://archive.ubuntu.com/ubuntu noble-updates InRelease [126 kB]
+Hit:4 http://archive.ubuntu.com/ubuntu noble-backports InRelease
+Get:5 http://archive.ubuntu.com/ubuntu noble-updates/main amd64 Packages [1729 kB]
+Get:6 http://archive.ubuntu.com/ubuntu noble-updates/universe amd64 Packages [2168 kB]
+Fetched 4023 kB in 8s (527 kB/s)
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+The following NEW packages will be installed:
+  curl
+0 upgraded, 1 newly installed, 0 to remove and 29 not upgraded.
+Need to get 226 kB of archives.
+After this operation, 537 kB of additional disk space will be used.
+Get:1 http://security.ubuntu.com/ubuntu noble-security/main amd64 curl amd64 8.5.0-2ubuntu10.16 [226 kB]
+debconf: delaying package configuration, since apt-utils is not installed
+Fetched 226 kB in 2s (139 kB/s)
+Selecting previously unselected package curl.
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 20412 files and directories currently installed.)
+Preparing to unpack .../curl_8.5.0-2ubuntu10.16_amd64.deb ...
+Unpacking curl (8.5.0-2ubuntu10.16) ...
+Setting up curl (8.5.0-2ubuntu10.16) ...
+downloading uv 0.9.5 x86_64-unknown-linux-gnu
+no checksums to verify
+installing to /root/.local/bin
+  uv
+  uvx
+everything's installed!
+
+To add $HOME/.local/bin to your PATH, either restart your shell or run:
+
+    source $HOME/.local/bin/env (sh, bash, zsh)
+    source $HOME/.local/bin/env.fish (fish)
+Downloading cpython-3.13.9-linux-x86_64-gnu (download) (32.0MiB)
+ Downloading cpython-3.13.9-linux-x86_64-gnu (download)
+Downloading pygments (1.2MiB)
+Downloading scipy (34.0MiB)
+Downloading numpy (15.9MiB)
+ Downloading pygments
+ Downloading numpy
+ Downloading scipy
+Installed 8 packages in 150ms
+============================= test session starts ==============================
+platform linux -- Python 3.13.9, pytest-8.4.1, pluggy-1.7.0
+rootdir: /tests
+plugins: json-ctrf-0.3.5
+collected 9 items
+
+../tests/test_outputs.py ...FF....                                       [100%]
+
+=================================== FAILURES ===================================
+_____________________ test_formal_testing_with_known_truth _____________________
+
+    def test_formal_testing_with_known_truth():
+        """Test that formal testing outputs correct format as specified."""
+        app_dir = Path("/app")
+    
+        # Run the test function and check output format
+        test_code = """
+    source("ars.R")
+    # Run the test function if it exists
+    if (exists("test")) {
+        test()
+    } else {
+        cat("ERROR: test function not found\n")
+    }
+    """
+    
+        test_file = app_dir / "run_test.R"
+        test_file.write_text(test_code)
+        try:
+            result = subprocess.run(
+                ["Rscript", str(test_file)],
+                capture_output=True,
+                text=True,
+                cwd=str(app_dir),
+                timeout=60,
+            )
+            output = result.stdout + result.stderr
+    
+            # Check for required output format: "TEST_NAME: PASS" or "TEST_NAME: FAIL"
+            assert ": PASS" in output or ": FAIL" in output, (
+                "Test function must output results in format "
+                "'TEST_NAME: PASS' or 'TEST_NAME: FAIL'"
+            )
+    
+            # Check for mean/std statistics in output
+>           assert "mean" in output.lower(), "Test output should include mean statistics"
+E           AssertionError: Test output should include mean statistics
+E           assert 'mean' in '=====================================\ntesting adaptive rejection sampling\n=====================================\n\n...of log-concavity detected at x = 0.2 and x = 0.124038940781342 hp[ 1 ] = 3.75000000009396 hp[ 2 ] = 6.92038109614823\n'
+E            +  where '=====================================\ntesting adaptive rejection sampling\n=====================================\n\n...of log-concavity detected at x = 0.2 and x = 0.124038940781342 hp[ 1 ] = 3.75000000009396 hp[ 2 ] = 6.92038109614823\n' = <built-in method lower of str object at 0x22e0cbb0>()
+E            +    where <built-in method lower of str object at 0x22e0cbb0> = '=====================================\nTesting Adaptive Rejection Sampling\n=====================================\n\n...of log-concavity detected at x = 0.2 and x = 0.124038940781342 hp[ 1 ] = 3.75000000009396 hp[ 2 ] = 6.92038109614823\n'.lower
+
+/tests/test_outputs.py:147: AssertionError
+_________________________ test_sample_files_generated __________________________
+
+    def test_sample_files_generated():
+        """Test that required sample files are generated."""
+        app_dir = Path("/app")
+    
+        # Check for required sample files as specified in task
+        normal_file = app_dir / "normal_samples.txt"
+        exp_file = app_dir / "exponential_samples.txt"
+    
+>       assert normal_file.exists() or exp_file.exists(), (
+            "At least one sample file must be generated. Task requires generating 'normal_samples.txt' "
+            "or 'exponential_samples.txt' containing test samples"
+        )
+E       AssertionError: At least one sample file must be generated. Task requires generating 'normal_samples.txt' or 'exponential_samples.txt' containing test samples
+E       assert (False or False)
+E        +  where False = exists()
+E        +    where exists = PosixPath('/app/normal_samples.txt').exists
+E        +  and   False = exists()
+E        +    where exists = PosixPath('/app/exponential_samples.txt').exists
+
+/tests/test_outputs.py:161: AssertionError
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_ars_function_exists
+PASSED ../tests/test_outputs.py::test_can_generate_standard_distribution_samples
+PASSED ../tests/test_outputs.py::test_has_test_function
+PASSED ../tests/test_outputs.py::test_implementation_is_modular
+PASSED ../tests/test_outputs.py::test_implementation_handles_errors
+PASSED ../tests/test_outputs.py::test_input_validation_functionality
+PASSED ../tests/test_outputs.py::test_log_concavity_functionality
+FAILED ../tests/test_outputs.py::test_formal_testing_with_known_truth - Asser...
+FAILED ../tests/test_outputs.py::test_sample_files_generated - AssertionError...
+========================= 2 failed, 7 passed in 2.47s ==========================

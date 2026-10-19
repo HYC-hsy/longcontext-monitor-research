@@ -1,0 +1,115 @@
+Task complete-response-v1 two-task batch: stopped-run audit (2026-10-19)
+
+This is an archive of the one authorized sampler -> compressor batch, not a new
+run or a method-effect claim. Execution code and public preflight were frozen at
+656e3d0a2bdb8f22e5a00cb5c534b2b4da7b0cbc. The plan enabled
+GA_TASK_COMPLETE_RESPONSE=1 for Task only, with 300 turns and a fixed 14,400 s
+Task wall deadline; PoS auxiliary calls retained their existing policy. This
+batch used the same PoS method, model/profile and official assets as the
+source-bound preflight. The complete-response policy is an infrastructure
+acceptance/recovery change, not a PoS innovation. No code or configuration was
+changed during execution.
+
+Outcome and safety stop
+
+1. adaptive-rejection-sampler, run pos-1342daa39c224c91, started. The Task
+   terminal recorded EXCEPTION, not CURRENT_TASK_DONE. The native-SHARED
+   evaluator ran once after the stopped-writer barrier, returned recorded
+   reward=0.0, and did not make this a normal completed-task score. Harbor
+   returned 0, same-run cleanup was confirmed, and no owned container, volume
+   or worker remained in the status and read-only post-run check. The PoS worker
+   closed gracefully with a partial result, but its archive status was
+   archive_incomplete=true. Serial continue_safe=false.
+2. write-compressor, planned run pos-727c9a60c0f74897, was prepared only.
+   It has no serial_start or authorization, no Task/model/evaluator calls,
+   no run result and no reward in this batch. The safety stop prevented launch.
+3. No active authorization.json remains under this batch output root. Older
+   sampler/compressor outcomes and the nginx/sqlite records were not rewritten
+   or rerun.
+
+Observed calls and terminal boundary
+
+Task research_events.jsonl contains 166 provider_request_ready, 166
+provider_request_attempt (observable POSTs), 166 provider_response and 166
+task_response_integrity records with category=complete. All 166 provider
+responses have outcome=success; 166 action_selected events identify 189
+selected tool calls (selection is not independently an execution count).
+There are no observed Task incomplete-response retries, rejected attempts or
+request-level recoveries in this run. Observable Task usage sums are input
+198868, output 221696, cache-creation input 3313915 and cache-read input
+202852 tokens; these are sums of recorded fields, not a billing estimate.
+
+PoS role events contain 711 logical role requests: belief 357, consistency
+188, progress 166. The provider sink has 710 observable request attempts and
+710 returns, of which 709 are marked success and one transport_error/Timeout.
+There are 710 usage records (input 153360, output 451403, cache-creation input
+20685985, cache-read input 729009). Deeper provider-side attempts and cost
+are unknown. The role chronology records 97 valid scored transitions, 69
+progress_failed/unscored events, 51 recovery_started and 50 recovery_finished;
+the failed last update is not converted into a successful transition or a
+zero score. These are event counts, not proof of correct semantics.
+
+The last Task response was fully accepted at 2026-10-18T19:39:24.816367Z.
+The following PoS update reached belief textualization, recorded a parse
+error, and initiated its existing correction path. A belief provider attempt
+returned transport_error/Timeout at 19:40:26.664417Z. The next belief
+role request at 19:40:26.682362Z failed before send with TimeoutError,
+"PoS role deadline elapsed before send"; a worker command error and partial
+persist followed. This is the proximate recorded path at the fixed Task total
+deadline; the record does not prove why the previous provider attempt timed
+out at a lower network layer. The final PoS logical role request has no
+provider send record. The collector accordingly marked role/provider call
+mismatch and archive_incomplete, rather than inventing a missing response.
+The known Task EXCEPTION and official reward=0 remain distinct from that
+auxiliary archive state.
+
+Source and public evidence
+
+Private originals remain unchanged under
+E:\LongContext\pos_complete_response_two_20261018_v1. Public, individually
+readable files are under raw_complete_response_stop_v1. FILE_HASHES.json lists
+each source byte count/SHA-256, each public copy byte count/SHA-256, explicit
+per-line omissions and the read-back verification. It is not a claim that the
+public JSON reserialization is byte-identical to the private source.
+DIAGNOSTICS.json contains only bounded chronology/counters and safe terminal
+categories. The complete Task research event JSONL is published as a
+redacted part; PoS provider events are published in two redacted parts.
+The metadata-only PoS role chronology preserves order/time/role/step and
+references source line numbers. Full private PoS role state (357061120 bytes,
+SHA-256 ed86e57cda50d7594a1b86c57dab17f6c443a8a5e8d999e8f9cf41d94bb971b7)
+and result snapshot (24539852 bytes) are not public in full.
+
+The conservative public projection omitted 313 of 3549 provider JSONL lines,
+all provider_request_ready; their original line numbers, byte lengths and
+SHA-256 values are in FILE_HASHES.json. This is a public-evidence gap, not a
+claim that private requests or the provider sink are absent. The large
+serial_stdout private original and two unsafe-to-project plain logs are also
+enumerated as private-only/omitted in the index. Do not treat the available
+public subset as complete PoS prompt capture. The local read-back checked
+41 public members and found none of the private profile values. Hidden
+thinking, provider identities, private endpoint and credentials are not
+intended for publication. No secret original value appears in this report.
+
+Key source identities: Task research_events.jsonl 15003768 bytes,
+SHA-256 fb7cfd9402195c36fb85705adcb9a4ca9f57d7727ba7eeb8ddde4dca7946b18f;
+PoS provider events 84974918 bytes,
+SHA-256 888f4f404eaca8dfa901a6fb6b1daf6b8c8f31703bf0dab1499c50b1d2eac3ed.
+The public FILE_HASHES.json SHA-256 is
+3b3d3587d60f684a982e48caae80eee87644a12e9b8c864a65de6e3209a1794a.
+
+The source-bound zero-model preflight index remains
+raw_complete_response_preflight_v1/FILE_HASHES.json,
+SHA-256 0a658129783b39cbe7182d3f47f32dddada94b1ad7b41ce730a54a5cb8ba4ab2;
+the existing synthetic certification remains separately archived under
+raw_complete_response_cert_v1. No new model, Task or official evaluator call
+was made to produce this stopped-run audit. Formal batch calls and its one
+official evaluation are counted above.
+
+Archive-only additions after the frozen run: analyze_complete_response_stop.py,
+archive_complete_response_stop.py, derive_complete_response_diagnostics.py,
+verify_complete_response_public.py, this TXT, and raw_complete_response_stop_v1.
+The sole verification command executed on the public copy was:
+C:\Python313\python.exe -B -m method_discovery.pos_upstream_ga_v1_20261017.verify_complete_response_public --archive method_discovery\pos_upstream_ga_v1_20261017\raw_complete_response_stop_v1 --task-profile E:\LongContext\GenericAgent-main\mykey.py
+It returned status=pass, public_members_checked=41 and
+private_profile_values_found=0. The task profile path was used locally only;
+the profile file itself is not included in the public archive.
