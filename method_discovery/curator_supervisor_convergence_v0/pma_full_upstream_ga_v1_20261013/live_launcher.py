@@ -115,7 +115,9 @@ def _require_evaluation_state_contract(manifest: dict) -> None:
         if not path.is_relative_to(CHECKOUT) or _sha(path) != cert['committed_evidence_sha256']:
             raise RuntimeError('PoS native-SHARED certification bytes differ')
         from method_discovery.pos_upstream_ga_v1_20261017.certification import verify_evidence
-        if verify_evidence(path.parent, require_committed=True) != cert.get('result'):
+        research = manifest['planned_order'][0]['research_candidate']
+        if verify_evidence(path.parent, require_committed=True,
+                           research_candidate=research) != cert.get('result'):
             raise RuntimeError('PoS native-SHARED certification result differs')
         return
     if manifest.get('schema') == 'pma-ga-live-manifest-v3':

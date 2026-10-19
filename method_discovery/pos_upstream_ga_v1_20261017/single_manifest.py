@@ -194,7 +194,8 @@ def prepare(plan: dict, source: Path, task_profile: Path,
             raise RuntimeError('synthetic fixture does not accept live certification')
         from .certification import verify_evidence
         evidence = certification_dir.resolve(strict=True)
-        verified = verify_evidence(evidence, require_committed=True)
+        verified = verify_evidence(evidence, require_committed=True,
+                                   research_candidate=plan['method'])
         index = evidence / 'FILE_HASHES.json'
         certification = {'relative_path': index.relative_to(CHECKOUT).as_posix(),
                          'committed_evidence_sha256': sha(index),

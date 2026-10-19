@@ -15,7 +15,8 @@ def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def verify_evidence(directory: Path, *, require_committed: bool = True) -> dict:
+def verify_evidence(directory: Path, *, require_committed: bool = True,
+                    research_candidate: str = 'PoS') -> dict:
     base = directory.resolve(strict=True)
     index_path = base / 'FILE_HASHES.json'
     index = json.loads(index_path.read_text(encoding='utf-8'))
@@ -68,12 +69,30 @@ def verify_evidence(directory: Path, *, require_committed: bool = True) -> dict:
         for name in SOURCE_FILES}
     prepared = load('prepared.json')
     bundled = prepared.get('executed_pos_source_sha256')
+    if research_candidate not in {'PoS', 'PoS-citation-fixed',
+                                  'pos_pma_complement_v1'}:
+        raise RuntimeError('PoS certification method identity invalid')
     executed_names = ('agent_loop.py', 'agentmain.py', 'ga.py', 'llmcore.py',
                       'research_runtime.py', 'pos_bridge.py',
-                      'pos_runtime/worker.py', 'pos_runtime/episode.py')
+                      'pos_runtime/worker.py', 'pos_runtime/episode.py',
+                      'pos_runtime/citation_fix.py',
+                      'pos_runtime/candidate.py',
+                      'pos_runtime/memory_adapter.py',
+                      'pos_runtime/event_spool.py')
+    def source_name(name):
+        if not name.startswith('pos_runtime/'):
+            return 'GenericAgent-main/' + name
+        leaf = Path(name).name
+        if leaf in {'candidate.py', 'memory_adapter.py'}:
+            directory = 'pos_pma_complement_v1_20261019'
+        elif leaf == 'event_spool.py':
+            directory = ('curator_supervisor_convergence_v0/'
+                         'pma_full_upstream_ga_v1_20261013')
+        else:
+            directory = 'pos_upstream_ga_v1_20261017'
+        return 'method_discovery/' + directory + '/' + leaf
     expected_executed = {name: identity['source_files'][
-        ('method_discovery/pos_upstream_ga_v1_20261017/' + Path(name).name)
-        if name.startswith('pos_runtime/') else 'GenericAgent-main/' + name]
+        source_name(name)]
         for name in executed_names}
     script = (base / 'normal/synthetic_test.sh').read_text(encoding='utf-8')
     if (identity.get('git_blob_source_files') != committed_sources or
@@ -83,7 +102,7 @@ def verify_evidence(directory: Path, *, require_committed: bool = True) -> dict:
             identity.get('source_files') != source_hashes() or
             identity.get('vendor_files') != vendor_hashes() or
             result.get('condition') != 'P' or
-            result.get('research_candidate') != 'PoS' or
+            result.get('research_candidate') != research_candidate or
             result.get('zero_model_fixture_only') is not True or
             result.get('harbor_return_code') != 0 or
             result.get('cleanup_confirmed') is not True or
@@ -105,5 +124,6 @@ def verify_evidence(directory: Path, *, require_committed: bool = True) -> dict:
             'http://127.0.0.1:19173/' not in script):
         raise RuntimeError('PoS native-SHARED lifecycle evidence incomplete')
     return {'status': 'pass', 'run_id': result['run_id'],
+            'research_candidate': research_candidate,
             'synthetic_task': result['task'], 'file_count': len(files),
             'real_model_calls': 0, 'official_evaluator_calls': 0}
