@@ -84,6 +84,7 @@ def run_batch(args: argparse.Namespace) -> dict:
         manifest_path=str(manifest_path), manifest_sha256=manifest_hash,
         authorization_path=str(authorization_path), authorization_sha256=auth_hash,
         audited_code_commit=granted["audited_code_commit"], task_id=first["task"],
+        candidate_profile_fixture_only=profile_fixture,
         **first))
     record = {"schema": "pma-ga-batch-result-v2" if native_plan else "pma-ga-batch-result-v1", "arms": [],
               "not_started": [], "stop_reason": None}
