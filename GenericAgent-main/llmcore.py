@@ -104,6 +104,13 @@ def trim_messages_history(history, sess):
                   'sha256': _sha256_json(history)}
         _research_emit('history_transform_started', before, history_transform_id=transform_id)
     cap = sess.context_win * 3
+    candidate_limit = getattr(sess, 'candidate_request_byte_limit', None)
+    if candidate_limit is not None:
+        # Candidate-only conservative pre-prune. The final serialized payload
+        # (including schema/system) is checked again immediately before POST.
+        overhead = len(json.dumps({'system': sess.system or '',
+            'tools': sess.tools or []}, ensure_ascii=False).encode('utf-8'))
+        cap = min(cap, max(0, candidate_limit - overhead - 4096))
     target = int(cap * getattr(sess, 'trim_keep_rate', 0.6))
     def cost(): return sum(len(json.dumps(m, ensure_ascii=False)) for m in history)
     compress_history_tags(history, interval=getattr(sess, 'cut_msg_interval', 5))
@@ -1226,6 +1233,11 @@ class NativeClaudeSession(BaseSession):
         for idx in user_idxs[-2:]:
             messages[idx] = {**messages[idx], "content": list(messages[idx]["content"])}
             messages[idx]["content"][-1] = dict(messages[idx]["content"][-1], cache_control={"type": "ephemeral"})
+        candidate_limit = getattr(self, 'candidate_request_byte_limit', None)
+        if candidate_limit is not None:
+            payload_bytes = len(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
+            if payload_bytes > candidate_limit:
+                raise ValueError('candidate complete Task/PoS request exceeds frozen byte budget')
         url = auto_make_url(self.api_base, "messages") + '?beta=true'
         parse_fn = (lambda r: _parse_claude_sse(r.iter_lines(), strict=bool(
             getattr(self, 'task_complete_response', False)))) if self.stream else (lambda r: _parse_claude_json(
@@ -1643,6 +1655,8 @@ class NativeToolClient:
             if not original_system:
                 raise ValueError('transient system overlay requires original system')
             self.backend.system = original_system + '\n\n' + system_overlay
+            previous_limit = getattr(self.backend, 'candidate_request_byte_limit', None)
+            self.backend.candidate_request_byte_limit = 90000
             generator = self.chat(scoped_messages, tools=tools)
             try:
                 while True:
@@ -1653,6 +1667,7 @@ class NativeToolClient:
                     yield chunk
             finally:
                 self.backend.system = original_system
+                self.backend.candidate_request_byte_limit = previous_limit
                 generator.close()
             return
         if request_view is not None:

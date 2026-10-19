@@ -367,8 +367,10 @@ def run_live(args) -> dict:
             Path(args.ga_source).resolve(strict=True) !=
             (STAGE.parents[2] / 'GenericAgent-main').resolve(strict=True)):
         raise RuntimeError('V3 GA source is not the frozen repository bridge')
+    candidate_profile = (args.condition == 'P' and candidate == 'pos_pma_complement_v1'
+                         and not fixture)
     memory_profile_path = None
-    if args.condition == 'B':
+    if args.condition == 'B' or candidate_profile:
         if not args.pma_profile_file:
             raise RuntimeError('PMA Opus 4.8 profile is required for B')
         memory_profile_path = Path(args.pma_profile_file).resolve(strict=True)
@@ -381,8 +383,6 @@ def run_live(args) -> dict:
                              'pos_pma_complement_v1'} or fixture != (
                              args.task == 'pos-synthetic-file-http'):
             raise RuntimeError('PoS method or fixture identity differs')
-        if candidate == 'pos_pma_complement_v1' and not fixture:
-            raise RuntimeError('candidate profile transport is not yet frozen')
         if fixture:
             from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import ROOT
             args.pos_fake_replies = str((ROOT.parent / 'pos_pma_complement_v1_20261019' /
@@ -487,6 +487,7 @@ def run_live(args) -> dict:
             'citation_fix_sha256': _sha(staged_pos / 'citation_fix.py'),
             'candidate_sha256': _sha(staged_pos / 'candidate.py'),
             'memory_adapter_sha256': _sha(staged_pos / 'memory_adapter.py'),
+            'event_spool_sha256': _sha(staged_pos / 'event_spool.py'),
             'profile_sha256': _sha(root / 'bundle/source/mykey.json'),
             'vendor_files_sha256': manifest['vendor_files_sha256'],
             'pma_vendor_files_sha256': manifest['pma_vendor_files_sha256'],
@@ -508,7 +509,7 @@ def run_live(args) -> dict:
     stop_requested_at = None
     pending_end_at = None
     try:
-        if args.condition == 'B':
+        if args.condition == 'B' or candidate_profile:
             for name in ('worker.stdout.log', 'worker.stderr.log'):
                 worker_logs.append((root / 'archive' / name).open('wb'))
             worker_env = dict(os.environ)
@@ -520,15 +521,17 @@ def run_live(args) -> dict:
             worker_env['LITELLM_LOCAL_MODEL_COST_MAP'] = 'True'
             worker_env.pop('PMA_MEMORY_API_BASE', None)
             worker_env.pop('PMA_MEMORY_API_KEY', None)
+            worker_script = ('candidate_transport_worker.py' if candidate_profile
+                             else 'worker_main.py')
             worker = subprocess.Popen([
-                str(Path(args.worker_python).resolve(strict=True)), str(STAGE / 'worker_main.py'),
+                str(Path(args.worker_python).resolve(strict=True)), str(STAGE / worker_script),
                 '--run-id', args.run_id, '--task-id', args.task,
                 '--private-root', str(root / 'host_private'),
                 '--requests', str(root / 'control' / 'spool' / 'requests'),
                 '--responses', str(root / 'control' / 'spool' / 'responses'),
                 '--deadline-epoch', str(deadline),
-                '--research-candidate', candidate,
-                *(['--fake-memory', '--fake-memory-update'] if fixture else [])],
+                *([] if candidate_profile else ['--research-candidate', candidate]),
+                *(['--fake-memory', '--fake-memory-update'] if fixture and not candidate_profile else [])],
                 cwd=STAGE, env=worker_env,
                 stdout=worker_logs[0], stderr=worker_logs[1])
             ready = root / 'host_private' / 'worker_ready.json'

@@ -55,7 +55,9 @@ def prepare(args: argparse.Namespace) -> dict:
         manifest = prepare_pos(plan, Path(args.official_source_git).resolve(strict=True),
                                Path(args.task_profile_file).resolve(strict=True),
                                certification_dir=(Path(args.certification_dir)
-                                   if getattr(args, 'certification_dir', None) else None))
+                                   if getattr(args, 'certification_dir', None) else None),
+                               pma_profile=(Path(args.pma_profile_file)
+                                   if getattr(args, 'pma_profile_file', None) else None))
     else:
         manifest = prepare_manifest(Path(args.official_source_git).resolve(strict=True),
             Path(args.task_profile_file).resolve(strict=True),
@@ -80,9 +82,6 @@ def prepare(args: argparse.Namespace) -> dict:
 def run(args: argparse.Namespace) -> dict:
     root = Path(args.output).resolve(strict=True)
     manifest = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))
-    if (manifest.get('config', {}).get('name') == 'pos_pma_complement_v1' and
-            manifest.get('zero_model_fixture_only') is not True):
-        raise RuntimeError('candidate private PMA role route is not frozen; no live send')
     identity = json.loads((root / 'run_identity.json').read_text(encoding='utf-8'))
     granted = json.loads(Path(args.authorization).read_text(encoding='utf-8'))
     bindings = validate_plan(manifest, granted)

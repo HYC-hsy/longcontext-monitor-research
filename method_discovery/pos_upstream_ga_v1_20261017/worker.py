@@ -218,6 +218,8 @@ class RoleTransport:
             self.sessions[role] = llmcore.NativeClaudeSession(cfg)
             self.sessions[role].max_retries = 0  # ignore Task retry env override
         session = self.sessions[role]
+        if getattr(self, 'candidate_mode', False):
+            session.candidate_request_byte_limit = 90000
         overall = float(os.environ.get('GA_POS_DEADLINE_EPOCH', '0') or 0)
         remaining = overall - time.time() if overall else float(
             os.environ.get('GA_POS_TIMEOUT', '180'))
@@ -274,18 +276,34 @@ class RoleTransport:
 
 
 class CandidatePMATransport:
-    """Finite fake PMA responses; profile use requires a separately frozen route."""
+    """Candidate bank model over fake replies or the bound host PMA spool."""
 
-    def __init__(self, *, role_transport):
+    def __init__(self, *, role_transport, profile_client=None):
         self.role_transport = role_transport
+        self.profile_client = profile_client
 
     async def call(self, *, prompt, system, tools=None):
         transport = self.role_transport
         role = 'pma_phase1' if tools is not None else 'pma_phase2'
         transport.archive.log('candidate_pma_request', role=role, prompt=prompt,
                               system=system, tools=tools)
-        if transport.mode != 'fake':
-            raise RuntimeError('candidate PMA profile route is not frozen; reject before send')
+        if transport.mode == 'profile':
+            if self.profile_client is None:
+                raise RuntimeError('candidate PMA spool identity unavailable before send')
+            import asyncio
+            payload = await asyncio.to_thread(self.profile_client.exchange,
+                'candidate_pma_call', role=role, prompt=prompt, system=system,
+                tools=tools)
+            if not isinstance(payload.get('tool_calls'), list) or not isinstance(
+                    payload.get('content'), str):
+                raise RuntimeError('candidate PMA host response malformed')
+            calls = [SimpleNamespace(function=SimpleNamespace(
+                name=call['name'], arguments=call.get('arguments', {})))
+                for call in payload['tool_calls']]
+            response = SimpleNamespace(content=payload['content'], tool_calls=calls)
+            transport.archive.log('candidate_pma_response', role=role,
+                content=response.content, tool_calls=payload['tool_calls'])
+            return response
         if not transport.replies.get(role):
             raise RuntimeError('candidate PMA fake reply exhausted: ' + role)
         payload = transport.replies[role].pop(0)
@@ -334,9 +352,6 @@ def main():
         def digest(path): return hashlib.sha256(path.read_bytes()).hexdigest()
         for key, path in (('worker_sha256', Path(__file__)),
                           ('episode_sha256', args.episode_module),
-                          ('citation_fix_sha256', args.episode_module.with_name('citation_fix.py')),
-                          ('candidate_sha256', args.episode_module.with_name('candidate.py')),
-                          ('memory_adapter_sha256', args.episode_module.with_name('memory_adapter.py')),
                           ('profile_sha256', args.profile_file)):
             if binding.get(key) != digest(path.resolve(strict=True)):
                 raise RuntimeError('PoS profile binding bytes differ: ' + key)
@@ -391,8 +406,26 @@ def main():
                     if episode is not None:
                         raise RuntimeError('PoS episode already constructed')
                     if command.get('candidate'):
-                        if args.mode != 'fake':
-                            raise RuntimeError('candidate profile route unavailable before send')
+                        transport.candidate_mode = True
+                        profile_client = None
+                        if args.mode == 'profile':
+                            for key, name in (('citation_fix_sha256', 'citation_fix.py'),
+                                    ('candidate_sha256', 'candidate.py'),
+                                    ('memory_adapter_sha256', 'memory_adapter.py'),
+                                    ('event_spool_sha256', 'event_spool.py')):
+                                if binding.get(key) != digest(
+                                        args.episode_module.with_name(name)):
+                                    raise RuntimeError('candidate source binding differs: ' + key)
+                            from event_spool import EventClient
+                            deadline_epoch = float(os.environ['GA_POS_DEADLINE_EPOCH'])
+                            remaining = deadline_epoch - time.time()
+                            if remaining <= 0:
+                                raise RuntimeError('candidate PMA fixed deadline expired')
+                            profile_client = EventClient(
+                                Path('/run/pma-bridge/requests'),
+                                Path('/run/pma-bridge/responses'),
+                                args.run_id, args.task_id,
+                                deadline_monotonic=time.monotonic() + remaining)
                         pma_root = args.episode_module.parent / 'pma_vendor' / 'src'
                         sys.path.insert(0, str(pma_root.resolve(strict=True)))
                         import asyncio
@@ -408,7 +441,8 @@ def main():
                         from memory_agent.memory.trigger import MemoryAgentTrigger, TriggerConfig
                         from memory_agent.memory.universal_memory import UniversalMemory
                         pma = ComplementMemoryAgent(llm=CandidatePMATransport(
-                            role_transport=transport), memory=UniversalMemory())
+                            role_transport=transport, profile_client=profile_client),
+                            memory=UniversalMemory())
                         manager_slot = {}
                         def candidate_consistency(messages):
                             manager = manager_slot.get('manager')
@@ -438,6 +472,10 @@ def main():
                         value = asyncio.run(episode.reset(task=command['task'],
                             observation=command['observation'], actions=command['actions']))
                     else:
+                        if (args.mode == 'profile' and command.get('citation_fixed') and
+                                binding.get('citation_fix_sha256') != digest(
+                                    args.episode_module.with_name('citation_fix.py'))):
+                            raise RuntimeError('PoS citation fix source binding differs')
                         episode = module.PoSEpisode(case_id=command['case_id'],
                             config=module.execution_config(), logger=logger,
                             belief_call=transport.caller('belief'),

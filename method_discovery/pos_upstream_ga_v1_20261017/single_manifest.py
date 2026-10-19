@@ -33,6 +33,10 @@ SOURCE_FILES = (
     'method_discovery/pos_pma_complement_v1_20261019/memory_adapter.py',
     'method_discovery/pos_pma_complement_v1_20261019/synthetic_replies.json',
     'method_discovery/pos_upstream_ga_v1_20261017/worker.py',
+    'method_discovery/curator_supervisor_convergence_v0/'
+    'pma_full_upstream_ga_v1_20261013/event_spool.py',
+    'method_discovery/curator_supervisor_convergence_v0/'
+    'pma_full_upstream_ga_v1_20261013/candidate_transport_worker.py',
     'method_discovery/pos_upstream_ga_v1_20261017/provider_capture.py',
     'method_discovery/pos_upstream_ga_v1_20261017/compatibility_probe.py',
     'method_discovery/pos_upstream_ga_v1_20261017/serial_live.py',
@@ -88,7 +92,8 @@ def synthetic_members() -> dict:
 
 
 def prepare(plan: dict, source: Path, task_profile: Path,
-            certification_dir: Path | None = None) -> dict:
+            certification_dir: Path | None = None,
+            pma_profile: Path | None = None) -> dict:
     if (plan.get('schema') != 'pos-ga-single-plan-v1' or
             plan.get('execution_authorized') is not False or
             plan.get('official_source_git_commit') != COMMIT or
@@ -175,8 +180,10 @@ def prepare(plan: dict, source: Path, task_profile: Path,
         method['candidate_limits'] = {'task_panel_chars': 16000,
             'phase2_advisory_chars': 16000, 'revision_chars': 12000,
             'history_events': 4, 'history_event_chars': 2000,
-            'related_records': 8}
-        method['candidate_profile_status'] = 'not_authorized_fake_only'
+            'related_records': 8, 'complete_request_bytes': 90000,
+            'byte_budget_basis': 'conservative_engineering_cap_not_token_context',
+            'output_reserve': 'existing_frozen_max_tokens_per_role'}
+        method['candidate_profile_status'] = 'host_pinned_pma_transport_v1_requires_separate_authorization'
     if 'task_complete_response_policy' in plan:
         method['task_complete_response_policy'] = policy
     config_sha = hashlib.sha256(json.dumps(method, sort_keys=True,
@@ -192,10 +199,31 @@ def prepare(plan: dict, source: Path, task_profile: Path,
         certification = {'relative_path': index.relative_to(CHECKOUT).as_posix(),
                          'committed_evidence_sha256': sha(index),
                          'result': verified}
+    pma_profile_sha256 = None
+    if plan['method'] == 'pos_pma_complement_v1' and not synthetic:
+        if pma_profile is None:
+            raise RuntimeError('candidate requires existing private PMA profile identity')
+        profile_path = pma_profile.resolve(strict=True)
+        private_profile = json.loads(profile_path.read_text(encoding='utf-8'))[
+            'claude_monitor_opus48']
+        if (private_profile.get('provider'), private_profile.get('api_mode'),
+                private_profile.get('model'), private_profile.get('thinking_type')) != (
+                'anthropic', 'messages', 'claude-opus-4-8', 'adaptive'):
+            raise RuntimeError('candidate PMA profile route differs from pinned U route')
+        pma_profile_sha256 = sha(profile_path)
+        method['pma_transport'] = {'kind': 'pinned_host_litellm_spool_v1',
+            'profile_sha256': pma_profile_sha256,
+            'max_tokens': private_profile['max_tokens'],
+            'read_timeout': private_profile['read_timeout'],
+            'temperature': private_profile['temperature'],
+            'retry_policy': 'pinned_litellm_up_to_3_total_attempts'}
+        config_sha = hashlib.sha256(json.dumps(method, sort_keys=True,
+            separators=(',', ':')).encode('utf-8')).hexdigest()
     return {'schema': 'pos-ga-single-manifest-v1', 'status': 'prepared_not_executed',
             'execution_authorized': False, 'zero_model_fixture_only': synthetic,
             'official_source_git_commit': COMMIT, 'upstream_commit': UPSTREAM,
             'task_profile_sha256': sha(task_profile),
+            'pma_profile_sha256': pma_profile_sha256,
             'profile_identity_status': 'private_bytes_hashed_not_exported',
             'resolved_models_public': {'task': {key: profile.get(key) for key in
                 ('model', 'max_tokens', 'temperature', 'max_retries')}},

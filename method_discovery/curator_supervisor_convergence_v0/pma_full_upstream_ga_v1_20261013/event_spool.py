@@ -13,7 +13,10 @@ import tempfile
 import time
 import uuid
 
-from episode import PMAEpisode
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from episode import PMAEpisode
 
 
 class SpoolError(RuntimeError):

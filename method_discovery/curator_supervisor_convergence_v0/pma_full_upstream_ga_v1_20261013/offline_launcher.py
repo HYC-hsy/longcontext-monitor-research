@@ -131,6 +131,7 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
         candidate_source = STAGE.parents[1] / 'pos_pma_complement_v1_20261019'
         for name in ('candidate.py', 'memory_adapter.py'):
             shutil.copy2(candidate_source / name, pos_stage / name)
+        shutil.copy2(STAGE / 'event_spool.py', pos_stage / 'event_spool.py')
         pma_source = STAGE / 'vendor' / 'pma_89e5c0d'
         shutil.copytree(pma_source / 'src', pos_stage / 'pma_vendor' / 'src',
                         ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '.git'))
@@ -153,12 +154,15 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
                      'research_runtime.py',
                      'pos_bridge.py', 'pos_runtime/worker.py',
                      'pos_runtime/episode.py', 'pos_runtime/citation_fix.py',
-                     'pos_runtime/candidate.py', 'pos_runtime/memory_adapter.py'):
+                     'pos_runtime/candidate.py', 'pos_runtime/memory_adapter.py',
+                     'pos_runtime/event_spool.py'):
             staged = source / name
             actual = hashlib.sha256(staged.read_bytes()).hexdigest()
             frozen_name = ('method_discovery/' +
                            ('pos_pma_complement_v1_20261019/' if
                             Path(name).name in {'candidate.py', 'memory_adapter.py'} else
+                            'curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/' if
+                            Path(name).name == 'event_spool.py' else
                             'pos_upstream_ga_v1_20261017/') +
                            Path(name).name if name.startswith('pos_runtime/') else
                            'GenericAgent-main/' + name)
@@ -191,7 +195,9 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
     elif pos:
         (root / 'control' / 'pos_archive').mkdir()
     config = json.loads(compose.read_text(encoding="utf-8"))
-    if args.condition == "B":
+    if args.condition == "B" or (pos and manifest.get('config', {}).get('name') ==
+                                  'pos_pma_complement_v1' and
+                                  manifest.get('zero_model_fixture_only') is False):
         main = config["services"]["main"]
         main["volumes"] += [
             {"type": "bind", "source": (root / "control" / "spool" / "requests").as_posix(),

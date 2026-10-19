@@ -103,6 +103,8 @@ class Tests(unittest.TestCase):
                     handler, tools, max_turns=2, verbose=False))
             self.assertEqual(outcome['result'], 'CURRENT_TASK_DONE')
             self.assertEqual(len(captured), 2)
+            self.assertTrue(all(len(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
+                                <= 90000 for payload in captured))
             first, second = [json.dumps(item, ensure_ascii=False) for item in captured]
             for payload in (first, second):
                 self.assertIn('ORIGINAL_TASK', payload)
@@ -117,6 +119,21 @@ class Tests(unittest.TestCase):
                     .read_text(encoding='utf-8').splitlines()]
             self.assertEqual(sum(row['event'] == 'candidate_pma_request' for row in rows), 4)
             self.assertTrue((root / 'events.result.json').is_file())
+
+    def test_candidate_full_payload_budget_rejects_before_post(self):
+        backend = NativeClaudeSession({'apibase': 'https://fixture.invalid',
+            'apikey': 'SYNTHETIC-NO-ACCESS', 'model': 'claude-opus-4-8',
+            'max_tokens': 64, 'max_retries': 0, 'stream': False})
+        client = NativeToolClient(backend)
+        sent = []
+        with patch('llmcore.requests.post', side_effect=lambda *a, **k: sent.append(k)):
+            with self.assertRaisesRegex(ValueError, 'byte budget'):
+                exhaust(client.chat([{'role': 'system', 'content': 'SYSTEM' * 18000},
+                    {'role': 'user', 'content': 'original task'}],
+                    tools=json.loads((GA / 'assets/tools_schema.json').read_text()),
+                    system_overlay='fallible current-state panel'))
+        self.assertEqual(sent, [])
+        self.assertFalse(any(row['role'] == 'assistant' for row in backend.history))
 
     def test_required_host_capture_failure_stops_candidate_without_replay(self):
         tools = json.loads((GA / 'assets/tools_schema.json').read_text(encoding='utf-8'))
