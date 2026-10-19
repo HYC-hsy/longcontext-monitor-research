@@ -95,6 +95,29 @@ def verify_evidence(directory: Path, *, require_committed: bool = True,
         source_name(name)]
         for name in executed_names}
     script = (base / 'normal/synthetic_test.sh').read_text(encoding='utf-8')
+    candidate_profile = research_candidate == 'pos_pma_complement_v1'
+    provider = status.get('provider_capture', {})
+    if candidate_profile:
+        host_ready = load('host_private/worker_ready.json')
+        requests = {Path(name).name for name in names
+                    if name.startswith('normal/spool/requests/')}
+        responses = {Path(name).name for name in names
+                     if name.startswith('normal/spool/responses/')}
+        if (result.get('candidate_profile_fixture_only') is not True or
+                result.get('fake_host_calls') != 4 or
+                host_ready.get('fake_memory') is not False or
+                host_ready.get('research_candidate') != research_candidate or
+                host_ready.get('run_id') != result.get('run_id') or
+                host_ready.get('task_id') != result.get('task') or
+                len(requests) != 4 or requests != responses or
+                'normal/host_private/fake_host_calls.jsonl' not in names or
+                provider.get('mode') != 'profile' or
+                provider.get('capture_complete') is not True or
+                provider.get('role_calls') != 5 or
+                provider.get('observable_attempts') != 5 or
+                provider.get('observable_returns') != 5 or
+                result.get('fake_provider_captures') != 7):
+            raise RuntimeError('candidate profile fixture capture incomplete')
     if (identity.get('git_blob_source_files') != committed_sources or
             bundled != expected_executed or
             identity.get('harbor_commit') != HARBOR_COMMIT or
@@ -107,7 +130,7 @@ def verify_evidence(directory: Path, *, require_committed: bool = True,
             result.get('harbor_return_code') != 0 or
             result.get('cleanup_confirmed') is not True or
             result.get('evaluation_released') is not True or
-            result.get('fake_provider_captures') != 2 or
+            (not candidate_profile and result.get('fake_provider_captures') != 2) or
             result.get('native_result', {}).get('status') != 'native_recorded' or
             result.get('native_result', {}).get('rewards', {}).get('reward') != 1 or
             status.get('archive_incomplete') is not False or

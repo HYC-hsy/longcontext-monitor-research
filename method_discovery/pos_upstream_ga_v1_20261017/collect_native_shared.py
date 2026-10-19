@@ -23,6 +23,7 @@ def secrets_from_profile(path: Path) -> list[str]:
 
 def mapping_for(source: Path) -> dict[str, Path]:
     identity = json.loads((source / 'run_identity.json').read_text(encoding='utf-8'))
+    manifest = json.loads((source / 'manifest.json').read_text(encoding='utf-8'))
     run = Path(identity['run_root']).resolve(strict=True)
     if not run.is_relative_to(source.resolve(strict=True)):
         raise RuntimeError('run root outside source')
@@ -67,6 +68,13 @@ def mapping_for(source: Path) -> dict[str, Path]:
     mapping['synthetic_test.sh'] = run / 'public_task/tests/test.sh'
     mapping['synthetic_instruction.md'] = run / 'public_task/instruction.md'
     mapping['synthetic_task.toml'] = run / 'public_task/task.toml'
+    if manifest.get('candidate_profile_fixture_only') is True:
+        mapping['host_private/worker_ready.json'] = run / 'host_private/worker_ready.json'
+        mapping['host_private/fake_host_calls.jsonl'] = run / 'host_private/fake_host_calls.jsonl'
+        spool = run / 'control/spool'
+        for kind in ('requests', 'responses'):
+            for path in sorted((spool / kind).glob('*.json')):
+                mapping[f'spool/{kind}/{path.name}'] = path
     return mapping
 
 
