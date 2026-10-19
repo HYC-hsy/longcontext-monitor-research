@@ -103,7 +103,8 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
         handler.parent.pos_decision_context = True
         pos.exchange('reset', case_id=os.environ.get('GA_BENCH_TASK_ID', 'offline-task'),
                      task=initial_content, observation=initial_content,
-                     actions=tools_schema)
+                     actions=tools_schema,
+                     citation_fixed=os.environ.get('GA_POS_CITATION_FIXED') == '1')
     if os.environ.get('GA_PMA_UPSTREAM_ENABLED') == '1':
         if (os.environ.get('GA_PMA_ENABLED') == '1' or
                 os.environ.get('GA_MONITOR_ENABLED') == '1' or

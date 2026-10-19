@@ -6,10 +6,20 @@ The caller owns Task actions and termination; no PMA object is instantiated.
 from __future__ import annotations
 
 from copy import deepcopy
+import importlib.util
 import json
+from pathlib import Path
 
 from belief.manager import BeliefManager
 from prompts.react_prompt import FRONTIER_ACTION_SELECTION_CONTRACT, _frontier_relevant_world
+
+
+def _citation_fixed_manager():
+    path = Path(__file__).with_name('citation_fix.py')
+    spec = importlib.util.spec_from_file_location('pos_ga_citation_fix', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.CitationFixedBeliefManager
 
 
 def execution_config() -> dict:
@@ -37,13 +47,15 @@ class PoSEpisode:
     """One completed GA decision/batch becomes one PoS transition."""
 
     def __init__(self, *, case_id, config, logger, belief_call, consistency_call,
-                 progress_call):
+                 progress_call, citation_fixed=False):
         self.case_id = case_id
         self.config = deepcopy(config)
         self.logger = logger
-        self.manager = BeliefManager(self.config, belief_call, logger,
+        manager_class = _citation_fixed_manager() if citation_fixed else BeliefManager
+        self.manager = manager_class(self.config, belief_call, logger,
                                      call_sentinel=consistency_call,
                                      call_progress=progress_call)
+        self.citation_mode = 'decoded_source_fields_v1' if citation_fixed else 'released_core'
         self.started = False
         self.ended = False
         self.success_known = False

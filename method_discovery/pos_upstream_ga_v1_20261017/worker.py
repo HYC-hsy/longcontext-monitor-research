@@ -304,6 +304,7 @@ def main():
         def digest(path): return hashlib.sha256(path.read_bytes()).hexdigest()
         for key, path in (('worker_sha256', Path(__file__)),
                           ('episode_sha256', args.episode_module),
+                          ('citation_fix_sha256', args.episode_module.with_name('citation_fix.py')),
                           ('profile_sha256', args.profile_file)):
             if binding.get(key) != digest(path.resolve(strict=True)):
                 raise RuntimeError('PoS profile binding bytes differ: ' + key)
@@ -354,7 +355,8 @@ def main():
                         config=module.execution_config(), logger=logger,
                         belief_call=transport.caller('belief'),
                         consistency_call=transport.caller('consistency'),
-                        progress_call=transport.caller('progress'))
+                        progress_call=transport.caller('progress'),
+                        citation_fixed=command.get('citation_fixed', False))
                     value = episode.reset(task=command['task'],
                         observation=command['observation'], actions=command['actions'])
                 elif episode is None:

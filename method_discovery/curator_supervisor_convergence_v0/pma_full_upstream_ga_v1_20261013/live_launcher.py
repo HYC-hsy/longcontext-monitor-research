@@ -477,6 +477,7 @@ def run_live(args) -> dict:
             'config_sha256': manifest['config_sha256'],
             'worker_sha256': _sha(staged_pos / 'worker.py'),
             'episode_sha256': _sha(staged_pos / 'episode.py'),
+            'citation_fix_sha256': _sha(staged_pos / 'citation_fix.py'),
             'profile_sha256': _sha(root / 'bundle/source/mykey.json'),
             'vendor_files_sha256': manifest['vendor_files_sha256'],
         }

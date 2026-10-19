@@ -27,6 +27,7 @@ SOURCE_FILES = (
     'GenericAgent-main/research_runtime.py',
     'GenericAgent-main/pos_bridge.py',
     'method_discovery/pos_upstream_ga_v1_20261017/episode.py',
+    'method_discovery/pos_upstream_ga_v1_20261017/citation_fix.py',
     'method_discovery/pos_upstream_ga_v1_20261017/worker.py',
     'method_discovery/pos_upstream_ga_v1_20261017/provider_capture.py',
     'method_discovery/pos_upstream_ga_v1_20261017/compatibility_probe.py',

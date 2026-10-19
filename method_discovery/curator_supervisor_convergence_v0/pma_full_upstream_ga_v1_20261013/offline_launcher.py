@@ -126,7 +126,7 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
         pos_source = STAGE.parents[1] / 'pos_upstream_ga_v1_20261017'
         pos_stage = ga_stage / 'pos_runtime'
         pos_stage.mkdir()
-        for name in ('worker.py', 'episode.py'):
+        for name in ('worker.py', 'episode.py', 'citation_fix.py'):
             shutil.copy2(pos_source / name, pos_stage / name)
         shutil.copytree(pos_source / 'vendor', pos_stage / 'vendor',
                         ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '.git'))
@@ -145,7 +145,7 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
         for name in ('agent_loop.py', 'agentmain.py', 'ga.py', 'llmcore.py',
                      'research_runtime.py',
                      'pos_bridge.py', 'pos_runtime/worker.py',
-                     'pos_runtime/episode.py'):
+                     'pos_runtime/episode.py', 'pos_runtime/citation_fix.py'):
             staged = source / name
             actual = hashlib.sha256(staged.read_bytes()).hexdigest()
             frozen_name = ('method_discovery/pos_upstream_ga_v1_20261017/' +
