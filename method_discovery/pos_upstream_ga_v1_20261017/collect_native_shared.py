@@ -47,8 +47,11 @@ def mapping_for(source: Path) -> dict[str, Path]:
         if path.suffix in {'.json', '.sse'}:
             mapping['fake_requests/' + path.name] = path
     pos = run / 'control/pos_archive'
-    for name in ('events.jsonl', 'events.host.jsonl', 'events.result.json',
-                 'events.close.json', 'events.stderr.log'):
+    event_names = ['events.jsonl', 'events.host.jsonl', 'events.result.json',
+                   'events.close.json']
+    if manifest.get('candidate_profile_fixture_only') is not True:
+        event_names.append('events.stderr.log')
+    for name in event_names:
         mapping[name] = pos / name
     if (pos / 'events.provider.jsonl').is_file():
         mapping['events.provider.jsonl'] = pos / 'events.provider.jsonl'
@@ -70,7 +73,7 @@ def mapping_for(source: Path) -> dict[str, Path]:
     mapping['synthetic_task.toml'] = run / 'public_task/task.toml'
     if manifest.get('candidate_profile_fixture_only') is True:
         mapping['host_private/worker_ready.json'] = run / 'host_private/worker_ready.json'
-        mapping['host_private/fake_host_calls.jsonl'] = run / 'host_private/fake_host_calls.jsonl'
+        mapping['host_private/fake_host_calls.jsonl'] = archive / 'fake_host_calls.jsonl'
         spool = run / 'control/spool'
         for kind in ('requests', 'responses'):
             for path in sorted((spool / kind).glob('*.json')):
