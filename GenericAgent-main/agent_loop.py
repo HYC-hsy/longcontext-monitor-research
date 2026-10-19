@@ -83,8 +83,12 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
         raise ValueError('complement requires an explicit PoS worker')
     pos_observation = initial_content
     pos_auxiliary_errors = []
+    pos_integrity_failed = False
     def pos_record(kind, payload):
+        nonlocal pos_integrity_failed
         if pos is None:
+            return
+        if complement and pos_integrity_failed:
             return
         try:
             pos.record_host(kind, payload)
@@ -93,6 +97,18 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
             # failure is auxiliary, never a change to the Task result.
             pos_auxiliary_errors.append({'kind': kind, 'error_type':
                                          type(error).__name__})
+            if complement:
+                pos_integrity_failed = True
+                # Do not send another Task or auxiliary inference after a
+                # required candidate host receipt is lost. Closing stdin lets
+                # the worker persist whatever partial state it already owns.
+                try:
+                    pos.close()
+                except BaseException as cleanup_error:
+                    pos_auxiliary_errors.append({'kind': 'candidate_close_after_capture_failure',
+                                                 'error_type': type(cleanup_error).__name__})
+                if not exit_reason:
+                    raise RuntimeError('candidate required host capture failed') from error
     if os.environ.get('GA_POS_ENABLED') == '1':
         if any(os.environ.get(name) == '1' for name in (
                 'GA_PMA_UPSTREAM_ENABLED', 'GA_PMA_ENABLED',
@@ -370,6 +386,10 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
             if pos_actions is not None and tool_name != 'no_tool':
                 pos_actions[ii]['status'] = ('rejected' if tool_name == 'bad_json' or
                     not hasattr(handler, 'do_' + tool_name) else 'executed')
+                if outcome.should_exit:
+                    exit_reason = {'result': 'EXITED', 'data': outcome.data}
+                elif not outcome.next_prompt:
+                    exit_reason = {'result': 'CURRENT_TASK_DONE', 'data': outcome.data}
                 receipt = {'tool_use_id': tid, 'name': tool_name,
                            'status': pos_actions[ii]['status'],
                            'result': _pos_public_value(outcome.data),
@@ -398,6 +418,9 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
             except BaseException as error:
                 if not exit_reason:
                     raise
+                if complement:
+                    pos_auxiliary_errors.append({'kind': 'terminal_decision_receipt',
+                                                 'error_type': type(error).__name__})
                 _research_emit('pos_terminal_context_error', {
                     'host_terminal': exit_reason, 'error_type': type(error).__name__,
                     'error': str(error)}, internal_turn=turn)
@@ -429,12 +452,21 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                                      {'result': 'CURRENT_TASK_DONE'})['result']),
                                      observation=terminal_observation)
                     except BaseException as error:
+                        if complement:
+                            pos_auxiliary_errors.append({'kind': 'terminal_auxiliary_update_or_finish',
+                                                         'error_type': type(error).__name__})
                         _research_emit('pos_terminal_context_error', {
                             'host_terminal': exit_reason or {'result': 'CURRENT_TASK_DONE'},
                             'error_type': type(error).__name__, 'error': str(error)},
                             internal_turn=turn)
                     finally:
-                        pos.close()
+                        try:
+                            pos.close()
+                        except BaseException as error:
+                            if not complement:
+                                raise
+                            pos_auxiliary_errors.append({'kind': 'terminal_auxiliary_close',
+                                                         'error_type': type(error).__name__})
                 if pma_upstream is not None:
                     pma_upstream.actor_step(
                         turn, status='completed', response=response.content or '',
@@ -487,9 +519,22 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
             response, 'complete_response_accepted', False)) and _is_provider_error_response(response):
         final_outcome = {'result': 'PROVIDER_FAILURE', 'error': response.content}
     if pos is not None and not pos.closed:
-        try: pos.exchange('finish', reason=final_outcome['result'],
-                          observation=pos_observation)
-        finally: pos.close()
+        try:
+            pos.exchange('finish', reason=final_outcome['result'],
+                         observation=pos_observation)
+        except BaseException as error:
+            if not complement:
+                raise
+            pos_auxiliary_errors.append({'kind': 'final_auxiliary_finish',
+                                         'error_type': type(error).__name__})
+        finally:
+            try:
+                pos.close()
+            except BaseException as error:
+                if not complement:
+                    raise
+                pos_auxiliary_errors.append({'kind': 'final_auxiliary_close',
+                                             'error_type': type(error).__name__})
     if pos is not None and pos_auxiliary_errors:
         final_outcome = {**final_outcome, 'pos_archive_incomplete': True,
                          'pos_auxiliary_errors': pos_auxiliary_errors}

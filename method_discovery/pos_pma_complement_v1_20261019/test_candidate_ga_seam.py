@@ -118,6 +118,83 @@ class Tests(unittest.TestCase):
             self.assertEqual(sum(row['event'] == 'candidate_pma_request' for row in rows), 4)
             self.assertTrue((root / 'events.result.json').is_file())
 
+    def test_required_host_capture_failure_stops_candidate_without_replay(self):
+        tools = json.loads((GA / 'assets/tools_schema.json').read_text(encoding='utf-8'))
+        system = (GA / 'assets/sys_prompt_en.txt').read_text(encoding='utf-8')
+        for fail_at, terminal in [('tool_started', False),
+                                  ('tool_outcome', False),
+                                  ('decision_batch_completed', False),
+                                  ('tool_outcome', True)]:
+            with self.subTest(fail_at=fail_at, terminal=terminal), \
+                 tempfile.TemporaryDirectory() as tmp:
+                calls = []
+                class Bridge:
+                    closed = False
+                    process = SimpleNamespace(poll=lambda: 0)
+                    def exchange(self, kind, **kwargs):
+                        calls.append(('aux', kind))
+                        if kind == 'decision_panel':
+                            return {'panel': 'fallible current state',
+                                    'included_advice': None}
+                        return {'status': 'ok'}
+                    def record_host(self, kind, payload):
+                        calls.append(('host', kind))
+                        if kind == fail_at:
+                            raise OSError('synthetic required journal failure')
+                    def close(self):
+                        self.closed = True
+                bridge = Bridge()
+                parent = SimpleNamespace(task_dir=tmp, extrakeyinfo=None,
+                    intervene=None, obligation_ledger=None,
+                    evidence_completion_kernel=None, research_condition=None,
+                    monitor_runtime=None, _turn_end_hooks={}, verbose=False)
+                class Handler(GenericAgentHandler):
+                    def do_code_run(self, args, response):
+                        calls.append(('tool', 'code_run'))
+                        if False: yield None
+                        return StepOutcome({'stdout': 'ACTUAL'},
+                            next_prompt='' if terminal else 'continue')
+                handler = Handler(parent, cwd=tmp)
+                backend = NativeClaudeSession({'apibase': 'https://fixture.invalid',
+                    'apikey': 'SYNTHETIC-NO-ACCESS', 'model': 'claude-opus-4-8',
+                    'max_tokens': 64, 'max_retries': 0, 'stream': False})
+                client = NativeToolClient(backend)
+                parent.llmclient = client
+                sent = []
+                class HTTP:
+                    status_code = 200
+                    headers = {}
+                    def __enter__(self): return self
+                    def __exit__(self, *args): return False
+                    def json(self): return {'content': [{'type': 'tool_use',
+                        'name': 'code_run', 'id': 't1', 'input': {}}], 'usage': {}}
+                    def close(self): pass
+                def post(_url, **kwargs):
+                    sent.append(kwargs['json'])
+                    return HTTP()
+                env = {'GA_POS_ENABLED': '1', 'GA_POS_PMA_COMPLEMENT': '1',
+                       'GA_LANG': 'en', 'GA_BENCH_TASK_ID': 'synthetic'}
+                with patch.dict(os.environ, env), \
+                     patch('pos_bridge.PoSBridge.from_environment', return_value=bridge), \
+                     patch('llmcore.requests.post', side_effect=post):
+                    if terminal:
+                        outcome = exhaust(agent_runner_loop(client, system, 'TASK',
+                            handler, tools, max_turns=2, verbose=False))
+                        self.assertEqual(outcome['result'], 'CURRENT_TASK_DONE')
+                        self.assertTrue(outcome['pos_archive_incomplete'])
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, 'capture failed'):
+                            exhaust(agent_runner_loop(client, system, 'TASK',
+                                handler, tools, max_turns=2, verbose=False))
+                self.assertEqual(len(sent), 1)
+                self.assertTrue(bridge.closed)
+                self.assertFalse(any(kind == 'aux' and value == 'update'
+                                     for kind, value in calls))
+                if fail_at == 'tool_started':
+                    self.assertNotIn(('tool', 'code_run'), calls)
+                else:
+                    self.assertIn(('tool', 'code_run'), calls)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
