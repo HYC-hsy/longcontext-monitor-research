@@ -1,0 +1,109 @@
+pos_pma_complement_v1 — limited offline closure, 2026-10-20
+
+Scope and identity
+- Runtime change commit: 1d1c43342290d59f3c2d663bd9db7136309c5f2a.
+- Candidate is default-off; PLAN_UNAUTHORIZED.json remains execution_authorized=false.
+- PoS 6818cfa6434dbc91fcf67f0b3eb12a91db47433f and PMA
+  89e5c0d6aadfe531a1aee42fd290d48be89973dd vendor bytes unchanged.
+- No real Task/model/provider, formal task, official evaluator, training, or scoring
+  model call was made in this closure. The local fake HTTP calls, synthetic Task
+  tool, and synthetic sentinel below are real *offline test* activity.
+
+Changes in the runtime commit
+- Candidate auxiliary RoleTransport now reads a typed result from the existing
+  NativeClaudeSession parser. HTTP/transport, deadline/cancel, incomplete stream,
+  and required-capture failures cannot be presented as JSON-repair model text.
+  A complete model answer containing an error-looking literal remains ordinary
+  text. The Task complete-response retry switch is not applied to auxiliary
+  roles; no extra auxiliary retry or JSON-correction round was added.
+- Candidate-only live success qualification requires affirmative archive and
+  Task-terminal availability. It does not rewrite CURRENT_TASK_DONE, tool
+  receipts, evaluation, or other methods' success conditions.
+- Historical source slicing fixes the remaining=1, tail[-0:] bug; a 1999-char
+  field followed by a 5000-char field cannot expand to 6999 displayed chars.
+  Phase 2 includes the already available health/progress scored/unscored signal.
+  Actual bank-render IDs/hashes and advice SHA are persisted, with no new search.
+- REUSE_MAP.md and RUNNING.md distinguish these candidate adaptations from
+  unchanged vendor method code. See the runtime commit for the complete diff.
+
+Targeted tests actually run
+- After the runtime commit, focused unittest command (the 7 modules named in
+  TEST_OUTPUT_CLOSURE_20261020.txt): 45 tests, unittest says OK. PowerShell's
+  Tee-Object pipeline returned shell code 1 because Python stderr was surfaced
+  as NativeCommandError; this is reported separately from unittest's OK line.
+  The saved output SHA-256 is
+  5bfedec8f886cfa691d2b29706300bfc63fbb15ea6968b12b5e6d35328c79d0e.
+  PowerShell 5.1 wrote that untouched capture as UTF-16LE. The separately
+  readable UTF-8 conversion (with one trailing-space-only line normalized) is
+  TEST_OUTPUT_CLOSURE_20261020_UTF8.txt, SHA-256
+  fcd41333d897b6c182eac5aebcf3c8125d4df1382a28d9c0dcbd6f7c308d04fa;
+  it is not claimed byte-identical to the capture.
+- Earlier post-change checks: Task complete-response 20 passed; original PoS
+  GA seam 18 passed; original PoS offline 6 passed (after correcting its module
+  import invocation); independent PMA host spool 3 passed. These are distinct
+  commands, not counted inside the 45 tests.
+- Actual packaged profile-process test, frozen runtime commit, isolated Docker
+  and local fake SSE: candidate_profile_docker_20261020_v4, status=pass. The
+  container PoS worker emitted 5 fake HTTP attempts; an independent host PMA
+  subprocess emitted 4 fake LiteLLM calls (phase1, phase2, phase1, phase2).
+  Ready identity, spool command/response binding, worker exit, captured provider
+  requests, and panel delivery were checked. A command after host exit remained
+  unknown and was not replayed. This test does NOT enter single_run/Harbor.
+  Public derived, line-indexed evidence: raw_profile_process_v1/.
+- Source-bound existing single_run/Harbor/native-SHARED synthetic fixture:
+  pos_pma_synthetic_20261020_v3, run pos-bcf790842684409b,
+  controller_exit=0, Harbor return=0, Task final CURRENT_TASK_DONE,
+  pos_archive_status.archive_incomplete=false, result/close bound, evaluation
+  released, synthetic sentinel test.sh executed once and returned 0, synthetic
+  reward=1, cleanup_confirmed=true and owned volume clearance=clean. The
+  synthetic Task uses its code_run to create a file and HTTP service; the
+  sentinel checks both. Two fake Task requests, five fake PoS role calls, four
+  fake PMA role calls are present. Its authorization.json was removed. This
+  fixture intentionally uses fake auxiliary replies; it does NOT exercise the
+  independent host PMA profile subprocess. Public derived evidence:
+  raw_native_shared_v4/FILE_HASHES.json and its individually readable JSONL.
+  Untouched private batch_result SHA-256:
+  97e7cef8b785ed82a5100eef52440b80a8b77885d657d97ee30f38fd1f60e8a7.
+  Untouched private live_result SHA-256:
+  d63d1b8588db4a61799edce0277058deac695c3439fcdf8ff65a2ab16419665a.
+
+Preserved failed setup attempts
+- pos_pma_synthetic_20261020_v1 stopped before Harbor because the selected
+  Harbor checkout had tracked modifications. It was not reset or overwritten.
+- pos_pma_synthetic_20261020_v2 stopped before the Task/evaluator because a
+  different bench checkout had GA adapter SHA 8a4513... rather than the pinned
+  f50894... . The v3 command used the unchanged pinned checkout. v2 remains
+  intact; its fake authorization was removed. These setup failures are not
+  called successful runs.
+
+Remaining limitations — do not promote this to a complete profile certification
+- The full single_run -> Harbor -> independent host PMA profile process -> event
+  spool -> container PoS worker -> Task panel -> native-SHARED sentinel sequence
+  has NOT been observed in one run. The profile-process and native-SHARED
+  tests above are separate. The existing zero-model fixture deliberately routes
+  auxiliary roles through fake mode, while production profile routing requires
+  private profile identity and authorization. We have not relaxed that boundary
+  or introduced a synthetic flag that could authorize a real request.
+- The private profile's effective model context-window limit is not specified
+  in the frozen fields inspected; the 90000-byte engineering guard and GA's
+  history heuristic are logged but cannot prove the provider context fits.
+  Actual token use and any downstream provider truncation remain unknown.
+- Thus candidate mechanism effectiveness and complete production profile
+  lifecycle remain unverified. No real experiment authorization was created.
+
+Redaction and byte identity
+- The raw directories here are derived public copies, not byte-identical
+  private originals. Each FILE_HASHES.json records original source byte count
+  and SHA-256 separately from public byte count and SHA-256. JSON was parsed
+  and reserialized, so redactions=0 alone would never imply identical bytes.
+- Example: a provider request's model-visible system/messages/tools and
+  generation knobs are retained in raw_profile_process_v1/provider_events.jsonl,
+  while provider_url, authentication/headers, profile credentials, and hidden
+  thinking are not exported. The exporter fails on an unexpected endpoint or
+  secret marker inside those model-visible fields; it does not silently shorten
+  the task text. The independent raw source remains private and untouched.
+- Do not use the local fake endpoint or fake credentials as a real profile.
+
+No active authorization remains from the synthetic fixture. No unrelated
+__pycache__ entries were touched. No subsequent real compatibility probe or
+formal experiment was started.

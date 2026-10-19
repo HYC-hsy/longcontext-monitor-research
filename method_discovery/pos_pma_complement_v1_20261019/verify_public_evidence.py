@@ -15,12 +15,14 @@ def sha(data):
 def main():
     result = {}
     for name in ('raw_native_shared_v1', 'raw_native_shared_v2',
-                 'raw_native_shared_v3', 'raw_offline_v4'):
+                 'raw_native_shared_v3', 'raw_offline_v4',
+                 'raw_native_shared_v4', 'raw_profile_process_v1'):
         base = BASE / name
         index = json.loads((base / 'FILE_HASHES.json').read_text(encoding='utf-8'))
         count = 0
         for item in index['files']:
-            relative = item.get('path', item.get('public_path'))
+            relative = item.get('path', item.get('public_path',
+                                item.get('public_file')))
             target = (base / relative).resolve(strict=True)
             if not target.is_relative_to(base):
                 raise RuntimeError('evidence path escapes published directory')
