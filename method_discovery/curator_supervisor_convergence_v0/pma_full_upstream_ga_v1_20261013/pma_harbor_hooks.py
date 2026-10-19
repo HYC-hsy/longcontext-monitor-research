@@ -300,7 +300,11 @@ class NativeSharedTrialHooks(PMATrialHooks):
         env_names = [value.split('=', 1)[0] for value in raw.get('Config', {}).get('Env', [])]
         if any(name.endswith('_API_KEY') for name in env_names):
             raise RuntimeError('provider credential environment exposed to Task')
-        if self.spec['condition'] == 'B':
+        candidate_profile = (self.spec['condition'] == 'P' and
+            self.spec.get('research_candidate') == 'pos_pma_complement_v1' and
+            (self.spec.get('zero_model_fixture_only') is not True or
+             self.spec.get('candidate_profile_fixture_only') is True))
+        if self.spec['condition'] == 'B' or candidate_profile:
             for destination, expected_rw, source in (
                     ('/run/pma-bridge/requests', True, 'requests'),
                     ('/run/pma-bridge/responses', False, 'responses')):
@@ -320,7 +324,9 @@ class NativeSharedTrialHooks(PMATrialHooks):
                     _source_identity(expected.as_posix())):
                 raise RuntimeError('PoS archive mount identity differs')
             fake = mounts.get('/run/pos-fake-replies.json')
-            if (fake is not None) != bool(self.spec.get('zero_model_fixture_only')):
+            expected_fake = (self.spec.get('zero_model_fixture_only') is True and
+                self.spec.get('candidate_profile_fixture_only') is not True)
+            if (fake is not None) != expected_fake:
                 raise RuntimeError('PoS fake reply mount differs from fixture identity')
         elif any(path.startswith('/run/pos-') for path in mounts):
             raise RuntimeError('non-P Task sees PoS mount')
