@@ -29,15 +29,22 @@ def main() -> None:
     parser.add_argument('--pma-profile-file')
     parser.add_argument('--python-home', default='cpython-3.12.12-linux-x86_64-gnu')
     parser.add_argument('--service-fixture', action='store_true')
+    parser.add_argument('--candidate-profile-fixture', action='store_true',
+                        help='isolated synthetic P with real independent PMA host process')
     args = parser.parse_args()
     root = args.output.resolve(strict=False)
     if args.condition == 'P' and (args.task != 'pos-synthetic-file-http' or
                                    args.research_candidate not in {'PoS',
                                        'PoS-citation-fixed', 'pos_pma_complement_v1'}):
         raise RuntimeError('PoS zero-model fixture must use the synthetic P identity')
+    if args.candidate_profile_fixture and (args.condition != 'P' or
+            args.research_candidate != 'pos_pma_complement_v1' or
+            not args.pma_profile_file):
+        raise RuntimeError('profile fixture requires synthetic candidate and fake PMA profile')
     identity = prepare(argparse.Namespace(output=str(root), task=args.task,
         condition=args.condition, occurrence=1, fake_only=True,
         synthetic_pos_fixture=args.condition == 'P',
+        candidate_profile_fixture=args.candidate_profile_fixture,
         research_candidate=args.research_candidate,
         official_source_git=args.official_source_git,
         task_profile_file=args.task_profile_file,
@@ -75,6 +82,7 @@ def main() -> None:
                    run_root=identity['run_root'], batch_id=identity['run_id'],
                    config_sha256=manifest['config_sha256'])
     auth = {'execution_authorized': True, 'zero_model_fixture_only': True,
+            'candidate_profile_fixture_only': args.candidate_profile_fixture,
             'manifest_sha256': identity['manifest_sha256'],
             'audited_code_commit': head, 'approved_arms': manifest['planned_order'],
             'run_bindings': [binding], 'run_id': identity['run_id'],
@@ -95,6 +103,8 @@ def main() -> None:
         '--official-source-git', args.official_source_git,
         '--harbor-source-root', args.harbor_source_root,
         '--python-home', args.python_home]
+    if args.candidate_profile_fixture:
+        command += ['--candidate-profile-fixture']
     if args.pma_profile_file:
         command += ['--pma-profile-file', args.pma_profile_file]
     try:
@@ -110,7 +120,8 @@ def main() -> None:
         authorization.unlink(missing_ok=True)
         (root / 'fake_authorization_removed.json').write_text(json.dumps({
             'authorization_removed': not authorization.exists(),
-            'zero_model_fixture_only': True}), encoding='utf-8')
+            'zero_model_fixture_only': True,
+            'candidate_profile_fixture_only': args.candidate_profile_fixture}), encoding='utf-8')
     print(json.dumps({'task': args.task, 'condition': args.condition,
                       'controller_exit': completed.returncode,
                       'run_root': identity['run_root'],

@@ -37,6 +37,11 @@ def prepare(args: argparse.Namespace) -> dict:
     if pos:
         plan.update(method=getattr(args, 'research_candidate', 'PoS'), synthetic_fixture=bool(
             getattr(args, 'synthetic_pos_fixture', False)))
+        if getattr(args, 'candidate_profile_fixture', False):
+            if (not plan['synthetic_fixture'] or not args.fake_only or
+                    plan['method'] != 'pos_pma_complement_v1'):
+                raise RuntimeError('candidate profile fixture requires isolated synthetic P')
+            plan['candidate_profile_fixture_only'] = True
         if getattr(args, 'task_complete_response', False):
             if plan['synthetic_fixture']:
                 raise RuntimeError('synthetic PoS fixture cannot authorize Task response policy')
@@ -88,7 +93,10 @@ def run(args: argparse.Namespace) -> dict:
     if (len(bindings) != 1 or bindings[0]['run_id'] != identity['run_id'] or
             bindings[0]['run_root'] != identity['run_root'] or
             granted.get('manifest_sha256') != identity['manifest_sha256'] or
-            bool(args.zero_model_fixture) != (manifest.get('zero_model_fixture_only') is True)):
+            bool(args.zero_model_fixture) != (manifest.get('zero_model_fixture_only') is True) or
+            bool(args.candidate_profile_fixture) !=
+                (manifest.get('candidate_profile_fixture_only') is True and
+                 granted.get('candidate_profile_fixture_only') is True)):
         raise RuntimeError('single-run identity or fixture mode differs from approval')
     if manifest.get('schema') == 'pos-ga-single-manifest-v1':
         policy = manifest.get('config', {}).get('task_complete_response_policy', 'disabled')
@@ -108,7 +116,8 @@ def run(args: argparse.Namespace) -> dict:
         worker_python=args.worker_python, harbor_python=args.harbor_python,
         bench_root=args.bench_root, official_source_git=args.official_source_git,
         harbor_source_root=args.harbor_source_root, python_home=args.python_home,
-        zero_model_fixture=args.zero_model_fixture)
+        zero_model_fixture=args.zero_model_fixture,
+        candidate_profile_fixture=args.candidate_profile_fixture)
     result = run_batch(options)
     return {'run_id': identity['run_id'], 'arm': result['arms'][0] if result['arms'] else None,
             'stop_reason': result['stop_reason']}
@@ -130,6 +139,7 @@ def main() -> None:
     prepared.add_argument('--pma-profile-file')
     prepared.add_argument('--fake-only', action='store_true')
     prepared.add_argument('--synthetic-pos-fixture', action='store_true')
+    prepared.add_argument('--candidate-profile-fixture', action='store_true')
     prepared.add_argument('--task-complete-response', action='store_true',
                           help='bind complete-response-v1 for the Task only')
     prepared.add_argument('--certification-dir',
@@ -144,6 +154,7 @@ def main() -> None:
     launched.add_argument('--pma-profile-file')
     launched.add_argument('--python-home', default='cpython-3.12.12-linux-x86_64-gnu')
     launched.add_argument('--zero-model-fixture', action='store_true')
+    launched.add_argument('--candidate-profile-fixture', action='store_true')
     pos_plan = commands.add_parser('prepare-pos', help='unarmed fixed-source PoS serial plan')
     pos_plan.add_argument('--task', action='append', required=True,
                           help='canonical registered task ID, repeat in desired serial order')

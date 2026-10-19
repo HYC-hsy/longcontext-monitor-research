@@ -32,6 +32,7 @@ SOURCE_FILES = (
     'method_discovery/pos_pma_complement_v1_20261019/candidate.py',
     'method_discovery/pos_pma_complement_v1_20261019/memory_adapter.py',
     'method_discovery/pos_pma_complement_v1_20261019/synthetic_replies.json',
+    'method_discovery/pos_pma_complement_v1_20261019/test_fake_host_entry.py',
     'method_discovery/pos_upstream_ga_v1_20261017/worker.py',
     'method_discovery/curator_supervisor_convergence_v0/'
     'pma_full_upstream_ga_v1_20261013/event_spool.py',
@@ -42,6 +43,8 @@ SOURCE_FILES = (
     'method_discovery/pos_upstream_ga_v1_20261017/serial_live.py',
     'method_discovery/curator_supervisor_convergence_v0/'
     'pma_full_upstream_ga_v1_20261013/single_run.py',
+    'method_discovery/curator_supervisor_convergence_v0/'
+    'pma_full_upstream_ga_v1_20261013/single_run_fixture.py',
     'method_discovery/curator_supervisor_convergence_v0/'
     'pma_full_upstream_ga_v1_20261013/batch_controller.py',
     'method_discovery/curator_supervisor_convergence_v0/'
@@ -103,6 +106,10 @@ def prepare(plan: dict, source: Path, task_profile: Path,
         raise RuntimeError('PoS single-run plan identity invalid')
     task = plan['task']
     synthetic = plan.get('synthetic_fixture') is True
+    candidate_profile_fixture = plan.get('candidate_profile_fixture_only') is True
+    if candidate_profile_fixture and (not synthetic or
+            plan['method'] != 'pos_pma_complement_v1'):
+        raise RuntimeError('candidate profile fixture identity invalid')
     policy = plan.get('task_complete_response_policy', 'disabled')
     if policy not in {'disabled', 'complete-response-v1'} or (synthetic and policy != 'disabled'):
         raise RuntimeError('PoS Task response policy invalid')
@@ -201,7 +208,8 @@ def prepare(plan: dict, source: Path, task_profile: Path,
                          'committed_evidence_sha256': sha(index),
                          'result': verified}
     pma_profile_sha256 = None
-    if plan['method'] == 'pos_pma_complement_v1' and not synthetic:
+    if plan['method'] == 'pos_pma_complement_v1' and (not synthetic or
+            candidate_profile_fixture):
         if pma_profile is None:
             raise RuntimeError('candidate requires existing private PMA profile identity')
         profile_path = pma_profile.resolve(strict=True)
@@ -211,6 +219,10 @@ def prepare(plan: dict, source: Path, task_profile: Path,
                 private_profile.get('model'), private_profile.get('thinking_type')) != (
                 'anthropic', 'messages', 'claude-opus-4-8', 'adaptive'):
             raise RuntimeError('candidate PMA profile route differs from pinned U route')
+        if candidate_profile_fixture and (private_profile.get('apibase') !=
+                'https://fake.invalid/no-network' or private_profile.get('apikey') !=
+                'SYNTHETIC_TEST_ONLY'):
+            raise RuntimeError('candidate fixture profile is not the isolated test profile')
         pma_profile_sha256 = sha(profile_path)
         method['pma_transport'] = {'kind': 'pinned_host_litellm_spool_v1',
             'profile_sha256': pma_profile_sha256,
@@ -222,6 +234,7 @@ def prepare(plan: dict, source: Path, task_profile: Path,
             separators=(',', ':')).encode('utf-8')).hexdigest()
     return {'schema': 'pos-ga-single-manifest-v1', 'status': 'prepared_not_executed',
             'execution_authorized': False, 'zero_model_fixture_only': synthetic,
+            'candidate_profile_fixture_only': candidate_profile_fixture,
             'official_source_git_commit': COMMIT, 'upstream_commit': UPSTREAM,
             'task_profile_sha256': sha(task_profile),
             'pma_profile_sha256': pma_profile_sha256,

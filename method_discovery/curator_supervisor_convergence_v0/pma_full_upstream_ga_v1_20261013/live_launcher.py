@@ -356,6 +356,10 @@ def run_live(args) -> dict:
     if fixture != (manifest.get('zero_model_fixture_only') is True and
                    authorized.get('zero_model_fixture_only') is True):
         raise RuntimeError('zero-model fixture identity does not match both records')
+    profile_fixture = bool(getattr(args, 'candidate_profile_fixture', False))
+    if profile_fixture != (manifest.get('candidate_profile_fixture_only') is True and
+                           authorized.get('candidate_profile_fixture_only') is True):
+        raise RuntimeError('candidate profile fixture identity differs')
     candidate = getattr(args, 'research_candidate', 'U')
     expected_candidate = (manifest['planned_order'][0]['research_candidate']
         if manifest['schema'] in {'pma-ga-live-manifest-v5',
@@ -370,7 +374,10 @@ def run_live(args) -> dict:
             (STAGE.parents[2] / 'GenericAgent-main').resolve(strict=True)):
         raise RuntimeError('V3 GA source is not the frozen repository bridge')
     candidate_profile = (args.condition == 'P' and candidate == 'pos_pma_complement_v1'
-                         and not fixture)
+                         and (not fixture or profile_fixture))
+    if profile_fixture and (not fixture or not candidate_profile or
+            args.task != 'pos-synthetic-file-http'):
+        raise RuntimeError('profile fixture requires isolated synthetic candidate')
     memory_profile_path = None
     if args.condition == 'B' or candidate_profile:
         if not args.pma_profile_file:
@@ -402,10 +409,16 @@ def run_live(args) -> dict:
         compose_path.write_text(json.dumps(compose), encoding='utf-8')
         _offline_gateway(root, Path(args.runtime_root), args.python_home)
         compose = json.loads(compose_path.read_text(encoding='utf-8'))
+        if profile_fixture:
+            from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import ROOT
+            replies = ROOT.parent / 'pos_pma_complement_v1_20261019' / 'synthetic_replies.json'
+            compose['services']['model-gateway']['volumes'].append(
+                f'{replies.resolve(strict=True).as_posix()}:/pos_role_replies.json:ro')
         compose['services']['model-gateway']['environment'] = {
             'PMA_MULTITURN_FIXTURE': '1',
             'PMA_SERVICE_FIXTURE': '1' if os.environ.get('PMA_SERVICE_FIXTURE') == '1' else '0',
-            'POS_SYNTHETIC_FIXTURE': '1' if args.condition == 'P' else '0'}
+            'POS_SYNTHETIC_FIXTURE': '1' if args.condition == 'P' else '0',
+            'POS_CANDIDATE_PROFILE_FIXTURE': '1' if profile_fixture else '0'}
         if main_network is None:
             compose['services']['main'].pop('network_mode')
         else:
@@ -420,6 +433,7 @@ def run_live(args) -> dict:
         'task_id': args.task, 'condition': args.condition, 'run_id': args.run_id,
         'research_candidate': candidate,
         'zero_model_fixture_only': fixture,
+        'candidate_profile_fixture_only': profile_fixture,
         'run_root': str(root), 'image_id': prepared['image_id'],
         'control_root': str(root / 'control'), 'archive_root': str(root / 'archive'),
         'manifest_path': str(manifest_path), 'manifest_sha256': _sha(manifest_path),
@@ -475,7 +489,7 @@ def run_live(args) -> dict:
         if args.condition == 'P':
             spec['evaluation_protocol'] = 'synthetic_shared_v1'
     _require_evaluation_state_contract(manifest)
-    if args.condition == 'P' and not fixture:
+    if args.condition == 'P' and (not fixture or profile_fixture):
         staged_pos = root / 'bundle/source/pos_runtime'
         binding = {
             'schema': 'pos-ga-transport-binding-v1', 'transport': 'profile',
@@ -526,12 +540,19 @@ def run_live(args) -> dict:
             worker_env['PMA_MEMORY_PROFILE_FILE'] = str(memory_profile_path)
             worker_env['PMA_MEMORY_PROFILE_SHA256'] = manifest['pma_profile_sha256']
             worker_env['LITELLM_LOCAL_MODEL_COST_MAP'] = 'True'
+            if profile_fixture:
+                worker_env['CANDIDATE_FAKE_HOST_CAPTURE'] = str(
+                    root / 'archive/fake_host_calls.jsonl')
             worker_env.pop('PMA_MEMORY_API_BASE', None)
             worker_env.pop('PMA_MEMORY_API_KEY', None)
             worker_script = ('candidate_transport_worker.py' if candidate_profile
                              else 'worker_main.py')
+            worker_path = STAGE / worker_script
+            if profile_fixture:
+                worker_path = (STAGE.parents[2] / 'method_discovery' /
+                    'pos_pma_complement_v1_20261019/test_fake_host_entry.py')
             worker = subprocess.Popen([
-                str(Path(args.worker_python).resolve(strict=True)), str(STAGE / worker_script),
+                str(Path(args.worker_python).resolve(strict=True)), str(worker_path),
                 '--run-id', args.run_id, '--task-id', args.task,
                 '--private-root', str(root / 'host_private'),
                 '--requests', str(root / 'control' / 'spool' / 'requests'),
@@ -550,7 +571,7 @@ def run_live(args) -> dict:
             ready_data = json.loads(ready.read_text(encoding='utf-8'))
             if (ready_data.get('run_id'), ready_data.get('task_id'),
                     ready_data.get('fake_memory'), ready_data.get('research_candidate')) != (
-                    args.run_id, args.task, fixture, candidate):
+                    args.run_id, args.task, fixture and not candidate_profile, candidate):
                 raise RuntimeError('PMA worker identity or transport mode mismatch')
         else:
             _worker_clearance(root, None, args.run_id)
@@ -623,14 +644,14 @@ def run_live(args) -> dict:
                            'released_core' else '1'),
                        GA_POS_PMA_COMPLEMENT=('1' if manifest['config']['name'] ==
                            'pos_pma_complement_v1' else '0'),
-                       GA_POS_TRANSPORT='fake' if fixture else 'profile',
+                       GA_POS_TRANSPORT='fake' if fixture and not profile_fixture else 'profile',
                        GA_POS_WORKER_SCRIPT='/opt/genericagent/pos_runtime/worker.py',
                        GA_POS_VENDOR_ROOT='/opt/genericagent/pos_runtime/vendor',
                        GA_POS_EPISODE_MODULE='/opt/genericagent/pos_runtime/episode.py',
                        GA_POS_ARCHIVE='/run/pos-archive/events.jsonl',
                        GA_POS_TIMEOUT=str(min(180, agent_seconds)),
                        GA_POS_DEADLINE_EPOCH=str(deadline))
-            if fixture:
+            if fixture and not profile_fixture:
                 env['GA_POS_FAKE_REPLIES'] = '/run/pos-fake-replies.json'
             else:
                 env['GA_POS_PROFILE_FILE'] = '/opt/genericagent/mykey.json'
@@ -727,9 +748,13 @@ def run_live(args) -> dict:
                   'task': args.task, 'condition': args.condition,
                   'research_candidate': candidate,
                   'zero_model_fixture_only': fixture,
+                  'candidate_profile_fixture_only': profile_fixture,
                   'fake_provider_captures': len(fake_captures) if fixture else None,
                   'harbor_return_code': result, 'primary_failure': first_error,
                   'worker_return_code': None if worker is None else worker.poll(),
+                  'fake_host_calls': (len((root / 'archive/fake_host_calls.jsonl').read_text(
+                      encoding='utf-8').splitlines()) if profile_fixture and
+                      (root / 'archive/fake_host_calls.jsonl').is_file() else None),
                   'pma_finalization': clearance.get('pma_finalization')
                       if isinstance(clearance, dict) else None,
                   'pos_archive_status': pos_archive,
@@ -785,6 +810,9 @@ def live_status_success(status: dict) -> bool:
                 status.get('native_reports_checked') is True and
                 isinstance(status.get('fake_provider_captures'), int) and
                 status['fake_provider_captures'] >= 2 and
+                (status.get('candidate_profile_fixture_only') is not True or
+                 (status.get('worker_return_code') == 0 and
+                  status.get('fake_host_calls') == 4)) and
                 (status.get('condition') != 'B' or
                  status.get('worker_return_code') == 0))
     native = status.get('native_result')
@@ -820,6 +848,7 @@ def main() -> None:
     parser.add_argument('--pma-profile-file')
     parser.add_argument('--harbor-source-root')
     parser.add_argument('--zero-model-fixture', action='store_true')
+    parser.add_argument('--candidate-profile-fixture', action='store_true')
     parser.add_argument('--python-home', default='cpython-3.12.12-linux-x86_64-gnu')
     args = parser.parse_args()
     status = run_live(args)

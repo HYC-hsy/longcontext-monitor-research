@@ -17,6 +17,7 @@ class State:
         self.lock = threading.Lock()
         self.sequence = 0
         self.task_responses = 0
+        self.pos_role_responses = 0
         self.reference_written = False
         self.intervened = False
         self.root_code_returned = False
@@ -26,6 +27,17 @@ class State:
         with self.lock:
             self.sequence += 1
             sequence = self.sequence
+            if route == 'pos-role':
+                self.pos_role_responses += 1
+                position = self.pos_role_responses - 1
+                schedule = (('belief', 4096, 0), ('consistency', 512, 0),
+                            ('belief', 4096, 1), ('consistency', 512, 1),
+                            ('progress', 512, 0))
+                if position >= len(schedule) or body.get('max_tokens') != schedule[position][1]:
+                    raise ValueError('unmatched synthetic PoS role request')
+                replies = json.loads(Path('/pos_role_replies.json').read_text(encoding='utf-8'))
+                role, _, index = schedule[position]
+                return sequence, None, replies[role][index], {}
             if route != 'monitor':
                 self.task_responses += 1
                 if os.environ.get('POS_SYNTHETIC_FIXTURE') == '1' and self.task_responses == 1:
@@ -160,7 +172,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         raw = self.rfile.read(length)
         body = json.loads(raw)
         route = self.headers.get('x-model-route', 'task')
-        sequence, name, text, args = STATE.next(route, body)
+        if os.environ.get('POS_CANDIDATE_PROFILE_FIXTURE') == '1':
+            if (body.get('thinking') == {'type': 'disabled'} and
+                    body.get('temperature') == 0):
+                route = 'pos-role'
+            elif route != 'monitor' and (body.get('thinking') == {'type': 'disabled'} or
+                    body.get('temperature') == 0):
+                self.send_error(400, 'unmatched synthetic auxiliary role')
+                return
+        try:
+            sequence, name, text, args = STATE.next(route, body)
+        except (ValueError, KeyError, IndexError):
+            self.send_error(400, 'unmatched synthetic request')
+            return
         capture = Path('/fake_capture') / f'{sequence:04d}.json'
         capture.write_bytes(json.dumps({'route': route, 'path': self.path, 'body': body},
                                        ensure_ascii=False).encode())

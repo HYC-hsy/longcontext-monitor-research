@@ -53,6 +53,10 @@ def run_batch(args: argparse.Namespace) -> dict:
     if fixture != (manifest.get('zero_model_fixture_only') is True and
                    granted.get('zero_model_fixture_only') is True):
         raise RuntimeError('zero-model batch fixture identity mismatch')
+    profile_fixture = bool(getattr(args, 'candidate_profile_fixture', False))
+    if profile_fixture != (manifest.get('candidate_profile_fixture_only') is True and
+                           granted.get('candidate_profile_fixture_only') is True):
+        raise RuntimeError('candidate profile fixture identity mismatch')
     native_plan = manifest.get("schema") in {"pma-ga-live-manifest-v2",
                                                 "pma-ga-live-manifest-v3",
                                                 "pma-ga-live-manifest-v4",
@@ -114,6 +118,8 @@ def run_batch(args: argparse.Namespace) -> dict:
             command += ['--research-candidate', binding['research_candidate']]
         if fixture:
             command += ['--zero-model-fixture']
+        if profile_fixture:
+            command += ['--candidate-profile-fixture']
         completed = subprocess.run(command, check=False)
         result_path = root / "archive" / "live_result.json"
         try:
@@ -145,6 +151,7 @@ def main() -> None:
     parser.add_argument("--pma-profile-file")
     parser.add_argument("--harbor-source-root")
     parser.add_argument('--zero-model-fixture', action='store_true')
+    parser.add_argument('--candidate-profile-fixture', action='store_true')
     parser.add_argument("--python-home", default="cpython-3.12.12-linux-x86_64-gnu")
     record = run_batch(parser.parse_args())
     print(json.dumps({"completed_or_attempted": len(record["arms"]),
