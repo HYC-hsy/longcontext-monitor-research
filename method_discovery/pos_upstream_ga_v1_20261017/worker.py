@@ -416,7 +416,14 @@ def main():
                                 messages = [*messages, {'role': 'system',
                                     'content': 'Previously delivered fallible advice, '
                                     'not an external observation:\n' + manager.revision_context}]
-                            return transport.caller('consistency')(messages)
+                            try:
+                                return transport.caller('consistency')(messages)
+                            except Exception as error:
+                                # Released _validate_candidate catches RuntimeError
+                                # as semantic/format rejection. A failed transport
+                                # must instead stop this candidate episode.
+                                raise candidate_module.CandidateRoleTransportFailure(
+                                    'candidate consistency transport failed') from error
                         pos_episode = module.PoSEpisode(case_id=command['case_id'],
                             config=module.execution_config(), logger=logger,
                             belief_call=transport.caller('belief'),

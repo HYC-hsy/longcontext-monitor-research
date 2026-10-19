@@ -14,6 +14,57 @@ HERE = Path(__file__).resolve().parent
 
 
 class WorkerTests(unittest.TestCase):
+    def test_initial_consistency_transport_failure_is_not_swallowed(self):
+        initial = {'goal_specification': 'Clean mug.', 'entities': [], 'states': [],
+                   'relations': [], 'epistemic_gaps': [], 'achievement_gaps': [],
+                   'frontier': None}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / 'pos_runtime'
+            runtime.mkdir()
+            for name in ('worker.py', 'episode.py', 'citation_fix.py'):
+                shutil.copy2(POS / name, runtime / name)
+            for name in ('candidate.py', 'memory_adapter.py'):
+                shutil.copy2(HERE / name, runtime / name)
+            shutil.copytree(POS / 'vendor', runtime / 'vendor',
+                            ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+            shutil.copytree(PMA / 'src', runtime / 'pma_vendor' / 'src',
+                            ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+            fixture = root / 'replies.json'
+            fixture.write_text(json.dumps({'belief': [json.dumps(initial)],
+                'consistency': [{'raise': 'synthetic transport failure'}]}),
+                encoding='utf-8')
+            command = {'kind': 'reset', 'candidate': True, 'case_id': 'synthetic/mug',
+                       'task': 'Clean mug.', 'observation': 'Mug dirty.', 'actions': []}
+            process = subprocess.run([sys.executable, '-B', str(runtime / 'worker.py'),
+                '--vendor', str(runtime / 'vendor'), '--episode-module', str(runtime / 'episode.py'),
+                '--archive', str(root / 'events.jsonl'), '--mode', 'fake',
+                '--fake-replies', str(fixture)], input=json.dumps(command) + '\n',
+                text=True, encoding='utf-8', capture_output=True, timeout=15)
+            outputs = [json.loads(line) for line in process.stdout.splitlines()]
+            self.assertEqual(outputs[0]['status'], 'error')
+            self.assertEqual(outputs[0]['error_type'], 'CandidateRoleTransportFailure')
+            result = json.loads((root / 'events.result.json').read_text(encoding='utf-8'))
+            # This error precedes the original manager's initial commit.
+            # There is no committed state to invent as a partial snapshot.
+            self.assertEqual(result['status'], 'missing')
+            self.assertIsNone(result['result'])
+            fixture.write_text(json.dumps({'belief': [json.dumps(initial)],
+                'consistency': ['{"issues": []}'],
+                'pma_phase1': [{'raise': 'synthetic PMA transport failure'}]}),
+                encoding='utf-8')
+            second_archive = root / 'after_commit.jsonl'
+            process = subprocess.run([sys.executable, '-B', str(runtime / 'worker.py'),
+                '--vendor', str(runtime / 'vendor'), '--episode-module', str(runtime / 'episode.py'),
+                '--archive', str(second_archive), '--mode', 'fake',
+                '--fake-replies', str(fixture)], input=json.dumps(command) + '\n',
+                text=True, encoding='utf-8', capture_output=True, timeout=15)
+            self.assertEqual(json.loads(process.stdout.splitlines()[0])['status'], 'error')
+            committed = json.loads((root / 'after_commit.result.json').read_text(encoding='utf-8'))
+            self.assertEqual(committed['status'], 'partial')
+            self.assertEqual(committed['result']['pos']['belief_state']['goal']['specification'],
+                             'Clean mug.')
+
     def test_packed_candidate_reset_update_finish(self):
         initial = {'goal_specification': 'Clean mug.', 'entities': [], 'states': [],
                    'relations': [], 'epistemic_gaps': [],

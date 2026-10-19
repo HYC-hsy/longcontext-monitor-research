@@ -5,7 +5,7 @@ from copy import deepcopy
 import hashlib
 import json
 
-from citation_fix import CitationFixedBeliefManager
+from citation_fix import CitationFixedBeliefManager, CitationFixedSentinel
 
 
 LIMITS = {'task_panel_chars': 16000, 'phase2_advisory_chars': 16000,
@@ -21,11 +21,35 @@ def _digest(value):
     return hashlib.sha256(value.encode('utf-8')).hexdigest()
 
 
+class CandidateRoleTransportFailure(Exception):
+    """Do not let released PoS treat a failed role transport as a rejected idea."""
+
+
+class CandidateSentinel(CitationFixedSentinel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.last_format_rejection = None
+
+    def audit_candidate(self, **kwargs):
+        self.last_format_rejection = None
+        try:
+            return super().audit_candidate(**kwargs)
+        except RuntimeError as error:
+            # Released manager intentionally retains the old state here.
+            # Preserve that behavior, but expose the protocol outcome.
+            self.last_format_rejection = type(error).__name__
+            raise
+
+
 class ComplementBeliefManager(CitationFixedBeliefManager):
     """Only candidate inputs and post-commit text projection differ from PoS."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        if self.sentinel is not None:
+            prior = self.sentinel
+            self.sentinel = CandidateSentinel(prior.config, prior.call_model,
+                prior.logger, call_progress_model=prior.call_progress_model)
         self.revision_context = ''
 
     def _request_candidate(self, messages, *, base, operation, step):
@@ -197,6 +221,9 @@ class ComplementEpisode:
         if self.memory.memory.status or self.memory.memory.knowledge or self.memory.memory.procedural:
             raise ValueError('candidate requires a fresh empty PMA bank')
         self.pos.reset(task=task, observation=observation, actions=actions)
+        if (self.manager.sentinel is not None and
+                self.manager.sentinel.last_format_rejection):
+            raise RuntimeError('candidate initialization audit format rejected')
         self.started = True
         self.original_task = task
         self.trigger.reset()
@@ -262,6 +289,11 @@ class ComplementEpisode:
                             observation=observation, done=done)
         finally:
             manager.revision_context = ''
+        if (manager.sentinel is not None and
+                manager.sentinel.last_format_rejection):
+            self.events.append({'kind': 'pos_format_rejected',
+                                'transition_id': transition_id,
+                                'reason': manager.sentinel.last_format_rejection})
         self.events.append({'kind': 'transition_committed', 'id': transition_id,
                             'revision_sha256': _digest(revision) if revision else None})
         self.recent_steps.append({'step': actor_attempt + 1, 'analysis': str(thought or ''),

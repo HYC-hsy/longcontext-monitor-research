@@ -130,6 +130,43 @@ class CandidateTests(unittest.TestCase):
         episode.request_accepted(panel=too_long, event_id='task-accepted')
         self.assertIsNone(episode.delivered)
 
+    def test_sentinel_format_exhaustion_is_not_semantic_validation(self):
+        episode, _belief, consistency, _pma = self.make()
+        asyncio.run(episode.reset(task='Clean mug.', observation='Mug dirty.', actions=[]))
+        prior = episode.pos.get_context()
+        consistency.replies[:] = ['invalid JSON', 'still invalid JSON']
+        asyncio.run(episode.update(actor_attempt=1, transition_id='joint-1',
+            thought='inspect', action_batch=[{'id': 't', 'name': 'inspect',
+              'arguments': {}, 'order': 0, 'status': 'executed'}],
+            observation='Still dirty.'))
+        self.assertEqual(episode.pos.get_context()['achievement_gaps'],
+                         prior['achievement_gaps'])
+        self.assertIn('pos_format_rejected', [item['kind'] for item in episode.events])
+
+    def test_named_task_counterexamples_are_projection_not_verdicts(self):
+        base = {'step': 2, 'goal': {'user_input': 'Keep the public contract.'},
+                'epistemic_gaps': [], 'achievement_gaps': [],
+                'frontier_gap': None, 'world': {}}
+        nginx = dict(base, achievement_gaps=[{'target': 'service accessible',
+            'reason': 'access still unverified'}])
+        panel = render_task_panel(nginx, original_observation=
+            'tool receipt: uid=0 (root); sudo unavailable; service probe pending')['panel']
+        self.assertIn('uid=0 (root)', panel)
+        self.assertIn('service accessible', panel)
+        sqlite = dict(base, achievement_gaps=[{'target': 'binary on PATH',
+            'reason': 'PATH check failed'}])
+        self.assertIn('PATH check failed', render_task_panel(sqlite)['panel'])
+        revised = dict(sqlite, achievement_gaps=[])
+        self.assertNotIn('PATH check failed', render_task_panel(revised)['panel'])
+        sampler = dict(base, epistemic_gaps=[{'target': 'sampler behavior',
+            'reason': 'model interpretation may be damaged'}])
+        proposed = render_task_panel(sampler, advice='Maybe re-check the interpretation.')
+        self.assertIn('Maybe re-check', proposed['panel'])
+        self.assertIn('sampler behavior', proposed['panel'])
+        compressor = dict(base, achievement_gaps=[{'target': 'full decoding',
+            'reason': 'only the first symbol is observed'}])
+        self.assertIn('full decoding', render_task_panel(compressor)['panel'])
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
