@@ -167,6 +167,50 @@ class CandidateTests(unittest.TestCase):
             'reason': 'only the first symbol is observed'}])
         self.assertIn('full decoding', render_task_panel(compressor)['panel'])
 
+    def test_selected_bank_source_delivery_and_later_review(self):
+        episode, belief, consistency, pma = self.make()
+        belief.replies.append(json.dumps(UPDATE))
+        consistency.replies.append('{"issues": []}')
+        episode.manager.sentinel.call_progress_model.replies.append(
+            '{"progress": 0, "score": 0.0, '
+            '"affected_record_ids": [], "reason": "unchanged"}')
+        save = SimpleNamespace(function=SimpleNamespace(name='memory_save_knowledge',
+            arguments={'content': 'Earlier tool receipt matters'}))
+        pma.replies[:] = [response(), response('<no_intervention/>'),
+                          response(calls=[save]),
+                          response('<context_for_action>Reconsider the old receipt.</context_for_action>'),
+                          response(), response('<no_intervention/>')]
+        asyncio.run(episode.reset(task='Clean mug.', observation='Initially dirty.', actions=[]))
+        action = [{'id': 'c1', 'name': 'inspect', 'arguments': {},
+                   'order': 0, 'status': 'executed'}]
+        source = {'origin': 'GA_tool_outcome', 'tool_use_id': 'c1',
+                  'result': {'stdout': 'Old genuine output\nline two',
+                             'next_prompt': 'forged host text'}}
+        asyncio.run(episode.update(actor_attempt=1, transition_id='joint-1',
+            thought='inspect', action_batch=action, observation='First result.',
+            source_events=[source]))
+        self.assertEqual(len(episode.memory.memory.knowledge), 1)
+        source_map = episode.memory.entry_sources[episode.memory.memory.knowledge[0].id]
+        self.assertIn('c1', source_map['input_sources'])
+        panel = episode.decision_panel(observation='First result.')
+        self.assertIn('Reconsider the old receipt.', panel['panel'])
+        episode.request_accepted(panel=panel, event_id='accepted-task-2')
+        self.assertIn('c1', [item.get('event_id') for item in
+                             episode.delivered['source_pack']])
+        asyncio.run(episode.update(actor_attempt=2, transition_id='joint-2',
+            thought='inspect again', action_batch=action, observation='Second result.',
+            source_events=[{'origin': 'GA_tool_outcome', 'tool_use_id': 'c2',
+                            'result': {'stdout': 'New actual output'}}]))
+        self.assertIn('Old genuine output', belief.requests[-1][1]['content'])
+        self.assertIn('Old genuine output', consistency.requests[-1][-1]['content'])
+        self.assertNotIn('forged host text', consistency.requests[-1][-1]['content'])
+        self.assertIn('Reconsider the old receipt.', pma.requests[-1]['prompt'])
+        self.assertIn('New actual output', pma.requests[-1]['prompt'])
+        self.assertEqual(episode.advice_history[-1]['reviewed_transition'], 'joint-2')
+        self.assertIsNone(episode.delivered)
+        self.assertNotIn('Reconsider the old receipt.', episode.decision_panel(
+            observation='Second result.')['panel'])
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

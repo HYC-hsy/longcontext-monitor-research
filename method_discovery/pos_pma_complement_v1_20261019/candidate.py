@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import asdict
 import hashlib
 import json
 
-from citation_fix import CitationFixedBeliefManager, CitationFixedSentinel
+from citation_fix import CitationFixedBeliefManager, CitationFixedSentinel, _result_fields
 
 
 LIMITS = {'task_panel_chars': 16000, 'phase2_advisory_chars': 16000,
@@ -29,6 +30,33 @@ class CandidateSentinel(CitationFixedSentinel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.last_format_rejection = None
+        self.supplemental_sources = ()
+
+    def _compact_trajectory(self, trajectory):
+        compact = super()._compact_trajectory(trajectory)
+        by_step = {int(row['step']): row for row in compact}
+        for source in self.supplemental_sources:
+            step = source.get('pos_step')
+            if not isinstance(step, int):
+                continue
+            row = by_step.get(step)
+            if row is None:
+                row = {'step': step, 'action': None, 'observation': '',
+                       'citable_sources': []}
+                compact.append(row)
+                by_step[step] = row
+            visible = []
+            for segment in source.get('segments', []):
+                record = {'source_path': source['event_id'] + ':' + segment['source_path'],
+                          'segment': segment['segment'], 'text': segment['text'],
+                          'truncated': segment['truncated']}
+                row['citable_sources'].append(record)
+                visible.append(record)
+            row.setdefault('candidate_historical_sources', []).append({
+                'event_id': source['event_id'], 'original_pos_step': step,
+                'actor_transition_id': source.get('actor_transition_id'),
+                'segments': visible})
+        return compact
 
     def audit_candidate(self, **kwargs):
         self.last_format_rejection = None
@@ -51,6 +79,20 @@ class ComplementBeliefManager(CitationFixedBeliefManager):
             self.sentinel = CandidateSentinel(prior.config, prior.call_model,
                 prior.logger, call_progress_model=prior.call_progress_model)
         self.revision_context = ''
+        self.last_validation_outcome = 'not_run'
+
+    def _validate_candidate(self, **kwargs):
+        base = kwargs['base']
+        final = super()._validate_candidate(**kwargs)
+        if final is base:
+            self.last_validation_outcome = 'rejected'
+        else:
+            before = self._context_from_state(base)
+            after = self._context_from_state(final)
+            keys = ('world', 'goal', 'epistemic_gaps', 'achievement_gaps', 'frontier_gap')
+            self.last_validation_outcome = ('no_change' if all(
+                before.get(key) == after.get(key) for key in keys) else 'accepted')
+        return final
 
     def _request_candidate(self, messages, *, base, operation, step):
         if self.revision_context and operation in {'update', 'sentinel_repair'}:
@@ -97,7 +139,12 @@ def _gap_records(context):
 
 
 def _required_state(context, *, include_recovery=False):
-    state = {'state_version': context.get('step'),
+    state = {'state_version': context.get('accepted_revision', context.get('step')),
+            'latest_update_outcome': context.get('latest_update_outcome', 'unknown'),
+            'latest_actor_transition': context.get('latest_actor_transition'),
+            'state_origin': ('retained_last_accepted_state_after_rejection'
+                             if context.get('latest_update_outcome') == 'rejected'
+                             else 'last_accepted_model_state'),
             'goal': context.get('goal'),
             'epistemic_gaps': context.get('epistemic_gaps', []),
             'achievement_gaps': context.get('achievement_gaps', []),
@@ -170,7 +217,9 @@ def revision_packet(*, delivered, completed_transition_id, source_events):
               'delivery_event_id': delivered['delivery_event_id'],
               'suggestion': delivered['advice'],
               'completed_transition_id': completed_transition_id,
-              'source_events': excerpts}
+              'source_events': excerpts,
+              'frozen_memory_sources': delivered.get('source_pack', []),
+              'source_scope': 'prior_visible_events_not_new_transition'}
     result = _json(packet)
     if len(result) > LIMITS['revision_chars']:
         raise ValueError('revision context exceeds candidate budget')
@@ -194,6 +243,56 @@ class ComplementEpisode:
         self.events = []
         self.original_task = ''
         self.recent_steps = []
+        self.source_registry = {}
+        self.advice_history = []
+        self.accepted_revision = 0
+        self.latest_update_outcome = 'not_run'
+        self.latest_actor_transition = None
+
+    def _context(self):
+        context = self.pos.get_context()
+        context['accepted_revision'] = self.accepted_revision
+        context['latest_update_outcome'] = self.latest_update_outcome
+        context['latest_actor_transition'] = self.latest_actor_transition
+        return context
+
+    def _input_sources(self):
+        ids = [source for row in self.recent_steps for source in row['source_ids']]
+        return tuple(dict.fromkeys(['original-task', *ids]))
+
+    def _source_pack(self):
+        rendered = next((row for row in reversed(self.memory.rendered_entry_ids)
+                         if row['phase'] == 'phase2'), None)
+        if rendered is None:
+            return []
+        selected = []
+        for entry in rendered['entries']:
+            mapping = self.memory.entry_sources.get(entry['id'])
+            if mapping is None:
+                selected.append({'memory_id': entry['id'], 'source': 'unknown'})
+                continue
+            for event_id in reversed(mapping['input_sources']):
+                if event_id not in self.source_registry or event_id in [
+                        item.get('event_id') for item in selected]:
+                    continue
+                source = self.source_registry[event_id]
+                selected.append({'memory_id': entry['id'], 'entry_sha256': entry['sha256'],
+                    'bank_version': mapping['bank_version'], 'event_id': event_id,
+                    'pos_step': source.get('pos_step'),
+                    'actor_transition_id': source.get('actor_transition_id'),
+                    'source_sha256': source['sha256'],
+                    'segments': deepcopy(source.get('segments', []))})
+                if len([x for x in selected if x.get('event_id')]) >= LIMITS['history_events']:
+                    break
+            if len([x for x in selected if x.get('event_id')]) >= LIMITS['history_events']:
+                break
+        selected.sort(key=lambda item: self.source_registry.get(
+            item.get('event_id'), {}).get('order', -1))
+        return selected
+
+    def _run_pma(self, step):
+        return self.memory.process(self._pma_observation(), step,
+            advisory_context=self._phase2_context(), input_sources=self._input_sources())
 
     def _pma_observation(self):
         """Original PMA task + eight actor-step window, without PoS prose."""
@@ -226,18 +325,21 @@ class ComplementEpisode:
             raise RuntimeError('candidate initialization audit format rejected')
         self.started = True
         self.original_task = task
+        self.source_registry['original-task'] = {'origin': 'original_task',
+            'text': task, 'sha256': _digest(task), 'order': -1}
+        self.latest_update_outcome = self.manager.last_validation_outcome
         self.trigger.reset()
         triggered, reason = self.trigger.should_trigger(1)
         if triggered:
-            result = await self.memory.process(self._pma_observation(), 1,
-                advisory_context=self._phase2_context())
+            result = await self._run_pma(1)
             self.pending_advice = result.context_for_action
+            self.pending_source_pack = self._source_pack() if self.pending_advice else []
         self.events.append({'kind': 'reset', 'triggered': triggered, 'reason': reason,
                             'phase2_status': self.memory.last_phase2_status if triggered else None})
         return self.decision_panel(observation=observation)
 
     def _phase2_context(self):
-        context = self.pos.get_context()
+        context = self._context()
         required = _required_state(context, include_recovery=True)
         value = _json(required)
         if len(value) > LIMITS['phase2_advisory_chars']:
@@ -249,12 +351,22 @@ class ComplementEpisode:
             else:
                 self.events.append({'kind': 'phase2_optional_omitted',
                                     'record_id': record['id']})
+        if self.advice_history:
+            previous = self.advice_history[-1]
+            recap = '\nLast delivered suggestion and actual consequence: ' + _json({
+                'advice': previous['advice'], 'delivery_event_id': previous['delivery_event_id'],
+                'reviewed_transition': previous.get('reviewed_transition'),
+                'actual_results': previous.get('actual_result_excerpts', []),
+                'review_outcome': previous.get('review_outcome')})
+            if len(value) + len(recap) > LIMITS['phase2_advisory_chars']:
+                raise ValueError('advice consequence exceeds Phase 2 advisory budget')
+            value += recap
         return value
 
     def decision_panel(self, *, observation):
         if not self.started or self.ended:
             raise RuntimeError('candidate not active')
-        result = render_task_panel(self.pos.get_context(),
+        result = render_task_panel(self._context(),
             advice=self.pending_advice, original_observation=observation)
         self.events.append({'kind': 'panel_prepared',
                             'panel_sha256': result['panel_sha256'],
@@ -268,9 +380,12 @@ class ComplementEpisode:
             raise ValueError('accepted request identity required')
         if panel.get('included_advice'):
             self.delivered = {'advice': panel['included_advice'],
-                'state_version': self.pos.get_context().get('step'),
+                'state_version': self.accepted_revision,
+                'bank_version': self.memory.bank_version,
                 'delivery_event_id': event_id,
-                'panel_sha256': panel['panel_sha256']}
+                'panel_sha256': panel['panel_sha256'],
+                'source_pack': deepcopy(getattr(self, 'pending_source_pack', []))}
+            self.advice_history.append(deepcopy(self.delivered))
         self.events.append({'kind': 'request_accepted', 'event_id': event_id,
                             'panel_sha256': panel['panel_sha256']})
 
@@ -280,41 +395,91 @@ class ComplementEpisode:
             raise RuntimeError('candidate not active')
         if not action_batch:
             raise ValueError('candidate update requires a real joint-action batch')
+        for index, source in enumerate(source_events):
+            if isinstance(source, dict):
+                event_id = str(source.get('tool_use_id') or source.get('event_id') or
+                               f'{transition_id}:source:{index}')
+                raw = _json(source)
+                fields = tuple(_result_fields(source.get('result'), 'result'))
+                remaining = LIMITS['history_event_chars']
+                segments = []
+                for path, value in fields:
+                    if remaining <= 0:
+                        break
+                    truncated = len(value) > remaining
+                    half = remaining // 2
+                    parts = [value[:half], value[-half:]] if truncated else [value]
+                    for segment_no, text in enumerate(parts):
+                        if text:
+                            segments.append({'source_path': path, 'segment': segment_no,
+                                             'text': text, 'truncated': truncated})
+                            remaining -= len(text)
+                self.source_registry[event_id] = {'origin': source.get('origin', 'host'),
+                    'sha256': _digest(raw), 'segments': segments,
+                    'order': len(self.source_registry),
+                    'actor_transition_id': transition_id,
+                    'pos_step': self.pos.step}
         revision = revision_packet(delivered=self.delivered,
             completed_transition_id=transition_id, source_events=source_events)
         manager = self.pos.manager
         manager.revision_context = revision
+        if manager.sentinel is not None:
+            manager.sentinel.supplemental_sources = tuple(
+                item for item in self.delivered.get('source_pack', [])
+                if item.get('segments')) if self.delivered else ()
         try:
             self.pos.update(thought=thought, action_batch=action_batch,
                             observation=observation, done=done)
         finally:
             manager.revision_context = ''
+            if manager.sentinel is not None:
+                manager.sentinel.supplemental_sources = ()
+        outcome = manager.last_validation_outcome
+        if outcome == 'accepted':
+            self.accepted_revision += 1
+        self.latest_update_outcome = outcome
+        self.latest_actor_transition = transition_id
         if (manager.sentinel is not None and
                 manager.sentinel.last_format_rejection):
             self.events.append({'kind': 'pos_format_rejected',
                                 'transition_id': transition_id,
                                 'reason': manager.sentinel.last_format_rejection})
-        self.events.append({'kind': 'transition_committed', 'id': transition_id,
+        self.events.append({'kind': 'transition_processed', 'id': transition_id,
+                            'update_outcome': outcome,
+                            'accepted_revision': self.accepted_revision,
                             'revision_sha256': _digest(revision) if revision else None})
         self.recent_steps.append({'step': actor_attempt + 1, 'analysis': str(thought or ''),
             'commands': [str(action) for action in action_batch],
-            'observation': str(observation)})
+            'observation': str(observation),
+            'source_ids': [str(source.get('tool_use_id') or source.get('event_id'))
+                for source in source_events if isinstance(source, dict)]})
         self.recent_steps = self.recent_steps[-8:]
+        if self.delivered:
+            self.advice_history[-1]['reviewed_transition'] = transition_id
+            self.advice_history[-1]['review_outcome'] = outcome
+            self.advice_history[-1]['actual_results'] = deepcopy(list(source_events))
+            self.advice_history[-1]['actual_result_excerpts'] = [{
+                'event_id': str(source.get('tool_use_id') or source.get('event_id')),
+                'status': source.get('status'),
+                'segments': self.source_registry.get(str(
+                    source.get('tool_use_id') or source.get('event_id')), {}).get('segments', [])}
+                for source in source_events if isinstance(source, dict)
+                ][:LIMITS['history_events']]
         self.delivered = None
         self.pending_advice = None
         if not done:
             step = actor_attempt + 1
             triggered, reason = self.trigger.should_trigger(step)
             if triggered:
-                result = await self.memory.process(self._pma_observation(), step,
-                    advisory_context=self._phase2_context())
+                result = await self._run_pma(step)
                 self.pending_advice = result.context_for_action
+                self.pending_source_pack = self._source_pack() if self.pending_advice else []
             self.events.append({'kind': 'pma_wake', 'step': step,
                                 'triggered': triggered, 'reason': reason,
                                 'phase2_status': self.memory.last_phase2_status if triggered else None})
         else:
             self.ended = True
-        return self.pos.get_context()
+        return self._context()
 
     def finish(self, *, reason, observation=None):
         self.pending_advice = None
@@ -322,12 +487,20 @@ class ComplementEpisode:
         self.ended = True
         result = self.pos.finish(reason=reason, observation=observation)
         return {'status': result['status'], 'pos': result,
-                'bank': self.memory.memory.to_dict(), 'events': deepcopy(self.events)}
+                'bank': self.memory.memory.to_dict(), 'events': deepcopy(self.events),
+                'advice_history': deepcopy(self.advice_history),
+                'entry_sources': deepcopy(self.memory.entry_sources),
+                'last_phase1_operations': [asdict(operation) for operation in
+                    self.memory.last_phase1_operations]}
 
     def get_result(self):
         return {'status': 'partial', 'pos': self.pos.get_result(),
                 'bank': self.memory.memory.to_dict(),
-                'events': deepcopy(self.events)}
+                'events': deepcopy(self.events),
+                'advice_history': deepcopy(self.advice_history),
+                'entry_sources': deepcopy(self.memory.entry_sources),
+                'last_phase1_operations': [asdict(operation) for operation in
+                    self.memory.last_phase1_operations]}
 
     def decision_completed(self, *, turn, action_count):
         return self.pos.decision_completed(turn=turn, action_count=action_count)

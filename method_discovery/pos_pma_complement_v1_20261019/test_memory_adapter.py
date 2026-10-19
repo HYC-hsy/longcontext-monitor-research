@@ -58,6 +58,23 @@ class Tests(unittest.TestCase):
         self.assertEqual(result.context_for_action, 'Tentative alternative')
         self.assertEqual(len(agent.rendered_entry_ids), 2)
         self.assertEqual(agent.rendered_entry_ids[1]['knowledge'], [bank.knowledge[0].id])
+        self.assertEqual([row['phase'] for row in agent.rendered_entry_ids],
+                         ['phase1', 'phase2'])
+
+    def test_new_entry_source_is_input_visibility_not_support(self):
+        transport = Fake([SimpleNamespace(content='', tool_calls=[
+            call('memory_save_procedural', {'content': 'prior diagnosis'})]),
+            SimpleNamespace(content='<no_intervention/>', tool_calls=[])])
+        agent = ComplementMemoryAgent(llm=transport, memory=UniversalMemory())
+        asyncio.run(agent.process('Original task and tool observation', 2,
+                                  input_sources=('task-1', 'tool-7')))
+        entry = agent.memory.procedural[0]
+        self.assertEqual(agent.entry_sources[entry.id]['input_sources'],
+                         ('task-1', 'tool-7'))
+        self.assertEqual(agent.entry_sources[entry.id]['meaning'],
+                         'visible_at_creation_not_sentence_support')
+        self.assertEqual(agent.rendered_entry_ids[1]['entries'][0]['id'], entry.id)
+        self.assertEqual(agent.rendered_entry_ids[1]['entries'][0]['bank_version'], 1)
 
     def test_fallback_status_not_dispatched(self):
         transport = Fake([
@@ -78,6 +95,24 @@ class Tests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'phase1 failed'):
             asyncio.run(agent.process('Raw', 1, advisory_context='derived'))
         self.assertEqual(len(transport.requests), 1)
+
+    def test_fatal_bank_error_preserves_prior_operation_and_skips_phase2(self):
+        class FailingBank(UniversalMemory):
+            def save_procedural(self, content):
+                raise OSError('synthetic durable capture failure')
+        transport = Fake([SimpleNamespace(content='', tool_calls=[
+            call('memory_save_knowledge', {'content': 'retained'}),
+            call('memory_save_procedural', {'content': 'not saved'})])])
+        bank = FailingBank()
+        agent = ComplementMemoryAgent(llm=transport, memory=bank)
+        with self.assertRaisesRegex(OSError, 'capture failure'):
+            asyncio.run(agent.process('Raw', 2, input_sources=('host-1',)))
+        self.assertEqual(len(transport.requests), 1)
+        self.assertEqual([entry.content for entry in bank.knowledge], ['retained'])
+        self.assertEqual([op.action for op in agent.last_phase1_operations],
+                         ['save_knowledge'])
+        self.assertEqual(agent.entry_sources[bank.knowledge[0].id]['input_sources'],
+                         ('host-1',))
 
     def test_original_is_unchanged(self):
         bank = UniversalMemory()
