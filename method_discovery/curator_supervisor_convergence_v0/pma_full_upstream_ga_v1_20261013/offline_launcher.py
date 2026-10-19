@@ -152,6 +152,12 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
                                            "pma-ga-live-manifest-v5",
                                            "pos-ga-single-manifest-v1"}
                                        else "isolated"))
+    if pos:
+        # The generic bundle copier omits every directory named "tests". The
+        # pinned PMA vendor identity includes such files; restore only this
+        # already-staged vendor subtree before computing the deployed hash.
+        shutil.copytree(pos_stage / 'pma_vendor',
+                        source / 'pos_runtime' / 'pma_vendor', dirs_exist_ok=True)
     executed_pos_sources = {}
     if pos:
         for name in ('agent_loop.py', 'agentmain.py', 'ga.py', 'llmcore.py',
