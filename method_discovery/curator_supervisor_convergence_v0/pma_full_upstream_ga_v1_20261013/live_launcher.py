@@ -419,6 +419,9 @@ def run_live(args) -> dict:
             'PMA_SERVICE_FIXTURE': '1' if os.environ.get('PMA_SERVICE_FIXTURE') == '1' else '0',
             'POS_SYNTHETIC_FIXTURE': '1' if args.condition == 'P' else '0',
             'POS_CANDIDATE_PROFILE_FIXTURE': '1' if profile_fixture else '0'}
+        if profile_fixture and os.environ.get('POS_SYNTHETIC_LONG_OUTPUT') == '1':
+            compose['services']['model-gateway']['environment'][
+                'POS_SYNTHETIC_LONG_OUTPUT'] = '1'
         if main_network is None:
             compose['services']['main'].pop('network_mode')
         else:

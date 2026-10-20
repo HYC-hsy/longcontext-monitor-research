@@ -214,28 +214,80 @@ def revision_packet(*, delivered, completed_transition_id, source_events):
     """Only a sent suggestion plus an actual later transition can be revisited."""
     if not delivered or not completed_transition_id:
         return ''
-    excerpts = []
-    for item in [item for item in source_events if item][:LIMITS['history_events']]:
-        raw = _json(item)
-        limit = LIMITS['history_event_chars']
-        if len(raw) > limit:
-            half = max(0, (limit - 40) // 2)
-            raw = raw[:half] + '\n[TRUNCATED; NOT A CITABLE SOURCE]\n' + raw[-half:]
-        excerpts.append({'host_receipt_excerpt': raw,
-                         'full_receipt_sha256': _digest(_json(item))})
     packet = {'origin': 'pma_tentative_suggestion',
               'generated_state_version': delivered['state_version'],
               'delivery_event_id': delivered['delivery_event_id'],
               'suggestion': delivered['advice'],
               'advice_sha256': delivered.get('advice_sha256') or _digest(delivered['advice']),
               'completed_transition_id': completed_transition_id,
-              'source_events': excerpts,
+              'source_events': [], 'optional_receipts_omitted': 0,
               'frozen_memory_sources': delivered.get('source_pack', []),
               'source_scope': 'prior_visible_events_not_new_transition'}
+    cap = LIMITS['revision_chars']
+    if len(_json(packet)) > cap:
+        raise ValueError('required revision context exceeds candidate budget')
+    selected = [item for item in source_events if item][:LIMITS['history_events']]
+    for index, item in enumerate(selected):
+        raw = _json(item)
+        identity = (item.get('tool_use_id') or item.get('event_id')
+                    if isinstance(item, dict) else None)
+        base = {'event_id': identity, 'full_receipt_sha256': _digest(raw)}
+        # Fit the complete JSON envelope, not the unescaped source length.
+        best = None
+        low, high = 0, min(len(raw), LIMITS['history_event_chars'])
+        while low <= high:
+            size = (low + high) // 2
+            parts, clipped = _visible_parts(raw, size)
+            offsets = ([{'start': 0, 'text': parts[0]}] if parts else [])
+            if clipped and len(parts) == 2:
+                offsets.append({'start': len(raw) - len(parts[1]), 'text': parts[1]})
+            row = {**base, 'segments': offsets, 'truncated': clipped}
+            trial = {**packet, 'source_events': [*packet['source_events'], row],
+                     'optional_receipts_omitted': len(selected) - index - 1}
+            if len(_json(trial)) <= cap:
+                best = row
+                low = size + 1
+            else:
+                high = size - 1
+        if best is None or not best['segments']:
+            packet['optional_receipts_omitted'] = len(selected) - index
+            break
+        packet['source_events'].append(best)
     result = _json(packet)
-    if len(result) > LIMITS['revision_chars']:
+    if len(result) > cap:
         raise ValueError('revision context exceeds candidate budget')
     return result
+
+
+HEALTH_CORE = ('window_ready', 'persistence_e', 'persistence_a', 'stagnation',
+               'recurrence', 'recurrence_period', 'health_score', 'health_threshold',
+               'gap_dimension', 'trapping_pattern')
+PROGRESS_CORE = ('step', 'frontier_episode', 'frontier', 'done', 'success',
+                 'task_score', 'progress', 'scoring_method', 'score')
+
+
+def _health_progress_signal(episode, context):
+    """Model view only: the stored HealthTransition remains byte-for-byte intact."""
+    transition = (episode.manager.health_transitions[-1]
+                  if episode.manager.health_transitions else None)
+    health = asdict(episode.manager._current().health)
+    progress = asdict(transition) if transition is not None else None
+    latest = episode.recent_steps[-1] if episode.recent_steps else None
+    tool_ids = latest.get('source_ids') if latest else None
+    signal = {'health': {key: health[key] for key in HEALTH_CORE if key in health},
+              'progress': ({key: progress[key] for key in PROGRESS_CORE if key in progress}
+                           if progress is not None else None),
+              'progress_status': ('scored' if progress is not None and
+                                  progress.get('progress') in (0, 1) else 'unscored'),
+              'original_receipt_refs': {
+                  'pos_step': progress.get('step') if progress else None,
+                  'actor_transition_id': context.get('latest_actor_transition'),
+                  'tool_event_ids': tool_ids,
+                  'observation_sha256': (_digest(progress['observation'])
+                      if progress and isinstance(progress.get('observation'), str) else None)}}
+    if hasattr(episode.pos, 'success_known'):
+        signal['success_known'] = episode.pos.success_known
+    return signal, health, progress
 
 
 class ComplementEpisode:
@@ -360,35 +412,58 @@ class ComplementEpisode:
         context = self._context()
         required = _required_state(context, include_recovery=True)
         value = _json(required)
-        if len(value) > LIMITS['phase2_advisory_chars']:
-            raise ValueError('required PoS state exceeds Phase 2 advisory budget')
-        for record in _gap_records(context):
-            part = '\nDirectly related model-state record: ' + _json(record)
-            if len(value) + len(part) <= LIMITS['phase2_advisory_chars']:
-                value += part
-            else:
-                self.events.append({'kind': 'phase2_optional_omitted',
-                                    'record_id': record['id']})
+        signal, health, progress = _health_progress_signal(self, context)
+        value += '\nExisting PoS health/progress (unscored is not zero): ' + _json(signal)
         if self.advice_history:
             previous = self.advice_history[-1]
-            recap = '\nLast delivered suggestion and actual consequence: ' + _json({
+            recap = '\nLast delivered suggestion and review identity: ' + _json({
                 'advice': previous['advice'], 'delivery_event_id': previous['delivery_event_id'],
+                'advice_sha256': previous.get('advice_sha256'),
+                'state_version': previous.get('state_version'),
+                'bank_version': previous.get('bank_version'),
                 'reviewed_transition': previous.get('reviewed_transition'),
-                'actual_results': previous.get('actual_result_excerpts', []),
                 'review_outcome': previous.get('review_outcome')})
-            if len(value) + len(recap) > LIMITS['phase2_advisory_chars']:
-                raise ValueError('advice consequence exceeds Phase 2 advisory budget')
             value += recap
-        transition = (self.manager.health_transitions[-1]
-                      if self.manager.health_transitions else None)
-        signal = {'health': asdict(self.manager._current().health),
-                  'progress': (asdict(transition) if transition is not None else None),
-                  'progress_status': ('scored' if transition is not None and
-                                      transition.progress in (0, 1) else 'unscored')}
-        signal_text = '\nExisting PoS health/progress (unscored is not zero): ' + _json(signal)
-        if len(value) + len(signal_text) > LIMITS['phase2_advisory_chars']:
-            raise ValueError('PoS health/progress exceeds Phase 2 advisory budget')
-        value += signal_text
+        cap = LIMITS['phase2_advisory_chars']
+        if len(value) > cap:
+            raise ValueError(f'required Phase 2 state/health/advice {len(value)} exceeds {cap}')
+        optional = [('related_record:' + record['id'],
+            '\nDirectly related model-state record: ' + _json(record))
+            for record in _gap_records(context)]
+        for field in ('persistent_epistemic_gaps', 'persistent_achievement_gaps'):
+            for index, item in enumerate(health.get(field, [])):
+                optional.append((f'health.{field}[{index}]',
+                    '\nExisting PoS health explanation: ' + _json({field: [item]})))
+        if progress is not None:
+            for field in ('reason', 'affected_record_ids'):
+                field_value = progress.get(field)
+                if field_value is None:
+                    continue
+                items = (field_value if isinstance(field_value, list) else [field_value])
+                for index, item in enumerate(items):
+                    optional.append((f'progress.{field}[{index}]',
+                        '\nExisting PoS progress explanation: ' + _json({field: [item]}
+                            if isinstance(field_value, list) else {field: item})))
+        if self.advice_history:
+            for index, item in enumerate(previous.get('actual_result_excerpts', [])):
+                optional.append((f'actual_result_excerpt[{index}]',
+                    '\nActual result excerpt after delivered suggestion: ' + _json(item)))
+        omitted = []
+        # Reserve a visible bounded omission marker while measuring the fully
+        # serialized view, including labels and JSON escaping, after each item.
+        reserve = len('\nOptional advisory details omitted: 999999')
+        for name, part in optional:
+            if len(part) <= LIMITS['history_event_chars'] + 120 and len(value + part) + reserve <= cap:
+                value += part
+            else:
+                omitted.append(name)
+        if omitted:
+            marker = f'\nOptional advisory details omitted: {len(omitted)}'
+            if len(value + marker) > cap:
+                raise ValueError(f'Phase 2 omission marker exceeds {cap}')
+            value += marker
+            self.events.append({'kind': 'phase2_optional_omitted',
+                                'items': omitted, 'rendered_chars': len(value)})
         return value
 
     def decision_panel(self, *, observation):
@@ -476,7 +551,10 @@ class ComplementEpisode:
                             'accepted_revision': self.accepted_revision,
                             'advice_sha256': (self.delivered.get('advice_sha256')
                                 if self.delivered else None),
-                            'revision_sha256': _digest(revision) if revision else None})
+                            'revision_sha256': _digest(revision) if revision else None,
+                            'revision_optional_receipts_omitted': (
+                                json.loads(revision)['optional_receipts_omitted']
+                                if revision else 0)})
         self.recent_steps.append({'step': actor_attempt + 1, 'analysis': str(thought or ''),
             'commands': [str(action) for action in action_batch],
             'observation': str(observation),

@@ -41,6 +41,10 @@ class State:
             if route != 'monitor':
                 self.task_responses += 1
                 if os.environ.get('POS_SYNTHETIC_FIXTURE') == '1' and self.task_responses == 1:
+                    long_output = ('; /opt/m4-runtime/python/'
+                        'cpython-3.12.12-linux-x86_64-gnu/bin/python3.12 '
+                        '-c "print(\'SYNTHETIC_LONG_OUTPUT_\' + \'X\' * 12000)"'
+                        if os.environ.get('POS_SYNTHETIC_LONG_OUTPUT') == '1' else '')
                     return sequence, 'code_run', '<summary>Creating synthetic file and service.</summary>', {
                         'script': ('printf "POS_FILE_OK\\n" > /app/pos-fixture-marker.txt; '
                                    'setsid /opt/m4-runtime/python/'
@@ -53,7 +57,8 @@ class State:
                                    "-c 'import urllib.request; "
                                    'assert urllib.request.build_opener('
                                    'urllib.request.ProxyHandler({})).open('
-                                   '"http://127.0.0.1:19173/", timeout=3).status == 200\''),
+                                   '"http://127.0.0.1:19173/", timeout=3).status == 200\''
+                                   + long_output),
                         'type': 'bash', 'timeout': 60}
                 if os.environ.get('PMA_MULTITURN_FIXTURE') == '1' and self.task_responses == 1:
                     if os.environ.get('PMA_SERVICE_FIXTURE') == '1':
