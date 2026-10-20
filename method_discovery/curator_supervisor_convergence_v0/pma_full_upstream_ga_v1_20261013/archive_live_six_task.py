@@ -54,7 +54,7 @@ def redact(raw: bytes, secrets: list[str]) -> tuple[bytes, int]:
     hidden_keys = {'thinking', 'redacted_thinking', 'reasoning_content',
                    'encrypted_content', 'signature', 'thinking_signature'}
 
-    def remove_hidden(value, path=()):
+    def remove_hidden(value):
         nonlocal changes
         if isinstance(value, dict):
             if value.get('type') == 'redacted_thinking':
@@ -66,10 +66,6 @@ def redact(raw: bytes, secrets: list[str]) -> tuple[bytes, int]:
                         'private_sha256': hashlib.sha256(encoded).hexdigest()}
             output = {}
             for key, item in value.items():
-                if key == 'user_id' and path and path[-1] == 'metadata':
-                    output[key] = '[REDACTED_CLIENT_ID]'
-                    changes += 1
-                    continue
                 request_setting = (key == 'thinking' and isinstance(item, dict) and
                     set(item) <= {'type', 'budget_tokens'} and
                     item.get('type') in {'adaptive', 'enabled', 'disabled'})
@@ -80,10 +76,10 @@ def redact(raw: bytes, secrets: list[str]) -> tuple[bytes, int]:
                                    'private_sha256': hashlib.sha256(encoded).hexdigest()}
                     changes += 1
                 else:
-                    output[key] = remove_hidden(item, (*path, key))
+                    output[key] = remove_hidden(item)
             return output
         if isinstance(value, list):
-            return [remove_hidden(item, path) for item in value]
+            return [remove_hidden(item) for item in value]
         if isinstance(value, str) and value.lstrip().startswith(('{', '[')):
             try:
                 nested = json.loads(value)

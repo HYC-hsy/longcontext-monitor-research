@@ -21,6 +21,60 @@ def secrets_from_profile(path: Path) -> list[str]:
     return sorted(set(values), key=len, reverse=True)
 
 
+def redact_client_metadata(public: bytes) -> tuple[bytes, int]:
+    """Remove transport client identity without changing model-visible messages."""
+
+    text = public.decode('utf-8')
+    if 'user_id' not in text:
+        return public, 0
+    changes = 0
+
+    def project(value):
+        nonlocal changes
+        if isinstance(value, dict):
+            result = {}
+            for key, item in value.items():
+                if key == 'metadata' and isinstance(item, dict) and 'user_id' in item:
+                    item = dict(item)
+                    item['user_id'] = '[REDACTED_CLIENT_ID]'
+                    changes += 1
+                result[key] = project(item)
+            return result
+        if isinstance(value, list):
+            return [project(item) for item in value]
+        if isinstance(value, str) and value.lstrip().startswith(('{', '[')):
+            try:
+                nested = json.loads(value)
+            except ValueError:
+                if '"user_id"' in value:
+                    raise RuntimeError('unparseable client metadata in public copy')
+            else:
+                before = changes
+                nested = project(nested)
+                if changes != before:
+                    return json.dumps(nested, ensure_ascii=False)
+        return value
+
+    try:
+        projected = project(json.loads(text))
+        rendered = json.dumps(projected, ensure_ascii=False)
+    except ValueError:
+        rendered_lines = []
+        for line in text.splitlines():
+            if not line.strip():
+                rendered_lines.append('')
+                continue
+            try:
+                rendered_lines.append(json.dumps(project(json.loads(line)),
+                                                 ensure_ascii=False))
+            except ValueError as error:
+                raise RuntimeError('unparseable client metadata in public copy') from error
+        rendered = '\n'.join(rendered_lines) + ('\n' if text.endswith('\n') else '')
+    if '"user_id"' in rendered and changes == 0:
+        raise RuntimeError('unprojected client metadata in public copy')
+    return rendered.encode('utf-8'), changes
+
+
 def mapping_for(source: Path) -> dict[str, Path]:
     identity = json.loads((source / 'run_identity.json').read_text(encoding='utf-8'))
     manifest = json.loads((source / 'manifest.json').read_text(encoding='utf-8'))
@@ -87,6 +141,8 @@ def collect(source: Path, target: Path, secrets: list[str]) -> list[dict]:
     for name, path in sorted(mapping.items()):
         raw = path.read_bytes()
         public, count = redact(raw, secrets)
+        public, client_count = redact_client_metadata(public)
+        count += client_count
         destination = target / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         with destination.open('xb') as stream:
@@ -138,6 +194,8 @@ def collect_provider_capture(source: Path, target: Path, secrets: list[str],
             continue
         raw = path.read_bytes()
         public, count = redact(raw, secrets)
+        public, client_count = redact_client_metadata(public)
+        count += client_count
         destination = target / name
         with destination.open('xb') as stream:
             stream.write(public)
