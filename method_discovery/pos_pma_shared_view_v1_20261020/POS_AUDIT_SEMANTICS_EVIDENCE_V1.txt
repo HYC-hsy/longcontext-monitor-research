@@ -1,0 +1,140 @@
+PoS shared-view audit semantics and evidence IDs — offline handoff
+==================================================================
+
+Scope and identity
+------------------
+Historical evidence: a2665e40328b94fd61f457b4b3bc1bb63de0df3e;
+historical running source: a636837627f92873a4807c099935c35839255ab7;
+counterexample run: pos-68764e0592a8481e. None of these records or its reward
+was changed. Development began at 986613e96cb4ea18bac8eeb57297fe9d13173c0f
+(later archive-only changes after the audit commit). Commit A ece141d6 changes
+the shared-view audit wording and adds an explicit before/after field diff while
+retaining evidence_step. Commit B 55e2a74d adds pos-shared-evidence-id-v1 only
+to SharedViewSentinel. Both are opt-in to pos_pma_shared_view_v1. GA-only, U,
+plain PoS and the former complement retain the prior audit protocol.
+
+The pinned public source is luoyu100/PoS@6818cfa6434dbc91fcf67f0b3eb12a91db47433f.
+The local vendor/belief/beliefSentinel.py and vendor/prompts/beliefSentinel_prompt.py
+were already patched before this work and have further local opt-in patches now;
+they are not byte-identical to upstream. The PMA source, prompts, trigger,
+memory bank, renderer and profiles were not changed in these two commits.
+
+Contract
+--------
+The added system text distinguishes revisable belief_before, attempted action,
+actual observation and candidate_after. It asks about specific state/relation/
+gap/frontier changes, allows new observed facts and revision of older inference,
+and warns that a copy does not establish source deletion or local success imply
+broader completion. It also rejects unsupported additions, deletions and gap
+closure. The diff is computed from the two actual state arguments at each audit,
+including reaudit of a repaired candidate; it is a locator, not evidence.
+Neither the original before/candidate nor trajectory is truncated by this diff.
+
+The second commit assigns ev_<24 hex> to each actually displayed citable fragment.
+Its hash input includes case identity, event identity when available (otherwise
+the request-row position explicitly stands for unknown event identity), original
+step, source field path, offset, length and fragment SHA-256. Different events
+with the same text retain different IDs. Binding collisions raise an error.
+The request displays the ID on its fragment, and a separate event records the
+ID, step, event, path, offset, length and hash. The response must use evidence_id
+and a short quote. The program first checks ID membership in this request, then
+the quote against that one visible fragment, then the target against the existing
+target set. Only then does it derive evidence_step for the existing internal
+issue type. No whole-history lookup, text similarity, or cross-fragment joining.
+Valid citation is provenance binding, not a semantic entailment proof.
+Memory interpretations, task text, advice and old-state prose remain outside
+the citable tool-source map. The existing clean/issues/unusable and one-finding
+limit remain. Invalid siblings are counted and filtered, not changed to clean.
+Transport errors still propagate; no extra model call or retry was added.
+
+Fixed counterexample catalog (all development cases; no held-out inference)
+--------------------------------------------------------------------------
+D1, historical inspiration: pos-68764e0592a8481e, archived audit/result under
+raw_live_sqlite_contract_v2. A later observation can justify a fact absent in
+belief_before; expected: mere novelty is not an issue. The historical model
+response is not replayed as if it had seen the new prompt.
+D2, generic copy: receipt says a destination copy exists, with no source
+deletion observation. Freeze before={source_present:true,dest_present:false},
+action="copy src to dst", tool stdout="copied src to dst; src remains";
+candidate={source_present:true,dest_present:true}. Expected: allow destination,
+do not infer source gone. Counter-candidate source_present:false is unsupported.
+D3, generic move/delete: receipt explicitly reports source removed; candidate
+retains a contradictory source state. Freeze before={source_present:true},
+action="move src to dst", stdout="move completed; src no longer exists";
+candidate={source_present:true,dest_present:true}. Expected: one grounded issue
+is allowed against retained source state, with the shown stdout as source.
+D4, generic unsupported change: action requests creation but tool reports
+failure. Freeze before={artifact_present:false,gap_open:true}, action="build",
+stderr="build failed before output creation"; candidate={artifact_present:true,
+gap_open:false}. Expected: unobserved addition or gap closure challenged.
+D5, generic scope: local sandbox test passes while requirement covers deployed
+service. Freeze task="service responds on deployed listener", before gap_open=true,
+action="test local sandbox", stdout="sandbox test passed; deployment not tested";
+candidate gap_open=false. Expected: do not close the broader requirement on
+local-only evidence.
+D6, generic stale gap: later tool receipt resolves one old uncertainty but a
+separate active gap remains. Freeze before={gap_A_open:true,gap_B_open:true},
+action="inspect artifact", stdout="artifact A exists; B not inspected";
+candidate={gap_A_open:false,gap_B_open:true}. Expected: allow A revision while
+preserving B, distinguishing revisable old inference from still-open duty.
+D7, citation control: identical tool text in two events. Expected: distinct
+IDs and derived steps/paths. An ID from a prior snapshot, an unknown ID,
+non-tool memory prose, omitted middle text, or a quote spanning two fragments
+must be rejected. A valid quote from one visible tool fragment can be bound.
+
+These expectations are human-checkable scenario labels, not newly observed
+model judgments. D1 is development material from a previously examined run;
+D2–D7 are developer-constructed controls, also development material. There is
+no independent held-out set in this delivery. The finite fake responses in
+test_shared_view.py validate request construction and branching only. They do
+not demonstrate that a real model will correctly decide D1–D6.
+
+Offline checks actually executed
+--------------------------------
+1. `python -B -m unittest method_discovery.pos_pma_complement_v1_20261019.test_shared_view`
+   24 tests, OK, exit 0. This included actual request construction, frozen
+   memory, repair/reaudit, stale Task panel, and new ID positive/negative tests.
+2. `python -B -m unittest method_discovery.pos_pma_complement_v1_20261019.test_shared_view method_discovery.pos_pma_complement_v1_20261019.test_candidate_core method_discovery.pos_upstream_ga_v1_20261017.test_citation_fix`
+   41 tests, OK, exit 0.
+3. `python -B test_offline.py` from pos_upstream_ga_v1_20261017: 6 tests, OK,
+   exit 0. The initial root-level module invocation of test_offline failed
+   collection (ModuleNotFoundError: episode); it was not counted as passing.
+4. `python -B -m unittest method_discovery.pos_pma_complement_v1_20261019.test_memory_adapter method_discovery.pos_pma_complement_v1_20261019.test_candidate_ga_seam`
+   10 tests, OK, exit 0 in the corrected standalone command. The earlier
+   combined command's overall exit was 1 because test_offline failed collection.
+
+File SHA-256 of current Windows worktree bytes (not Git blob IDs):
+  vendor/belief/beliefSentinel.py 970ee78bde95b5ef8708a871a13f4981c67f5d2268cf84f3682f21c9ab8c6644
+  vendor/prompts/beliefSentinel_prompt.py cc82ae90b2f0e34209829a7e2fda56daca12f11596d5cce3556f6211b3344451
+  pos_pma_complement_v1_20261019/shared_view.py 933ee1602850ecb3d5ed76dded229b44bb28e42a17586225b317b190df87574e
+  pos_pma_complement_v1_20261019/test_shared_view.py 3a58cb9fdafb0cc52401e4830de16915a68fb10ac8ec6aa281865cbaaca17673
+
+No new source-bound Docker certification was produced. The old certification
+belongs to different running code and cannot authorize the changed source.
+Real provider/Task/evaluator calls in this work: zero. Previous one-use live
+authorization was not restored or replaced. No reward or historical run
+result was altered.
+
+Next-stage plan, NOT executed or authorized
+-------------------------------------------
+Freeze before state, candidate, raw observation, selected historical memory,
+source projection and model/profile once per case. Compare three versions:
+historical audited baseline, commit A, and commit A+B. Use identical model,
+per-call token cap and retry cap; do not change candidate wording except the
+documented audit semantics and citation representation. Propose D1–D7 with
+two repeats/version, maximum 7*3*2=42 logical audits. With the existing
+one bounded JSON correction per audit the ceiling would be 84 physical model
+attempts; actual attempts/usage must be counted. This is a proposed ceiling,
+not a live authorization. Have an external reviewer freeze additional unseen
+cases before model testing; none of D1–D7 may be labeled held-out. Predefine
+incorrect rejection, incorrect acceptance, unusable output, wrong citation
+and reason as separate outcomes, with two independent human labels per case
+and adjudication of disagreement. Report per-case paired outcomes, not just
+aggregate acceptance. A single-step frozen-candidate audit cannot establish
+continuous-state improvement or Task success; a separate approved longitudinal
+test would be needed.
+
+Residual risk: the Sentinel can still misread evidence, and selected historical
+memory may bias interpretation. A valid fragment binding alone cannot prove
+the issue's semantic claim. The changed prompt/representation has not been
+tested against a real provider or formally certified for another live episode.
