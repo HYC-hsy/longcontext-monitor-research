@@ -13,7 +13,7 @@ import json
 from candidate import (ComplementBeliefManager, ComplementEpisode,
                        CandidateSentinel, _digest, _health_progress_signal,
                        _json, _required_state)
-from citation_fix import _result_fields
+from citation_fix import CitationFixedSentinel, _result_fields
 from prompts.react_prompt import _frontier_relevant_world
 
 
@@ -31,8 +31,27 @@ def _visible_tool_sources(source):
 class SharedViewSentinel(CandidateSentinel):
     """Project supplemental history through the original per-step audit cap."""
 
+    def _request_json(self, messages, caller, retries, **kwargs):
+        if kwargs.get('lane') == 'consistency' and getattr(self, 'shared_selection', None):
+            selection = self.shared_selection
+            history = {'selection': selection,
+                'meaning': 'selected PMA memory is fallible historical interpretation; '
+                           'it is not a tool receipt or citable evidence'}
+            body = _json(history)
+            messages = [*messages, {'role': 'system', 'content':
+                'Frozen selected PMA history for this audit (not a tool result):\n' + body}]
+            self.logger.log('shared_audit_history_input',
+                step=kwargs.get('step'), audit_mode=kwargs.get('audit_mode'),
+                entry_ids=[item['id'] for item in selection['entries']],
+                selection_sha256=_digest(selection['rendered_text']),
+                request_context_sha256=_digest(body),
+                field_path='messages[-1].content')
+        return super()._request_json(messages, caller, retries, **kwargs)
+
     def _compact_trajectory(self, trajectory):
-        compact = super()._compact_trajectory(trajectory)
+        # The old complement's supplemental_sources path would grant a second
+        # independent projection allowance. Begin with the native bounded view.
+        compact = CitationFixedSentinel._compact_trajectory(self, trajectory)
         task_only_hash = getattr(self, 'task_only_initial_sha256', None)
         for original, shown in zip(trajectory, compact):
             if (original.get('step') == -1 and task_only_hash and
@@ -41,6 +60,35 @@ class SharedViewSentinel(CandidateSentinel):
                 shown['source_origin'] = 'original_task_not_tool_result'
         by_step = {row['step']: row for row in compact}
         seen = set()
+        for original, row in zip(trajectory, compact):
+            try:
+                envelope = json.loads(original.get('observation', ''))
+            except (TypeError, ValueError):
+                row['citable_sources'] = []
+                row.setdefault('source_origin', 'unidentified_plain_observation')
+                continue
+            receipts = envelope.get('tool_results') if isinstance(envelope, dict) else None
+            if not isinstance(receipts, list):
+                row['citable_sources'] = []
+                row.setdefault('source_origin', 'not_a_tool_result_envelope')
+                continue
+            for field in row.get('citable_sources', ()):
+                path = field.get('source_path', '')
+                if not path.startswith('tool_results['):
+                    continue
+                try:
+                    index = int(path.split('[', 1)[1].split(']', 1)[0])
+                    receipt = receipts[index]
+                except (IndexError, ValueError, TypeError):
+                    continue
+                if not isinstance(receipt, dict):
+                    continue
+                event_id = receipt.get('tool_use_id') or receipt.get('event_id')
+                if event_id is None:
+                    continue
+                field['event_id'] = str(event_id)
+                field['source_path'] = str(event_id) + ':' + path.split(']', 1)[1].lstrip('.')
+                seen.add((str(event_id), field['source_path'].split(':', 1)[1]))
         for source in getattr(self, 'shared_sources', ()):
             step = source.get('pos_step')
             if not isinstance(step, int) or step < 0:
@@ -49,24 +97,23 @@ class SharedViewSentinel(CandidateSentinel):
             if not fields:
                 continue
             row = by_step.get(step)
-            if row is not None:
-                # A live transition is already represented by its original
-                # bounded observation. Never use its registry copy to reopen
-                # omitted middle text or grant another 6000 characters.
-                continue
-            row = {'step': step, 'action': None, 'observation': '',
-                   'citable_sources': []}
-            compact.append(row)
-            by_step[step] = row
+            if row is None:
+                row = {'step': step, 'action': None, 'observation': '',
+                       'citable_sources': []}
+                compact.append(row)
+                by_step[step] = row
             used = sum(len(item['text']) for item in row.get('citable_sources', ()))
             for path, value in fields:
-                identity = (source['event_id'], source['sha256'], path)
+                identity = (source['event_id'], path)
                 if identity in seen:
                     continue
                 seen.add(identity)
                 remaining = self.audit_observation_max_chars - used
                 if remaining <= 0:
-                    break
+                    row.setdefault('shared_omitted', []).append({
+                        'event_id': source['event_id'], 'field_path': path,
+                        'offset': 0, 'length': len(value), 'reason': 'audit_cap'})
+                    continue
                 if len(value) > remaining:
                     head = (remaining + 1) // 2
                     tail = remaining - head
@@ -88,6 +135,18 @@ class SharedViewSentinel(CandidateSentinel):
                         'actor_transition_id': source.get('actor_transition_id'),
                         'pos_step': step, 'segment': record})
                     used += len(text)
+                if clipped:
+                    row.setdefault('shared_omitted', []).append({
+                        'event_id': source['event_id'], 'field_path': path,
+                        'offset': head, 'length': len(value) - remaining,
+                        'reason': 'audit_cap'})
+        self.logger.log('shared_audit_source_projection',
+            rows=[{'step': row['step'], 'sources': [{
+                'event_id': item.get('event_id'),
+                'field_path': item.get('source_path'),
+                'offset': item.get('offset', 0),
+                'sha256': _digest(item['text'])} for item in row.get('citable_sources', ())],
+                'omitted': row.get('shared_omitted', [])} for row in compact])
         return compact
 
 
@@ -143,6 +202,7 @@ class SharedViewEpisode(ComplementEpisode):
         self.phase1_status = 'not_attempted'
         self.phase2_status = 'not_attempted'
         self.pending_source_pack = []
+        self.current_attempt = {'kind': 'not_attempted'}
 
     def _selection_sources(self):
         selected = []
@@ -179,6 +239,7 @@ class SharedViewEpisode(ComplementEpisode):
         if self.manager.sentinel is not None:
             self.manager.sentinel.shared_sources = tuple(
                 source for source in sources if source.get('origin') == 'tool_result')
+            self.manager.sentinel.shared_selection = deepcopy(self.frozen_selection)
         self.events.append({'kind': 'shared_selection_bound',
             'entry_ids': [entry['id'] for entry in self.frozen_selection['entries']],
             'bank_version': self.frozen_selection['bank_version'],
@@ -189,6 +250,7 @@ class SharedViewEpisode(ComplementEpisode):
         self.manager.shared_history = None
         if self.manager.sentinel is not None:
             self.manager.sentinel.shared_sources = ()
+            self.manager.sentinel.shared_selection = None
 
     def _freeze(self):
         self.frozen_selection = self.memory.freeze_selection(self._phase1_observation())
@@ -205,6 +267,7 @@ class SharedViewEpisode(ComplementEpisode):
     def _phase2_context(self):
         context = self._context()
         signal, health, progress = _health_progress_signal(self, context)
+        selected_sources = self._selection_sources()
         explanations = {'health': {key: health.get(key) for key in
             ('persistent_epistemic_gaps', 'persistent_achievement_gaps')},
             'progress': ({key: progress.get(key) for key in
@@ -214,6 +277,9 @@ class SharedViewEpisode(ComplementEpisode):
             'adopted_state': _required_state(context, include_recovery=True),
             'health_progress': signal, 'explanations': explanations,
             'last_delivered_advice_and_consequence': previous,
+            'selected_memory_input_sources': selected_sources,
+            'selected_source_count': len(selected_sources),
+            'selected_source_utf8_bytes': len(_json(selected_sources).encode('utf-8')),
             'frozen_bank_selection_sha256': _digest(
                 self.frozen_selection['rendered_text']) if self.frozen_selection else None})
 
@@ -244,6 +310,7 @@ class SharedViewEpisode(ComplementEpisode):
                 self.memory.last_phase1_operations],
             'phase1_status': self.phase1_status, 'phase2_status': self.phase2_status,
             'initialization_stage': self.initialization_stage,
+            'current_attempt': deepcopy(self.current_attempt),
             'frozen_selection': deepcopy(self.frozen_selection)}
 
     async def reset(self, *, task, observation, actions):
@@ -253,6 +320,13 @@ class SharedViewEpisode(ComplementEpisode):
                 self.memory.memory.procedural):
             raise ValueError('shared-view requires a fresh PMA bank')
         self.original_task = task
+        self.current_attempt = {'kind': 'initialization', 'stage': 'phase1',
+                                'reviewed': False}
+        self.phase1_status = 'not_attempted'
+        self.phase2_status = 'not_attempted'
+        self.frozen_selection = None
+        self.memory.last_phase1_operations = []
+        self.memory.frozen_selection = None
         self.source_registry['original-task'] = {
             'event_id': 'original-task', 'origin': 'original_task',
             'raw': {'task': task}, 'sha256': _digest(task), 'order': -1,
@@ -273,9 +347,11 @@ class SharedViewEpisode(ComplementEpisode):
                 self.phase1_status = 'completed'
             except BaseException:
                 self.phase1_status = 'failed'
+                self.current_attempt['stage'] = 'phase1_failed'
                 raise
         self._freeze()
         self.initialization_stage = 'pos_initializing'
+        self.current_attempt['stage'] = 'pos_initializing'
         try:
             if self.manager.sentinel is not None:
                 self.manager.sentinel.task_only_initial_sha256 = (
@@ -289,6 +365,8 @@ class SharedViewEpisode(ComplementEpisode):
             self.started = True
             self.latest_update_outcome = self.manager.last_validation_outcome
             self.initialization_stage = 'pos_initialized'
+            self.current_attempt['stage'] = 'pos_initialized'
+            self.current_attempt['reviewed'] = True
         finally:
             self._clear_selection()
         if triggered:
@@ -302,7 +380,9 @@ class SharedViewEpisode(ComplementEpisode):
                 self.phase2_status = result['status']
             except BaseException:
                 self.phase2_status = 'failed'
+                self.current_attempt['stage'] = 'phase2_failed'
                 raise
+        self.current_attempt['stage'] = 'completed'
         self.events.append({'kind': 'reset', 'triggered': triggered,
             'phase1_status': self.phase1_status,
             'phase2_status': self.phase2_status,
@@ -321,6 +401,12 @@ class SharedViewEpisode(ComplementEpisode):
             raise ValueError('shared-view update requires a real action batch')
         # A skipped PMA wake still needs a fresh selection from the unchanged
         # bank, rather than the prior wake's frozen render.
+        self.current_attempt = {'kind': 'transition', 'transition_id': transition_id,
+                                'stage': 'result_recorded', 'reviewed': False}
+        self.phase1_status = 'not_attempted'
+        self.phase2_status = 'not_attempted'
+        self.frozen_selection = None
+        self.memory.last_phase1_operations = []
         self.memory.frozen_selection = None
         self.processed_transitions.add(transition_id)
         for index, item in enumerate(source_events):
@@ -346,6 +432,9 @@ class SharedViewEpisode(ComplementEpisode):
             'source_ids': [str(item.get('tool_use_id') or item.get('event_id'))
                 for item in source_events if isinstance(item, dict)]})
         self.recent_steps = self.recent_steps[-self.recent_window:]
+        self.events.append({'kind': 'transition_result_recorded',
+            'transition_id': transition_id, 'source_ids':
+            deepcopy(self.recent_steps[-1]['source_ids']), 'reviewed': False})
         triggered = False
         reason = 'terminal_batch'
         step = actor_attempt + 1
@@ -359,6 +448,7 @@ class SharedViewEpisode(ComplementEpisode):
                     self.phase1_status = 'completed'
                 except BaseException:
                     self.phase1_status = 'failed'
+                    self.current_attempt['stage'] = 'phase1_failed'
                     self.events.append({'kind': 'phase1_failed',
                         'transition_id': transition_id,
                         'pos_update': 'not_attempted',
@@ -369,6 +459,7 @@ class SharedViewEpisode(ComplementEpisode):
         else:
             self.phase1_status = 'skipped_terminal'
         self._freeze()
+        self.current_attempt['stage'] = 'pos_updating'
         if self.delivered:
             self.manager.shared_history['previous_delivered_advice'] = {
                 'advice': self.delivered['advice'],
@@ -393,6 +484,8 @@ class SharedViewEpisode(ComplementEpisode):
         finally:
             self._clear_selection()
         outcome = self.manager.last_validation_outcome
+        self.current_attempt['stage'] = 'pos_processed'
+        self.current_attempt['reviewed'] = True
         if outcome == 'accepted':
             self.accepted_revision += 1
         self.latest_update_outcome = outcome
@@ -422,9 +515,11 @@ class SharedViewEpisode(ComplementEpisode):
                 self.phase2_status = result['status']
             except BaseException:
                 self.phase2_status = 'failed'
+                self.current_attempt['stage'] = 'phase2_failed'
                 raise
         else:
             self.phase2_status = 'not_triggered'
+        self.current_attempt['stage'] = 'completed'
         return self._context()
 
     def finish(self, *, reason, observation=None):
@@ -442,4 +537,5 @@ class SharedViewEpisode(ComplementEpisode):
                 'last_phase1_operations': [asdict(item) for item in
                     self.memory.last_phase1_operations],
                 'phase1_status': self.phase1_status,
-                'phase2_status': self.phase2_status}
+                'phase2_status': self.phase2_status,
+                'current_attempt': deepcopy(self.current_attempt)}

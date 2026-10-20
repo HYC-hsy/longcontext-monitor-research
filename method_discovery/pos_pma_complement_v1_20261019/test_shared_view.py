@@ -140,12 +140,210 @@ class Tests(unittest.TestCase):
         self.assertTrue(all(field['source_path'].startswith('old-tool:result.')
                             for field in fields))
         self.assertNotIn('A' * 7000, ''.join(field['text'] for field in fields))
-        # A current observation already projected at step 3 cannot gain a
-        # second audit allowance through its registry copy.
+        # The same event already present in the live window gets no second
+        # allowance from its historical registry copy.
         current = sentinel._compact_trajectory([{'step': 3, 'action': None,
-            'observation': 'Original actual observation'}])
+            'observation': json.dumps({'tool_results': [{
+                'tool_use_id': 'old-tool', 'result': {'stdout': 'A' * 7000 +
+                'VISIBLE_TAIL'}}]})}])
         self.assertEqual(len(current), 1)
-        self.assertNotIn('VISIBLE_TAIL', json.dumps(current))
+        self.assertEqual(sum(len(field['text']) for field in current[0]['citable_sources']),
+                         sentinel.audit_observation_max_chars)
+        self.assertFalse(current[0].get('shared_history'))
+
+    def test_two_distinct_events_at_same_step_and_memory_not_citable(self):
+        ep, *_ = self.make()
+        sentinel = ep.manager.sentinel
+        sentinel.shared_selection = {'entries': [{'id': 'mem-1'}],
+            'rendered_text': 'MEMORY_MIDDLE_ONLY', 'bank_version': 1}
+        sources = ({'event_id': 'tool-A', 'origin': 'tool_result',
+                    'sha256': 'a' * 64, 'pos_step': 2,
+                    'raw': {'result': {'stdout': 'FIRST_SHORT'}}},
+                   {'event_id': 'tool-B', 'origin': 'tool_result',
+                    'sha256': 'b' * 64, 'pos_step': 2,
+                    'raw': {'result': {'stdout': 'SECOND_DISTINCT'}}})
+        sentinel.shared_sources = sources
+        compact = sentinel._compact_trajectory([])
+        self.assertEqual(len(compact), 1)
+        self.assertEqual({item['event_id'] for item in compact[0]['shared_history']},
+                         {'tool-A', 'tool-B'})
+        self.assertIn('SECOND_DISTINCT', json.dumps(compact))
+        original = {'step': 2, 'action': None, 'observation': json.dumps({
+            'tool_results': [{'tool_use_id': 'tool-A',
+                              'result': {'stdout': 'FIRST_SHORT'}}]})}
+        merged = sentinel._compact_trajectory([original])
+        self.assertEqual(len(merged), 1)
+        self.assertEqual([item['event_id'] for item in merged[0]['shared_history']],
+                         ['tool-B'])
+        self.assertEqual(len([item for item in merged[0]['citable_sources']
+            if 'FIRST_SHORT' in item['text']]), 1)
+        from belief.beliefSentinel import SentinelIssue
+        def issue(quote):
+            return SentinelIssue(targets=['e1'], issue_type='contradiction',
+                problem='test', evidence_step=2, evidence_quote=quote,
+                evidence='test', suggestion='test')
+        evidence = {2: sentinel._trajectory_text(merged[0])}
+        self.assertTrue(sentinel._valid_issue(issue('SECOND_DISTINCT'), {'e1'}, evidence))
+        self.assertFalse(sentinel._valid_issue(issue('MEMORY_MIDDLE_ONLY'), {'e1'}, evidence))
+        sentinel.call_model.replies.append('{"issues": []}')
+        sentinel.audit_candidate(case_id='case', base_step=2, mode='local',
+            belief_before={'world': {'entities': {'e1': {}}}},
+            candidate_belief={'world': {'entities': {'e1': {}}}},
+            raw_trajectory=[original])
+        submitted = [row for name, row in ep.logger.rows
+                     if name == 'belief_sentinel_model_input'][-1]['messages']
+        self.assertIn('MEMORY_MIDDLE_ONLY', json.dumps(submitted))
+        self.assertIn('SECOND_DISTINCT', json.dumps(submitted))
+
+    def test_phase2_uses_current_selection_sources_and_attempt_reset(self):
+        ep, belief, consistency, pma = self.make()
+        asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.', actions=[]))
+        pma.replies[0] = response('', [tool('memory_save_knowledge',
+            {'content': 'Memory from actual tool output'})])
+        first = {'origin': 'GA_tool_outcome', 'tool_use_id': 'actual-1',
+                 'result': {'stdout': 'WINDOW_OUTSIDE_SOURCE'}}
+        asyncio.run(ep.update(actor_attempt=1, transition_id='joint-1',
+            thought='inspect', action_batch=[{'id': 'actual-1', 'name': 'inspect',
+                'arguments': {}, 'order': 0, 'status': 'executed'}],
+            observation=json.dumps({'tool_results': [first]}),
+            source_events=[first]))
+        self.assertIn('WINDOW_OUTSIDE_SOURCE', pma.requests[-1]['prompt'])
+        prior_bank = ep.memory.memory.to_dict()
+        prior_pos = ep.pos.get_result()
+        async def fail_call(**_kwargs):
+            raise RuntimeError('fatal next Phase 1')
+        ep.memory.llm.call = fail_call
+        with self.assertRaisesRegex(RuntimeError, 'fatal next Phase 1'):
+            asyncio.run(ep.update(actor_attempt=2, transition_id='joint-2',
+                thought='inspect', action_batch=[{'id': 'actual-2',
+                    'name': 'inspect', 'arguments': {}, 'order': 0,
+                    'status': 'executed'}], observation='Second actual result.'))
+        result = ep.get_result()
+        self.assertEqual(result['phase1_status'], 'failed')
+        self.assertEqual(result['phase2_status'], 'not_attempted')
+        self.assertIsNone(result['frozen_selection'])
+        self.assertEqual(result['last_phase1_operations'], [])
+        self.assertFalse(result['current_attempt']['reviewed'])
+        self.assertEqual(result['bank'], prior_bank)
+        self.assertEqual(result['pos'], prior_pos)
+        self.assertTrue(any(row.get('kind') == 'transition_result_recorded' and
+            row.get('transition_id') == 'joint-2' for row in result['events']))
+
+    def test_partial_real_crud_survives_initialization_and_update_failure(self):
+        for initialize in (True, False):
+            with self.subTest(initialize=initialize):
+                ep, _belief, _consistency, pma = self.make()
+                if not initialize:
+                    asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.',
+                                         actions=[]))
+                failing_reply = response('', [
+                    tool('memory_save_knowledge', {'content': 'Committed first item'}),
+                    tool('memory_save_procedural', {'content': 'Fatal second item'})])
+                pma.replies[0] = failing_reply
+                def fail_second(_content):
+                    raise RuntimeError('synthetic bank storage failure')
+                ep.memory.memory.save_procedural = fail_second
+                with self.assertRaisesRegex(RuntimeError, 'synthetic bank storage failure'):
+                    if initialize:
+                        asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.',
+                                             actions=[]))
+                    else:
+                        asyncio.run(ep.update(actor_attempt=1,
+                            transition_id='joint-partial', thought='inspect',
+                            action_batch=[{'id': 'tool-partial', 'name': 'inspect',
+                                'arguments': {}, 'order': 0, 'status': 'executed'}],
+                            observation='Actual inspected result.',
+                            source_events=[{'tool_use_id': 'tool-partial',
+                                'result': {'stdout': 'Actual inspected result.'}}]))
+                partial = ep.get_result()
+                self.assertEqual(partial['phase1_status'], 'failed')
+                self.assertEqual(partial['phase2_status'], 'not_attempted')
+                self.assertIsNone(partial['frozen_selection'])
+                self.assertEqual(len(partial['last_phase1_operations']), 1)
+                self.assertEqual(len(partial['bank']['knowledge']),
+                                 1 if initialize else 2)
+                saved = partial['last_phase1_operations'][0]['memory_id']
+                self.assertIn(saved, partial['entry_sources'])
+                self.assertEqual(partial['current_attempt']['reviewed'], False)
+                self.assertEqual(partial['current_attempt']['stage'], 'phase1_failed')
+                if initialize:
+                    self.assertEqual(partial['initialization_stage'], 'not_attempted')
+                    self.assertEqual(partial['pos']['status'], 'unavailable')
+                else:
+                    self.assertEqual(partial['current_attempt']['kind'], 'transition')
+
+    def test_repair_reaudit_receive_same_frozen_memory_in_actual_requests(self):
+        ep, belief, consistency, pma = self.make()
+        belief.replies.append(json.dumps(UPDATE))
+        issue = {'targets': ['e1'], 'issue_type': 'contradiction',
+                 'problem': 'Prior clean interpretation conflicts with actual tool',
+                 'evidence_step': 0, 'evidence_quote': 'STILL_DIRTY',
+                 'evidence': 'STILL_DIRTY', 'suggestion': 'retain gap'}
+        consistency.replies[1:] = [json.dumps({'issues': [issue]}),
+                                   '{"issues": []}']
+        asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.', actions=[]))
+        source = {'origin': 'GA_tool_outcome', 'tool_use_id': 'repair-tool',
+                  'result': {'stdout': 'STILL_DIRTY'}}
+        asyncio.run(ep.update(actor_attempt=1, transition_id='repair-transition',
+            thought='Inspect', action_batch=[{'id': 'repair-tool', 'name': 'inspect',
+                'arguments': {}, 'order': 0, 'status': 'executed'}],
+            observation=json.dumps({'tool_results': [source]}),
+            source_events=[source]))
+        self.assertEqual(len(consistency.requests), 3)
+        self.assertEqual(len(belief.requests), 3)
+        for request in (belief.requests[1], consistency.requests[1],
+                        belief.requests[2], consistency.requests[2]):
+            self.assertIn('Remember actual tool output', json.dumps(request))
+            self.assertIn('shared_selection', json.dumps(request))
+        self.assertIn('STILL_DIRTY', json.dumps(consistency.requests[1]))
+        self.assertIn('STILL_DIRTY', json.dumps(consistency.requests[2]))
+        audit_meta = [row for name, row in ep.logger.rows
+                      if name == 'shared_audit_history_input']
+        self.assertEqual(audit_meta[-1]['selection_sha256'],
+                         audit_meta[-2]['selection_sha256'])
+
+    def test_window_outside_source_reaches_phase2_and_repair(self):
+        ep, belief, consistency, pma = self.make()
+        ep.recent_window = 1
+        ep.manager.recent_transition_count = 1
+        ep.manager.sentinel.call_progress_model.replies.append(
+            '{"progress": 0, "score": 0.0, "affected_record_ids": [], '
+            '"reason": "no change"}')
+        belief.replies.extend([json.dumps(UPDATE), json.dumps(UPDATE)])
+        long_source = 'VISIBLE_HEAD' + 'MIDDLE_NOT_CITABLE' * 400 + 'VISIBLE_TAIL'
+        issue = {'targets': ['e1'], 'issue_type': 'contradiction',
+                 'problem': 'old selected evidence is relevant',
+                 'evidence_step': 0, 'evidence_quote': 'VISIBLE_TAIL',
+                 'evidence': 'VISIBLE_TAIL', 'suggestion': 'retain gap'}
+        consistency.replies.extend([json.dumps({'issues': [issue]}),
+                                    '{"issues": []}'])
+        pma.replies.extend([response(), response('<no_intervention/>')])
+        asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.', actions=[]))
+        pma.replies[0] = response('', [tool('memory_save_knowledge',
+            {'content': 'Selected old observed outcome'})])
+        first = {'origin': 'GA_tool_outcome', 'tool_use_id': 'old-event',
+                 'result': {'stdout': long_source}}
+        asyncio.run(ep.update(actor_attempt=1, transition_id='old-transition',
+            thought='inspect', action_batch=[{'id': 'old-event', 'name': 'inspect',
+                'arguments': {}, 'order': 0, 'status': 'executed'}],
+            observation=json.dumps({'tool_results': [first]}), source_events=[first]))
+        second = {'origin': 'GA_tool_outcome', 'tool_use_id': 'new-event',
+                  'result': {'stdout': 'Current new outcome'}}
+        asyncio.run(ep.update(actor_attempt=2, transition_id='new-transition',
+            thought='inspect', action_batch=[{'id': 'new-event', 'name': 'inspect',
+                'arguments': {}, 'order': 0, 'status': 'executed'}],
+            observation=json.dumps({'tool_results': [second]}), source_events=[second]))
+        self.assertNotIn('old-event', ep._pma_observation())
+        self.assertIn('MIDDLE_NOT_CITABLE', pma.requests[-1]['prompt'])
+        self.assertIn('Selected old observed outcome', pma.requests[-1]['prompt'])
+        self.assertIn('MIDDLE_NOT_CITABLE', json.dumps(belief.requests[-2]))
+        self.assertIn('MIDDLE_NOT_CITABLE', json.dumps(belief.requests[-1]))
+        audit = [row for name, row in ep.logger.rows
+                 if name == 'shared_audit_source_projection'][-2:]
+        self.assertTrue(any(item['step'] == 0 for item in audit[0]['rows']))
+        self.assertTrue(any(item['step'] == 0 for item in audit[1]['rows']))
+        self.assertEqual(audit[0]['rows'][0]['sources'][0]['field_path'],
+                         audit[1]['rows'][0]['sources'][0]['field_path'])
 
     def test_recovery_survives_silence_and_no_cap(self):
         context = {'goal': {'user_input': 'Original Task'},

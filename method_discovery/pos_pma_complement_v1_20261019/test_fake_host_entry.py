@@ -15,6 +15,7 @@ import litellm
 
 capture = Path(os.environ['CANDIDATE_FAKE_HOST_CAPTURE'])
 sequence = 0
+shared_view = 'pos_pma_shared_view_v1' in sys.argv
 
 
 async def finite_fake_last_hop(**kwargs):
@@ -31,7 +32,15 @@ async def finite_fake_last_hop(**kwargs):
         stream.write(json.dumps(row, sort_keys=True) + '\n')
     content = ('<context_for_action>Synthetic PMA advice.</context_for_action>'
                if sequence == 2 else '<no_intervention/>')
-    return {'choices': [{'message': {'content': content, 'tool_calls': None},
+    calls = None
+    if shared_view and sequence == 3:
+        if '[Recent Trajectory' not in str(kwargs.get('messages')):
+            raise AssertionError('synthetic PMA save requires a real prior Task trajectory')
+        calls = [{'id': 'synthetic-memory-save', 'type': 'function',
+                  'function': {'name': 'memory_save_knowledge',
+                               'arguments': json.dumps({'content':
+                                   'Synthetic prior Task tool outcome; fallible historical memory.'})}}]
+    return {'choices': [{'message': {'content': content, 'tool_calls': calls},
                          'finish_reason': 'stop'}]}
 
 
