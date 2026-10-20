@@ -185,11 +185,16 @@ class Tests(unittest.TestCase):
         evidence = {2: sentinel._trajectory_text(merged[0])}
         self.assertTrue(sentinel._valid_issue(issue('SECOND_DISTINCT'), {'e1'}, evidence))
         self.assertFalse(sentinel._valid_issue(issue('MEMORY_MIDDLE_ONLY'), {'e1'}, evidence))
-        sentinel.call_model.replies.append('{"issues": []}')
-        sentinel.audit_candidate(case_id='case', base_step=2, mode='local',
+        sentinel.call_model.replies.append(json.dumps({
+            'issues': [{'targets': ['e1'], 'issue_type': 'contradiction',
+                'problem': 'memory prose cannot cite itself', 'evidence_step': 2,
+                'evidence_quote': 'MEMORY_MIDDLE_ONLY', 'evidence': 'memory',
+                'suggestion': 'ignore'}]}))
+        findings = sentinel.audit_candidate(case_id='case', base_step=2, mode='local',
             belief_before={'world': {'entities': {'e1': {}}}},
             candidate_belief={'world': {'entities': {'e1': {}}}},
             raw_trajectory=[original])
+        self.assertEqual(findings, [])
         submitted = [row for name, row in ep.logger.rows
                      if name == 'belief_sentinel_model_input'][-1]['messages']
         self.assertIn('MEMORY_MIDDLE_ONLY', json.dumps(submitted))
@@ -310,7 +315,8 @@ class Tests(unittest.TestCase):
             '{"progress": 0, "score": 0.0, "affected_record_ids": [], '
             '"reason": "no change"}')
         belief.replies.extend([json.dumps(UPDATE), json.dumps(UPDATE)])
-        long_source = 'VISIBLE_HEAD' + 'MIDDLE_NOT_CITABLE' * 400 + 'VISIBLE_TAIL'
+        long_source = ('VISIBLE_HEAD' + 'a' * 4000 +
+                       'MIDDLE_NOT_CITABLE' + 'b' * 4000 + 'VISIBLE_TAIL')
         issue = {'targets': ['e1'], 'issue_type': 'contradiction',
                  'problem': 'old selected evidence is relevant',
                  'evidence_step': 0, 'evidence_quote': 'VISIBLE_TAIL',
@@ -344,6 +350,19 @@ class Tests(unittest.TestCase):
         self.assertTrue(any(item['step'] == 0 for item in audit[1]['rows']))
         self.assertEqual(audit[0]['rows'][0]['sources'][0]['field_path'],
                          audit[1]['rows'][0]['sources'][0]['field_path'])
+        sentinel = ep.manager.sentinel
+        sentinel.shared_selection = ep.frozen_selection
+        sentinel.shared_sources = tuple(source for source in ep._selection_sources()
+                                        if source.get('origin') == 'tool_result')
+        hidden_issue = dict(issue, evidence_quote='MIDDLE_NOT_CITABLE',
+                            evidence='MIDDLE_NOT_CITABLE')
+        consistency.replies.append(json.dumps({'issues': [hidden_issue]}))
+        findings = sentinel.audit_candidate(case_id='case', base_step=1,
+            mode='local', belief_before={'world': {'entities': {'e1': {}}}},
+            candidate_belief={'world': {'entities': {'e1': {}}}},
+            raw_trajectory=ep.manager.raw_trajectory[-1:])
+        self.assertEqual(findings, [])
+        self.assertNotIn('MIDDLE_NOT_CITABLE', json.dumps(consistency.requests[-1]))
 
     def test_recovery_survives_silence_and_no_cap(self):
         context = {'goal': {'user_input': 'Original Task'},

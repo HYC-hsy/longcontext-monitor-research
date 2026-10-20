@@ -86,9 +86,23 @@ class SharedViewSentinel(CandidateSentinel):
                 event_id = receipt.get('tool_use_id') or receipt.get('event_id')
                 if event_id is None:
                     continue
+                field_path = path.split(']', 1)[1].lstrip('.')
+                root_key = field_path.split('.', 1)[0]
+                original_fields = dict(_result_fields(
+                    receipt.get(root_key), root_key))
+                original_value = original_fields.get(field_path)
                 field['event_id'] = str(event_id)
-                field['source_path'] = str(event_id) + ':' + path.split(']', 1)[1].lstrip('.')
-                seen.add((str(event_id), field['source_path'].split(':', 1)[1]))
+                field['source_path'] = str(event_id) + ':' + field_path
+                if isinstance(original_value, str):
+                    field['offset'] = (len(original_value) - len(field['text'])
+                        if field.get('truncated') and field.get('segment') == 1 else 0)
+                    if field.get('truncated') and field.get('segment') == 0:
+                        row.setdefault('shared_omitted', []).append({
+                            'event_id': str(event_id), 'field_path': field_path,
+                            'offset': len(field['text']),
+                            'length': len(original_value) - 2 * len(field['text']),
+                            'reason': 'native_audit_projection'})
+                seen.add((str(event_id), field_path))
         for source in getattr(self, 'shared_sources', ()):
             step = source.get('pos_step')
             if not isinstance(step, int) or step < 0:
