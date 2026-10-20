@@ -152,3 +152,69 @@ def test_usage_distinguishes_returned_zero_from_missing_cache(monkeypatch):
     assert usage['input_tokens'] == 0
     assert usage['cache_read_input_tokens'] is None
     assert usage['cache_creation_input_tokens'] is None
+
+
+@pytest.mark.parametrize('body, expected', [
+    ('{"error":{"type":"billing_error","message":"SECRET_ENDPOINT"}}',
+     'billing_error'),
+    ('{"error":{"code":"insufficient_quota","message":"SECRET_ENDPOINT"}}',
+     'insufficient_quota'),
+    ('<html>private route SECRET_ENDPOINT</html>', None),
+])
+def test_auxiliary_http_error_records_safe_diagnosis_without_retry(
+        monkeypatch, body, expected):
+    monkeypatch.setenv('GA_PMA_CAPTURE_TASK_REQUESTS', '1')
+    posts, events = [], []
+
+    class ErrorResponse(Response):
+        status_code = 502
+        headers = {'content-type': 'application/json; charset=utf-8',
+                   'x-request-id': 'SECRET_REQUEST_ID',
+                   'authorization': 'SECRET_AUTH'}
+        text = body
+
+    monkeypatch.setattr(llmcore.requests, 'post',
+                        lambda *_a, **_k: posts.append(1) or ErrorResponse())
+    session = SimpleNamespace(max_retries=0, stream=True, connect_timeout=1,
+                              read_timeout=1, proxies=None, verify=True,
+                              api_key='SECRET_KEY', candidate_auxiliary_integrity=True)
+    with research_context({'run_id': 'safe-error-fixture'}, events.append):
+        with pytest.raises(llmcore.AuxiliaryResponseRejected, match='http_error'):
+            next(llmcore._stream_with_retry(session, 'https://offline.invalid',
+                                            {}, {'messages': []}, lambda _: iter(())))
+    assert posts == [1]
+    result = next(event['payload'] for event in events
+                  if event['event_type'] == 'provider_response')
+    assert result['status_code'] == 502
+    assert result.get('error_type', result.get('error_code')) == expected
+    assert result['error_body_captured_bytes'] == len(body.encode())
+    assert len(result['error_body_sha256']) == 64
+    assert len(result['request_id_sha256']) == 64
+    assert result['content_type'] == 'application/json' or expected is None
+    assert all(secret not in str(events) for secret in
+               ('SECRET_ENDPOINT', 'SECRET_REQUEST_ID', 'SECRET_AUTH', 'SECRET_KEY'))
+
+
+def test_auxiliary_error_receipt_failure_does_not_resend(monkeypatch):
+    monkeypatch.setenv('GA_PMA_CAPTURE_TASK_REQUESTS', '1')
+    posts = []
+
+    class ErrorResponse(Response):
+        status_code = 502
+        text = '{"error":{"type":"billing_error"}}'
+
+    monkeypatch.setattr(llmcore.requests, 'post',
+                        lambda *_a, **_k: posts.append(1) or ErrorResponse())
+    session = SimpleNamespace(max_retries=0, stream=True, connect_timeout=1,
+                              read_timeout=1, proxies=None, verify=True,
+                              api_key='fake', candidate_auxiliary_integrity=True)
+
+    def sink(event):
+        if event['event_type'] == 'provider_response':
+            raise OSError('fixture sink failure')
+
+    with research_context({'run_id': 'safe-error-fixture'}, sink):
+        with pytest.raises(llmcore.AuxiliaryResponseRejected, match='capture_failed'):
+            next(llmcore._stream_with_retry(session, 'https://offline.invalid',
+                                            {}, {'messages': []}, lambda _: iter(())))
+    assert posts == [1]

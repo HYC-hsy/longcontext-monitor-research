@@ -562,6 +562,45 @@ def _retryable_http_error(status_code, body=""):
             or '"type": "upstream_error"' in lowered
             or "upstream request failed" in lowered)
 
+_SAFE_HTTP_ERROR_LABELS = frozenset({
+    'billing_error', 'insufficient_quota', 'insufficient_credits',
+    'payment_required', 'rate_limit_error', 'overloaded_error',
+    'authentication_error', 'permission_error', 'invalid_request_error',
+    'not_found_error', 'api_error', 'server_error', 'upstream_error',
+    'timeout_error',
+})
+
+
+def _safe_http_error_metadata(response, body):
+    """Persist diagnostic identity, never an arbitrary relay body or header."""
+    raw = body.encode('utf-8', errors='replace')
+    result = {'error_body_sha256': hashlib.sha256(raw).hexdigest(),
+              'error_body_captured_bytes': len(raw)}
+    try:
+        parsed = json.loads(body)
+    except (TypeError, ValueError):
+        parsed = None
+    if isinstance(parsed, dict):
+        error = parsed.get('error', parsed)
+        if isinstance(error, dict):
+            for source, target in (('type', 'error_type'), ('code', 'error_code')):
+                value = error.get(source)
+                if isinstance(value, str) and value in _SAFE_HTTP_ERROR_LABELS:
+                    result[target] = value
+    headers = getattr(response, 'headers', {}) or {}
+    for name in ('request-id', 'x-request-id', 'anthropic-request-id'):
+        value = headers.get(name)
+        if isinstance(value, str) and value:
+            result['request_id_sha256'] = hashlib.sha256(value.encode()).hexdigest()
+            result['request_id_header'] = name
+            break
+    content_type = headers.get('content-type', '')
+    if isinstance(content_type, str):
+        media_type = content_type.split(';', 1)[0].strip().lower()
+        if media_type in ('application/json', 'text/plain', 'text/html'):
+            result['content_type'] = media_type
+    return result
+
 class _RetryableStreamError(RuntimeError):
     """A transient provider error delivered inside an otherwise-200 stream."""
 
@@ -689,13 +728,16 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                     response_deadline.daemon = True
                     response_deadline.start()
                 if r.status_code >= 400:
-                    try: body = r.text.strip()[:500]
-                    except: body = ""
+                    try: response_body = r.text.strip()
+                    except: response_body = ""
+                    body = response_body[:500]
+                    error_metadata = _safe_http_error_metadata(r, response_body)
                     if _retryable_http_error(r.status_code, body) and attempt < sess.max_retries:
                         d = _delay(r, attempt)
                         retry_event = _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code,
                                        'outcome': 'retryable_http_error', 'retry_delay_seconds': d,
-                                       'relay_wrapped_upstream_error': r.status_code == 400},
+                                       'relay_wrapped_upstream_error': r.status_code == 400,
+                                       **error_metadata},
                                        llm_call_id=llm_call_id, required_sink=strict)
                         if strict and retry_event is None:
                             sess._research_capture_failed = True
@@ -705,7 +747,17 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                         else: time.sleep(d)
                         continue
                     err = f"!!!Error: HTTP {r.status_code}" + (f": {body}" if body else "")
-                    _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code, 'outcome': 'http_error'}, llm_call_id=llm_call_id)
+                    error_event = _research_emit('provider_response', {
+                        'attempt': attempt + 1, 'status_code': r.status_code,
+                        'outcome': 'http_error', **error_metadata},
+                        llm_call_id=llm_call_id, required_sink=capture_required)
+                    if capture_required and error_event is None:
+                        sess._research_capture_failed = True
+                        if strict:
+                            sess.last_response_acceptance = 'capture_failed'
+                            raise TaskResponseRejected('capture_failed')
+                        if auxiliary_integrity:
+                            raise AuxiliaryResponseRejected('capture_failed')
                     if strict:
                         sess.last_response_acceptance = 'http_error'
                         raise TaskResponseRejected('http_error')
