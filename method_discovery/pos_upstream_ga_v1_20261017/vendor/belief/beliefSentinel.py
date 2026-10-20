@@ -107,7 +107,14 @@ class BeliefSentinel:
     ) -> list[SentinelFinding]:
         """Audit an uncommitted candidate; global auditing expands the evidence window."""
 
+        strict = getattr(self, 'strict_audit_contract', False)
+        if strict:
+            self.last_audit_result = {'outcome': 'unusable', 'filtered_count': 0,
+                                      'filtered_reasons': []}
         if not self.consistency_enabled:
+            if strict:
+                self.last_audit_result = {'outcome': 'clean', 'filtered_count': 0,
+                                          'filtered_reasons': []}
             return []
         compact = self._compact_trajectory(raw_trajectory)
         audit_input = {
@@ -161,14 +168,17 @@ class BeliefSentinel:
         if not isinstance(raw_issues, list):
             raise RuntimeError("Sentinel response must contain an issues list")
         issues: list[SentinelIssue] = []
-        for data in raw_issues[:1]:
+        filtered_reasons = []
+        for data in (raw_issues if strict else raw_issues[:1]):
             try:
                 issue = SentinelIssue(**data)
             except TypeError:
                 raise RuntimeError("Sentinel issue does not match its schema")
             if self._valid_issue(issue, valid_targets, evidence_by_step):
-                issues.append(issue)
+                if not issues:
+                    issues.append(issue)  # Preserve the released one-finding limit.
             else:
+                filtered_reasons.append('issue target or evidence is not grounded')
                 self.logger.log(
                     "belief_sentinel_issue_discarded",
                     case_id=case_id,
@@ -178,6 +188,11 @@ class BeliefSentinel:
                     issue=asdict(issue),
                 )
         findings = [SentinelFinding(base_step, mode, issue) for issue in issues]
+        if strict:
+            self.last_audit_result = {
+                'outcome': 'issues' if findings else ('unusable' if raw_issues else 'clean'),
+                'filtered_count': len(filtered_reasons),
+                'filtered_reasons': filtered_reasons}
         self.audit_history.append(
             {
                 "step": base_step,

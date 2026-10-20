@@ -173,6 +173,7 @@ class SharedViewBeliefManager(ComplementBeliefManager):
             self.sentinel = SharedViewSentinel(prior.config, prior.call_model,
                 prior.logger, call_progress_model=prior.call_progress_model)
             self.sentinel.shared_sources = ()
+            self.sentinel.strict_audit_contract = True
         self.shared_history = None
 
     def _request_candidate(self, messages, *, base, operation, step):
@@ -193,9 +194,13 @@ def shared_panel(context, *, advice=None):
     state = _required_state(context, include_recovery=True)
     world = _frontier_relevant_world(context.get('world', {}),
                                     context.get('frontier_gap'))
+    warning = ('Latest PoS update was unusable; displayed state is the last '
+               'accepted interpretation and may be stale. Use the current raw '
+               'Task observation in ordinary history.\n' if
+               context.get('latest_update_outcome') == 'unusable' else '')
     panel = ('Auxiliary model-generated view; not a new user requirement, tool '
              'receipt or completion approval. Original Task and actual GA '
-             'observations remain authoritative.\n' + _json({
+             'observations remain authoritative.\n' + warning + _json({
                  'state': state, 'frontier_relevant_world': world,
                  'recovery': context.get('recovery')}))
     if advice:

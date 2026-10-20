@@ -325,6 +325,89 @@ class Tests(unittest.TestCase):
         self.assertIn('{second broken', belief.requests[2][-1]['content'])
         self.assertIn('original task', json.dumps(belief.requests[2]))
 
+    def test_filtered_audit_is_unusable_and_keeps_raw_observation(self):
+        ep, belief, consistency, _ = self.make()
+        asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.', actions=[]))
+        bad = {'targets': ['e1'], 'issue_type': 'contradiction',
+            'problem': 'Unsupported quote', 'evidence_step': 0,
+            'evidence_quote': 'NEVER_IN_TOOL', 'evidence': 'NEVER_IN_TOOL',
+            'suggestion': 'check again'}
+        consistency.replies = [json.dumps({'issues': [bad]})]
+        source = {'origin': 'GA_tool_outcome', 'tool_use_id': 'tool-bad',
+                  'result': {'stdout': 'Actual current observation'}}
+        asyncio.run(ep.update(actor_attempt=1, transition_id='bad-audit',
+            thought='Inspect', action_batch=[{'id': 'tool-bad', 'name': 'inspect',
+                'arguments': {}, 'order': 0, 'status': 'executed'}],
+            observation=json.dumps({'tool_results': [source]}),
+            source_events=[source]))
+        self.assertEqual(ep.latest_update_outcome, 'unusable')
+        self.assertEqual(ep.accepted_revision, 0)
+        self.assertEqual(ep.manager.sentinel.last_audit_result['filtered_count'], 1)
+        self.assertEqual(len(belief.requests), 2)  # no repair for invalid issue
+        panel = ep.decision_panel(observation='Actual current observation')['panel']
+        self.assertIn('may be stale', panel)
+        self.assertIn('Actual current observation', ep._pma_observation())
+
+    def test_empty_and_partial_issues_are_distinct(self):
+        ep, _, consistency, _ = self.make()
+        asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.', actions=[]))
+        sentinel = ep.manager.sentinel
+        trajectory = [{'step': 0, 'action': None,
+            'observation': json.dumps({'tool_results': [{
+                'tool_use_id': 'tool-ok', 'result': {'stdout': 'VISIBLE_OK'}}]})}]
+        valid = {'targets': ['e1'], 'issue_type': 'contradiction',
+            'problem': 'Check result', 'evidence_step': 0,
+            'evidence_quote': 'VISIBLE_OK', 'evidence': 'VISIBLE_OK',
+            'suggestion': 'retain uncertainty'}
+        invalid = dict(valid, evidence_quote='INVISIBLE', evidence='INVISIBLE')
+        consistency.replies = [json.dumps({'issues': [invalid, valid]})]
+        findings = sentinel.audit_candidate(case_id='shared-test', base_step=0,
+            mode='local', belief_before=ep.manager._structured_context(),
+            candidate_belief=ep.manager._structured_context(),
+            raw_trajectory=trajectory)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(sentinel.last_audit_result['outcome'], 'issues')
+        self.assertEqual(sentinel.last_audit_result['filtered_count'], 1)
+        consistency.replies = ['{"issues": []}']
+        self.assertEqual(sentinel.audit_candidate(case_id='shared-test', base_step=0,
+            mode='local', belief_before=ep.manager._structured_context(),
+            candidate_belief=ep.manager._structured_context(),
+            raw_trajectory=trajectory), [])
+        self.assertEqual(sentinel.last_audit_result['outcome'], 'clean')
+
+    def test_unusable_initialization_has_no_empty_committed_state(self):
+        ep, _, consistency, _ = self.make()
+        consistency.replies = ['{"issues": [{"invalid": true}]}']
+        with self.assertRaisesRegex(RuntimeError, 'initial belief audit unusable'):
+            asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.', actions=[]))
+        partial = ep.get_result()
+        self.assertEqual(partial['initialization_stage'], 'pos_initializing')
+        self.assertEqual(partial['pos']['status'], 'unavailable')
+        self.assertFalse(ep.started)
+
+    def test_unusable_reaudit_retains_prior_state_not_repaired_candidate(self):
+        ep, belief, consistency, _ = self.make()
+        issue = {'targets': ['e1'], 'issue_type': 'contradiction',
+            'problem': 'Current output conflicts', 'evidence_step': 0,
+            'evidence_quote': 'STILL_DIRTY', 'evidence': 'STILL_DIRTY',
+            'suggestion': 'keep gap'}
+        consistency.replies = ['{"issues": []}', json.dumps({'issues': [issue]}),
+                               json.dumps({'issues': [dict(issue,
+                                   evidence_quote='NOT_VISIBLE', evidence='NOT_VISIBLE')]})]
+        belief.replies.append(json.dumps(UPDATE))
+        asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.', actions=[]))
+        source = {'origin': 'GA_tool_outcome', 'tool_use_id': 'tool-r',
+                  'result': {'stdout': 'STILL_DIRTY'}}
+        asyncio.run(ep.update(actor_attempt=1, transition_id='reaudit-unusable',
+            thought='Inspect', action_batch=[{'id': 'tool-r', 'name': 'inspect',
+                'arguments': {}, 'order': 0, 'status': 'executed'}],
+            observation=json.dumps({'tool_results': [source]}),
+            source_events=[source]))
+        self.assertEqual(ep.latest_update_outcome, 'unusable')
+        self.assertEqual(len(belief.requests), 3)
+        self.assertIn('may be stale', ep.decision_panel(
+            observation='STILL_DIRTY')['panel'])
+
     def test_window_outside_source_reaches_phase2_and_repair(self):
         ep, belief, consistency, pma = self.make()
         ep.recent_window = 1

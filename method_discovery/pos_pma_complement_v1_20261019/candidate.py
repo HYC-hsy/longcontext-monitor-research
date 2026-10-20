@@ -95,7 +95,10 @@ class ComplementBeliefManager(CitationFixedBeliefManager):
     def _validate_candidate(self, **kwargs):
         base = kwargs['base']
         final = super()._validate_candidate(**kwargs)
-        if final is base:
+        if getattr(self, 'strict_audit_contract', False) and getattr(
+                self, 'last_audit_unusable', False):
+            self.last_validation_outcome = 'unusable'
+        elif final is base:
             self.last_validation_outcome = 'rejected'
         else:
             before = self._context_from_state(base)
@@ -153,7 +156,9 @@ def _required_state(context, *, include_recovery=False):
     state = {'state_version': context.get('accepted_revision', context.get('step')),
             'latest_update_outcome': context.get('latest_update_outcome', 'unknown'),
             'latest_actor_transition': context.get('latest_actor_transition'),
-            'state_origin': ('retained_last_accepted_state_after_rejection'
+            'state_origin': ('retained_last_accepted_state_update_unusable_may_be_stale'
+                             if context.get('latest_update_outcome') == 'unusable'
+                             else 'retained_last_accepted_state_after_rejection'
                              if context.get('latest_update_outcome') == 'rejected'
                              else 'last_accepted_model_state'),
             'goal': context.get('goal'),

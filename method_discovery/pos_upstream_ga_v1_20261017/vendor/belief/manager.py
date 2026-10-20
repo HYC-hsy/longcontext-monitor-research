@@ -417,6 +417,17 @@ class BeliefManager:
     ) -> BeliefState:
         """Audit before commit; retain the previous belief if the repair also fails."""
 
+        strict = getattr(self, 'strict_audit_contract', False)
+        if strict:
+            self.last_audit_unusable = False
+        def unusable(stage, error=None):
+            self.last_audit_unusable = True
+            self.logger.log('belief_candidate_audit_unusable', case_id=self.case_id,
+                step=step, stage=stage, error_type=type(error).__name__ if error else None)
+            if step == -1:
+                raise RuntimeError('initial belief audit unusable') from error
+            return base
+
         mode, evidence = self._audit_scope(step)
         if (
             mode is None
@@ -442,6 +453,8 @@ class BeliefManager:
                 raw_trajectory=evidence,
             )
         except RuntimeError as error:
+            if strict:
+                return unusable('initial_audit', error)
             self.logger.log(
                 "belief_candidate_rejected",
                 case_id=self.case_id,
@@ -449,6 +462,8 @@ class BeliefManager:
                 error=str(error),
             )
             return base
+        if strict and self.sentinel.last_audit_result['outcome'] == 'unusable':
+            return unusable('initial_audit')
         if not issues:
             self.logger.log(
                 "belief_candidate_validated",
@@ -487,6 +502,8 @@ class BeliefManager:
                 raw_trajectory=evidence,
             )
         except RuntimeError as error:
+            if strict:
+                return unusable('repair_audit', error)
             self.logger.log(
                 "belief_candidate_rejected",
                 case_id=self.case_id,
@@ -494,6 +511,8 @@ class BeliefManager:
                 error=str(error),
             )
             return base
+        if strict and self.sentinel.last_audit_result['outcome'] == 'unusable':
+            return unusable('repair_audit')
         if remaining:
             self.pending_issues.extend(remaining)
             self.logger.log(
