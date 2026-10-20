@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from dataclasses import asdict, dataclass
 from typing import Any, Callable, Literal
 
@@ -121,6 +122,31 @@ class BeliefSentinel:
                                           'filtered_reasons': []}
             return []
         compact = self._compact_trajectory(raw_trajectory)
+        evidence_by_id = {}
+        if getattr(self, 'shared_evidence_id_v1', False):
+            for row_index, row in enumerate(compact):
+                for source in row.get('citable_sources', ()):
+                    identity = {'case_id': case_id,
+                        'event_id': source.get('event_id'),
+                        'row_index': None if source.get('event_id') else row_index,
+                        'step': row['step'], 'field_path': source.get('source_path'),
+                        'offset': source.get('offset', 0),
+                        'length': len(source['text']),
+                        'sha256': hashlib.sha256(source['text'].encode('utf-8')).hexdigest()}
+                    evidence_id = 'ev_' + hashlib.sha256(json.dumps(
+                        identity, sort_keys=True, ensure_ascii=False).encode('utf-8')
+                        ).hexdigest()[:24]
+                    if (evidence_id in evidence_by_id and
+                            evidence_by_id[evidence_id] != (identity, source['text'])):
+                        raise SentinelProtocolError('evidence ID collision')
+                    evidence_by_id[evidence_id] = (identity, source['text'])
+                    source['evidence_id'] = evidence_id
+            self.last_evidence_bindings = {key: item[0]
+                for key, item in evidence_by_id.items()}
+            self.logger.log('belief_sentinel_evidence_bindings',
+                case_id=case_id, step=base_step, audit_mode=mode,
+                protocol='pos-shared-evidence-id-v1',
+                bindings=self.last_evidence_bindings)
         audit_input = {
             "step": base_step,
             "belief_before": belief_before,
@@ -135,6 +161,8 @@ class BeliefSentinel:
             audit_input['candidate_changes'] = self._candidate_changes(
                 belief_before, candidate_belief)
             audit_input['audit_semantics_version'] = 'pos-shared-audit-semantics-v1'
+        if getattr(self, 'shared_evidence_id_v1', False):
+            audit_input['evidence_protocol_version'] = 'pos-shared-evidence-id-v1'
         messages = (
             build_global_audit_prompt(audit_input)
             if mode == "global"
@@ -181,9 +209,11 @@ class BeliefSentinel:
             raise error_type("Sentinel response must contain an issues list")
         issues: list[SentinelIssue] = []
         filtered_reasons = []
+        validated_bindings = []
         for index, data in enumerate(raw_issues if strict else raw_issues[:1]):
             if strict:
-                reason = self._strict_issue_schema_error(data)
+                reason = self._strict_issue_schema_error(data,
+                    evidence_ids=getattr(self, 'shared_evidence_id_v1', False))
                 if reason is not None:
                     filtered_reasons.append(reason)
                     self.logger.log("belief_sentinel_issue_discarded",
@@ -191,12 +221,36 @@ class BeliefSentinel:
                         issue_index=index, reason=reason)
                     continue
             try:
+                if getattr(self, 'shared_evidence_id_v1', False):
+                    binding = evidence_by_id.get(data['evidence_id'])
+                    if binding is None:
+                        filtered_reasons.append('evidence_id_not_visible')
+                        self.logger.log('belief_sentinel_issue_discarded',
+                            case_id=case_id, step=base_step, audit_mode=mode,
+                            issue_index=index, reason='evidence_id_not_visible')
+                        continue
+                    quote = ' '.join(data['evidence_quote'].casefold().split())
+                    fragment = ' '.join(binding[1].casefold().split())
+                    if not quote or quote not in fragment:
+                        filtered_reasons.append('evidence_quote_outside_fragment')
+                        self.logger.log('belief_sentinel_issue_discarded',
+                            case_id=case_id, step=base_step, audit_mode=mode,
+                            issue_index=index, reason='evidence_quote_outside_fragment')
+                        continue
+                    data = {key: value for key, value in data.items()
+                            if key != 'evidence_id'}
+                    data['evidence_step'] = binding[0]['step']
                 issue = SentinelIssue(**data)
             except TypeError:
                 raise RuntimeError("Sentinel issue does not match its schema")
-            if self._valid_issue(issue, valid_targets, evidence_by_step):
+            if (getattr(self, 'shared_evidence_id_v1', False) or
+                    self._valid_issue(issue, valid_targets, evidence_by_step)) and (
+                    issue.targets and set(issue.targets) <= valid_targets):
                 if not issues:
                     issues.append(issue)  # Preserve the released one-finding limit.
+                    if getattr(self, 'shared_evidence_id_v1', False):
+                        validated_bindings.append({'evidence_id':
+                            raw_issues[index]['evidence_id'], **binding[0]})
             else:
                 filtered_reasons.append('issue target or evidence is not grounded')
                 self.logger.log(
@@ -218,6 +272,8 @@ class BeliefSentinel:
                 "step": base_step,
                 "audit_mode": mode,
                 "issues": [asdict(item) for item in findings],
+                **({'validated_evidence_bindings': validated_bindings}
+                   if getattr(self, 'shared_evidence_id_v1', False) else {}),
                 **({'audit_result': dict(self.last_audit_result)} if strict else {}),
             }
         )
@@ -228,6 +284,8 @@ class BeliefSentinel:
             audit_mode=mode,
             issue_count=len(findings),
             issues=[asdict(item.issue) for item in findings],
+            **({'validated_evidence_bindings': validated_bindings}
+               if getattr(self, 'shared_evidence_id_v1', False) else {}),
             **({'audit_result': dict(self.last_audit_result)} if strict else {}),
         )
         return findings
@@ -247,10 +305,11 @@ class BeliefSentinel:
         return changes
 
     @staticmethod
-    def _strict_issue_schema_error(data: object) -> str | None:
+    def _strict_issue_schema_error(data: object, *, evidence_ids=False) -> str | None:
         """Validate a reported issue before grounding; only the opt-in path uses this."""
 
-        fields = {"targets", "issue_type", "problem", "evidence_step",
+        fields = {"targets", "issue_type", "problem",
+                  "evidence_id" if evidence_ids else "evidence_step",
                   "evidence_quote", "evidence", "suggestion"}
         if not isinstance(data, dict):
             return "issue_not_object"
@@ -260,7 +319,10 @@ class BeliefSentinel:
         if (not isinstance(targets, list) or not targets or
                 not all(isinstance(target, str) and target for target in targets)):
             return "targets_invalid"
-        if type(data["evidence_step"]) is not int:
+        if evidence_ids:
+            if not isinstance(data['evidence_id'], str) or not data['evidence_id']:
+                return 'evidence_id_invalid'
+        elif type(data["evidence_step"]) is not int:
             return "evidence_step_invalid"
         for field in ("issue_type", "problem", "evidence_quote", "evidence",
                       "suggestion"):

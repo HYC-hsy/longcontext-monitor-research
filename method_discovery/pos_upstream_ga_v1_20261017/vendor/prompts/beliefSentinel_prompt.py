@@ -42,18 +42,25 @@ progress."""
 
 def build_local_audit_prompt(audit_input: dict) -> list[dict[str, str]]:
     """Build local audit prompt."""
-
+    evidence_field = ('"evidence_id": "ev_..."' if audit_input.get(
+        'evidence_protocol_version') == 'pos-shared-evidence-id-v1'
+        else '"evidence_step": 0')
     return [
         {"role": "system", "content": CONSISTENCY_SYSTEM_PROMPT +
          ("\n\n" + SHARED_AUDIT_SEMANTICS_V1 if audit_input.get(
-             'audit_semantics_version') == 'pos-shared-audit-semantics-v1' else '')},
+             'audit_semantics_version') == 'pos-shared-audit-semantics-v1' else '') +
+         ('\n\nCite an evidence_id shown on one citable_sources fragment and a short '
+          'quote from that same visible fragment. Do not cite omitted text, memory '
+          'interpretations, task instructions, or advice as tool evidence.' if
+          audit_input.get('evidence_protocol_version') ==
+          'pos-shared-evidence-id-v1' else '')},
         {
             "role": "user",
             "content": (
                 json.dumps(audit_input, ensure_ascii=False)
                 + '\nReturn JSON: {"issues": [{"targets": ["id or gap target"], '
                 '"issue_type": "internal or external", '
-                '"problem": "...", "evidence_step": 0, '
+                '"problem": "...", ' + evidence_field + ', '
                 '"evidence_quote": "verbatim evidence", '
                 '"evidence": "...", "suggestion": "belief correction"}]}. '
                 "Use an empty issues list when the candidate is consistent."

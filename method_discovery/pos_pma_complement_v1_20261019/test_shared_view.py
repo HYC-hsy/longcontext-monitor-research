@@ -22,6 +22,32 @@ from .memory_adapter import SharedViewMemoryAgent
 from .shared_view import SharedViewBeliefManager, SharedViewEpisode, shared_panel
 
 
+class EvidenceRole(SyncRole):
+    """Translate legacy *fixture* steps into IDs actually shown in the request."""
+    def __call__(self, messages):
+        raw = super().__call__(messages)
+        if '"evidence_id"' not in messages[1]['content']:
+            return raw
+        try:
+            payload = json.loads(raw)
+            audit = json.loads(messages[1]['content'].split('\nReturn JSON:', 1)[0])
+            if not isinstance(payload, dict) or not isinstance(payload.get('issues'), list):
+                return raw
+            for issue in payload['issues']:
+                if not isinstance(issue, dict) or 'evidence_step' not in issue:
+                    continue
+                step = issue.pop('evidence_step')
+                quote = issue.get('evidence_quote')
+                ids = [source['evidence_id'] for row in audit['raw_trajectory']
+                    if type(step) is int and row['step'] == step
+                    for source in row.get('citable_sources', ())
+                    if isinstance(quote, str) and quote in source['text']]
+                issue['evidence_id'] = ids[0] if ids else 'ev_not_visible'
+            return json.dumps(payload)
+        except (ValueError, TypeError, KeyError):
+            return raw
+
+
 def tool(name, arguments):
     return SimpleNamespace(function=SimpleNamespace(name=name, arguments=arguments))
 
@@ -30,7 +56,7 @@ class Tests(unittest.TestCase):
     def make(self, *, interval=1, initial_advice='<no_intervention/>'):
         log = Logger()
         belief = SyncRole([json.dumps(INITIAL), json.dumps(UPDATE)])
-        consistency = SyncRole(['{"issues": []}', '{"issues": []}'])
+        consistency = EvidenceRole(['{"issues": []}', '{"issues": []}'])
         progress = SyncRole(['{"progress": 0, "score": 0.0, '
                              '"affected_record_ids": [], "reason": "no change"}'])
         pma = AsyncRole([response('', [tool('memory_save_knowledge',
@@ -454,7 +480,63 @@ class Tests(unittest.TestCase):
         self.assertEqual(payload['candidate_changes']['epistemic_gaps']['before'],
                          before['epistemic_gaps'])
         self.assertEqual(payload['raw_trajectory'][0]['step'], 3)
-        self.assertIn('evidence_step', request[1]['content'])  # Commit A retains protocol.
+        self.assertIn('evidence_id', request[1]['content'])
+        self.assertNotIn('"evidence_step": 0', request[1]['content'])
+
+    def test_evidence_id_binds_one_visible_fragment_and_derives_step(self):
+        ep, _, _, _ = self.make()
+        asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.', actions=[]))
+        sentinel = ep.manager.sentinel
+        belief = ep.manager._structured_context()
+        trajectory = [{'step': 4, 'action': {'name': 'inspect'},
+            'observation': json.dumps({'tool_results': [
+                {'tool_use_id': 'first', 'result': {'stdout': 'SAME TEXT alpha'}},
+                {'tool_use_id': 'second', 'result': {'stdout': 'SAME TEXT beta'}}]})}]
+        seen = []
+        def respond(messages):
+            request = json.loads(messages[1]['content'].split('\nReturn JSON:', 1)[0])
+            fragments = request['raw_trajectory'][0]['citable_sources']
+            self.assertEqual(len(fragments), 2)
+            self.assertNotEqual(fragments[0]['evidence_id'],
+                                fragments[1]['evidence_id'])
+            seen.append(fragments)
+            issue = {'targets': ['e1'], 'issue_type': 'external',
+                'problem': 'Specific candidate change lacks support',
+                'evidence_id': fragments[1]['evidence_id'],
+                'evidence_quote': 'TEXT beta', 'evidence': 'TEXT beta',
+                'suggestion': 'retain the gap'}
+            return json.dumps({'issues': [issue]})
+        sentinel.call_model = respond
+        findings = sentinel.audit_candidate(case_id='ids', base_step=4,
+            mode='local', belief_before=belief, candidate_belief=belief,
+            raw_trajectory=trajectory)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].issue.evidence_step, 4)
+        self.assertEqual(sentinel.last_evidence_bindings[
+            seen[0][1]['evidence_id']]['event_id'], 'second')
+        sentinel.audit_candidate(case_id='ids', base_step=4, mode='local',
+            belief_before=belief, candidate_belief=belief,
+            raw_trajectory=trajectory)
+        self.assertEqual(seen[0][1]['evidence_id'], seen[1][1]['evidence_id'])
+
+        def rejected(messages):
+            request = json.loads(messages[1]['content'].split('\nReturn JSON:', 1)[0])
+            fragments = request['raw_trajectory'][0]['citable_sources']
+            common = {'targets': ['e1'], 'issue_type': 'external',
+                'problem': 'check', 'evidence': 'check', 'suggestion': 'retain'}
+            return json.dumps({'issues': [
+                dict(common, evidence_id=fragments[0]['evidence_id'],
+                     evidence_quote='TEXT beta'),
+                dict(common, evidence_id='ev_old_snapshot',
+                     evidence_quote='SAME TEXT alpha'),
+                dict(common, evidence_id=fragments[1]['evidence_id'],
+                     evidence_quote='TEXT beta')]})
+        sentinel.call_model = rejected
+        findings = sentinel.audit_candidate(case_id='ids', base_step=4,
+            mode='local', belief_before=belief, candidate_belief=belief,
+            raw_trajectory=trajectory)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(sentinel.last_audit_result['filtered_count'], 2)
 
     def test_strict_audit_rejects_scalar_and_non_list_top_levels(self):
         ep, _, consistency, _ = self.make()
