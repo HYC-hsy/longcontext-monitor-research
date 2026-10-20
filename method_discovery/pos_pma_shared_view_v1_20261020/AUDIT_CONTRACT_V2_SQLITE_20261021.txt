@@ -1,0 +1,150 @@
+PoS audit-contract repair and one authorized SQLite episode
+==========================================================
+
+Scope and identities
+--------------------
+Branch: public/crs-v0-20261007. Starting HEAD: 86ed99c206ebebadb895037e93cc907f9ff54471.
+Frozen runtime/source-bound certification commit: a636837627f92873a4807c099935c35839255ab7.
+The later archive commit changes evidence/documentation only, not runtime source. The
+prior pos-41c50cafd3b24b87 run and its reward=0 were not edited or resumed.
+New episode: pos-68764e0592a8481e, sqlite-with-gcov, P,
+pos_pma_shared_view_v1. Exactly one formal episode was launched.
+
+Bounded implementation
+----------------------
+Commits 71b305aa, 280257f4, ba8a5d78, 7c67cd08 and a6368376 lead from the
+starting baseline to the frozen runtime. The intermediate general archive
+redactor change in 280257f4 was reversed in ba8a5d78; final client-ID
+redaction is scoped to collect_native_shared. The final bounded source diff is
+the Git compare 86ed99c206ebebadb895037e93cc907f9ff54471..a636837627f92873a4807c099935c35839255ab7.
+
+The opt-in strict/shared-view Sentinel audit now validates the response's top
+object, issues list, and required per-issue fields/types. Malformed individual
+issues are filtered with a reason, without discarding valid siblings. A valid
+empty list is clean; a nonempty list with no valid issues is unusable. A typed
+SentinelProtocolError distinguishes completed-but-malformed model text from
+transport, deadline and capture exceptions, which still propagate. Strict
+candidate construction/schema repair records the actual current provider raw
+answer separately from its normalized patch and the validation error. The
+latest failed answer is used for each repair attempt. Semantic replacement
+patches remain relative to belief_before and applied once. Non-strict paths,
+model parameters, retry budgets, task assets and PMA architecture were not
+altered. The pinned PoS upstream identity remains
+luoyu100/PoS@6818cfa6434dbc91fcf67f0b3eb12a91db47433f, but the vendored
+beliefSentinel.py, manager.py and prompt_generation.py have explicit local
+patches and must not be described as byte-identical upstream files.
+
+Runtime source worktree SHA-256:
+  vendor/belief/beliefSentinel.py 0b81a7ea10b81a7aafc90b507d13c54fb248f53e308cde10c90fee4ae40772a6
+  vendor/belief/manager.py 1999fe9db524dfa90b74443093ad8505f0c9bd2472d0a25198ddde10ca7dbbaf
+  vendor/prompts/prompt_generation.py 961321f6628be4a1891534eb4b519a9b2eb53d16ef7efab851b0e8a611cbaa28
+  collect_native_shared.py 576752fbf105f241b91dd1925747745894c7c887373e5867e2cbda55e3a773d8
+Full paths and all other runtime hashes are in the prepared manifest and
+source-bound certification; Git blob bytes and worktree bytes are separate
+identities where Windows newline conversion applies.
+
+Offline evidence and gates
+--------------------------
+The final targeted command was:
+  python -B -m unittest method_discovery.pos_upstream_ga_v1_20261017.test_collect_client_metadata method_discovery.pos_pma_complement_v1_20261019.test_shared_view method_discovery.pos_pma_complement_v1_20261019.test_worker_fake method_discovery.pos_pma_complement_v1_20261019.test_candidate_ga_seam method_discovery.pos_pma_complement_v1_20261019.test_candidate_core method_discovery.pos_upstream_ga_v1_20261017.test_citation_fix method_discovery.pos_upstream_ga_v1_20261017.test_ga_seam
+Result: 66 tests, OK, Python exit 0. Raw stdout/stderr are in
+raw_contract_v2/affected_final.*. Earlier 64 affected tests, 6 PoS tests and
+13 PMA tests passed; their separate output remains in raw_contract_v2/.
+One attempted combined command named two nonexistent test modules and failed
+collection; the corrected command above passed. The historical source-bound
+PMA fixture test still rejects its old A/B source identity; it was not called
+a pass, weakened, or used as this shared-view certification.
+
+The final all-fake same-run fixture output is
+E:\LongContext\pos_pma_shared_view_offline_20261020_contract_v2b,
+run_id pos-c0264ea68b8c468a. It exercised the independent PMA host/spool,
+container PoS, Task, one synthetic code_run file-and-HTTP action, and one
+synthetic sentinel on the same main product before confirmed cleanup. It had
+7 finite fake provider captures, 4 fake PMA host calls, 1 Task tool outcome,
+1 synthetic sentinel script and zero real model/official evaluator calls.
+The source-bound public certification is certification_contract_v2b/;
+verify_evidence(..., require_committed=True,
+research_candidate='pos_pma_shared_view_v1') returned pass, 64 files.
+An initial verification found Git LF-normalizing one CRLF log; the narrow
+.gitattributes rule and byte-preserving restage fixed this without relaxing
+the verifier. Earlier failed/intermediate fixture/certification directories
+were not substituted for the final v2b identity.
+
+Formal preparation and authorization
+------------------------------------
+Fresh prepare output: E:\LongContext\pos_pma_shared_view_sqlite_contract_v2_run1.
+Prepared manifest SHA-256 8af5d4a706b3dfd8b9f9c479fb204cdf28d7d45c005819a891c37fea45408891.
+It kept execution_authorized=false. A separate one-use authorization, SHA-256
+b862171c4c86ba2aea3b3b287325ea4fb23b757310dc82d0082c328787d6b66e,
+bound this run, manifest bytes, config SHA-256
+d84e331c6383fc5a913a2c4b55c30b35f49c13b3e298d21024a042f078f7786e,
+method/condition/task and frozen commit. The unchanged verify_live_spec passed
+before sending. The authorization was removed after the run; see the public
+authorization_removed.json, not the private active authorization itself.
+
+The private Task and PMA profile byte hashes matched the previous authorized
+reference: ed09a811b654b83097bee77942704eae2539d67291bf55aa34476692081ff02e
+and cc5f784b069034f44bc4527d15acd70191b1f7fc5810556c087b7b35e0ae00f1.
+No endpoint or secret value is published. Task model claude-opus-4-8,
+max_tokens 64000, temperature 1, transport max_retries 4;
+complete-response-v1 enabled only for Task. PoS belief/consistency/progress
+limits 4096/512/512, temperature 0, thinking disabled, transport retries 0.
+PMA max_tokens 8192, read_timeout 300 seconds, temperature 1, at most three
+total attempts, interval 1, first_step true, recent window 8. Task maximum
+300 turns/14400 seconds, native verifier 900 seconds, outer lifecycle 15900
+seconds. Official source commit 2fd12b88aafdd04a52c298e3940bcb189f9766d6;
+the installed linux/amd64 image ID matched
+sha256:f986820b00c74ce75db7288719d364df313fde7c7917bea6eb6352a08431a89f.
+
+Exact launcher commands (profile paths are disclosed, profile contents are not):
+  python -B -m method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.single_run prepare --task sqlite-with-gcov --condition P --research-candidate pos_pma_shared_view_v1 --occurrence 1 --output E:\LongContext\pos_pma_shared_view_sqlite_contract_v2_run1 --official-source-git E:\pma-posthoc-official-source-20261014 --task-profile-file E:\LongContext\GenericAgent-main\mykey.py --pma-profile-file E:\LongContext\monitor_config\models.local.json --task-complete-response --certification-dir E:\longcontext-cqs-v0-20261005\method_discovery\pos_pma_shared_view_v1_20261020\certification_contract_v2b
+  GA_TASK_COMPLETE_RESPONSE=1 python -B -m method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.single_run run --output E:\LongContext\pos_pma_shared_view_sqlite_contract_v2_run1 --authorization E:\LongContext\pos_pma_shared_view_sqlite_contract_v2_run1\authorization.json --ga-source E:\longcontext-cqs-v0-20261005\GenericAgent-main --runtime-root E:\LongContext\bench_runtime\m2\linux --task-profile-file E:\LongContext\GenericAgent-main\mykey.py --pma-profile-file E:\LongContext\monitor_config\models.local.json --worker-python E:\LongContext\bench_runtime\pma_native_venv\Scripts\python.exe --harbor-python E:\LongContext\bench_runtime\m4\harbor-env\Scripts\python.exe --bench-root E:\longcontext-cqs-v0-20261005\long_context_bench --official-source-git E:\pma-posthoc-official-source-20261014 --harbor-source-root E:\LongContext\bench_runtime\m4\harbor-src-pos-clean
+The real run command had no fixture flags. The single-use authorization file
+was created after preparation, passed the original verify_live_spec, and was
+removed immediately after exit. The Task response environment was restored
+in the launcher shell's finally block.
+
+One real episode: observed result
+---------------------------------
+The unique run started at 2026-10-20 15:56 UTC and its agent completed at
+16:22:46 UTC; native verification ran 16:23:06--16:25:45 UTC. The raw
+records show 18 Task logical requests and 18 provider attempt/return records,
+18 selected tool calls and 18 tool outcomes; 66 PoS role requests/returns
+(belief 28, consistency 29, progress 9); 36 PMA role requests (18 Phase 1,
+18 Phase 2). Observability below these captured attempts is unknown. PoS
+Sentinel completed audit outcomes were clean 6, issues 14, unusable 8.
+Progress model response events numbered 9: 5 completed scoring events and
+4 progress_failed events. Unscored is not score zero. One candidate repair
+event is recorded. These are event counts, not a judgment of audit accuracy.
+
+Task fact terminal: CURRENT_TASK_DONE. Harbor and worker returned 0, Task and
+PoS archives report archive_incomplete=false, profile provider capture reports
+66 observable attempts and 66 returns, result/close bound and graceful exit.
+The same Harbor/native-SHARED lifecycle executed the official deterministic
+test script once and recorded reward 0.0. Its public stdout reports three
+failed tests, including sqlite3 not in PATH. This is a normally concluded
+episode with score zero, not a chain/infrastructure success being passed off
+as task success. No extra evaluator or second episode was launched.
+Cleanup: writer barrier and same-container evaluation receipts exist,
+cleanup_confirmed=true, remaining containers=[], owned volume clearance
+clean. A post-run check found no owned container, volume or run-bound Python
+process. No active authorization remains.
+
+Public evidence and limits
+--------------------------
+raw_live_sqlite_contract_v2/FILE_HASHES.json lists 112 private source files,
+their original byte hashes and 133 readback-verified public parts with distinct
+public hashes. 388 redactions were applied. The two unsafe-public-projection
+omissions are pos/events.stderr.log and task/agent/agent_stdout.log; their
+private originals are retained and their source hashes indexed. Their absence
+from the public copy does not mean the private originals were missing.
+Published parts were scanned against the private profile secret values and
+client-ID/credential patterns with zero matches in that bounded scan. Hidden
+thinking, credentials and private endpoints are not published. The exporter
+re-serializes some JSON; public hashes must never be called original hashes.
+The scope, Task events, PoS/PMA records, spool, evaluation receipts and
+FILE_HASHES index can be read individually under raw_live_sqlite_contract_v2/.
+
+This one run cannot establish a method advantage or guarantee future audit
+judgments. It did demonstrate the repaired contract path and a complete
+deployment/evaluation lifecycle; the specific task failed its official tests.
