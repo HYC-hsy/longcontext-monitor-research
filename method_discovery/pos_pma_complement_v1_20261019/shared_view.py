@@ -72,38 +72,45 @@ class SharedViewSentinel(CandidateSentinel):
                 row['citable_sources'] = []
                 row.setdefault('source_origin', 'not_a_tool_result_envelope')
                 continue
-            for field in row.get('citable_sources', ()):
-                path = field.get('source_path', '')
-                if not path.startswith('tool_results['):
-                    continue
-                try:
-                    index = int(path.split('[', 1)[1].split(']', 1)[0])
-                    receipt = receipts[index]
-                except (IndexError, ValueError, TypeError):
-                    continue
+            # Preserve the complete field path and original string length at
+            # projection time. A list-valued result has paths like
+            # result[0].stdout, not a root key named result[0].
+            source_fields = {}
+            for index, receipt in enumerate(receipts):
                 if not isinstance(receipt, dict):
                     continue
                 event_id = receipt.get('tool_use_id') or receipt.get('event_id')
-                if event_id is None:
+                for root_key in ('result', 'content'):
+                    if root_key not in receipt:
+                        continue
+                    prefix = f'tool_results[{index}].'
+                    for path, value in _result_fields(receipt[root_key],
+                                                       prefix + root_key):
+                        source_fields[path] = (str(event_id) if event_id else None,
+                                               path[len(prefix):], value)
+            for field in row.get('citable_sources', ()):
+                path = field.get('source_path', '')
+                metadata = source_fields.get(path)
+                if metadata is None:
                     continue
-                field_path = path.split(']', 1)[1].lstrip('.')
-                root_key = field_path.split('.', 1)[0]
-                original_fields = dict(_result_fields(
-                    receipt.get(root_key), root_key))
-                original_value = original_fields.get(field_path)
-                field['event_id'] = str(event_id)
-                field['source_path'] = str(event_id) + ':' + field_path
-                if isinstance(original_value, str):
-                    field['offset'] = (len(original_value) - len(field['text'])
-                        if field.get('truncated') and field.get('segment') == 1 else 0)
-                    if field.get('truncated') and field.get('segment') == 0:
-                        row.setdefault('shared_omitted', []).append({
-                            'event_id': str(event_id), 'field_path': field_path,
-                            'offset': len(field['text']),
-                            'length': len(original_value) - 2 * len(field['text']),
-                            'reason': 'native_audit_projection'})
-                seen.add((str(event_id), field_path))
-        for source in getattr(self, 'shared_sources', ()):
+                event_id, field_path, original_value = metadata
+                field['event_id'] = event_id
+                field['event_identity_status'] = ('known' if event_id else
+                                                   'unknown_fallback')
+                field['field_path'] = field_path
+                field['source_path'] = (event_id + ':' + field_path if event_id
+                                        else path)
+                field['offset'] = (len(original_value) - len(field['text'])
+                    if field.get('truncated') and field.get('segment') == 1 else 0)
+                if field.get('truncated') and field.get('segment') == 0:
+                    row.setdefault('shared_omitted', []).append({
+                        'event_id': event_id, 'field_path': field_path,
+                        'offset': len(field['text']),
+                        'length': len(original_value) - 2 * len(field['text']),
+                        'reason': 'native_audit_projection'})
+                if event_id:
+                    seen.add((event_id, field_path))
+        for source_index, source in enumerate(getattr(self, 'shared_sources', ())):
             step = source.get('pos_step')
             if not isinstance(step, int) or step < 0:
                 continue  # task-only initialization is not a tool observation
@@ -117,15 +124,18 @@ class SharedViewSentinel(CandidateSentinel):
                 compact.append(row)
                 by_step[step] = row
             used = sum(len(item['text']) for item in row.get('citable_sources', ()))
+            event_id = source.get('event_id')
+            event_id = str(event_id) if event_id else None
             for path, value in fields:
-                identity = (source['event_id'], path)
-                if identity in seen:
+                identity = (event_id, path)
+                if event_id and identity in seen:
                     continue
-                seen.add(identity)
+                if event_id:
+                    seen.add(identity)
                 remaining = self.audit_observation_max_chars - used
                 if remaining <= 0:
                     row.setdefault('shared_omitted', []).append({
-                        'event_id': source['event_id'], 'field_path': path,
+                        'event_id': event_id, 'field_path': path,
                         'offset': 0, 'length': len(value), 'reason': 'audit_cap'})
                     continue
                 if len(value) > remaining:
@@ -140,18 +150,26 @@ class SharedViewSentinel(CandidateSentinel):
                 for offset, text in pieces:
                     if not text:
                         continue
-                    record = {'source_path': source['event_id'] + ':' + path,
+                    record = {'source_path': (str(event_id) + ':' + path
+                              if event_id else path),
+                              'event_id': event_id,
+                              'event_identity_status': ('known' if event_id else
+                                                        'unknown_fallback'),
+                              'fallback_identity': (None if event_id else
+                                  f'shared-source-{source_index}:' +
+                                  str(source.get('sha256', 'unknown'))),
+                              'field_path': path,
                               'offset': offset, 'text': text,
                               'truncated': clipped}
                     row['citable_sources'].append(record)
                     row.setdefault('shared_history', []).append({
-                        'event_id': source['event_id'], 'sha256': source['sha256'],
+                        'event_id': event_id, 'sha256': source.get('sha256'),
                         'actor_transition_id': source.get('actor_transition_id'),
                         'pos_step': step, 'segment': record})
                     used += len(text)
                 if clipped:
                     row.setdefault('shared_omitted', []).append({
-                        'event_id': source['event_id'], 'field_path': path,
+                        'event_id': event_id, 'field_path': path,
                         'offset': head, 'length': len(value) - remaining,
                         'reason': 'audit_cap'})
         self.logger.log('shared_audit_source_projection',

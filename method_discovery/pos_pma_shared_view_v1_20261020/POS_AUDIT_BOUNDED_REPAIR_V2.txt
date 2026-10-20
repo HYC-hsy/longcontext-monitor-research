@@ -1,0 +1,94 @@
+PoS shared-view audit bounded repair — offline handoff
+======================================================
+
+Baseline and scope
+------------------
+Starting HEAD and remote: f1ee46d00736944b6467cd000bdb5c92ae7cc6be.
+Only pre-existing unrelated monitor_agent_core __pycache__ paths were untracked.
+No running Task/episode was edited. PMA code, prompt, trigger, memory bank,
+selection, configuration and budgets have zero diff against the baseline.
+The historic pos-68764e0592a8481e record/reward and previous audit files
+remain unchanged. There were zero real model, Task and official evaluator calls.
+
+Local PoS provenance must be described accurately. The pinned public upstream
+is luoyu100/PoS@6818cfa6434dbc91fcf67f0b3eb12a91db47433f. Before this
+turn the local vendor/belief/beliefSentinel.py and
+vendor/prompts/beliefSentinel_prompt.py already had opt-in strict auditing,
+repair and evidence-ID patches. This turn changes only those existing local
+patches plus SharedViewSentinel and its tests; the files are not pristine
+upstream copies. The earlier citation_fix.py implementation is unchanged.
+
+What changed
+------------
+1. In opt-in pos_pma_shared_view_v1, the shared audit system instruction now
+replaces the conflicting legacy changed-only instruction. It inspects candidate
+changes and also allows an unchanged retained claim to be challenged if this
+step's explicit observation directly contradicts it. Silence is not disproof;
+unsupported whole-graph objections and unsupported additions/deletions remain
+disallowed. The old system instruction is still used when the flag is off.
+
+2. The shared audit projection now maps a displayed source path to its actual
+receipt field during projection. This preserves the full field path even for
+result[0].stdout and content[0].output[0].text, the known event ID, and the
+original field length used to compute each visible segment's offset. It no
+longer parses result[0] as if it were a root dictionary key. Supplemental
+history carries a known event ID too. Unknown identity is explicitly marked
+unknown_fallback rather than silently discarding a known ID.
+
+3. The opt-in evidence-ID hash binds case, event/fallback identity, original
+step, field path, offset, length, and visible content SHA-256. A current-window
+fragment and the identical supplemental-history fragment therefore have the
+same ID, even after row reordering. Identical text at different offsets or
+from different events has a different ID. ID membership is checked against
+the present request, not against a prior-use blacklist: an old ID is valid if
+its same fragment is still displayed. Missing/changed fragments cannot borrow
+that ID. Explicit hash collisions still fail.
+
+4. New-protocol quotes are tested as nonempty, contiguous substrings of the
+selected visible fragment after JSON decoding. No case-folding, whitespace
+folding, cross-field search or cross-fragment joining occurs. This is an exact
+string comparison, not a claim about original network frame bytes. Legacy
+evidence_step validation retains its previous normalization policy.
+
+Direct test evidence and boundaries
+-----------------------------------
+The new tests in test_shared_view.py use a callback that reads the actual
+constructed request and emits evidence_id responses directly. They check:
+list result/content/nested paths and tail offsets; identical head/tail text at
+different offsets; stable known-source ID after moving from the current window
+into supplemental history and after row reorder; ID leaving the request;
+content change; case/space/newline-mutated quotes; known versus explicitly
+unknown event identity; an unchanged retained state challenged by this step's
+visible move result; and an actual manager repair/reaudit request whose second
+candidate_changes map names the replacement candidate, not the old one.
+Earlier shared-view fixtures still translate their legacy synthetic step
+answers to IDs; these direct cases are independent of that test adapter.
+The explicit flag-off test sees the old changed-only wording and accepts an
+evidence_step issue. Original PoS transfer tests also passed.
+
+The pre-fix direct command produced E/F/F: missing list-result offset,
+unstable ID across current/history, and the conflicting changed-only prompt.
+After the targeted edits, the same three tests passed. A test-only callback
+initially raised StopIteration in the source-absent case; it was corrected to
+return a deliberately stale ID, and the re-run passed. That was fixture logic,
+not a production request. The final affected command ran 56 tests, exit 0;
+the original PoS offline command ran 6 tests, exit 0. Full console text and
+the exact commands are in POS_AUDIT_BOUNDED_REPAIR_V2_TEST_OUTPUT.txt.
+
+Four worktree SHA-256 values, computed after the final code edit (Windows file
+bytes; do not confuse with Git blob IDs):
+  shared_view.py c1abe6e52cc57a4323e49817f75a5123a15badc4d0e5aa7d30b2b5177b447ac4
+  test_shared_view.py 1746ea5eb12cf3b1c5cb847248db6892ffac3bcfb2807e5536cffcf919b21954
+  vendor/belief/beliefSentinel.py 15a003b783472b7ef461edb1b0c073b73598c15282f99581a99b7ce052a620cf
+  vendor/prompts/beliefSentinel_prompt.py 8bff08da702ca28eb89543d1847e93a334b1fdfa8321abdaad8e48f8e75f34bf
+No PMA source or config file is in this diff. Git may LF-normalize some
+worktree files; the hashes above are worktree bytes, not an assertion of
+byte-for-byte equality with public blobs.
+
+Still not established: whether a real audit model will infer the right
+semantic label for a retained or changed claim, or whether longitudinal state
+quality improves. A correctly bound citation is not proof of semantic truth.
+D1–D7 remain development cases, not held-out tests. The previously proposed
+42 logical / 84 maximum physical model-call comparison has no authorization
+and was not executed. No new full-fake source-bound certification was created;
+the old certification must not be used for this changed source.

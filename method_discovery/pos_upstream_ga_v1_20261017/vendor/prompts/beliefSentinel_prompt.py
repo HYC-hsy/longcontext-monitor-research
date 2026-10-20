@@ -11,21 +11,27 @@ inconsistent or contradicts the supplied raw trajectory. Absence from a partial
 observation is not contradiction. Return at most one evidence-grounded issue and
 do not propose environment actions."""
 
-SHARED_AUDIT_SEMANTICS_V1 = """Audit the transition from belief_before (a revisable prior
+SHARED_AUDIT_SEMANTICS_V1 = """Validate one candidate Belief transition. Audit the
+transition from belief_before (a revisable prior
 interpretation) to candidate_belief (the proposed state AFTER this action). The action
 describes what was attempted, not proof of success; observation is the returned evidence.
 Inspect each added, changed, or deleted State, Relation and Gap, including frontier
-changes, against the actual observation and original task requirements. A new fact need
+changes, against the actual observation and original task requirements. You may
+also challenge an unchanged retained state only when this step's explicit evidence
+directly contradicts it. Do not roam the whole graph for unsupported objections.
+A new fact need
 not have existed before: allow a result supported by this step. New evidence can replace
 an old inference. Do not conflate copying with moving or deleting: a destination copy
 alone does not prove the source vanished. Silence in an observation is not proof of
 absence. Additions, deletions and gap closure still require support; local success does
-not establish a broader requirement or weaken the task. For each issue name the specific
-candidate change and why its evidence is insufficient; difference from the prior state
-alone is not an issue. For example, a tool reporting that a new file was created can
+not establish a broader requirement or weaken the task. For each issue name the
+specific candidate change or retained claim and the actual contradicting or
+insufficient evidence; difference from the prior state alone is not an issue.
+For example, a tool reporting that a new file was created can
 support adding that file, while merely requesting its creation cannot support deleting
 an existing source file. The candidate_changes map locates differences; it is not
-independent evidence. Return at most one grounded issue."""
+independent evidence. Return at most one grounded issue and do not propose
+environment actions."""
 
 
 PROGRESS_SYSTEM_PROMPT = """Label whether the finalized execution transition made
@@ -46,9 +52,9 @@ def build_local_audit_prompt(audit_input: dict) -> list[dict[str, str]]:
         'evidence_protocol_version') == 'pos-shared-evidence-id-v1'
         else '"evidence_step": 0')
     return [
-        {"role": "system", "content": CONSISTENCY_SYSTEM_PROMPT +
-         ("\n\n" + SHARED_AUDIT_SEMANTICS_V1 if audit_input.get(
-             'audit_semantics_version') == 'pos-shared-audit-semantics-v1' else '') +
+        {"role": "system", "content": (SHARED_AUDIT_SEMANTICS_V1 if audit_input.get(
+             'audit_semantics_version') == 'pos-shared-audit-semantics-v1'
+             else CONSISTENCY_SYSTEM_PROMPT) +
          ('\n\nCite an evidence_id shown on one citable_sources fragment and a short '
           'quote from that same visible fragment. Do not cite omitted text, memory '
           'interpretations, task instructions, or advice as tool evidence.' if

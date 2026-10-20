@@ -128,6 +128,9 @@ class BeliefSentinel:
                 for source in row.get('citable_sources', ()):
                     identity = {'case_id': case_id,
                         'event_id': source.get('event_id'),
+                        'event_identity_status': source.get('event_identity_status',
+                            'known' if source.get('event_id') else 'unknown_fallback'),
+                        'fallback_identity': source.get('fallback_identity'),
                         'row_index': None if source.get('event_id') else row_index,
                         'step': row['step'], 'field_path': source.get('source_path'),
                         'offset': source.get('offset', 0),
@@ -229,9 +232,10 @@ class BeliefSentinel:
                             case_id=case_id, step=base_step, audit_mode=mode,
                             issue_index=index, reason='evidence_id_not_visible')
                         continue
-                    quote = ' '.join(data['evidence_quote'].casefold().split())
-                    fragment = ' '.join(binding[1].casefold().split())
-                    if not quote or quote not in fragment:
+                    # Both values are JSON-decoded strings. New protocol quotes
+                    # must be a literal contiguous substring of this fragment.
+                    quote = data['evidence_quote']
+                    if not quote or quote not in binding[1]:
                         filtered_reasons.append('evidence_quote_outside_fragment')
                         self.logger.log('belief_sentinel_issue_discarded',
                             case_id=case_id, step=base_step, audit_mode=mode,

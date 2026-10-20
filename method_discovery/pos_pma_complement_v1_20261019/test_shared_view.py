@@ -307,7 +307,14 @@ class Tests(unittest.TestCase):
 
     def test_repair_reaudit_receive_same_frozen_memory_in_actual_requests(self):
         ep, belief, consistency, pma = self.make()
-        belief.replies.append(json.dumps(UPDATE))
+        first_patch = deepcopy(UPDATE)
+        first_patch['upsert_states'] = [{'state_id': 's-initial',
+            'entity_id': 'e1', 'description': 'first candidate'}]
+        replacement_patch = deepcopy(UPDATE)
+        replacement_patch['upsert_states'] = [{'state_id': 's-repaired',
+            'entity_id': 'e1', 'description': 'repaired candidate'}]
+        belief.replies[1] = json.dumps(first_patch)
+        belief.replies.append(json.dumps(replacement_patch))
         issue = {'targets': ['e1'], 'issue_type': 'contradiction',
                  'problem': 'Prior clean interpretation conflicts with actual tool',
                  'evidence_step': 0, 'evidence_quote': 'STILL_DIRTY',
@@ -330,6 +337,13 @@ class Tests(unittest.TestCase):
             self.assertIn('shared_selection', json.dumps(request))
         self.assertIn('STILL_DIRTY', json.dumps(consistency.requests[1]))
         self.assertIn('STILL_DIRTY', json.dumps(consistency.requests[2]))
+        first_audit = json.loads(consistency.requests[1][1]['content'].split(
+            '\nReturn JSON:', 1)[0])
+        second_audit = json.loads(consistency.requests[2][1]['content'].split(
+            '\nReturn JSON:', 1)[0])
+        self.assertIn('s-initial', first_audit['candidate_changes']['states'])
+        self.assertIn('s-repaired', second_audit['candidate_changes']['states'])
+        self.assertNotIn('s-initial', second_audit['candidate_belief']['world']['states'])
         audit_meta = [row for name, row in ep.logger.rows
                       if name == 'shared_audit_history_input']
         self.assertEqual(audit_meta[-1]['selection_sha256'],
@@ -537,6 +551,181 @@ class Tests(unittest.TestCase):
             raw_trajectory=trajectory)
         self.assertEqual(len(findings), 1)
         self.assertEqual(sentinel.last_audit_result['filtered_count'], 2)
+
+    def test_list_result_content_offsets_and_same_text_different_positions(self):
+        ep, _, _, _ = self.make()
+        sentinel = ep.manager.sentinel
+        sentinel.audit_observation_max_chars = 6
+        trajectory = [{'step': 2, 'action': None, 'observation': json.dumps({
+            'tool_results': [
+                {'tool_use_id': 'list-result', 'result': [
+                    {'stdout': 'abcMIDDLEabc'}]},
+                {'tool_use_id': 'list-content', 'content': [
+                    {'output': [{'text': 'OTHER'}]}]}]})}]
+        shown = sentinel._compact_trajectory(trajectory)[0]
+        sources = shown['citable_sources']
+        self.assertEqual([item['source_path'] for item in sources[:2]],
+            ['list-result:result[0].stdout'] * 2)
+        self.assertEqual([(item['text'], item['offset']) for item in sources[:2]],
+                         [('abc', 0), ('abc', 9)])
+        # The second receipt is still tracked exactly when room is available.
+        sentinel.audit_observation_max_chars = 30
+        shown = sentinel._compact_trajectory(trajectory)[0]
+        self.assertEqual(shown['citable_sources'][-1]['source_path'],
+                         'list-content:content[0].output[0].text')
+        self.assertEqual(shown['citable_sources'][-1]['offset'], 0)
+        sentinel.audit_observation_max_chars = 6
+        sentinel.call_model = lambda _messages: '{"issues": []}'
+        sentinel.audit_candidate(case_id='list-case', base_step=2,
+            mode='local', belief_before={'world': {}},
+            candidate_belief={'world': {}}, raw_trajectory=trajectory)
+        bindings = sentinel.last_evidence_bindings
+        positions = sorted((item['offset'], evidence_id) for evidence_id, item
+            in bindings.items() if item['event_id'] == 'list-result')
+        self.assertEqual([item[0] for item in positions], [0, 9])
+        self.assertNotEqual(positions[0][1], positions[1][1])
+
+    def test_exact_quote_and_stable_id_after_window_to_history_move(self):
+        ep, _, _, _ = self.make()
+        sentinel = ep.manager.sentinel
+        belief = {'world': {'entities': {'e1': {}}}}
+        source = {'origin': 'GA_tool_outcome', 'tool_use_id': 'stable-event',
+                  'result': [{'stdout': 'Alpha  Beta\nGamma'}]}
+        current = {'step': 2, 'action': None,
+                   'observation': json.dumps({'tool_results': [source]})}
+        ids = []
+        def answer(messages):
+            request = json.loads(messages[1]['content'].split('\nReturn JSON:', 1)[0])
+            item = next((row for row in request['raw_trajectory']
+                         if row['step'] == 2), None)
+            if item is not None:
+                ids.append(item['citable_sources'][0]['evidence_id'])
+            quote = answer.quote
+            return json.dumps({'issues': [{'targets': ['e1'],
+                'issue_type': 'external', 'problem': 'inspect retained state',
+                'evidence_id': answer.use_id or ids[0],
+                'evidence_quote': quote, 'evidence': quote,
+                'suggestion': 'revise state'}]})
+        answer.quote = 'Alpha  Beta\nGamma'
+        answer.use_id = None
+        sentinel.call_model = answer
+        def audit(rows):
+            return sentinel.audit_candidate(case_id='same-case', base_step=2,
+                mode='local', belief_before=belief, candidate_belief=belief,
+                raw_trajectory=rows)
+        self.assertEqual(len(audit([current])), 1)
+        sentinel.shared_sources = [{'event_id': 'stable-event', 'pos_step': 2,
+            'sha256': 'synthetic-source', 'raw': source}]
+        # A different row precedes the old source; its ID must not depend on row order.
+        other = {'step': 1, 'action': None,
+            'observation': json.dumps({'tool_results': [{
+                'tool_use_id': 'other-event', 'result': {'stdout': 'other'}}]})}
+        self.assertEqual(len(audit([other])), 1)
+        self.assertEqual(ids[0], ids[1])
+        for quote in ('alpha  Beta\nGamma', 'Alpha Beta\nGamma',
+                      'Alpha  Beta Gamma'):
+            answer.quote = quote
+            self.assertEqual(audit([other]), [])
+            self.assertEqual(sentinel.last_audit_result['outcome'], 'unusable')
+        answer.quote = 'Alpha  Beta\nGamma'
+        changed = dict(source, result=[{'stdout': 'Alpha  Beta\nGamma!'}])
+        sentinel.shared_sources = [dict(sentinel.shared_sources[0], raw=changed)]
+        self.assertEqual(audit([other]), [])  # Old ID no longer names this fragment.
+        self.assertNotEqual(ids[0], ids[-1])
+        sentinel.shared_sources = []
+        answer.use_id = ids[0]
+        self.assertEqual(audit([other]), [])  # Source left this request entirely.
+
+    def test_retained_state_challenge_and_reaudit_changes_actual_candidate(self):
+        ep, belief_role, consistency, _ = self.make()
+        asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.', actions=[]))
+        before = deepcopy(ep.manager._structured_context())
+        before['world']['states']['retained'] = {'state_id': 'retained',
+            'entity_id': 'e1', 'description': 'source still exists'}
+        source = {'tool_use_id': 'move-event',
+                  'result': {'stdout': 'source removed after move'}}
+        captured = []
+        def review(messages):
+            self.assertNotIn('only when a changed State', messages[0]['content'])
+            self.assertIn('retained', messages[0]['content'])
+            self.assertIn('Silence in an observation is not proof of',
+                          ' '.join(messages[0]['content'].split()))
+            self.assertIn('Additions, deletions and gap closure still require support',
+                          ' '.join(messages[0]['content'].split()))
+            request = json.loads(messages[1]['content'].split('\nReturn JSON:', 1)[0])
+            captured.append(request)
+            fragment = request['raw_trajectory'][0]['citable_sources'][0]
+            return json.dumps({'issues': [{'targets': ['retained'],
+                'issue_type': 'external', 'problem': 'retained source contradicted',
+                'evidence_id': fragment['evidence_id'],
+                'evidence_quote': 'source removed after move',
+                'evidence': 'source removed after move',
+                'suggestion': 'remove retained state'}]})
+        ep.manager.sentinel.call_model = review
+        trajectory = [{'step': 4, 'action': {'name': 'move'},
+            'observation': json.dumps({'tool_results': [source]})}]
+        self.assertEqual(len(ep.manager.sentinel.audit_candidate(case_id='retained',
+            base_step=4, mode='local', belief_before=before,
+            candidate_belief=before, raw_trajectory=trajectory)), 1)
+        self.assertEqual(captured[0]['candidate_changes']['states'], {})
+        # A replacement candidate is a different object and gets a fresh diff.
+        repaired = deepcopy(before)
+        del repaired['world']['states']['retained']
+        consistency.replies = ['{"issues": []}']
+        ep.manager.sentinel.call_model = consistency
+        ep.manager.sentinel.audit_candidate(case_id='retained', base_step=4,
+            mode='local', belief_before=before, candidate_belief=repaired,
+            raw_trajectory=trajectory)
+        second = json.loads(consistency.requests[-1][1]['content'].split(
+            '\nReturn JSON:', 1)[0])
+        self.assertEqual(second['candidate_changes']['states']['retained']['before'],
+                         before['world']['states']['retained'])
+        self.assertIsNone(second['candidate_changes']['states']['retained']['after'])
+        self.assertIn('source removed after move', json.dumps(second))
+
+    def test_explicitly_disabled_protocol_keeps_legacy_step_and_prompt(self):
+        ep, _, _, _ = self.make()
+        sentinel = ep.manager.sentinel
+        sentinel.shared_audit_semantics_v1 = False
+        sentinel.shared_evidence_id_v1 = False
+        requests = []
+        def legacy(messages):
+            requests.append(messages)
+            return json.dumps({'issues': [{'targets': ['e1'],
+                'issue_type': 'external', 'problem': 'legacy citation',
+                'evidence_step': 2, 'evidence_quote': 'Visible Receipt',
+                'evidence': 'Visible Receipt', 'suggestion': 'retain gap'}]})
+        sentinel.call_model = legacy
+        trajectory = [{'step': 2, 'action': None,
+            'observation': json.dumps({'tool_results': [{
+                'tool_use_id': 'legacy-tool',
+                'result': {'stdout': 'Visible Receipt'}}]})}]
+        findings = sentinel.audit_candidate(case_id='legacy', base_step=2,
+            mode='local', belief_before={'world': {'entities': {'e1': {}}}},
+            candidate_belief={'world': {'entities': {'e1': {}}}},
+            raw_trajectory=trajectory)
+        self.assertEqual(len(findings), 1)
+        self.assertIn('only when a changed State', requests[0][0]['content'])
+        self.assertIn('"evidence_step": 0', requests[0][1]['content'])
+        self.assertNotIn('"evidence_id":', requests[0][1]['content'])
+
+    def test_unknown_event_identity_is_explicit_fallback_only(self):
+        ep, _, _, _ = self.make()
+        sentinel = ep.manager.sentinel
+        with_id = {'step': 2, 'action': None, 'observation': json.dumps({
+            'tool_results': [{'tool_use_id': 'known-id',
+                              'result': {'stdout': 'KNOWN'}}]})}
+        without_id = {'step': 3, 'action': None, 'observation': json.dumps({
+            'tool_results': [{'result': {'stdout': 'UNKNOWN'}}]})}
+        sentinel.call_model = lambda _messages: '{"issues": []}'
+        sentinel.audit_candidate(case_id='identity', base_step=3, mode='local',
+            belief_before={'world': {}}, candidate_belief={'world': {}},
+            raw_trajectory=[with_id, without_id])
+        bindings = list(sentinel.last_evidence_bindings.values())
+        self.assertEqual([item['event_identity_status'] for item in bindings],
+                         ['known', 'unknown_fallback'])
+        self.assertEqual(bindings[0]['event_id'], 'known-id')
+        self.assertIsNone(bindings[1]['event_id'])
 
     def test_strict_audit_rejects_scalar_and_non_list_top_levels(self):
         ep, _, consistency, _ = self.make()
