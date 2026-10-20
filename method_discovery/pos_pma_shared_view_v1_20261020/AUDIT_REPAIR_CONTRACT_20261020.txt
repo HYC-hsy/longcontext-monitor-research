@@ -1,0 +1,103 @@
+PoS shared-view repair/audit contract: offline handoff
+=====================================================
+
+Scope and identity
+------------------
+Audited starting commit: 8df92f0c230a8e3b07c637cbd1f9e20452a5ceb7.
+At inspection, local HEAD and public/crs-v0-20261007 both matched that commit;
+only unrelated monitor_agent_core __pycache__ directories were untracked.
+No live Task, provider, PoS/PMA role, or official evaluator call was made.
+The historical pos-41c50cafd3b24b87 reward=0 and raw archive were not edited.
+
+Separate changes
+----------------
+efaf581c: A/B request context. In pos_pma_shared_view_v1 only, the semantic
+repair request now contains the baseline belief, rejected candidate, original
+patch, current transition, validated issue list, existing schema, and an
+explicit replacement-patch-on-before instruction. The structural JSON repair
+request includes the actual failed response and schema/parse error from the
+current attempt. No new correction attempt was added.
+
+e36656d8 and adeb30ce: C adoption policy. The shared-view audit now records
+clean / issues / unusable. It checks all reported issues for grounding while
+retaining the published one-finding action limit. A nonempty issue list whose
+issues all fail validation is unusable, not clean. Partial filtering with a
+grounded issue is issues. Invalid/empty audit output is unusable. On update,
+unusable retains last accepted belief, marks the update and Task panel stale,
+and leaves progress unscored without an extra progress request. On initial
+audit with no prior belief it raises and exports an unavailable partial state;
+it does not turn an empty graph into apparent completion. The original Task
+observation remains in ordinary GA history. PMA silence does not erase the
+stale-state warning. The change adds no completion approval or Task gate.
+
+Synthetic request/response excerpts (not real model answers)
+-------------------------------------------------------------
+Semantic repair request includes separate sections named:
+  Current structured Belief; Realized transition; Rejected candidate;
+  Original patch; validated consistency issues; Required JSON schema.
+Its operative sentence is: "Return a complete replacement incremental patch
+applied ONCE to Current structured Belief, not a delta applied to the rejected
+candidate." The test response removes s-old and adds e2/s-new; after one
+application to before, s-old is absent and the new state still references e2.
+
+Schema repair attempt 1 includes the literal synthetic raw "{first broken";
+attempt 2 includes the current literal "{second broken" and its parse error.
+The original task message remains in the request. These are finite fake calls.
+
+Audit examples: {"issues":[]} => clean. One grounded VISIBLE_OK issue with
+another non-grounded issue => issues, filtered_count=1. A sole NEVER_IN_TOOL
+quotation => unusable, filtered_count=1. In the last case no semantic repair
+or progress model request occurs, and the final fake HTTP Task payload contains
+"may be stale" plus the actual current observation.
+
+Executed checks and outcomes
+----------------------------
+Using E:\LongContext\bench_runtime\m4\harbor-env\Scripts\python.exe -B:
+  -m unittest method_discovery.pos_pma_complement_v1_20261019.test_shared_view
+    method_discovery.pos_pma_complement_v1_20261019.test_worker_fake
+    method_discovery.pos_pma_complement_v1_20261019.test_candidate_ga_seam
+    method_discovery.pos_pma_complement_v1_20261019.test_candidate_core
+    method_discovery.pos_upstream_ga_v1_20261017.test_citation_fix
+    method_discovery.pos_upstream_ga_v1_20261017.test_ga_seam -q
+Result: Ran 59 tests in 5.732s, OK, process exit 0. The existing
+ResourceWarning on agentmain.py tools_schema.json remains unrelated.
+
+  method_discovery/pos_upstream_ga_v1_20261017/test_offline.py -q
+Result: Ran 6 tests in 0.258s, OK, exit 0. A first package-style collection
+attempt failed ModuleNotFoundError: episode; the direct-file invocation above
+collected the intended suite. The failure is not counted as a pass.
+
+PMA test_episode through its documented package alias and pinned vendor paths:
+Result: Ran 13 tests in 0.757s, OK, exit 0. Its synthetic exception
+tracebacks are expected fixture events, not provider traffic.
+
+The required source-bound full-fake Docker/native-SHARED certification could
+not be regenerated. `docker ps` returned: "failed to connect to the docker API
+at npipe:////./pipe/dockerDesktopLinuxEngine ... The system cannot find the
+file specified." `com.docker.service` was Stopped; Start-Service failed to
+open that service. Docker Desktop executable was not present at its common
+Program Files path. No synthetic container was started. Old certification
+remains historical only and is NOT valid for this patched source. Therefore
+the engineering precondition for any next live verification is NOT satisfied.
+
+Reproducibility and limitations
+-------------------------------
+The three patched PoS vendor files are local deltas on fixed upstream
+luoyu100/PoS@6818cfa6434dbc91fcf67f0b3eb12a91db47433f. Their baseline
+Git blob identities at 8df92f0c were manager 56601f8d, beliefSentinel
+716c4857, prompt_generation 04c6e56c; at adeb30ce they are manager
+6e36a1ab, beliefSentinel d7b97307, prompt_generation ae9daaa9. Thus this
+shared-view variant must not be described as byte-identical released vendor.
+The optional strict_audit_contract gate defaults off; existing PoS path uses
+the previous prompt and audit adoption behavior.
+
+These scripted responses prove request construction, branch selection and
+state retention under the fixtures. They do not prove that a real model would
+repair correctly or that reward would improve. Citation grounding remains
+syntactic; a genuine quote is not a semantic correctness proof. Historical
+memory can still broaden context, and Sentinel can still misread evidence.
+
+Public file is itself a sanitized summary. No credential, private endpoint,
+hidden thinking, or historical private response body is included. Raw output
+was observed in the terminal but not independently persisted byte-for-byte;
+the exact exit counts above are transcribed, not claimed as raw-log hashes.
