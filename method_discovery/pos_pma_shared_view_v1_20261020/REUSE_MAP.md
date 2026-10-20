@@ -10,8 +10,8 @@
 | Phase 1 before PoS, frozen selected history in PoS updater/audit, Phase 2 after PoS | Candidate method change | This is an input and timing change, not a claim about released PoS or PMA behavior. |
 | Complete recovery plus optional PMA advice in one temporary GA view | Candidate method change | PoS alone commits current state; PMA cannot gate completion or write status. |
 | Removal of prior complement-only caps and pretrim | Candidate method change | Strict integrity and native projection remain; not a claim of known provider token capacity. |
-| Generic `single_run` → Harbor/native-SHARED, independent PMA profile host, PoS worker, Task complete-response | Direct existing host path with mode identity adaptation | No new scheduler, evaluator or authorization service. |
+| Generic `single_run` to Harbor/native-SHARED, independent PMA profile host, PoS worker, Task complete-response | Direct existing host path with mode identity adaptation | No new scheduler, evaluator or authorization service. |
 
-Mechanical offline checks can establish request content, ordering, isolation,
+Mechanical offline checks establish request content, ordering, isolation,
 receipts and cleanup. They cannot establish that a model used history correctly
 or that this candidate improves outcomes.
