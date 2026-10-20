@@ -20,7 +20,7 @@ def main() -> None:
     parser.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
     parser.add_argument('--research-candidate', choices=(
         'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
-        'pos_pma_complement_v1'), default='U')
+        'pos_pma_complement_v1', 'pos_pma_shared_view_v1'), default='U')
     parser.add_argument('--output', type=Path, required=True)
     for name in ('official-source-git', 'task-profile-file',
                  'ga-source', 'runtime-root', 'worker-python', 'harbor-python',
@@ -35,10 +35,12 @@ def main() -> None:
     root = args.output.resolve(strict=False)
     if args.condition == 'P' and (args.task != 'pos-synthetic-file-http' or
                                    args.research_candidate not in {'PoS',
-                                       'PoS-citation-fixed', 'pos_pma_complement_v1'}):
+                                       'PoS-citation-fixed', 'pos_pma_complement_v1',
+                                       'pos_pma_shared_view_v1'}):
         raise RuntimeError('PoS zero-model fixture must use the synthetic P identity')
     if args.candidate_profile_fixture and (args.condition != 'P' or
-            args.research_candidate != 'pos_pma_complement_v1' or
+            args.research_candidate not in {'pos_pma_complement_v1',
+                                            'pos_pma_shared_view_v1'} or
             not args.pma_profile_file):
         raise RuntimeError('profile fixture requires synthetic candidate and fake PMA profile')
     identity = prepare(argparse.Namespace(output=str(root), task=args.task,
@@ -70,12 +72,15 @@ def main() -> None:
                  **({'upstream_commit': manifest['upstream_commit']} if args.condition == 'P'
                     else {'pma_vendor_commit': manifest['pma_vendor_commit']})}
     if args.condition == 'P':
-        from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import SOURCE_FILES
+        from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import (
+            SOURCE_FILES, SHARED_SOURCE_FILE)
+        frozen_sources = ((*SOURCE_FILES, SHARED_SOURCE_FILE) if
+            args.research_candidate == 'pos_pma_shared_view_v1' else SOURCE_FILES)
         execution['git_blob_source_files'] = {
             name: hashlib.sha256(subprocess.run(
                 ['git', 'cat-file', 'blob', f'{head}:{name}'], cwd=checkout,
                 capture_output=True, check=True).stdout).hexdigest()
-            for name in SOURCE_FILES}
+            for name in frozen_sources}
     (root / 'execution_identity.json').write_text(
         json.dumps(execution, sort_keys=True, indent=2), encoding='utf-8')
     binding = dict(manifest['planned_order'][0], run_id=identity['run_id'],

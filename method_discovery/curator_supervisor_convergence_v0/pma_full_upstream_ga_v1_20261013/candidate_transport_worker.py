@@ -28,11 +28,12 @@ def _durable(path: Path, row: dict) -> None:
 
 
 class TransportEpisode:
-    def __init__(self, llm, *, run_id, task_id, archive):
+    def __init__(self, llm, *, run_id, task_id, archive, research_candidate):
         self.llm, self.run_id, self.task_id = llm, run_id, task_id
         self.archive = archive
         self.ended = False
         self.sequence = 0
+        self.research_candidate = research_candidate
 
     async def handle(self, event):
         if event.get('kind') != 'candidate_pma_call' or event.get('sequence') != self.sequence + 1:
@@ -46,7 +47,7 @@ class TransportEpisode:
             raise ValueError('candidate PMA prompt/system missing')
         request_bytes = len(json.dumps({'prompt': prompt, 'system': system,
             'tools': tools}, ensure_ascii=False).encode('utf-8'))
-        if request_bytes > 90000:
+        if self.research_candidate != 'pos_pma_shared_view_v1' and request_bytes > 90000:
             raise ValueError('candidate complete PMA role input exceeds byte budget')
         self.sequence += 1
         request_id = event['event_id']
@@ -93,13 +94,15 @@ async def serve(args):
     profile = json.loads(raw)['claude_monitor_opus48']
     agent = construct_upstream(private / 'upstream_agent', memory_profile=profile)
     episode = TransportEpisode(agent._memory_llm, run_id=args.run_id,
-                               task_id=args.task_id, archive=archive)
+                               task_id=args.task_id, archive=archive,
+                               research_candidate=args.research_candidate)
     dispatcher = EventDispatcher(episode, requests, responses,
                                  deadline_epoch=args.deadline_epoch)
     (private / 'worker_ready.json').write_text(json.dumps({
         'run_id': args.run_id, 'task_id': args.task_id, 'fake_memory': False,
-        'research_candidate': 'pos_pma_complement_v1',
-        'pma_budget': {'input_limit_utf8_bytes': 90000,
+        'research_candidate': args.research_candidate,
+        'pma_budget': {'input_limit_utf8_bytes': (None if
+            args.research_candidate == 'pos_pma_shared_view_v1' else 90000),
             'ga_history_context_win': profile.get('context_win', 30000),
             'provider_context_limit_tokens': profile.get('model_context_limit_tokens'),
             'output_reserve_max_tokens': profile.get('max_tokens'),
@@ -139,4 +142,7 @@ if __name__ == '__main__':
     parser.add_argument('--requests', required=True)
     parser.add_argument('--responses', required=True)
     parser.add_argument('--deadline-epoch', type=float, required=True)
+    parser.add_argument('--research-candidate', choices=(
+        'pos_pma_complement_v1', 'pos_pma_shared_view_v1'),
+        default='pos_pma_complement_v1')
     asyncio.run(serve(parser.parse_args()))

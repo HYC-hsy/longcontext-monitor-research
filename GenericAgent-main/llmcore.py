@@ -1666,7 +1666,8 @@ class NativeToolClient:
         combined = f"{extra_system}\n\n{protocol}" if extra_system and protocol else (extra_system or protocol)
         if combined != self.backend.system: print(f"[Debug] Updated system prompt, length {len(combined)} chars.")
         self.backend.system = combined
-    def chat(self, messages, tools=None, request_view=None, system_overlay=None):
+    def chat(self, messages, tools=None, request_view=None, system_overlay=None,
+             overlay_request_byte_limit=90000):
         if system_overlay is not None:
             if request_view is not None or not isinstance(self.backend, NativeClaudeSession):
                 raise ValueError('transient system overlay requires stateful native Task path')
@@ -1685,13 +1686,15 @@ class NativeToolClient:
                 raise ValueError('transient system overlay requires original system')
             self.backend.system = original_system + '\n\n' + system_overlay
             previous_limit = getattr(self.backend, 'candidate_request_byte_limit', None)
-            self.backend.candidate_request_byte_limit = 90000
+            self.backend.candidate_request_byte_limit = overlay_request_byte_limit
             _research_emit('candidate_task_budget_resolved', {
-                'complete_request_byte_limit': 90000,
+                'complete_request_byte_limit': overlay_request_byte_limit,
                 'panel_utf8_bytes': len(system_overlay.encode('utf-8')),
                 'ga_history_context_win': self.backend.context_win,
                 'output_reserve_max_tokens': self.backend.max_tokens,
-                'basis': 'serialized_utf8_bytes_not_provider_token_limit',
+                'basis': ('ordinary_GA_history_policy_provider_limit_unknown'
+                          if overlay_request_byte_limit is None else
+                          'serialized_utf8_bytes_not_provider_token_limit'),
             })
             generator = self.chat(scoped_messages, tools=tools)
             try:

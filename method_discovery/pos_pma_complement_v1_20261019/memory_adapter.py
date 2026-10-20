@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from copy import deepcopy
 from types import SimpleNamespace
 
 from memory_agent.memory.memory_agent import (
@@ -171,5 +172,97 @@ class ComplementMemoryAgent(MemoryAgent):
                 reasoning_phase2=getattr(response2, 'reasoning_content', None),
                 user_prompt_phase1=prompt1, user_prompt_phase2=prompt2)
         finally:
+            self._advisory_context = ''
+            self._render_phase = None
+
+
+class SharedViewMemoryAgent(ComplementMemoryAgent):
+    """New-mode-only phase scheduler; the released PMA builders still run."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.frozen_selection = None
+        self._using_frozen_selection = False
+
+    def _format_memory_bank(self, observation=''):
+        if self._using_frozen_selection:
+            if self.frozen_selection is None:
+                raise RuntimeError('shared-view bank selection was not frozen')
+            rendered = deepcopy({key: value for key, value in
+                self.frozen_selection.items() if key not in
+                {'rendered_text', 'source_mappings'}})
+            rendered['phase'] = self._render_phase
+            rendered['selection_origin'] = 'frozen_shared_selection'
+            self.rendered_entry_ids.append(rendered)
+            if self.on_render is not None:
+                self.on_render(rendered)
+            return self.frozen_selection['rendered_text']
+        return super()._format_memory_bank(observation)
+
+    async def phase1(self, observation, step_count, *, input_sources=()):
+        self.last_phase1_operations = []
+        self.frozen_selection = None
+        self._render_phase = 'phase1'
+        try:
+            prompt = self._build_phase1_prompt(observation, step_count)
+            response = await self._call_llm_phase1(prompt)
+            try:
+                operations = self._execute_tool_calls(response)
+            finally:
+                # Already successful operations survive a later fatal operation.
+                for operation in self.last_phase1_operations:
+                    if operation.success and operation.action in {
+                            'save_knowledge', 'save_procedural'}:
+                        self.bank_version += 1
+                        self.entry_sources[operation.memory_id] = {
+                            'bank_version': self.bank_version,
+                            'content_sha256': hashlib.sha256(
+                                operation.content.encode('utf-8')).hexdigest(),
+                            'input_sources': tuple(input_sources),
+                            'meaning': 'visible_at_creation_not_sentence_support'}
+                    elif operation.success and operation.action == 'delete':
+                        self.bank_version += 1
+                        self.entry_sources.pop(operation.memory_id, None)
+            return {'prompt': prompt, 'response': response,
+                    'operations': deepcopy(operations)}
+        finally:
+            self._render_phase = None
+
+    def freeze_selection(self, observation):
+        if self.frozen_selection is not None:
+            raise RuntimeError('shared-view selection already frozen for this wake')
+        self._render_phase = 'shared_selection'
+        try:
+            rendered_text = super()._format_memory_bank(observation)
+            selected = deepcopy(self.rendered_entry_ids[-1])
+            selected['rendered_text'] = rendered_text
+            selected['bank_version'] = self.bank_version
+            selected['source_mappings'] = {
+                entry['id']: deepcopy(self.entry_sources.get(entry['id']))
+                for entry in selected['entries']}
+            self.frozen_selection = selected
+            return deepcopy(selected)
+        finally:
+            self._render_phase = None
+
+    async def phase2(self, observation, step_count, *, advisory_context=''):
+        if self.frozen_selection is None:
+            raise RuntimeError('shared-view Phase 2 requires frozen history')
+        self._advisory_context = advisory_context
+        self._render_phase = 'phase2'
+        self._using_frozen_selection = True
+        try:
+            prompt = self._build_phase2_prompt(observation, step_count)
+            response = await self._call_llm_phase2(prompt)
+            raw = getattr(response, 'content', None) or ''
+            reminder = self._parse_phase2_response(raw)
+            self.last_phase2_status = ('reminder' if reminder is not None else
+                'no_intervention' if '<no_intervention' in self._strip_thinking(raw)
+                else 'format_rejected')
+            return {'prompt': prompt, 'response': response, 'reminder': reminder,
+                    'status': self.last_phase2_status,
+                    'selection': deepcopy(self.frozen_selection)}
+        finally:
+            self._using_frozen_selection = False
             self._advisory_context = ''
             self._render_phase = None

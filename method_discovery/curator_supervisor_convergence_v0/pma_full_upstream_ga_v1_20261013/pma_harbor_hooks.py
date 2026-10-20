@@ -101,7 +101,7 @@ def verify_live_spec(spec: dict) -> None:
                 Path(spec['run_root']).resolve() != Path(binding['run_root']).resolve() or
                 spec.get('condition') != 'P' or
                 spec.get('research_candidate') not in {'PoS', 'PoS-citation-fixed',
-                    'pos_pma_complement_v1'} or
+                    'pos_pma_complement_v1', 'pos_pma_shared_view_v1'} or
                 (frozen.get('zero_model_fixture_only') is True) !=
                 (granted.get('zero_model_fixture_only') is True) or
                 (spec.get('candidate_profile_fixture_only') is True) !=
@@ -305,7 +305,8 @@ class NativeSharedTrialHooks(PMATrialHooks):
         if any(name.endswith('_API_KEY') for name in env_names):
             raise RuntimeError('provider credential environment exposed to Task')
         candidate_profile = (self.spec['condition'] == 'P' and
-            self.spec.get('research_candidate') == 'pos_pma_complement_v1' and
+            self.spec.get('research_candidate') in {
+                'pos_pma_complement_v1', 'pos_pma_shared_view_v1'} and
             (self.spec.get('zero_model_fixture_only') is not True or
              self.spec.get('candidate_profile_fixture_only') is True))
         if self.spec['condition'] == 'B' or candidate_profile:

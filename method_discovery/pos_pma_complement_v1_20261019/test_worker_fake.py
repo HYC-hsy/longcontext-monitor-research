@@ -14,6 +14,54 @@ HERE = Path(__file__).resolve().parent
 
 
 class WorkerTests(unittest.TestCase):
+    def test_packed_shared_view_phase1_before_pos_and_partial_export(self):
+        initial = {'goal_specification': 'Clean mug.', 'entities': [], 'states': [],
+                   'relations': [], 'epistemic_gaps': [], 'achievement_gaps': [],
+                   'frontier': None}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / 'pos_runtime'
+            runtime.mkdir()
+            for name in ('worker.py', 'episode.py', 'citation_fix.py'):
+                shutil.copy2(POS / name, runtime / name)
+            for name in ('candidate.py', 'memory_adapter.py', 'shared_view.py'):
+                shutil.copy2(HERE / name, runtime / name)
+            shutil.copytree(POS / 'vendor', runtime / 'vendor',
+                            ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+            shutil.copytree(PMA / 'src', runtime / 'pma_vendor' / 'src',
+                            ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+            fixture = root / 'replies.json'
+            fixture.write_text(json.dumps({'belief': [json.dumps(initial)],
+                'consistency': ['{"issues": []}'],
+                'pma_phase1': [{'content': '', 'tool_calls': [{'name':
+                    'memory_save_knowledge', 'arguments': {'content': 'Stored first'}}]}],
+                'pma_phase2': [{'content': '<no_intervention/>'}]}),
+                encoding='utf-8')
+            command = {'kind': 'reset', 'candidate': True,
+                       'candidate_method': 'pos_pma_shared_view_v1',
+                       'case_id': 'synthetic/mug', 'task': 'Clean mug.',
+                       'observation': 'Clean mug.', 'actions': []}
+            archive = root / 'events.jsonl'
+            process = subprocess.run([sys.executable, '-B', str(runtime / 'worker.py'),
+                '--vendor', str(runtime / 'vendor'), '--episode-module',
+                str(runtime / 'episode.py'), '--archive', str(archive),
+                '--mode', 'fake', '--fake-replies', str(fixture)],
+                input=json.dumps(command) + '\n', text=True, encoding='utf-8',
+                capture_output=True, timeout=15)
+            self.assertEqual(process.returncode, 0, process.stderr)
+            self.assertEqual(json.loads(process.stdout.splitlines()[0])['status'], 'ok')
+            events = [json.loads(line) for line in
+                      archive.read_text(encoding='utf-8').splitlines()]
+            names = [row.get('event') for row in events]
+            self.assertLess(names.index('candidate_pma_request'),
+                            names.index('pos_role_request'))
+            self.assertEqual(sum(name == 'candidate_pma_request' for name in names), 2)
+            result = json.loads(archive.with_suffix('.result.json').read_text(
+                encoding='utf-8'))['result']
+            self.assertEqual(result['bank']['knowledge'][0]['content'], 'Stored first')
+            self.assertEqual(result['phase1_status'], 'completed')
+            self.assertEqual(result['initialization_stage'], 'pos_initialized')
+
     def test_initial_consistency_transport_failure_is_not_swallowed(self):
         initial = {'goal_specification': 'Clean mug.', 'entities': [], 'states': [],
                    'relations': [], 'epistemic_gaps': [], 'achievement_gaps': [],

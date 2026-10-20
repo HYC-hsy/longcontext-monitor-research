@@ -129,7 +129,10 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
         for name in ('worker.py', 'episode.py', 'citation_fix.py'):
             shutil.copy2(pos_source / name, pos_stage / name)
         candidate_source = STAGE.parents[1] / 'pos_pma_complement_v1_20261019'
-        for name in ('candidate.py', 'memory_adapter.py'):
+        candidate_names = ['candidate.py', 'memory_adapter.py']
+        if manifest.get('config', {}).get('name') == 'pos_pma_shared_view_v1':
+            candidate_names.append('shared_view.py')
+        for name in candidate_names:
             shutil.copy2(candidate_source / name, pos_stage / name)
         shutil.copy2(STAGE / 'event_spool.py', pos_stage / 'event_spool.py')
         pma_source = STAGE / 'vendor' / 'pma_89e5c0d'
@@ -160,17 +163,21 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
                         source / 'pos_runtime' / 'pma_vendor', dirs_exist_ok=True)
     executed_pos_sources = {}
     if pos:
-        for name in ('agent_loop.py', 'agentmain.py', 'ga.py', 'llmcore.py',
+        executed_names = ['agent_loop.py', 'agentmain.py', 'ga.py', 'llmcore.py',
                      'research_runtime.py',
                      'pos_bridge.py', 'pos_runtime/worker.py',
                      'pos_runtime/episode.py', 'pos_runtime/citation_fix.py',
                      'pos_runtime/candidate.py', 'pos_runtime/memory_adapter.py',
-                     'pos_runtime/event_spool.py'):
+                     'pos_runtime/event_spool.py']
+        if manifest.get('config', {}).get('name') == 'pos_pma_shared_view_v1':
+            executed_names.append('pos_runtime/shared_view.py')
+        for name in executed_names:
             staged = source / name
             actual = hashlib.sha256(staged.read_bytes()).hexdigest()
             frozen_name = ('method_discovery/' +
                            ('pos_pma_complement_v1_20261019/' if
-                            Path(name).name in {'candidate.py', 'memory_adapter.py'} else
+                            Path(name).name in {'candidate.py', 'memory_adapter.py',
+                                                'shared_view.py'} else
                             'curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/' if
                             Path(name).name == 'event_spool.py' else
                             'pos_upstream_ga_v1_20261017/') +
@@ -206,8 +213,8 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
     elif pos:
         (root / 'control' / 'pos_archive').mkdir()
     config = json.loads(compose.read_text(encoding="utf-8"))
-    if args.condition == "B" or (pos and manifest.get('config', {}).get('name') ==
-                                  'pos_pma_complement_v1' and
+    if args.condition == "B" or (pos and manifest.get('config', {}).get('name') in
+                                  ('pos_pma_complement_v1', 'pos_pma_shared_view_v1') and
                                   (manifest.get('zero_model_fixture_only') is False or
                                    manifest.get('candidate_profile_fixture_only') is True)):
         main = config["services"]["main"]
@@ -330,6 +337,8 @@ def run_offline(args) -> dict:
         env['GA_POS_ENABLED'] = '1' if args.condition == 'P' else '0'
         env['GA_POS_PMA_COMPLEMENT'] = ('1' if args.condition == 'P' and
             manifest['config']['name'] == 'pos_pma_complement_v1' else '0')
+        env['GA_POS_PMA_SHARED_VIEW'] = ('1' if args.condition == 'P' and
+            manifest['config']['name'] == 'pos_pma_shared_view_v1' else '0')
         env['GA_POS_CITATION_FIXED'] = ('1' if args.condition == 'P' and
             manifest['config'].get('citation_mode') == 'decoded_source_fields_v1' else '0')
         env["GA_PMA_ENABLED"] = env["GA_MONITOR_ENABLED"] = "0"

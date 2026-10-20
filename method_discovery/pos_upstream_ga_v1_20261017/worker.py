@@ -219,7 +219,8 @@ class RoleTransport:
             self.sessions[role].max_retries = 0  # ignore Task retry env override
         session = self.sessions[role]
         if getattr(self, 'candidate_mode', False):
-            session.candidate_request_byte_limit = 90000
+            session.candidate_request_byte_limit = (
+                None if getattr(self, 'shared_view_mode', False) else 90000)
             session.candidate_auxiliary_integrity = True
         overall = float(os.environ.get('GA_POS_DEADLINE_EPOCH', '0') or 0)
         remaining = overall - time.time() if overall else float(
@@ -410,7 +411,14 @@ def main():
                     if episode is not None:
                         raise RuntimeError('PoS episode already constructed')
                     if command.get('candidate'):
+                        candidate_method = command.get('candidate_method',
+                            'pos_pma_complement_v1')
+                        if candidate_method not in {'pos_pma_complement_v1',
+                                'pos_pma_shared_view_v1'}:
+                            raise RuntimeError('unknown candidate method identity')
+                        shared_view = candidate_method == 'pos_pma_shared_view_v1'
                         transport.candidate_mode = True
+                        transport.shared_view_mode = shared_view
                         profile_client = None
                         if args.mode == 'profile':
                             for key, name in (('citation_fix_sha256', 'citation_fix.py'),
@@ -420,6 +428,9 @@ def main():
                                 if binding.get(key) != digest(
                                         args.episode_module.with_name(name)):
                                     raise RuntimeError('candidate source binding differs: ' + key)
+                            if shared_view and binding.get('shared_view_sha256') != digest(
+                                    args.episode_module.with_name('shared_view.py')):
+                                raise RuntimeError('shared-view source binding differs')
                             from event_spool import EventClient
                             deadline_epoch = float(os.environ['GA_POS_DEADLINE_EPOCH'])
                             remaining = deadline_epoch - time.time()
@@ -441,7 +452,10 @@ def main():
                             fixture_uuid.__fixture_only__ = True
                             sys.modules['shortuuid'] = fixture_uuid
                         import candidate as candidate_module
-                        from memory_adapter import ComplementMemoryAgent
+                        from memory_adapter import (ComplementMemoryAgent,
+                                                    SharedViewMemoryAgent)
+                        if shared_view:
+                            import shared_view as shared_module
                         from memory_agent.memory.trigger import MemoryAgentTrigger, TriggerConfig
                         from memory_agent.memory.universal_memory import UniversalMemory
                         trigger_config = {'interval': 1, 'first_step': True,
@@ -454,19 +468,26 @@ def main():
                                 'byte_budget_basis': 'conservative_engineering_cap_not_token_context',
                                 'output_reserve': 'existing_frozen_max_tokens_per_role'}
                             if (not isinstance(frozen, dict) or
-                                    frozen.get('candidate_limits') != expected_limits or
+                                    (shared_view and
+                                     frozen.get('name') != candidate_method) or
+                                    (not shared_view and
+                                     frozen.get('candidate_limits') != expected_limits) or
+                                    (shared_view and
+                                     frozen.get('candidate_limits') is not None) or
                                     not isinstance(frozen.get('pma_profile_sha256'), str) or
                                     len(frozen['pma_profile_sha256']) != 64 or
                                     frozen.get('pma_trigger') != trigger_config):
                                 raise RuntimeError('candidate resolved configuration differs')
                             trigger_config = frozen['pma_trigger']
-                        pma = ComplementMemoryAgent(llm=CandidatePMATransport(
+                        pma_class = SharedViewMemoryAgent if shared_view else ComplementMemoryAgent
+                        pma = pma_class(llm=CandidatePMATransport(
                             role_transport=transport, profile_client=profile_client),
                             memory=UniversalMemory())
                         manager_slot = {}
                         def candidate_consistency(messages):
                             manager = manager_slot.get('manager')
-                            if manager is not None and manager.revision_context:
+                            if (manager is not None and manager.revision_context and
+                                    not shared_view):
                                 messages = [*messages, {'role': 'system',
                                     'content': 'Previously delivered fallible advice, '
                                     'not an external observation:\n' + manager.revision_context}]
@@ -483,9 +504,12 @@ def main():
                             belief_call=transport.caller('belief'),
                             consistency_call=candidate_consistency,
                             progress_call=transport.caller('progress'),
-                            manager_class=candidate_module.ComplementBeliefManager)
+                            manager_class=(shared_module.SharedViewBeliefManager
+                                if shared_view else candidate_module.ComplementBeliefManager))
                         manager_slot['manager'] = pos_episode.manager
-                        episode = candidate_module.ComplementEpisode(
+                        episode_class = (shared_module.SharedViewEpisode if shared_view
+                                         else candidate_module.ComplementEpisode)
+                        episode = episode_class(
                             pos_episode=pos_episode, memory_agent=pma,
                             trigger=MemoryAgentTrigger(TriggerConfig(
                                 interval=trigger_config['interval'],

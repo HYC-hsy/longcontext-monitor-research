@@ -39,7 +39,8 @@ def prepare(args: argparse.Namespace) -> dict:
             getattr(args, 'synthetic_pos_fixture', False)))
         if getattr(args, 'candidate_profile_fixture', False):
             if (not plan['synthetic_fixture'] or not args.fake_only or
-                    plan['method'] != 'pos_pma_complement_v1'):
+                    plan['method'] not in {'pos_pma_complement_v1',
+                                           'pos_pma_shared_view_v1'}):
                 raise RuntimeError('candidate profile fixture requires isolated synthetic P')
             plan['candidate_profile_fixture_only'] = True
         if getattr(args, 'task_complete_response', False):
@@ -49,7 +50,8 @@ def prepare(args: argparse.Namespace) -> dict:
         if plan['synthetic_fixture'] and not args.fake_only:
             raise RuntimeError('synthetic PoS package is zero-model only')
     candidate = getattr(args, 'research_candidate', 'U')
-    if pos and candidate not in {'PoS', 'PoS-citation-fixed', 'pos_pma_complement_v1'}:
+    if pos and candidate not in {'PoS', 'PoS-citation-fixed',
+                                  'pos_pma_complement_v1', 'pos_pma_shared_view_v1'}:
         raise RuntimeError('PoS plan requires explicit fixed method identity')
     if not pos and candidate != 'U':
         plan['schema'] = 'pma-ga-single-plan-v2'
@@ -131,7 +133,7 @@ def main() -> None:
     prepared.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
     prepared.add_argument('--research-candidate', choices=(
         'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
-        'pos_pma_complement_v1'), default='U')
+        'pos_pma_complement_v1', 'pos_pma_shared_view_v1'), default='U')
     prepared.add_argument('--occurrence', type=int, default=1)
     prepared.add_argument('--output', required=True)
     prepared.add_argument('--official-source-git', required=True)

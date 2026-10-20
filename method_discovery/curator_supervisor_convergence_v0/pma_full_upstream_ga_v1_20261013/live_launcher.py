@@ -373,7 +373,8 @@ def run_live(args) -> dict:
             Path(args.ga_source).resolve(strict=True) !=
             (STAGE.parents[2] / 'GenericAgent-main').resolve(strict=True)):
         raise RuntimeError('V3 GA source is not the frozen repository bridge')
-    candidate_profile = (args.condition == 'P' and candidate == 'pos_pma_complement_v1'
+    candidate_profile = (args.condition == 'P' and candidate in
+                         {'pos_pma_complement_v1', 'pos_pma_shared_view_v1'}
                          and (not fixture or profile_fixture))
     if profile_fixture and (not fixture or not candidate_profile or
             args.task != 'pos-synthetic-file-http'):
@@ -389,13 +390,14 @@ def run_live(args) -> dict:
         raise FileExistsError(args.run_root)
     if args.condition == 'P':
         if candidate not in {'PoS', 'PoS-citation-fixed',
-                             'pos_pma_complement_v1'} or fixture != (
+                             'pos_pma_complement_v1', 'pos_pma_shared_view_v1'} or fixture != (
                              args.task == 'pos-synthetic-file-http'):
             raise RuntimeError('PoS method or fixture identity differs')
         if fixture:
             from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import ROOT
             args.pos_fake_replies = str((ROOT.parent / 'pos_pma_complement_v1_20261019' /
-                'synthetic_replies.json') if candidate == 'pos_pma_complement_v1' else
+                'synthetic_replies.json') if candidate in
+                {'pos_pma_complement_v1', 'pos_pma_shared_view_v1'} else
                 (ROOT / 'synthetic_task/pos_replies.json'))
     args.execution_authorized = False
     prepared = _prepare_common(args, fake_gateway=False)
@@ -512,9 +514,12 @@ def run_live(args) -> dict:
             'pma_vendor_files_sha256': manifest['pma_vendor_files_sha256'],
         }
         if candidate_profile:
+            if candidate == 'pos_pma_shared_view_v1':
+                binding['shared_view_sha256'] = _sha(staged_pos / 'shared_view.py')
             binding['candidate_config'] = {
+                **({'name': candidate} if candidate == 'pos_pma_shared_view_v1' else {}),
                 'pma_trigger': manifest['config']['pma_trigger'],
-                'candidate_limits': manifest['config']['candidate_limits'],
+                'candidate_limits': manifest['config'].get('candidate_limits'),
                 'pma_profile_sha256': manifest['pma_profile_sha256']}
         binding_path = root / 'control/pos_archive/binding.json'
         with binding_path.open('x', encoding='utf-8', newline='\n') as stream:
@@ -561,7 +566,7 @@ def run_live(args) -> dict:
                 '--requests', str(root / 'control' / 'spool' / 'requests'),
                 '--responses', str(root / 'control' / 'spool' / 'responses'),
                 '--deadline-epoch', str(deadline),
-                *([] if candidate_profile else ['--research-candidate', candidate]),
+                '--research-candidate', candidate,
                 *(['--fake-memory', '--fake-memory-update'] if fixture and not candidate_profile else [])],
                 cwd=STAGE, env=worker_env,
                 stdout=worker_logs[0], stderr=worker_logs[1])
@@ -647,6 +652,8 @@ def run_live(args) -> dict:
                            'released_core' else '1'),
                        GA_POS_PMA_COMPLEMENT=('1' if manifest['config']['name'] ==
                            'pos_pma_complement_v1' else '0'),
+                       GA_POS_PMA_SHARED_VIEW=('1' if manifest['config']['name'] ==
+                           'pos_pma_shared_view_v1' else '0'),
                        GA_POS_TRANSPORT='fake' if fixture and not profile_fixture else 'profile',
                        GA_POS_WORKER_SCRIPT='/opt/genericagent/pos_runtime/worker.py',
                        GA_POS_VENDOR_ROOT='/opt/genericagent/pos_runtime/vendor',
@@ -796,7 +803,8 @@ def live_status_success(status: dict) -> bool:
                 archive.get('close_status') != 'graceful_exit' or
                 archive.get('result_status') != 'completed'):
             return False
-        if status.get('research_candidate') == 'pos_pma_complement_v1' and (
+        if status.get('research_candidate') in {'pos_pma_complement_v1',
+                                                'pos_pma_shared_view_v1'} and (
                 archive.get('archive_incomplete') is not False or
                 archive.get('task_archive_incomplete') is not False or
                 archive.get('task_terminal_status') != 'available'):
@@ -846,7 +854,7 @@ def main() -> None:
     parser.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
     parser.add_argument('--research-candidate', choices=(
         'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
-        'pos_pma_complement_v1'), default='U')
+        'pos_pma_complement_v1', 'pos_pma_shared_view_v1'), default='U')
     parser.add_argument('--task-profile', default='native_claude_cc_vibe_opus48')
     parser.add_argument('--pma-profile-file')
     parser.add_argument('--harbor-source-root')

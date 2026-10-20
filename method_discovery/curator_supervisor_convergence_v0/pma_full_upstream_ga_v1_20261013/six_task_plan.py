@@ -57,11 +57,14 @@ def validate_plan(manifest: dict, granted: dict) -> list[dict]:
                 row['order'] != 1 or type(row['repeat']) is not int or
                 row['repeat'] < 1 or row['condition'] != 'P' or
                 row['research_candidate'] not in {'PoS', 'PoS-citation-fixed',
-                                                  'pos_pma_complement_v1'} or
-                (row['research_candidate'] == 'pos_pma_complement_v1' and
+                                                  'pos_pma_complement_v1',
+                                                  'pos_pma_shared_view_v1'} or
+                (row['research_candidate'] in {'pos_pma_complement_v1',
+                                               'pos_pma_shared_view_v1'} and
                  manifest.get('config', {}).get('name') !=
-                    'pos_pma_complement_v1') or
-                (row['research_candidate'] == 'pos_pma_complement_v1' and
+                    row['research_candidate']) or
+                (row['research_candidate'] in {'pos_pma_complement_v1',
+                                               'pos_pma_shared_view_v1'} and
                  manifest.get('config', {}).get('citation_mode') !=
                     'visible_tool_fields_v2') or
                 (row['research_candidate'] == 'PoS-citation-fixed' and

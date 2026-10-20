@@ -78,7 +78,10 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
     pma = None
     pma_upstream = None
     pos = None
-    complement = os.environ.get('GA_POS_PMA_COMPLEMENT') == '1'
+    shared_view = os.environ.get('GA_POS_PMA_SHARED_VIEW') == '1'
+    if shared_view and os.environ.get('GA_POS_PMA_COMPLEMENT') == '1':
+        raise ValueError('shared-view and previous complement are exclusive')
+    complement = (os.environ.get('GA_POS_PMA_COMPLEMENT') == '1' or shared_view)
     if complement and os.environ.get('GA_POS_ENABLED') != '1':
         raise ValueError('complement requires an explicit PoS worker')
     pos_observation = initial_content
@@ -124,7 +127,9 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                      task=initial_content, observation=initial_content,
                      actions=tools_schema,
                      citation_fixed=os.environ.get('GA_POS_CITATION_FIXED') == '1',
-                     candidate=complement)
+                     candidate=complement,
+                     candidate_method=('pos_pma_shared_view_v1' if shared_view else
+                         'pos_pma_complement_v1' if complement else None))
     if os.environ.get('GA_PMA_UPSTREAM_ENABLED') == '1':
         if (os.environ.get('GA_PMA_ENABLED') == '1' or
                 os.environ.get('GA_MONITOR_ENABLED') == '1' or
@@ -200,7 +205,9 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
             if complement:
                 panel = pos.exchange('decision_panel', observation=pos_observation)
                 response_gen = client.chat(messages=messages, tools=tools_schema,
-                                           system_overlay=panel['panel'])
+                                           system_overlay=panel['panel'],
+                                           overlay_request_byte_limit=(None if shared_view
+                                               else 90000))
             else:
                 consume_current = getattr(handler, 'consume_pos_current_instruction', None)
                 if consume_current is not None:

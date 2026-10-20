@@ -62,15 +62,18 @@ def verify_evidence(directory: Path, *, require_committed: bool = True,
         ('events.result.json', 'events.close.json', 'native_test_execution.json',
          'writer_termination_check.json'))
     from .single_manifest import source_hashes, vendor_hashes
-    from .single_manifest import SOURCE_FILES
+    from .single_manifest import SOURCE_FILES, SHARED_SOURCE_FILE
+    shared = research_candidate == 'pos_pma_shared_view_v1'
+    frozen_sources = (*SOURCE_FILES, SHARED_SOURCE_FILE) if shared else SOURCE_FILES
     committed_sources = {name: hashlib.sha256(subprocess.run(
         ['git', 'cat-file', 'blob', f"{identity.get('code_commit')}:{name}"],
         cwd=ROOT, capture_output=True, check=True).stdout).hexdigest()
-        for name in SOURCE_FILES}
+        for name in frozen_sources}
     prepared = load('prepared.json')
     bundled = prepared.get('executed_pos_source_sha256')
     if research_candidate not in {'PoS', 'PoS-citation-fixed',
-                                  'pos_pma_complement_v1'}:
+                                  'pos_pma_complement_v1',
+                                  'pos_pma_shared_view_v1'}:
         raise RuntimeError('PoS certification method identity invalid')
     executed_names = ('agent_loop.py', 'agentmain.py', 'ga.py', 'llmcore.py',
                       'research_runtime.py', 'pos_bridge.py',
@@ -79,11 +82,13 @@ def verify_evidence(directory: Path, *, require_committed: bool = True,
                       'pos_runtime/candidate.py',
                       'pos_runtime/memory_adapter.py',
                       'pos_runtime/event_spool.py')
+    if shared:
+        executed_names += ('pos_runtime/shared_view.py',)
     def source_name(name):
         if not name.startswith('pos_runtime/'):
             return 'GenericAgent-main/' + name
         leaf = Path(name).name
-        if leaf in {'candidate.py', 'memory_adapter.py'}:
+        if leaf in {'candidate.py', 'memory_adapter.py', 'shared_view.py'}:
             directory = 'pos_pma_complement_v1_20261019'
         elif leaf == 'event_spool.py':
             directory = ('curator_supervisor_convergence_v0/'
@@ -95,7 +100,8 @@ def verify_evidence(directory: Path, *, require_committed: bool = True,
         source_name(name)]
         for name in executed_names}
     script = (base / 'normal/synthetic_test.sh').read_text(encoding='utf-8')
-    candidate_profile = research_candidate == 'pos_pma_complement_v1'
+    candidate_profile = research_candidate in {
+        'pos_pma_complement_v1', 'pos_pma_shared_view_v1'}
     provider = status.get('provider_capture', {})
     if candidate_profile:
         host_ready = load('host_private/worker_ready.json')
@@ -122,7 +128,7 @@ def verify_evidence(directory: Path, *, require_committed: bool = True,
             bundled != expected_executed or
             identity.get('harbor_commit') != HARBOR_COMMIT or
             identity.get('upstream_commit') != UPSTREAM or
-            identity.get('source_files') != source_hashes() or
+            identity.get('source_files') != source_hashes(include_shared=shared) or
             identity.get('vendor_files') != vendor_hashes() or
             result.get('condition') != 'P' or
             result.get('research_candidate') != research_candidate or
@@ -138,7 +144,7 @@ def verify_evidence(directory: Path, *, require_committed: bool = True,
             status.get('close_bound') is not True or
             worker.get('status') != 'completed' or
             (worker.get('result', {}).get('pos', {}).get('success_known')
-             if research_candidate == 'pos_pma_complement_v1' else
+             if candidate_profile else
              worker.get('result', {}).get('success_known')) is not False or
             closed.get('status') != 'graceful_exit' or
             closed.get('worker_return_code') != 0 or

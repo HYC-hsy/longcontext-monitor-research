@@ -21,6 +21,93 @@ from llmcore import NativeClaudeSession, NativeToolClient
 
 
 class Tests(unittest.TestCase):
+    def test_shared_view_actual_ga_http_keeps_history_and_removes_old_cap(self):
+        initial = {'goal_specification': 'G' * 95000, 'entities': [],
+            'states': [], 'relations': [], 'epistemic_gaps': [],
+            'achievement_gaps': [{'target': 'service', 'reason': 'not yet checked'}],
+            'frontier': {'gap_type': 'achievement', 'target': 'service'}}
+        delta = {'remove_state_ids': [], 'remove_relation_ids': [],
+            'upsert_entities': [], 'upsert_states': [], 'upsert_relations': [],
+            'epistemic_gaps': [], 'achievement_gaps': initial['achievement_gaps'],
+            'frontier': initial['frontier']}
+        replies = {'belief': [json.dumps(initial), json.dumps(delta)],
+            'consistency': ['{"issues": []}', '{"issues": []}'],
+            'progress': ['{"progress": 0, "score": 0.0, '
+                         '"affected_record_ids": [], "reason": "unchanged"}'],
+            'pma_phase1': [{'content': '', 'tool_calls': []}] * 2,
+            'pma_phase2': [{'content': '<context_for_action>Synthetic advice.</context_for_action>'},
+                           {'content': '<no_intervention/>'}]}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime = root / 'pos_runtime'
+            runtime.mkdir()
+            for name in ('worker.py', 'episode.py', 'citation_fix.py'):
+                shutil.copy2(POS / name, runtime / name)
+            for name in ('candidate.py', 'memory_adapter.py', 'shared_view.py'):
+                shutil.copy2(HERE / name, runtime / name)
+            shutil.copytree(POS / 'vendor', runtime / 'vendor',
+                            ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+            shutil.copytree(PMA / 'src', runtime / 'pma_vendor' / 'src',
+                            ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+            fixture = root / 'replies.json'
+            fixture.write_text(json.dumps(replies), encoding='utf-8')
+            env = {'GA_POS_ENABLED': '1', 'GA_POS_PMA_SHARED_VIEW': '1',
+                'GA_POS_PMA_COMPLEMENT': '0', 'GA_PMA_ENABLED': '0',
+                'GA_PMA_UPSTREAM_ENABLED': '0', 'GA_MONITOR_ENABLED': '0',
+                'GA_M0_MONITOR_ENABLED': '0', 'GA_POS_TRANSPORT': 'fake',
+                'GA_POS_WORKER_SCRIPT': str(runtime / 'worker.py'),
+                'GA_POS_VENDOR_ROOT': str(runtime / 'vendor'),
+                'GA_POS_EPISODE_MODULE': str(runtime / 'episode.py'),
+                'GA_POS_ARCHIVE': str(root / 'events.jsonl'),
+                'GA_POS_FAKE_REPLIES': str(fixture),
+                'GA_BENCH_TASK_ID': 'synthetic', 'GA_LANG': 'en'}
+            parent = SimpleNamespace(task_dir=tmp, extrakeyinfo=None,
+                intervene=None, obligation_ledger=None,
+                evidence_completion_kernel=None, research_condition=None,
+                monitor_runtime=None, _turn_end_hooks={}, verbose=False)
+            class Handler(GenericAgentHandler):
+                def do_code_run(self, args, response):
+                    if False: yield None
+                    return StepOutcome({'stdout': 'VISIBLE_SYNTHETIC_RESULT',
+                        'exit_code': 0}, next_prompt='Synthetic step complete')
+            handler = Handler(parent, cwd=tmp)
+            backend = NativeClaudeSession({'apibase': 'https://fixture.invalid',
+                'apikey': 'SYNTHETIC-NO-ACCESS', 'model': 'claude-opus-4-8',
+                'max_tokens': 64, 'max_retries': 0, 'stream': False})
+            client = NativeToolClient(backend)
+            parent.llmclient = client
+            tools = json.loads((GA / 'assets/tools_schema.json').read_text(encoding='utf-8'))
+            system = (GA / 'assets/sys_prompt_en.txt').read_text(encoding='utf-8')
+            captured = []
+            class HTTP:
+                status_code = 200
+                headers = {}
+                def __init__(self, blocks): self.blocks = blocks
+                def __enter__(self): return self
+                def __exit__(self, *args): return False
+                def json(self): return {'content': self.blocks, 'usage': {}}
+                def close(self): pass
+            responses = [[{'type': 'tool_use', 'name': 'code_run', 'id': 't1',
+                'input': {'type': 'python', 'script': 'print(1)'}}],
+                [{'type': 'text', 'text': 'Done.'}]]
+            def post(_url, **kwargs):
+                captured.append(kwargs['json'])
+                return HTTP(responses[len(captured) - 1])
+            with patch.dict(os.environ, env), patch('llmcore.requests.post', side_effect=post):
+                outcome = exhaust(agent_runner_loop(client, system, 'ORIGINAL_TASK',
+                    handler, tools, max_turns=2, verbose=False))
+            self.assertEqual(outcome['result'], 'CURRENT_TASK_DONE')
+            self.assertEqual(len(captured), 2)
+            self.assertGreater(len(json.dumps(captured[0], ensure_ascii=False).encode('utf-8')),
+                               90000)
+            self.assertEqual(len(backend.history), 4)
+            first, second = [json.dumps(item, ensure_ascii=False) for item in captured]
+            self.assertIn('Synthetic advice.', first)
+            self.assertNotIn('Synthetic advice.', second)
+            self.assertIn('VISIBLE_SYNTHETIC_RESULT', second)
+            self.assertIn('ORIGINAL_TASK', second)
+            self.assertTrue((root / 'events.result.json').is_file())
+
     def test_actual_ga_stateful_http_and_worker(self):
         initial = {'goal_specification': 'Make service available.', 'entities': [],
             'states': [], 'relations': [], 'epistemic_gaps': [],

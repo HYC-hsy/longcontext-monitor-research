@@ -71,8 +71,12 @@ def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def source_hashes() -> dict:
-    return {name: sha(CHECKOUT / name) for name in SOURCE_FILES}
+SHARED_SOURCE_FILE = 'method_discovery/pos_pma_complement_v1_20261019/shared_view.py'
+
+
+def source_hashes(*, include_shared=False) -> dict:
+    names = (*SOURCE_FILES, SHARED_SOURCE_FILE) if include_shared else SOURCE_FILES
+    return {name: sha(CHECKOUT / name) for name in names}
 
 
 def vendor_hashes() -> dict:
@@ -101,18 +105,22 @@ def prepare(plan: dict, source: Path, task_profile: Path,
             plan.get('execution_authorized') is not False or
             plan.get('official_source_git_commit') != COMMIT or
             plan.get('condition') != 'P' or plan.get('method') not in
-                {'PoS', 'PoS-citation-fixed', 'pos_pma_complement_v1'} or
+                {'PoS', 'PoS-citation-fixed', 'pos_pma_complement_v1',
+                 'pos_pma_shared_view_v1'} or
             type(plan.get('occurrence')) is not int or plan['occurrence'] < 1):
         raise RuntimeError('PoS single-run plan identity invalid')
     task = plan['task']
     synthetic = plan.get('synthetic_fixture') is True
     candidate_profile_fixture = plan.get('candidate_profile_fixture_only') is True
     if candidate_profile_fixture and (not synthetic or
-            plan['method'] != 'pos_pma_complement_v1'):
+            plan['method'] not in {'pos_pma_complement_v1', 'pos_pma_shared_view_v1'}):
         raise RuntimeError('candidate profile fixture identity invalid')
     policy = plan.get('task_complete_response_policy', 'disabled')
     if policy not in {'disabled', 'complete-response-v1'} or (synthetic and policy != 'disabled'):
         raise RuntimeError('PoS Task response policy invalid')
+    if plan['method'] == 'pos_pma_shared_view_v1' and not synthetic and (
+            policy != 'complete-response-v1'):
+        raise RuntimeError('shared-view formal Task requires complete-response-v1')
     if synthetic != (task == SYNTHETIC_ID) or (not synthetic and task not in FOUR):
         raise RuntimeError('PoS task not in frozen four or synthetic fixture')
     profile = runpy.run_path(str(task_profile))['native_claude_cc_vibe_opus48']
@@ -163,6 +171,7 @@ def prepare(plan: dict, source: Path, task_profile: Path,
         'PoS': 'released-core PoS-on-GA transfer',
         'PoS-citation-fixed': 'released-core PoS-on-GA transfer + decoded citation fix',
         'pos_pma_complement_v1': 'pos_pma_complement_v1',
+        'pos_pma_shared_view_v1': 'pos_pma_shared_view_v1',
     }[plan['method']]
     method = {'name': method_name,
               'citation_mode': ('released_core' if plan['method'] == 'PoS' else
@@ -191,6 +200,12 @@ def prepare(plan: dict, source: Path, task_profile: Path,
             'byte_budget_basis': 'conservative_engineering_cap_not_token_context',
             'output_reserve': 'existing_frozen_max_tokens_per_role'}
         method['candidate_profile_status'] = 'host_pinned_pma_transport_v1_requires_separate_authorization'
+    elif plan['method'] == 'pos_pma_shared_view_v1':
+        method['pma_trigger'] = {'interval': 1, 'first_step': True,
+                                 'sliding_window_size': 8,
+                                 'actor_step_mapping': 'actor_attempt_plus_one'}
+        method['shared_view_contract'] = 'pma-history-before-pos-single-ga-view-v1'
+        method['candidate_profile_status'] = 'host_pinned_pma_transport_v1_requires_separate_authorization'
     if 'task_complete_response_policy' in plan:
         method['task_complete_response_policy'] = policy
     config_sha = hashlib.sha256(json.dumps(method, sort_keys=True,
@@ -208,7 +223,7 @@ def prepare(plan: dict, source: Path, task_profile: Path,
                          'committed_evidence_sha256': sha(index),
                          'result': verified}
     pma_profile_sha256 = None
-    if plan['method'] == 'pos_pma_complement_v1' and (not synthetic or
+    if plan['method'] in {'pos_pma_complement_v1', 'pos_pma_shared_view_v1'} and (not synthetic or
             candidate_profile_fixture):
         if pma_profile is None:
             raise RuntimeError('candidate requires existing private PMA profile identity')
@@ -241,7 +256,9 @@ def prepare(plan: dict, source: Path, task_profile: Path,
             'profile_identity_status': 'private_bytes_hashed_not_exported',
             'resolved_models_public': {'task': {key: profile.get(key) for key in
                 ('model', 'max_tokens', 'temperature', 'max_retries')}},
-            'source_files_sha256': source_hashes(), 'vendor_files_sha256': vendor_hashes(),
+            'source_files_sha256': source_hashes(
+                include_shared=plan['method'] == 'pos_pma_shared_view_v1'),
+            'vendor_files_sha256': vendor_hashes(),
             'pma_vendor_files_sha256': pma_vendor_hashes(),
             'config': method, 'config_sha256': config_sha,
             'planned_order': [row], 'assets': {task: asset},
