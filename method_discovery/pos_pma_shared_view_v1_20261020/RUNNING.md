@@ -58,3 +58,16 @@ future offline rerun. These commands never authorize a live experiment.
 Future real use would require a separate source-bound certification, frozen
 manifest/profile/assets, per-run authorization and the existing native-SHARED
 stop/evaluate/cleanup chain. No such authorization exists in this package.
+
+## One authorized SQLite episode (concluded)
+
+`AUDIT_LIVE_SQLITE_20261020.txt` and `raw_live_sqlite_v1/` document the sole
+authorized episode `pos-235d5ee3ccf64fa7` under audited runtime commit
+`f1c2974bd46aebcaf35114a06cc629e35727295b`. The committed
+`certification_v6/` passed the unchanged `verify_evidence` check before
+preparation. The new preparation had `execution_authorized=false`; a separate
+one-use authorization bound the manifest and run, and was removed after the
+episode. Do not rerun this command or use the old authorization. The Task
+ended `EXCEPTION` during auxiliary initialization, before any Task action;
+the existing same-run deterministic native verifier recorded reward 0 and
+cleanup was confirmed. The episode is not a normal method result.
