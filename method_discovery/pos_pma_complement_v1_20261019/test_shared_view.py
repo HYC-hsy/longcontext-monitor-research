@@ -1,5 +1,6 @@
 """Offline shared-view order, freeze, audit and panel checks with pinned cores."""
 import asyncio
+from copy import deepcopy
 import json
 from pathlib import Path
 import sys
@@ -341,12 +342,40 @@ class Tests(unittest.TestCase):
             observation=json.dumps({'tool_results': [source]}),
             source_events=[source]))
         self.assertEqual(ep.latest_update_outcome, 'unusable')
+        self.assertEqual(ep.manager.belief_update_history[-1]['status'], 'unusable')
         self.assertEqual(ep.accepted_revision, 0)
         self.assertEqual(ep.manager.sentinel.last_audit_result['filtered_count'], 1)
         self.assertEqual(len(belief.requests), 2)  # no repair for invalid issue
+        self.assertEqual(len(ep.manager.sentinel.call_progress_model.requests), 0)
         panel = ep.decision_panel(observation='Actual current observation')['panel']
         self.assertIn('may be stale', panel)
         self.assertIn('Actual current observation', ep._pma_observation())
+        sys.path.insert(0, str(ROOT.parent / 'GenericAgent-main'))
+        from llmcore import NativeClaudeSession, NativeToolClient
+        backend = NativeClaudeSession({'apibase': 'https://fixture.invalid',
+            'apikey': 'SYNTHETIC-NO-ACCESS', 'model': 'claude-opus-4-8',
+            'max_tokens': 64, 'max_retries': 0, 'stream': False})
+        captured = []
+        class HTTP:
+            status_code = 200
+            headers = {}
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def json(self): return {'content': [{'type': 'text', 'text': 'OK'}],
+                                    'usage': {}}
+            def close(self): pass
+        def post(_url, **kwargs):
+            captured.append(kwargs['json'])
+            return HTTP()
+        with patch('llmcore.requests.post', side_effect=post):
+            iterator = NativeToolClient(backend).chat([{'role': 'system',
+                'content': 'BASE'}, {'role': 'user', 'content':
+                'Actual current observation'}], tools=[{'name': 'inspect'}],
+                system_overlay=panel, overlay_request_byte_limit=None)
+            list(iterator)
+        sent = json.dumps(captured[0])
+        self.assertIn('may be stale', sent)
+        self.assertIn('Actual current observation', sent)
 
     def test_empty_and_partial_issues_are_distinct(self):
         ep, _, consistency, _ = self.make()
@@ -407,6 +436,43 @@ class Tests(unittest.TestCase):
         self.assertEqual(len(belief.requests), 3)
         self.assertIn('may be stale', ep.decision_panel(
             observation='STILL_DIRTY')['panel'])
+
+    def test_replacement_patch_applies_once_to_before_and_preserves_changes(self):
+        ep, belief, consistency, _ = self.make()
+        initial = deepcopy(INITIAL)
+        initial['states'] = [{'state_id': 's-old', 'entity_id': 'e1',
+            'description': 'Old state'}]
+        patch = deepcopy(UPDATE)
+        patch['remove_state_ids'] = ['s-old']
+        patch['upsert_entities'] = [{'entity_id': 'e2', 'entity_type': 'record',
+                                     'name': 'new record'}]
+        patch['upsert_states'] = [{'state_id': 's-new', 'entity_id': 'e2',
+            'description': 'New state'}]
+        belief.replies = [json.dumps(initial), json.dumps(patch), json.dumps(patch)]
+        issue = {'targets': ['e1'], 'issue_type': 'contradiction',
+            'problem': 'Inspect one local interpretation', 'evidence_step': 0,
+            'evidence_quote': 'VISIBLE', 'evidence': 'VISIBLE',
+            'suggestion': 'Correct only the local issue'}
+        consistency.replies = ['{"issues": []}', json.dumps({'issues': [issue]}),
+                               '{"issues": []}']
+        asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.', actions=[]))
+        source = {'origin': 'GA_tool_outcome', 'tool_use_id': 'tool-v',
+                  'result': {'stdout': 'VISIBLE'}}
+        asyncio.run(ep.update(actor_attempt=1, transition_id='replacement-once',
+            thought='Inspect', action_batch=[{'id': 'tool-v', 'name': 'inspect',
+                'arguments': {}, 'order': 0, 'status': 'executed'}],
+            observation=json.dumps({'tool_results': [source]}),
+            source_events=[source]))
+        world = ep.manager._structured_context()['world']
+        self.assertNotIn('s-old', world['states'])
+        self.assertIn('s-new', world['states'])
+        self.assertIn('e2', world['entities'])
+        self.assertEqual(world['states']['s-new']['entity_id'], 'e2')
+        self.assertEqual(ep.latest_update_outcome, 'accepted')
+        repair = json.dumps(belief.requests[2], ensure_ascii=False)
+        self.assertIn('s-old', repair)
+        self.assertIn('s-new', repair)
+        self.assertIn('replacement incremental patch', repair)
 
     def test_window_outside_source_reaches_phase2_and_repair(self):
         ep, belief, consistency, pma = self.make()

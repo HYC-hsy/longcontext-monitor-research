@@ -320,7 +320,9 @@ class BeliefManager:
         self.health_transitions.append(transition_record)
         self._record_snapshot(step=step)
 
-        if self.sentinel is not None and self.sentinel_progress_enabled:
+        if (self.sentinel is not None and self.sentinel_progress_enabled and
+                not (getattr(self, 'strict_audit_contract', False) and
+                     getattr(self, 'last_audit_unusable', False))):
             self.sentinel.submit_progress(
                 case_id=self.case_id,
                 step=step,
@@ -618,7 +620,10 @@ class BeliefManager:
         """Record both candidate and finalized belief for result export."""
 
         status = (
-            "validated"
+            "unusable"
+            if getattr(self, 'strict_audit_contract', False) and
+               getattr(self, 'last_audit_unusable', False)
+            else "validated"
             if final == candidate
             else "rejected"
             if final == base
