@@ -1,0 +1,37 @@
+From b1adcb3bbf2051176041af6a44aca9671ca67c6c Mon Sep 17 00:00:00 2001
+From: HYC-hsy <3510069313@qq.com>
+Date: Tue, 20 Oct 2026 14:35:59 +0800
+Subject: [PATCH 2/3] Use native LiteLLM tool-call shape in synthetic PMA host
+
+
+diff --git a/method_discovery/pos_pma_complement_v1_20261019/test_fake_host_entry.py b/method_discovery/pos_pma_complement_v1_20261019/test_fake_host_entry.py
+index fc31a5f0..6afde2b3 100644
+--- a/method_discovery/pos_pma_complement_v1_20261019/test_fake_host_entry.py
++++ b/method_discovery/pos_pma_complement_v1_20261019/test_fake_host_entry.py
+@@ -12,6 +12,7 @@ sys.path[:0] = [str(root), str(vendor / 'src'),
+                 str(vendor / 'external/harbor/src')]
+ 
+ import litellm
++from litellm.types.utils import ChatCompletionMessageToolCall, Function
+ 
+ capture = Path(os.environ['CANDIDATE_FAKE_HOST_CAPTURE'])
+ sequence = 0
+@@ -36,10 +37,11 @@ async def finite_fake_last_hop(**kwargs):
+     if shared_view and sequence == 3:
+         if '[Recent Trajectory' not in str(kwargs.get('messages')):
+             raise AssertionError('synthetic PMA save requires a real prior Task trajectory')
+-        calls = [{'id': 'synthetic-memory-save', 'type': 'function',
+-                  'function': {'name': 'memory_save_knowledge',
+-                               'arguments': json.dumps({'content':
+-                                   'Synthetic prior Task tool outcome; fallible historical memory.'})}}]
++        calls = [ChatCompletionMessageToolCall(
++            id='synthetic-memory-save', type='function',
++            function=Function(name='memory_save_knowledge',
++                arguments=json.dumps({'content':
++                    'Synthetic prior Task tool outcome; fallible historical memory.'})))]
+     return {'choices': [{'message': {'content': content, 'tool_calls': calls},
+                          'finish_reason': 'stop'}]}
+ 
+-- 
+2.49.0.windows.1
+

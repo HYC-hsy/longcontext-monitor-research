@@ -35,6 +35,26 @@ over the final model hop. The fake PMA profile is an isolated fixture, not a
 real-role profile. The v3 private output and its authorization-removal receipt
 are indexed by `raw_native_v3b/FILE_HASHES.json`.
 
+## Final repair check (2026-10-20)
+
+The final runtime source is commit `52f85a34db52b748f246d6cfd85a4aa686a1d7c5`.
+Run the unit command above, plus `test_candidate_core` and the existing PoS
+`test_citation_fix`/`test_ga_seam` modules. The PMA `test_episode` suite needs
+its pinned vendor roots on `sys.path` and the package `offline_launcher`
+alias; the exact invocation and separate raw output are in `AUDIT_REPAIR.txt`
+and `raw_tests_repair_v5/`. Mixing PMA's top-level `episode` import with the
+PoS `episode` module in one unittest process does not collect that suite.
+
+The final same-run synthetic invocation is the v3 command above with only
+`--output E:\LongContext\pos_pma_shared_view_offline_20261020_v6` changed.
+Its run ID is `pos-264631de99a64a8f`; published derived records are in
+`raw_repair_v6/`. The isolated fake PMA host now makes one valid knowledge
+save after the synthetic Task tool result, so the second selection is nonempty.
+The earlier v4 failed fixture remains described in `V4_FAILURE.txt`; v5 passed
+before the final source-offset bookkeeping patch and is not the final
+source-bound certification. Use a *new nonexistent output directory* for any
+future offline rerun. These commands never authorize a live experiment.
+
 Future real use would require a separate source-bound certification, frozen
 manifest/profile/assets, per-run authorization and the existing native-SHARED
 stop/evaluate/cleanup chain. No such authorization exists in this package.

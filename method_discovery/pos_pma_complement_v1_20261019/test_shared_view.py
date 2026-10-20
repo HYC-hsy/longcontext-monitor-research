@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(Path(__file__).resolve().parent),
@@ -375,6 +376,58 @@ class Tests(unittest.TestCase):
         self.assertIn('R' * 18000, panel['panel'])
         self.assertIsNone(panel['included_advice'])
         self.assertGreater(len(panel['panel']), 16000)
+
+    def test_actual_stateful_task_http_retains_recovery_for_silence_and_rejection(self):
+        sys.path.insert(0, str(ROOT.parent / 'GenericAgent-main'))
+        from belief.beliefStates import RecoveryDirective
+        from llmcore import NativeClaudeSession, NativeToolClient
+        for phase2, expected_advice in (('<no_intervention/>', False),
+            ('unparseable Phase 2 prose', False),
+            ('<context_for_action>Optional synthetic advice</context_for_action>', True)):
+            with self.subTest(phase2=phase2):
+                ep, *_ = self.make(initial_advice=phase2)
+                asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.',
+                                     actions=[]))
+                frontier = ep.manager._current().frontier
+                ep.manager.active_recovery = RecoveryDirective(
+                    recovery_frontier=frontier, trigger_frontier=frontier,
+                    gap_dimension='achievement', trapping_pattern='static',
+                    started_at_step=0, applies_from_step=0,
+                    instruction='KEEP_ACTIVE_RECOVERY_UNABRIDGED')
+                panel = ep.decision_panel(observation='Current actual observation')
+                backend = NativeClaudeSession({'apibase': 'https://fixture.invalid',
+                    'apikey': 'SYNTHETIC-NO-ACCESS', 'model': 'claude-opus-4-8',
+                    'max_tokens': 64, 'max_retries': 0, 'stream': False})
+                client = NativeToolClient(backend)
+                captured = []
+                class HTTP:
+                    status_code = 200
+                    headers = {}
+                    def __enter__(self): return self
+                    def __exit__(self, *args): return False
+                    def json(self): return {'content': [{'type': 'text',
+                        'text': 'Synthetic Task response'}], 'usage': {}}
+                    def close(self): pass
+                def post(_url, **kwargs):
+                    captured.append(kwargs['json'])
+                    return HTTP()
+                with patch('llmcore.requests.post', side_effect=post):
+                    iterator = client.chat([{'role': 'system',
+                        'content': 'BASE_SYSTEM'}, {'role': 'user',
+                        'content': 'Clean mug.'}], tools=[{'name': 'synthetic_tool'}],
+                        system_overlay=panel['panel'], overlay_request_byte_limit=None)
+                    while True:
+                        try:
+                            next(iterator)
+                        except StopIteration:
+                            break
+                self.assertEqual(len(captured), 1)
+                sent = json.dumps(captured[0])
+                self.assertIn('BASE_SYSTEM', sent)
+                self.assertIn('KEEP_ACTIVE_RECOVERY_UNABRIDGED', sent)
+                self.assertIn('Clean mug.', sent)
+                self.assertEqual('Optional synthetic advice' in sent,
+                                 expected_advice)
 
 
 if __name__ == '__main__':

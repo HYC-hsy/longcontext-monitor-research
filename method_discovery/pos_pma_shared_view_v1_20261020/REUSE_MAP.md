@@ -6,6 +6,10 @@
 | Fixed PoS manager initialize/update, Sentinel, finite repair/re-audit, progress, health and recovery | Direct upstream reuse | One normal update per completed actor batch; no historical replay or extra scoring. |
 | Fixed PoS `react_prompt._frontier_relevant_world` | Direct upstream reuse | Current-state panel projection; no replacement retriever. |
 | `citation_fix.py` permitted source-field extraction | Existing baseline repair | New mode projects the same frozen history into actual audit-visible fields; task-only initialization is excluded. |
+| Fixed Sentinel's local/global scheduling and `audit_observation_max_chars` | Direct upstream reuse | Initial audit and re-audit still occur only when the manager calls them. New-mode adapter merges receipt identities before one native-sized projection and records visible/omitted offsets. |
+| Frozen PMA bank render and selected entry body | Candidate input extension | The same immutable render now reaches updater, applicable repair, initial audit, re-audit, and Phase 2. In audit it is explicitly non-citable interpretation, not a second evidence budget. |
+| PMA entry `input_sources` and host tool receipts | Candidate input extension | Selected entries' real source union is passed to this wake's Phase 2 before advice creation; no new retrieval or inferred support coordinate. |
+| Current reset/update stage record | Candidate bookkeeping repair | Per-attempt Phase 1 operations, selected render and Phase 2 status are reset while historical adopted state and delivered advice remain intact. |
 | `ComplementEpisode`, PMA provenance and advice receipt | Necessary host adaptation | Retain original Task history, independent state/bank, actual accepted-request boundary and partial-result export. |
 | Phase 1 before PoS, frozen selected history in PoS updater/audit, Phase 2 after PoS | Candidate method change | This is an input and timing change, not a claim about released PoS or PMA behavior. |
 | Complete recovery plus optional PMA advice in one temporary GA view | Candidate method change | PoS alone commits current state; PMA cannot gate completion or write status. |

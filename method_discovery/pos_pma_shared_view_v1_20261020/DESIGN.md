@@ -27,6 +27,29 @@ visible tool-result segments under the original projection, deduplicated by
 identity, field, hash and span. Task-only initial text, memory prose, advice,
 next_prompt and actor analysis are not tool evidence.
 
+Repair at `52f85a34`: updater and applicable repair use the frozen selection
+plus its available original sources; initial audit and re-audit additionally
+receive the *same frozen rendered memory body* in a separately labelled,
+non-citable history message. The latter is not another tool-result projection.
+The selected input-source union is prepared before Phase 2 and appears in its
+actual advisory request, including sources already outside PMA's recent window.
+Missing or shortened source data remains marked as such, never reconstructed.
+
+The Sentinel compacts each real PoS step only once. Within a step it keys
+receipts by event ID and field, so two distinct tool results remain distinct,
+while current-window, selected-history and prior-advice copies of the same
+receipt cannot each consume a new 6000-character allowance. Projection logs
+record field paths, segment hashes, offsets and omitted spans. The validator
+sees only those separately displayed tool pieces; neither memory prose nor
+unshown middle bytes gain citation eligibility. Plain observations without an
+identified tool-result envelope do not become tool citations in this mode.
+
+Every reset/update has a separate current-attempt stage. A real transition is
+recorded once before auxiliary work. A Phase 1 failure can leave committed
+PMA CRUD and provenance, but leaves PoS/Phase 2 as not attempted and the new
+transition unreviewed. Prior adopted PoS state, bank, and delivered-advice
+history remain available without masquerading as this attempt's outputs.
+
 | Boundary | Source and effective value | New-mode treatment |
 | --- | --- | --- |
 | PMA wake/window | Frozen trigger: interval 1, first step true, eight recent actor steps in the synthetic run | One decision-batch trigger, not one per tool; existing configuration remains authoritative. |

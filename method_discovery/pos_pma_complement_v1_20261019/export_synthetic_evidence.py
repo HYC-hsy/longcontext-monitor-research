@@ -15,7 +15,8 @@ import re
 ROLE_EVENTS = {'pos_role_request', 'pos_role_response',
                'candidate_pma_request', 'candidate_pma_response',
                'belief_model_input', 'belief_sentinel_model_input',
-               'belief_sentinel_progress_model_input', 'belief_text_updated'}
+               'belief_sentinel_progress_model_input', 'belief_text_updated',
+               'shared_audit_history_input', 'shared_audit_source_projection'}
 PRIVATE_KEYS = {'provider_url', 'metadata', 'authorization', 'headers',
                 'api_key', 'apikey', 'signature', 'thinking_content'}
 EXTERNAL_URL = re.compile(r'https?://(?!127\.0\.0\.1(?::|/)|localhost(?::|/))\S+', re.I)
