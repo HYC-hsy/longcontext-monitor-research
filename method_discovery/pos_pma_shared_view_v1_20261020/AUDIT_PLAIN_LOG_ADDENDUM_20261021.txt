@@ -1,0 +1,41 @@
+Supplemental safe projection of two previously omitted logs
+=============================================================
+
+Run: pos-68764e0592a8481e, sqlite-with-gcov. The original private files,
+previous public raw_live_sqlite_contract_v2/FILE_HASHES.json, score and all
+runtime results remain unchanged. No Task, model or evaluator call was made
+for this addendum.
+
+The old exporter interpreted logs beginning with `[` as potentially JSON
+records. Both files are ordinary mixed-format text, not JSON. It therefore
+raised UnsafePublicProjection("structured record could not be projected").
+That was a conservative parser refusal, not evidence that either log
+contained a credential. The new one-off exporter handles only the two exact
+stopped-run paths and will not run while the one-use authorization exists.
+
+Projection policy: decode strict UTF-8 and reject unsupported control bytes;
+preserve original line order and ordinary text; omit any entire line with a
+hidden-thinking marker, recording its hash; replace all URL, email, bearer,
+credential-assignment, API-key-shaped and Windows local-path spans with
+irreversible truncated SHA-256 labels; replace exact private profile values;
+then scan again and fail if any such marker remains. Unknown secret forms
+cannot be ruled out mathematically. This is a bounded public safety scan,
+not a claim that every possible secret detector exists.
+
+The event stderr source was 8,403 bytes / 198 lines; its projection had zero
+redactions and the same bytes/hash. The Task stdout source was 76,303 bytes /
+1,283 lines; 95 URL spans were redacted, producing 76,901 public bytes with
+the same number of lines. Neither file contained a known profile value or
+hidden-thinking marker; no lines were dropped. Both original and public
+SHA-256 values and exact redaction counts are in
+raw_live_sqlite_contract_v2_log_addendum/FILE_HASHES.json. Public copies
+are separate supplemental files, not replacements for the original records.
+
+Command (profile contents are private and not uploaded):
+  python -B -m method_discovery.pos_pma_shared_view_v1_20261020.archive_plain_log_addendum --source E:\LongContext\pos_pma_shared_view_sqlite_contract_v2_run1 --output method_discovery\pos_pma_shared_view_v1_20261020\raw_live_sqlite_contract_v2_log_addendum --task-profile E:\LongContext\GenericAgent-main\mykey.py --pma-profile E:\LongContext\monitor_config\models.local.json
+
+Tests: python -B -m unittest
+method_discovery.pos_pma_shared_view_v1_20261020.test_archive_plain_log_addendum
+returned 2 tests, OK, exit 0. The addendum's index and both public files
+were read back before publication. The publishing Git blob bytes are checked
+against the recorded public bytes separately from the private source hashes.
