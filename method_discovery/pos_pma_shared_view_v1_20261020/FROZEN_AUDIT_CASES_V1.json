@@ -1,0 +1,99 @@
+{
+  "schema": "pos-single-step-audit-case-lock-v1",
+  "code_commit": "07e18c8ddf305f4c9a8405cec33a8f7aad61dd51",
+  "status": "prepared_not_executed",
+  "audit_mode": "local",
+  "runnable_case_order": ["D2", "D3", "D4", "D5", "D6", "D7", "R1", "R2", "R3", "R4"],
+  "not_scheduled": {
+    "D1": {
+      "identity": "development_disputed",
+      "source_run": "pos-68764e0592a8481e",
+      "source_public_copy_sha256": "78cfa0a8343868e055364947bdd93d77581d252cea0feaf09949ca6794ce08ea",
+      "source_reference": "POS_AUDIT_SEMANTICS_EVIDENCE_V1.txt D1; raw_live_sqlite_contract_v2 pos/events.jsonl.part001.jsonl lines 38-48",
+      "expected": "disputed_pending_independent_adjudication",
+      "reason_not_scheduled": "Exact old case payload and the completeness of the /app listing require pre-output adjudication; not a held-out case."
+    }
+  },
+  "cases": [
+    {
+      "id": "D2", "set": "development", "task": "Copy src to dst while retaining src.",
+      "belief_before": {"goal": {"user_input": "Copy src to dst while retaining src."}, "world": {"entities": {}, "states": {"s_src": {"description": "src exists"}, "s_dst": {"description": "dst absent"}}, "relations": {}}, "epistemic_gaps": [], "achievement_gaps": [{"target": "dst copy verified", "reason": "not yet observed"}], "frontier_gap": {"target": "dst copy verified"}},
+      "candidate_after": {"goal": {"user_input": "Copy src to dst while retaining src."}, "world": {"entities": {}, "states": {"s_src": {"description": "src exists"}, "s_dst": {"description": "dst copy exists"}}, "relations": {}}, "epistemic_gaps": [], "achievement_gaps": [], "frontier_gap": null},
+      "raw_trajectory": [{"step": 4, "event_id": "D2-tool-1", "action": {"name": "copy", "arguments": {"source": "src", "destination": "dst"}}, "observation": "{\"tool_results\":[{\"origin\":\"GA_tool_outcome\",\"tool_use_id\":\"D2-tool-1\",\"result\":{\"stdout\":\"copied src to dst; src remains\"}}]}"}],
+      "selected_history": [], "visible_tool_fields": [{"event_id": "D2-tool-1", "step": 4, "field_path": "result.stdout", "text": "copied src to dst; src remains"}],
+      "gold": "allow", "basis": "Receipt reports the destination copy and surviving source; candidate asserts only those scoped facts."
+    },
+    {
+      "id": "D3", "set": "development", "task": "Move src to dst.",
+      "belief_before": {"goal": {"user_input": "Move src to dst."}, "world": {"entities": {}, "states": {"s_src": {"description": "src exists"}}, "relations": {}}, "epistemic_gaps": [], "achievement_gaps": [{"target": "move completed", "reason": "not verified"}], "frontier_gap": {"target": "move completed"}},
+      "candidate_after": {"goal": {"user_input": "Move src to dst."}, "world": {"entities": {}, "states": {"s_src": {"description": "src exists"}, "s_dst": {"description": "dst exists"}}, "relations": {}}, "epistemic_gaps": [], "achievement_gaps": [], "frontier_gap": null},
+      "raw_trajectory": [{"step": 5, "event_id": "D3-tool-1", "action": {"name": "move", "arguments": {"source": "src", "destination": "dst"}}, "observation": "{\"tool_results\":[{\"origin\":\"GA_tool_outcome\",\"tool_use_id\":\"D3-tool-1\",\"result\":{\"stdout\":\"move completed; src no longer exists; dst exists\"}}]}"}],
+      "selected_history": [{"entry_id": "D3-k1", "kind": "knowledge", "content": "Earlier inspection reported src existed before the move.", "input_sources": [], "source_status": "unknown"}], "visible_tool_fields": [{"event_id": "D3-tool-1", "step": 5, "field_path": "result.stdout", "text": "move completed; src no longer exists; dst exists"}],
+      "gold": "reject", "target": "s_src", "basis": "This step explicitly contradicts the retained source state; old memory is only prior interpretation, not a new tool receipt."
+    },
+    {
+      "id": "D4", "set": "development", "task": "Create build artifact.",
+      "belief_before": {"goal": {"user_input": "Create build artifact."}, "world": {"entities": {}, "states": {"s_artifact": {"description": "artifact absent"}}, "relations": {}}, "epistemic_gaps": [], "achievement_gaps": [{"target": "artifact built", "reason": "build not verified"}], "frontier_gap": {"target": "artifact built"}},
+      "candidate_after": {"goal": {"user_input": "Create build artifact."}, "world": {"entities": {}, "states": {"s_artifact": {"description": "artifact exists"}}, "relations": {}}, "epistemic_gaps": [], "achievement_gaps": [], "frontier_gap": null},
+      "raw_trajectory": [{"step": 6, "event_id": "D4-tool-1", "action": {"name": "build", "arguments": {}}, "observation": "{\"tool_results\":[{\"origin\":\"GA_tool_outcome\",\"tool_use_id\":\"D4-tool-1\",\"result\":{\"stderr\":\"build failed before output creation\",\"exit_code\":1}}]}"}],
+      "selected_history": [], "visible_tool_fields": [{"event_id": "D4-tool-1", "step": 6, "field_path": "result.stderr", "text": "build failed before output creation"}],
+      "gold": "reject", "target": "s_artifact", "basis": "Attempted build is not success; observed failure contradicts artifact addition and unsupported gap closure."
+    },
+    {
+      "id": "D5", "set": "development", "task": "Ensure the service responds from the deployed listener.",
+      "belief_before": {"goal": {"user_input": "Ensure the service responds from the deployed listener."}, "world": {"entities": {}, "states": {}, "relations": {}}, "epistemic_gaps": [], "achievement_gaps": [{"target": "deployed listener reachable", "reason": "deployment untested"}], "frontier_gap": {"target": "deployed listener reachable"}},
+      "candidate_after": {"goal": {"user_input": "Ensure the service responds from the deployed listener."}, "world": {"entities": {}, "states": {"s_local": {"description": "local sandbox test passed"}}, "relations": {}}, "epistemic_gaps": [], "achievement_gaps": [], "frontier_gap": null},
+      "raw_trajectory": [{"step": 7, "event_id": "D5-tool-1", "action": {"name": "test", "arguments": {"scope": "local sandbox"}}, "observation": "{\"tool_results\":[{\"origin\":\"GA_tool_outcome\",\"tool_use_id\":\"D5-tool-1\",\"result\":{\"stdout\":\"sandbox test passed; deployment not tested\"}}]}"}],
+      "selected_history": [], "visible_tool_fields": [{"event_id": "D5-tool-1", "step": 7, "field_path": "result.stdout", "text": "sandbox test passed; deployment not tested"}],
+      "gold": "reject", "target": "deployed listener reachable", "basis": "Local success does not close the original wider deployment requirement."
+    },
+    {
+      "id": "D6", "set": "development", "task": "Verify artifact A and artifact B.",
+      "belief_before": {"goal": {"user_input": "Verify artifact A and artifact B."}, "world": {"entities": {}, "states": {}, "relations": {}}, "epistemic_gaps": [{"target": "A exists", "reason": "not checked"}, {"target": "B exists", "reason": "not checked"}], "achievement_gaps": [], "frontier_gap": {"target": "A exists"}},
+      "candidate_after": {"goal": {"user_input": "Verify artifact A and artifact B."}, "world": {"entities": {}, "states": {"s_A": {"description": "A exists"}}, "relations": {}}, "epistemic_gaps": [{"target": "B exists", "reason": "not checked"}], "achievement_gaps": [], "frontier_gap": {"target": "B exists"}},
+      "raw_trajectory": [{"step": 8, "event_id": "D6-tool-1", "action": {"name": "inspect", "arguments": {"target": "A"}}, "observation": "{\"tool_results\":[{\"origin\":\"GA_tool_outcome\",\"tool_use_id\":\"D6-tool-1\",\"result\":{\"stdout\":\"artifact A exists; B not inspected\"}}]}"}],
+      "selected_history": [], "visible_tool_fields": [{"event_id": "D6-tool-1", "step": 8, "field_path": "result.stdout", "text": "artifact A exists; B not inspected"}],
+      "gold": "allow", "basis": "Current receipt resolves only A; candidate preserves the separate B uncertainty."
+    },
+    {
+      "id": "D7", "set": "development_citation_only", "task": "Verify which of two probes produced a readiness line.",
+      "belief_before": {"goal": {"user_input": "Verify which of two probes produced a readiness line."}, "world": {"entities": {}, "states": {}, "relations": {}}, "epistemic_gaps": [{"target": "probe identity", "reason": "not resolved"}], "achievement_gaps": [], "frontier_gap": {"target": "probe identity"}},
+      "candidate_after": {"goal": {"user_input": "Verify which of two probes produced a readiness line."}, "world": {"entities": {}, "states": {"s_probe": {"description": "one probe reported ready"}}, "relations": {}}, "epistemic_gaps": [{"target": "probe identity", "reason": "still ambiguous"}], "achievement_gaps": [], "frontier_gap": {"target": "probe identity"}},
+      "raw_trajectory": [{"step": 9, "event_id": "D7-tool-1", "action": {"name": "probe", "arguments": {"target": "one"}}, "observation": "{\"tool_results\":[{\"origin\":\"GA_tool_outcome\",\"tool_use_id\":\"D7-tool-1\",\"result\":{\"stdout\":\"ready\"}}]}"}, {"step": 10, "event_id": "D7-tool-2", "action": {"name": "probe", "arguments": {"target": "two"}}, "observation": "{\"tool_results\":[{\"origin\":\"GA_tool_outcome\",\"tool_use_id\":\"D7-tool-2\",\"result\":{\"stdout\":\"ready\"}}]}"}],
+      "selected_history": [], "visible_tool_fields": [{"event_id": "D7-tool-1", "step": 9, "field_path": "result.stdout", "text": "ready"}, {"event_id": "D7-tool-2", "step": 10, "field_path": "result.stdout", "text": "ready"}],
+      "gold": "citation_diagnostic_only", "basis": "Identical text from distinct events must not erase provenance; no single semantic gold issue is asserted."
+    },
+    {
+      "id": "R1", "set": "reserved_post_code_freeze", "task": "Create /work/output.txt containing ready and verify its contents.",
+      "belief_before": {"goal": {"user_input": "Create /work/output.txt containing ready and verify its contents."}, "world": {"entities": {}, "states": {}, "relations": {}}, "epistemic_gaps": [], "achievement_gaps": [{"target": "output verified", "reason": "not yet created"}], "frontier_gap": {"target": "output verified"}},
+      "candidate_after": {"goal": {"user_input": "Create /work/output.txt containing ready and verify its contents."}, "world": {"entities": {}, "states": {"s_output": {"description": "/work/output.txt read back as ready"}}, "relations": {}}, "epistemic_gaps": [], "achievement_gaps": [], "frontier_gap": null},
+      "raw_trajectory": [{"step": 11, "event_id": "R1-tool-1", "action": {"name": "write_then_read", "arguments": {"path": "/work/output.txt", "content": "ready"}}, "observation": "{\"tool_results\":[{\"origin\":\"GA_tool_outcome\",\"tool_use_id\":\"R1-tool-1\",\"result\":{\"stdout\":\"created /work/output.txt; read-back: ready\",\"exit_code\":0}}]}"}],
+      "selected_history": [], "visible_tool_fields": [{"event_id": "R1-tool-1", "step": 11, "field_path": "result.stdout", "text": "created /work/output.txt; read-back: ready"}],
+      "gold": "allow", "basis": "A new state is directly supported by the same-step write/read-back receipt."
+    },
+    {
+      "id": "R2", "set": "reserved_post_code_freeze", "task": "Create /work/output.txt containing ready and verify its contents.",
+      "belief_before": {"goal": {"user_input": "Create /work/output.txt containing ready and verify its contents."}, "world": {"entities": {}, "states": {}, "relations": {}}, "epistemic_gaps": [], "achievement_gaps": [{"target": "output verified", "reason": "not yet created"}], "frontier_gap": {"target": "output verified"}},
+      "candidate_after": {"goal": {"user_input": "Create /work/output.txt containing ready and verify its contents."}, "world": {"entities": {}, "states": {"s_output": {"description": "/work/output.txt contains ready"}}, "relations": {}}, "epistemic_gaps": [], "achievement_gaps": [], "frontier_gap": null},
+      "raw_trajectory": [{"step": 12, "event_id": "R2-tool-1", "action": {"name": "write_then_read", "arguments": {"path": "/work/output.txt", "content": "ready"}}, "observation": "{\"tool_results\":[{\"origin\":\"GA_tool_outcome\",\"tool_use_id\":\"R2-tool-1\",\"result\":{\"stderr\":\"permission denied before write; no read-back performed\",\"exit_code\":13}}]}"}],
+      "selected_history": [], "visible_tool_fields": [{"event_id": "R2-tool-1", "step": 12, "field_path": "result.stderr", "text": "permission denied before write; no read-back performed"}],
+      "gold": "reject", "target": "s_output", "basis": "The action was attempted, but the receipt explicitly says no write or read-back occurred."
+    },
+    {
+      "id": "R3", "set": "reserved_post_code_freeze", "task": "Move /work/a to /work/b.",
+      "belief_before": {"goal": {"user_input": "Move /work/a to /work/b."}, "world": {"entities": {}, "states": {"s_a": {"description": "/work/a exists"}}, "relations": {}}, "epistemic_gaps": [], "achievement_gaps": [{"target": "move verified", "reason": "not performed"}], "frontier_gap": {"target": "move verified"}},
+      "candidate_after": {"goal": {"user_input": "Move /work/a to /work/b."}, "world": {"entities": {}, "states": {"s_a": {"description": "/work/a exists"}, "s_b": {"description": "/work/b exists"}}, "relations": {}}, "epistemic_gaps": [], "achievement_gaps": [], "frontier_gap": null},
+      "raw_trajectory": [{"step": 13, "event_id": "R3-tool-1", "action": {"name": "move", "arguments": {"source": "/work/a", "destination": "/work/b"}}, "observation": "{\"tool_results\":[{\"origin\":\"GA_tool_outcome\",\"tool_use_id\":\"R3-tool-1\",\"result\":{\"stdout\":\"move succeeded; /work/a no longer exists; /work/b exists\",\"exit_code\":0}}]}"}],
+      "selected_history": [{"entry_id": "R3-k1", "kind": "knowledge", "content": "Prior inspection found /work/a before the move.", "input_sources": [], "source_status": "unknown"}], "visible_tool_fields": [{"event_id": "R3-tool-1", "step": 13, "field_path": "result.stdout", "text": "move succeeded; /work/a no longer exists; /work/b exists"}],
+      "gold": "reject", "target": "s_a", "basis": "Current move receipt directly refutes retained /work/a state despite stale historical memory."
+    },
+    {
+      "id": "R4", "set": "reserved_post_code_freeze", "task": "Make the service reachable from the public endpoint.",
+      "belief_before": {"goal": {"user_input": "Make the service reachable from the public endpoint."}, "world": {"entities": {}, "states": {}, "relations": {}}, "epistemic_gaps": [], "achievement_gaps": [{"target": "public endpoint reachable", "reason": "not verified"}], "frontier_gap": {"target": "public endpoint reachable"}},
+      "candidate_after": {"goal": {"user_input": "Make the service reachable from the public endpoint."}, "world": {"entities": {}, "states": {"s_local": {"description": "local loopback replied 200"}}, "relations": {}}, "epistemic_gaps": [], "achievement_gaps": [], "frontier_gap": null},
+      "raw_trajectory": [{"step": 14, "event_id": "R4-tool-1", "action": {"name": "http_get", "arguments": {"url": "http://127.0.0.1:8080/health"}}, "observation": "{\"tool_results\":[{\"origin\":\"GA_tool_outcome\",\"tool_use_id\":\"R4-tool-1\",\"result\":{\"stdout\":\"loopback /health HTTP 200; public endpoint not tested\"}}]}"}],
+      "selected_history": [], "visible_tool_fields": [{"event_id": "R4-tool-1", "step": 14, "field_path": "result.stdout", "text": "loopback /health HTTP 200; public endpoint not tested"}],
+      "gold": "reject", "target": "public endpoint reachable", "basis": "The observed local-only check does not establish the broader public-endpoint requirement."
+    }
+  ]
+}
