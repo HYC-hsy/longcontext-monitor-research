@@ -428,6 +428,34 @@ class Tests(unittest.TestCase):
             raw_trajectory=trajectory), [])
         self.assertEqual(sentinel.last_audit_result['outcome'], 'clean')
 
+    def test_shared_audit_semantics_and_candidate_diff_are_request_scoped(self):
+        ep, _, consistency, _ = self.make()
+        asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.', actions=[]))
+        sentinel = ep.manager.sentinel
+        before = deepcopy(ep.manager._structured_context())
+        after = deepcopy(before)
+        after['world']['states']['new-result'] = {'description': 'new observation'}
+        after['epistemic_gaps'] = [{'target': 'new-result',
+                                     'description': 'check new result'}]
+        consistency.replies = ['{"issues": []}']
+        sentinel.audit_candidate(case_id='diff-case', base_step=3, mode='local',
+            belief_before=before, candidate_belief=after,
+            raw_trajectory=[{'step': 3, 'action': {'name': 'inspect'},
+                'observation': 'inspection returned a new result'}])
+        request = consistency.requests[-1]
+        self.assertIn('state AFTER this action', request[0]['content'])
+        self.assertIn('conflate copying with moving or deleting',
+                      ' '.join(request[0]['content'].split()))
+        payload = json.loads(request[1]['content'].split('\nReturn JSON:', 1)[0])
+        self.assertEqual(payload['step'], 3)
+        self.assertIsNone(payload['candidate_changes']['states']['new-result']['before'])
+        self.assertEqual(payload['candidate_changes']['states']['new-result']['after'],
+                         after['world']['states']['new-result'])
+        self.assertEqual(payload['candidate_changes']['epistemic_gaps']['before'],
+                         before['epistemic_gaps'])
+        self.assertEqual(payload['raw_trajectory'][0]['step'], 3)
+        self.assertIn('evidence_step', request[1]['content'])  # Commit A retains protocol.
+
     def test_strict_audit_rejects_scalar_and_non_list_top_levels(self):
         ep, _, consistency, _ = self.make()
         asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.', actions=[]))

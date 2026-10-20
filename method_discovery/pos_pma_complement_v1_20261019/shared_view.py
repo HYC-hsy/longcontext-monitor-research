@@ -174,6 +174,7 @@ class SharedViewBeliefManager(ComplementBeliefManager):
                 prior.logger, call_progress_model=prior.call_progress_model)
             self.sentinel.shared_sources = ()
             self.sentinel.strict_audit_contract = True
+            self.sentinel.shared_audit_semantics_v1 = True
         self.shared_history = None
 
     def _request_candidate(self, messages, *, base, operation, step):

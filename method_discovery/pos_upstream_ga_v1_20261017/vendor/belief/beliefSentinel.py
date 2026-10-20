@@ -131,6 +131,10 @@ class BeliefSentinel:
             ),
             "raw_trajectory": compact,
         }
+        if getattr(self, 'shared_audit_semantics_v1', False):
+            audit_input['candidate_changes'] = self._candidate_changes(
+                belief_before, candidate_belief)
+            audit_input['audit_semantics_version'] = 'pos-shared-audit-semantics-v1'
         messages = (
             build_global_audit_prompt(audit_input)
             if mode == "global"
@@ -227,6 +231,20 @@ class BeliefSentinel:
             **({'audit_result': dict(self.last_audit_result)} if strict else {}),
         )
         return findings
+
+    @staticmethod
+    def _candidate_changes(before: dict, after: dict) -> dict:
+        """Show changed fields, without treating difference as contradiction."""
+        changes = {}
+        for kind in ('entities', 'states', 'relations'):
+            old = before.get('world', {}).get(kind, {})
+            new = after.get('world', {}).get(kind, {})
+            changes[kind] = {key: {'before': old.get(key), 'after': new.get(key)}
+                for key in sorted(set(old) | set(new)) if old.get(key) != new.get(key)}
+        for field in ('goal', 'epistemic_gaps', 'achievement_gaps', 'frontier_gap'):
+            if before.get(field) != after.get(field):
+                changes[field] = {'before': before.get(field), 'after': after.get(field)}
+        return changes
 
     @staticmethod
     def _strict_issue_schema_error(data: object) -> str | None:
