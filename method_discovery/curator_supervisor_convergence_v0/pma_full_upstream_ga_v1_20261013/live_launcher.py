@@ -98,7 +98,9 @@ def _require_evaluation_state_contract(manifest: dict) -> None:
             source_hashes, vendor_hashes, pma_vendor_hashes, synthetic_members)
         if (manifest.get('upstream_commit') !=
                 '6818cfa6434dbc91fcf67f0b3eb12a91db47433f' or
-                manifest.get('source_files_sha256') != source_hashes() or
+                manifest.get('source_files_sha256') != source_hashes(
+                    include_shared=manifest.get('config', {}).get('name') ==
+                    'pos_pma_shared_view_v1') or
                 manifest.get('vendor_files_sha256') != vendor_hashes() or
                 manifest.get('pma_vendor_files_sha256') != pma_vendor_hashes()):
             raise RuntimeError('PoS source/vendor freeze changed')
