@@ -1,0 +1,1682 @@
+diff --git a/GenericAgent-main/agent_loop.py b/GenericAgent-main/agent_loop.py
+index e8c5d53b..2fce6c13 100644
+--- a/GenericAgent-main/agent_loop.py
++++ b/GenericAgent-main/agent_loop.py
+@@ -78,7 +78,10 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
+     pma = None
+     pma_upstream = None
+     pos = None
+-    complement = os.environ.get('GA_POS_PMA_COMPLEMENT') == '1'
++    shared_view = os.environ.get('GA_POS_PMA_SHARED_VIEW') == '1'
++    if shared_view and os.environ.get('GA_POS_PMA_COMPLEMENT') == '1':
++        raise ValueError('shared-view and previous complement are exclusive')
++    complement = (os.environ.get('GA_POS_PMA_COMPLEMENT') == '1' or shared_view)
+     if complement and os.environ.get('GA_POS_ENABLED') != '1':
+         raise ValueError('complement requires an explicit PoS worker')
+     pos_observation = initial_content
+@@ -124,7 +127,9 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
+                      task=initial_content, observation=initial_content,
+                      actions=tools_schema,
+                      citation_fixed=os.environ.get('GA_POS_CITATION_FIXED') == '1',
+-                     candidate=complement)
++                     candidate=complement,
++                     candidate_method=('pos_pma_shared_view_v1' if shared_view else
++                         'pos_pma_complement_v1' if complement else None))
+     if os.environ.get('GA_PMA_UPSTREAM_ENABLED') == '1':
+         if (os.environ.get('GA_PMA_ENABLED') == '1' or
+                 os.environ.get('GA_MONITOR_ENABLED') == '1' or
+@@ -200,7 +205,9 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
+             if complement:
+                 panel = pos.exchange('decision_panel', observation=pos_observation)
+                 response_gen = client.chat(messages=messages, tools=tools_schema,
+-                                           system_overlay=panel['panel'])
++                                           system_overlay=panel['panel'],
++                                           overlay_request_byte_limit=(None if shared_view
++                                               else 90000))
+             else:
+                 consume_current = getattr(handler, 'consume_pos_current_instruction', None)
+                 if consume_current is not None:
+diff --git a/GenericAgent-main/llmcore.py b/GenericAgent-main/llmcore.py
+index b734edb5..ef46dd76 100644
+--- a/GenericAgent-main/llmcore.py
++++ b/GenericAgent-main/llmcore.py
+@@ -1666,7 +1666,8 @@ class NativeToolClient:
+         combined = f"{extra_system}\n\n{protocol}" if extra_system and protocol else (extra_system or protocol)
+         if combined != self.backend.system: print(f"[Debug] Updated system prompt, length {len(combined)} chars.")
+         self.backend.system = combined
+-    def chat(self, messages, tools=None, request_view=None, system_overlay=None):
++    def chat(self, messages, tools=None, request_view=None, system_overlay=None,
++             overlay_request_byte_limit=90000):
+         if system_overlay is not None:
+             if request_view is not None or not isinstance(self.backend, NativeClaudeSession):
+                 raise ValueError('transient system overlay requires stateful native Task path')
+@@ -1685,13 +1686,15 @@ class NativeToolClient:
+                 raise ValueError('transient system overlay requires original system')
+             self.backend.system = original_system + '\n\n' + system_overlay
+             previous_limit = getattr(self.backend, 'candidate_request_byte_limit', None)
+-            self.backend.candidate_request_byte_limit = 90000
++            self.backend.candidate_request_byte_limit = overlay_request_byte_limit
+             _research_emit('candidate_task_budget_resolved', {
+-                'complete_request_byte_limit': 90000,
++                'complete_request_byte_limit': overlay_request_byte_limit,
+                 'panel_utf8_bytes': len(system_overlay.encode('utf-8')),
+                 'ga_history_context_win': self.backend.context_win,
+                 'output_reserve_max_tokens': self.backend.max_tokens,
+-                'basis': 'serialized_utf8_bytes_not_provider_token_limit',
++                'basis': ('ordinary_GA_history_policy_provider_limit_unknown'
++                          if overlay_request_byte_limit is None else
++                          'serialized_utf8_bytes_not_provider_token_limit'),
+             })
+             generator = self.chat(scoped_messages, tools=tools)
+             try:
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/candidate_transport_worker.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/candidate_transport_worker.py
+index b37de3fe..94d366f6 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/candidate_transport_worker.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/candidate_transport_worker.py
+@@ -28,11 +28,12 @@ def _durable(path: Path, row: dict) -> None:
+ 
+ 
+ class TransportEpisode:
+-    def __init__(self, llm, *, run_id, task_id, archive):
++    def __init__(self, llm, *, run_id, task_id, archive, research_candidate):
+         self.llm, self.run_id, self.task_id = llm, run_id, task_id
+         self.archive = archive
+         self.ended = False
+         self.sequence = 0
++        self.research_candidate = research_candidate
+ 
+     async def handle(self, event):
+         if event.get('kind') != 'candidate_pma_call' or event.get('sequence') != self.sequence + 1:
+@@ -46,7 +47,7 @@ class TransportEpisode:
+             raise ValueError('candidate PMA prompt/system missing')
+         request_bytes = len(json.dumps({'prompt': prompt, 'system': system,
+             'tools': tools}, ensure_ascii=False).encode('utf-8'))
+-        if request_bytes > 90000:
++        if self.research_candidate != 'pos_pma_shared_view_v1' and request_bytes > 90000:
+             raise ValueError('candidate complete PMA role input exceeds byte budget')
+         self.sequence += 1
+         request_id = event['event_id']
+@@ -93,13 +94,15 @@ async def serve(args):
+     profile = json.loads(raw)['claude_monitor_opus48']
+     agent = construct_upstream(private / 'upstream_agent', memory_profile=profile)
+     episode = TransportEpisode(agent._memory_llm, run_id=args.run_id,
+-                               task_id=args.task_id, archive=archive)
++                               task_id=args.task_id, archive=archive,
++                               research_candidate=args.research_candidate)
+     dispatcher = EventDispatcher(episode, requests, responses,
+                                  deadline_epoch=args.deadline_epoch)
+     (private / 'worker_ready.json').write_text(json.dumps({
+         'run_id': args.run_id, 'task_id': args.task_id, 'fake_memory': False,
+-        'research_candidate': 'pos_pma_complement_v1',
+-        'pma_budget': {'input_limit_utf8_bytes': 90000,
++        'research_candidate': args.research_candidate,
++        'pma_budget': {'input_limit_utf8_bytes': (None if
++            args.research_candidate == 'pos_pma_shared_view_v1' else 90000),
+             'ga_history_context_win': profile.get('context_win', 30000),
+             'provider_context_limit_tokens': profile.get('model_context_limit_tokens'),
+             'output_reserve_max_tokens': profile.get('max_tokens'),
+@@ -139,4 +142,7 @@ if __name__ == '__main__':
+     parser.add_argument('--requests', required=True)
+     parser.add_argument('--responses', required=True)
+     parser.add_argument('--deadline-epoch', type=float, required=True)
++    parser.add_argument('--research-candidate', choices=(
++        'pos_pma_complement_v1', 'pos_pma_shared_view_v1'),
++        default='pos_pma_complement_v1')
+     asyncio.run(serve(parser.parse_args()))
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/harbor_adapter.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/harbor_adapter.py
+index 49c2de18..bc5533ad 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/harbor_adapter.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/harbor_adapter.py
+@@ -21,6 +21,7 @@ FORWARD = (
+     "GA_POS_ENABLED",
+     "GA_POS_CITATION_FIXED",
+     "GA_POS_PMA_COMPLEMENT",
++    "GA_POS_PMA_SHARED_VIEW",
+     "GA_POS_TRANSPORT",
+     "GA_POS_WORKER_SCRIPT",
+     "GA_POS_VENDOR_ROOT",
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/live_launcher.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/live_launcher.py
+index da2946d2..f8ed5958 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/live_launcher.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/live_launcher.py
+@@ -98,7 +98,9 @@ def _require_evaluation_state_contract(manifest: dict) -> None:
+             source_hashes, vendor_hashes, pma_vendor_hashes, synthetic_members)
+         if (manifest.get('upstream_commit') !=
+                 '6818cfa6434dbc91fcf67f0b3eb12a91db47433f' or
+-                manifest.get('source_files_sha256') != source_hashes() or
++                manifest.get('source_files_sha256') != source_hashes(
++                    include_shared=manifest.get('config', {}).get('name') ==
++                    'pos_pma_shared_view_v1') or
+                 manifest.get('vendor_files_sha256') != vendor_hashes() or
+                 manifest.get('pma_vendor_files_sha256') != pma_vendor_hashes()):
+             raise RuntimeError('PoS source/vendor freeze changed')
+@@ -373,7 +375,8 @@ def run_live(args) -> dict:
+             Path(args.ga_source).resolve(strict=True) !=
+             (STAGE.parents[2] / 'GenericAgent-main').resolve(strict=True)):
+         raise RuntimeError('V3 GA source is not the frozen repository bridge')
+-    candidate_profile = (args.condition == 'P' and candidate == 'pos_pma_complement_v1'
++    candidate_profile = (args.condition == 'P' and candidate in
++                         {'pos_pma_complement_v1', 'pos_pma_shared_view_v1'}
+                          and (not fixture or profile_fixture))
+     if profile_fixture and (not fixture or not candidate_profile or
+             args.task != 'pos-synthetic-file-http'):
+@@ -389,13 +392,14 @@ def run_live(args) -> dict:
+         raise FileExistsError(args.run_root)
+     if args.condition == 'P':
+         if candidate not in {'PoS', 'PoS-citation-fixed',
+-                             'pos_pma_complement_v1'} or fixture != (
++                             'pos_pma_complement_v1', 'pos_pma_shared_view_v1'} or fixture != (
+                              args.task == 'pos-synthetic-file-http'):
+             raise RuntimeError('PoS method or fixture identity differs')
+         if fixture:
+             from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import ROOT
+             args.pos_fake_replies = str((ROOT.parent / 'pos_pma_complement_v1_20261019' /
+-                'synthetic_replies.json') if candidate == 'pos_pma_complement_v1' else
++                'synthetic_replies.json') if candidate in
++                {'pos_pma_complement_v1', 'pos_pma_shared_view_v1'} else
+                 (ROOT / 'synthetic_task/pos_replies.json'))
+     args.execution_authorized = False
+     prepared = _prepare_common(args, fake_gateway=False)
+@@ -512,9 +516,12 @@ def run_live(args) -> dict:
+             'pma_vendor_files_sha256': manifest['pma_vendor_files_sha256'],
+         }
+         if candidate_profile:
++            if candidate == 'pos_pma_shared_view_v1':
++                binding['shared_view_sha256'] = _sha(staged_pos / 'shared_view.py')
+             binding['candidate_config'] = {
++                **({'name': candidate} if candidate == 'pos_pma_shared_view_v1' else {}),
+                 'pma_trigger': manifest['config']['pma_trigger'],
+-                'candidate_limits': manifest['config']['candidate_limits'],
++                'candidate_limits': manifest['config'].get('candidate_limits'),
+                 'pma_profile_sha256': manifest['pma_profile_sha256']}
+         binding_path = root / 'control/pos_archive/binding.json'
+         with binding_path.open('x', encoding='utf-8', newline='\n') as stream:
+@@ -561,7 +568,7 @@ def run_live(args) -> dict:
+                 '--requests', str(root / 'control' / 'spool' / 'requests'),
+                 '--responses', str(root / 'control' / 'spool' / 'responses'),
+                 '--deadline-epoch', str(deadline),
+-                *([] if candidate_profile else ['--research-candidate', candidate]),
++                '--research-candidate', candidate,
+                 *(['--fake-memory', '--fake-memory-update'] if fixture and not candidate_profile else [])],
+                 cwd=STAGE, env=worker_env,
+                 stdout=worker_logs[0], stderr=worker_logs[1])
+@@ -647,6 +654,8 @@ def run_live(args) -> dict:
+                            'released_core' else '1'),
+                        GA_POS_PMA_COMPLEMENT=('1' if manifest['config']['name'] ==
+                            'pos_pma_complement_v1' else '0'),
++                       GA_POS_PMA_SHARED_VIEW=('1' if manifest['config']['name'] ==
++                           'pos_pma_shared_view_v1' else '0'),
+                        GA_POS_TRANSPORT='fake' if fixture and not profile_fixture else 'profile',
+                        GA_POS_WORKER_SCRIPT='/opt/genericagent/pos_runtime/worker.py',
+                        GA_POS_VENDOR_ROOT='/opt/genericagent/pos_runtime/vendor',
+@@ -796,7 +805,8 @@ def live_status_success(status: dict) -> bool:
+                 archive.get('close_status') != 'graceful_exit' or
+                 archive.get('result_status') != 'completed'):
+             return False
+-        if status.get('research_candidate') == 'pos_pma_complement_v1' and (
++        if status.get('research_candidate') in {'pos_pma_complement_v1',
++                                                'pos_pma_shared_view_v1'} and (
+                 archive.get('archive_incomplete') is not False or
+                 archive.get('task_archive_incomplete') is not False or
+                 archive.get('task_terminal_status') != 'available'):
+@@ -846,7 +856,7 @@ def main() -> None:
+     parser.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
+     parser.add_argument('--research-candidate', choices=(
+         'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
+-        'pos_pma_complement_v1'), default='U')
++        'pos_pma_complement_v1', 'pos_pma_shared_view_v1'), default='U')
+     parser.add_argument('--task-profile', default='native_claude_cc_vibe_opus48')
+     parser.add_argument('--pma-profile-file')
+     parser.add_argument('--harbor-source-root')
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py
+index 1a9aa13d..28999851 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/offline_launcher.py
+@@ -129,7 +129,10 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
+         for name in ('worker.py', 'episode.py', 'citation_fix.py'):
+             shutil.copy2(pos_source / name, pos_stage / name)
+         candidate_source = STAGE.parents[1] / 'pos_pma_complement_v1_20261019'
+-        for name in ('candidate.py', 'memory_adapter.py'):
++        candidate_names = ['candidate.py', 'memory_adapter.py']
++        if manifest.get('config', {}).get('name') == 'pos_pma_shared_view_v1':
++            candidate_names.append('shared_view.py')
++        for name in candidate_names:
+             shutil.copy2(candidate_source / name, pos_stage / name)
+         shutil.copy2(STAGE / 'event_spool.py', pos_stage / 'event_spool.py')
+         pma_source = STAGE / 'vendor' / 'pma_89e5c0d'
+@@ -160,17 +163,21 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
+                         source / 'pos_runtime' / 'pma_vendor', dirs_exist_ok=True)
+     executed_pos_sources = {}
+     if pos:
+-        for name in ('agent_loop.py', 'agentmain.py', 'ga.py', 'llmcore.py',
++        executed_names = ['agent_loop.py', 'agentmain.py', 'ga.py', 'llmcore.py',
+                      'research_runtime.py',
+                      'pos_bridge.py', 'pos_runtime/worker.py',
+                      'pos_runtime/episode.py', 'pos_runtime/citation_fix.py',
+                      'pos_runtime/candidate.py', 'pos_runtime/memory_adapter.py',
+-                     'pos_runtime/event_spool.py'):
++                     'pos_runtime/event_spool.py']
++        if manifest.get('config', {}).get('name') == 'pos_pma_shared_view_v1':
++            executed_names.append('pos_runtime/shared_view.py')
++        for name in executed_names:
+             staged = source / name
+             actual = hashlib.sha256(staged.read_bytes()).hexdigest()
+             frozen_name = ('method_discovery/' +
+                            ('pos_pma_complement_v1_20261019/' if
+-                            Path(name).name in {'candidate.py', 'memory_adapter.py'} else
++                            Path(name).name in {'candidate.py', 'memory_adapter.py',
++                                                'shared_view.py'} else
+                             'curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/' if
+                             Path(name).name == 'event_spool.py' else
+                             'pos_upstream_ga_v1_20261017/') +
+@@ -206,8 +213,8 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
+     elif pos:
+         (root / 'control' / 'pos_archive').mkdir()
+     config = json.loads(compose.read_text(encoding="utf-8"))
+-    if args.condition == "B" or (pos and manifest.get('config', {}).get('name') ==
+-                                  'pos_pma_complement_v1' and
++    if args.condition == "B" or (pos and manifest.get('config', {}).get('name') in
++                                  ('pos_pma_complement_v1', 'pos_pma_shared_view_v1') and
+                                   (manifest.get('zero_model_fixture_only') is False or
+                                    manifest.get('candidate_profile_fixture_only') is True)):
+         main = config["services"]["main"]
+@@ -330,6 +337,8 @@ def run_offline(args) -> dict:
+         env['GA_POS_ENABLED'] = '1' if args.condition == 'P' else '0'
+         env['GA_POS_PMA_COMPLEMENT'] = ('1' if args.condition == 'P' and
+             manifest['config']['name'] == 'pos_pma_complement_v1' else '0')
++        env['GA_POS_PMA_SHARED_VIEW'] = ('1' if args.condition == 'P' and
++            manifest['config']['name'] == 'pos_pma_shared_view_v1' else '0')
+         env['GA_POS_CITATION_FIXED'] = ('1' if args.condition == 'P' and
+             manifest['config'].get('citation_mode') == 'decoded_source_fields_v1' else '0')
+         env["GA_PMA_ENABLED"] = env["GA_MONITOR_ENABLED"] = "0"
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py
+index edff174f..35db5ece 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/pma_harbor_hooks.py
+@@ -101,7 +101,7 @@ def verify_live_spec(spec: dict) -> None:
+                 Path(spec['run_root']).resolve() != Path(binding['run_root']).resolve() or
+                 spec.get('condition') != 'P' or
+                 spec.get('research_candidate') not in {'PoS', 'PoS-citation-fixed',
+-                    'pos_pma_complement_v1'} or
++                    'pos_pma_complement_v1', 'pos_pma_shared_view_v1'} or
+                 (frozen.get('zero_model_fixture_only') is True) !=
+                 (granted.get('zero_model_fixture_only') is True) or
+                 (spec.get('candidate_profile_fixture_only') is True) !=
+@@ -305,7 +305,8 @@ class NativeSharedTrialHooks(PMATrialHooks):
+         if any(name.endswith('_API_KEY') for name in env_names):
+             raise RuntimeError('provider credential environment exposed to Task')
+         candidate_profile = (self.spec['condition'] == 'P' and
+-            self.spec.get('research_candidate') == 'pos_pma_complement_v1' and
++            self.spec.get('research_candidate') in {
++                'pos_pma_complement_v1', 'pos_pma_shared_view_v1'} and
+             (self.spec.get('zero_model_fixture_only') is not True or
+              self.spec.get('candidate_profile_fixture_only') is True))
+         if self.spec['condition'] == 'B' or candidate_profile:
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run.py
+index 28bc4364..7f3c0e88 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run.py
+@@ -39,7 +39,8 @@ def prepare(args: argparse.Namespace) -> dict:
+             getattr(args, 'synthetic_pos_fixture', False)))
+         if getattr(args, 'candidate_profile_fixture', False):
+             if (not plan['synthetic_fixture'] or not args.fake_only or
+-                    plan['method'] != 'pos_pma_complement_v1'):
++                    plan['method'] not in {'pos_pma_complement_v1',
++                                           'pos_pma_shared_view_v1'}):
+                 raise RuntimeError('candidate profile fixture requires isolated synthetic P')
+             plan['candidate_profile_fixture_only'] = True
+         if getattr(args, 'task_complete_response', False):
+@@ -49,7 +50,8 @@ def prepare(args: argparse.Namespace) -> dict:
+         if plan['synthetic_fixture'] and not args.fake_only:
+             raise RuntimeError('synthetic PoS package is zero-model only')
+     candidate = getattr(args, 'research_candidate', 'U')
+-    if pos and candidate not in {'PoS', 'PoS-citation-fixed', 'pos_pma_complement_v1'}:
++    if pos and candidate not in {'PoS', 'PoS-citation-fixed',
++                                  'pos_pma_complement_v1', 'pos_pma_shared_view_v1'}:
+         raise RuntimeError('PoS plan requires explicit fixed method identity')
+     if not pos and candidate != 'U':
+         plan['schema'] = 'pma-ga-single-plan-v2'
+@@ -131,7 +133,7 @@ def main() -> None:
+     prepared.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
+     prepared.add_argument('--research-candidate', choices=(
+         'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
+-        'pos_pma_complement_v1'), default='U')
++        'pos_pma_complement_v1', 'pos_pma_shared_view_v1'), default='U')
+     prepared.add_argument('--occurrence', type=int, default=1)
+     prepared.add_argument('--output', required=True)
+     prepared.add_argument('--official-source-git', required=True)
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run_fixture.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run_fixture.py
+index 7db934a7..a13c65a4 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run_fixture.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run_fixture.py
+@@ -20,7 +20,7 @@ def main() -> None:
+     parser.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
+     parser.add_argument('--research-candidate', choices=(
+         'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
+-        'pos_pma_complement_v1'), default='U')
++        'pos_pma_complement_v1', 'pos_pma_shared_view_v1'), default='U')
+     parser.add_argument('--output', type=Path, required=True)
+     for name in ('official-source-git', 'task-profile-file',
+                  'ga-source', 'runtime-root', 'worker-python', 'harbor-python',
+@@ -35,10 +35,12 @@ def main() -> None:
+     root = args.output.resolve(strict=False)
+     if args.condition == 'P' and (args.task != 'pos-synthetic-file-http' or
+                                    args.research_candidate not in {'PoS',
+-                                       'PoS-citation-fixed', 'pos_pma_complement_v1'}):
++                                       'PoS-citation-fixed', 'pos_pma_complement_v1',
++                                       'pos_pma_shared_view_v1'}):
+         raise RuntimeError('PoS zero-model fixture must use the synthetic P identity')
+     if args.candidate_profile_fixture and (args.condition != 'P' or
+-            args.research_candidate != 'pos_pma_complement_v1' or
++            args.research_candidate not in {'pos_pma_complement_v1',
++                                            'pos_pma_shared_view_v1'} or
+             not args.pma_profile_file):
+         raise RuntimeError('profile fixture requires synthetic candidate and fake PMA profile')
+     identity = prepare(argparse.Namespace(output=str(root), task=args.task,
+@@ -70,12 +72,15 @@ def main() -> None:
+                  **({'upstream_commit': manifest['upstream_commit']} if args.condition == 'P'
+                     else {'pma_vendor_commit': manifest['pma_vendor_commit']})}
+     if args.condition == 'P':
+-        from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import SOURCE_FILES
++        from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import (
++            SOURCE_FILES, SHARED_SOURCE_FILE)
++        frozen_sources = ((*SOURCE_FILES, SHARED_SOURCE_FILE) if
++            args.research_candidate == 'pos_pma_shared_view_v1' else SOURCE_FILES)
+         execution['git_blob_source_files'] = {
+             name: hashlib.sha256(subprocess.run(
+                 ['git', 'cat-file', 'blob', f'{head}:{name}'], cwd=checkout,
+                 capture_output=True, check=True).stdout).hexdigest()
+-            for name in SOURCE_FILES}
++            for name in frozen_sources}
+     (root / 'execution_identity.json').write_text(
+         json.dumps(execution, sort_keys=True, indent=2), encoding='utf-8')
+     binding = dict(manifest['planned_order'][0], run_id=identity['run_id'],
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/six_task_plan.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/six_task_plan.py
+index 99131152..11e8e8a0 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/six_task_plan.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/six_task_plan.py
+@@ -57,11 +57,14 @@ def validate_plan(manifest: dict, granted: dict) -> list[dict]:
+                 row['order'] != 1 or type(row['repeat']) is not int or
+                 row['repeat'] < 1 or row['condition'] != 'P' or
+                 row['research_candidate'] not in {'PoS', 'PoS-citation-fixed',
+-                                                  'pos_pma_complement_v1'} or
+-                (row['research_candidate'] == 'pos_pma_complement_v1' and
++                                                  'pos_pma_complement_v1',
++                                                  'pos_pma_shared_view_v1'} or
++                (row['research_candidate'] in {'pos_pma_complement_v1',
++                                               'pos_pma_shared_view_v1'} and
+                  manifest.get('config', {}).get('name') !=
+-                    'pos_pma_complement_v1') or
+-                (row['research_candidate'] == 'pos_pma_complement_v1' and
++                    row['research_candidate']) or
++                (row['research_candidate'] in {'pos_pma_complement_v1',
++                                               'pos_pma_shared_view_v1'} and
+                  manifest.get('config', {}).get('citation_mode') !=
+                     'visible_tool_fields_v2') or
+                 (row['research_candidate'] == 'PoS-citation-fixed' and
+diff --git a/method_discovery/pos_pma_complement_v1_20261019/memory_adapter.py b/method_discovery/pos_pma_complement_v1_20261019/memory_adapter.py
+index 9b4c342f..e2fa70cf 100644
+--- a/method_discovery/pos_pma_complement_v1_20261019/memory_adapter.py
++++ b/method_discovery/pos_pma_complement_v1_20261019/memory_adapter.py
+@@ -2,6 +2,7 @@
+ from __future__ import annotations
+ 
+ import hashlib
++from copy import deepcopy
+ from types import SimpleNamespace
+ 
+ from memory_agent.memory.memory_agent import (
+@@ -173,3 +174,95 @@ class ComplementMemoryAgent(MemoryAgent):
+         finally:
+             self._advisory_context = ''
+             self._render_phase = None
++
++
++class SharedViewMemoryAgent(ComplementMemoryAgent):
++    """New-mode-only phase scheduler; the released PMA builders still run."""
++
++    def __init__(self, *args, **kwargs):
++        super().__init__(*args, **kwargs)
++        self.frozen_selection = None
++        self._using_frozen_selection = False
++
++    def _format_memory_bank(self, observation=''):
++        if self._using_frozen_selection:
++            if self.frozen_selection is None:
++                raise RuntimeError('shared-view bank selection was not frozen')
++            rendered = deepcopy({key: value for key, value in
++                self.frozen_selection.items() if key not in
++                {'rendered_text', 'source_mappings'}})
++            rendered['phase'] = self._render_phase
++            rendered['selection_origin'] = 'frozen_shared_selection'
++            self.rendered_entry_ids.append(rendered)
++            if self.on_render is not None:
++                self.on_render(rendered)
++            return self.frozen_selection['rendered_text']
++        return super()._format_memory_bank(observation)
++
++    async def phase1(self, observation, step_count, *, input_sources=()):
++        self.last_phase1_operations = []
++        self.frozen_selection = None
++        self._render_phase = 'phase1'
++        try:
++            prompt = self._build_phase1_prompt(observation, step_count)
++            response = await self._call_llm_phase1(prompt)
++            try:
++                operations = self._execute_tool_calls(response)
++            finally:
++                # Already successful operations survive a later fatal operation.
++                for operation in self.last_phase1_operations:
++                    if operation.success and operation.action in {
++                            'save_knowledge', 'save_procedural'}:
++                        self.bank_version += 1
++                        self.entry_sources[operation.memory_id] = {
++                            'bank_version': self.bank_version,
++                            'content_sha256': hashlib.sha256(
++                                operation.content.encode('utf-8')).hexdigest(),
++                            'input_sources': tuple(input_sources),
++                            'meaning': 'visible_at_creation_not_sentence_support'}
++                    elif operation.success and operation.action == 'delete':
++                        self.bank_version += 1
++                        self.entry_sources.pop(operation.memory_id, None)
++            return {'prompt': prompt, 'response': response,
++                    'operations': deepcopy(operations)}
++        finally:
++            self._render_phase = None
++
++    def freeze_selection(self, observation):
++        if self.frozen_selection is not None:
++            raise RuntimeError('shared-view selection already frozen for this wake')
++        self._render_phase = 'shared_selection'
++        try:
++            rendered_text = super()._format_memory_bank(observation)
++            selected = deepcopy(self.rendered_entry_ids[-1])
++            selected['rendered_text'] = rendered_text
++            selected['bank_version'] = self.bank_version
++            selected['source_mappings'] = {
++                entry['id']: deepcopy(self.entry_sources.get(entry['id']))
++                for entry in selected['entries']}
++            self.frozen_selection = selected
++            return deepcopy(selected)
++        finally:
++            self._render_phase = None
++
++    async def phase2(self, observation, step_count, *, advisory_context=''):
++        if self.frozen_selection is None:
++            raise RuntimeError('shared-view Phase 2 requires frozen history')
++        self._advisory_context = advisory_context
++        self._render_phase = 'phase2'
++        self._using_frozen_selection = True
++        try:
++            prompt = self._build_phase2_prompt(observation, step_count)
++            response = await self._call_llm_phase2(prompt)
++            raw = getattr(response, 'content', None) or ''
++            reminder = self._parse_phase2_response(raw)
++            self.last_phase2_status = ('reminder' if reminder is not None else
++                'no_intervention' if '<no_intervention' in self._strip_thinking(raw)
++                else 'format_rejected')
++            return {'prompt': prompt, 'response': response, 'reminder': reminder,
++                    'status': self.last_phase2_status,
++                    'selection': deepcopy(self.frozen_selection)}
++        finally:
++            self._using_frozen_selection = False
++            self._advisory_context = ''
++            self._render_phase = None
+diff --git a/method_discovery/pos_pma_complement_v1_20261019/shared_view.py b/method_discovery/pos_pma_complement_v1_20261019/shared_view.py
+new file mode 100644
+index 00000000..f09bdae4
+--- /dev/null
++++ b/method_discovery/pos_pma_complement_v1_20261019/shared_view.py
+@@ -0,0 +1,445 @@
++"""Default-off shared historical selection and single GA view.
++
++The released PMA bank and PoS manager remain unchanged. This module is an
++explicitly different candidate input/scheduling adapter, not a baseline fix.
++"""
++from __future__ import annotations
++
++from copy import deepcopy
++from dataclasses import asdict
++import hashlib
++import json
++
++from candidate import (ComplementBeliefManager, ComplementEpisode,
++                       CandidateSentinel, _digest, _health_progress_signal,
++                       _json, _required_state)
++from citation_fix import _result_fields
++from prompts.react_prompt import _frontier_relevant_world
++
++
++METHOD = 'pos_pma_shared_view_v1'
++
++
++def _visible_tool_sources(source):
++    if not isinstance(source, dict) or not isinstance(source.get('result'), (str, dict, list)):
++        return ()
++    if source.get('origin') in {'task', 'initial_task', 'model', 'advice'}:
++        return ()
++    return tuple(_result_fields(source['result'], 'result'))
++
++
++class SharedViewSentinel(CandidateSentinel):
++    """Project supplemental history through the original per-step audit cap."""
++
++    def _compact_trajectory(self, trajectory):
++        compact = super()._compact_trajectory(trajectory)
++        task_only_hash = getattr(self, 'task_only_initial_sha256', None)
++        for original, shown in zip(trajectory, compact):
++            if (original.get('step') == -1 and task_only_hash and
++                    _digest(str(original.get('observation', ''))) == task_only_hash):
++                shown['citable_sources'] = []
++                shown['source_origin'] = 'original_task_not_tool_result'
++        by_step = {row['step']: row for row in compact}
++        seen = set()
++        for source in getattr(self, 'shared_sources', ()):
++            step = source.get('pos_step')
++            if not isinstance(step, int) or step < 0:
++                continue  # task-only initialization is not a tool observation
++            fields = _visible_tool_sources(source.get('raw'))
++            if not fields:
++                continue
++            row = by_step.get(step)
++            if row is not None:
++                # A live transition is already represented by its original
++                # bounded observation. Never use its registry copy to reopen
++                # omitted middle text or grant another 6000 characters.
++                continue
++            row = {'step': step, 'action': None, 'observation': '',
++                   'citable_sources': []}
++            compact.append(row)
++            by_step[step] = row
++            used = sum(len(item['text']) for item in row.get('citable_sources', ()))
++            for path, value in fields:
++                identity = (source['event_id'], source['sha256'], path)
++                if identity in seen:
++                    continue
++                seen.add(identity)
++                remaining = self.audit_observation_max_chars - used
++                if remaining <= 0:
++                    break
++                if len(value) > remaining:
++                    head = (remaining + 1) // 2
++                    tail = remaining - head
++                    pieces = ((0, value[:head]),
++                              (len(value) - tail, value[-tail:] if tail else ''))
++                    clipped = True
++                else:
++                    pieces = ((0, value),)
++                    clipped = False
++                for offset, text in pieces:
++                    if not text:
++                        continue
++                    record = {'source_path': source['event_id'] + ':' + path,
++                              'offset': offset, 'text': text,
++                              'truncated': clipped}
++                    row['citable_sources'].append(record)
++                    row.setdefault('shared_history', []).append({
++                        'event_id': source['event_id'], 'sha256': source['sha256'],
++                        'actor_transition_id': source.get('actor_transition_id'),
++                        'pos_step': step, 'segment': record})
++                    used += len(text)
++        return compact
++
++
++class SharedViewBeliefManager(ComplementBeliefManager):
++    def __init__(self, *args, **kwargs):
++        super().__init__(*args, **kwargs)
++        prior = self.sentinel
++        if prior is not None:
++            self.sentinel = SharedViewSentinel(prior.config, prior.call_model,
++                prior.logger, call_progress_model=prior.call_progress_model)
++            self.sentinel.shared_sources = ()
++        self.shared_history = None
++
++    def _request_candidate(self, messages, *, base, operation, step):
++        if self.shared_history is not None and operation in {
++                'initialize', 'update', 'sentinel_repair'}:
++            messages = [dict(item) for item in messages]
++            messages.append({'role': 'system', 'content':
++                'Selected PMA history and original source identities are fallible '
++                'context, not a new tool result or a Sentinel finding:\n' +
++                _json(self.shared_history)})
++        # Do not call the former candidate's revision-context injection here.
++        from citation_fix import CitationFixedBeliefManager
++        return CitationFixedBeliefManager._request_candidate(
++            self, messages, base=base, operation=operation, step=step)
++
++
++def shared_panel(context, *, advice=None):
++    state = _required_state(context, include_recovery=True)
++    world = _frontier_relevant_world(context.get('world', {}),
++                                    context.get('frontier_gap'))
++    panel = ('Auxiliary model-generated view; not a new user requirement, tool '
++             'receipt or completion approval. Original Task and actual GA '
++             'observations remain authoritative.\n' + _json({
++                 'state': state, 'frontier_relevant_world': world,
++                 'recovery': context.get('recovery')}))
++    if advice:
++        panel += '\n\nOptional PMA advice (fallible):\n' + advice
++    return {'panel': panel, 'panel_sha256': _digest(panel),
++            'included_advice': advice or None,
++            'advice_sha256': _digest(advice) if advice else None,
++            'budget_suppressed': False, 'omitted': []}
++
++
++class SharedViewEpisode(ComplementEpisode):
++    """One frozen bank choice per wake, before a single PoS state transition."""
++
++    def __init__(self, *args, **kwargs):
++        super().__init__(*args, **kwargs)
++        self.processed_transitions = set()
++        self.frozen_selection = None
++        self.initialization_stage = 'not_attempted'
++        self.phase1_status = 'not_attempted'
++        self.phase2_status = 'not_attempted'
++        self.pending_source_pack = []
++
++    def _selection_sources(self):
++        selected = []
++        seen = set()
++        selection = self.frozen_selection or {}
++        for entry in selection.get('entries', ()):
++            mapping = selection.get('source_mappings', {}).get(entry['id'])
++            if not mapping:
++                selected.append({'memory_id': entry['id'], 'source': 'unknown'})
++                continue
++            for event_id in mapping['input_sources']:
++                if event_id in seen:
++                    continue
++                seen.add(event_id)
++                source = self.source_registry.get(event_id)
++                if source is None:
++                    selected.append({'memory_id': entry['id'], 'event_id': event_id,
++                                     'source': 'unknown'})
++                else:
++                    projected = deepcopy(source)
++                    if projected.get('origin') == 'tool_result':
++                        # Host next_prompt/arguments/metadata are not a tool
++                        # return, even when nested beside one in the receipt.
++                        projected['raw'] = {'result': deepcopy(
++                            source['raw'].get('result'))}
++                    selected.append(projected)
++        return selected
++
++    def _bind_selection(self):
++        sources = self._selection_sources()
++        self.manager.shared_history = {'selection': deepcopy(self.frozen_selection),
++                                       'sources': sources,
++                                       'provenance_meaning': 'visible_at_creation_only'}
++        if self.manager.sentinel is not None:
++            self.manager.sentinel.shared_sources = tuple(
++                source for source in sources if source.get('origin') == 'tool_result')
++        self.events.append({'kind': 'shared_selection_bound',
++            'entry_ids': [entry['id'] for entry in self.frozen_selection['entries']],
++            'bank_version': self.frozen_selection['bank_version'],
++            'source_ids': [source.get('event_id') for source in sources],
++            'render_sha256': _digest(self.frozen_selection['rendered_text'])})
++
++    def _clear_selection(self):
++        self.manager.shared_history = None
++        if self.manager.sentinel is not None:
++            self.manager.sentinel.shared_sources = ()
++
++    def _freeze(self):
++        self.frozen_selection = self.memory.freeze_selection(self._phase1_observation())
++        self._bind_selection()
++
++    def _phase1_observation(self):
++        observation = self._pma_observation()
++        if self.started:
++            prior = _required_state(self._context(), include_recovery=True)
++            observation += ('\n\n[Previously adopted PoS interpretation — '
++                'not a tool observation]\n' + _json(prior))
++        return observation
++
++    def _phase2_context(self):
++        context = self._context()
++        signal, health, progress = _health_progress_signal(self, context)
++        explanations = {'health': {key: health.get(key) for key in
++            ('persistent_epistemic_gaps', 'persistent_achievement_gaps')},
++            'progress': ({key: progress.get(key) for key in
++                ('reason', 'affected_record_ids')} if progress else None)}
++        previous = self.advice_history[-1] if self.advice_history else None
++        return _json({'original_task': self.original_task,
++            'adopted_state': _required_state(context, include_recovery=True),
++            'health_progress': signal, 'explanations': explanations,
++            'last_delivered_advice_and_consequence': previous,
++            'frozen_bank_selection_sha256': _digest(
++                self.frozen_selection['rendered_text']) if self.frozen_selection else None})
++
++    def decision_panel(self, *, observation):
++        if not self.started or self.ended:
++            raise RuntimeError('shared-view episode not active')
++        panel = shared_panel(self._context(), advice=self.pending_advice)
++        self.events.append({'kind': 'panel_prepared',
++            'panel_sha256': panel['panel_sha256'],
++            'advice_sha256': panel['advice_sha256']})
++        return panel
++
++    def _safe_pos_result(self):
++        try:
++            return self.pos.get_result()
++        except BaseException as error:
++            return {'status': 'unavailable', 'stage': self.initialization_stage,
++                    'error_type': type(error).__name__}
++
++    def get_result(self):
++        return {'status': 'partial', 'pos': self._safe_pos_result(),
++            'bank': self.memory.memory.to_dict(), 'events': deepcopy(self.events),
++            'advice_history': deepcopy(self.advice_history),
++            'source_registry': deepcopy(self.source_registry),
++            'entry_sources': deepcopy(self.memory.entry_sources),
++            'rendered_bank_entries': deepcopy(self.memory.rendered_entry_ids),
++            'last_phase1_operations': [asdict(item) for item in
++                self.memory.last_phase1_operations],
++            'phase1_status': self.phase1_status, 'phase2_status': self.phase2_status,
++            'initialization_stage': self.initialization_stage,
++            'frozen_selection': deepcopy(self.frozen_selection)}
++
++    async def reset(self, *, task, observation, actions):
++        if self.started:
++            raise RuntimeError('shared-view episode already initialized')
++        if (self.memory.memory.status or self.memory.memory.knowledge or
++                self.memory.memory.procedural):
++            raise ValueError('shared-view requires a fresh PMA bank')
++        self.original_task = task
++        self.source_registry['original-task'] = {
++            'event_id': 'original-task', 'origin': 'original_task',
++            'raw': {'task': task}, 'sha256': _digest(task), 'order': -1,
++            'pos_step': None, 'actor_transition_id': None}
++        self.trigger.reset()
++        triggered, reason = self.trigger.should_trigger(1)
++        if not triggered:
++            self.phase1_status = 'not_triggered'
++            self.phase2_status = 'not_triggered'
++        self.events.append({'kind': 'initial_trigger', 'step': 1,
++                            'triggered': triggered, 'reason': reason,
++                            'initial_observation_origin': 'task_only'})
++        if triggered:
++            self.phase1_status = 'started'
++            try:
++                await self.memory.phase1(self._phase1_observation(), 1,
++                                         input_sources=self._input_sources())
++                self.phase1_status = 'completed'
++            except BaseException:
++                self.phase1_status = 'failed'
++                raise
++        self._freeze()
++        self.initialization_stage = 'pos_initializing'
++        try:
++            if self.manager.sentinel is not None:
++                self.manager.sentinel.task_only_initial_sha256 = (
++                    _digest(observation) if observation == task else None)
++            # The host supplies initial_content as both parameters. It remains
++            # a task-only row and never becomes a tool-result citation.
++            self.pos.reset(task=task, observation=observation, actions=actions)
++            if (self.manager.sentinel is not None and
++                    self.manager.sentinel.last_format_rejection):
++                raise RuntimeError('shared-view initialization audit format rejected')
++            self.started = True
++            self.latest_update_outcome = self.manager.last_validation_outcome
++            self.initialization_stage = 'pos_initialized'
++        finally:
++            self._clear_selection()
++        if triggered:
++            self.phase2_status = 'started'
++            try:
++                result = await self.memory.phase2(self._pma_observation(), 1,
++                    advisory_context=self._phase2_context())
++                self.pending_advice = result['reminder']
++                self.pending_source_pack = (self._selection_sources()
++                                            if self.pending_advice else [])
++                self.phase2_status = result['status']
++            except BaseException:
++                self.phase2_status = 'failed'
++                raise
++        self.events.append({'kind': 'reset', 'triggered': triggered,
++            'phase1_status': self.phase1_status,
++            'phase2_status': self.phase2_status,
++            'initialization_stage': self.initialization_stage})
++        return self.decision_panel(observation=observation)
++
++    async def update(self, *, actor_attempt, transition_id, thought,
++                     action_batch, observation, source_events=(), done=False):
++        if not self.started or self.ended:
++            raise RuntimeError('shared-view episode not active')
++        if not isinstance(transition_id, str) or not transition_id:
++            raise ValueError('stable transition identity required')
++        if transition_id in self.processed_transitions:
++            raise ValueError('duplicate shared-view transition')
++        if not action_batch:
++            raise ValueError('shared-view update requires a real action batch')
++        # A skipped PMA wake still needs a fresh selection from the unchanged
++        # bank, rather than the prior wake's frozen render.
++        self.memory.frozen_selection = None
++        self.processed_transitions.add(transition_id)
++        for index, item in enumerate(source_events):
++            if not isinstance(item, dict):
++                continue
++            event_id = str(item.get('tool_use_id') or item.get('event_id') or
++                           f'{transition_id}:source:{index}')
++            raw = _json(item)
++            if event_id in self.source_registry:
++                if self.source_registry[event_id]['sha256'] != _digest(raw):
++                    raise ValueError('source identity/hash conflict')
++                continue
++            self.source_registry[event_id] = {
++                'event_id': event_id, 'origin': 'tool_result',
++                'raw': deepcopy(item), 'sha256': _digest(raw),
++                'order': len(self.source_registry),
++                'actor_transition_id': transition_id,
++                'pos_step': self.pos.step}
++        self.recent_steps.append({'step': actor_attempt + 1,
++            'analysis': str(thought or ''),
++            'commands': [str(action) for action in action_batch],
++            'observation': str(observation),
++            'source_ids': [str(item.get('tool_use_id') or item.get('event_id'))
++                for item in source_events if isinstance(item, dict)]})
++        self.recent_steps = self.recent_steps[-self.recent_window:]
++        triggered = False
++        reason = 'terminal_batch'
++        step = actor_attempt + 1
++        if not done:
++            triggered, reason = self.trigger.should_trigger(step)
++            if triggered:
++                self.phase1_status = 'started'
++                try:
++                    await self.memory.phase1(self._phase1_observation(), step,
++                        input_sources=self._input_sources())
++                    self.phase1_status = 'completed'
++                except BaseException:
++                    self.phase1_status = 'failed'
++                    self.events.append({'kind': 'phase1_failed',
++                        'transition_id': transition_id,
++                        'pos_update': 'not_attempted',
++                        'phase2': 'not_attempted'})
++                    raise
++            else:
++                self.phase1_status = 'not_triggered'
++        else:
++            self.phase1_status = 'skipped_terminal'
++        self._freeze()
++        if self.delivered:
++            self.manager.shared_history['previous_delivered_advice'] = {
++                'advice': self.delivered['advice'],
++                'advice_sha256': self.delivered['advice_sha256'],
++                'delivery_event_id': self.delivered['delivery_event_id'],
++                'completed_transition_id': transition_id,
++                'frozen_sources': deepcopy(self.delivered.get('source_pack', []))}
++            if self.manager.sentinel is not None:
++                combined = list(self.manager.sentinel.shared_sources)
++                identities = {(item.get('event_id'), item.get('sha256'))
++                              for item in combined}
++                for item in self.delivered.get('source_pack', []):
++                    identity = (item.get('event_id'), item.get('sha256'))
++                    if (item.get('origin') == 'tool_result' and
++                            identity not in identities):
++                        combined.append(deepcopy(item))
++                        identities.add(identity)
++                self.manager.sentinel.shared_sources = tuple(combined)
++        try:
++            self.pos.update(thought=thought, action_batch=action_batch,
++                            observation=observation, done=done)
++        finally:
++            self._clear_selection()
++        outcome = self.manager.last_validation_outcome
++        if outcome == 'accepted':
++            self.accepted_revision += 1
++        self.latest_update_outcome = outcome
++        self.latest_actor_transition = transition_id
++        self.events.append({'kind': 'transition_processed', 'id': transition_id,
++            'update_outcome': outcome,
++            'accepted_revision': self.accepted_revision,
++            'pma_triggered': triggered, 'trigger_reason': reason,
++            'selected_bank_sha256': _digest(self.frozen_selection['rendered_text'])})
++        if self.delivered:
++            self.advice_history[-1]['reviewed_transition'] = transition_id
++            self.advice_history[-1]['review_outcome'] = outcome
++            self.advice_history[-1]['actual_results'] = deepcopy(list(source_events))
++        self.delivered = None
++        self.pending_advice = None
++        if done:
++            self.ended = True
++            self.phase2_status = 'skipped_terminal'
++        elif triggered:
++            self.phase2_status = 'started'
++            try:
++                result = await self.memory.phase2(self._pma_observation(), step,
++                    advisory_context=self._phase2_context())
++                self.pending_advice = result['reminder']
++                self.pending_source_pack = (self._selection_sources()
++                                            if self.pending_advice else [])
++                self.phase2_status = result['status']
++            except BaseException:
++                self.phase2_status = 'failed'
++                raise
++        else:
++            self.phase2_status = 'not_triggered'
++        return self._context()
++
++    def finish(self, *, reason, observation=None):
++        self.pending_advice = None
++        self.delivered = None
++        self.ended = True
++        result = self.pos.finish(reason=reason, observation=observation)
++        return {'status': result['status'], 'pos': result,
++                'bank': self.memory.memory.to_dict(),
++                'events': deepcopy(self.events),
++                'advice_history': deepcopy(self.advice_history),
++                'source_registry': deepcopy(self.source_registry),
++                'entry_sources': deepcopy(self.memory.entry_sources),
++                'rendered_bank_entries': deepcopy(self.memory.rendered_entry_ids),
++                'last_phase1_operations': [asdict(item) for item in
++                    self.memory.last_phase1_operations],
++                'phase1_status': self.phase1_status,
++                'phase2_status': self.phase2_status}
+diff --git a/method_discovery/pos_pma_complement_v1_20261019/test_candidate_ga_seam.py b/method_discovery/pos_pma_complement_v1_20261019/test_candidate_ga_seam.py
+index 5b0b2e1c..557e1c7f 100644
+--- a/method_discovery/pos_pma_complement_v1_20261019/test_candidate_ga_seam.py
++++ b/method_discovery/pos_pma_complement_v1_20261019/test_candidate_ga_seam.py
+@@ -21,6 +21,93 @@ from llmcore import NativeClaudeSession, NativeToolClient
+ 
+ 
+ class Tests(unittest.TestCase):
++    def test_shared_view_actual_ga_http_keeps_history_and_removes_old_cap(self):
++        initial = {'goal_specification': 'G' * 95000, 'entities': [],
++            'states': [], 'relations': [], 'epistemic_gaps': [],
++            'achievement_gaps': [{'target': 'service', 'reason': 'not yet checked'}],
++            'frontier': {'gap_type': 'achievement', 'target': 'service'}}
++        delta = {'remove_state_ids': [], 'remove_relation_ids': [],
++            'upsert_entities': [], 'upsert_states': [], 'upsert_relations': [],
++            'epistemic_gaps': [], 'achievement_gaps': initial['achievement_gaps'],
++            'frontier': initial['frontier']}
++        replies = {'belief': [json.dumps(initial), json.dumps(delta)],
++            'consistency': ['{"issues": []}', '{"issues": []}'],
++            'progress': ['{"progress": 0, "score": 0.0, '
++                         '"affected_record_ids": [], "reason": "unchanged"}'],
++            'pma_phase1': [{'content': '', 'tool_calls': []}] * 2,
++            'pma_phase2': [{'content': '<context_for_action>Synthetic advice.</context_for_action>'},
++                           {'content': '<no_intervention/>'}]}
++        with tempfile.TemporaryDirectory() as tmp:
++            root = Path(tmp)
++            runtime = root / 'pos_runtime'
++            runtime.mkdir()
++            for name in ('worker.py', 'episode.py', 'citation_fix.py'):
++                shutil.copy2(POS / name, runtime / name)
++            for name in ('candidate.py', 'memory_adapter.py', 'shared_view.py'):
++                shutil.copy2(HERE / name, runtime / name)
++            shutil.copytree(POS / 'vendor', runtime / 'vendor',
++                            ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
++            shutil.copytree(PMA / 'src', runtime / 'pma_vendor' / 'src',
++                            ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
++            fixture = root / 'replies.json'
++            fixture.write_text(json.dumps(replies), encoding='utf-8')
++            env = {'GA_POS_ENABLED': '1', 'GA_POS_PMA_SHARED_VIEW': '1',
++                'GA_POS_PMA_COMPLEMENT': '0', 'GA_PMA_ENABLED': '0',
++                'GA_PMA_UPSTREAM_ENABLED': '0', 'GA_MONITOR_ENABLED': '0',
++                'GA_M0_MONITOR_ENABLED': '0', 'GA_POS_TRANSPORT': 'fake',
++                'GA_POS_WORKER_SCRIPT': str(runtime / 'worker.py'),
++                'GA_POS_VENDOR_ROOT': str(runtime / 'vendor'),
++                'GA_POS_EPISODE_MODULE': str(runtime / 'episode.py'),
++                'GA_POS_ARCHIVE': str(root / 'events.jsonl'),
++                'GA_POS_FAKE_REPLIES': str(fixture),
++                'GA_BENCH_TASK_ID': 'synthetic', 'GA_LANG': 'en'}
++            parent = SimpleNamespace(task_dir=tmp, extrakeyinfo=None,
++                intervene=None, obligation_ledger=None,
++                evidence_completion_kernel=None, research_condition=None,
++                monitor_runtime=None, _turn_end_hooks={}, verbose=False)
++            class Handler(GenericAgentHandler):
++                def do_code_run(self, args, response):
++                    if False: yield None
++                    return StepOutcome({'stdout': 'VISIBLE_SYNTHETIC_RESULT',
++                        'exit_code': 0}, next_prompt='Synthetic step complete')
++            handler = Handler(parent, cwd=tmp)
++            backend = NativeClaudeSession({'apibase': 'https://fixture.invalid',
++                'apikey': 'SYNTHETIC-NO-ACCESS', 'model': 'claude-opus-4-8',
++                'max_tokens': 64, 'max_retries': 0, 'stream': False})
++            client = NativeToolClient(backend)
++            parent.llmclient = client
++            tools = json.loads((GA / 'assets/tools_schema.json').read_text(encoding='utf-8'))
++            system = (GA / 'assets/sys_prompt_en.txt').read_text(encoding='utf-8')
++            captured = []
++            class HTTP:
++                status_code = 200
++                headers = {}
++                def __init__(self, blocks): self.blocks = blocks
++                def __enter__(self): return self
++                def __exit__(self, *args): return False
++                def json(self): return {'content': self.blocks, 'usage': {}}
++                def close(self): pass
++            responses = [[{'type': 'tool_use', 'name': 'code_run', 'id': 't1',
++                'input': {'type': 'python', 'script': 'print(1)'}}],
++                [{'type': 'text', 'text': 'Done.'}]]
++            def post(_url, **kwargs):
++                captured.append(kwargs['json'])
++                return HTTP(responses[len(captured) - 1])
++            with patch.dict(os.environ, env), patch('llmcore.requests.post', side_effect=post):
++                outcome = exhaust(agent_runner_loop(client, system, 'ORIGINAL_TASK',
++                    handler, tools, max_turns=2, verbose=False))
++            self.assertEqual(outcome['result'], 'CURRENT_TASK_DONE')
++            self.assertEqual(len(captured), 2)
++            self.assertGreater(len(json.dumps(captured[0], ensure_ascii=False).encode('utf-8')),
++                               90000)
++            self.assertEqual(len(backend.history), 4)
++            first, second = [json.dumps(item, ensure_ascii=False) for item in captured]
++            self.assertIn('Synthetic advice.', first)
++            self.assertNotIn('Synthetic advice.', second)
++            self.assertIn('VISIBLE_SYNTHETIC_RESULT', second)
++            self.assertIn('ORIGINAL_TASK', second)
++            self.assertTrue((root / 'events.result.json').is_file())
++
+     def test_actual_ga_stateful_http_and_worker(self):
+         initial = {'goal_specification': 'Make service available.', 'entities': [],
+             'states': [], 'relations': [], 'epistemic_gaps': [],
+diff --git a/method_discovery/pos_pma_complement_v1_20261019/test_shared_view.py b/method_discovery/pos_pma_complement_v1_20261019/test_shared_view.py
+new file mode 100644
+index 00000000..3028df38
+--- /dev/null
++++ b/method_discovery/pos_pma_complement_v1_20261019/test_shared_view.py
+@@ -0,0 +1,164 @@
++"""Offline shared-view order, freeze, audit and panel checks with pinned cores."""
++import asyncio
++import json
++from pathlib import Path
++import sys
++from types import SimpleNamespace
++import unittest
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path[:0] = [str(Path(__file__).resolve().parent),
++                str(ROOT / 'pos_upstream_ga_v1_20261017'),
++                str(ROOT / 'pos_upstream_ga_v1_20261017/vendor'),
++                str(ROOT / ('curator_supervisor_convergence_v0/'
++                    'pma_full_upstream_ga_v1_20261013/vendor/pma_89e5c0d/src'))]
++from .test_candidate_core import INITIAL, UPDATE, Logger, SyncRole, AsyncRole, response
++from episode import PoSEpisode, execution_config
++from memory_agent.memory.trigger import MemoryAgentTrigger, TriggerConfig
++from memory_agent.memory.universal_memory import UniversalMemory
++from .memory_adapter import SharedViewMemoryAgent
++from .shared_view import SharedViewBeliefManager, SharedViewEpisode, shared_panel
++
++
++def tool(name, arguments):
++    return SimpleNamespace(function=SimpleNamespace(name=name, arguments=arguments))
++
++
++class Tests(unittest.TestCase):
++    def make(self, *, interval=1, initial_advice='<no_intervention/>'):
++        log = Logger()
++        belief = SyncRole([json.dumps(INITIAL), json.dumps(UPDATE)])
++        consistency = SyncRole(['{"issues": []}', '{"issues": []}'])
++        progress = SyncRole(['{"progress": 0, "score": 0.0, '
++                             '"affected_record_ids": [], "reason": "no change"}'])
++        pma = AsyncRole([response('', [tool('memory_save_knowledge',
++            {'content': 'Remember actual tool output'})]), response(initial_advice),
++            response(), response('<no_intervention/>')])
++        pos = PoSEpisode(case_id='shared-test', config=execution_config(),
++            logger=log, belief_call=belief, consistency_call=consistency,
++            progress_call=progress, manager_class=SharedViewBeliefManager)
++        bank = SharedViewMemoryAgent(llm=pma, memory=UniversalMemory())
++        trigger = MemoryAgentTrigger(TriggerConfig(interval=interval,
++                                                   trigger_on_first_step=True))
++        episode = SharedViewEpisode(pos_episode=pos, memory_agent=bank,
++            trigger=trigger, logger=log)
++        return episode, belief, consistency, pma
++
++    def test_phase_order_and_frozen_bank_panel(self):
++        ep, belief, consistency, pma = self.make(initial_advice=
++            '<context_for_action>Check the tool result.</context_for_action>')
++        first = asyncio.run(ep.reset(task='Clean mug.',
++                                     observation='Clean mug.', actions=[]))
++        self.assertEqual(ep.phase1_status, 'completed')
++        self.assertEqual(ep.phase2_status, 'reminder')
++        self.assertEqual(len(pma.requests), 2)
++        self.assertIn('Check the tool result.', first['panel'])
++        self.assertIn('recovery', first['panel'])
++        self.assertNotIn('memory_update_status', [item['function']['name']
++            for item in pma.requests[0]['tools']])
++        self.assertEqual(ep.memory.memory.status, '')
++        task_only = ep.manager.sentinel._compact_trajectory([{
++            'step': -1, 'action': None, 'observation': 'Clean mug.'}])
++        self.assertEqual(task_only[0]['citable_sources'], [])
++        self.assertEqual(task_only[0]['source_origin'],
++                         'original_task_not_tool_result')
++        self.assertEqual([row['phase'] for row in ep.memory.rendered_entry_ids],
++                         ['phase1', 'shared_selection', 'phase2'])
++        self.assertEqual(ep.memory.rendered_entry_ids[1]['knowledge'],
++                         ep.memory.rendered_entry_ids[2]['knowledge'])
++        ep.request_accepted(panel=first, event_id='accepted-task-1')
++        source = {'origin': 'GA_tool_outcome', 'tool_use_id': 'tool-1',
++                  'result': {'stdout': 'Mug is still dirty.'},
++                  'next_prompt': 'NOT A TOOL CITATION'}
++        asyncio.run(ep.update(actor_attempt=1, transition_id='joint-1',
++            thought='Inspect', action_batch=[{'id': 'tool-1', 'name': 'inspect',
++                'arguments': {}, 'order': 0, 'status': 'executed'}],
++            observation=json.dumps({'tool_results': [source]}),
++            source_events=[source]))
++        self.assertEqual(len(belief.requests), 2)
++        self.assertIn('shared_selection', json.dumps(belief.requests[1]))
++        self.assertIn('tool-1', json.dumps(belief.requests[1]))
++        self.assertEqual(ep.advice_history[0]['reviewed_transition'], 'joint-1')
++        self.assertIn('accepted-task-1', pma.requests[-1]['prompt'])
++        self.assertNotIn('Check the tool result.', ep.decision_panel(
++            observation='Mug is still dirty.')['panel'])
++        compact = ep.manager.sentinel._compact_trajectory([{
++            'step': 0, 'action': None,
++            'observation': 'Clean mug.'}])
++        self.assertFalse(any('NOT A TOOL CITATION' in json.dumps(row)
++                             for row in compact))
++
++    def test_partial_bank_before_pos_initialization(self):
++        ep, *_ = self.make()
++        async def failing_call(**_kwargs):
++            raise RuntimeError('synthetic Phase 1 failure')
++        ep.memory.llm.call = failing_call
++        with self.assertRaisesRegex(RuntimeError, 'synthetic Phase 1 failure'):
++            asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.',
++                                 actions=[]))
++        partial = ep.get_result()
++        self.assertEqual(partial['phase1_status'], 'failed')
++        self.assertEqual(partial['initialization_stage'], 'not_attempted')
++        self.assertEqual(partial['pos']['status'], 'unavailable')
++        self.assertEqual(partial['bank']['knowledge'], [])
++
++    def test_interval_skip_selects_unchanged_bank_once(self):
++        ep, belief, _, pma = self.make(interval=3)
++        asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.',
++                             actions=[]))
++        asyncio.run(ep.update(actor_attempt=1, transition_id='joint-skip',
++            thought='Inspect', action_batch=[{'id': 'tool-1', 'name': 'inspect',
++                'arguments': {}, 'order': 0, 'status': 'executed'}],
++            observation='Mug remains dirty.', source_events=[]))
++        self.assertEqual(ep.phase1_status, 'not_triggered')
++        self.assertEqual(ep.phase2_status, 'not_triggered')
++        self.assertEqual(len(pma.requests), 2)
++        self.assertEqual(len(belief.requests), 2)
++        self.assertEqual(ep.frozen_selection['bank_version'], 1)
++        self.assertEqual([row['phase'] for row in ep.memory.rendered_entry_ids],
++                         ['phase1', 'shared_selection', 'phase2',
++                          'shared_selection'])
++
++    def test_audit_uses_only_visible_tool_fields_and_one_step_budget(self):
++        ep, *_ = self.make()
++        sentinel = ep.manager.sentinel
++        sentinel.shared_sources = ({'event_id': 'old-tool', 'origin': 'tool_result',
++            'sha256': 'a' * 64, 'pos_step': 3,
++            'raw': {'result': {'stdout': 'A' * 7000 + 'VISIBLE_TAIL'},
++                    'next_prompt': 'FAKE_HOST_NOTE'}},
++            {'event_id': 'initial-task', 'origin': 'original_task',
++             'sha256': 'b' * 64, 'pos_step': None,
++             'raw': {'result': {'stdout': 'TASK_NOT_TOOL'}}})
++        compact = sentinel._compact_trajectory([])
++        self.assertEqual(len(compact), 1)
++        fields = compact[0]['citable_sources']
++        self.assertLessEqual(sum(len(field['text']) for field in fields),
++                             sentinel.audit_observation_max_chars)
++        self.assertFalse(any('FAKE_HOST_NOTE' in field['text'] or
++                             'TASK_NOT_TOOL' in field['text'] for field in fields))
++        self.assertEqual(compact[0]['step'], 3)
++        self.assertTrue(all(field['source_path'].startswith('old-tool:result.')
++                            for field in fields))
++        self.assertNotIn('A' * 7000, ''.join(field['text'] for field in fields))
++        # A current observation already projected at step 3 cannot gain a
++        # second audit allowance through its registry copy.
++        current = sentinel._compact_trajectory([{'step': 3, 'action': None,
++            'observation': 'Original actual observation'}])
++        self.assertEqual(len(current), 1)
++        self.assertNotIn('VISIBLE_TAIL', json.dumps(current))
++
++    def test_recovery_survives_silence_and_no_cap(self):
++        context = {'goal': {'user_input': 'Original Task'},
++            'epistemic_gaps': [], 'achievement_gaps': [],
++            'frontier_gap': {'target': 'keep-going'},
++            'world': {'entities': {}, 'states': {}, 'relations': {}},
++            'recovery': {'instruction': 'R' * 18000},
++            'accepted_revision': 2, 'latest_update_outcome': 'accepted'}
++        panel = shared_panel(context)
++        self.assertIn('R' * 18000, panel['panel'])
++        self.assertIsNone(panel['included_advice'])
++        self.assertGreater(len(panel['panel']), 16000)
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/method_discovery/pos_pma_complement_v1_20261019/test_worker_fake.py b/method_discovery/pos_pma_complement_v1_20261019/test_worker_fake.py
+index 1acc7b0e..1d48dc57 100644
+--- a/method_discovery/pos_pma_complement_v1_20261019/test_worker_fake.py
++++ b/method_discovery/pos_pma_complement_v1_20261019/test_worker_fake.py
+@@ -14,6 +14,54 @@ HERE = Path(__file__).resolve().parent
+ 
+ 
+ class WorkerTests(unittest.TestCase):
++    def test_packed_shared_view_phase1_before_pos_and_partial_export(self):
++        initial = {'goal_specification': 'Clean mug.', 'entities': [], 'states': [],
++                   'relations': [], 'epistemic_gaps': [], 'achievement_gaps': [],
++                   'frontier': None}
++        with tempfile.TemporaryDirectory() as directory:
++            root = Path(directory)
++            runtime = root / 'pos_runtime'
++            runtime.mkdir()
++            for name in ('worker.py', 'episode.py', 'citation_fix.py'):
++                shutil.copy2(POS / name, runtime / name)
++            for name in ('candidate.py', 'memory_adapter.py', 'shared_view.py'):
++                shutil.copy2(HERE / name, runtime / name)
++            shutil.copytree(POS / 'vendor', runtime / 'vendor',
++                            ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
++            shutil.copytree(PMA / 'src', runtime / 'pma_vendor' / 'src',
++                            ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
++            fixture = root / 'replies.json'
++            fixture.write_text(json.dumps({'belief': [json.dumps(initial)],
++                'consistency': ['{"issues": []}'],
++                'pma_phase1': [{'content': '', 'tool_calls': [{'name':
++                    'memory_save_knowledge', 'arguments': {'content': 'Stored first'}}]}],
++                'pma_phase2': [{'content': '<no_intervention/>'}]}),
++                encoding='utf-8')
++            command = {'kind': 'reset', 'candidate': True,
++                       'candidate_method': 'pos_pma_shared_view_v1',
++                       'case_id': 'synthetic/mug', 'task': 'Clean mug.',
++                       'observation': 'Clean mug.', 'actions': []}
++            archive = root / 'events.jsonl'
++            process = subprocess.run([sys.executable, '-B', str(runtime / 'worker.py'),
++                '--vendor', str(runtime / 'vendor'), '--episode-module',
++                str(runtime / 'episode.py'), '--archive', str(archive),
++                '--mode', 'fake', '--fake-replies', str(fixture)],
++                input=json.dumps(command) + '\n', text=True, encoding='utf-8',
++                capture_output=True, timeout=15)
++            self.assertEqual(process.returncode, 0, process.stderr)
++            self.assertEqual(json.loads(process.stdout.splitlines()[0])['status'], 'ok')
++            events = [json.loads(line) for line in
++                      archive.read_text(encoding='utf-8').splitlines()]
++            names = [row.get('event') for row in events]
++            self.assertLess(names.index('candidate_pma_request'),
++                            names.index('pos_role_request'))
++            self.assertEqual(sum(name == 'candidate_pma_request' for name in names), 2)
++            result = json.loads(archive.with_suffix('.result.json').read_text(
++                encoding='utf-8'))['result']
++            self.assertEqual(result['bank']['knowledge'][0]['content'], 'Stored first')
++            self.assertEqual(result['phase1_status'], 'completed')
++            self.assertEqual(result['initialization_stage'], 'pos_initialized')
++
+     def test_initial_consistency_transport_failure_is_not_swallowed(self):
+         initial = {'goal_specification': 'Clean mug.', 'entities': [], 'states': [],
+                    'relations': [], 'epistemic_gaps': [], 'achievement_gaps': [],
+diff --git a/method_discovery/pos_pma_shared_view_v1_20261020/DESIGN.md b/method_discovery/pos_pma_shared_view_v1_20261020/DESIGN.md
+new file mode 100644
+index 00000000..c3056705
+--- /dev/null
++++ b/method_discovery/pos_pma_shared_view_v1_20261020/DESIGN.md
+@@ -0,0 +1,50 @@
++# pos_pma_shared_view_v1 — offline implementation contract
++
++This is a separately selected, default-off research mode. It does not modify the
++fixed PoS or PMA vendors, does not authorize a live run, and does not add an
++evaluator or completion gate.
++
++For each eligible actor batch, the order is: archive actual action/observation;
++run PMA Phase 1 if the existing trigger fires; freeze exactly one rendered bank
++selection and its available input-source identities; run one PoS update with that
++historical context visible to updater and applicable audit/repair calls; then
++run PMA Phase 2 over that same selection and the final adopted PoS state. The
++next GA request keeps its ordinary history and receives one temporary auxiliary
++view containing the committed state, original frontier-relevant world,
++recovery, and optional successfully parsed advice. The GA alone acts or ends.
++
++At initialization, the task-only host input remains task text, not a tool
++observation or progress transition. Trigger step 1 is checked once. When it
++fires, Phase 1 precedes PoS initialization, and Phase 2 follows it. Terminal
++real batches retain the existing PoS terminal update and skip both PMA phases;
++finish alone creates no transition. MAX_TURNS retains the host's actual done
++flag rather than synthesizing one.
++
++The frozen bank selection consists of rendered text, ordered category/ID,
++content hash, bank version, and available source event identity. Source
++mapping means the event was visible when an entry was created, never that it
++supports the entry's claims. Missing legacy provenance is unknown. Historical
++sources are not replayed as new PoS transitions. Audit citation eligibility is
++derived only from actual visible permitted tool-result segments, after the
++original audit projection and deduplication by identity, field, hash and span.
++The task-only initial row, memory prose, advice, next_prompt and actor analysis
++cannot become tool evidence.
++
++The new mode removes only the earlier complement adapter's 16K/12K character
++caps, four-source/two-thousand-character/eight-record selection caps, 2120
++wrapper guard, 90KB request cap and candidate-only pretrim. It retains native
++PMA render thresholds and BM25 settings, PoS local audit projection, GA history
++policy, fixed task deadline, strict capture, typed failures and Task complete-
++response behavior. Character counts, UTF-8 bytes and tokens are distinct;
++provider hard context limit remains unknown unless established by configuration.
++
++Receipt stages are prepared, transport-observed and request-accepted. Only an
++accepted Task response binds advice for possible next-transition review; this
++does not prove the model understood the advice. Unknown send status stays
++unknown. Fatal auxiliary or capture failure stops this candidate without
++changing already executed tools, the Task's factual terminal state, or an
++independent native evaluation observation.
++
++All offline fixtures must force finite fake transport at the final network
++boundary. `execution_authorized` is false. No live compatibility probe or
++formal task is in scope.
+diff --git a/method_discovery/pos_pma_shared_view_v1_20261020/PLAN_UNAUTHORIZED.json b/method_discovery/pos_pma_shared_view_v1_20261020/PLAN_UNAUTHORIZED.json
+new file mode 100644
+index 00000000..7487c0e2
+--- /dev/null
++++ b/method_discovery/pos_pma_shared_view_v1_20261020/PLAN_UNAUTHORIZED.json
+@@ -0,0 +1,11 @@
++{
++  "schema": "pos-ga-single-plan-v1",
++  "execution_authorized": false,
++  "official_source_git_commit": "2fd12b88aafdd04a52c298e3940bcb189f9766d6",
++  "task": "pos-synthetic-file-http",
++  "condition": "P",
++  "occurrence": 1,
++  "method": "pos_pma_shared_view_v1",
++  "synthetic_fixture": true,
++  "candidate_profile_fixture_only": true
++}
+diff --git a/method_discovery/pos_pma_shared_view_v1_20261020/REUSE_MAP.md b/method_discovery/pos_pma_shared_view_v1_20261020/REUSE_MAP.md
+new file mode 100644
+index 00000000..9f06c555
+--- /dev/null
++++ b/method_discovery/pos_pma_shared_view_v1_20261020/REUSE_MAP.md
+@@ -0,0 +1,17 @@
++# Reuse map
++
++| Component | Classification | New-mode use |
++| --- | --- | --- |
++| Fixed PMA `MemoryAgent` phase builders, call seams, CRUD, parser, bank renderer and trigger | Direct upstream reuse | Existing `ComplementMemoryAgent` narrows status operations; separate phase orchestration and one frozen render are adapter changes. |
++| Fixed PoS manager initialize/update, Sentinel, finite repair/re-audit, progress, health and recovery | Direct upstream reuse | One normal update per completed actor batch; no historical replay or extra scoring. |
++| Fixed PoS `react_prompt._frontier_relevant_world` | Direct upstream reuse | Current-state panel projection; no replacement retriever. |
++| `citation_fix.py` permitted source-field extraction | Existing baseline repair | New mode projects the same frozen history into actual audit-visible fields; task-only initialization is excluded. |
++| `ComplementEpisode`, PMA provenance and advice receipt | Necessary host adaptation | Retain original Task history, independent state/bank, actual accepted-request boundary and partial-result export. |
++| Phase 1 before PoS, frozen selected history in PoS updater/audit, Phase 2 after PoS | Candidate method change | This is an input and timing change, not a claim about released PoS or PMA behavior. |
++| Complete recovery plus optional PMA advice in one temporary GA view | Candidate method change | PoS alone commits current state; PMA cannot gate completion or write status. |
++| Removal of prior complement-only caps and pretrim | Candidate method change | Strict integrity and native projection remain; not a claim of known provider token capacity. |
++| Generic `single_run` → Harbor/native-SHARED, independent PMA profile host, PoS worker, Task complete-response | Direct existing host path with mode identity adaptation | No new scheduler, evaluator or authorization service. |
++
++Mechanical offline checks can establish request content, ordering, isolation,
++receipts and cleanup. They cannot establish that a model used history correctly
++or that this candidate improves outcomes.
+diff --git a/method_discovery/pos_pma_shared_view_v1_20261020/RUNNING.md b/method_discovery/pos_pma_shared_view_v1_20261020/RUNNING.md
+new file mode 100644
+index 00000000..024ca582
+--- /dev/null
++++ b/method_discovery/pos_pma_shared_view_v1_20261020/RUNNING.md
+@@ -0,0 +1,28 @@
++# Offline running card
++
++`pos_pma_shared_view_v1` is default off. `PLAN_UNAUTHORIZED.json` is a
++synthetic example only; `execution_authorized=false` and no live authorization
++is created by these commands. Use Python 3.12+ with the existing pinned
++dependencies. The synthetic profile must be the isolated fake file whose
++endpoint is `https://fake.invalid/no-network`; do not use a private live
++profile for this fixture.
++
++From the repository root, run the targeted unit and packed-worker checks:
++
++```powershell
++& E:\LongContext\bench_runtime\m4\harbor-env\Scripts\python.exe -B -m unittest method_discovery.pos_pma_complement_v1_20261019.test_shared_view method_discovery.pos_pma_complement_v1_20261019.test_worker_fake method_discovery.pos_pma_complement_v1_20261019.test_candidate_ga_seam
++```
++
++For the existing `single_run` synthetic native-SHARED path, choose a fresh
++output directory and use `single_run_fixture` with
++`--research-candidate pos_pma_shared_view_v1 --candidate-profile-fixture
++--service-fixture`. Required fixed paths are the existing official-source
++checkout, Task profile source, isolated fake PMA profile, GA checkout,
++runtime root, worker Python, Harbor Python/source and bench root. The fixture
++forces the final Task/PoS/PMA model hops to finite fake responses, checks the
++file and HTTP service with the synthetic sentinel, then removes its temporary
++authorization. It must never be run with a real provider profile.
++
++Future real use would require a separate source-bound certification, frozen
++manifest/profile/assets, per-run authorization and the existing native-SHARED
++stop/evaluate/cleanup chain. No such authorization exists in this package.
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/certification.py b/method_discovery/pos_upstream_ga_v1_20261017/certification.py
+index eceaa5d1..74af398b 100644
+--- a/method_discovery/pos_upstream_ga_v1_20261017/certification.py
++++ b/method_discovery/pos_upstream_ga_v1_20261017/certification.py
+@@ -62,15 +62,18 @@ def verify_evidence(directory: Path, *, require_committed: bool = True,
+         ('events.result.json', 'events.close.json', 'native_test_execution.json',
+          'writer_termination_check.json'))
+     from .single_manifest import source_hashes, vendor_hashes
+-    from .single_manifest import SOURCE_FILES
++    from .single_manifest import SOURCE_FILES, SHARED_SOURCE_FILE
++    shared = research_candidate == 'pos_pma_shared_view_v1'
++    frozen_sources = (*SOURCE_FILES, SHARED_SOURCE_FILE) if shared else SOURCE_FILES
+     committed_sources = {name: hashlib.sha256(subprocess.run(
+         ['git', 'cat-file', 'blob', f"{identity.get('code_commit')}:{name}"],
+         cwd=ROOT, capture_output=True, check=True).stdout).hexdigest()
+-        for name in SOURCE_FILES}
++        for name in frozen_sources}
+     prepared = load('prepared.json')
+     bundled = prepared.get('executed_pos_source_sha256')
+     if research_candidate not in {'PoS', 'PoS-citation-fixed',
+-                                  'pos_pma_complement_v1'}:
++                                  'pos_pma_complement_v1',
++                                  'pos_pma_shared_view_v1'}:
+         raise RuntimeError('PoS certification method identity invalid')
+     executed_names = ('agent_loop.py', 'agentmain.py', 'ga.py', 'llmcore.py',
+                       'research_runtime.py', 'pos_bridge.py',
+@@ -79,11 +82,13 @@ def verify_evidence(directory: Path, *, require_committed: bool = True,
+                       'pos_runtime/candidate.py',
+                       'pos_runtime/memory_adapter.py',
+                       'pos_runtime/event_spool.py')
++    if shared:
++        executed_names += ('pos_runtime/shared_view.py',)
+     def source_name(name):
+         if not name.startswith('pos_runtime/'):
+             return 'GenericAgent-main/' + name
+         leaf = Path(name).name
+-        if leaf in {'candidate.py', 'memory_adapter.py'}:
++        if leaf in {'candidate.py', 'memory_adapter.py', 'shared_view.py'}:
+             directory = 'pos_pma_complement_v1_20261019'
+         elif leaf == 'event_spool.py':
+             directory = ('curator_supervisor_convergence_v0/'
+@@ -95,7 +100,8 @@ def verify_evidence(directory: Path, *, require_committed: bool = True,
+         source_name(name)]
+         for name in executed_names}
+     script = (base / 'normal/synthetic_test.sh').read_text(encoding='utf-8')
+-    candidate_profile = research_candidate == 'pos_pma_complement_v1'
++    candidate_profile = research_candidate in {
++        'pos_pma_complement_v1', 'pos_pma_shared_view_v1'}
+     provider = status.get('provider_capture', {})
+     if candidate_profile:
+         host_ready = load('host_private/worker_ready.json')
+@@ -122,7 +128,7 @@ def verify_evidence(directory: Path, *, require_committed: bool = True,
+             bundled != expected_executed or
+             identity.get('harbor_commit') != HARBOR_COMMIT or
+             identity.get('upstream_commit') != UPSTREAM or
+-            identity.get('source_files') != source_hashes() or
++            identity.get('source_files') != source_hashes(include_shared=shared) or
+             identity.get('vendor_files') != vendor_hashes() or
+             result.get('condition') != 'P' or
+             result.get('research_candidate') != research_candidate or
+@@ -138,7 +144,7 @@ def verify_evidence(directory: Path, *, require_committed: bool = True,
+             status.get('close_bound') is not True or
+             worker.get('status') != 'completed' or
+             (worker.get('result', {}).get('pos', {}).get('success_known')
+-             if research_candidate == 'pos_pma_complement_v1' else
++             if candidate_profile else
+              worker.get('result', {}).get('success_known')) is not False or
+             closed.get('status') != 'graceful_exit' or
+             closed.get('worker_return_code') != 0 or
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/single_manifest.py b/method_discovery/pos_upstream_ga_v1_20261017/single_manifest.py
+index 5a3abdf7..2a5f9c64 100644
+--- a/method_discovery/pos_upstream_ga_v1_20261017/single_manifest.py
++++ b/method_discovery/pos_upstream_ga_v1_20261017/single_manifest.py
+@@ -71,8 +71,12 @@ def sha(path: Path) -> str:
+     return hashlib.sha256(path.read_bytes()).hexdigest()
+ 
+ 
+-def source_hashes() -> dict:
+-    return {name: sha(CHECKOUT / name) for name in SOURCE_FILES}
++SHARED_SOURCE_FILE = 'method_discovery/pos_pma_complement_v1_20261019/shared_view.py'
++
++
++def source_hashes(*, include_shared=False) -> dict:
++    names = (*SOURCE_FILES, SHARED_SOURCE_FILE) if include_shared else SOURCE_FILES
++    return {name: sha(CHECKOUT / name) for name in names}
+ 
+ 
+ def vendor_hashes() -> dict:
+@@ -101,18 +105,22 @@ def prepare(plan: dict, source: Path, task_profile: Path,
+             plan.get('execution_authorized') is not False or
+             plan.get('official_source_git_commit') != COMMIT or
+             plan.get('condition') != 'P' or plan.get('method') not in
+-                {'PoS', 'PoS-citation-fixed', 'pos_pma_complement_v1'} or
++                {'PoS', 'PoS-citation-fixed', 'pos_pma_complement_v1',
++                 'pos_pma_shared_view_v1'} or
+             type(plan.get('occurrence')) is not int or plan['occurrence'] < 1):
+         raise RuntimeError('PoS single-run plan identity invalid')
+     task = plan['task']
+     synthetic = plan.get('synthetic_fixture') is True
+     candidate_profile_fixture = plan.get('candidate_profile_fixture_only') is True
+     if candidate_profile_fixture and (not synthetic or
+-            plan['method'] != 'pos_pma_complement_v1'):
++            plan['method'] not in {'pos_pma_complement_v1', 'pos_pma_shared_view_v1'}):
+         raise RuntimeError('candidate profile fixture identity invalid')
+     policy = plan.get('task_complete_response_policy', 'disabled')
+     if policy not in {'disabled', 'complete-response-v1'} or (synthetic and policy != 'disabled'):
+         raise RuntimeError('PoS Task response policy invalid')
++    if plan['method'] == 'pos_pma_shared_view_v1' and not synthetic and (
++            policy != 'complete-response-v1'):
++        raise RuntimeError('shared-view formal Task requires complete-response-v1')
+     if synthetic != (task == SYNTHETIC_ID) or (not synthetic and task not in FOUR):
+         raise RuntimeError('PoS task not in frozen four or synthetic fixture')
+     profile = runpy.run_path(str(task_profile))['native_claude_cc_vibe_opus48']
+@@ -163,6 +171,7 @@ def prepare(plan: dict, source: Path, task_profile: Path,
+         'PoS': 'released-core PoS-on-GA transfer',
+         'PoS-citation-fixed': 'released-core PoS-on-GA transfer + decoded citation fix',
+         'pos_pma_complement_v1': 'pos_pma_complement_v1',
++        'pos_pma_shared_view_v1': 'pos_pma_shared_view_v1',
+     }[plan['method']]
+     method = {'name': method_name,
+               'citation_mode': ('released_core' if plan['method'] == 'PoS' else
+@@ -191,6 +200,12 @@ def prepare(plan: dict, source: Path, task_profile: Path,
+             'byte_budget_basis': 'conservative_engineering_cap_not_token_context',
+             'output_reserve': 'existing_frozen_max_tokens_per_role'}
+         method['candidate_profile_status'] = 'host_pinned_pma_transport_v1_requires_separate_authorization'
++    elif plan['method'] == 'pos_pma_shared_view_v1':
++        method['pma_trigger'] = {'interval': 1, 'first_step': True,
++                                 'sliding_window_size': 8,
++                                 'actor_step_mapping': 'actor_attempt_plus_one'}
++        method['shared_view_contract'] = 'pma-history-before-pos-single-ga-view-v1'
++        method['candidate_profile_status'] = 'host_pinned_pma_transport_v1_requires_separate_authorization'
+     if 'task_complete_response_policy' in plan:
+         method['task_complete_response_policy'] = policy
+     config_sha = hashlib.sha256(json.dumps(method, sort_keys=True,
+@@ -208,7 +223,7 @@ def prepare(plan: dict, source: Path, task_profile: Path,
+                          'committed_evidence_sha256': sha(index),
+                          'result': verified}
+     pma_profile_sha256 = None
+-    if plan['method'] == 'pos_pma_complement_v1' and (not synthetic or
++    if plan['method'] in {'pos_pma_complement_v1', 'pos_pma_shared_view_v1'} and (not synthetic or
+             candidate_profile_fixture):
+         if pma_profile is None:
+             raise RuntimeError('candidate requires existing private PMA profile identity')
+@@ -241,7 +256,9 @@ def prepare(plan: dict, source: Path, task_profile: Path,
+             'profile_identity_status': 'private_bytes_hashed_not_exported',
+             'resolved_models_public': {'task': {key: profile.get(key) for key in
+                 ('model', 'max_tokens', 'temperature', 'max_retries')}},
+-            'source_files_sha256': source_hashes(), 'vendor_files_sha256': vendor_hashes(),
++            'source_files_sha256': source_hashes(
++                include_shared=plan['method'] == 'pos_pma_shared_view_v1'),
++            'vendor_files_sha256': vendor_hashes(),
+             'pma_vendor_files_sha256': pma_vendor_hashes(),
+             'config': method, 'config_sha256': config_sha,
+             'planned_order': [row], 'assets': {task: asset},
+diff --git a/method_discovery/pos_upstream_ga_v1_20261017/worker.py b/method_discovery/pos_upstream_ga_v1_20261017/worker.py
+index 4cde106e..56ff2ac8 100644
+--- a/method_discovery/pos_upstream_ga_v1_20261017/worker.py
++++ b/method_discovery/pos_upstream_ga_v1_20261017/worker.py
+@@ -219,7 +219,8 @@ class RoleTransport:
+             self.sessions[role].max_retries = 0  # ignore Task retry env override
+         session = self.sessions[role]
+         if getattr(self, 'candidate_mode', False):
+-            session.candidate_request_byte_limit = 90000
++            session.candidate_request_byte_limit = (
++                None if getattr(self, 'shared_view_mode', False) else 90000)
+             session.candidate_auxiliary_integrity = True
+         overall = float(os.environ.get('GA_POS_DEADLINE_EPOCH', '0') or 0)
+         remaining = overall - time.time() if overall else float(
+@@ -410,7 +411,14 @@ def main():
+                     if episode is not None:
+                         raise RuntimeError('PoS episode already constructed')
+                     if command.get('candidate'):
++                        candidate_method = command.get('candidate_method',
++                            'pos_pma_complement_v1')
++                        if candidate_method not in {'pos_pma_complement_v1',
++                                'pos_pma_shared_view_v1'}:
++                            raise RuntimeError('unknown candidate method identity')
++                        shared_view = candidate_method == 'pos_pma_shared_view_v1'
+                         transport.candidate_mode = True
++                        transport.shared_view_mode = shared_view
+                         profile_client = None
+                         if args.mode == 'profile':
+                             for key, name in (('citation_fix_sha256', 'citation_fix.py'),
+@@ -420,6 +428,9 @@ def main():
+                                 if binding.get(key) != digest(
+                                         args.episode_module.with_name(name)):
+                                     raise RuntimeError('candidate source binding differs: ' + key)
++                            if shared_view and binding.get('shared_view_sha256') != digest(
++                                    args.episode_module.with_name('shared_view.py')):
++                                raise RuntimeError('shared-view source binding differs')
+                             from event_spool import EventClient
+                             deadline_epoch = float(os.environ['GA_POS_DEADLINE_EPOCH'])
+                             remaining = deadline_epoch - time.time()
+@@ -441,7 +452,10 @@ def main():
+                             fixture_uuid.__fixture_only__ = True
+                             sys.modules['shortuuid'] = fixture_uuid
+                         import candidate as candidate_module
+-                        from memory_adapter import ComplementMemoryAgent
++                        from memory_adapter import (ComplementMemoryAgent,
++                                                    SharedViewMemoryAgent)
++                        if shared_view:
++                            import shared_view as shared_module
+                         from memory_agent.memory.trigger import MemoryAgentTrigger, TriggerConfig
+                         from memory_agent.memory.universal_memory import UniversalMemory
+                         trigger_config = {'interval': 1, 'first_step': True,
+@@ -454,19 +468,26 @@ def main():
+                                 'byte_budget_basis': 'conservative_engineering_cap_not_token_context',
+                                 'output_reserve': 'existing_frozen_max_tokens_per_role'}
+                             if (not isinstance(frozen, dict) or
+-                                    frozen.get('candidate_limits') != expected_limits or
++                                    (shared_view and
++                                     frozen.get('name') != candidate_method) or
++                                    (not shared_view and
++                                     frozen.get('candidate_limits') != expected_limits) or
++                                    (shared_view and
++                                     frozen.get('candidate_limits') is not None) or
+                                     not isinstance(frozen.get('pma_profile_sha256'), str) or
+                                     len(frozen['pma_profile_sha256']) != 64 or
+                                     frozen.get('pma_trigger') != trigger_config):
+                                 raise RuntimeError('candidate resolved configuration differs')
+                             trigger_config = frozen['pma_trigger']
+-                        pma = ComplementMemoryAgent(llm=CandidatePMATransport(
++                        pma_class = SharedViewMemoryAgent if shared_view else ComplementMemoryAgent
++                        pma = pma_class(llm=CandidatePMATransport(
+                             role_transport=transport, profile_client=profile_client),
+                             memory=UniversalMemory())
+                         manager_slot = {}
+                         def candidate_consistency(messages):
+                             manager = manager_slot.get('manager')
+-                            if manager is not None and manager.revision_context:
++                            if (manager is not None and manager.revision_context and
++                                    not shared_view):
+                                 messages = [*messages, {'role': 'system',
+                                     'content': 'Previously delivered fallible advice, '
+                                     'not an external observation:\n' + manager.revision_context}]
+@@ -483,9 +504,12 @@ def main():
+                             belief_call=transport.caller('belief'),
+                             consistency_call=candidate_consistency,
+                             progress_call=transport.caller('progress'),
+-                            manager_class=candidate_module.ComplementBeliefManager)
++                            manager_class=(shared_module.SharedViewBeliefManager
++                                if shared_view else candidate_module.ComplementBeliefManager))
+                         manager_slot['manager'] = pos_episode.manager
+-                        episode = candidate_module.ComplementEpisode(
++                        episode_class = (shared_module.SharedViewEpisode if shared_view
++                                         else candidate_module.ComplementEpisode)
++                        episode = episode_class(
+                             pos_episode=pos_episode, memory_agent=pma,
+                             trigger=MemoryAgentTrigger(TriggerConfig(
+                                 interval=trigger_config['interval'],

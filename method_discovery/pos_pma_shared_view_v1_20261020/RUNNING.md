@@ -23,6 +23,18 @@ forces the final Task/PoS/PMA model hops to finite fake responses, checks the
 file and HTTP service with the synthetic sentinel, then removes its temporary
 authorization. It must never be run with a real provider profile.
 
+The completed v3 invocation used this command (replace the output with a new
+nonexistent directory before any future offline check):
+
+```powershell
+& E:\LongContext\bench_runtime\m4\harbor-env\Scripts\python.exe -B -m method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.single_run_fixture --task pos-synthetic-file-http --condition P --research-candidate pos_pma_shared_view_v1 --output E:\LongContext\pos_pma_shared_view_offline_20261020_v3 --official-source-git E:\pma-posthoc-official-source-20261014 --task-profile-file E:\LongContext\GenericAgent-main\mykey.py --pma-profile-file E:\LongContext\candidate_profile_docker_20261020_v4\fake_pma_profile.json --ga-source E:\longcontext-cqs-v0-20261005\GenericAgent-main --runtime-root E:\LongContext\bench_runtime\m2\linux --worker-python E:\LongContext\bench_runtime\pma_native_venv\Scripts\python.exe --harbor-python E:\LongContext\bench_runtime\m4\harbor-env\Scripts\python.exe --bench-root E:\longcontext-cqs-v0-20261005\long_context_bench --harbor-source-root E:\LongContext\bench_runtime\m4\harbor-src-pos-clean --candidate-profile-fixture --service-fixture
+```
+
+The Task profile is read only for binding and the finite fake gateway takes
+over the final model hop. The fake PMA profile is an isolated fixture, not a
+real-role profile. The v3 private output and its authorization-removal receipt
+are indexed by `raw_native_v3b/FILE_HASHES.json`.
+
 Future real use would require a separate source-bound certification, frozen
 manifest/profile/assets, per-run authorization and the existing native-SHARED
 stop/evaluate/cleanup chain. No such authorization exists in this package.
