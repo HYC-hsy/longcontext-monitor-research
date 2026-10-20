@@ -54,3 +54,4 @@ R1–R4 于源码冻结后编制，尚未用于改提示；今后若依据其模
 - 历史审计与开发集说明：`POS_AUDIT_SEMANTICS_EVIDENCE_V1.txt`；已补修的直接离线反例和原始 stdout 索引：`POS_AUDIT_BOUNDED_REPAIR_V2.txt`、`raw_pos_audit_bounded_repair_v2/manifest.json`。
 - 最终共享适配：`../pos_pma_complement_v1_20261019/shared_view.py`；Sentinel/提示：`../pos_upstream_ga_v1_20261017/vendor/belief/beliefSentinel.py` 与 `../pos_upstream_ga_v1_20261017/vendor/prompts/beliefSentinel_prompt.py`。PoS 固定上游为 `luoyu100/PoS@6818cfa6434dbc91fcf67f0b3eb12a91db47433f`，这两个本地 vendor 文件已有明确本地补丁，不能称原字节。
 - 前置只读核对：`git diff --name-status 3c4901c5 07e18c8d -- <上述运行源码>`；`git show` 比对三版本提示常量和 parser 分支；校验本文件与 case JSON hash。执行阶段还需冻结发送 payload bytes/hash、模型/profile 身份和裁决文件后才可请求新授权。本轮未生成授权，也未运行这些请求。
+- 逐格计划和执行顺序另见 `FROZEN_AUDIT_MATRIX_V1.csv`；所有行均为 `execution_authorized=false`，它不是一次性授权。
