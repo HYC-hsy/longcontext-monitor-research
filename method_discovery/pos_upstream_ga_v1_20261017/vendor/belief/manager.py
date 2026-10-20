@@ -466,6 +466,10 @@ class BeliefManager:
             config=self.config,
             consistency_issues=issue_payload,
             step=step,
+            rejected_candidate=(self._context_from_state(candidate)
+                if getattr(self, 'strict_audit_contract', False) else None),
+            original_patch=(initial_update
+                if getattr(self, 'strict_audit_contract', False) else None),
         )
         repaired_update, repaired = self._request_candidate(
             repair_messages,
@@ -1078,7 +1082,8 @@ class BeliefManager:
                 )
                 if attempt == self.max_json_retries:
                     raise
-                messages = build_belief_repair_prompt(messages, raw)
+                messages = build_belief_repair_prompt(messages, raw,
+                    include_failure_payload=getattr(self, 'strict_audit_contract', False))
             except (KeyError, TypeError, ValueError) as error:
                 self.logger.log(
                     "belief_model_schema_error",
@@ -1094,6 +1099,7 @@ class BeliefManager:
                     messages,
                     raw,
                     schema_error=str(error),
+                    include_failure_payload=getattr(self, 'strict_audit_contract', False),
                 )
         raise RuntimeError("Belief model did not return JSON")
 
@@ -1157,6 +1163,7 @@ class BeliefManager:
                 messages,
                 json.dumps(update, ensure_ascii=False),
                 schema_error=str(error),
+                include_failure_payload=getattr(self, 'strict_audit_contract', False),
             )
             repaired_update = self._request_json(
                 repair_messages,

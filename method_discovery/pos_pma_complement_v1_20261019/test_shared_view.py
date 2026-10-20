@@ -307,6 +307,23 @@ class Tests(unittest.TestCase):
                       if name == 'shared_audit_history_input']
         self.assertEqual(audit_meta[-1]['selection_sha256'],
                          audit_meta[-2]['selection_sha256'])
+        repair_body = json.dumps(belief.requests[2], ensure_ascii=False)
+        self.assertIn('Rejected candidate', repair_body)
+        self.assertIn('Original patch', repair_body)
+        self.assertIn('replacement incremental patch', repair_body)
+        self.assertIn('STILL_DIRTY', repair_body)
+        self.assertIn('Current structured Belief', repair_body)
+
+    def test_schema_repair_carries_each_actual_failed_response(self):
+        ep, belief, _, _ = self.make()
+        manager = ep.manager
+        manager.max_json_retries = 2
+        belief.replies = ['{first broken', '{second broken', json.dumps(INITIAL)]
+        manager._request_json([{'role': 'user', 'content': 'original task'}],
+                              operation='initialize', step=-1)
+        self.assertIn('{first broken', belief.requests[1][-1]['content'])
+        self.assertIn('{second broken', belief.requests[2][-1]['content'])
+        self.assertIn('original task', json.dumps(belief.requests[2]))
 
     def test_window_outside_source_reaches_phase2_and_repair(self):
         ep, belief, consistency, pma = self.make()

@@ -167,6 +167,7 @@ class SharedViewSentinel(CandidateSentinel):
 class SharedViewBeliefManager(ComplementBeliefManager):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.strict_audit_contract = True
         prior = self.sentinel
         if prior is not None:
             self.sentinel = SharedViewSentinel(prior.config, prior.call_model,

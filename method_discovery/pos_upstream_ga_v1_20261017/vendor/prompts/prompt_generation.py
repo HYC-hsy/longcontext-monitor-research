@@ -129,6 +129,8 @@ def build_belief_update_prompt(
     config: dict,
     consistency_issues: list[dict] | None = None,
     step: int | None = None,
+    rejected_candidate: dict | None = None,
+    original_patch: dict | None = None,
     **_: object,
 ) -> list[dict[str, str]]:
     """Build belief update prompt."""
@@ -140,6 +142,17 @@ def build_belief_update_prompt(
             "only these issues using the supplied observation:\n"
             + json.dumps(consistency_issues, ensure_ascii=False)
         )
+        if rejected_candidate is not None and original_patch is not None:
+            issue_section += (
+                "\nRejected candidate (not the patch application base):\n"
+                + json.dumps(rejected_candidate, ensure_ascii=False)
+                + "\nOriginal patch that produced that candidate:\n"
+                + json.dumps(original_patch, ensure_ascii=False)
+                + "\nReturn a complete replacement incremental patch applied ONCE to "
+                  "Current structured Belief, not a delta applied to the rejected "
+                  "candidate. Preserve unrelated evidence-supported additions and "
+                  "deletions from the original patch while correcting the cited issues."
+            )
     user = f"""Current structured Belief:
 {json.dumps(belief_context, ensure_ascii=False)}
 
@@ -193,6 +206,7 @@ def build_belief_repair_prompt(
     messages: list[dict[str, str]],
     raw_response: str,
     schema_error: str | None = None,
+    include_failure_payload: bool = False,
 ) -> list[dict[str, str]]:
     """Build belief repair prompt."""
 
@@ -206,7 +220,9 @@ def build_belief_repair_prompt(
         {
             "role": "user",
             "content": (
-                failure + "Return the same answer as one JSON object with exactly the "
+                failure + ("Actual failed response from this attempt:\n"
+                           + raw_response + "\n" if include_failure_payload else "")
+                + "Return the same answer as one JSON object with exactly the "
                 "requested keys; every array item must be a non-null object."
             ),
         }
