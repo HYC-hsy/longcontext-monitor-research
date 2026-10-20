@@ -76,7 +76,8 @@ def main() -> None:
     rows = []
     for name, path in sorted(files.items()):
         if path.suffix == '.jsonl':
-            rows.append(archive_line_file(name, path, args.output, secrets))
+            rows.append(archive_line_file(name, path, args.output, secrets,
+                                          max_part_bytes=1024 * 1024))
             continue
         size, source_hash = digest(path)
         try:
@@ -97,9 +98,11 @@ def main() -> None:
                                       'sha256': hashlib.sha256(data).hexdigest()}],
                      'redactions': redactions, 'omissions': []})
     index = args.output / 'FILE_HASHES.json'
+    run_id = json.loads((args.source / 'run_identity.json').read_text(
+        encoding='utf-8'))['run_id']
     with index.open('x', encoding='utf-8', newline='\n') as stream:
         json.dump({'schema': 'pos-pma-shared-view-single-live-public-v1',
-                   'run_id': 'pos-235d5ee3ccf64fa7', 'files': rows,
+                   'run_id': run_id, 'files': rows,
                    'public_copy_is_source_byte_identical': False},
                   stream, ensure_ascii=False, indent=2)
         stream.write('\n')

@@ -78,7 +78,7 @@ def selected(source: Path) -> dict[str, Path]:
 
 
 def archive_line_file(name: str, path: Path, target: Path,
-                      secrets: list[str]) -> dict:
+                      secrets: list[str], max_part_bytes: int = LIMIT) -> dict:
     source_bytes, source_sha = digest(path)
     parts, omissions = [], []
     stream = None
@@ -98,7 +98,7 @@ def archive_line_file(name: str, path: Path, target: Path,
                                       'source_bytes': len(raw),
                                       'reason': 'unsafe_public_projection'})
                     continue
-                if stream is None or (part_size + len(data) > LIMIT and part_size):
+                if stream is None or (part_size + len(data) > max_part_bytes and part_size):
                     if stream is not None:
                         stream.close()
                     part_number += 1

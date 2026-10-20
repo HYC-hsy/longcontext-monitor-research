@@ -1,0 +1,99 @@
+SQLite shared-view HTTP diagnosis and one new episode, 2026-10-20
+
+Observed failure and repair boundary
+------------------------------------
+The original run pos-235d5ee3ccf64fa7 remains unchanged: one PoS belief
+HTTP attempt returned 502 during initialization; Task EXCEPTION, Task model
+requests 0, official deterministic reward 0, cleanup confirmed. The saved
+provider event did not include the 502 response body, headers, upstream error
+code or request ID. A successful PMA Phase 1 call to the same private route
+preceded it. This does not establish whether the private proxy translated a
+billing error, encountered an upstream outage, or failed for another reason.
+No read-only billing dashboard was available; account balance remains unknown.
+
+Commit 049c1bc36cba53b459fea932574160ef7f2e0b2b adds safe HTTP-failure
+metadata at the actual NativeClaudeSession provider return boundary:
+status/outcome, a whitelisted JSON error type/code if present, response-body
+SHA-256 and UTF-8 byte count, Content-Type from a short whitelist, and a
+request-ID header name/fingerprint if present. Arbitrary response bodies,
+raw request IDs, endpoint and authentication headers are not put in the
+provider event. A required receipt write failure still prevents acceptance
+and cannot resend the already attempted request. PoS/PMA auxiliary retry
+count remains zero; this change does not repair or reinterpret the old 502.
+
+Offline check and certification
+-------------------------------
+Command: python -B -m pytest GenericAgent-main/tests/test_pma_capture_boundary.py
+  GenericAgent-main/tests/test_task_complete_response.py -q
+Result: 35 passed in 55.22s, Python exit 0. The new tests cover a billing
+error JSON, insufficient-quota JSON, opaque HTML, secret non-disclosure, one
+POST and capture failure without resend. The first harbor-env Python lacked
+pytest (No module named pytest); system Python with pytest ran the suite.
+
+The new full-fake single_run fixture used committed runtime source 049c1bc3,
+independent host PMA profile process, container PoS, synthetic Task file/HTTP
+service, native-SHARED sentinel and cleanup. It returned controller_exit=0,
+run pos-e1182397c56b4df1, authorization_removed=true. The new 64-file
+certification_httpdiag_v1 passed unchanged verify_evidence with
+require_committed=True, research_candidate=pos_pma_shared_view_v1. The
+certification's executed-source identity is 049c1bc3; its byte-preserving
+archive was later committed, without runtime-source changes, at 1bb6ecc5.
+Fake model traffic and synthetic tools/sentinel are not real method results.
+
+New authorized episode
+----------------------
+Only one fresh new sqlite-with-gcov/P/pos_pma_shared_view_v1 episode was
+launched: pos-41c50cafd3b24b87. Audited execution HEAD:
+1bb6ecc5a6e9c2b8ae1c88f94fd864070a955b09. Preparation retained
+execution_authorized=false; a separate single-use binding matched the new
+manifest SHA-256 f5fa112737014169403394f18ecf18f9387db10f58c851844274bb1b8541a198
+and config SHA-256 d84e331c6383fc5a913a2c4b55c30b35f49c13b3e298d21024a042f078f7786e.
+Task complete-response-v1 was enabled in manifest, authorization and process
+environment. No fake fixture flags were set. The prior profiles' byte hashes,
+registered task/evaluator assets and pinned image digest matched the new
+preparation. Task budget remained 300 turns/14400 seconds; the official
+SQLite verifier limit remained 900 seconds. No old workspace, bank, state,
+run ID or authorization was reused.
+
+This episode's Task terminal is CURRENT_TASK_DONE. Task provider ledger:
+14 logical requests, 14 observable POST attempts, 14 returns, 0 errors;
+14 decision records and 13 actual tool starts/outcomes. PoS provider ledger:
+57 logical role calls, 57 observable POST attempts, 57 returns, 0 HTTP or
+transport errors (belief 22, consistency 22, progress 13). PMA host spool:
+28 request/response pairs, all status=ok; lower-level LiteLLM attempts and
+PMA usage/cost cannot be independently recovered from that spool. The
+provider's more deeply hidden attempts and monetary charge remain unknown.
+No 502 recurred. A successful new run shows the fixed route was usable at
+this time, not why the old 502 occurred or the current account balance.
+
+The same Harbor/native-SHARED lifecycle ran the fixed official deterministic
+verifier once. It recorded reward=0.0. Task completion and reward are separate:
+the former is a runtime termination, the latter is the official task result;
+neither is a claim of PoS/PMA improvement. Auxiliary result/close were bound,
+provider capture complete, archive_incomplete=false, stopped-writer clearance
+confirmed, cleanup_confirmed=true, no remaining owned container/volume or
+run process. The one-use authorization was removed after this episode.
+There was no third episode, other task, separate compatibility probe or
+second evaluator.
+
+Public evidence and limits
+--------------------------
+raw_live_sqlite_httpdiag_v2_split/ contains individually readable redacted
+records. FILE_HASHES.json records each private-source byte length/SHA-256,
+each public part's byte length/SHA-256, redactions and omissions. 96 source
+files mapped to 109 public files; 253 redactions; two logs were withheld as
+unsafe_public_projection: pos/events.stderr.log and
+task/agent/agent_stdout.log. Their private source hashes are in the index;
+their omission does not mean the private originals were absent. Large JSONL
+logs were split at whole-record boundaries below 1 MiB. JSON projection
+and redaction can change bytes; public copies are not claimed byte-identical
+to private originals. A scan against values in both private profiles found
+zero remaining secret-value matches in the public directory. It is not a
+proof that every possible sensitive string was automatically identified.
+
+The 502 response body was never captured in the historical run; the new
+metadata cannot retroactively supply it. The failure's exact cause and
+account balance remain unknown. A future proxy failure can now be diagnosed
+from safe error codes when provided, but an opaque 502 still requires
+private proxy-side logs or billing records. No further real rerun is
+authorized by this report.
