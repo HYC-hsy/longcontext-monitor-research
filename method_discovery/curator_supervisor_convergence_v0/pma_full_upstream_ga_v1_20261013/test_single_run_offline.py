@@ -67,6 +67,15 @@ class SingleRunOfflineTests(unittest.TestCase):
         self.assertNotIn(b'PRIVATE_ONE', projected)
         self.assertIn(b'public', projected)
 
+    def test_public_projection_removes_client_metadata_identifier(self):
+        original = json.dumps({'payload': {'content': {'metadata': {
+            'user_id': '{"device_id":"SYNTHETIC_PRIVATE_CLIENT_ID"}'},
+            'messages': [{'role': 'user', 'content': 'Keep the Task text'}]}}}).encode()
+        public, changed = redact(original, [])
+        self.assertEqual(changed, 1)
+        self.assertNotIn(b'SYNTHETIC_PRIVATE_CLIENT_ID', public)
+        self.assertIn(b'Keep the Task text', public)
+
     def test_preparation_and_run_receipts_are_distinct(self):
         from tempfile import TemporaryDirectory
         from unittest.mock import patch
