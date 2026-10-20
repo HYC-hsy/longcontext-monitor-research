@@ -74,6 +74,14 @@ return a deliberately stale ID, and the re-run passed. That was fixture logic,
 not a production request. The final affected command ran 56 tests, exit 0;
 the original PoS offline command ran 6 tests, exit 0. Full console text and
 the exact commands are in POS_AUDIT_BOUNDED_REPAIR_V2_TEST_OUTPUT.txt.
+After the code commit, the same two final commands were repeated once through
+capture_pos_audit_offline_v2.py, which saves child stdout/stderr pipe bytes
+without decoding or reserializing them. Both exit codes were 0. Byte counts
+and SHA-256 hashes are in raw_pos_audit_bounded_repair_v2/manifest.json.
+Those four byte files are the raw-output evidence; TEST_OUTPUT is the earlier
+readable synopsis, not a byte-faithful capture. A bounded scan found no API
+key, Bearer header, URL or thinking marker in these generated files. This
+scan does not certify unrelated historical private logs.
 
 Four worktree SHA-256 values, computed after the final code edit (Windows file
 bytes; do not confuse with Git blob IDs):
