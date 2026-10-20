@@ -207,6 +207,7 @@ def build_belief_repair_prompt(
     raw_response: str,
     schema_error: str | None = None,
     include_failure_payload: bool = False,
+    normalized_patch: str | None = None,
 ) -> list[dict[str, str]]:
     """Build belief repair prompt."""
 
@@ -222,6 +223,9 @@ def build_belief_repair_prompt(
             "content": (
                 failure + ("Actual failed response from this attempt:\n"
                            + raw_response + "\n" if include_failure_payload else "")
+                + ("Normalized patch produced from that response before applying "
+                   "it to the original belief:\n" + normalized_patch + "\n"
+                   if include_failure_payload and normalized_patch is not None else "")
                 + "Return the same answer as one JSON object with exactly the "
                 "requested keys; every array item must be a non-null object."
             ),

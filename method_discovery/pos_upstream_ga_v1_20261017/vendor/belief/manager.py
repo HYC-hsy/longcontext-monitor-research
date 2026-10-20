@@ -11,6 +11,7 @@ from belief.beliefSentinel import (
     BeliefSentinel,
     ProgressFinding,
     SentinelFinding,
+    SentinelProtocolError,
 )
 from belief.beliefStates import (
     AchievementGap,
@@ -456,6 +457,8 @@ class BeliefManager:
             )
         except RuntimeError as error:
             if strict:
+                if not isinstance(error, SentinelProtocolError):
+                    raise
                 return unusable('initial_audit', error)
             self.logger.log(
                 "belief_candidate_rejected",
@@ -505,6 +508,8 @@ class BeliefManager:
             )
         except RuntimeError as error:
             if strict:
+                if not isinstance(error, SentinelProtocolError):
+                    raise
                 return unusable('repair_audit', error)
             self.logger.log(
                 "belief_candidate_rejected",
@@ -1092,6 +1097,9 @@ class BeliefManager:
             )
             try:
                 response = json.loads(raw)
+                if (getattr(self, 'strict_audit_contract', False) and
+                        operation in {'initialize', 'update', 'sentinel_repair'}):
+                    self._last_candidate_provider_raw = raw
                 response = self._normalize_model_payload(response, operation)
                 self._validate_model_payload(response, operation)
                 return response
@@ -1170,24 +1178,34 @@ class BeliefManager:
     ) -> tuple[dict, BeliefState]:
         """Build a candidate, allowing one targeted repair of cross-record references."""
 
+        if getattr(self, 'strict_audit_contract', False):
+            self._last_candidate_provider_raw = None
         update = self._request_json(messages, operation=operation, step=step)
         if operation == "initialize":
             base.goal.specification = str(update["goal_specification"])
         try:
             return update, self._build_candidate(base, update)
         except (KeyError, TypeError, ValueError) as error:
+            strict = getattr(self, 'strict_audit_contract', False)
+            raw_failed = (self._last_candidate_provider_raw if strict else None)
+            if strict and not isinstance(raw_failed, str):
+                raise RuntimeError('candidate raw response unavailable for repair') from error
+            normalized_failed = json.dumps(update, ensure_ascii=False)
             self.logger.log(
                 "belief_candidate_schema_error",
                 case_id=self.case_id,
                 step=step,
                 operation=operation,
                 error=str(error),
+                **({'provider_raw_response': raw_failed,
+                    'normalized_patch': normalized_failed} if strict else {}),
             )
             repair_messages = build_belief_repair_prompt(
                 messages,
-                json.dumps(update, ensure_ascii=False),
+                raw_failed if strict else normalized_failed,
                 schema_error=str(error),
-                include_failure_payload=getattr(self, 'strict_audit_contract', False),
+                include_failure_payload=strict,
+                normalized_patch=normalized_failed if strict else None,
             )
             repaired_update = self._request_json(
                 repair_messages,

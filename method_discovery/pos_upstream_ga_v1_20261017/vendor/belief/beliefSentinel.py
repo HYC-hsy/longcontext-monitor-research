@@ -19,6 +19,10 @@ from prompts.beliefSentinel_prompt import (
 from utils.logger import Logger
 
 
+class SentinelProtocolError(RuntimeError):
+    """A completed model response could not express a usable audit result."""
+
+
 @dataclass(slots=True)
 class SentinelIssue:
     """Minimal belief correction supported by quoted trajectory evidence."""
@@ -156,7 +160,8 @@ class BeliefSentinel:
                 audit_mode=mode,
                 error="invalid model response",
             )
-            raise RuntimeError("Sentinel consistency validation failed")
+            error_type = SentinelProtocolError if strict else RuntimeError
+            raise error_type("Sentinel consistency validation failed")
 
         evidence_by_step = {
             int(item["step"]): self._trajectory_text(item) for item in compact
@@ -164,12 +169,23 @@ class BeliefSentinel:
         valid_targets = self._valid_targets(belief_before) | self._valid_targets(
             candidate_belief
         )
+        if strict and not isinstance(payload, dict):
+            raise SentinelProtocolError("Sentinel response must be a JSON object")
         raw_issues = payload.get("issues")
         if not isinstance(raw_issues, list):
-            raise RuntimeError("Sentinel response must contain an issues list")
+            error_type = SentinelProtocolError if strict else RuntimeError
+            raise error_type("Sentinel response must contain an issues list")
         issues: list[SentinelIssue] = []
         filtered_reasons = []
-        for data in (raw_issues if strict else raw_issues[:1]):
+        for index, data in enumerate(raw_issues if strict else raw_issues[:1]):
+            if strict:
+                reason = self._strict_issue_schema_error(data)
+                if reason is not None:
+                    filtered_reasons.append(reason)
+                    self.logger.log("belief_sentinel_issue_discarded",
+                        case_id=case_id, step=base_step, audit_mode=mode,
+                        issue_index=index, reason=reason)
+                    continue
             try:
                 issue = SentinelIssue(**data)
             except TypeError:
@@ -198,6 +214,7 @@ class BeliefSentinel:
                 "step": base_step,
                 "audit_mode": mode,
                 "issues": [asdict(item) for item in findings],
+                **({'audit_result': dict(self.last_audit_result)} if strict else {}),
             }
         )
         self.logger.log(
@@ -207,8 +224,31 @@ class BeliefSentinel:
             audit_mode=mode,
             issue_count=len(findings),
             issues=[asdict(item.issue) for item in findings],
+            **({'audit_result': dict(self.last_audit_result)} if strict else {}),
         )
         return findings
+
+    @staticmethod
+    def _strict_issue_schema_error(data: object) -> str | None:
+        """Validate a reported issue before grounding; only the opt-in path uses this."""
+
+        fields = {"targets", "issue_type", "problem", "evidence_step",
+                  "evidence_quote", "evidence", "suggestion"}
+        if not isinstance(data, dict):
+            return "issue_not_object"
+        if set(data) != fields:
+            return "issue_fields_invalid"
+        targets = data["targets"]
+        if (not isinstance(targets, list) or not targets or
+                not all(isinstance(target, str) and target for target in targets)):
+            return "targets_invalid"
+        if type(data["evidence_step"]) is not int:
+            return "evidence_step_invalid"
+        for field in ("issue_type", "problem", "evidence_quote", "evidence",
+                      "suggestion"):
+            if not isinstance(data[field], str):
+                return field + "_invalid"
+        return None
 
     def submit_local(
         self,

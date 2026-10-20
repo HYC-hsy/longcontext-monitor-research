@@ -326,6 +326,30 @@ class Tests(unittest.TestCase):
         self.assertIn('{second broken', belief.requests[2][-1]['content'])
         self.assertIn('original task', json.dumps(belief.requests[2]))
 
+    def test_cross_record_repair_binds_provider_raw_and_normalized_patch(self):
+        ep, belief, _, _ = self.make()
+        asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.', actions=[]))
+        bad = deepcopy(UPDATE)
+        bad['upsert_relations'] = [{'relation_id': 'r-new', 'source': 'e1',
+            'target': 'missing-owner', 'relation_type': 'synthetic relation'}]
+        raw_bad = json.dumps(bad, ensure_ascii=False, separators=(',', ':'))
+        belief.replies = [raw_bad, json.dumps(UPDATE)]
+        update, _candidate = ep.manager._request_candidate(
+            [{'role': 'user', 'content': 'This event only'}],
+            base=ep.manager._current(), operation='update', step=0)
+        self.assertEqual(update, UPDATE)
+        self.assertEqual(len(belief.requests), 3)  # initialization + two here
+        repair_request = belief.requests[-1][-1]['content']
+        self.assertIn(raw_bad, repair_request)
+        self.assertIn('Normalized patch produced', repair_request)
+        self.assertIn('"source_id": "e1"', repair_request)
+        self.assertIn('Relation target does not exist', repair_request)
+        records = [row for name, row in ep.logger.rows
+                   if name == 'belief_candidate_schema_error']
+        self.assertEqual(records[-1]['provider_raw_response'], raw_bad)
+        self.assertIn('"target_id": "missing-owner"',
+                      records[-1]['normalized_patch'])
+
     def test_filtered_audit_is_unusable_and_keeps_raw_observation(self):
         ep, belief, consistency, _ = self.make()
         asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.', actions=[]))
@@ -404,6 +428,82 @@ class Tests(unittest.TestCase):
             raw_trajectory=trajectory), [])
         self.assertEqual(sentinel.last_audit_result['outcome'], 'clean')
 
+    def test_strict_audit_rejects_scalar_and_non_list_top_levels(self):
+        ep, _, consistency, _ = self.make()
+        asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.', actions=[]))
+        sentinel = ep.manager.sentinel
+        for payload in ([], 'text', 7, True, None, {}, {'issues': None},
+                        {'issues': 'not a list'}):
+            with self.subTest(payload=payload):
+                consistency.replies = [json.dumps(payload)]
+                with self.assertRaises(RuntimeError):
+                    sentinel.audit_candidate(case_id='shared-test', base_step=0,
+                        mode='local', belief_before=ep.manager._structured_context(),
+                        candidate_belief=ep.manager._structured_context(),
+                        raw_trajectory=[])
+                self.assertEqual(sentinel.last_audit_result['outcome'], 'unusable')
+
+    def test_strict_audit_filters_bad_issue_shapes_in_both_orders(self):
+        ep, _, consistency, _ = self.make()
+        asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.', actions=[]))
+        sentinel = ep.manager.sentinel
+        trajectory = [{'step': 0, 'action': None,
+            'observation': json.dumps({'tool_results': [{
+                'tool_use_id': 'tool-ok', 'result': {'stdout': 'VISIBLE_OK'}}]})}]
+        valid = {'targets': ['e1'], 'issue_type': 'contradiction',
+            'problem': 'Check result', 'evidence_step': 0,
+            'evidence_quote': 'VISIBLE_OK', 'evidence': 'VISIBLE_OK',
+            'suggestion': 'retain uncertainty'}
+        bad = [None, [], {'targets': ['e1']},
+            dict(valid, targets='e1'), dict(valid, targets=[1]),
+            dict(valid, evidence_step=True), dict(valid, evidence_step='0'),
+            dict(valid, evidence_quote=23)]
+        for malformed in bad:
+            for order in ((malformed, valid), (valid, malformed)):
+                with self.subTest(order=order):
+                    consistency.replies = [json.dumps({'issues': order})]
+                    findings = sentinel.audit_candidate(case_id='shared-test',
+                        base_step=0, mode='local',
+                        belief_before=ep.manager._structured_context(),
+                        candidate_belief=ep.manager._structured_context(),
+                        raw_trajectory=trajectory)
+                    self.assertEqual(len(findings), 1)
+                    self.assertEqual(sentinel.last_audit_result['outcome'], 'issues')
+                    self.assertEqual(sentinel.last_audit_result['filtered_count'], 1)
+            consistency.replies = [json.dumps({'issues': [malformed]})]
+            self.assertEqual(sentinel.audit_candidate(case_id='shared-test',
+                base_step=0, mode='local',
+                belief_before=ep.manager._structured_context(),
+                candidate_belief=ep.manager._structured_context(),
+                raw_trajectory=trajectory), [])
+            self.assertEqual(sentinel.last_audit_result['outcome'], 'unusable')
+
+    def test_transport_exception_is_not_converted_to_unusable_response(self):
+        ep, _, _, _ = self.make()
+        asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.', actions=[]))
+        sentinel = ep.manager.sentinel
+        def failed(_messages):
+            raise TimeoutError('synthetic transport deadline')
+        sentinel.call_model = failed
+        with self.assertRaisesRegex(TimeoutError, 'synthetic transport deadline'):
+            sentinel.audit_candidate(case_id='shared-test', base_step=0,
+                mode='local', belief_before=ep.manager._structured_context(),
+                candidate_belief=ep.manager._structured_context(),
+                raw_trajectory=[])
+        def runtime_failure(_messages):
+            raise RuntimeError('synthetic upstream transport failure')
+        sentinel.call_model = runtime_failure
+        source = {'origin': 'GA_tool_outcome', 'tool_use_id': 'tool-fail',
+                  'result': {'stdout': 'Current raw tool result'}}
+        with self.assertRaisesRegex(RuntimeError, 'upstream transport failure'):
+            asyncio.run(ep.update(actor_attempt=1, transition_id='transport-fail',
+                thought='Inspect', action_batch=[{'id': 'tool-fail',
+                    'name': 'inspect', 'arguments': {}, 'order': 0,
+                    'status': 'executed'}],
+                observation=json.dumps({'tool_results': [source]}),
+                source_events=[source]))
+        self.assertNotEqual(ep.manager.last_validation_outcome, 'unusable')
+
     def test_unusable_initialization_has_no_empty_committed_state(self):
         ep, _, consistency, _ = self.make()
         consistency.replies = ['{"issues": [{"invalid": true}]}']
@@ -434,6 +534,29 @@ class Tests(unittest.TestCase):
             source_events=[source]))
         self.assertEqual(ep.latest_update_outcome, 'unusable')
         self.assertEqual(len(belief.requests), 3)
+        self.assertIn('may be stale', ep.decision_panel(
+            observation='STILL_DIRTY')['panel'])
+
+    def test_reaudit_json_repair_exhaustion_is_unusable_without_progress(self):
+        ep, belief, consistency, _ = self.make()
+        issue = {'targets': ['e1'], 'issue_type': 'contradiction',
+            'problem': 'Current output conflicts', 'evidence_step': 0,
+            'evidence_quote': 'STILL_DIRTY', 'evidence': 'STILL_DIRTY',
+            'suggestion': 'keep gap'}
+        consistency.replies = ['{"issues": []}', json.dumps({'issues': [issue]}),
+                               '{bad json', '{still bad json']
+        belief.replies.append(json.dumps(UPDATE))
+        asyncio.run(ep.reset(task='Clean mug.', observation='Clean mug.', actions=[]))
+        source = {'origin': 'GA_tool_outcome', 'tool_use_id': 'tool-j',
+                  'result': {'stdout': 'STILL_DIRTY'}}
+        asyncio.run(ep.update(actor_attempt=1, transition_id='reaudit-json',
+            thought='Inspect', action_batch=[{'id': 'tool-j', 'name': 'inspect',
+                'arguments': {}, 'order': 0, 'status': 'executed'}],
+            observation=json.dumps({'tool_results': [source]}),
+            source_events=[source]))
+        self.assertEqual(ep.latest_update_outcome, 'unusable')
+        self.assertEqual(len(belief.requests), 3)  # original update + one repair
+        self.assertEqual(len(ep.manager.sentinel.call_progress_model.requests), 0)
         self.assertIn('may be stale', ep.decision_panel(
             observation='STILL_DIRTY')['panel'])
 
