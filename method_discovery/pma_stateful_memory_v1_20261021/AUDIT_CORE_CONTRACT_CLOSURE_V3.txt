@@ -1,0 +1,102 @@
+Stateful proactive memory v1: remaining core-contract closure, offline V3
+=======================================================================
+
+Fixed specification: f57a7c47a6b9a5d1c3911b886742e6627f625e76.
+Previous tested source: 87e09551460334d17b3fc4eebe0b4053c3e52c89.
+Previous archive: e6f6475a274eddc30ad6d5d83f5ead5237461e1e.
+V3 tested source: df2e0f8acc3f41be44d6bfd4a06341a264eee953.
+This report and evidence are later archive material, not changes to tested runtime code.
+
+Scoped implementation commits, each below 600 added+deleted lines:
+de1a1520 frozen exact aliases and historical selection context;
+423e9805 retirement-timing clarification and transition validation;
+46402251 durable transition evidence and idempotent commit identity;
+8131611b role-local wire contracts and actual response size measurement;
+121e530c GA13 stateful development fixture;
+c6617b08 historical replacement context;
+5dce6b38 transition record validation and message alias regression;
+eaa3ead8 multi-epoch replacement-history regression;
+c8bf23df closure branches and selection regressions;
+df2e0f8a repeatable fake-only V3 capture.
+
+The capture command was:
+python -B -m method_discovery.pma_stateful_memory_v1_20261021.run_offline_acceptance_v3
+All five child commands, their full argv, raw stdout/stderr, Python exit codes,
+file sizes/hashes and Git-blob/worktree SHA256 are in
+evidence/core_contract_closure_v3/manifest.json. The package discovery ran
+82 tests: 82 passed, 0 failed, 0 errors, 0 skipped. The separately captured
+V3-specific nine tests, GA13 one test, and continuous two tests are subsets
+of those 82, not additional independent tests. The eight fake scenarios and
+continuous chain are separate executions, not one experimental denominator.
+Continuous chain: 14 fake role calls/14 observable attempts, two synthetic
+Task tool actions, committed event frontier 3. No real model/provider,
+real Task, official evaluator, balance API, or network token-count calls.
+
+F1: retrieval.visible_stored_source_refs walks typed frozen visible objects,
+including current Requirement specifications and retirement refs, State
+support/challenge refs, gap closure, and exact historical Requirements.
+engine._catalog registers their validated stored spans as exact aliases.
+It does not loosen SourceCatalog.resolve or make unseen ledger content visible.
+Current/retirement aliases through build_candidate and all three final role
+messages are exercised in test_core_contract_closure_v3. Existing source
+tests cover wrong quotation and source visibility. No claim of exhaustive
+cross-product coverage is made.
+
+F2: engine._contextual_objects sends selected historical State and Requirement
+objects as explicitly historical context to audit and to selection's own
+re-retrieved workset. They are not inserted into the current W head or made
+eligible selected_refs. Selection budget counts the actual additional text;
+an over-budget request fails rather than silently deleting the old State.
+
+F3: each actual maintenance/audit/selection request now carries its own wire
+type closure. Audit receives GapRef/GoalDeltaRef, EvidenceRef, target, witness
+and ClosureAssessment shapes and basis/coverage rules. Selection has explicit
+silent/remind output without a protocol field. Runtime validators remain
+unchanged. The tests check actual messages and representative valid/invalid
+union branches; they do not prove that a real model will follow the contract.
+
+F4: a validated transition's operation, exact before/after StateRef, statuses,
+reason and internal SourceRefs are shown together in the audit operation
+index. The version-change record is committed transactionally with snapshot,
+archive, journal and frontier. It is queryable by update ID or exact State
+version after reopening the store. Commit fingerprint covers base/epoch,
+candidate and transition metadata; same-ID/different-metadata conflicts,
+same-ID/same-fingerprint retries return the original commit result even after
+head advancement. Transaction rollback and zero-transition ordinary commits
+have regression coverage. Builder enforces frozen request visibility; direct
+store calls validate persisted internal reference shape/source identity but
+are not a substitute for a frozen request catalog.
+
+C1: the separate SPEC_CLARIFICATION_RETIREMENT_TIMING_V1.txt states the
+bounded timing rule without changing any byte of the four fixed spec files.
+New/changed retirement links require a current active replacement; unchanged
+committed links retain their exact historical replacement version if it
+exists. Builder and CAS use the same transition check. The multi-epoch test
+retains A->B@1 after B@2 and later goal change/B retirement; new C->obsolete
+B@1 is rejected. This is history preservation, not automatic status upgrade.
+
+E1: V2 FiniteProvider measured json.dumps(response) although response was
+already a string. V3 measures exactly the returned string's Unicode length,
+UTF-8 bytes and local o200k_base proxy tokens; a separate raw UTF-8 hash is
+reported. The prior canonical response hash remains under its old name.
+V2 response-size values measured a wrapper and remain unmodified; V2 role
+call counts are unaffected. Quotes, backslashes, newline and Chinese are
+tested. Proxy tokens are not provider usage or cost.
+
+E2: GA13 development fixture reads archived action/result at lines 52/53,
+tool ID toolu_exwuJ8l8ii6K0TOkaI8jn6, and the corresponding archived task
+request. Archive and request SHA256 appear in ga13_development.stdout.txt.
+It never executes the archived command. The PATH Requirement, Knowledge,
+open gap, before state, candidates, fake audit issues and expectations are
+developer-authored, not a reconstructed historical model state. It covers a
+restrained candidate, a broad unsupported PATH closure repaired after an
+actual field-bound issue, and fake clean accepting a structurally legal but
+semantically wrong candidate. Gold/reward do not enter request construction.
+Its message sizes include the actual system contract and user payload.
+
+The low-priority duplicate display of identical source text remains. It was
+not removed at the cost of evidence visibility. This core fake-chain result
+does not provide GA single_run/Harbor integration, native context guard,
+provider failure-type validation, or source-bound Docker certification.
+Those remain blockers before any real experiment. Semantic false clean and
+advisory overclaim remain possible; no model effectiveness claim is made.
