@@ -28,9 +28,10 @@ def empty_snapshot():
 
 class ContractTests(unittest.TestCase):
     def test_strict_json(self):
-        for raw in ('{"x":1,"x":2}', '{"x":NaN}', '[1.2]'):
+        for raw in ('{"x":1,"x":2}', '{"x":NaN}', '{"x":Infinity}'):
             with self.assertRaises(ContractError):
                 strict_loads(raw)
+        self.assertEqual(strict_loads('[1.2]'), [1.2])
         self.assertEqual(strict_loads('{"字":"x"}'), {"字": "x"})
         self.assertEqual(canonical({"b": 2, "a": 1}), b'{"a":1,"b":2}')
 

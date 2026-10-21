@@ -77,6 +77,10 @@ class StoreTests(unittest.TestCase):
             incomplete = {**event, "source_ids": [orphan["source_id"]]}
             with self.assertRaisesRegex(ContractError, "incomplete_atomic_action_batch"):
                 self.store.append_event(incomplete, [orphan])
+        mismatched = {**event, "payload": {"actions": [
+            {"tool_use_id": "different-call"}]}}
+        with self.assertRaisesRegex(ContractError, "action_result_identity_mismatch"):
+            self.store.append_event(mismatched, sources)
         self.assertEqual(self.store.events_after(0), [])
 
     def test_goal_epoch_and_delivery_idempotency(self):

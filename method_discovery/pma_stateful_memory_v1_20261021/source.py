@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass
 
 
@@ -29,7 +30,8 @@ def canonical(value: object) -> bytes:
             for value in item:
                 check(value)
         elif isinstance(item, float):
-            raise ContractError("non_integer_metadata", "floating JSON values are not canonical")
+            if not math.isfinite(item):
+                raise ContractError("nonstandard_constant")
         elif item is not None and not isinstance(item, (bool, int)):
             raise ContractError("unsupported_json_value", type(item).__name__)
     check(value)

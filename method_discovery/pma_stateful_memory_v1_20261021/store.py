@@ -142,6 +142,17 @@ class MemoryStore:
             if not by_call or any(kinds != {"executed_action", "tool_result"}
                                   for kinds in by_call.values()):
                 raise ContractError("incomplete_atomic_action_batch")
+            payload = event["payload"]
+            if type(payload) is not dict:
+                raise ContractError("invalid_action_batch_payload")
+            actions = payload.get("actions")
+            if type(actions) is not list or any(type(item) is not dict or
+                    type(item.get("tool_use_id")) is not str or
+                    not item["tool_use_id"] for item in actions):
+                raise ContractError("invalid_action_batch_payload")
+            identifiers = [item["tool_use_id"] for item in actions]
+            if len(identifiers) != len(set(identifiers)) or set(identifiers) != set(by_call):
+                raise ContractError("action_result_identity_mismatch")
         elif event["kind"] == "user_message":
             if len(leaves) != 1 or leaves[0]["source_kind"] != "user_requirement":
                 raise ContractError("user_message_source_role")

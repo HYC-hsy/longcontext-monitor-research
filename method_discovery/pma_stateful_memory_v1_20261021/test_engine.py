@@ -27,7 +27,8 @@ def event(seq, text="observed result"):
     return {"event_id": identifier, "event_seq": seq, "kind": "action_batch",
             "occurred_at_step": seq,
             "source_ids": [action["source_id"], source["source_id"]],
-            "payload": {"commands": ["read_file"], "observation": text}}, [action, source]
+            "payload": {"actions": [{"tool_use_id": call_id}],
+                        "commands": ["read_file"], "observation": text}}, [action, source]
 
 
 class ScriptedProvider:
