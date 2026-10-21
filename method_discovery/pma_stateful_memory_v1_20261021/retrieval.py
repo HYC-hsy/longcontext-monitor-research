@@ -305,6 +305,22 @@ class WorksetBuilder:
                 if identity not in seen_requirements:
                     historical_requirements.append(old)
                     seen_requirements.add(identity)
+        for head in current_requirements.values():
+            retirement = head["retirement"]
+            if not retirement or retirement["kind"] != "interpretation_replaced":
+                continue
+            for ref in retirement["replacement_requirement_refs"]:
+                current = current_requirements.get(ref["requirement_id"])
+                if current and (current["revision"], current["task_version"]) == (
+                        ref["revision"], ref["task_version"]):
+                    continue
+                identity = ("requirement", ref["requirement_id"], ref["revision"])
+                old = archive.get(identity)
+                if old is None or old["task_version"] != ref["task_version"]:
+                    raise ContractError("source_unavailable", str(identity))
+                if identity not in seen_requirements:
+                    historical_requirements.append(old)
+                    seen_requirements.add(identity)
         mandatory["historical_requirements"] = historical_requirements
         batch = {"cycle_id": cycle_id,
                  "base_committed_event_seq": snapshot["committed_event_seq"],

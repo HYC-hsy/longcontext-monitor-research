@@ -242,6 +242,25 @@ class ClosureV3Tests(unittest.TestCase):
                     from .schema import validate_snapshot
                     validate_snapshot(invalid, store.sources(), store.archive(),
                                       store.goals()["deltas"])
+                store.append_event(*event(3, "subsequent result"))
+                provider = ScriptedProvider()
+                later = CycleEngine(store, provider, task_text="task").run(
+                    "retained-old-link")
+                self.assertEqual(later["status"], "committed_selection_silent")
+                for call in provider.calls:
+                    payload = json.loads(call["messages"][1]["content"])
+                    if call["role"] == "maintenance":
+                        context = payload["working_set"]["mandatory"][
+                            "historical_requirements"]
+                        self.assertTrue(any(item["requirement_id"] ==
+                            "replacement" and item["revision"] == 1 for item
+                            in context))
+                    else:
+                        context = payload["contextual_objects"]
+                        self.assertTrue(any(item["kind"] ==
+                            "archived_requirement" and item["record_ref"][
+                            "requirement_id"] == "replacement" and item[
+                            "record_ref"]["revision"] == 1 for item in context))
             finally:
                 store.close()
 
