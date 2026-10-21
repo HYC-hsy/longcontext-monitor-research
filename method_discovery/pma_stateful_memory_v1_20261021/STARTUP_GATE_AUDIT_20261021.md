@@ -55,3 +55,15 @@ route, package identity, effective no-retry transport, native context guard and
 total-budget semantics, then obtain a source-bound Harbor fake certification
 in a working Docker environment. None of these gates may be replaced by this
 audit note or by the historical direct-GA fixture.
+
+## Subsequent Docker correction (same day)
+
+The earlier Docker finding was incomplete: `AGENTS.md` already identifies the
+actual installation at `E:\Docker\Desktop`, not the default C: path checked
+above. Following its recovery SOP, `Docker Desktop.exe` was launched once.
+`docker info --format '{{.ServerVersion}}'` then returned `29.6.1` under the
+`desktop-linux` context. The local SQLite image is present with digest
+`sha256:f986820b00c74ce75db7288719d364df313fde7c7917bea6eb6352a08431a89f`.
+Thus Docker availability is no longer a blocker. The separate formal-route,
+source-bound fake-chain and native context guard gates above remain open; no
+real run or official evaluation was started during this correction.
