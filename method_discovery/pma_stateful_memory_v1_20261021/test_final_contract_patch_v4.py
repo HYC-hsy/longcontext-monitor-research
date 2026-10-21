@@ -281,3 +281,119 @@ class InitializationV4Tests(unittest.TestCase):
                     self.assertEqual(store.sources()['u0']['text'], 'task')
                 finally:
                     store.close()
+
+
+class CommitRetryV4Tests(unittest.TestCase):
+    def test_original_fingerprint_retries_after_head_advances_and_restart(self):
+        from .test_core_contract_closure_v3 import seeded_store
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'db'
+            store = seeded_store(path)
+            base = store.snapshot()
+            catalog = SourceCatalog(store.sources(), 'v4-retry')
+            span = catalog.add('tool-2', 0, len('next result'), 'maintenance')
+            patch = proposal('u1')
+            patch['base_state_version'] = base['state_version']
+            patch['world_patch']['record_transitions'] = [{
+                'record_ref': {'type': 'state', 'record_id': 's', 'revision': 1},
+                'to_status': 'contested', 'reason': 'new observation',
+                'evidence_refs': [{'evidence_id': span.evidence_id, 'quote': 'next result'}]}]
+            built = build_candidate(proposal=patch, base=base, catalog=catalog,
+                cycle_id='u1', processed_to=2, goal_ledger=store.goals(),
+                visible_existing_ids={('state', 's')}, archive=store.archive())
+            original = {'update_id': built['update_id'], 'cycle_id': 'u1',
+                'base': base, 'candidate': built['candidate'],
+                'archive_delta': built['archive_delta'],
+                'transition_changes': built['transition_changes']}
+            u1 = store.compare_and_swap(**original)
+            patch2 = proposal('u2')
+            patch2['base_state_version'] = built['candidate']['state_version']
+            u2 = build_candidate(proposal=patch2, base=store.snapshot(), catalog=catalog,
+                cycle_id='u2', processed_to=2, goal_ledger=store.goals(),
+                visible_existing_ids=set(), archive=store.archive())
+            store.compare_and_swap(update_id=u2['update_id'], cycle_id='u2',
+                base=store.snapshot(), candidate=u2['candidate'],
+                archive_delta=u2['archive_delta'], transition_changes=u2['transition_changes'])
+            head = store.snapshot()
+            self.assertEqual(head['state_version'], 3)
+            self.assertEqual(store.compare_and_swap(**original), u1)
+            store.close()
+            store = MemoryStore(path)
+            try:
+                self.assertEqual(store.compare_and_swap(**original), u1)
+                self.assertEqual(store.snapshot(), head)
+                for field, value in (('reason', 'another reason'), ('evidence_refs', [])):
+                    altered = deepcopy(original)
+                    altered['transition_changes'][0][field] = value
+                    with self.subTest(field=field), self.assertRaisesRegex(
+                            ContractError, 'update_id_identity_conflict'):
+                        store.compare_and_swap(**altered)
+                self.assertIn(('s', 1), store.archive())
+            finally:
+                store.close()
+
+    def test_committed_historical_retirement_chain_survives_reopen(self):
+        from .test_core_contract_closure_v3 import seeded_store
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'db'
+            store = seeded_store(path, retired_requirement=True)
+            base = store.snapshot()
+            catalog = SourceCatalog(store.sources(), 'v4-history')
+            span = catalog.add('u0', 0, 4, 'maintenance', exact_stored_ref=True)
+            patch = proposal('history')
+            patch['base_state_version'] = base['state_version']
+            replacement = deepcopy(base['B']['G']['specifications'][1])
+            replacement.update(revision=2, interpretation='revised interpretation',
+                               source_refs=[{'evidence_id': span.evidence_id, 'quote': 'task'}])
+            patch['specification_upserts'] = [replacement]
+            for gap in base['B']['DeltaE'] + base['B']['DeltaA']:
+                updated = deepcopy(gap)
+                updated['revision'] += 1
+                updated['goal_refs'][0]['revision'] = 2
+                patch['gap_upserts'].append(updated)
+            built = build_candidate(proposal=patch, base=base, catalog=catalog,
+                cycle_id='history', processed_to=2, goal_ledger=store.goals(),
+                visible_existing_ids={('requirement', 'replacement'), ('gap', 'ge'),
+                                      ('gap', 'ga'), ('state', 's')}, archive=store.archive())
+            store.compare_and_swap(update_id=built['update_id'], cycle_id='history',
+                base=base, candidate=built['candidate'], archive_delta=built['archive_delta'])
+            store.close()
+            reopened = MemoryStore(path)
+            try:
+                snapshot = reopened.snapshot()
+                validate_snapshot(snapshot, reopened.sources(), reopened.archive(),
+                                  reopened.goals()['deltas'])
+                retirement = snapshot['B']['G']['specifications'][0]['retirement']
+                self.assertEqual(retirement['replacement_requirement_refs'][0]['revision'], 1)
+                self.assertIn(('requirement', 'replacement', 1), reopened.archive())
+            finally:
+                reopened.close()
+
+
+class ActualMessagesV4Tests(unittest.TestCase):
+    def test_actual_role_messages_include_rules_in_measured_budget(self):
+        import json
+        from .budget import TokenProxy
+        from .engine import CycleEngine
+        from .test_engine import ScriptedProvider
+        with tempfile.TemporaryDirectory() as root:
+            store = MemoryStore(Path(root) / 'db')
+            try:
+                store.initialize(empty_snapshot(), leaf('task'))
+                provider = ScriptedProvider()
+                proxy = TokenProxy()
+                result = CycleEngine(store, provider, task_text='task', token_proxy=proxy).run('v4-messages')
+                self.assertEqual(result['status'], 'committed_selection_silent')
+                expected = {'maintenance': 'Requirement.source_refs | no',
+                            'audit': 'claim.support_refs.0.quote', 'selection': 'one to three'}
+                prepared = {row['body']['role']: row['body']['input_size'] for row in
+                    store.journal_rows(result['cycle_id']) if row['phase'] == 'call_prepared'}
+                self.assertEqual(set(expected), {call['role'] for call in provider.calls})
+                for call in provider.calls:
+                    self.assertIn(expected[call['role']], call['messages'][0]['content'])
+                    self.assertEqual(prepared[call['role']], proxy.measure(call['messages']))
+                    self.assertGreater(prepared[call['role']]['proxy_tokens'],
+                        proxy.measure([call['messages'][1]])['proxy_tokens'])
+                    json.loads(call['messages'][1]['content'])
+            finally:
+                store.close()
