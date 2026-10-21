@@ -113,6 +113,7 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
             from stateful_memory_bridge import StatefulLiveBridge
             stateful = StatefulLiveBridge.from_environment(initial_content,
                                                            turn_offset=turn_offset)
+            backend.stateful_native_preflight = stateful.native_preflight
         handler.parent._stateful_memory_bridge = stateful
     shared_view = os.environ.get('GA_POS_PMA_SHARED_VIEW') == '1'
     if shared_view and os.environ.get('GA_POS_PMA_COMPLEMENT') == '1':

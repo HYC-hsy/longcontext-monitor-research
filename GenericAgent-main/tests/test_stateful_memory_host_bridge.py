@@ -77,6 +77,11 @@ class StatefulHostBridgeTests(unittest.TestCase):
                             "Synthetic system", "Create synthetic artifact", handler,
                             client.backend.tools, max_turns=3, verbose=False))
                 self.assertEqual(len(server.payloads), 3)
+                events = [json.loads(line) for line in
+                    (private / 'archive/events.jsonl').read_text(
+                        encoding='utf-8').splitlines()]
+                self.assertEqual(sum(row['kind'] == 'count_tokens'
+                    for row in events), 3)
                 self.assertEqual(handler.calls, 2)
                 inserts = [raw.count(b"Auxiliary memory information")
                            for raw in server.payloads]

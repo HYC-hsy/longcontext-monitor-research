@@ -253,6 +253,12 @@ class StatefulLiveBridge:
         if content:
             self.client.exchange("agent_report", turn=turn, content=content)
 
+    def native_preflight(self, payload):
+        """Count the already wrapped Task payload in the private host."""
+        result = self.client.exchange("count_tokens", payload=payload)
+        if result.get("status") != "accepted":
+            raise StatefulBridgeError("native context preflight rejected")
+
     def complete_batch(self, turn, actions, receipts):
         if not actions:
             return None

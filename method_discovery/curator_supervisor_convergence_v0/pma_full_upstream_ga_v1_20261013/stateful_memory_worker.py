@@ -26,10 +26,11 @@ def _durable(path: Path, row: dict) -> None:
 
 class StatefulEpisode:
     def __init__(self, *, run_id: str, task_id: str, archive: Path,
-                 private: Path, provider):
+                 private: Path, provider, counter=None):
         self.run_id, self.task_id = run_id, task_id
         self.archive, self.private, self.provider = archive, private, provider
         self.bridge = None
+        self.counter = counter
         self.sequence = 0
         self.business = {}
 
@@ -86,6 +87,10 @@ class StatefulEpisode:
 
     def _handle(self, event: dict) -> dict:
         kind = event["kind"]
+        if kind == "count_tokens":
+            if self.counter is None:
+                raise RuntimeError("native context counter unavailable")
+            return self.counter(event["payload"])
         if kind == "initialize":
             return self._one_business_event(event, "initial", lambda:
                 self._initialize(event.get("task")))
@@ -173,10 +178,11 @@ async def serve(args) -> None:
         from method_discovery.pma_stateful_memory_v1_20261021.ga_fake_provider import FiniteGAFakeProvider
         provider = FiniteGAFakeProvider.from_file(args.fake_replies)
         mode = "fake-only"
+        counter = lambda payload: {"status": "accepted", "synthetic": True}
     else:
         raise RuntimeError("live auxiliary provider is not yet configured")
     episode = StatefulEpisode(run_id=args.run_id, task_id=args.task_id,
-        archive=archive, private=private, provider=provider)
+        archive=archive, private=private, provider=provider, counter=counter)
     dispatcher = EventDispatcher(episode, requests, responses)
     (private / "worker_ready.json").write_text(json.dumps({
         "run_id": args.run_id, "task_id": args.task_id,
