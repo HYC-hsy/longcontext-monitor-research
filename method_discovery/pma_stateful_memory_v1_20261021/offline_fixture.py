@@ -60,6 +60,7 @@ def scenario(name: str) -> dict:
                 provider.calls.extend(replay_provider.calls)
             task_delivery = "not_prepared"
             task_request_hash = None
+            post_delivery_event_id = None
             if first_result["status"] == "committed_reminder_ready":
                 reminder = first_result["reminder"]
                 messages = [{"role": "system", "content": "synthetic Task"},
@@ -80,6 +81,9 @@ def scenario(name: str) -> dict:
                         task_messages=messages, request_id="fake-task-request-1",
                         cycle_id=first_result["cycle_id"], send=fake_task_send)
                     task_delivery = "included_in_accepted_request"
+                    if name == "clean_remind":
+                        task.execute_synthetic_tool("synthetic later action result")
+                        post_delivery_event_id = store.events_after(1)[0]["event_id"]
                 except ContractError as error:
                     task_delivery = error.code
             cycle_ids = [first_result["cycle_id"]]
@@ -108,6 +112,7 @@ def scenario(name: str) -> dict:
                 "fake_user_revision_events": user_events,
                 "task_delivery": task_delivery,
                 "task_request_sha256": task_request_hash,
+                "post_delivery_event_id": post_delivery_event_id,
                 "real_model_calls": 0, "official_evaluator_calls": 0}
         finally:
             store.close()
@@ -128,7 +133,8 @@ def main() -> None:
                 ("characters", "utf8_bytes", "proxy_tokens")} for item in
                 result["request_sizes"]]
         rows.append(json.dumps(result, ensure_ascii=False, sort_keys=True))
-    record_name = ("FAKE_CHAIN_POST_STALE.jsonl" if "--record-post-stale" in sys.argv[1:]
+    record_name = ("FAKE_CHAIN_FOLLOWUP.jsonl" if "--record-followup" in sys.argv[1:]
+                   else "FAKE_CHAIN_POST_STALE.jsonl" if "--record-post-stale" in sys.argv[1:]
                    else "FAKE_CHAIN_STATUS_V1.jsonl" if "--record-status" in sys.argv[1:]
                    else "FAKE_CHAIN_FINAL.jsonl" if "--record-final" in sys.argv[1:]
                    else None)

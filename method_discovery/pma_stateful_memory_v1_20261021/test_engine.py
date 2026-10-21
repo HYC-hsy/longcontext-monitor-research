@@ -252,6 +252,10 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(sent[0][-1]["role"], "user")
         self.assertIn("not a new user requirement", sent[0][-1]["content"])
         self.assertIsNotNone(self.store.delivery_result(reminder["reminder_id"]))
+        self.store.append_event(*event(2, "synthetic later action result"))
+        self.assertEqual(self.store.events_after(1)[0]["event_id"], "batch-2")
+        self.assertEqual(self.store.delivery_result(reminder["reminder_id"])[
+            "request_id"], "task-request-1")
 
     def test_unusable_and_exhausted_audit_do_not_commit(self):
         for outcomes in (["unusable"], ["malformed", "malformed"]):
