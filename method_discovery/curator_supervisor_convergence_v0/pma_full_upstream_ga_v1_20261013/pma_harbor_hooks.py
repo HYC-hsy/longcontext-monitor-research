@@ -402,6 +402,19 @@ class NativeSharedTrialHooks(PMATrialHooks):
                 clearance.get('clean') is not True or
                 clearance.get('stopped') is not True):
             raise RuntimeError('native PMA sidecar not stopped')
+        if self.spec.get('research_candidate') == 'pma_stateful_memory_v1':
+            terminal_read = await self.trial.agent_environment.exec(
+                'cat /logs/agent/task_terminal.json', timeout_sec=30, user='root')
+            if terminal_read.return_code:
+                raise RuntimeError('stateful Task terminal receipt unavailable')
+            try:
+                terminal = json.loads(terminal_read.stdout)
+            except (TypeError, ValueError) as error:
+                raise RuntimeError('stateful Task terminal receipt invalid') from error
+            _atomic(self.archive / 'stateful_task_terminal.json', terminal)
+            if (not self.terminal_identity_valid(terminal) or
+                    terminal.get('result') not in {'CURRENT_TASK_DONE', 'EXITED'}):
+                raise RuntimeError('stateful Task did not finish with bound valid terminal')
         if await self._main_id() != self.container_id:
             raise RuntimeError('native main container replaced before verification')
         # Stop the inference gateway but preserve main, its writable layer,

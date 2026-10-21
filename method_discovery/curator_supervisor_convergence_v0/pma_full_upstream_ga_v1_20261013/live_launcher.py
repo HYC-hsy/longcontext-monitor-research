@@ -823,6 +823,11 @@ def run_live(args) -> dict:
                 encoding='utf-8')) if args.condition == 'P' else None
         except (OSError, ValueError):
             pos_archive = {'status': 'missing_or_unknown'}
+        try:
+            stateful_terminal = json.loads((root / 'archive/stateful_task_terminal.json').read_text(
+                encoding='utf-8')) if stateful else None
+        except (OSError, ValueError):
+            stateful_terminal = {'status': 'missing_or_unknown'}
         status = {'schema': manifest['schema'], 'run_id': args.run_id,
                   'task': args.task, 'condition': args.condition,
                   'research_candidate': candidate,
@@ -837,6 +842,7 @@ def run_live(args) -> dict:
                   'pma_finalization': clearance.get('pma_finalization')
                       if isinstance(clearance, dict) else None,
                   'pos_archive_status': pos_archive,
+                  'stateful_task_terminal': stateful_terminal,
                   'sidecar_clearance': clearance,
                   'remaining_containers': None if remaining is None else [m['id'] for m in remaining],
                   'cleanup_errors': cleanup_errors,
@@ -865,6 +871,15 @@ def run_live(args) -> dict:
 
 
 def live_status_success(status: dict) -> bool:
+    if status.get('research_candidate') == 'pma_stateful_memory_v1':
+        terminal = status.get('stateful_task_terminal') or {}
+        final = terminal.get('stateful_finalization') or {}
+        if (terminal.get('run_id') != status.get('run_id') or
+                terminal.get('task_id') != status.get('task') or
+                terminal.get('result') not in {'CURRENT_TASK_DONE', 'EXITED'} or
+                final.get('closed') is not True or
+                type(final.get('cycle_count')) is not int):
+            return False
     if status.get('condition') == 'P':
         archive = status.get('pos_archive_status') or {}
         if (archive.get('result_bound') is not True or

@@ -213,6 +213,7 @@ class StatefulLiveBridge:
         self.episode_id = episode_id
         self.closed = False
         self.last_result = None
+        self.finish_result = None
 
     @classmethod
     def from_environment(cls, task, *, turn_offset=0):
@@ -288,9 +289,13 @@ class StatefulLiveBridge:
 
     def finish(self, terminal):
         if self.closed:
-            return self.last_result
+            return self.finish_result
         try:
-            self.last_result = self.client.exchange("finish", terminal=terminal)
-            return self.last_result
+            self.finish_result = self.client.exchange("finish", terminal=terminal)
+            return self.finish_result
+        except BaseException as error:
+            self.finish_result = {"status": "failed",
+                                  "error_type": type(error).__name__}
+            raise
         finally:
             self.closed = True

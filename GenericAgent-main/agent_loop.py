@@ -633,7 +633,8 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
         final_outcome = {**final_outcome, 'pos_archive_incomplete': True,
                          'pos_auxiliary_errors': pos_auxiliary_errors}
     if stateful is not None:
-        handler.parent.stateful_finalization = stateful.finish(final_outcome)
+        handler.parent.stateful_finalization = stateful.finish(
+            _pos_public_value(final_outcome))
     _research_emit('termination', final_outcome, internal_turn=turn)
     _hook('agent_after', locals())
     return final_outcome

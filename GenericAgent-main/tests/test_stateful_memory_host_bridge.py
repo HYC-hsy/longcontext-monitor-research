@@ -74,7 +74,8 @@ class StatefulHostBridgeTests(unittest.TestCase):
                         ]
                     class FinishingHandler(SyntheticToolHandler):
                         def do_no_tool(self, args, response):
-                            return agent_loop.StepOutcome('synthetic done')
+                            # The real GA returns the response object itself here.
+                            return agent_loop.StepOutcome(response)
                     handler = FinishingHandler(root)
                     with research_context({"task_id": "synthetic-local-task",
                                            "run_id": "host-ga-test"}, lambda _: None):
@@ -87,6 +88,8 @@ class StatefulHostBridgeTests(unittest.TestCase):
                         encoding='utf-8').splitlines()]
                 self.assertEqual(sum(row['kind'] == 'count_tokens'
                     for row in events), 3)
+                self.assertEqual(sum(row['kind'] == 'finish'
+                    for row in events), 1)
                 self.assertEqual(handler.calls, 2)
                 inserts = [raw.count(b"Auxiliary memory information")
                            for raw in server.payloads]
