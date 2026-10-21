@@ -128,8 +128,11 @@ def main() -> None:
                 ("characters", "utf8_bytes", "proxy_tokens")} for item in
                 result["request_sizes"]]
         rows.append(json.dumps(result, ensure_ascii=False, sort_keys=True))
-    if "--record-final" in sys.argv[1:]:
-        target = Path(__file__).resolve().parent / "evidence" / "FAKE_CHAIN_FINAL.jsonl"
+    record_name = ("FAKE_CHAIN_STATUS_V1.jsonl" if "--record-status" in sys.argv[1:]
+                   else "FAKE_CHAIN_FINAL.jsonl" if "--record-final" in sys.argv[1:]
+                   else None)
+    if record_name:
+        target = Path(__file__).resolve().parent / "evidence" / record_name
         content = ("\n".join(rows) + "\n").encode("utf-8")
         if target.exists() and target.read_bytes() != content:
             raise RuntimeError("Refusing to overwrite a different fake evidence record")

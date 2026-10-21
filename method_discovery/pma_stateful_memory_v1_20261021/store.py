@@ -218,7 +218,9 @@ class MemoryStore:
             entry = cycles.setdefault(cycle_id, {})
             if phase == "workset_frozen":
                 entry["event_ids"] = body["event_ids"]
-            elif phase == "cycle_result" and body["status"] == "failed":
+            elif phase == "cycle_result" and body["status"] in {
+                    "init_failed", "update_rejected", "update_unusable",
+                    "runtime_failed"}:
                 entry["failure_class"] = body["error_code"]
         return [{"attempt_id": cycle_id,
                  "event_ids": [event_id for event_id in entry["event_ids"] if

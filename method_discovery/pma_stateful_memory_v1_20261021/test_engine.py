@@ -156,6 +156,22 @@ class EngineTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_initial_provider_failure_is_not_an_empty_accepted_state(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = MemoryStore(Path(root) / "initial-failure.sqlite3")
+            try:
+                store.initialize(empty_snapshot(), leaf("task"))
+                provider = ScriptedProvider(fail_role="maintenance")
+                result = CycleEngine(store, provider, task_text="task").run(
+                    "initial-failure")
+                self.assertEqual(result["status"], "init_failed")
+                self.assertEqual(result["failure_stage"], "provider")
+                self.assertEqual(store.snapshot()["state_version"], 0)
+                self.assertEqual([item["role"] for item in provider.calls],
+                                 ["maintenance"])
+            finally:
+                store.close()
+
     def test_audit_contract_one_shared_correction(self):
         provider = ScriptedProvider(outcomes=["malformed"])
         result = CycleEngine(self.store, provider, task_text="task").run("trigger-2")
@@ -187,8 +203,9 @@ class EngineTests(unittest.TestCase):
     def test_failure_preserves_pending_for_next_real_trigger(self):
         provider = ScriptedProvider(fail_role="audit")
         result = CycleEngine(self.store, provider, task_text="task").run("trigger-3")
-        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["status"], "runtime_failed")
         self.assertEqual(result["error_code"], "RuntimeError")
+        self.assertEqual(result["failure_stage"], "provider")
         self.assertEqual(self.store.snapshot()["committed_event_seq"], 0)
         fixed = ScriptedProvider()
         replay = CycleEngine(self.store, fixed, task_text="task").run("trigger-4")
@@ -241,9 +258,20 @@ class EngineTests(unittest.TestCase):
             provider = ScriptedProvider(outcomes=outcomes)
             result = CycleEngine(self.store, provider, task_text="task").run(
                 "unusable-" + str(len(outcomes)))
-            self.assertEqual(result["status"], "failed")
+            self.assertEqual(result["status"], "update_unusable")
             self.assertEqual(self.store.snapshot()["state_version"], 0)
             self.assertNotIn("selection", [call["role"] for call in provider.calls])
+
+    def test_valid_issue_after_shared_credit_is_update_rejected(self):
+        provider = ScriptedProvider(outcomes=["malformed", "issues"],
+                                    create_requirement=True)
+        result = CycleEngine(self.store, provider, task_text="task").run(
+            "credit-exhausted")
+        self.assertEqual(result["status"], "update_rejected")
+        self.assertEqual(result["error_code"], "blocking_issues_repair_exhausted")
+        self.assertEqual(self.store.snapshot()["state_version"], 0)
+        self.assertEqual([item["role"] for item in provider.calls],
+            ["maintenance", "audit", "audit_correction"])
 
     def test_selection_failure_does_not_roll_back_commit(self):
         provider = ScriptedProvider(fail_role="selection")
@@ -283,8 +311,9 @@ class EngineTests(unittest.TestCase):
             return answer
         result = CycleEngine(self.store, change_goal, task_text="task").run(
             "goal-change")
-        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["status"], "runtime_failed")
         self.assertEqual(result["error_code"], "goal_epoch_mismatch")
+        self.assertEqual(result["failure_stage"], "commit")
         self.assertEqual(self.store.snapshot()["state_version"], 0)
 
     def test_partial_prefix_commits_without_selection(self):

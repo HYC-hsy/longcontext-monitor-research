@@ -147,6 +147,7 @@ class CycleEngine:
             "pending_event_ids": [event["event_id"] for event in pending]})
         calls = 0
         credit = 1
+        stage = "preparation"
         try:
             ledger = self.store.sources()
             prior_attempts = self.store.failed_attempts_for({event["event_id"]
@@ -210,7 +211,9 @@ class CycleEngine:
             candidate = None
             while candidate is None:
                 calls += 1
+                stage = "provider"
                 raw = self._call(cycle_id, "maintenance", messages, calls, 8192)
+                stage = "model_validation"
                 try:
                     response = strict_loads(raw)
                     proposal = validate_proposal(response,
@@ -275,7 +278,9 @@ class CycleEngine:
                     contextual_objects=contextual)
                 audit_messages = audit(view)
                 calls += 1
+                stage = "provider"
                 raw = self._call(cycle_id, "audit", audit_messages, calls, 8192)
+                stage = "model_validation"
                 try:
                     response = strict_loads(raw)
                     result = validate_audit_result(response, view=view,
@@ -292,8 +297,10 @@ class CycleEngine:
                         base=before_view, rejected=after_view,
                         raw_response=raw, error=error.code, mode="audit_contract")
                     calls += 1
+                    stage = "provider"
                     corrected_raw = self._call(cycle_id, "audit_correction",
                                                correction, calls, 8192)
+                    stage = "model_validation"
                     result = validate_audit_result(strict_loads(corrected_raw), view=view,
                         catalog=catalog, archive={("state", item["record_ref"][
                             "record_id"], item["record_ref"]["revision"]): item["body"]
@@ -313,8 +320,10 @@ class CycleEngine:
                               "proposal": proposal, "issues": result["issues"]},
                     raw_response=raw, error="blocking_issues", mode="replacement_proposal")
                 calls += 1
+                stage = "provider"
                 replacement_raw = self._call(cycle_id, "candidate_repair",
                                              repair_messages, calls, 8192)
+                stage = "model_validation"
                 proposal = validate_proposal(strict_loads(replacement_raw),
                     request_id=binding["request_id"], task_version=goals["epoch"],
                     base_version=snapshot["state_version"])
@@ -323,6 +332,7 @@ class CycleEngine:
                     processed_to=body["observation_batch"]["processing_range"][
                         "to_event_seq"], goal_ledger=goals,
                     visible_existing_ids=mutable_ids, archive=self.store.archive())
+            stage = "commit"
             committed = self.store.compare_and_swap(update_id=candidate["update_id"],
                 cycle_id=cycle_id, base=snapshot, candidate=candidate["candidate"],
                 archive_delta=candidate["archive_delta"])
@@ -339,7 +349,13 @@ class CycleEngine:
             return outcome
         except BaseException as error:
             category = error.code if isinstance(error, ContractError) else type(error).__name__
-            failure = {"cycle_id": cycle_id, "status": "failed", "error_code": category,
+            status = ("init_failed" if snapshot["state_version"] == 0 and
+                      not pending else
+                      "update_rejected" if category == "blocking_issues_repair_exhausted" else
+                      "update_unusable" if stage == "model_validation" and
+                      isinstance(error, ContractError) else "runtime_failed")
+            failure = {"cycle_id": cycle_id, "status": status, "error_code": category,
+                       "failure_stage": stage,
                        "logical_calls": calls, "frontier": self.store.snapshot()[
                            "committed_event_seq"]}
             self.store.journal(cycle_id, "cycle_result", failure)
@@ -418,6 +434,8 @@ class CycleEngine:
                     "logical_calls": calls + 1}
         except BaseException as error:
             code = error.code if isinstance(error, ContractError) else type(error).__name__
-            return {"cycle_id": cycle_id, "status": "committed_selection_failed",
+            status = ("committed_selection_stale" if code == "selection_stale" else
+                      "committed_selection_failed")
+            return {"cycle_id": cycle_id, "status": status,
                     "commit": committed, "error_code": code,
                     "logical_calls": calls + 1}
