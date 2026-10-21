@@ -112,6 +112,9 @@ def validate_plan(manifest: dict, granted: dict) -> list[dict]:
                     'complete-response-v1' or
                  granted.get('task_complete_response_policy') !=
                     'complete-response-v1')) or
+                (stateful and (manifest.get('config', {}).get('agent_time_protocol') !=
+                    'diagnostic-uncapped-v1' or granted.get('agent_time_protocol') !=
+                    'diagnostic-uncapped-v1')) or
                 set(manifest.get('assets', {})) != {row['task']} or
                 _identity(bound) != _identity(row) or
                 bound.get('run_id') != granted.get('run_id') or

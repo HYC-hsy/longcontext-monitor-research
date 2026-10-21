@@ -112,6 +112,7 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
             required.add('research_candidate')
         if stateful:
             required.add('task_complete_response_policy')
+            required.add('agent_time_protocol')
         if (set(plan) != required or
                 plan['execution_authorized'] is not False or
                 plan['official_source_git_commit'] !=
@@ -122,6 +123,8 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
                                   if versioned else {'U'}) or
                 (stateful and (plan['condition'] != 'B' or
                  plan.get('task_complete_response_policy') != 'complete-response-v1')) or
+                (stateful and plan.get('agent_time_protocol') !=
+                 'diagnostic-uncapped-v1') or
                 (plan['condition'] == 'A' and candidate != 'U') or
                 type(plan['occurrence']) is not int or plan['occurrence'] < 1):
             raise RuntimeError('single-run plan schema mismatch')
@@ -216,6 +219,7 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
                 research_cumulative_calls=None, research_cumulative_tokens=None,
                 research_cumulative_cost=None,
                 task_complete_response_policy='complete-response-v1',
+                agent_time_protocol='diagnostic-uncapped-v1',
                 auxiliary_provider_retries=0, task_provider_retries=0,
                 native_context_guard_window_tokens=guard_window,
                 native_context_guard_basis=guard_basis)

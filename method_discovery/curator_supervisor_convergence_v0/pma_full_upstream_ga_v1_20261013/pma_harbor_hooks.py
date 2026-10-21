@@ -148,6 +148,20 @@ def verify_live_spec(spec: dict) -> None:
                               check=True).stdout.strip()
         if head != granted.get('audited_code_commit') or head != spec.get('audited_code_commit'):
             raise RuntimeError('PMA running code differs from authorized commit')
+        if spec.get('research_candidate') == 'pma_stateful_memory_v1':
+            diagnostic = spec.get('diagnostic_task_identity') or {}
+            task_root = Path(spec['run_root']) / 'public_task'
+            if (spec.get('agent_time_protocol') != 'diagnostic-uncapped-v1' or
+                    granted.get('agent_time_protocol') != 'diagnostic-uncapped-v1' or
+                    frozen.get('config', {}).get('agent_time_protocol') !=
+                    'diagnostic-uncapped-v1' or
+                    diagnostic.get('derived_task_tree_sha256') !=
+                    _tree_sha256(task_root) or
+                    diagnostic.get('derived_task_toml_sha256') !=
+                    hashlib.sha256((task_root / 'task.toml').read_bytes()).hexdigest() or
+                    diagnostic.get('original_task_tree_sha256') !=
+                    frozen['assets'][spec['task']]['public_task_tree_sha256']):
+                raise RuntimeError('stateful diagnostic task copy identity differs')
         return
     if (frozen.get('schema') != 'pma-ga-live-manifest-v1' or
             frozen.get('execution_authorized') is not False or
@@ -299,6 +313,11 @@ class NativeSharedTrialHooks(PMATrialHooks):
         # network expectation changed for an official-network Task.
         if getattr(self.trial.agent, 'run_id', None) != self.spec['run_id']:
             raise RuntimeError('PMA agent/run identity mismatch')
+        if self.spec.get('research_candidate') == 'pma_stateful_memory_v1' and (
+                self.trial._agent_timeout_sec is not None or
+                self.trial._verifier_timeout_sec != 900 or
+                getattr(self.trial.agent, 'condition_id', None) != 'stateful-memory-v1'):
+            raise RuntimeError('stateful diagnostic Harbor timeout not effective')
         container, raw = await self._inspect()
         mounts = {m['Destination']: m for m in raw.get('Mounts', [])}
         if raw['Image'] != self.spec['image_id'] or raw['HostConfig']['NetworkMode'] == 'none':

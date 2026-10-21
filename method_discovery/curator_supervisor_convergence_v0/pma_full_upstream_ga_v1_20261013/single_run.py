@@ -110,6 +110,9 @@ def prepare(args: argparse.Namespace) -> dict:
             if args.condition != 'B' or not args.task_complete_response:
                 raise RuntimeError('stateful candidate requires B carrier and complete response')
             plan['task_complete_response_policy'] = 'complete-response-v1'
+            if not getattr(args, 'stateful_uncapped_diagnostic', False):
+                raise RuntimeError('stateful live/fake entry requires explicit diagnostic protocol')
+            plan['agent_time_protocol'] = 'diagnostic-uncapped-v1'
     _write_new(root / 'plan.json', plan)
     if pos:
         from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import prepare as prepare_pos
@@ -168,6 +171,10 @@ def run(args: argparse.Namespace) -> dict:
                 granted.get('task_complete_response_policy', 'disabled') != policy or
                 actual != policy):
             raise RuntimeError('Task response policy differs from frozen PoS authorization')
+        if manifest.get('config', {}).get('research_candidate') == 'pma_stateful_memory_v1' and (
+                manifest['config'].get('agent_time_protocol') != 'diagnostic-uncapped-v1' or
+                granted.get('agent_time_protocol') != 'diagnostic-uncapped-v1'):
+            raise RuntimeError('stateful Agent time protocol differs from authorization')
     if (root / 'batch_result.json').exists() or Path(identity['run_root']).exists():
         raise FileExistsError('single-run result or run root already exists')
     options = argparse.Namespace(
@@ -215,6 +222,8 @@ def main() -> None:
     prepared.add_argument('--candidate-profile-fixture', action='store_true')
     prepared.add_argument('--task-complete-response', action='store_true',
                           help='bind complete-response-v1 for the Task only')
+    prepared.add_argument('--stateful-uncapped-diagnostic', action='store_true',
+                          help='bind nonstandard unlimited cumulative Agent time')
     prepared.add_argument('--certification-dir',
                           help='committed A/B Harbor evidence for future authorized use')
     launched = commands.add_parser('run', help='requires an independent one-use approval')

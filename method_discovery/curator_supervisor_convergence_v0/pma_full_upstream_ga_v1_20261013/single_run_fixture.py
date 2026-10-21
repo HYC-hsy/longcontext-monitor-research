@@ -54,6 +54,7 @@ def main() -> None:
         synthetic_pos_fixture=args.condition == 'P',
         candidate_profile_fixture=args.candidate_profile_fixture,
         task_complete_response=stateful,
+        stateful_uncapped_diagnostic=stateful,
         research_candidate=args.research_candidate,
         official_source_git=args.official_source_git,
         task_profile_file=args.task_profile_file,
@@ -105,6 +106,7 @@ def main() -> None:
             'output_root': identity['output_root']}
     if stateful:
         auth['task_complete_response_policy'] = 'complete-response-v1'
+        auth['agent_time_protocol'] = 'diagnostic-uncapped-v1'
     authorization = root / 'authorization.json'
     authorization.write_text(json.dumps(auth, indent=2), encoding='utf-8')
     command = [sys.executable, '-m',

@@ -5,6 +5,7 @@ adapter, A condition and other experiments do not import this module.
 """
 
 import hashlib
+import os
 from pathlib import Path
 
 from adapters import harbor_ga_agent as original
@@ -16,6 +17,7 @@ FORWARD = (
     "GA_STATEFUL_MEMORY_ENABLED",
     "GA_STATEFUL_MEMORY_MODE",
     "GA_STATEFUL_UNCAPPED_TOTAL",
+    "GA_STATEFUL_AGENT_TIME_PROTOCOL",
     "GA_STATEFUL_LIVE_AUTHORIZED",
     "GA_STATEFUL_REQUESTS",
     "GA_STATEFUL_RESPONSES",
@@ -71,6 +73,12 @@ class HarborGenericAgent(original.HarborGenericAgent):
             await start_networked_transport(environment, python_bin, original.CONTAINER_GA)
 
     async def run(self, instruction, environment, context) -> None:
+        if os.environ.get('GA_STATEFUL_AGENT_TIME_PROTOCOL') == 'diagnostic-uncapped-v1':
+            if (os.environ.get('GA_STATEFUL_MEMORY_ENABLED') != '1' or
+                    self.condition_id != 'stateful-memory-v1'):
+                raise RuntimeError('uncapped diagnostic requires stateful identity')
+            environment = _UncappedAgentExecution(environment, self.run_id,
+                                                   self.timeout_sec)
         try:
             await super().run(instruction, environment, context)
         except RuntimeError as exc:
@@ -84,3 +92,35 @@ class HarborGenericAgent(original.HarborGenericAgent):
                 from harbor.agents.installed.base import NonZeroAgentExitCodeError
                 raise NonZeroAgentExitCodeError(str(exc)) from exc
             raise
+
+
+class _UncappedAgentExecution:
+    """Candidate-only overlay for the pinned GA adapter's one long exec.
+
+    The base adapter's setup, environment, metadata, and failure handling remain
+    unchanged. Only its cumulative shell loop and exec timeout are removed.
+    """
+
+    def __init__(self, environment, run_id, base_timeout):
+        self._environment = environment
+        self._run_id = run_id
+        self._base_timeout = base_timeout
+        self.long_exec_seen = False
+
+    def __getattr__(self, name):
+        return getattr(self._environment, name)
+
+    async def exec(self, command, *args, **kwargs):
+        marker = f'# GA_WRAPPER_RUN_ID={self._run_id}\n'
+        if marker in command:
+            if self.long_exec_seen:
+                raise RuntimeError('stateful agent long exec repeated')
+            count = max(1, self._base_timeout // 2)
+            old = f'timed_out=1\nfor i in $(seq 1 {count}); do'
+            if command.count(marker) != 1 or command.count(old) != 1 or (
+                    kwargs.get('timeout_sec') != self._base_timeout + 90):
+                raise RuntimeError('pinned GA adapter timeout template changed')
+            command = command.replace(old, 'timed_out=0\nwhile :; do')
+            kwargs['timeout_sec'] = None
+            self.long_exec_seen = True
+        return await self._environment.exec(command, *args, **kwargs)

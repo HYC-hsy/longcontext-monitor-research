@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import subprocess
 import time
+import tomllib
 
 from long_context_bench.scripts.isolated_run_bundle import digest_tree
 
@@ -25,6 +26,32 @@ from .two_task_certification import verify_evidence
 
 def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _derive_uncapped_task(root: Path) -> dict:
+    """Modify only the new run's materialized task copy, never the fixed asset."""
+    path = root / 'public_task/task.toml'
+    original = path.read_bytes()
+    before = tomllib.loads(original.decode('utf-8'))
+    if before.get('agent', {}).get('timeout_sec') != 900.0 or (
+            before.get('verifier', {}).get('timeout_sec') != 900.0):
+        raise RuntimeError('diagnostic task does not have frozen 900/900 timeouts')
+    pattern = rb'(?m)(^\[agent\]\r?\n)timeout_sec = 900\.0\r?\n'
+    derived, count = re.subn(pattern, rb'\1', original)
+    if count != 1:
+        raise RuntimeError('diagnostic Agent timeout line not uniquely found')
+    after = tomllib.loads(derived.decode('utf-8'))
+    expected = json.loads(json.dumps(before))
+    expected['agent'].pop('timeout_sec')
+    if after != expected or after['agent'].get('timeout_sec') is not None:
+        raise RuntimeError('diagnostic task changed beyond Agent timeout')
+    path.write_bytes(derived)
+    return {'protocol': 'diagnostic-uncapped-v1',
+            'original_task_toml_sha256': hashlib.sha256(original).hexdigest(),
+            'derived_task_toml_sha256': hashlib.sha256(derived).hexdigest(),
+            'original_task_tree_sha256': None,
+            'derived_task_tree_sha256': digest_tree(root / 'public_task'),
+            'agent_timeout_sec': None, 'verifier_timeout_sec': 900.0}
 
 
 def _native_schema(manifest: dict) -> bool:
@@ -396,6 +423,10 @@ def run_live(args) -> dict:
             manifest.get('config', {}).get('task_turns_max', 'missing') is not None or
             manifest.get('config', {}).get('agent_wall_seconds', 'missing') is not None):
         raise RuntimeError('stateful authorization, policy or uncapped identity mismatch')
+    if stateful and (manifest['config'].get('agent_time_protocol') !=
+            'diagnostic-uncapped-v1' or authorized.get('agent_time_protocol') !=
+            'diagnostic-uncapped-v1'):
+        raise RuntimeError('stateful diagnostic Agent time binding mismatch')
     if (manifest.get('schema') in {'pma-ga-live-manifest-v3',
                                    'pma-ga-live-manifest-v4',
                                    'pma-ga-live-manifest-v5',
@@ -461,6 +492,11 @@ def run_live(args) -> dict:
         compose_path.write_text(json.dumps(compose), encoding='utf-8')
     if prepared['public_task_tree_sha256'] != manifest['assets'][args.task]['public_task_tree_sha256']:
         raise RuntimeError('PMA public task package differs from frozen identity')
+    diagnostic_task = _derive_uncapped_task(root) if stateful else None
+    if diagnostic_task is not None:
+        diagnostic_task['original_task_tree_sha256'] = prepared['public_task_tree_sha256']
+        (root / 'archive/diagnostic_task_identity.json').write_text(
+            json.dumps(diagnostic_task, sort_keys=True, indent=2), encoding='utf-8')
     order = args.order
     spec = {
         'schema': 'pma-ga-live-run-v1', 'mode': 'authorized_live',
@@ -476,6 +512,9 @@ def run_live(args) -> dict:
         'authorization_sha256': _sha(authorization_path),
         'audited_code_commit': authorized['audited_code_commit'],
     }
+    if stateful:
+        spec['agent_time_protocol'] = 'diagnostic-uncapped-v1'
+        spec['diagnostic_task_identity'] = diagnostic_task
     if _native_schema(manifest):
         spec.update(repeat=args.repeat, batch_id=authorized['batch_id'],
                     config_sha256=manifest['config_sha256'],
@@ -516,6 +555,10 @@ def run_live(args) -> dict:
         staged = _stage_verifier(root, args.task, manifest,
                                  Path(args.official_source_git))
     spec.update(staged)
+    if diagnostic_task is not None:
+        diagnostic_task['derived_task_tree_sha256'] = digest_tree(root / 'public_task')
+        (root / 'archive/diagnostic_task_identity.json').write_text(
+            json.dumps(diagnostic_task, sort_keys=True, indent=2), encoding='utf-8')
     if fixture:
         spec.update(official_source_git_commit='synthetic_no_official_evaluator',
                     expected_native_reports=[],
@@ -707,6 +750,8 @@ def run_live(args) -> dict:
                    GA_PMA_UPSTREAM_ENABLED='1' if args.condition == 'B' and not stateful else '0',
                    GA_PMA_CAPTURE_TASK_REQUESTS='1',
                    GA_PMA_ENABLED='0', GA_MONITOR_ENABLED='0', GA_M0_MONITOR_ENABLED='0')
+        if stateful:
+            env['GA_STATEFUL_AGENT_TIME_PROTOCOL'] = 'diagnostic-uncapped-v1'
         if task_policy == 'complete-response-v1' or (
                 args.condition != 'P' and env.get('GA_TASK_COMPLETE_RESPONSE') == '1'):
             env['GA_TASK_COMPLETE_RESPONSE'] = '1'
@@ -759,21 +804,23 @@ def run_live(args) -> dict:
                 env.get('GA_TASK_COMPLETE_RESPONSE') == '1' else 'disabled'),
             'evaluator_timeout_sec': manifest['assets'][args.task].get(
                 'native_verifier_seconds', 900),
-            'outer_timeout_sec': (agent_seconds if agent_seconds is not None else
+            'diagnostic_task_identity': diagnostic_task,
+            'outer_timeout_sec': None if stateful else (agent_seconds if agent_seconds is not None else
                 manifest['assets'][args.task]['native_agent_seconds']) + manifest['assets'][args.task].get(
                 'native_verifier_seconds', 900) + 600}, indent=2), encoding='utf-8')
         with (root / 'archive/harbor.stdout.log').open('wb') as out, (
                 root / 'archive/harbor.stderr.log').open('wb') as err:
             harbor = subprocess.Popen(command, cwd=repo, env=env, stdout=out, stderr=err)
-            outer_timeout_seconds = ((agent_seconds if agent_seconds is not None else
+            outer_timeout_seconds = None if stateful else ((agent_seconds if agent_seconds is not None else
                 manifest['assets'][args.task]['native_agent_seconds']) +
                 manifest['assets'][args.task].get('native_verifier_seconds', 900) + 600)
-            outer_deadline = time.time() + outer_timeout_seconds
+            outer_deadline = (None if outer_timeout_seconds is None else
+                              time.time() + outer_timeout_seconds)
             while harbor.poll() is None:
                 pending_end_at, stop_requested_at = _advance_worker_stop(
                     root, worker, deadline, pending_end_at, stop_requested_at)
                 _worker_clearance(root, worker, args.run_id)
-                if time.time() >= outer_deadline:
+                if outer_deadline is not None and time.time() >= outer_deadline:
                     raise subprocess.TimeoutExpired(command, outer_timeout_seconds)
                 time.sleep(.25)
             result = harbor.returncode
