@@ -38,3 +38,8 @@ transport failure taxonomy, full packaged-source certification, and real
 provider compatibility remain unverified. Real model, real benchmark Task,
 and official evaluator calls in this stage: zero. The local fake Task sends
 three HTTP POSTs and the finite method script makes nine fake role calls.
+
+`single_run.py` is in the older source-bound A/B certification file list.
+Consequently its historical fixture's execution identity no longer matches
+the current source after this entry change; that is an expected refusal, not
+evidence of a newly certified Harbor path. The old evidence is unchanged.
