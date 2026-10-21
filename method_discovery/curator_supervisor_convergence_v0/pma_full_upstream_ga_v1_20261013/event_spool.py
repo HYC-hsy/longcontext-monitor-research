@@ -40,19 +40,23 @@ class EventClient:
     """GA-side request/receipt client; timeout means delivery is unknown."""
 
     def __init__(self, request_dir: Path, response_dir: Path, run_id: str,
-                 task_id: str, *, deadline_monotonic: float):
+                 task_id: str, *, deadline_monotonic: float | None,
+                 worker_exit: Path | None = None):
         self.requests = Path(request_dir).resolve(strict=True)
         self.responses = Path(response_dir).resolve(strict=True)
         self.run_id = run_id
         self.task_id = task_id
         self.deadline = deadline_monotonic
+        self.worker_exit = Path(worker_exit) if worker_exit is not None else None
         self.sequence = 0
         if not self.requests.is_dir() or not self.responses.is_dir():
             raise SpoolError("PMA event spool unavailable")
 
     def exchange(self, kind: str, **fields):
-        if time.monotonic() >= self.deadline:
+        if self.deadline is not None and time.monotonic() >= self.deadline:
             raise SpoolError("PMA event deadline expired before send")
+        if self.worker_exit is not None and self.worker_exit.exists():
+            raise SpoolError("host worker exited before send")
         self.sequence += 1
         event_id = uuid.uuid4().hex
         request = {"schema": "pma-ga-events-v1", "kind": kind,
@@ -76,7 +80,9 @@ class EventClient:
                 if not isinstance(result, dict):
                     raise SpoolError("PMA result is not an object")
                 return result
-            if time.monotonic() >= self.deadline:
+            if self.worker_exit is not None and self.worker_exit.exists():
+                raise SpoolError("host worker exited; event result unknown")
+            if self.deadline is not None and time.monotonic() >= self.deadline:
                 raise SpoolError("PMA receipt unknown; accepted event will not be replayed")
             time.sleep(0.02)
 
