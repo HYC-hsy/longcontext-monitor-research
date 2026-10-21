@@ -1,0 +1,45 @@
+Nonstandard SQLite Agent-time diagnostic, first episode (immutable result)
+
+Run ID: pma-211a643d2d2b4ee7. Audited source commit:
+4b0542c2a0be755eb288872407cb1cefee78a3ba.
+Task: fixed sqlite-with-gcov source and evaluator. A run-local copy removed
+only [agent].timeout_sec=900; Harbor's final Agent timeout was checked as None.
+Verifier remained 900 seconds. This is NOT an original 900-second protocol
+score. No research-side cumulative turn/call/token/time/cost cap was added.
+
+The role worker initialized. Two native count requests returned HTTP 200
+(3,740 and 9,770 input tokens; 0.976 and 1.248 seconds). Two maintenance
+generation HTTP requests returned 200, with two complete public texts.
+Recorded usage: first input 1,343, cache creation 2,259, cache read 79,
+output 4,816; second input 6,262, cache creation 2,241, cache read 97,
+output 3,764. These are provider-reported categories, not a price quote.
+
+Both maintenance outputs were byte-identical (SHA256
+17d7f09efb374a2d4ce7fc751b94f9fc970042d972abb2f0f8584209572baf14)
+despite distinct request payload hashes. Each contained a Markdown code-fenced
+JSON object. The strict raw-JSON parser correctly classified the first as
+malformed_output, spent the one shared precommit correction, and classified
+the second identically. The fenced interior is syntactically JSON, but it was
+NOT parsed or accepted, and no semantic validation of it is claimed. The
+cycle_result is init_failed at model_validation; committed frontier stayed 0.
+No Task model request/action occurred. Task terminal was EXCEPTION. No official
+evaluation was released/executed; reward=unavailable, not 0. Worker and Harbor
+exited, remaining containers/volumes were cleared, and one-use authorization
+SHA256 fd8a2ccce8cebbd42196b3d54ac47d00d6515f87a2774005a4f880a5ce08869a
+was removed. No 15-minute marker was due because the run ended earlier.
+
+Private original per-file SHA256 (not public byte copies):
+archive/live_result.json 50bc24dda362f53fb16760398dfa6b5f47b898f6485ab63b6e4023a37c1a4da7
+archive/stateful_task_terminal.json 2b1dfb3d405b59d22a708a50e73207fb6c105a21bf842a62ba0f5ede7483e1
+archive/diagnostic_task_identity.json c039d4bbe13ee7d4059af8d5c1f895c797217f333a49e8f023ab7d2ab8ba68a5
+archive/agent_start_identity.json e9ed09ac43b1955ae188ad84ff9d287a7d93f6489a5cf0307ea71b4f3f4499a0
+host_private/archive/native_count.jsonl 53d6e6d7389d2988c6586011823302a83079a28d51bf3d204de1f4eea5f3f056
+host_private/archive/provider_events.jsonl 47c9503b91572bc7078415bcabfb48fec156f3c7579f962dc14878da4b2d2100
+host_private/archive/role_calls.jsonl 3788626a82f411961e1d8dec0960657cd8aabfccb85565516a41e88668728971
+host_private/archive/events.jsonl 4bb306aa3e255fa5b0a9423e9b7e57588b13204d0806f01fa8c51c6a36cef697
+host_private/archive/failures.jsonl 07201a135d082e8c6da3035cd514a2723f88e621c97889298b52c66f91fb8fe1
+host_private/memory.sqlite3 d635f65adaa66ecbde084afd3a594d84bb0aac053d559c4bc936a4fb7c1379f7
+
+This public audit omits private profile, endpoint, authentication, raw model
+body and hidden thinking. Raw originals remain in the private run directory.
+Its hash differs from every original listed above.
