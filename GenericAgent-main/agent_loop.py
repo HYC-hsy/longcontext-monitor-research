@@ -179,7 +179,9 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
     if os.environ.get('GA_PMA_ENABLED') == '1':
         from pma_baseline.runtime import from_environment
         pma = from_environment(initial_content)
-    while local_turn < handler.max_turns:
+    while (stateful_enabled and stateful_mode == 'live' and
+           os.environ.get('GA_STATEFUL_UNCAPPED_TOTAL') == '1') or \
+            local_turn < handler.max_turns:
         wait_correction = getattr(handler.parent, 'wait_monitor_correction', None)
         if wait_correction is not None and not wait_correction():
             break

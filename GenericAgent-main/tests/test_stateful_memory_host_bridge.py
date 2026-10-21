@@ -54,6 +54,7 @@ class StatefulHostBridgeTests(unittest.TestCase):
                     "GA_BENCH_RUN_ID": "host-ga-test",
                     "GA_BENCH_TASK_ID": "synthetic-local-task",
                     "GA_TASK_COMPLETE_RESPONSE": "1",
+                    "GA_STATEFUL_UNCAPPED_TOTAL": "1",
                     "GA_PROVIDER_MAX_RETRIES": "0",
                     "GA_TASK_DEADLINE_EPOCH": str(time.time() + 30),
                     "GA_POS_ENABLED": "0", "GA_PMA_UPSTREAM_ENABLED": "0",
@@ -69,13 +70,17 @@ class StatefulHostBridgeTests(unittest.TestCase):
                     client = llmcore.NativeToolClient(backend)
                     client.backend.tools = [{"type": "function", "function": {
                         "name": "touch", "description": "isolated synthetic file",
-                        "parameters": {"type": "object", "properties": {}}}}]
-                    handler = SyntheticToolHandler(root)
+                        "parameters": {"type": "object", "properties": {}}}},
+                        ]
+                    class FinishingHandler(SyntheticToolHandler):
+                        def do_no_tool(self, args, response):
+                            return agent_loop.StepOutcome('synthetic done')
+                    handler = FinishingHandler(root)
                     with research_context({"task_id": "synthetic-local-task",
                                            "run_id": "host-ga-test"}, lambda _: None):
                         agent_loop.exhaust(agent_loop.agent_runner_loop(client,
                             "Synthetic system", "Create synthetic artifact", handler,
-                            client.backend.tools, max_turns=3, verbose=False))
+                            client.backend.tools, max_turns=1, verbose=False))
                 self.assertEqual(len(server.payloads), 3)
                 events = [json.loads(line) for line in
                     (private / 'archive/events.jsonl').read_text(

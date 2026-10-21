@@ -370,7 +370,11 @@ class GenericAgent:
                     'GA_M0_MONITOR_ENABLED is a retired historical runtime. '
                     'Use the clean GA_MONITOR_ENABLED path.'
                 )
-            max_turns = int(os.environ.get('GA_MAX_TURNS', '180'))
+            stateful_uncapped = (os.environ.get('GA_STATEFUL_MEMORY_ENABLED') == '1'
+                and os.environ.get('GA_STATEFUL_MEMORY_MODE') == 'live'
+                and os.environ.get('GA_STATEFUL_UNCAPPED_TOTAL') == '1')
+            max_turns = None if stateful_uncapped else int(
+                os.environ.get('GA_MAX_TURNS', '180'))
             if os.environ.get('GA_MONITOR_ENABLED') == '1' and self.monitor_runtime is None:
                 from ga_monitor_adapter import GenericAgentMonitorAdapter
                 monitor_config_name = os.environ.get(

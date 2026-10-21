@@ -442,7 +442,11 @@ class GenericAgentHandler(BaseHandler):
     def _in_plan_mode(self): return self.working.get('in_plan_mode')
     def _exit_plan_mode(self): self.working.pop('in_plan_mode', None)
     def enter_plan_mode(self, plan_path): 
-        self.working['in_plan_mode'] = plan_path; self.max_turns = 100
+        self.working['in_plan_mode'] = plan_path
+        if not (os.environ.get('GA_STATEFUL_MEMORY_ENABLED') == '1' and
+                os.environ.get('GA_STATEFUL_MEMORY_MODE') == 'live' and
+                os.environ.get('GA_STATEFUL_UNCAPPED_TOTAL') == '1'):
+            self.max_turns = 100
         self.print(f"[Info] Entered plan mode with plan file: {plan_path}")
         return plan_path
     def _check_plan_completion(self):
