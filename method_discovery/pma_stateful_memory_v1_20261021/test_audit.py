@@ -4,6 +4,8 @@ from copy import deepcopy
 import unittest
 
 from .audit import AuditCodec, validate_audit_result
+from .budget import TokenProxy
+from .prompts import audit as audit_messages
 from .source import ContractError, SourceCatalog, canonical, digest
 from .test_contracts import empty_snapshot, leaf
 
@@ -90,6 +92,13 @@ class AuditTests(unittest.TestCase):
         self.assertLess(len(canonical(view)), len(canonical({
             "before": before, "candidate": after, "source_catalog": [],
             "observations": {"events": []}})))
+        proxy = TokenProxy()
+        deduplicated = proxy.measure(audit_messages(view))
+        repeated = proxy.measure(audit_messages({"before": before,
+            "candidate": after, "source_catalog": [],
+            "observations": {"events": []}}))
+        self.assertLess(deduplicated["proxy_tokens"], repeated["proxy_tokens"])
+        self.assertLess(deduplicated["utf8_bytes"], repeated["utf8_bytes"])
 
 
 if __name__ == "__main__":

@@ -33,10 +33,11 @@ def event(seq, text="observed result"):
 
 class ScriptedProvider:
     def __init__(self, *, outcomes=(), fail_role=None,
-                 create_requirement=False, remind=False):
+                 create_requirement=False, create_state=False, remind=False):
         self.outcomes = list(outcomes)
         self.fail_role = fail_role
         self.create_requirement = create_requirement
+        self.create_state = create_state
         self.remind = remind
         self.calls = []
 
@@ -49,6 +50,21 @@ class ScriptedProvider:
         if role in {"maintenance", "candidate_repair"}:
             binding = content.get("binding") or json.loads(messages[1]["content"])["binding"]
             additions = []
+            entities, states = [], []
+            if self.create_state and role == "maintenance":
+                evidence_id = next(item["evidence_id"] for item in
+                    content["source_catalog"] if item["source_kind"] == "tool_result"
+                    and item["purpose"] == "maintenance")
+                entities = [{"entity_id": "e1", "entity_type": "environment",
+                             "display_name": "synthetic workspace"}]
+                states = [{"record_id": "s1", "revision": 1, "entity_id": "e1",
+                    "scope": {"task_id": "task", "entity_ids": ["e1"], "conditions": []},
+                    "use_status": "active", "updated_at_step": 1, "supersedes": [],
+                    "kind": "knowledge", "claim": {"text": "observed result",
+                        "assertion_origin": "tool_observation",
+                        "time_role": "present_fact", "support_refs": [{
+                            "evidence_id": evidence_id, "quote": "observed result"}],
+                        "challenge_refs": []}}]
             if self.create_requirement and role == "maintenance":
                 additions = [{"requirement_id": "r1", "revision": 1,
                     "task_version": 1, "interpretation": "perform task",
@@ -60,7 +76,7 @@ class ScriptedProvider:
                 "request_id": binding["request_id"],
                 "active_task_version": binding["active_task_version"],
                 "base_state_version": binding["base_state_version"],
-                "world_patch": {"entity_upserts": [], "state_upserts": [],
+                "world_patch": {"entity_upserts": entities, "state_upserts": states,
                                 "relation_upserts": [], "record_transitions": []},
                 "specification_upserts": additions, "gap_upserts": [],
                 "gap_resolutions": [], "gap_reopens": [],
@@ -206,6 +222,16 @@ class EngineTests(unittest.TestCase):
         result = CycleEngine(self.store, provider, task_text="task").run("select-fail")
         self.assertEqual(result["status"], "committed_selection_failed")
         self.assertEqual(self.store.snapshot()["committed_event_seq"], 1)
+
+    def test_postcommit_index_rebuilt_before_selection(self):
+        provider = ScriptedProvider(create_state=True)
+        result = CycleEngine(self.store, provider, task_text="task").run("new-state")
+        self.assertEqual(result["status"], "committed_selection_silent")
+        selected = json.loads(provider.calls[-1]["messages"][1]["content"])[
+            "selected_refs"]
+        self.assertIn({"type": "state", "record_id": "s1", "revision": 1}, selected)
+        self.assertEqual(self.store.snapshot()["B"]["W"]["states"][0][
+            "claim"]["support_refs"][0]["source_id"], "tool-1")
 
     def test_goal_epoch_change_blocks_commit(self):
         provider = ScriptedProvider()
