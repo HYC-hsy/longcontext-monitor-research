@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 import time
 
-from event_spool import EventDispatcher
+from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.event_spool import EventDispatcher
 
 
 def _durable(path: Path, row: dict) -> None:

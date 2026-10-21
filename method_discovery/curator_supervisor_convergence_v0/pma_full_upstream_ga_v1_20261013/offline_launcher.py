@@ -87,6 +87,7 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
                      STAGE / "FOUR_RUN_MANIFEST_DRAFT.json" if fake_gateway
                      else Path(args.manifest).resolve(strict=True))
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    stateful = manifest.get('config', {}).get('research_candidate') == 'pma_stateful_memory_v1'
     single = not fake_gateway and manifest.get('schema') in {
         'pma-ga-live-manifest-v4', 'pma-ga-live-manifest-v5'}
     pos = args.condition == 'P'
@@ -122,6 +123,25 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
         ".git", "temp", "tests", "__pycache__", ".pytest_cache", "*.pyc",
         "*.local.json", "file_access_stats.json", "mykey.py"))
     shutil.copy2(Path(args.task_profile_file).resolve(strict=True), ga_stage / "mykey.py")
+    if stateful:
+        shutil.copy2(STAGE / 'event_spool.py', ga_stage / 'event_spool.py')
+        host_stage = root / 'control' / 'stateful_host_stage'
+        core_source = STAGE.parents[2] / 'method_discovery' / 'pma_stateful_memory_v1_20261021'
+        core_target = host_stage / 'method_discovery' / 'pma_stateful_memory_v1_20261021'
+        core_target.mkdir(parents=True)
+        for item in core_source.glob('*.py'):
+            if not item.name.startswith(('test_', 'run_offline_')):
+                shutil.copy2(item, core_target / item.name)
+        run_target = (host_stage / 'method_discovery' /
+            'curator_supervisor_convergence_v0' / 'pma_full_upstream_ga_v1_20261013')
+        run_target.mkdir(parents=True)
+        for name in ('event_spool.py', 'stateful_memory_worker.py',
+                     'stateful_native_count.py', 'stateful_role_provider.py'):
+            shutil.copy2(STAGE / name, run_target / name)
+        bm25 = (STAGE / 'vendor/pma_89e5c0d/src/memory_agent/memory/bm25_search.py')
+        bm25_target = run_target / 'vendor/pma_89e5c0d/src/memory_agent/memory'
+        bm25_target.mkdir(parents=True)
+        shutil.copy2(bm25, bm25_target / bm25.name)
     if pos:
         pos_source = STAGE.parents[1] / 'pos_upstream_ga_v1_20261017'
         pos_stage = ga_stage / 'pos_runtime'
@@ -252,6 +272,10 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
                       "pos-ga-single-manifest-v1"}
                   else "none_requested"),
               "native_evaluator_calls": 0, "fake_provider_only": fake_gateway}
+    if stateful:
+        record['stateful_host_bundle_tree_sha256'] = digest_tree(host_stage)
+        record['stateful_task_spool_sha256'] = hashlib.sha256(
+            (source / 'event_spool.py').read_bytes()).hexdigest()
     (root / "archive" / "prepared.json").write_text(
         json.dumps(record, indent=2), encoding="utf-8")
     return record
