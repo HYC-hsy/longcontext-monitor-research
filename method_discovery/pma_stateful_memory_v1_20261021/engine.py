@@ -115,7 +115,9 @@ class CycleEngine:
             if index.state_hash != digest(snapshot):
                 raise ContractError("index_unavailable")
             recent = self.store.events_after(max(0, frozen_tip - 8))
-            query = query_text(self.task_text, [], [event["payload"] for event in recent])
+            query = query_text(self.task_text,
+                [ledger[source_id]["text"] for source_id in goals["messages"][1:]],
+                [event["payload"] for event in recent])
             ranked = index.select(query)
             def prepare_maintenance(body):
                 catalog, visible = self._catalog(ledger, body)
@@ -274,7 +276,10 @@ class CycleEngine:
             current_index = MemoryIndex(snapshot)
             if current_index.state_hash != digest(snapshot):
                 raise ContractError("index_unavailable")
-            query = query_text(self.task_text, [], [event["payload"] for event in
+            ledger = self.store.sources()
+            query = query_text(self.task_text,
+                [ledger[source_id]["text"] for source_id in self.store.goals()[
+                    "messages"][1:]], [event["payload"] for event in
                                self.store.events_after(max(0, snapshot[
                                    "committed_event_seq"] - 8))])
             selected = current_index.select(query)

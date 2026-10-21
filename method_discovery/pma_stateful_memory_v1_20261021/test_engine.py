@@ -15,13 +15,19 @@ from .test_contracts import empty_snapshot, leaf
 
 def event(seq, text="observed result"):
     identifier = f"batch-{seq}"
-    source = {"source_id": f"tool-{seq}", "event_id": identifier,
+    call_id = f"tool-call-{seq}"
+    source = {"source_id": f"tool-{seq}", "event_id": call_id,
               "field_path": "tool_results.0.result.content", "source_kind": "tool_result",
               "ga_turn": seq, "event_seq": seq, "truncated": False,
               "text": text, "text_sha256": hashlib.sha256(text.encode()).hexdigest()}
+    action = leaf("read_file", source_id=f"action-{seq}",
+                  source_kind="executed_action")
+    action.update(event_id=call_id, event_seq=seq, ga_turn=seq,
+                  field_path="actions.0.arguments")
     return {"event_id": identifier, "event_seq": seq, "kind": "action_batch",
-            "occurred_at_step": seq, "source_ids": [source["source_id"]],
-            "payload": {"commands": ["read_file"], "observation": text}}, [source]
+            "occurred_at_step": seq,
+            "source_ids": [action["source_id"], source["source_id"]],
+            "payload": {"commands": ["read_file"], "observation": text}}, [action, source]
 
 
 class ScriptedProvider:

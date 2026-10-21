@@ -133,6 +133,20 @@ class MemoryStore:
             # to the host's indivisible action batch.
             if leaf["event_seq"] != seq:
                 raise ContractError("event_leaf_identity")
+        if event["kind"] == "action_batch":
+            by_call = {}
+            for leaf in leaves:
+                if leaf["source_kind"] not in {"executed_action", "tool_result"}:
+                    raise ContractError("invalid_action_batch_source")
+                by_call.setdefault(leaf["event_id"], set()).add(leaf["source_kind"])
+            if not by_call or any(kinds != {"executed_action", "tool_result"}
+                                  for kinds in by_call.values()):
+                raise ContractError("incomplete_atomic_action_batch")
+        elif event["kind"] == "user_message":
+            if len(leaves) != 1 or leaves[0]["source_kind"] != "user_requirement":
+                raise ContractError("user_message_source_role")
+        elif not leaves or any(leaf["source_kind"] != "agent_report" for leaf in leaves):
+            raise ContractError("agent_report_source_role")
         raw = canonical(event)
         event_hash = digest(event)
         with self.transaction():

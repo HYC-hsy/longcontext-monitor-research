@@ -25,31 +25,37 @@ class StoreTests(unittest.TestCase):
         source = leaf(text, source_id=f"out-{seq}", source_kind="tool_result")
         source.update(event_id=f"tool-use-{seq}", event_seq=seq, ga_turn=seq,
                       field_path="result.stdout")
+        action = leaf("run synthetic command", source_id=f"action-{seq}",
+                      source_kind="executed_action")
+        action.update(event_id=f"tool-use-{seq}", event_seq=seq, ga_turn=seq,
+                      field_path="action.arguments")
         event = {"event_id": f"batch-{seq}", "event_seq": seq,
                  "kind": "action_batch", "occurred_at_step": seq,
-                 "source_ids": [source["source_id"]], "payload": {"actions": []}}
-        return event, source
+                 "source_ids": [action["source_id"], source["source_id"]],
+                 "payload": {"actions": [{"tool_use_id": f"tool-use-{seq}"}]}}
+        return event, [action, source]
 
     def test_idempotent_source_and_atomic_batch(self):
-        event, source = self.action()
-        self.store.append_event(event, [source])
-        self.store.append_event(event, [source])
+        event, sources = self.action()
+        source = sources[1]
+        self.store.append_event(event, sources)
+        self.store.append_event(event, sources)
         self.assertEqual(len(self.store.events_after(0)), 1)
         self.assertEqual(self.store.sources()[source["source_id"]]["event_id"],
                          "tool-use-1")
         changed = deepcopy(source)
         changed["text"] = "different"
         with self.assertRaises(ContractError):
-            self.store.append_event(event, [changed])
+            self.store.append_event(event, [sources[0], changed])
         self.assertEqual(self.store.sources()[source["source_id"]], source)
-        event2, source2 = self.action(seq=3)
+        event2, sources2 = self.action(seq=3)
         with self.assertRaises(ContractError):
-            self.store.append_event(event2, [source2])
+            self.store.append_event(event2, sources2)
         self.assertEqual(len(self.store.events_after(0)), 1)
 
     def test_commit_cas_frontier_and_uncertain_result_lookup(self):
-        event, source = self.action()
-        self.store.append_event(event, [source])
+        event, sources = self.action()
+        self.store.append_event(event, sources)
         candidate = deepcopy(self.base)
         candidate["state_version"] = 1
         candidate["committed_event_seq"] = 1
@@ -64,6 +70,14 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             self.store.compare_and_swap(update_id="update-2", cycle_id="cycle-2",
                 base=self.base, candidate=candidate, archive_delta=[])
+
+    def test_action_batch_rejects_unpaired_tool_result_or_action(self):
+        event, sources = self.action()
+        for orphan in sources:
+            incomplete = {**event, "source_ids": [orphan["source_id"]]}
+            with self.assertRaisesRegex(ContractError, "incomplete_atomic_action_batch"):
+                self.store.append_event(incomplete, [orphan])
+        self.assertEqual(self.store.events_after(0), [])
 
     def test_goal_epoch_and_delivery_idempotency(self):
         source = leaf("new task", source_id="u1")
