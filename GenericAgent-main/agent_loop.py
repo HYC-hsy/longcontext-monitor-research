@@ -78,6 +78,30 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
     pma = None
     pma_upstream = None
     pos = None
+    stateful = None
+    stateful_enabled = os.environ.get('GA_STATEFUL_MEMORY_ENABLED') == '1'
+    if stateful_enabled:
+        if any(os.environ.get(name) == '1' for name in (
+                'GA_POS_ENABLED', 'GA_PMA_UPSTREAM_ENABLED', 'GA_PMA_ENABLED',
+                'GA_MONITOR_ENABLED', 'GA_M0_MONITOR_ENABLED',
+                'GA_POS_PMA_COMPLEMENT', 'GA_POS_PMA_SHARED_VIEW')):
+            raise ValueError('stateful memory is exclusive of prior auxiliary modes')
+        if (os.environ.get('GA_STATEFUL_MEMORY_MODE') != 'fake-only' or
+                os.environ.get('GA_TASK_COMPLETE_RESPONSE') != '1' or
+                not getattr(getattr(client, 'backend', None),
+                            'task_complete_response', False)):
+            raise ValueError('stateful memory requires fake-only complete-response Task')
+        from urllib.parse import urlsplit
+        backend = client.backend
+        endpoint = urlsplit(getattr(backend, 'api_base', ''))
+        if (endpoint.scheme != 'http' or endpoint.hostname not in
+                {'127.0.0.1', 'localhost', '::1'} or
+                getattr(backend, 'api_key', None) != 'synthetic-only'):
+            raise ValueError('stateful fake Task requires loopback and synthetic key')
+        from stateful_memory_bridge import StatefulMemoryBridge
+        stateful = StatefulMemoryBridge.from_environment(initial_content,
+                                                         turn_offset=turn_offset)
+        handler.parent._stateful_memory_bridge = stateful
     shared_view = os.environ.get('GA_POS_PMA_SHARED_VIEW') == '1'
     if shared_view and os.environ.get('GA_POS_PMA_COMPLEMENT') == '1':
         raise ValueError('shared-view and previous complement are exclusive')
@@ -201,7 +225,9 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                             event, actor_attempt=turn,
                             pma_event_id=pma_upstream.last_event_id)
         _hook('llm_before', locals())
-        if pos is not None:
+        if stateful is not None:
+            response_gen = stateful.chat(client, messages, tools_schema, turn)
+        elif pos is not None:
             if complement:
                 panel = pos.exchange('decision_panel', observation=pos_observation)
                 response_gen = client.chat(messages=messages, tools=tools_schema,
@@ -256,6 +282,9 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
             }]
             continue
         except BaseException:
+            if stateful is not None:
+                stateful.finish({'result': 'PROVIDER_OR_CAPTURE_FAILURE',
+                                 'turn': turn})
             if pos is not None:
                 try: pos.exchange('finish', reason='provider_or_capture_failure')
                 finally: pos.close()
@@ -340,12 +369,16 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                          'status': 'not_executed'}
                         for index, call in enumerate(tool_calls)
                         if call['tool_name'] != 'no_tool'] if pos is not None else None)
+        stateful_actions = ([{'id': call.get('id', ''), 'name': call['tool_name'],
+            'arguments': dict(call['args'])} for call in tool_calls
+            if call['tool_name'] != 'no_tool'] if stateful is not None else None)
         if pos is not None:
             pos_record('decision_selected', {'turn': turn,
                 'content': response.content or '', 'actions': pos_actions,
                 'provider_error': provider_error_response})
        
-        tool_results = []; pos_receipts = []; next_prompts = set(); exit_reason = {}
+        tool_results = []; pos_receipts = []; stateful_receipts = []
+        next_prompts = set(); exit_reason = {}
         for ii, tc in enumerate(tool_calls):
             tool_name, args, tid = tc['tool_name'], tc['args'], tc.get('id', '')
             interruption = getattr(handler.parent, 'resumable_interruption', None)
@@ -385,6 +418,9 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                     if verbose: yield '`````\n'
                 except StopIteration as e: outcome = e.value
                 except BaseException as error:
+                    if stateful is not None and tool_name != 'no_tool':
+                        stateful.record_incomplete(turn, 'tool_result_unknown_after_start',
+                            [item['id'] for item in stateful_actions])
                     if pos is not None and tool_name != 'no_tool':
                         pos_record('tool_result_unknown_after_start', {
                             'turn': turn, 'id': tid, 'name': tool_name,
@@ -403,6 +439,11 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                            'next_prompt': outcome.next_prompt}
                 pos_receipts.append(receipt)
                 pos_record('tool_outcome', {'turn': turn, **receipt})
+            if stateful is not None and tool_name != 'no_tool':
+                stateful_receipts.append({'tool_use_id': tid,
+                    'status': ('rejected' if tool_name == 'bad_json' or
+                               not hasattr(handler, 'do_' + tool_name) else 'executed'),
+                    'result': _pos_public_value(outcome.data)})
             
             if outcome.data is not None and tool_name != 'no_tool':
                 handler.observe_tool_outcome(outcome.data, turn)
@@ -415,6 +456,10 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                 datastr = json.dumps(outcome.data, ensure_ascii=False, default=json_default) if type(outcome.data) in [dict, list] else str(outcome.data) 
                 tool_results.append({'tool_use_id': tid, 'content': datastr})
             next_prompts.add(outcome.next_prompt)
+        if stateful is not None:
+            stateful.record_report(turn, response.content or '')
+            if stateful_actions:
+                stateful.complete_batch(turn, stateful_actions, stateful_receipts)
         if pos is not None:
             pos_record('decision_batch_completed', {'turn': turn,
                 'actions': pos_actions, 'tool_results': pos_receipts,
@@ -545,6 +590,8 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
     if pos is not None and pos_auxiliary_errors:
         final_outcome = {**final_outcome, 'pos_archive_incomplete': True,
                          'pos_auxiliary_errors': pos_auxiliary_errors}
+    if stateful is not None:
+        stateful.finish(final_outcome)
     _research_emit('termination', final_outcome, internal_turn=turn)
     _hook('agent_after', locals())
     return final_outcome
@@ -556,9 +603,11 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
     """Keep PoS request scope and worker ownership even on generator close."""
     parent = handler.parent
     enabled = os.environ.get('GA_POS_ENABLED') == '1'
+    stateful_enabled = os.environ.get('GA_STATEFUL_MEMORY_ENABLED') == '1'
     sentinel = object()
     old_context = getattr(parent, 'pos_decision_context', sentinel)
     old_bridge = getattr(parent, '_pos_bridge', sentinel)
+    old_stateful = getattr(parent, '_stateful_memory_bridge', sentinel)
     try:
         return (yield from _agent_runner_loop_impl(
             client, system_prompt, user_input, handler, tools_schema,
@@ -566,6 +615,15 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             initial_user_content=initial_user_content, yield_info=yield_info,
             turn_offset=turn_offset))
     finally:
+        if stateful_enabled:
+            bridge = getattr(parent, '_stateful_memory_bridge', None)
+            if bridge is not None and bridge is not old_stateful:
+                bridge.finish({'result': 'GENERATOR_CLOSED_OR_FAILED'})
+            if old_stateful is sentinel:
+                if hasattr(parent, '_stateful_memory_bridge'):
+                    delattr(parent, '_stateful_memory_bridge')
+            else:
+                parent._stateful_memory_bridge = old_stateful
         if enabled:
             bridge = getattr(parent, '_pos_bridge', None)
             if bridge is not None and bridge is not old_bridge:

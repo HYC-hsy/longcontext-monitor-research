@@ -93,6 +93,19 @@ class StatefulMemoryBridge:
         self.store.journal("host-" + self.episode_id, "incomplete_batch",
             {"turn": turn, "reason": reason, "action_ids": list(action_ids)})
 
+    def record_report(self, turn, content):
+        if not content:
+            return
+        event_id = f"ga-agent-report-{self.episode_id}-{turn}"
+        prior = next((row for row in self.store.events_after(0) if
+                      row["event_id"] == event_id), None)
+        seq = prior["event_seq"] if prior else len(self.store.events_after(0)) + 1
+        source = _leaf(content, event_id + "/text", event_id,
+                       "assistant.content", "agent_report", turn, seq)
+        self.store.append_event({"event_id": event_id, "event_seq": seq,
+            "kind": "agent_report", "occurred_at_step": turn,
+            "source_ids": [source["source_id"]], "payload": {}}, [source])
+
     def complete_batch(self, turn, actions, receipts):
         from method_discovery.pma_stateful_memory_v1_20261021.source import canonical
         if not actions:
@@ -102,7 +115,7 @@ class StatefulMemoryBridge:
                    [receipt["tool_use_id"] for receipt in receipts]):
             self.record_incomplete(turn, "missing_or_unpaired_result",
                                    [action.get("id", "") for action in actions])
-            return None
+            raise StatefulBridgeError("incomplete GA action batch")
         event_id = f"ga-action-batch-{self.episode_id}-{turn}"
         prior = next((row for row in self.store.events_after(0) if
                       row["event_id"] == event_id), None)
@@ -127,6 +140,9 @@ class StatefulMemoryBridge:
         result = self.engine.run(event_id)
         self.results.append(result)
         self._take_reminder(result)
+        if result.get("error_code") in {"fake_script_exhausted", "fake_role_mismatch",
+                                        "fake_shape_mismatch", "fake_observation_missing"}:
+            raise StatefulBridgeError(result["error_code"])
         return result
 
     def chat(self, client, messages, tools, turn):
