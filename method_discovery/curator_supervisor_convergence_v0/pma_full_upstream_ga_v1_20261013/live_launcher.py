@@ -151,6 +151,19 @@ def _require_evaluation_state_contract(manifest: dict) -> None:
         checkout = STAGE.parents[2]
         research = (manifest['planned_order'][0]['research_candidate']
                     if manifest['schema'] == 'pma-ga-live-manifest-v5' else None)
+        if research == 'pma_stateful_memory_v1':
+            from .stateful_certification import (SOURCE_FILES as STATEFUL_SOURCE_FILES,
+                source_identity as stateful_source_identity,
+                verify_evidence as verify_stateful_evidence)
+            evidence = (checkout / cert.get('evidence_path', '')).resolve(strict=True)
+            if (manifest.get('status') != 'prepared_not_executed' or
+                    not evidence.is_relative_to(checkout) or
+                    cert.get('harbor_commit') != HARBOR_COMMIT or
+                    set(cert.get('source_files', {})) != set(STATEFUL_SOURCE_FILES) or
+                    cert.get('source_files') != stateful_source_identity(checkout) or
+                    cert.get('evidence') != verify_stateful_evidence(evidence)):
+                raise RuntimeError('stateful same-run native certification differs')
+            return
         expected_files = CANDIDATE_SOURCE_FILES if research is not None else SOURCE_FILES
         if (manifest.get('status') != 'prepared_not_executed' or
                 not isinstance(cert, dict) or cert.get('harbor_commit') != HARBOR_COMMIT or

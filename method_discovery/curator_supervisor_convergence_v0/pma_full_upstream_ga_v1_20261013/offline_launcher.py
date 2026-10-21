@@ -129,9 +129,10 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
         core_source = STAGE.parents[2] / 'method_discovery' / 'pma_stateful_memory_v1_20261021'
         core_target = host_stage / 'method_discovery' / 'pma_stateful_memory_v1_20261021'
         core_target.mkdir(parents=True)
-        for item in core_source.glob('*.py'):
-            if not item.name.startswith(('test_', 'run_offline_')):
-                shutil.copy2(item, core_target / item.name)
+        for name in ('__init__', 'audit', 'budget', 'engine', 'ga_fake_provider',
+                     'projection', 'prompts', 'proposal', 'reminder', 'retrieval',
+                     'schema', 'source', 'store'):
+            shutil.copy2(core_source / (name + '.py'), core_target / (name + '.py'))
         run_target = (host_stage / 'method_discovery' /
             'curator_supervisor_convergence_v0' / 'pma_full_upstream_ga_v1_20261013')
         run_target.mkdir(parents=True)

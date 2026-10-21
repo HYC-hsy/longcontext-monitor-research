@@ -12,6 +12,7 @@ import sys
 
 from .single_run import prepare
 from .single_run_certification import HARBOR_COMMIT, source_identity, vendor_identity
+from .stateful_certification import source_identity as stateful_source_identity
 
 
 def main() -> None:
@@ -70,6 +71,8 @@ def main() -> None:
         raise RuntimeError('fixture Harbor tracked source differs from commit')
     execution = {'code_commit': head,
                  'source_files': (manifest['source_files_sha256'] if args.condition == 'P'
+                                  else stateful_source_identity(checkout)
+                                  if stateful
                                   else source_identity(checkout,
                                       candidate=args.research_candidate != 'U')),
                  'vendor_files': (manifest['vendor_files_sha256'] if args.condition == 'P'

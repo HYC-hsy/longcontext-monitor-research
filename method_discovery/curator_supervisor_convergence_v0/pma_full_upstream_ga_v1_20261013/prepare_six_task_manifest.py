@@ -245,18 +245,22 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
             'harbor_commit': '459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc'}
     elif evidence is not None and schema in {'pma-ga-live-manifest-v4',
                                              'pma-ga-live-manifest-v5'}:
-        from .single_run_certification import (HARBOR_COMMIT, source_identity,
-                                               verify_evidence)
+        if stateful:
+            from .stateful_certification import (HARBOR_COMMIT, source_identity,
+                                                 verify_evidence)
+        else:
+            from .single_run_certification import (HARBOR_COMMIT, source_identity,
+                                                   verify_evidence)
         checkout = STAGE.parents[2]
         evidence = evidence.resolve(strict=True)
         if not evidence.is_relative_to(checkout):
             raise RuntimeError('single-run certification must be committed in repository')
         research = candidate if schema == 'pma-ga-live-manifest-v5' else None
-        certification = {'source_files': source_identity(checkout,
-                             candidate=research is not None),
+        certification = {'source_files': (source_identity(checkout) if stateful else
+                             source_identity(checkout, candidate=research is not None)),
                          'evidence_path': evidence.relative_to(checkout).as_posix(),
-                         'evidence': verify_evidence(evidence,
-                             research_candidate=research),
+                         'evidence': (verify_evidence(evidence) if stateful else
+                             verify_evidence(evidence, research_candidate=research)),
                          'harbor_commit': HARBOR_COMMIT}
     return {'schema': schema,
             'status': ('prepared_not_executed' if certification else
