@@ -203,9 +203,14 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
         method['research_candidate'] = candidate
         if candidate == 'pma_stateful_memory_v1':
             guard_window = task_settings.get('context_win')
-            if (type(guard_window) is not int or guard_window <= 0 or
-                    guard_window > 1000000):
-                raise RuntimeError('stateful conservative native window cannot be bound')
+            if guard_window is None:
+                guard_window = 1000000
+                guard_basis = ('Anthropic_Claude_Opus_4_8_official_1M_context;'
+                               'private_proxy_limit_unknown_fail_on_provider_rejection')
+            elif type(guard_window) is int and 0 < guard_window <= 1000000:
+                guard_basis = 'smaller_existing_task_profile_context_win'
+            else:
+                raise RuntimeError('stateful native window cannot be bound')
             method.update(conditions={'B': 'GA_plus_stateful_proactive_memory_v1'},
                 task_turns_max=None, agent_wall_seconds=None,
                 research_cumulative_calls=None, research_cumulative_tokens=None,
@@ -213,7 +218,7 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
                 task_complete_response_policy='complete-response-v1',
                 auxiliary_provider_retries=0, task_provider_retries=0,
                 native_context_guard_window_tokens=guard_window,
-                native_context_guard_basis='existing_task_profile_context_win_below_official_Opus48_1M')
+                native_context_guard_basis=guard_basis)
     config_hash = hashlib.sha256(json.dumps(method, sort_keys=True,
         separators=(',', ':')).encode('utf-8')).hexdigest()
     certification = None
