@@ -239,8 +239,11 @@ class WorksetBuilder:
             work.optional_bundles.append(bundle)
             if measure(work.payload()) > self.input_limit:
                 work.optional_bundles.pop()
-                work.omissions.append({"record_id": record["record_id"],
-                                       "reason": "optional_bundle_overflow"})
+                omission = {"record_id": record["record_id"],
+                            "reason": "optional_bundle_overflow"}
+                work.omissions.append(omission)
+                if measure(work.payload()) > self.input_limit:
+                    raise ContractError("input_budget_exceeded", "omission_manifest")
             else:
                 included.add(record["record_id"])
         return work

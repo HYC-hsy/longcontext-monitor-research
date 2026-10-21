@@ -179,11 +179,13 @@ class SourceCatalog:
         if allowed_kinds is not None and leaf["source_kind"] not in allowed_kinds:
             raise ContractError("source_role_misuse", span.source_id)
         domain = leaf["text"][span.start:span.end]
-        if domain.count(quote) == 0:
+        positions = [index for index in range(len(domain) - len(quote) + 1)
+                     if domain.startswith(quote, index)]
+        if not positions:
             raise ContractError("quote_mismatch", evidence_id)
-        if domain.count(quote) != 1:
+        if len(positions) != 1:
             raise ContractError("ambiguous_quote", evidence_id)
-        local_start = domain.index(quote)
+        local_start = positions[0]
         result = {"source_id": span.source_id, "start": span.start + local_start,
                   "end": span.start + local_start + len(quote), "quote": quote}
         cache_key = (span.source_id, leaf["text_sha256"],
