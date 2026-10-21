@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 from pathlib import Path
 
@@ -84,15 +85,24 @@ def scenario(name: str) -> dict:
             cycle_ids = [first_result["cycle_id"]]
             if replay_result:
                 cycle_ids.append(replay_result["cycle_id"])
-            measured = [row["body"]["input_size"] for cycle_id in cycle_ids
-                for row in store.journal_rows(cycle_id) if row["phase"] ==
-                "call_prepared"]
+            journal = [row for cycle_id in cycle_ids for row in
+                       store.journal_rows(cycle_id)]
+            measured = [row["body"]["input_size"] for row in journal if
+                        row["phase"] == "call_prepared"]
+            prepared_hashes = [row["body"]["messages_sha256"] for row in journal
+                               if row["phase"] == "call_prepared"]
+            returned_hashes = [row["body"]["public_response_sha256"] for row in
+                               journal if row["phase"] == "call_returned"]
             return {"scenario": name, "first_status": first_result["status"],
                 "replay_status": replay_result["status"] if replay_result else None,
                 "committed_frontier": store.snapshot()["committed_event_seq"],
                 "state_version": store.snapshot()["state_version"],
                 "fake_role_calls": len(provider.calls),
+                "observable_fake_attempts": sum(row["phase"] == "call_attempt"
+                                                for row in journal),
                 "roles": [call["role"] for call in provider.calls],
+                "request_sha256": prepared_hashes,
+                "response_sha256": returned_hashes,
                 "request_sizes": measured,
                 "fake_tool_calls": task.tool_calls,
                 "fake_user_revision_events": user_events,
@@ -109,8 +119,25 @@ SCENARIOS = ("initial_task", "clean_remind", "clean_silent", "issues_repair_clea
 
 
 def main() -> None:
+    compact = "--compact" in sys.argv[1:]
+    rows = []
     for name in SCENARIOS:
-        print(json.dumps(scenario(name), ensure_ascii=False, sort_keys=True))
+        result = scenario(name)
+        if compact:
+            result["request_sizes"] = [{key: item[key] for key in
+                ("characters", "utf8_bytes", "proxy_tokens")} for item in
+                result["request_sizes"]]
+        rows.append(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    if "--record-final" in sys.argv[1:]:
+        target = Path(__file__).resolve().parent / "evidence" / "FAKE_CHAIN_FINAL.jsonl"
+        content = ("\n".join(rows) + "\n").encode("utf-8")
+        if target.exists() and target.read_bytes() != content:
+            raise RuntimeError("Refusing to overwrite a different fake evidence record")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            target.write_bytes(content)
+    for row in rows:
+        print(row)
 
 
 if __name__ == "__main__":
