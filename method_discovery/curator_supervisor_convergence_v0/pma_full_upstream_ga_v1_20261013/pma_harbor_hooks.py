@@ -154,7 +154,9 @@ def verify_live_spec(spec: dict) -> None:
             if (spec.get('agent_time_protocol') != 'diagnostic-uncapped-v1' or
                     granted.get('agent_time_protocol') != 'diagnostic-uncapped-v1' or
                     frozen.get('config', {}).get('agent_time_protocol') !=
-                    'diagnostic-uncapped-v1' or
+                    'diagnostic-uncapped-v1'):
+                raise RuntimeError('stateful diagnostic authorization differs')
+            if task_root.is_dir() and (
                     diagnostic.get('derived_task_tree_sha256') !=
                     _tree_sha256(task_root) or
                     diagnostic.get('derived_task_toml_sha256') !=
