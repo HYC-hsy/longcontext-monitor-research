@@ -31,6 +31,8 @@ def main() -> None:
     parser.add_argument('--pma-profile-file')
     parser.add_argument('--python-home', default='cpython-3.12.12-linux-x86_64-gnu')
     parser.add_argument('--service-fixture', action='store_true')
+    parser.add_argument('--runtime-policy-file', type=Path,
+                        help='exercise the same explicit policy as the planned run')
     parser.add_argument('--candidate-profile-fixture', action='store_true',
                         help='isolated synthetic P with real independent PMA host process')
     args = parser.parse_args()
@@ -54,7 +56,9 @@ def main() -> None:
         synthetic_pos_fixture=args.condition == 'P',
         candidate_profile_fixture=args.candidate_profile_fixture,
         task_complete_response=stateful,
-        stateful_uncapped_diagnostic=stateful,
+        runtime_policy=(json.loads(args.runtime_policy_file.read_text(encoding='utf-8'))
+                        if args.runtime_policy_file else None),
+        stateful_uncapped_diagnostic=(stateful and not args.runtime_policy_file),
         research_candidate=args.research_candidate,
         official_source_git=args.official_source_git,
         task_profile_file=args.task_profile_file,
@@ -91,6 +95,9 @@ def main() -> None:
                 ['git', 'cat-file', 'blob', f'{head}:{name}'], cwd=checkout,
                 capture_output=True, check=True).stdout).hexdigest()
             for name in frozen_sources}
+    if manifest.get('config', {}).get('runtime_policy') is not None:
+        execution['runtime_policy'] = manifest['config']['runtime_policy']
+        execution['config_sha256'] = manifest['config_sha256']
     (root / 'execution_identity.json').write_text(
         json.dumps(execution, sort_keys=True, indent=2), encoding='utf-8')
     binding = dict(manifest['planned_order'][0], run_id=identity['run_id'],
@@ -106,7 +113,7 @@ def main() -> None:
             'output_root': identity['output_root']}
     if stateful:
         auth['task_complete_response_policy'] = 'complete-response-v1'
-        auth['agent_time_protocol'] = 'diagnostic-uncapped-v1'
+        auth['agent_time_protocol'] = manifest['config']['agent_time_protocol']
     authorization = root / 'authorization.json'
     authorization.write_text(json.dumps(auth, indent=2), encoding='utf-8')
     command = [sys.executable, '-m',
@@ -155,3 +162,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+

@@ -89,6 +89,12 @@ def verify_live_spec(spec: dict) -> None:
         raise RuntimeError('PMA frozen manifest or authorization changed')
     frozen = json.loads(manifest.read_text(encoding='utf-8'))
     granted = json.loads(authorization.read_text(encoding='utf-8'))
+    policy = frozen.get('config', {}).get('runtime_policy')
+    if spec.get('runtime_policy') != policy:
+        raise RuntimeError('runtime policy differs from the authorized manifest')
+    if policy is not None:
+        from experiment_runner.runtime_policy import validate_resolved_policy
+        validate_resolved_policy(policy, frozen['assets'][spec['task_id']])
     if frozen.get('schema') == 'pos-ga-single-manifest-v1':
         if granted.get('manifest_sha256') != spec['manifest_sha256']:
             raise RuntimeError('PoS authorization does not bind manifest bytes')
@@ -151,12 +157,13 @@ def verify_live_spec(spec: dict) -> None:
         if spec.get('research_candidate') == 'pma_stateful_memory_v1':
             diagnostic = spec.get('diagnostic_task_identity') or {}
             task_root = Path(spec['run_root']) / 'public_task'
-            if (spec.get('agent_time_protocol') != 'diagnostic-uncapped-v1' or
-                    granted.get('agent_time_protocol') != 'diagnostic-uncapped-v1' or
-                    frozen.get('config', {}).get('agent_time_protocol') !=
-                    'diagnostic-uncapped-v1'):
+            expected_protocol = ('runtime-policy-v1' if policy is not None else
+                                 'diagnostic-uncapped-v1')
+            if (spec.get('agent_time_protocol') != expected_protocol or
+                    granted.get('agent_time_protocol') != expected_protocol or
+                    frozen.get('config', {}).get('agent_time_protocol') != expected_protocol):
                 raise RuntimeError('stateful diagnostic authorization differs')
-            if task_root.is_dir() and (
+            if policy is None and task_root.is_dir() and (
                     diagnostic.get('derived_task_tree_sha256') !=
                     _tree_sha256(task_root) or
                     diagnostic.get('derived_task_toml_sha256') !=
@@ -315,9 +322,12 @@ class NativeSharedTrialHooks(PMATrialHooks):
         # network expectation changed for an official-network Task.
         if getattr(self.trial.agent, 'run_id', None) != self.spec['run_id']:
             raise RuntimeError('PMA agent/run identity mismatch')
+        policy = self.spec.get('runtime_policy')
+        expected_agent = policy['effective_agent_seconds'] if policy is not None else None
+        expected_verifier = policy['official_verifier_seconds'] if policy is not None else 900
         if self.spec.get('research_candidate') == 'pma_stateful_memory_v1' and (
-                self.trial._agent_timeout_sec is not None or
-                self.trial._verifier_timeout_sec != 900 or
+                self.trial._agent_timeout_sec != expected_agent or
+                self.trial._verifier_timeout_sec != expected_verifier or
                 getattr(self.trial.agent, 'condition_id', None) != 'stateful-memory-v1'):
             raise RuntimeError('stateful diagnostic Harbor timeout not effective')
         container, raw = await self._inspect()
@@ -598,6 +608,12 @@ def install_trial_hooks() -> None:
 
     async def create(cls, config):
         trial = await original(cls, config)
+        if spec.get('runtime_policy') is not None:
+            from experiment_runner.runtime_policy import apply_harbor_policy
+            effective = apply_harbor_policy(trial, spec['runtime_policy'])
+            _atomic(Path(spec['archive_root']) / 'runtime_policy_effective.json', {
+                **effective, 'run_id': spec['run_id'],
+                'config_sha256': spec['config_sha256']})
         hooks = (NativeSharedTrialHooks(trial, spec) if
                  spec.get('evaluation_protocol') in {'official_shared_v2',
                                                      'synthetic_shared_v1'} else
@@ -608,3 +624,4 @@ def install_trial_hooks() -> None:
         return trial
 
     Trial.create = classmethod(create)
+

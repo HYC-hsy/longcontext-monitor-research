@@ -378,6 +378,11 @@ class GenericAgent:
                 and os.environ.get('GA_STATEFUL_UNCAPPED_TOTAL') == '1')
             max_turns = None if stateful_uncapped else int(
                 os.environ.get('GA_MAX_TURNS', '180'))
+            configured_turns = os.environ.get('GA_EXPERIMENT_TASK_TURNS')
+            if configured_turns is not None and stateful_uncapped:
+                max_turns = None if configured_turns == 'uncapped' else int(configured_turns)
+                if max_turns is not None and max_turns <= 0:
+                    raise ValueError('configured Task turns must be positive or uncapped')
             if os.environ.get('GA_MONITOR_ENABLED') == '1' and self.monitor_runtime is None:
                 from ga_monitor_adapter import GenericAgentMonitorAdapter
                 monitor_config_name = os.environ.get(
@@ -708,3 +713,4 @@ if __name__ == '__main__':
                     if 'done' in item: print(); break
             except KeyboardInterrupt:
                 agent.abort(); print('\n[Interrupted]')
+
