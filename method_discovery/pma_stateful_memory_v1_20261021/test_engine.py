@@ -164,6 +164,26 @@ class EngineTests(unittest.TestCase):
         self.assertEqual([item["role"] for item in provider.calls],
                          ["maintenance", "audit", "audit_correction", "selection"])
 
+    def test_maintenance_contract_correction_uses_current_raw_and_one_credit(self):
+        provider = ScriptedProvider()
+        attempts = []
+        def malformed_once(role, messages, call_id, max_output):
+            attempts.append((role, messages))
+            if len(attempts) == 1:
+                return '{"protocol":"maintenance-proposal/1","world_patch":[]}'
+            return provider(role, messages, call_id, max_output)
+        result = CycleEngine(self.store, malformed_once, task_text="task").run(
+            "maintenance-correction")
+        self.assertEqual(result["status"], "committed_selection_silent")
+        self.assertEqual(result["logical_calls"], 4)
+        self.assertEqual([role for role, _ in attempts],
+                         ["maintenance", "maintenance", "audit", "selection"])
+        correction = json.loads(attempts[1][1][-1]["content"])
+        self.assertEqual(correction["last_raw_response"],
+                         '{"protocol":"maintenance-proposal/1","world_patch":[]}')
+        self.assertEqual(correction["repair_mode"], "maintenance_contract")
+        self.assertEqual(self.store.snapshot()["committed_event_seq"], 1)
+
     def test_failure_preserves_pending_for_next_real_trigger(self):
         provider = ScriptedProvider(fail_role="audit")
         result = CycleEngine(self.store, provider, task_text="task").run("trigger-3")

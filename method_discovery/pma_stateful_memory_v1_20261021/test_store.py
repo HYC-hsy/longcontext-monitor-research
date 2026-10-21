@@ -83,6 +83,32 @@ class StoreTests(unittest.TestCase):
             self.store.append_event(mismatched, sources)
         self.assertEqual(self.store.events_after(0), [])
 
+    def test_multi_tool_batch_is_one_event_and_failed_commit_rolls_back(self):
+        first, first_sources = self.action()
+        second, second_sources = self.action()
+        second_sources[0].update(source_id="action-other", event_id="other-call")
+        second_sources[1].update(source_id="out-other", event_id="other-call")
+        for item in second_sources:
+            item["event_seq"] = 1
+        batch = deepcopy(first)
+        batch["source_ids"] += [item["source_id"] for item in second_sources]
+        batch["payload"]["actions"].append({"tool_use_id": "other-call"})
+        self.store.append_event(batch, first_sources + second_sources)
+        self.assertEqual([item["event_seq"] for item in self.store.events_after(0)], [1])
+        self.assertEqual(len(self.store.sources()), 5)  # task plus four tool leaves
+        invalid = deepcopy(self.base)
+        invalid["state_version"] = 1
+        invalid["committed_event_seq"] = 1
+        invalid["B"]["W"]["entities"] = [{"entity_id": "e", "entity_type": "file",
+            "display_name": "x", "unsupported_fact": True}]
+        with self.assertRaises(ContractError):
+            self.store.compare_and_swap(update_id="bad-update", cycle_id="bad-cycle",
+                base=self.base, candidate=invalid,
+                archive_delta=[("state", "archived", 1, {"marker": "rollback"})])
+        self.assertEqual(self.store.snapshot(), self.base)
+        self.assertEqual(self.store.archive(), {})
+        self.assertIsNone(self.store.commit_result("bad-update"))
+
     def test_goal_epoch_and_delivery_idempotency(self):
         source = leaf("new task", source_id="u1")
         source.update(event_id="user-1", event_seq=1, ga_turn=1)
