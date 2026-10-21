@@ -96,9 +96,25 @@ class MemoryStore:
         validate_leaf(task_leaf)
         if task_leaf["source_kind"] != "user_requirement" or task_leaf["event_seq"] != 0:
             raise ContractError("invalid_initial_source")
-        validate_snapshot(snapshot, {task_leaf["source_id"]: task_leaf})
-        if snapshot["state_version"] != 0 or snapshot["committed_event_seq"] != 0:
+        # Ordinary initialization is not a state import protocol. Check the
+        # entire empty-method-state boundary before validating historical refs
+        # or opening a write transaction, so invalid seeds have a stable code.
+        snap = fields(snapshot, {"schema_version", "task_id", "episode_id",
+                                 "state_version", "committed_event_seq", "B"})
+        belief = fields(snap["B"], {"G", "W", "DeltaE", "DeltaA", "F"})
+        goal = fields(belief["G"], {"task_version", "original_user_sources",
+                                    "specifications", "goal_deltas"})
+        world = fields(belief["W"], {"entities", "states", "relations"})
+        if (type(snap["state_version"]) is not int or snap["state_version"] != 0 or
+                type(snap["committed_event_seq"]) is not int or
+                snap["committed_event_seq"] != 0 or
+                type(goal["task_version"]) is not int or goal["task_version"] != 1 or
+                any(value != [] for value in (goal["specifications"],
+                    goal["goal_deltas"], world["entities"], world["states"],
+                    world["relations"], belief["DeltaE"], belief["DeltaA"])) or
+                belief["F"] is not None):
             raise ContractError("invalid_initial_snapshot")
+        validate_snapshot(snapshot, {task_leaf["source_id"]: task_leaf})
         with self.transaction():
             existing = self.snapshot()
             if existing is not None:

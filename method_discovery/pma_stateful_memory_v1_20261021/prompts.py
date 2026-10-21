@@ -41,7 +41,8 @@ gap_ref, reason, changed_at_step. Use complete new versions, not partial edits.
 Source references in new output are {evidence_id,quote}; only visible IDs and
 exact, contiguous, uniquely matching quotes are accepted. Do not write stored
 {source_id,start,end,quote} objects in a new proposal.
-Scope={task_id:string,entity_ids:[existing Entity ID,...],conditions:[string,...]}.
+Scope={task_id:string,entity_ids:[visible Entity ID or same-proposal @local Entity,...],
+conditions:[string,...]}.
 StateRef={type:"state",record_id:string,revision:integer>=1};
 RequirementRef={type:"requirement",requirement_id:string,revision:integer>=1,
 task_version:integer>=1}; GapRef={type:"gap",gap_id:string,revision:integer>=1,
@@ -64,15 +65,52 @@ supported closure={kind:"environment_supported",conclusion:string,
 evidence_refs:[EvidenceRef,...],state_refs:[StateRef,...]}; superseded
 closure={kind:"goal_changed",goal_delta_ref:GoalDeltaRef} or
 {kind:"merged_into",replacement_gap_ref:GapRef}. No extra fields in any
-object. All array fields must be present even when empty, except arrays
-explicitly required nonempty by the binding contract.
+object. Required array fields must be present; operation arrays may be empty
+(no operations). Evidence-array nonemptiness is a separate rule below.
 Procedural episode conditions and result each require time_role:"past_episode".
-Scope.entity_ids is nonempty, with unique existing entity IDs for this task.
+Scope.entity_ids is nonempty, with unique Entity IDs for this task: visible
+current Entities or legal @local Entities created in this same proposal.
 Non-inference Claim support_refs must be nonempty and match origin:
 user_requirement, user_report, tool_result for tool_observation, or
 agent_report respectively. Inference requires general_hypothesis;
 a procedural lesson also requires nonempty support_refs. Source role and
 request-local EvidenceRef visibility are checked before construction.
+
+Binding array contract (field path | empty allowed | source/ref types | constraints):
+Requirement.source_refs | no | user_requirement | literal visible EvidenceRef.
+interpretation_replaced.replacement_requirement_refs | no | RequirementRef | exact versions.
+interpretation_replaced.source_refs | no | user_requirement | literal visible EvidenceRef.
+Procedural.episode.action_refs | no | executed_action | action is not proof of success.
+Gap.goal_refs | no | RequirementRef | open/blocked requires current active goal heads.
+environment_supported.evidence_refs | no | tool_result,user_report,agent_report,executed_action |
+  at least one tool_result or user_report; source role does not prove semantic sufficiency.
+Non-inference Claim.support_refs | no | source matching assertion_origin as above.
+lesson.support_refs | no | any visible source kind | inference/general_hypothesis only.
+Scope.entity_ids | no | Entity IDs | unique, same task, including legal same-proposal @local.
+Claim.challenge_refs | yes | any visible source kind.
+Inference Claim.support_refs outside lesson | yes | any visible source kind.
+Scope.conditions | yes | nonempty strings for any supplied entries.
+State.supersedes | yes for new State | StateRef | revisions require direct predecessor.
+Gap.record_refs, environment_supported.state_refs | yes | exact StateRef, history allowed.
+record_transitions.evidence_refs | yes | any visible source kind.
+world_patch.entity_upserts/state_upserts/relation_upserts/record_transitions and
+specification_upserts/gap_upserts/gap_resolutions/gap_reopens | yes | operations |
+  all arrays must exist; duplicate/conflicting operations on one typed ID are forbidden.
+
+Version construction: new State/Requirement/Gap starts at revision=1. An upsert
+of an existing object generates a complete new version at base revision+1;
+State.supersedes must include the exact direct predecessor StateRef. A reference
+to an existing base version keeps that exact revision; it is not a new upsert.
+Existing IDs/references must obey visible typed identities; @local IDs resolve
+only to legal objects created by this proposal, without cross-type substitution.
+
+Retirement timing: a new or materially changed interpretation_replaced relation
+must target exact Requirement versions that are active current heads in the
+candidate's current goal epoch. No self-reference or cycles. An unchanged legally
+committed retirement on the same logical Requirement may retain its original
+exact historical target even after that target advances or retires. The host
+compares canonical retirement content in base/candidate; a model's historical
+label grants no exemption. Do not automatically rewrite legal old refs to new heads.
 
 record_transitions contain record_ref,to_status,reason,evidence_refs and may
 only change availability to historical_only, contested, or retracted. A
@@ -94,8 +132,7 @@ issues requires at least one valid blocking Issue. unusable has no conclusions
 and a reason code insufficient_context, ambiguous_input, or
 cannot_complete_audit. Never filter malformed issues into clean.
 Issue fields: issue_id,kind,target,related_targets,explanation,witnesses,
-repair_constraint. A target is {snapshot:candidate,target:{kind,id,revision?},
-field_path}; related field witnesses may point to base/candidate/archive.
+repair_constraint. A target is {snapshot:candidate,target:AuditTargetRef,field_path}; related field witnesses may point to base/candidate/archive.
 Issue kind is one of unsupported_claim, observation_conflict, scope_overreach,
 temporal_misclassification, source_role_misuse, goal_misinterpretation,
 internal_inconsistency, unjustified_gap_closure, unjustified_information_loss.
@@ -106,6 +143,11 @@ closure_kind and basis; unsupported/uncertain must cite a blocking issue.
 BoundField={snapshot:"base"|"candidate"|"archive",target:AuditTargetRef,
 field_path:string}; AuditTargetRef={kind:"state"|"gap"|"requirement"|
 "entity"|"relation"|"focus",id:string,revision?:integer}.
+State/gap/requirement targets require revision matching the exact visible body;
+entity/relation/focus have no body revision and may omit revision. Focus ID is F.
+field_path uses dot-separated dictionary fields and decimal list indices, for
+example claim.support_refs.0.quote on a knowledge State with a support ref.
+It is relative to the target body, not JSON Pointer; do not use $root or brackets.
 witnesses is a nonempty array of SourceWitness={kind:"source",ref:EvidenceRef}
 or FieldWitness={kind:"field",field:BoundField,exact_value:JSONValue}.
 witnesses must be a nonempty list, including a FieldWitness of an exact
@@ -122,7 +164,9 @@ No extra fields. Copy the exact binding from the input. EvidenceRef is
 gap_before and gap_after are exact GapRef identities, not complete gap
 bodies in resolve_manifest. Every resolution needs exactly one assessment.
 environment_supported needs a visible tool_result or user_report EvidenceRef
-basis; goal_changed needs the exact candidate GoalDeltaRef; merged_into needs
+basis; goal_changed needs a real GoalDeltaRef present in candidate G.goal_deltas
+(the host does not mechanically require equality to the closure's own delta);
+merged_into needs
 its exact replacement GapRef. The basis must contain that kind. supported
 has no blocking_issue_ids; unsupported/uncertain identify a valid blocking
 Issue. clean has no Issues and all assessments supported; issues has one or
@@ -146,8 +190,11 @@ RequirementRef {type:"requirement",requirement_id:string,revision:integer,
 task_version:integer}, or GapRef {type:"gap",gap_id:string,revision:integer,
 task_version:integer}. No extra fields are allowed.
 Use only the committed state and selected refs in this request. Either return strict
-silent, or remind with at most three distinct visible committed refs and a conditional
-context_for_action. Do not claim that a historical episode or inferred lesson is a
+silent, or remind with one to three distinct refs from selected_refs, bound to
+visible committed heads. Retracted States and inactive Requirements cannot be
+selected; archived contextual objects are not selectable heads. State status may
+be historical_only or contested and Gap status may be open/blocked/supported/
+superseded. context_for_action must be a nonempty conditional advisory string. Do not claim that a historical episode or inferred lesson is a
 current tool-observed fact. Do not override the original user task, execute tools, or
 approve task completion. context_for_action is at most 1200 Unicode code
 points; the host-derived final reminder must fit 16384 UTF-8 bytes or the
