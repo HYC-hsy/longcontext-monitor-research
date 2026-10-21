@@ -179,6 +179,43 @@ def _complete_bundle(record: dict, world: dict, ledger: dict,
             "sources": sources}
 
 
+def visible_stored_source_refs(work: dict) -> list[dict]:
+    """Typed stored refs in this frozen workset, never a recursive JSON search."""
+    refs = []
+    def requirement(item):
+        refs.extend(item["source_refs"])
+        retirement = item["retirement"]
+        if retirement and retirement["kind"] == "interpretation_replaced":
+            refs.extend(retirement["source_refs"])
+    def state(item):
+        claims = ([item["claim"]] if item["kind"] == "knowledge" else
+                  [item["episode"]["conditions"], item["episode"]["result"]] +
+                  ([item["lesson"]] if item["lesson"] is not None else []))
+        for claim in claims:
+            refs.extend(claim["support_refs"])
+            refs.extend(claim["challenge_refs"])
+        if item["kind"] == "procedural":
+            refs.extend(item["episode"]["action_refs"])
+    def gap(item):
+        closure = item["closure"]
+        if closure and closure["kind"] == "environment_supported":
+            refs.extend(closure["evidence_refs"])
+    for item in work["mandatory"]["G"]["specifications"]:
+        requirement(item)
+    for item in work["mandatory"]["open_gaps"]:
+        gap(item)
+    for item in work["mandatory"].get("historical_requirements", []):
+        requirement(item)
+    for bundle in [*work["mandatory"]["bundles"], *work["optional_bundles"]]:
+        for item in [bundle["state"], *bundle.get("linked_state_versions", [])]:
+            state(item)
+        for item in bundle.get("linked_closed_gaps", []):
+            gap(item)
+        for item in bundle.get("historical_requirements", []):
+            requirement(item)
+    return refs
+
+
 @dataclass
 class Workset:
     mandatory: dict

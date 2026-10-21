@@ -10,8 +10,39 @@ from .prompts import audit, maintenance, repair, selection
 from .proposal import build_candidate, validate_proposal
 from .projection import project_snapshot, visible_existing
 from .reminder import render_reminder, validate_selection
-from .retrieval import MemoryIndex, WorksetBuilder, query_text
-from .source import ContractError, SourceCatalog, digest, strict_loads
+from .retrieval import (MemoryIndex, WorksetBuilder, query_text,
+                        visible_stored_source_refs)
+from .source import (ContractError, SourceCatalog, digest, strict_loads,
+                     validate_source_ref)
+
+
+def _contextual_objects(work: dict, snapshot: dict) -> list[dict]:
+    """Only exact historical objects pinned by this workset."""
+    current = {item["record_id"]: item["revision"] for item in
+               snapshot["B"]["W"]["states"]}
+    result = []
+    seen = set()
+    for bundle in [*work["mandatory"]["bundles"], *work["optional_bundles"]]:
+        for item in [bundle["state"], *bundle.get("linked_state_versions", [])]:
+            identity = ("state", item["record_id"], item["revision"])
+            if current.get(item["record_id"]) == item["revision"] or identity in seen:
+                continue
+            seen.add(identity)
+            result.append({"kind": "archived_state", "record_ref": {
+                "type": "state", "record_id": item["record_id"],
+                "revision": item["revision"]}, "body": item})
+    for item in [*work["mandatory"].get("historical_requirements", []),
+                 *(old for bundle in work["optional_bundles"] for old in
+                   bundle.get("historical_requirements", []))]:
+        identity = ("requirement", item["requirement_id"], item["revision"])
+        if identity in seen:
+            continue
+        seen.add(identity)
+        result.append({"kind": "archived_requirement", "record_ref": {
+            "type": "requirement", "requirement_id": item["requirement_id"],
+            "revision": item["revision"], "task_version": item["task_version"]},
+            "body": item})
+    return result
 
 
 def _operation_index(before: dict, candidate: dict, patch: dict) -> list[dict]:
@@ -149,6 +180,9 @@ class CycleEngine:
         for old in work["mandatory"].get("historical_requirements", []):
             for ref in old["source_refs"]:
                 add(ref["source_id"], ref["start"], ref["end"], True)
+        for ref in visible_stored_source_refs(work):
+            validate_source_ref(ref, ledger)
+            add(ref["source_id"], ref["start"], ref["end"], True)
         for ref in work["mandatory"]["G"]["original_user_sources"]:
             add(ref["source_id"], ref["start"], ref["end"])
         for source_id in (goals or {}).get("messages", []):
@@ -309,31 +343,7 @@ class CycleEngine:
                 after_view = project_snapshot(candidate["candidate"], snapshot, body)
                 audit_binding["before_view_hash"] = digest(before_view)
                 audit_binding["candidate_view_hash"] = digest(after_view)
-                current_revisions = {item["record_id"]: item["revision"] for item in
-                    snapshot["B"]["W"]["states"]}
-                contextual = []
-                seen_history = set()
-                for bundle in [*body["mandatory"]["bundles"],
-                               *body["optional_bundles"]]:
-                    for historical in [bundle["state"],
-                                       *bundle.get("linked_state_versions", [])]:
-                        identity = (historical["record_id"], historical["revision"])
-                        if (current_revisions.get(identity[0]) != identity[1] and
-                                identity not in seen_history):
-                            contextual.append({"kind": "archived_state",
-                                "record_ref": {"type": "state", "record_id": identity[0],
-                                               "revision": identity[1]},
-                                "body": historical})
-                            seen_history.add(identity)
-                archived_requirements = [*body["mandatory"].get(
-                    "historical_requirements", []), *(old for bundle in
-                    body["optional_bundles"] for old in bundle.get(
-                        "historical_requirements", []))]
-                contextual.extend({"kind": "archived_requirement",
-                    "record_ref": {"type": "requirement", "requirement_id": item[
-                        "requirement_id"], "revision": item["revision"],
-                        "task_version": item["task_version"]}, "body": item}
-                    for item in archived_requirements)
+                contextual = _contextual_objects(body, snapshot)
                 view = AuditCodec().encode(before_view, after_view,
                     binding=audit_binding, sources=[v for v in visible if
                         v["purpose"] == "audit"],
@@ -526,10 +536,7 @@ class CycleEngine:
                     "phase2_view_id": view_id}, "committed_view": projected,
                     "recent_activity": body["observation_batch"],
                     "source_catalog": visible, "selected_refs": refs,
-                    "historical_requirements": [*work["mandatory"].get(
-                        "historical_requirements", []), *(old for bundle in
-                        work["optional_bundles"] for old in bundle.get(
-                            "historical_requirements", []))],
+                    "contextual_objects": _contextual_objects(work, snapshot),
                     "budget_notice": {"input_proxy_tokens_limit": 32768,
                         "output_provider_tokens_limit": 2048},
                     "reviewed_this_cycle_refs": reviewed,
