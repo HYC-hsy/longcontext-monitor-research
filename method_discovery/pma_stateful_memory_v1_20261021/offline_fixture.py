@@ -20,12 +20,15 @@ def scenario(name: str) -> dict:
         try:
             store.initialize(empty_snapshot(), leaf("task"))
             task_events = 0
-            first, leaves = event(1, "synthetic tool observation")
-            store.append_event(first, leaves)
-            task_events += 1
+            if name != "initial_task":
+                first, leaves = event(1, "synthetic tool observation")
+                store.append_event(first, leaves)
+                task_events += 1
             options = {}
             if name in {"clean_remind", "goal_epoch_stale"}:
                 options = {"create_requirement": True, "remind": True}
+            elif name == "initial_task":
+                options = {"create_requirement": True}
             elif name == "issues_repair_clean":
                 options = {"create_requirement": True, "outcomes": ["issues"]}
             elif name == "audit_correction_exhausted":
@@ -91,7 +94,7 @@ def scenario(name: str) -> dict:
             store.close()
 
 
-SCENARIOS = ("clean_remind", "clean_silent", "issues_repair_clean",
+SCENARIOS = ("initial_task", "clean_remind", "clean_silent", "issues_repair_clean",
              "audit_correction_exhausted", "failed_then_replayed",
              "prefix_backlog", "goal_epoch_stale")
 

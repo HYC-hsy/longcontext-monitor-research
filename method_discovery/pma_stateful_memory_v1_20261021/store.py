@@ -231,6 +231,11 @@ class MemoryStore:
                 raise ContractError("state_version_not_incremented")
             if candidate["committed_event_seq"] < base["committed_event_seq"]:
                 raise ContractError("frontier_regression")
+            if candidate["committed_event_seq"] > base["committed_event_seq"]:
+                row = self.db.execute("SELECT event_seq FROM events WHERE event_seq=?",
+                    (candidate["committed_event_seq"],)).fetchone()
+                if row is None:
+                    raise ContractError("frontier_missing_event")
             if candidate["B"]["G"]["task_version"] != self.goals()["epoch"]:
                 raise ContractError("goal_epoch_mismatch")
             additions = {(kind, object_id, revision): body for kind, object_id,

@@ -99,7 +99,7 @@ class CycleEngine:
         goals = self.store.goals()
         pending = [event for event in self.store.events_after(
                    snapshot["committed_event_seq"]) if event["event_seq"] <= frozen_tip]
-        if not pending:
+        if not pending and snapshot["state_version"] > 0:
             result = {"cycle_id": cycle_id, "status": "no_pending",
                       "logical_calls": 0}
             self.store.journal(cycle_id, "cycle_result", result)

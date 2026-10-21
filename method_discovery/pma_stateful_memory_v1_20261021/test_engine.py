@@ -123,6 +123,23 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(engine.run("trigger-1"), result)
         self.assertEqual(len(provider.calls), 3)
 
+    def test_initial_task_seq_zero_is_not_a_tool_transition(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = MemoryStore(Path(root) / "initial.sqlite3")
+            try:
+                store.initialize(empty_snapshot(), leaf("task"))
+                provider = ScriptedProvider(create_requirement=True)
+                result = CycleEngine(store, provider, task_text="task").run("initial")
+                self.assertEqual(result["status"], "committed_selection_silent")
+                self.assertEqual(store.snapshot()["committed_event_seq"], 0)
+                self.assertEqual(store.snapshot()["state_version"], 1)
+                shown = json.loads(provider.calls[0]["messages"][1]["content"])
+                self.assertEqual(shown["observation_batch"]["events"], [])
+                self.assertTrue(all(item["source_kind"] == "user_requirement" for item
+                    in shown["source_catalog"]))
+            finally:
+                store.close()
+
     def test_audit_contract_one_shared_correction(self):
         provider = ScriptedProvider(outcomes=["malformed"])
         result = CycleEngine(self.store, provider, task_text="task").run("trigger-2")
