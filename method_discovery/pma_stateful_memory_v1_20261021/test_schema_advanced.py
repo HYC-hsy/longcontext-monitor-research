@@ -97,6 +97,38 @@ class SchemaAdvancedTests(unittest.TestCase):
         with self.assertRaisesRegex(ContractError, "supersedes_cycle"):
             validate_snapshot(snap, ledger, {("s", 1): cycle})
 
+    def test_goal_epoch_migration_requires_explicit_retirement(self):
+        snap, ledger = rich_state()
+        newer = leaf("revised task", source_id="u1")
+        newer.update(event_id="user-2", event_seq=2, ga_turn=2)
+        ledger["u1"] = newer
+        delta = {"type": "goal_delta", "goal_delta_id": "goal-delta-2",
+                 "from_task_version": 1, "to_task_version": 2}
+        goal = snap["B"]["G"]
+        goal["task_version"] = 2
+        goal["goal_deltas"] = [delta]
+        old_requirement = goal["specifications"][0]
+        old_requirement["status"] = "superseded"
+        old_requirement["retirement"] = {"kind": "goal_changed",
+                                          "goal_delta_ref": delta}
+        goal["specifications"].append({"requirement_id": "new-req",
+            "revision": 1, "task_version": 2, "interpretation": "revised task",
+            "source_refs": [ref("u1", "revised task")], "status": "active",
+            "retirement": None})
+        for gap in snap["B"]["DeltaE"] + snap["B"]["DeltaA"]:
+            gap["status"] = "superseded"
+            gap["closure"] = {"kind": "goal_changed", "goal_delta_ref": delta}
+        validate_snapshot(snap, ledger, goal_deltas={"goal-delta-2": delta})
+        bad = deepcopy(snap)
+        bad["B"]["DeltaA"][0]["status"] = "open"
+        bad["B"]["DeltaA"][0]["closure"] = None
+        with self.assertRaisesRegex(ContractError, "open_gap_contract"):
+            validate_snapshot(bad, ledger, goal_deltas={"goal-delta-2": delta})
+        bad = deepcopy(snap)
+        bad["B"]["G"]["specifications"][0]["retirement"] = None
+        with self.assertRaisesRegex(ContractError, "missing_retirement"):
+            validate_snapshot(bad, ledger, goal_deltas={"goal-delta-2": delta})
+
 
 if __name__ == "__main__":
     unittest.main()
