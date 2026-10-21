@@ -5,6 +5,17 @@ from __future__ import annotations
 from .source import canonical
 
 
+WIRE_REFS = """Each role receives these complete wire reference types:
+EvidenceRef={evidence_id:string,quote:nonempty literal contiguous string};
+StateRef={type:"state",record_id:string,revision:integer>=1};
+RequirementRef={type:"requirement",requirement_id:string,revision:integer>=1,
+task_version:integer>=1}; GapRef={type:"gap",gap_id:string,revision:integer>=1,
+task_version:integer>=1}; GoalDeltaRef={type:"goal_delta",goal_delta_id:string,
+from_task_version:integer>=1,to_task_version:integer>from_task_version}.
+Do not output an internal stored SourceRef. No extra fields in a wire ref.
+"""
+
+
 MAINTENANCE_SYSTEM = """Stateful proactive memory maintenance, protocol maintenance-proposal/1.
 Propose exactly one complete JSON object. Its top-level fields are exactly:
 protocol, request_id, active_task_version, base_state_version, world_patch,
@@ -55,6 +66,13 @@ closure={kind:"goal_changed",goal_delta_ref:GoalDeltaRef} or
 {kind:"merged_into",replacement_gap_ref:GapRef}. No extra fields in any
 object. All array fields must be present even when empty, except arrays
 explicitly required nonempty by the binding contract.
+Procedural episode conditions and result each require time_role:"past_episode".
+Scope.entity_ids is nonempty, with unique existing entity IDs for this task.
+Non-inference Claim support_refs must be nonempty and match origin:
+user_requirement, user_report, tool_result for tool_observation, or
+agent_report respectively. Inference requires general_hypothesis;
+a procedural lesson also requires nonempty support_refs. Source role and
+request-local EvidenceRef visibility are checked before construction.
 
 record_transitions contain record_ref,to_status,reason,evidence_refs and may
 only change availability to historical_only, contested, or retracted. A
@@ -88,6 +106,8 @@ closure_kind and basis; unsupported/uncertain must cite a blocking issue.
 BoundField={snapshot:"base"|"candidate"|"archive",target:AuditTargetRef,
 field_path:string}; AuditTargetRef={kind:"state"|"gap"|"requirement"|
 "entity"|"relation"|"focus",id:string,revision?:integer}.
+witnesses is a nonempty array of SourceWitness={kind:"source",ref:EvidenceRef}
+or FieldWitness={kind:"field",field:BoundField,exact_value:JSONValue}.
 witnesses must be a nonempty list, including a FieldWitness of an exact
 empty support_refs field when no source supports a claim; do not invent a quote.
 ClosureAssessment={resolution_id:string,gap_before:GapRef,gap_after:GapRef,
@@ -99,6 +119,14 @@ unusable, when it is {code:"insufficient_context"|"ambiguous_input"|
 "cannot_complete_audit",detail:string}; unusable must have no conclusions.
 No extra fields. Copy the exact binding from the input. EvidenceRef is
 {evidence_id,quote}, never an internal stored SourceRef.
+gap_before and gap_after are exact GapRef identities, not complete gap
+bodies in resolve_manifest. Every resolution needs exactly one assessment.
+environment_supported needs a visible tool_result or user_report EvidenceRef
+basis; goal_changed needs the exact candidate GoalDeltaRef; merged_into needs
+its exact replacement GapRef. The basis must contain that kind. supported
+has no blocking_issue_ids; unsupported/uncertain identify a valid blocking
+Issue. clean has no Issues and all assessments supported; issues has one or
+more valid Issues; unusable has no Issues or assessments and a valid reason.
 Check the entire bound candidate and every listed current target, including unchanged
 retained claims directly contradicted by this step's observations. Return clean only
 when the full coverage and every gap resolution are supportable. A valid source quote
@@ -121,7 +149,11 @@ Use only the committed state and selected refs in this request. Either return st
 silent, or remind with at most three distinct visible committed refs and a conditional
 context_for_action. Do not claim that a historical episode or inferred lesson is a
 current tool-observed fact. Do not override the original user task, execute tools, or
-approve task completion. Return one complete JSON object and no surrounding prose."""
+approve task completion. context_for_action is at most 1200 Unicode code
+points; the host-derived final reminder must fit 16384 UTF-8 bytes or the
+whole reminder is rejected. Copy state_version, task_version and
+phase2_view_id exactly from binding. Return one complete JSON object and no
+surrounding prose."""
 
 
 def _messages(system: str, payload: dict) -> list[dict]:
@@ -130,11 +162,11 @@ def _messages(system: str, payload: dict) -> list[dict]:
 
 
 def maintenance(payload: dict) -> list[dict]:
-    return _messages(MAINTENANCE_SYSTEM, payload)
+    return _messages(MAINTENANCE_SYSTEM + "\n" + WIRE_REFS, payload)
 
 
 def audit(payload: dict) -> list[dict]:
-    return _messages(AUDIT_SYSTEM, payload)
+    return _messages(AUDIT_SYSTEM + "\n" + WIRE_REFS, payload)
 
 
 def repair(*, original_messages: list[dict], base: dict, rejected: object,
@@ -149,4 +181,4 @@ def repair(*, original_messages: list[dict], base: dict, rejected: object,
 
 
 def selection(payload: dict) -> list[dict]:
-    return _messages(SELECTION_SYSTEM, payload)
+    return _messages(SELECTION_SYSTEM + "\n" + WIRE_REFS, payload)

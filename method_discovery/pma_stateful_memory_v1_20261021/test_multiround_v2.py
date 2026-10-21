@@ -1,6 +1,7 @@
 """One continuous fake episode with stored memory, repair, delivery and goal migration."""
 
 import json
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -31,12 +32,15 @@ class FiniteProvider:
 
     def __call__(self, role, messages, call_id, max_output):
         response = self._answer(role, messages, call_id, max_output)
+        assert isinstance(response, str)
         self.calls[-1]["request_size"] = self.proxy.measure(messages)
-        response_text = json.dumps(response, ensure_ascii=False, sort_keys=True)
-        self.calls[-1]["response_size"] = {"characters": len(response_text),
-            "utf8_bytes": len(response_text.encode("utf-8")),
-            "proxy_tokens": len(self.proxy.encoding.encode(response_text))}
+        self.calls[-1]["response_size"] = {"characters": len(response),
+            "utf8_bytes": len(response.encode("utf-8")),
+            "proxy_tokens": len(self.proxy.encoding.encode(
+                response, disallowed_special=()))}
         self.calls[-1]["response_sha256"] = digest(response)
+        self.calls[-1]["raw_response_utf8_sha256"] = hashlib.sha256(
+            response.encode("utf-8")).hexdigest()
         return response
 
     def _answer(self, role, messages, call_id, max_output):
@@ -231,9 +235,27 @@ class MultiRoundV2Tests(unittest.TestCase):
                             ("characters", "utf8_bytes", "proxy_tokens")},
                         "response": row["response_size"],
                         "request_sha256": row["messages_sha256"],
-                        "response_sha256": row["response_sha256"]}
+                        "response_sha256": row["response_sha256"],
+                        "raw_response_utf8_sha256": row["raw_response_utf8_sha256"]}
                         for row in provider.calls],
                     "real_model_calls": 0, "official_evaluator_calls": 0},
                     sort_keys=True))
             finally:
                 store.close()
+
+    def test_response_measurement_uses_returned_string_not_json_wrapper(self):
+        class Literal(FiniteProvider):
+            def _answer(self, role, messages, call_id, max_output):
+                self.calls.append({"phase": "synthetic", "role": role,
+                    "call_id": call_id, "messages_sha256": digest(messages)})
+                return '"quoted" \\slash\n中文'
+        provider = Literal()
+        messages = [{"role": "user", "content": "synthetic"}]
+        raw = provider("synthetic", messages, "id", 1)
+        size = provider.calls[0]["response_size"]
+        self.assertEqual(size["characters"], len(raw))
+        self.assertEqual(size["utf8_bytes"], len(raw.encode("utf-8")))
+        self.assertEqual(size["proxy_tokens"], len(provider.proxy.encoding.encode(
+            raw, disallowed_special=())))
+        self.assertNotEqual(size["utf8_bytes"], len(json.dumps(raw,
+            ensure_ascii=False).encode("utf-8")))

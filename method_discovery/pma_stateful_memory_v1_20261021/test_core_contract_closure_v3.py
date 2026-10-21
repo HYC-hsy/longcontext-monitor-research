@@ -60,6 +60,38 @@ def seeded_store(path, *, historical_state=False, repeated_user=False,
 
 
 class ClosureV3Tests(unittest.TestCase):
+    def test_each_actual_role_message_contains_its_wire_type_closure(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = seeded_store(Path(root) / "db", historical_state=True)
+            try:
+                provider = ScriptedProvider()
+                result = CycleEngine(store, provider, task_text="task").run(
+                    "wire-closure")
+                self.assertEqual(result["status"], "committed_selection_silent")
+                for call in provider.calls:
+                    system = call["messages"][0]["content"]
+                    for ref in ("EvidenceRef={evidence_id:",
+                                'GapRef={type:"gap",gap_id:',
+                                'GoalDeltaRef={type:"goal_delta",goal_delta_id:'):
+                        self.assertIn(ref, system, call["role"])
+                    if call["role"] == "maintenance":
+                        for rule in ("Scope.entity_ids is nonempty",
+                                     'time_role:"past_episode"',
+                                     "Non-inference Claim support_refs"):
+                            self.assertIn(rule, system)
+                    elif call["role"] == "audit":
+                        for rule in ("SourceWitness={kind:",
+                                     "FieldWitness={kind:",
+                                     "gap_before and gap_after are exact GapRef",
+                                     "unsupported/uncertain identify"):
+                            self.assertIn(rule, system)
+                    elif call["role"] == "selection":
+                        for rule in ("no protocol field", "1200 Unicode",
+                                     "16384 UTF-8 bytes"):
+                            self.assertIn(rule, system)
+            finally:
+                store.close()
+
     def test_transition_version_record_rolls_back_with_commit(self):
         with tempfile.TemporaryDirectory() as root:
             store = seeded_store(Path(root) / "db")
