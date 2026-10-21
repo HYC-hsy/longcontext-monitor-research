@@ -94,7 +94,7 @@ def checkpoint_turn_offset(checkpoint_dir):
 # output1_queue = agent.put_task(prompt1)
 # output2_queue = agent.put_task(prompt2)
 def build_task_terminal_record(run_id, task_id, terminal, pma_finalization,
-                               pos_finalization=None):
+                               pos_finalization=None, stateful_finalization=None):
     record = {'run_id': run_id, 'task_id': task_id,
               'result': terminal.get('result') if isinstance(terminal, dict) else None,
               'pma_finalization': pma_finalization}
@@ -106,6 +106,8 @@ def build_task_terminal_record(run_id, task_id, terminal, pma_finalization,
             pos_auxiliary_errors=[{'kind': row.get('kind'),
                                    'error_type': row.get('error_type')}
                                   for row in errors])
+    if stateful_finalization is not None:
+        record['stateful_finalization'] = stateful_finalization
     return record
 
 
@@ -360,6 +362,7 @@ class GenericAgent:
             if raw_query is None:
                 self.task_queue.task_done(); continue
             self.is_running = True
+            self.stateful_finalization = None
             handler_cwd = self.workspace_dir or resolve_workspace_dir(self.task_dir)
             raw_query = prepare_task_query(
                 raw_query, self.task_dir,
@@ -533,6 +536,7 @@ class GenericAgent:
                 display_queue.put({'done': full_resp, 'source': source, 'turn': curr_turn,
                                    'outputs': turn_resps.copy(), 'task_terminal': task_terminal,
                                    'pma_finalization': pma_finalization,
+                                   'stateful_finalization': self.stateful_finalization,
                                    'pos_finalization': pos_finalization(task_terminal)})
                 self.history = handler.history_info
             except Exception as e:
@@ -543,6 +547,7 @@ class GenericAgent:
                                    'turn': curr_turn, 'outputs': turn_resps.copy(),
                                    'task_terminal': task_terminal,
                                    'pma_finalization': pma_finalization,
+                                   'stateful_finalization': self.stateful_finalization,
                                    'pos_finalization': pos_finalization(task_terminal)})
             finally:
                 finalize_upstream_pma(task_terminal)
@@ -624,7 +629,10 @@ if __name__ == '__main__':
                     terminal, item.get('pma_finalization', {'status': 'not_enabled'}),
                     (item.get('pos_finalization') or {'status': 'missing_or_unknown',
                       'archive_incomplete': True})
-                    if os.environ.get('GA_POS_ENABLED') == '1' else None)
+                    if os.environ.get('GA_POS_ENABLED') == '1' else None,
+                    (item.get('stateful_finalization') or
+                     {'status': 'missing_or_unknown'})
+                    if os.environ.get('GA_STATEFUL_MEMORY_ENABLED') == '1' else None)
                 terminal_path = '/logs/agent/task_terminal.json'
                 with open(terminal_path + '.pending', 'x', encoding='utf-8') as f:
                     json.dump(terminal_record, f, sort_keys=True)

@@ -288,8 +288,9 @@ class StatefulLiveBridge:
 
     def finish(self, terminal):
         if self.closed:
-            return
+            return self.last_result
         try:
             self.last_result = self.client.exchange("finish", terminal=terminal)
+            return self.last_result
         finally:
             self.closed = True

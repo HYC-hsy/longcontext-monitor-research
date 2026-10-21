@@ -185,6 +185,16 @@ def verify_live_spec(spec: dict) -> None:
 class PMATrialHooks(PilotTrialHooks):
     def terminal_identity_valid(self, terminal):
         condition = self.spec.get('condition')
+        if self.spec.get('research_candidate') == 'pma_stateful_memory_v1':
+            final = terminal.get('stateful_finalization') if isinstance(terminal, dict) else None
+            return (condition == 'B' and isinstance(terminal, dict) and
+                    set(terminal) == {'run_id', 'task_id', 'result',
+                                      'pma_finalization', 'stateful_finalization'} and
+                    terminal.get('run_id') == self.spec['run_id'] and
+                    terminal.get('task_id') == self.spec['task_id'] and
+                    terminal.get('pma_finalization') == {'status': 'not_enabled'} and
+                    isinstance(final, dict) and final.get('closed') is True and
+                    type(final.get('cycle_count')) is int)
         if condition == 'P':
             return (isinstance(terminal, dict) and
                 set(terminal) == {'run_id', 'task_id', 'result',

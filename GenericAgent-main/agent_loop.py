@@ -633,7 +633,7 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
         final_outcome = {**final_outcome, 'pos_archive_incomplete': True,
                          'pos_auxiliary_errors': pos_auxiliary_errors}
     if stateful is not None:
-        stateful.finish(final_outcome)
+        handler.parent.stateful_finalization = stateful.finish(final_outcome)
     _research_emit('termination', final_outcome, internal_turn=turn)
     _hook('agent_after', locals())
     return final_outcome
@@ -661,10 +661,13 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             bridge = getattr(parent, '_stateful_memory_bridge', None)
             if bridge is not None and bridge is not old_stateful:
                 if sys.exc_info()[0] is not None:
-                    try: bridge.finish({'result': 'GENERATOR_CLOSED_OR_FAILED'})
+                    try:
+                        parent.stateful_finalization = bridge.finish(
+                            {'result': 'GENERATOR_CLOSED_OR_FAILED'})
                     except BaseException: pass  # Preserve the original failure.
                 else:
-                    bridge.finish({'result': 'GENERATOR_CLOSED_OR_FAILED'})
+                    parent.stateful_finalization = bridge.finish(
+                        {'result': 'GENERATOR_CLOSED_OR_FAILED'})
             if old_stateful is sentinel:
                 if hasattr(parent, '_stateful_memory_bridge'):
                     delattr(parent, '_stateful_memory_bridge')
