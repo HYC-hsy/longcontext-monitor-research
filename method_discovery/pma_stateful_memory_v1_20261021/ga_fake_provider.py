@@ -23,8 +23,11 @@ class FiniteGAFakeProvider:
             raise ContractError("fake_script_missing")
         self.script = []
         for row in script:
-            if (type(row) is not dict or set(row) != {"role", "shape"} or
+            if (type(row) is not dict or
+                    set(row) not in ({"role", "shape"}, {"role", "shape", "envelope"}) or
                     row["role"] not in ROLES or row["shape"] not in SHAPES):
+                raise ContractError("fake_script_invalid")
+            if row.get("envelope", "raw_json") not in {"raw_json", "fenced_json"}:
                 raise ContractError("fake_script_invalid")
             self.script.append(dict(row))
         self.calls = []
@@ -93,4 +96,5 @@ class FiniteGAFakeProvider:
                     raise ContractError("fake_reminder_ref_missing")
                 answer.update(refs=[state], context_for_action=
                               "If useful, review this observed tool result.")
-        return canonical(answer).decode("utf-8")
+        raw = canonical(answer).decode("utf-8")
+        return "```json\n" + raw + "\n```" if row.get("envelope") == "fenced_json" else raw

@@ -19,7 +19,7 @@ SOURCE_FILES = tuple(dict.fromkeys(V3_SOURCE_FILES + (
     'long_context_bench/scripts/isolated_run_bundle.py',
     RUN + 'vendor/pma_89e5c0d/src/memory_agent/memory/bm25_search.py',
     *(CORE + name + '.py' for name in (
-        '__init__', 'audit', 'budget', 'engine', 'ga_fake_provider',
+        '__init__', 'audit', 'budget', 'engine', 'ga_fake_provider', 'model_output',
         'projection', 'prompts', 'proposal', 'reminder', 'retrieval',
         'schema', 'source', 'store')),
     *(RUN + name for name in (

@@ -12,8 +12,9 @@ from .projection import project_snapshot, visible_existing
 from .reminder import render_reminder, validate_selection
 from .retrieval import (MemoryIndex, WorksetBuilder, query_text,
                         visible_stored_source_refs)
-from .source import (ContractError, SourceCatalog, digest, strict_loads,
+from .source import (ContractError, SourceCatalog, digest,
                      validate_source_ref)
+from .model_output import decode_model_object
 
 
 def _contextual_objects(work: dict, snapshot: dict) -> list[dict]:
@@ -146,6 +147,36 @@ class CycleEngine:
             "logical_calls": phases.count("call_attempt"),
             "observable_attempts": phases.count("call_attempt"),
             "responses_received": phases.count("call_returned")}
+
+    def _decode(self, cycle_id: str, role: str, number: int, raw: str,
+                repair_credit_remaining: int) -> dict:
+        call_id = f"{cycle_id}/{number}/{role}"
+        def record(meta: dict) -> None:
+            self.store.journal(cycle_id, "model_decode", {
+                "call_id": call_id, "role": role,
+                "repair_credit_remaining": repair_credit_remaining, **meta})
+        return decode_model_object(raw, record=record)
+
+    def _record_model_error(self, cycle_id: str, error: ContractError,
+                            repair_credit_remaining: int) -> None:
+        rows = self.store.journal_rows(cycle_id)
+        decoded = next((row["body"] for row in reversed(rows)
+                        if row["phase"] == "model_decode"), None)
+        if decoded is None or decoded["failure_layer"] is not None:
+            return  # The decoder already recorded the envelope/JSON failure.
+        if any(row["phase"] == "model_validation_error" and row["body"][
+                "call_id"] == decoded["call_id"] and row["body"]["error_code"] ==
+                error.code for row in rows):
+            return
+        code = error.code
+        layer = ("semantic_audit" if code in {"model_unusable",
+                 "blocking_issues_repair_exhausted"} else
+                 "reference" if code.startswith(("source_", "quote_", "evidence_"))
+                 or code in {"invisible_reference", "ambiguous_quote"} else "schema")
+        self.store.journal(cycle_id, "model_validation_error", {
+            "call_id": decoded["call_id"], "role": decoded["role"],
+            "failure_layer": layer, "error_code": code,
+            "repair_credit_remaining": repair_credit_remaining})
 
     def _catalog(self, ledger: dict, work: dict,
                  purposes: tuple[str, ...] = ("maintenance", "audit"),
@@ -332,7 +363,7 @@ class CycleEngine:
                 raw = self._call(cycle_id, "maintenance", messages, calls, 8192)
                 stage = "model_validation"
                 try:
-                    response = strict_loads(raw)
+                    response = self._decode(cycle_id, "maintenance", calls, raw, credit)
                     proposal = validate_proposal(response,
                         request_id=binding["request_id"], task_version=goals["epoch"],
                         base_version=snapshot["state_version"])
@@ -342,6 +373,7 @@ class CycleEngine:
                             "to_event_seq"], goal_ledger=goals,
                         visible_existing_ids=mutable_ids, archive=self.store.archive())
                 except ContractError as error:
+                    self._record_model_error(cycle_id, error, credit)
                     if credit == 0:
                         raise
                     credit = 0
@@ -413,7 +445,8 @@ class CycleEngine:
                     replacement_raw = self._call(cycle_id, "candidate_repair",
                                                  request, calls, 8192)
                     stage = "model_validation"
-                    proposal = validate_proposal(strict_loads(replacement_raw),
+                    proposal = validate_proposal(self._decode(cycle_id,
+                        "candidate_repair", calls, replacement_raw, credit),
                         request_id=binding["request_id"], task_version=goals["epoch"],
                         base_version=snapshot["state_version"])
                     candidate = build_candidate(proposal=proposal, base=snapshot,
@@ -427,7 +460,7 @@ class CycleEngine:
                 raw = self._call(cycle_id, "audit", audit_messages, calls, 8192)
                 stage = "model_validation"
                 try:
-                    response = strict_loads(raw)
+                    response = self._decode(cycle_id, "audit", calls, raw, credit)
                     result = validate_audit_result(response, view=view,
                         catalog=catalog, archive={(
                             "state", item["record_ref"]["record_id"], item["record_ref"]["revision"])
@@ -436,6 +469,7 @@ class CycleEngine:
                              item["record_ref"]["revision"]): item["body"]
                             for item in contextual})
                 except ContractError as error:
+                    self._record_model_error(cycle_id, error, credit)
                     if credit == 0:
                         raise
                     credit = 0
@@ -449,7 +483,8 @@ class CycleEngine:
                     corrected_raw = self._call(cycle_id, "audit_correction",
                                                correction, calls, 8192)
                     stage = "model_validation"
-                    result = validate_audit_result(strict_loads(corrected_raw), view=view,
+                    result = validate_audit_result(self._decode(cycle_id,
+                        "audit_correction", calls, corrected_raw, credit), view=view,
                         catalog=catalog, archive={(
                             "state", item["record_ref"]["record_id"], item["record_ref"]["revision"])
                             if item["kind"] == "archived_state" else
@@ -457,7 +492,12 @@ class CycleEngine:
                              item["record_ref"]["revision"]): item["body"]
                             for item in contextual})
                 if result["outcome"] == "unusable":
+                    self.store.journal(cycle_id, "audit_outcome", {
+                        "outcome": "unusable", "repair_credit_remaining": credit})
                     raise ContractError("model_unusable")
+                self.store.journal(cycle_id, "audit_outcome", {
+                    "outcome": result["outcome"],
+                    "repair_credit_remaining": credit})
                 if result["outcome"] == "clean":
                     break
                 if credit == 0:
@@ -475,7 +515,8 @@ class CycleEngine:
                 replacement_raw = self._call(cycle_id, "candidate_repair",
                                              repair_messages, calls, 8192)
                 stage = "model_validation"
-                proposal = validate_proposal(strict_loads(replacement_raw),
+                proposal = validate_proposal(self._decode(cycle_id,
+                    "candidate_repair", calls, replacement_raw, credit),
                     request_id=binding["request_id"], task_version=goals["epoch"],
                     base_version=snapshot["state_version"])
                 candidate = build_candidate(proposal=proposal, base=snapshot,
@@ -502,6 +543,8 @@ class CycleEngine:
             self.store.journal(cycle_id, "cycle_result", outcome)
             return outcome
         except BaseException as error:
+            if stage == "model_validation" and isinstance(error, ContractError):
+                self._record_model_error(cycle_id, error, credit)
             category = error.code if isinstance(error, ContractError) else type(error).__name__
             status = ("init_failed" if snapshot["state_version"] == 0 and
                       not pending else
@@ -585,7 +628,8 @@ class CycleEngine:
             if (self.store.goals()["epoch"] != snapshot["B"]["G"]["task_version"] or
                     self.store.snapshot()["state_version"] != snapshot["state_version"]):
                 raise ContractError("selection_stale")
-            decision = validate_selection(strict_loads(answer_raw), snapshot=snapshot,
+            decision = validate_selection(self._decode(cycle_id, "selection",
+                calls + 1, answer_raw, 0), snapshot=snapshot,
                 phase2_view_id=phase2_view_id, selected_refs=refs)
             if decision["decision"] == "silent":
                 return {"cycle_id": cycle_id, "status": "committed_selection_silent",
@@ -597,6 +641,8 @@ class CycleEngine:
                     "commit": committed, "reminder": reminder,
                     "logical_calls": calls + 1}
         except BaseException as error:
+            if selection_started and isinstance(error, ContractError):
+                self._record_model_error(cycle_id, error, 0)
             code = error.code if isinstance(error, ContractError) else type(error).__name__
             status = ("committed_selection_stale" if code == "selection_stale" else
                       "committed_selection_failed")

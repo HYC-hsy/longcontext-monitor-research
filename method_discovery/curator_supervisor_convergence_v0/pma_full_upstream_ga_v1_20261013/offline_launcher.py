@@ -130,6 +130,7 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
         core_target = host_stage / 'method_discovery' / 'pma_stateful_memory_v1_20261021'
         core_target.mkdir(parents=True)
         for name in ('__init__', 'audit', 'budget', 'engine', 'ga_fake_provider',
+                     'model_output',
                      'projection', 'prompts', 'proposal', 'reminder', 'retrieval',
                      'schema', 'source', 'store'):
             shutil.copy2(core_source / (name + '.py'), core_target / (name + '.py'))

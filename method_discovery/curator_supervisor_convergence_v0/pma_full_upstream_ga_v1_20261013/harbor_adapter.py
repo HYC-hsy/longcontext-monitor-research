@@ -13,6 +13,8 @@ from .networked_transport_setup import start_networked_transport
 
 
 EXPECTED_ADAPTER_SHA256 = "f50894cdb160793dcba83bcf4ecd2b73ff48e2bad427abef4551db87faadfb55"
+EXPECTED_STATEFUL_DIAGNOSTIC_ADAPTER_SHA256 = (
+    "8a4513c6b28befe747d581d22e94cd2715f20234c63115e0ea424a56d033c3a0")
 FORWARD = (
     "GA_STATEFUL_MEMORY_ENABLED",
     "GA_STATEFUL_MEMORY_MODE",
@@ -47,7 +49,10 @@ FORWARD = (
 )
 
 actual = hashlib.sha256(Path(original.__file__).read_bytes()).hexdigest()
-if actual != EXPECTED_ADAPTER_SHA256:
+if actual != EXPECTED_ADAPTER_SHA256 and not (
+        os.environ.get('GA_STATEFUL_MEMORY_ENABLED') == '1' and
+        os.environ.get('GA_STATEFUL_AGENT_TIME_PROTOCOL') == 'diagnostic-uncapped-v1' and
+        actual == EXPECTED_STATEFUL_DIAGNOSTIC_ADAPTER_SHA256):
     raise RuntimeError("PMA Harbor base adapter byte identity mismatch")
 if any(name in original.FORWARDED_ENV_VARS for name in FORWARD):
     raise RuntimeError("PMA Harbor forwarding unexpectedly already present")

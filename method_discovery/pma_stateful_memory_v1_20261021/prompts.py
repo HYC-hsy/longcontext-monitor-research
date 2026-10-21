@@ -126,6 +126,7 @@ Use only evidence IDs visible in this request, with literal contiguous quotes.
 The host will apply a complete proposal once to the original base; no partial commit."""
 
 AUDIT_SYSTEM = """Stateful proactive memory audit, protocol audit-result/1.
+Output raw JSON only: no Markdown code fence, language tag, or surrounding prose.
 Return exactly one JSON object with protocol,binding,coverage,outcome,issues,
 closure_assessments,unusable_reason. coverage contains every required_coverage
 ref exactly once. outcome is clean/issues/unusable. clean requires issues=[];
@@ -182,6 +183,7 @@ If an honest complete audit is impossible, return unusable with its defined reas
 Return one complete JSON object and no surrounding prose."""
 
 SELECTION_SYSTEM = """Stateful proactive memory selection, protocol reminder-decision/1.
+Output raw JSON only: no Markdown code fence, language tag, or surrounding prose.
 Return exactly one of these JSON objects (no protocol field):
 {decision:"silent",state_version:integer,task_version:integer,phase2_view_id:string}
 or {decision:"remind",state_version:integer,task_version:integer,
