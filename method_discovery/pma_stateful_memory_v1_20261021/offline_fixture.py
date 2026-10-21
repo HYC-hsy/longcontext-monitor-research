@@ -14,16 +14,26 @@ from .test_contracts import empty_snapshot, leaf
 from .test_engine import ScriptedProvider, event
 
 
+class FakeTask:
+    def __init__(self, store: MemoryStore) -> None:
+        self.store = store
+        self.tool_calls = 0
+
+    def execute_synthetic_tool(self, output: str) -> None:
+        self.tool_calls += 1
+        action_batch, leaves = event(self.tool_calls, output)
+        self.store.append_event(action_batch, leaves)
+
+
 def scenario(name: str) -> dict:
     with tempfile.TemporaryDirectory(prefix="stateful-memory-fake-") as directory:
         store = MemoryStore(Path(directory) / "method.sqlite3")
         try:
             store.initialize(empty_snapshot(), leaf("task"))
-            task_events = 0
+            task = FakeTask(store)
+            user_events = 0
             if name != "initial_task":
-                first, leaves = event(1, "synthetic tool observation")
-                store.append_event(first, leaves)
-                task_events += 1
+                task.execute_synthetic_tool("synthetic tool observation")
             options = {}
             if name in {"clean_remind", "goal_epoch_stale"}:
                 options = {"create_requirement": True, "remind": True}
@@ -37,9 +47,7 @@ def scenario(name: str) -> dict:
                 options = {"fail_role": "audit"}
             elif name == "prefix_backlog":
                 long_text = " ".join(str(number) for number in range(40000))
-                second, second_leaves = event(2, long_text)
-                store.append_event(second, second_leaves)
-                task_events += 1
+                task.execute_synthetic_tool(long_text)
             provider = ScriptedProvider(**options)
             first_result = CycleEngine(store, provider, task_text="task").run(
                 "trigger-first")
@@ -61,7 +69,7 @@ def scenario(name: str) -> dict:
                     store.append_event({"event_id": "user-message-2",
                         "event_seq": 2, "kind": "user_message", "occurred_at_step": 2,
                         "source_ids": ["user-new"], "payload": {}}, [revision])
-                    task_events += 1
+                    user_events += 1
                 def fake_task_send(payload):
                     nonlocal task_request_hash
                     task_request_hash = digest(payload)
@@ -86,7 +94,8 @@ def scenario(name: str) -> dict:
                 "fake_role_calls": len(provider.calls),
                 "roles": [call["role"] for call in provider.calls],
                 "request_sizes": measured,
-                "fake_task_events": task_events,
+                "fake_tool_calls": task.tool_calls,
+                "fake_user_revision_events": user_events,
                 "task_delivery": task_delivery,
                 "task_request_sha256": task_request_hash,
                 "real_model_calls": 0, "official_evaluator_calls": 0}
