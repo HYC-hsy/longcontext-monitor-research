@@ -1,0 +1,40 @@
+统一规范 v1 审阅与实现验收清单
+日期：2026-10-21
+状态：文档设计检查，不是代码测试报告。
+
+发布前已在文档中收口：
+[文档已明确] 单一状态、同步时序、联合提交、PMA两阶段重检索与生成式提醒。
+[文档已明确] 去重包保留 before_layout/candidate_layout，避免分组后丢数组顺序。
+[文档已明确] pinned archive是历史上下文，不混入candidate当前必审主目标。
+[文档已明确] 通过直接反向引用将相关已关闭gap纳入选中bundle，可显式reopen；不宣称不可见关闭项已被审。
+[文档已明确] 精确旧SourceRef映射到精确span evidence_id；显示上下文合并不改变匹配域。
+[文档已明确] 完整修复请求本身必须装入预算，不允许删错误来制造“可修复”。
+[文档已明确] 原子action_batch/user_message/agent_report事件，初始任务seq0，后续用户修订同时入事件与目标账本。
+[文档已明确] 提交前一次repair；selection无修复；provider自动重试0。
+[文档已明确] pending连续前缀，不跳步；未追上tip不运行selection。
+[文档已明确] host GoalLedger epoch与最后提交B分离；目标修改期间不交付旧目标提醒。
+[文档已明确] Requirement退役区分用户改目标与模型纠正解释。
+[文档已明确] BM25与输入/输出/提醒长度参数选定，代理token与provider计量分开。
+
+仍须实现和执行的验收，以下均未执行：
+1. 状态schema及所有联合类型/枚举/跨字段约束验证器。
+2. SourceRef、EvidenceRef、唯一匹配与缓存/可见范围验证。
+3. 输入装包器和mandatory/optional来源闭包；完整失败回执不静默删除。
+4. 审核codec可逆重建和hash一致性测试。
+5. 提案应用、archive、显式gap更新、GoalLedger迁移的事务测试。
+6. AuditResult整份校验与无效issue不能过滤成clean。
+7. 所有3/4/5调用及失败路径；同cycle重入不能补余额。
+8. pending跨轮重放、原子批次、预算溢出和前沿不越过缺口。
+9. selection合同、锚点派生、postcommit失败不回滚、交付幂等。
+10. 索引版本变化与提交后重检索；可见但本轮未审标签。
+11. 全假provider整链无真实API、无Task环境执行、无官方评价。
+12. 对新codec实际消息重新计数；不沿用旧GA13包的成本数字。
+
+真实实验的独立前置条件：
+- 新实现固定源码SHA与依赖，新的fake整链认证通过。
+- 模型和实际context guard可验证；run manifest记录tokenizer/计量、窗口、安全余量。
+- 数据集开发/保留边界、对照、预算、终止条件预注册。
+- 用户明确授权真实模型/Task/评价次数及总额度。
+- 旧案例仅开发证据；官方reward与人工gold不可倒灌在线输入。
+
+没有声称已通过任何runtime测试、已改善语义判断或已降低任务成本。

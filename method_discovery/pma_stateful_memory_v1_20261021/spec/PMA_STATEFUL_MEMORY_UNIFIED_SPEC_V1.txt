@@ -1,0 +1,772 @@
+状态化主动记忆：统一机制规范 v1
+日期：2026-10-21（UTC+8）
+协议标识：stateful-proactive-memory/1
+性质：待实现、待验证的候选规范；不是实验结果、开发完成报告或真实调用授权。
+
+0. 文档效力与阅读顺序
+
+本文件是本候选的唯一规范性入口，统一完整方法、状态类型、维护/审核协议及两次审计裁决。此前 V1 文档仅作为设计历史和证据附件；如与本文件冲突，以本文件为准。已有 SQLite 请求样例是旧表示的设计夹具，不是本版可直接送入 provider 的合规请求，也不能直接用于本版输入成本主张。
+“必须”表示工程合同；“应判断”表示模型语义职责；“待验证”表示实验假说。类型合法不等于命题真实。本文类型为可实现的伪类型，不声称已有运行时 JSON Schema、存储实现或认证。
+本文不改变任何已存在的源码、历史运行、reward、预算或一次性授权。实现与真实调用另行安排。
+
+1. 研究问题、核心机制与不做什么
+
+研究问题：长程任务中的主动记忆，如何在持续更新和使用时保留事实、经验与推断的依据和适用范围，减少错误概括、过时信息及经验误用对提醒的污染？
+待检验假说：将 PMA 维护的任务知识与过程经验组织成显式、有版本的状态，并在提交前审核其变化，再从已提交状态选择性提醒，可能比直接维护自由文本记忆更可靠。
+与原 PMA 的本质区别是记忆的更新与使用合同，不是多加几个标签或把整套 PoS 并排运行：维护先提出状态变化，只有通过工程校验和语义审核的联合候选才提交；经验分离历史 episode 与推断 lesson；提醒附程序派生的来源/范围锚点。
+借鉴 PoS 的 G/W/DeltaE/DeltaA/F 组织、候选副本、审核与整体提交思想；保留 PMA 的知识/经验内容、BM25 检索、提交后重新检索和生成式选择提醒。
+
+不做：
+- 不增加第二份可独立写入的 PMA bank 或 status 真源。
+- 不增加并发维护、后台 outbox、独立完成裁判、completion gate。
+- 不加入 PoS 全套 progress/health/trapping/recovery 评分。
+- 不建立通用因果依赖失效图，不要求模型自报所有行动依赖。
+- 不增加向量检索、查询改写模型、额外提醒审核角色。
+- 不保证 Task 一定采纳提醒，不保证状态没有语义错误，不预设任务成功率提升或成本下降。
+- v1 不自动跨任务共享记忆；历史档案供审计，不自动当新任务事实。
+
+2. 统一流程与角色
+
+Task 是唯一执行环境工具的角色。记忆系统只有维护、审核、选择三个模型职责；host 负责来源、视图、类型、事务、预算和渲染。
+采用同步时序：一次普通 Task 动作批次及回执结束后，等待本周期记忆处理结束，再进入下一次 Task 决策。
+初始化对应首次触发一次，不再额外重复首步维护：host 建空状态与原任务账本，维护提案建立初始目标解释/必要缺口，经同一审核后可进入选择。没有工具观察时不得制造环境事实。
+
+每个周期：
+(1) host 收录新事件，冻结 cycle_id、当前任务版本、base snapshot 和观察尾端。
+(2) 选择最早连续待处理观察批次，形成维护工作集和可见来源窗口。
+(3) 维护模型输出 MaintenanceProposal。
+(4) host 校验并在原 base 的隔离副本构造一次精确 CandidateUpdate。
+(5) 审核模型检查候选，host 验证整份 AuditResult 合同。
+(6) clean 则原子提交；issues/可纠正输出错误按共享余额最多修复一次；最终失败不提交。
+(7) 仅提交成功且已追上本周期冻结观察尾端时，重新检索并调用选择一次。
+(8) 合法提醒经 host 渲染送至下一次 Task 请求；合法 silent 不发送提醒；选择失败也不发送，但单独记为失败。
+(9) Task 按原循环继续或结束。结束不自动关闭缺口，也不追加一个记忆完成审查回合。
+
+普通触发 interval=1、近期查询窗口8步，沿用既有宿主触发点。解析恢复/完成确认等特殊分支的实际触发情况必须留证，不笼统声称每次循环均触发。没有新事件时不为消耗 pending 而在同一周期偷偷重复调用；下一次真实宿主触发可重试旧 pending。同一 trigger_id 对应同一 cycle_id，重入/进程恢复不能产生新周期来重置预算。
+
+3. 状态、来源与历史
+
+唯一记忆快照 B=(G,W,DeltaE,DeltaA,F)。
+G：原始用户要求的来源、任务版本、结构化解释。
+W：轻量实体、knowledge/procedural 记录与有状态锚点的关系。
+DeltaE：未知或需确认的信息缺口；得到否定答案也可以解决。
+DeltaA：尚未达到的任务要求；不能因为“知道做不到”就标完成。
+F：一个开放/阻塞缺口的记忆关注点，不是 Task 的强制下一步计划。
+status_view 从这些结构确定性生成，禁止另有独立可写 status 或 task_complete 标志。
+
+Knowledge 为有范围、有来源和时态的主张。Procedural.episode 保存过去条件、动作、结果；lesson 是可为空的条件性推断，不能继承 tool_observation 标签。
+Entity 仅表示身份；路径名不证明文件存在。Relation 必须由 StateRef 锚定，不允许无来源事实从关系字段绕入。
+当前可用状态主张不等于外部真值。scope.conditions 是自然语言；程序不能保证它们当前成立。
+
+当前头与归档：
+- 每个 record_id 只有一个当前 revision；修改 revision 加1。
+- supersedes 存直接替代边，所有历史版本与边在只读归档保留；查历史递归遍历或用等价索引。
+- 校验存在性、无自环、无重复边、无有向环。旧归档本身必须已满足不变量。
+- supersedes 不是事实依赖图，不自动重写其他关系和缺口。
+- 引用归档旧版本可用于历史依据，但必须显示历史身份；不得当作当前 head。
+- 对缺口/关系所引用旧版本，不静默改指向新版；必要修正由显式 patch 完成。
+- retracted 保留用于审计，不作为正常提醒可选记录；要解释纠错，引用有效的更正记录。
+
+来源账本与事务状态不是两份事实真源：来源账本追加原始事件，B 存模型接受的结构化解释。attempt 诊断不构成环境证据。
+原始源文本不可变，ID 同且 hash 同则幂等；ID 同但 hash 不同是 host 冲突，禁止当成新版本覆盖。
+官方评价、后验成功标签、人工预期答案不得进入在线来源。
+
+4. 观察前沿与失败重放
+
+观察顺序使用 host 单调 EventSeq，不再用 GA turn 直接表示提交前沿。ga_turn 保留供人阅读；一次 turn 可以有多个事件。
+ObservationEvent.kind=action_batch|user_message|agent_report。action_batch原子单位为宿主一次普通触发前完成的整个动作批次，包含其中所有工具动作与匹配回执的实际可见leaf；不是单个tool-call与整批混用。动作及其结果、同批多工具结果不得拆到两个已提交批次；缺失结果的动作不能冒充已完成成功事件。user_message/agent_report各自独立成事件，保留来源角色。初始任务源event_seq=0，不占后续处理范围；后续用户修改同时入GoalLedger和事件账本。SourceLeaf.event_id保留原tool_use_id/消息ID，并以event_seq关联host批次。
+agent_report 与 user_requirement 分角色记录。输出为空或非零退出不阻止事件入账；它们不等于解析失败。
+
+ObservationBatch = {
+ cycle_id,
+ base_committed_event_seq,
+ frozen_tip_event_seq,
+ processing_range: {from_event_seq, to_event_seq},
+ events: [{event_id,event_seq,kind,occurred_at_step,source_ids,
+           delivery_kind:new|replayed,previous_attempt_ids}],
+ previous_attempt_diagnostics: [{attempt_id,event_ids,failure_class,
+   detail,epistemic_status:diagnostic_not_evidence}],
+ pending_after_batch_count
+}
+
+host 选择从 committed_event_seq+1 开始的连续事件前缀；不能跳过较早失败事件只处理最新一步。初始化空批次采用 from=1,to=0，除此以外 from<=to。
+GA13 更新失败后，后续批次应携带同一 GA13 事件 ID 并标 replayed；若装得下，再带 GA14 新事件，不能把 GA13 伪装成刚发生。
+每条事件最多出现一次；模型诊断只是诊断，不允许作为 SourceRef.support。
+成功提交只推进到本次连续批次末端。没有必要把每条观察转成一条 State，但它必须确实进入本次维护/审核视图；只展示“还有N条”不算处理。
+若仅能提交较早前缀，剩余 pending 保留，本轮选择阶段返回 selection_deferred_pending，不在旧状态基础上发“当前”提醒，也不启动额外追赶调用。
+如果最早完整事件加必需上下文都装不下，返回 input_budget_exceeded；不能丢掉它后快进。该限制可能导致记忆停滞，是需测量的适用边界，而不是假装处理成功。
+达到 episode 总预算或 Task 结束时如还有 pending，记录未合并数量和区间，不追加未授权补跑。
+
+5. 工作集、BM25 与来源窗口
+
+5.1 排名保持 PMA 起点
+候选文档由当前 head 派生，排除 retracted；active、historical_only、contested 均可作为带对应标签的记忆内容检索，historical_only 不得渲染成当前事实。
+Knowledge 正文为 claim.text；Procedural 正文固定拼 episode.conditions.text、action_text、result.text、lesson.text（存在时）。不另写一份独立 content。
+BM25：k1=1.5,b=0.75，小写 Unicode \\w 词法切分；重复查询词重复贡献；只取正分；同分按 host 稳定创建顺序再按 ID。保持实现的具体 tokenizer/依赖版本，不宣称语义检索。
+合格 K+P 数量<=50 时全选；>50 时每类 top20。这是初始排名候选，不保证全部一定塞进预算。
+q 沿用固定 wrapper：原始任务与有效用户补充、最近8个普通步骤可用的公开 actor 字段、前5条命令及省略数、actor 可见观察。无隐藏推理时不补造；比较臂使用相同可得字段及构造器。
+用于 q 的有限历史不替代 ObservationBatch 的完整可见动作/回执。F 作为结构上下文，不另做加权查询。
+
+5.2 必需对象集合
+M 必须包含：当前目标原文/解释；所有当前 open/blocked gaps；F；这些 gap 直接引用的精确 State 版本与其当前 head（若不同，分别标记）；上述 State 的实体；必要的目标修订与来源。
+不沿任意关系边递归扩展整个图。选中的状态可携带由它锚定的关系及关系端点实体，受相同原子 bundle 规则约束。
+检索对象加入时为一个完整 bundle：State 正文及范围/时态/状态、实体、直接锚定关系、被引支持/反证来源片段。不得只保留支持而丢掉其已登记 challenge_refs。
+必需对象不因 BM25 分数低或因为“看起来历史无关”而删除。它们总量超限即明确失败，不增加相关性判断模型。
+对选中State的record_id，使用确定性反向索引一次找出当前已关闭gaps中record_refs或closure.state_refs引用该ID的对象，连同其精确被引版本、goal_refs与closure来源作为该bundle的必要上下文；不沿新加入上下文继续递归。这样可对已展示关闭项提出reopen，不自动重开。
+已关闭且没有上述直接关联的 gap 不全部强制展示；其原件保留。这些不可见关闭项本轮不能reopen，也不能声称被完整纠错；仅由纯SourceRef关闭且没有State关联的gap可能不被召回，是明确覆盖限制。对未展示旧 ID 的修改禁止。需要修改的旧对象只能来自本周期已冻结视图，不能在模型报一个新 ID 后临时扩展视图并继续原审核。
+
+5.3 装包顺序
+先固定 M，再按事件顺序找能装入的最长完整连续 ObservationBatch 前缀；最后用 BM25 结果按稳定顺序填可选 bundle。K/P 跨类使用本版选定的稳定合并规则：交替取各类第1、第2…名，K优先，不比较不同索引的原始分数。
+短于8步的查询历史不造填充；查询使用的历史序列化规则固定并记录可见截断，不按审核结果临时调查询。
+装不下可选 bundle 时跳过整个 bundle，继续尝试后续较小 bundle，记录 omitted IDs/reason；不截断单条命题的条件。
+维护和审核使用同一已冻结来源窗口。新提案只能引用已展示来源；审核不能偷偷看到维护没见过的新证据来形成对照不公平。
+候选造成审核输入超限属于候选合同错误，若仍有修复额度且完整修复请求本身装得下，可要求减少提案；不能事后从本轮已审必需范围删对象以放行。
+
+5.4 来源片段规则
+当前处理批次使用宿主实际提供的完整可见 action/result leaves；如果宿主本来已截断，保留 truncated 标记和原有范围，不宣称见到完整环境输出。
+历史已存 SourceRef 的源片段默认取引文 span 两侧各80个 Unicode code point，合并同 leaf 重叠/相接片段；完整 quote 不得被切断。若引用 tool_result，补同一事件的完整可见 executed_action，使模型能够辨认 echo/cat 自述。若缺失相应动作则明确 source_context_unavailable，不能把缺少上下文说成验证充分。
+可见来源由 base、处理批次与固定引用规则产生，不由人工“正确候选”或评价答案反向选择。
+已存SourceRef生成独立的精确span evidence_id，其匹配域恰为原quote span；±80上下文只作为同leaf context span关联展示，不扩大这个ID的匹配域。对处理批次和可选上下文提供普通segment ID供新引用使用，新quote仍须在所选匹配域内唯一。即使显示片段合并，已存引用ID的精确span映射不变，避免host投影把原合法短引文变歧义。
+相同 source segment 文本只展示一次；引用ID可以用span映射指向共用文本。裁剪元数据保存原 leaf hash、start/end、原可见长度、是否宿主截断；不得把片段 hash 冒充原网络字节 hash。
+
+5.5 提交后重检索
+每次提交使派生索引失效，基于新版本重建；记录 revise、撤回、scope 等展示变化，避免旧文本缓存。
+选择阶段用相同查询重新检索，因此结果可以不同于维护阶段。未在本周期重审的已提交记录标 not_reviewed_this_cycle，允许选用但不称本轮已验证。
+Phase2 不能访问被拒候选或未提交的解释；其近期轨迹仍可包含原始已处理观察。
+
+6. 审核视图的无损表示去重
+
+不采用只展示 diff，也不新增语义相关性裁剪。无损仅指冻结的同一工作集。
+AuditView = {
+ binding,
+ shared_objects:[{object_ref,body}],
+ changed_objects:[{before_ref,before_body,after_ref,after_body}],
+ added_objects:[{after_ref,body}],
+ operation_index:[{operation,target_ref,changed_field_paths}],
+ before_layout, candidate_layout, contextual_objects,
+ source_catalog,
+ observations,
+ required_coverage,
+ resolve_manifest,
+ view_omissions
+}
+
+历史IssueWitness/related_target的snapshot可取archive，并带显式archive StateRef定位；主target仍必须candidate。
+before_layout/candidate_layout 保存原 G/W/DeltaE/DeltaA/F 的根结构、标量与精确对象引用数组顺序；分组对象正文不替代成员顺序信息。contextual_objects 保存仅作历史对照的archive版本，不冒充candidate当前头。
+未改对象完整展示一次，标 shared；修改对象保留 before/after；新增只给 after。撤回为显式状态变化，不靠对象消失表达。operation_index 不再重复完整 patch/body；host 保留真实 canonical patch。
+可从该包机械重建原 before_view 和 candidate_view，并与各自规范 JSON hash 完全一致。重建测试不通过则不能送审核。
+required_coverage 指候选工作集当前对象，包括保留旧主张，不只是 changed_objects；pinned archive版本仅为contextual_objects，可作related_target/witness，不能作为candidate当前Issue主target或混入该清单。完整状态中未展示对象由 host 原样保留，不声称被本轮语义复核。
+审核只能评价这份绑定输入。声明覆盖完整不证明模型真的充分审过；这仍需错误率评测。
+
+7. 维护协议、候选构造与事务
+
+MaintenanceInput = {
+ protocol:"maintenance-input/1",
+ binding:{cycle_id,request_id,task_id,episode_id,active_task_version,
+          base_state_version,base_state_hash,source_window_id,maintenance_view_id},
+ before_view,
+ observation_batch,
+ source_catalog,
+ mutation_scope:{visible_existing_refs,new_local_ids_allowed:true},
+ budget_notice
+}
+
+MaintenanceProposal = {
+ protocol:"maintenance-proposal/1",request_id,active_task_version,base_state_version,
+ world_patch:{entity_upserts:Entity[],state_upserts:Wire<State>[],relation_upserts:Relation[],
+   record_transitions:[{record_ref,to_status:historical_only|contested|retracted,
+                        reason,evidence_refs:EvidenceRef[]}]},
+ specification_upserts:Wire<Requirement>[],
+ gap_upserts:Wire<Gap>[],gap_resolutions:Wire<Gap>[],gap_reopens:Wire<Gap>[],
+ focus:{op:keep}|{op:set,value:Focus}|{op:clear,reason}
+}
+
+Wire<T> 表示仅在模型输出交换层递归将 SourceRef 替换为 EvidenceRef，内部存储仍为 SourceRef；其余字段结构保持。输入中已存 SourceRef 可保留精确位置，并附可见 evidence_id 供输出重引用。不可把已存位置当成任意新引文的定位许可。
+所有数组必须出现，即使为空；additionalProperties=false。new ID 用 @local 名；host 一次分配正式 ID、解析所有局部引用后固定，不在提交时再分配。
+State 与 Gap 输出为完整新版本体，不允许部分字段默认为旧值而隐藏修改。现有对象修改 revision=旧值+1；新增 revision=1。metadata 的 step/版本由 host 校验或构造，模型不能改提交前沿。
+同一对象不能在 upsert/transition/resolve/reopen 多处出现。record_transition 由 host 构造保留原内容的下个版本，变更原因留在版本变更日志；不能靠它偷偷修改 claim。要修正内容必须 state_upsert。
+Entity ID 和类型创建后固定；名称变更仍须显式 upsert 并进入差异/审核。实体不是事实容器。Relation 更新显式进入差异，并校验锚点及端点。
+gap_upserts 只允许 open/blocked，不能关闭；gap_resolutions 只处理 open/blocked→supported/superseded；gap_reopens 处理关闭项→open/blocked。保持 gap_kind 不变；换类别需明确新建关联对象，不能偷换一个 gap 的含义。
+空 patch 合法，仍审核本批观察是否要求修改可见旧主张；审核通过可提交推进事件前沿。
+
+CandidateUpdate 由 host 构造：
+{update_id,binding:{cycle_id,task_version,base_state_version,base_state_hash,
+ candidate_state_hash,source_window_id,audit_view_id},
+ canonical_patch,exact_candidate,local_id_map,view_hashes,
+ operation_index,required_coverage,resolve_manifest}
+
+应用对象永远是原 base 副本；修复用完整 replacement proposal 重建，不在被拒候选上叠加。
+前置校验：类型/长度、引用存在性、来源字面匹配与角色、修改可见范围、版本、实体/关系引用、gap closure 联合类型、目标版本、替代链、工作集预算。
+审核后 compare-and-swap 检查 base_state_version/hash 与 active_task_version，精确候选原子写入并更新事件前沿。提交失败不写回旧快照覆盖别人的新版本。
+原子保存快照、archive 增量、commit 记录和 committed_event_seq；BM25 是可重建缓存，索引异常不撤销已提交状态，但选择必须等待同版本索引可用，否则显式失败。
+磁盘/事务提交结果不确定时先按 update_id 查 commit 记录；不得假定没提交而重复执行。
+
+8. 审核协议与三态采纳
+
+AuditResult = {
+ protocol:"audit-result/1",binding:exact_input_binding,
+ coverage:AuditTargetRef[],outcome:clean|issues|unusable,
+ issues:Issue[],closure_assessments:ClosureAssessment[],
+ unusable_reason:null|{code:insufficient_context|ambiguous_input|cannot_complete_audit,
+                       detail}
+}
+AuditTargetRef={kind:state|gap|requirement|entity|relation|focus,id,revision?}
+BoundField={snapshot:base|candidate|archive,target:AuditTargetRef,field_path:SchemaPath}
+Issue={issue_id,kind,target:BoundField,related_targets:BoundField[],explanation,
+       witnesses:[SourceWitness|FieldWitness,...],repair_constraint}
+SourceWitness={kind:source,ref:EvidenceRef}
+FieldWitness={kind:field,field:BoundField,exact_value:JSONValue}
+IssueKind=unsupported_claim|observation_conflict|scope_overreach|
+ temporal_misclassification|source_role_misuse|goal_misinterpretation|
+ internal_inconsistency|unjustified_gap_closure|unjustified_information_loss
+ClosureAssessment={resolution_id,gap_before:GapRef,gap_after:GapRef,
+ closure_kind:environment_supported|goal_changed|merged_into,
+ verdict:supported|unsupported|uncertain,assessed_scope,explanation,
+ basis_refs:(EvidenceRef|GoalDeltaRef|GapRef)[],blocking_issue_ids:Id[]}
+
+AuditTargetRef 中 state/gap/requirement 必须带精确 revision，entity/relation/focus 通过绑定候选 hash 固定；字段路径需通过类型白名单与实际值查询验证。
+Issue 主 target 必须在 candidate 可见工作集中，未改旧记录同样合法。field witness 精确匹配被冻结 JSON 字段；缺依据可引用 support_refs=[]，不强迫模型伪造“没有”的引文。
+任何有效 Issue 都阻断整个联合候选；不设影响采纳的 warning/minor 过滤。解释是否真的正确仍是模型判断。
+clean：issues=[]；完整覆盖；每个 resolve 恰一项 supported assessment；unusable_reason=null。
+issues：至少一项合法问题；完整覆盖与关闭评估；unsupported/uncertain closure 必须关联本结果的相关阻断 issue。
+unusable：明确模型侧 reason，不具采纳效力。任一 host 合同错误使整份输出不可用；有效子项仅可保留为未完成审核的诊断。
+不得删除非法 issue 后把空集合当 clean。不得因 issue 针对未改字段而过滤。问题数量不是标签目标，同一根因可关联多个目标，但每个 resolve 仍须独立评估。
+
+关闭依据机械边界：
+- environment_supported.evidence_refs 只能是 SourceRef，且来源不能是 user_requirement；至少有 tool_result 或 user_report。纯 agent_report/未执行意图/仅 executed_action 不能单独关闭。user_report 保留“用户报告”身份，语义审核判断是否足以支持该缺口的特定结论，不升级成工具独立验证。executed_action 可补上下文，但不能单独证明结果。
+- SourceRef 逐字真实仍可能引用 echo 自写总结；充分性、结论范围以及 DeltaE 的否定回答由审核判断。
+- goal_changed 只能用 host 真正用户修订账本的 GoalDeltaRef；用户取消不等于环境完成。若旧开放gap因目标更新退役，其goal_refs可保留旧版本作为历史关联，不能因非当前active而误拒合法superseded；当前open/blocked才要求当前active目标。
+- merged_into 要有实际替代 gap，禁止自指/循环合并；不能用合并隐藏目标欠账。
+- state_refs 只是补充解释锚点，不替代来源证据。
+
+9. 失败诊断、修复预算与输出上限
+
+三层诊断分开存，不要求解析失败的 JSON 自报解析错误。
+ModelUnusable：insufficient_context / ambiguous_input / cannot_complete_audit。
+HostContractError：malformed_output、unknown_target_id、version_mismatch、
+ invalid_field_path、invalid_witness_reference、quote_mismatch、ambiguous_quote、
+ invisible_reference、coverage_mismatch、closure_assessment_mismatch、
+ contradictory_assessment、binding_mismatch、candidate_budget_exceeded。
+RuntimeFailure：stale_snapshot、source_unavailable、host_invariant_failure、
+ input_budget_exceeded、output_limit_exceeded、provider_failure、
+ provider_outcome_unknown、storage_failure、budget_exhausted、index_unavailable。
+
+模型输出合同错误且输入完整、候选仍冻结有效、有修复余额且完整纠正请求装得下时，可纠正一次。
+模型自报无法审核不能自动触发重问：如果确实缺上下文则本轮失败；若可证实是完整输入下的输出未完成，最多用同一余额纠正一次。
+来源缺失、host 不变量失败、过期快照、服务异常不靠模型换个 ID 或数字“修好”。
+
+每个 cycle_id 一次 precommit repair credit：
+- 维护输出合同/候选大小失败：修维护提案一次，再审核。
+- 合同有效 issues：修完整候选一次，再审核。
+- 审核输出合同失败：对同一候选纠正审核输出一次。
+修复输入必须包含原base、被拒完整候选/提案及完整有效诊断，且自身满足同一预算；装不下即失败，不能裁掉错误来制造可修复假象。
+余额共享，不因换 request_id 或重启进程重置。一次语义修复包含提案修复与必需复审两个调用，但只消耗一个机会；它不是无限“完整修复循环”。
+选择阶段无修复，无论 precommit credit 是否剩余。
+正常成功=维护1+审核1+选择1=3逻辑调用；候选修复成功最多5。合同修复路径可能4；失败/积压路径可能更少。
+SDK/provider 自动重试默认0；物理尝试逐项记录。超时结局未知不重发同请求；若将来另批网络重试，须新冻结运行配置，不伪装成同样调用成本。
+输入/输出长度超限不得截 JSON 后硬解析；明确失败。模型截断可用剩余 precommit credit 要求更小的完整输出，但不能扩大预算或删强制审核对象。
+
+全 episode 总调用/token/时间额度没有本文件预授予的数值；未授权真实执行默认禁用。每轮限额不能替代总额度。反复跨轮失败记录为连续停滞，不是免费重试。
+
+10. 选择提醒与交付
+
+仅在状态成功提交、目标版本匹配、committed_event_seq==本周期冻结 tip、索引版本一致时调用。
+SelectionInput={binding:{cycle_id,state_version,task_version,phase2_view_id},
+ committed_view,recent_activity,source_catalog,reviewed_this_cycle_refs,
+ not_reviewed_this_cycle_refs,budget_notice}
+选用记录只能来自这份已提交视图。审核是否本轮覆盖明确标注。被拒候选不进入输入，selection 无状态写权限。
+
+ReminderDecision =
+ {decision:silent,state_version,task_version,phase2_view_id}
+ | {decision:remind,state_version,task_version,phase2_view_id,
+    refs:[TypedRef,...],context_for_action:Text}
+
+默认最多3个不同 refs，context_for_action 最多1200 Unicode code points；重复 refs 为合同错误，不静默合并后假装原输出合法。纯 goal/gap 提醒合法，不制造虚假 Knowledge 包装。
+无效 JSON、非法/过期/不可见引用、retracted 引用、超长、provider 失败均为 selection_failed：不交付任何部分、不重试、不回滚已提交状态、不记为合法 silent。
+若交付前版本/目标 epoch 已变，丢弃为 selection_stale，不拿旧引用去渲染当前新文本。
+
+HostAnchor 从精确提交内容生成，模型不能覆盖：origin_badge、temporal_badge、use_status、scope、记录版本、截至事件、审核覆盖标记。
+- contested：冲突/不确定。
+- historical_only 或 past_episode：历史，不因 active 变当前事实。
+- procedural：分别显示 episode 与 lesson；lesson 固定推断/条件经验。
+- inference 不能贴“工具已观察到”；用户/Task 报告也不能换成工具观察。
+- gap 区分信息/成就，关闭信息问题不等于任务达成。
+自由 context_for_action 单独标记 advisory_interpretation；锚点正确不保证生成说明正确。
+默认整条提醒 UTF-8 payload <=16384 bytes；host 完整生成后检查，超限拒绝整条，不截掉范围或反证。锚点正文取所引对象的相关完整主张/episode/lesson/要求/缺口，不复制整份来源账本。
+
+以显式“辅助记忆信息，非新增用户要求”的 user_turn 交付，保留 Task 原 system、原任务与原始工具历史。one-shot 表示一次交付，不意味着旧消息已从 Task 历史删除。
+准备提醒、实际暴露给 Task 请求、后续行为改变分别记录；口头接受不算行为采纳。不新增自动 uptake 控制器。
+
+11. 输入预算、参数与测量口径
+
+固定工程起点，不声称最优：BM25阈值50、每类top20、近期查询8步、查询每步命令前5条、历史引用侧翼80 code points、每轮一次 precommit repair、selection retry0、provider automatic retry0。
+每个辅助阶段装包上限32768个本地 o200k_base 代理输入 token；维护/审核最大输出配置8192 provider tokens，选择2048 provider tokens。两种单位分栏，禁止相加称真实计费。
+代理计数仅计序列化 system/user/tool schema 等实际送入内容；计数器版本与词表 hash 必须固定。provider 隐式包装另作上下文保护。
+真实执行前必须配置 provider context guard：可用时采用对应官方计数/可靠匹配 tokenizer，或经独立验证的保守界限与安全余量。不能仅凭 o200k 代理数宣布 Claude 等模型输入安全；没有可验证 guard 时真实执行 preflight 不通过。计数端点若需网络调用须纳入授权和物理请求日志，离线规范不自动发起。
+任何阶段实际 native input+max_output+安全余量不得超过 provider 窗口。具体模型、context window、计数器/guard、总预算为运行清单必填，未配置不启动真实运行。
+
+已有 GA13 旧表示单例代理输入：维护6494、正确候选审核16825、选择6986；三调用30305，候选修复路径55051。它们不是本版去重后的数字，不是运行均值，不是 Claude 计费 token。
+已有 shared_view 适配 PMA 三窗口均值 Phase1=20776、Phase2=47343（代理）；相应 PoS 首次维护29642.7、审核43503.3（日志 provider tokens）。两种口径不能混比，也不是原版公平均值。
+本版尚未完成新格式实际装包计数，不能先报降低百分比。先实现无损 codec 后测长度，再测输出、延迟、修复与总成本。允许成本更高但质量收益值得的结果，也允许复杂机制不值得的结论。
+
+12. 真实轨迹例与预期状态转移
+
+SQLite run pos-68764e0592a8481e，归档 a2665e40328b94fd61f457b4b3bc1bb63de0df3e。
+GA13 工具调用 toolu_exwuJ8l8ii6K0TOkaI8jn6：脚本先 cat 打印打勾 PATH 总结，再执行 which/sqlite3；真实 stdout 含 bash: line 40: sqlite3: command not found，整体 exit127。
+GA11 在同一脚本 export 后成功不能证明 GA13 独立调用可用。GA12 绝对路径 SELECT 返回2且之后见到两份 gcda，不证明文件恰好本次新生成。
+真实 PMA 错把 bin 位置当 PATH 满足的文本发生于 PMA Step15，消费 GA14，不能冒充 GA13 的真实新方法候选。
+
+设计预期：保留安装、绝对路径执行、构建及局部 export 的有效范围；新增本次失败；经验 lesson 仅表述局部成功不能单独推广；g_cross_script 可得到否定回答而解决，g_path 继续开放；F转向g_path。
+坏候选的问题可列为范围扩大、自写总结冒充验证、成就缺口误关、信息问题误答。不是强制四条固定输出；重要的是两个 resolve 分别处理正确。
+若审核误 clean 且合同合法，程序仍可能提交错误；这就是语义误放行。若误拒正确更新，记录 withheld useful update 与停滞代价。
+来源、before/after设计对象及预期审核必须分开。已有作者构造 JSON 需适配本版 event_seq、目标/选择字段后才能作为合同测试输入，不把作者标签当模型能力。
+
+13. 实现组件与复用裁决
+
+D=已核对基础算法/原语可直接复用；A=结构/思想与代码需适配；N=本候选新合同，不等于论文新颖性。
+- BM25评分/分词基础D；typed State正文投影A；阈值/重检索沿用但带预算资格适配。
+- PMA Task同步入口与选择提醒意图A；不用旧直接save/delete更新权威bank。
+- PoS G/W/gaps/F、副本候选和审核控制A；不整体导入manager以免带入评分/恢复机制。
+- Entity/State/Relation具体类型A/N；不能机械只改语义名字就宣称适配完成。
+- 本地来源ID/字面校验基础D/A；新来源角色、可见窗口、唯一匹配、缓存合同N/A。
+- S2/R2 revise/retract 为A；单记录原语可逐项核对复用，但联合候选事务不直接复用其逐操作采纳策略。
+- MemoryStateBackend 原子快照/版本档案N/A；只读 BM25IndexAdapter，不向模型暴露UniversalMemory.save/delete。
+- status_view确定性派生N/A；HostAnchor版本/来源/范围标签N。
+
+接口职责：SourceLedger.append/read；GoalLedger.current_epoch；ViewBuilder.build；
+ProposalValidator.validate；CandidateBuilder.build_once；AuditCodec.encode/decode；
+AuditValidator.validate_whole；SnapshotStore.compare_and_swap；
+MemoryIndex.project/rebuild/search；ReminderValidator.validate；HostRenderer.render；
+CycleJournal.append/lookup。
+这些是模块边界，不要求逐个新建类，不为复用率重写已可用纯函数。
+旧实验源码与档案保持只读；新候选使用独立入口/配置。测试通过后也不能借旧整链认证为新代码背书。
+
+14. 验收、实验与停止条件
+
+离线合同验收必须覆盖：
+- SourceRef精确Unicode位置、来源角色、重复quote、片段可见性、缓存不跨可见范围放行。
+- claim/episode/lesson标签、Entity不夹带事实、Relation锚点、gap三类closure。
+- 自写cat总结的真实引用可通过字面检查但不因此自动通过语义判断。
+- 历史替代链跨archive遍历、环检测、当前head不被旧版本冒充。
+- 维护proposal所有操作分支、局部ID、重复操作、不可见修改、空patch审核。
+- 去重包重建before/candidate与规范hash一致，包括未改旧主张。
+- 无效issue整份unusable、混合有效/无效问题、coverage和resolve漏项/多项。
+- 同一cycle换request不重置repair；3/4/5调用路径；selection无重试。
+- GA13失败→GA14批次重放；重复事件不重复入账；prefix不跳步；预算溢出不快进。
+- 提交失败/结果未知幂等检查；索引失败不回滚已提交数据。
+- selection失败不等于silent；stale版本拒绝；未追上tip不调用selection。
+- 提醒ref标签强制但自由note仍可能语义错误的负对照。
+- initialization只触发一次、目标epoch变化使旧提醒失效、Task结束不自动关闭gaps。
+- 所有真实API/Task/evaluation默认关闭，fake-provider整链可跑而不接触凭据。
+
+实验分层：
+A 工程：单元/属性/假provider/整链，验证接线，不宣称语义有效。
+B 冻结轨迹：正确更新接受、错误更新拒绝、反证保留、错误泛化、误拒、停滞与候选修复；开发例与保留例分开，SQLite已反复讨论不当盲测。
+C 连续维护与提醒：不能只用固定候选单步审核代替完整闭环；记录提醒必要性、适用性及实际行为。
+D 完整Task：原PMA U、同表示无语义审核 S、完整方法 F、计算预算匹配的简单额外复核 G；PoS可作参照。模型/环境/任务/计量与预算对齐，不能只比调用次数。具体样本量/种子/预算在真实授权前冻结，不由本文虚构。
+消融分开冻结版本；不要一边改检索一边改审核后把收益全归给状态。允许不提醒，不能以提醒数量作为收益。
+
+停止/重设计条件：
+- 工程合同或无损重建不成立：先修工程，不进入效果实验。
+- 冻结保留案例中，完整机制不能减少目标错误或误拒/停滞抵消改善：不继续堆提醒/角色，以消融定位表示还是审核失效。
+- 提醒正确但Task行为/结果没有改善：不能把记忆指标改善当任务收益。
+- 等预算简单基线相当且本方法显著复杂：不维持无依据的复杂机制贡献主张。
+- 收益只在已调试SQLite出现，或靠超额输入/重试获得：重新审视适用边界与实验设计。
+- 没有普适“修复率50%”阈值；阈值、容忍代价及评价方式应在观察保留集结果前预注册。
+
+下一阶段：先对照此规范审阅，再实现核心结构、codec、状态转移与假provider测试。真实模型、Task、官方评价需另有明确运行清单和授权。
+
+15. 目标版本与解释修正的精确规则
+
+GoalLedger 是 host 维护的不可变用户消息/epoch 账本，不是另一份模型事实状态。真实用户修改到达后 active_task_version 前进；已提交 B 保留旧版本直到联合候选成功。旧 B 不被后台悄悄改写；epoch 不匹配期间禁止 selection。
+MaintenanceInput 同时给旧 snapshot 与 host 当前 GoalLedger；candidate.G 的原文来源/goal_deltas 由 host 按目标 epoch 构造，不允许模型修改。模型只提 specification/gap 的显式修订。
+Requirement 增加 status=active|superseded 和 retirement 字段，区别两种情况：
+- goal_changed：引用真实 GoalDeltaRef。
+- interpretation_replaced：同一用户目标下纠正/合并模型解释，引用替代 RequirementRef 与原要求 SourceRef；不能伪造用户修改。
+替代解释必须在候选存在、active、当前 task_version；替代链不得自指或成环。原用户原文始终保留，不因解释退役删除。
+同一含义的解释修正优先 revise 同 requirement_id；只有确实需要替换/合并解释对象才退役。退役不是宣称原要求完成。
+目标 epoch 变化时，候选所有作为当前解释的 Requirement heads 必须显式迁移为新 task_version；需要处理的开放 gaps 也必须显式迁移或用 goal_changed 关闭为 superseded。旧关闭 gap 可以作为旧目标的历史对象保留，不显示成新目标成就；旧版本节点在 archive 保留。
+当前 open/blocked gap 的 goal_refs 必须指候选中当前 task_version 的 active requirement heads。候选审核检查这些变化，不能仅靠更新版本号认定用户新目标已被理解。
+W 的历史经验不因用户改目标自动变假，但适用性须重新判断；未在工作集中看到的 W 不宣称被重新审过。
+目标迁移若超过预算或失败，则保持旧快照并暂停该目标下的提醒；Task 仍按真实新用户要求继续。不能为保持提示不断而强行使用旧目标版本。
+
+16. 引用协议、规范哈希与长度精确定义
+
+SourceRef 是内部存储形式；模型交换使用 EvidenceRef={evidence_id,quote}。
+evidence_id 绑定 source_id、leaf哈希、匹配域start/end及source_window_id；匹配域必须完整可见，但可小于所显示的上下文片段。quote 必须在该可见片段唯一逐字连续出现。0次=quote_mismatch，多次=ambiguous_quote；可在已有修复预算中提供更长引文，不能默认取第一处或任意拆拼。
+解码后按 Unicode code point 计数，不做 NFC/NFKC、大小写或空白归一化；不接受未配对 surrogate。工具数值 leaf 使用固定 JSON 标量文本。原始网络字节另存 hash，不能用解码 leaf hash 冒充。
+缓存键=(source_id,leaf_sha256,decode_policy_version,start,end,quote_sha256)。命中只跳过重复字面比较，每次仍检查来源角色、绑定任务、可见范围与用途。检查发生在候选入库之前，而非延迟到提醒渲染。
+
+规范 JSON 编码用于绑定：UTF-8、键按 Unicode code point 升序、无空白分隔、字符串保留 Unicode 非ASCII字符且固定转义规则、无重复键、无NaN/Infinity、元数据数值均为整数。数组顺序有语义；不为hash临时重新排列数组。对象主列表在host首次构造时按稳定创建顺序排列，新对象按proposal出现顺序追加；归档保留该顺序。所有语言实现必须用同一测试向量确认编码一致。
+base_state_hash/candidate_state_hash 包含完整 Snapshot；审核视图 hash 包含实际模型可见对象/来源与绑定；不能只hash模型自然语言摘要。
+模型输出长度与候选对象长度在完整解析前后均受限；不要把省略号当正文恢复，也不能截断 JSON 片段后继续提交。
+
+17. 首版交付结果枚举与幂等
+
+CycleResult.status =
+ init_failed | update_rejected | update_unusable | runtime_failed |
+ committed_backlog_pending | committed_selection_silent |
+ committed_reminder_ready | committed_selection_failed | committed_selection_stale
+
+没有选择调用时不允许填 selection_silent。周期 journal 分开记录 proposal/audit/repair/commit/selection/delivery 的时间与结果，不把完成一轮等同于有效干预。
+DeliveredReminder 使用 host reminder_id=(episode_id,cycle_id,commit_id) 的稳定编码，交付前做版本/epoch检查。实际加入 Task 请求由宿主保存交付记录；同一 reminder_id 不得重复注入。交付结果不确定先检查记录，不能盲目重发。历史 Task 消息不删除；后续更正只能显式指出旧版本已被替代。
+缓存/索引/交付 journal 都不是模型可编辑的世界事实字段。
+
+18. 默认参数清单与可变性
+
+以下值统一写入配套 DEFAULTS_V1.json；是可测试的工程起点，不是搜索得到的最优参数。
+- retrieval_threshold=50；top_k_per_kind=20；recent_steps=8；query_commands_per_step=5。
+- historical_quote_context_codepoints=80；support/challenge 同等保留；历史工具结果补完整可见执行动作。
+- stage_input_proxy_limit=32768；maintenance/audit max_output_tokens=8192；selection=2048。
+- provider_context_safety_margin_native_tokens=2048，若官方guard需要更多则运行清单明确上调并各臂一致。
+- repair_credit_per_cycle=1；selection_retries=0；provider_automatic_retries=0。
+- max_reminder_refs=3；max_note_codepoints=1200；max_rendered_reminder_utf8_bytes=16384。
+- action_batch 不跨已提交边界拆分；pending处理最早连续前缀；仍有积压则不运行selection。
+- live_enabled=false；episode真实总额度未设置，故不可能依据此默认直接启动实验。
+
+改变参数必须记录 config_hash；影响语义、展示范围、修复次数或实验口径的改变需另存版本，不在同一冻结实验中静默漂移。
+维护/审核工作集过大时可选对象裁减不是免费收益；需要统计输入溢出、遗漏对象、反证可见率和记忆覆盖。32K代理上限不是强迫候选一定装下的承诺。
+
+附录A：持久化状态类型（规范化，取代旧附录同名定义）
+type Id = string;       // 非空、同一命名域唯一、不可复用于不同对象
+type Text = string;     // 非空；字符/模型预算在外围检查
+type Rev = number;      // 整数 >=1；修改同一对象时 +1
+type Step = number;     // 整数 >=0；本文统一为GA assistant turn
+type EventSeq = number; // 整数 >=0，host分配，0表示尚未处理事件
+type TaskVersion = Rev;// 仅host随真实用户要求变更推进
+
+type SourceRef = {
+  source_id: Id;
+  start: number;        // 整数 >=0，Unicode code-point 索引
+  end: number;          // 整数 >start，半开区间
+  quote: Text;          // 必须等于 ledger[source_id].text[start:end]
+};
+
+type SourceLeaf = {
+  source_id: Id;
+  event_id: Id;         // 例如原始 tool_use_id
+  field_path: Text;     // 例如 action.script / result.stdout
+  source_kind:
+    | "user_requirement" | "user_report"
+    | "executed_action" | "tool_result" | "agent_report";
+  ga_turn: Step;
+  event_seq: EventSeq;
+  truncated: boolean; // 宿主可见来源本身是否已截断
+  text: string;         // 允许空工具输出；引用的quote不允许为空
+  text_sha256: string;  // 64个十六进制字符，针对实际可见leaf文本
+};
+// 来源角色由host记录，不由模型随意宣称。
+// 对数值leaf，host使用固定JSON标量文本表示；这不等于原网络字节。
+// 如果原始日志已截断，必须保留截断标记，不宣称leaf就是完整环境输出。
+
+type StateRef = {
+  type: "state";
+  record_id: Id;
+  revision: Rev;
+};
+type RequirementRef = {
+  type: "requirement";
+  requirement_id: Id;
+  revision: Rev;                 // 同task_version内解释也可能改变
+  task_version: TaskVersion;
+};
+type GapRef = {
+  type: "gap";
+  gap_id: Id;
+  revision: Rev;
+  task_version: TaskVersion;
+};
+type GoalDeltaRef = {
+  type: "goal_delta";
+  goal_delta_id: Id;              // 必须存在于host的用户修订账本
+  from_task_version: TaskVersion;
+  to_task_version: TaskVersion;   // >from_task_version
+};
+type TypedRef = StateRef | RequirementRef | GapRef;
+
+type Origin =
+  | "user_requirement"
+  | "user_report"
+  | "tool_observation"
+  | "agent_report"
+  | "inference";
+type TimeRole =
+  | "present_fact"
+  | "past_episode"
+  | "general_hypothesis";
+type UseStatus =
+  | "active"
+  | "historical_only"
+  | "contested"
+  | "retracted";
+
+type Claim = {
+  text: Text;
+  assertion_origin: Origin;
+  time_role: TimeRole;
+  support_refs: SourceRef[];
+  challenge_refs: SourceRef[];
+};
+// tool_observation/report/requirement至少有一项相应来源。
+// 无观察依据的先验仅可标 inference + general_hypothesis，
+// 不能据此用 environment_supported 关闭目标。
+// 有引用也不代表支持关系在语义上成立。
+
+type Scope = {
+  task_id: Id;
+  entity_ids: Id[];               // 至少一个；必须存在于W
+  conditions: Text[];             // 自然语言；[]不是“所有情境都适用”的证明
+};
+// scope/task_id/身份检查可机械做；条件当前是否成立仍由模型判断。
+// 记录最新更新步不等于世界事实有效期，不能自动据此判定真伪。
+
+type Entity = {
+  entity_id: Id;
+  entity_type:
+    | "file" | "function" | "tool" | "environment"
+    | "artifact" | "attempt" | "other";
+  display_name: Text;
+};
+// 只作身份元数据。命名 /app/sqlite/bin/sqlite3 不证明该文件存在。
+// 不允许通过properties塞installed=true之类无来源事实。
+// 必需的世界事实放入下述State。
+
+type RecordBase = {
+  record_id: Id;
+  revision: Rev;
+  entity_id: Id;
+  scope: Scope;
+  use_status: UseStatus;
+  updated_at_step: Step;
+  supersedes: StateRef[];
+};
+// supersedes是精确版本替代链，不是通用因果依赖图。
+// 旧版本在审计archive保留，但不能假装是当前head引用。
+
+type Knowledge = RecordBase & {
+  kind: "knowledge";
+  claim: Claim;
+};
+
+type Procedural = RecordBase & {
+  kind: "procedural";
+  episode: {
+    conditions: Claim;            // 当时的条件，有自己的来源
+    action_text: Text;            // 已执行动作，不是Task意图
+    action_refs: SourceRef[];     // 至少一项
+    result: Claim;               // 观察到的结果，不是期望结果
+    time_role: "past_episode";
+  };
+  lesson: {
+    text: Text;
+    assertion_origin: "inference";
+    time_role: "general_hypothesis";
+    support_refs: SourceRef[];    // 从episode相关依据归纳，至少一项
+    challenge_refs: SourceRef[];
+  } | null;
+};
+// episode.conditions/result各自的time_role必须为past_episode。
+// lesson不能继承“工具观察”标签。
+// 如兼容层要显示整条mixed，只能从子字段派生mixed，不能取代子字段。
+
+type State = Knowledge | Procedural;
+
+type Relation = {
+  relation_id: Id;
+  from_entity_id: Id;
+  predicate: Text;
+  to_entity_id: Id;
+  anchored_by: StateRef;
+};
+// Relation的事实依据、来源、时态和可用性继承anchored_by，
+// 不允许成为绕过State的无证据事实通道。
+// 当前事实展示只可用当前head的可用锚点。
+// 指向归档旧版本的关系只能作为历史/审计上下文，不自动重绑新版。
+
+type Requirement = {
+  requirement_id: Id;
+  revision: Rev;
+  task_version: TaskVersion;
+  interpretation: Text;
+  source_refs: SourceRef[];       // 至少一项，来自真实用户要求
+  status: "active" | "superseded";
+  retirement: null |
+    {kind:"goal_changed";goal_delta_ref:GoalDeltaRef} |
+    {kind:"interpretation_replaced";replacement_requirement_refs:RequirementRef[];source_refs:SourceRef[]};
+};
+type Goal = {
+  task_version: TaskVersion;
+  original_user_sources: SourceRef[]; // 至少一项；host追加，不由模型改写
+  specifications: Requirement[];
+  goal_deltas: GoalDeltaRef[];
+};
+// specifications是模型解释，原文仍权威；不保证自动提取覆盖所有要求。
+
+type GapClosure =
+  | {
+      kind: "environment_supported";
+      conclusion: Text;          // 尤其DeltaE可得到否定答案，不等于任务成功
+      evidence_refs: SourceRef[]; // 至少一项
+      state_refs: StateRef[];     // 可为空，不强制为每个工具值制造State
+    }
+  | {
+      kind: "goal_changed";
+      goal_delta_ref: GoalDeltaRef;
+    }
+  | {
+      kind: "merged_into";
+      replacement_gap_ref: GapRef;
+    };
+
+type Gap = {
+  gap_id: Id;
+  revision: Rev;
+  task_version: TaskVersion;
+  gap_kind: "epistemic" | "achievement";
+  target: Text;
+  reason: Text;
+  goal_refs: RequirementRef[];    // 至少一项
+  record_refs: StateRef[];        // 可以为空：真正未知项不必已有知识
+  status: "open" | "blocked" | "supported" | "superseded";
+  closure: GapClosure | null;
+};
+// open/blocked => closure=null
+// supported => environment_supported
+// superseded => goal_changed或merged_into
+// 用户取消要求不等于环境完成；不得写成supported。
+// DeltaE的supported可以表示“已知道不能这样推广”，不表示DeltaA达成。
+
+type Focus = {
+  gap_ref: GapRef;                // 必须是open/blocked项
+  reason: Text;
+  changed_at_step: Step;
+} | null;
+
+type BeliefState = {
+  G: Goal;
+  W: {
+    entities: Entity[];
+    states: State[];              // 当前版本头；历史版本另行只读归档
+    relations: Relation[];
+  };
+  DeltaE: Gap[];                  // gap_kind必须epistemic
+  DeltaA: Gap[];                  // gap_kind必须achievement
+  F: Focus;
+};
+
+type Snapshot = {
+  schema_version: Text;
+  task_id: Id;
+  episode_id: Id;
+  state_version: number; // 整数>=0，host空快照为0，首次提交为1
+  committed_event_seq: EventSeq;
+  B: BeliefState;
+};
+// 完整候选提交一次，state_version加1；失败时该字段和committed前沿不推进。
+// 原始观察账本、attempted前沿、审计诊断不是新的世界事实。
+
+type ReminderDecision =
+  | {
+      decision: "silent";
+      state_version: Rev;
+      task_version: TaskVersion;
+      phase2_view_id: Id;
+    }
+  | {
+      decision: "remind";
+      state_version: Rev;
+      task_version: TaskVersion;
+      phase2_view_id: Id;
+      refs: [TypedRef, ...TypedRef[]]; // 至少一个
+      context_for_action: Text;       // 模型生成，仍可能语义错误
+    };
+
+type RenderMode =
+  | "current_claim"
+  | "historical_record"
+  | "conditional_experience"
+  | "uncertain_claim"
+  | "requirement"
+  | "gap";
+
+type HostAnchor = {
+  ref: TypedRef;
+  component: Text;                // claim / episode.result / lesson / requirement / gap等
+  render_mode: RenderMode;        // host计算，不接受模型覆盖
+  origin_badge: Text;
+  temporal_badge: Text;
+  uncertainty_badge: Text | null;
+  content: Text;                  // 来自精确提交版本，不是Phase2自由改写
+  scope: Scope | null;
+  reviewed_this_cycle: boolean;
+  committed_event_seq: EventSeq;
+};
+
+type DeliveredReminder = {
+  state_version: Rev;
+  task_version: TaskVersion;
+  phase2_view_id: Id;
+  reminder_id: Id;
+  anchors: HostAnchor[];
+  generated_note: {
+    role: "advisory_interpretation";
+    text: Text;
+  };
+};
+
+附录B：类型补充约束
+
+Requirement.status=active时retirement=null；superseded时retirement非空。当前open/blocked gaps只能绑定当前active解释。
+StateRef允许精确历史引用仅限supersedes、历史来源/关系与上下文；正常提醒StateRef必须是选中已提交head。
+Snapshot.schema_version固定为stateful-proactive-memory/1；Snapshot.B.G.task_version表示最后成功提交的目标epoch，不一定等于host最新GoalLedger epoch。
+空snapshot版本0仅供初始化base，G原文非空，specifications/gaps/W为空，F=null；不得把版本0当已通过审核的状态。
+Requirement先验解释被替换时，相关open/blocked gap的goal_refs必须在同一候选显式更新，不能引用已退役解释；已关闭历史gap保留旧关联。
+SourceLeaf.source_kind由host判定来源通道，不由模型改标签；tool_result里的自写总结仍是语义风险。
+
+附录C：与旧材料的明确变更
+
+1. committed_observed_through:GA Step 改为 committed_event_seq；Step只作可读时间标签。
+2. 单轮repair明确仅用于precommit，selection一次、无额外修复。
+3. 增加连续pending批次与partial-prefix提交后不选择；没有异步循环。
+4. 审核完整重复列表改为可逆重建的shared/changed/added表示；不是相关性删减。
+5. 模型unusable、host合同错误、runtime失败分层；不按六个枚举武断分可修/不可修。
+6. Requirement退役区分真实用户变更与模型解释替换；GoalLedger epoch与已提交B版本分离。
+7. EvidenceRef唯一字面定位；预校验缓存不替代可见范围/来源角色检查。
+8. 50/20/8沿用为起点，32K代理装包与8K/8K/2K输出等明确是新工程默认。
+9. 旧GA13人工例保留历史证据地位，不冒充新版已执行或已适配夹具。
+10. S2/R2 revise/retract标A，不再笼统写D/A意味着整套直接复用。
+
+附录D：固定来源与已知验证边界
+
+以下来源沿用此前已核对的固定提交；本轮是设计整合，没有重新运行其代码或历史任务。
+[S1] PMA memory_agent.py
+https://github.com/yifannnwu/proactive-memory-agent/blob/89e5c0d6aadfe531a1aee42fd290d48be89973dd/src/memory_agent/memory/memory_agent.py
+[S2] PMA memory_enabled_agent.py
+https://github.com/yifannnwu/proactive-memory-agent/blob/89e5c0d6aadfe531a1aee42fd290d48be89973dd/src/memory_agent/memory_enabled_agent.py
+[S3] PoS action loop
+https://github.com/luoyu100/PoS/blob/6818cfa6434dbc91fcf67f0b3eb12a91db47433f/baselines/react.py
+[S4] PoS state and manager
+https://github.com/luoyu100/PoS/blob/6818cfa6434dbc91fcf67f0b3eb12a91db47433f/belief/beliefStates.py
+https://github.com/luoyu100/PoS/blob/6818cfa6434dbc91fcf67f0b3eb12a91db47433f/belief/worldStates.py
+https://github.com/luoyu100/PoS/blob/6818cfa6434dbc91fcf67f0b3eb12a91db47433f/belief/manager.py
+[S5] PMA memory store
+https://github.com/yifannnwu/proactive-memory-agent/blob/89e5c0d6aadfe531a1aee42fd290d48be89973dd/src/memory_agent/memory/universal_memory.py
+[S6] PMA BM25
+https://github.com/yifannnwu/proactive-memory-agent/blob/89e5c0d6aadfe531a1aee42fd290d48be89973dd/src/memory_agent/memory/bm25_search.py
+[S7] Local PoS strict contract and bounded repairs
+https://github.com/HYC-hsy/longcontext-monitor-research/blob/7e23acc87c89b5972b3106f3457b707971839ebd/method_discovery/pos_upstream_ga_v1_20261017/vendor/belief/beliefSentinel.py
+https://github.com/HYC-hsy/longcontext-monitor-research/blob/7e23acc87c89b5972b3106f3457b707971839ebd/method_discovery/pos_pma_shared_view_v1_20261020/POS_AUDIT_BOUNDED_REPAIR_V2.txt
+[S8] Native U shadow memory
+https://github.com/HYC-hsy/longcontext-monitor-research/blob/7e23acc87c89b5972b3106f3457b707971839ebd/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory_v2_live_batch_20261015_95940c8d/raw/source-v2-822ee4349181-06-u/memory.json
+[S9] SQLite archive
+https://github.com/HYC-hsy/longcontext-monitor-research/tree/a2665e40328b94fd61f457b4b3bc1bb63de0df3e/method_discovery/pos_pma_shared_view_v1_20261020/raw_live_sqlite_contract_v2
+https://github.com/HYC-hsy/longcontext-monitor-research/tree/8df92f0c230a8e3b07c637cbd1f9e20452a5ceb7/method_discovery/pos_pma_shared_view_v1_20261020/raw_live_sqlite_httpdiag_v2_split
+[S10] S2/R2 mechanical archive
+https://github.com/HYC-hsy/longcontext-monitor-research/blob/7e23acc87c89b5972b3106f3457b707971839ebd/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_memory_v3_single_r2_archive_20261015/POSTRUN_MECHANICAL.txt
+[S12] PMA published TerminalBench configuration
+https://github.com/yifannnwu/proactive-memory-agent/blob/89e5c0d6aadfe531a1aee42fd290d48be89973dd/configs/memory_terminalbench.yaml
+[S11] Positive/negative six-task report
+https://github.com/HYC-hsy/longcontext-monitor-research/blob/7e23acc87c89b5972b3106f3457b707971839ebd/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/six_task_live_batch_20261014_r1/AUDIT_SIX_TASK_LIVE_BATCH_20261014.txt
+
+
+本轮实际完成：规范整合、默认参数冻结、文本/类型一致性审阅和文档级合同清单。未实现runtime validator、codec、backend或新模型入口；未进行新格式token实测、fake-provider整链、真实模型调用、Task执行或官方评价。文档检查不是工程认证，更不是效果认证。

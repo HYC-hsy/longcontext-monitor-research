@@ -1,0 +1,56 @@
+{
+  "protocol": "stateful-proactive-memory/1",
+  "status": "design_only_not_execution_authorization",
+  "live_enabled": false,
+  "source_policy": {
+    "decode": "immutable_host_decoded_unicode_no_normalization",
+    "offset_unit": "unicode_codepoint",
+    "historical_quote_context_codepoints": 80,
+    "quote_resolution": "unique_literal_occurrence",
+    "source_visibility_rechecked_each_request": true
+  },
+  "retrieval": {
+    "threshold": 50,
+    "top_k_per_kind": 20,
+    "recent_steps": 8,
+    "query_commands_per_step": 5,
+    "bm25_k1": 1.5,
+    "bm25_b": 0.75,
+    "cross_kind_fill": "alternate_rank_knowledge_first",
+    "mandatory_overflow": "fail_without_dropping",
+    "optional_bundle_overflow": "omit_whole_bundle_log_and_continue"
+  },
+  "budget": {
+    "input_unit": "o200k_base_proxy",
+    "input_limit_each_stage": 32768,
+    "maintenance_max_output_provider_tokens": 8192,
+    "audit_max_output_provider_tokens": 8192,
+    "selection_max_output_provider_tokens": 2048,
+    "provider_context_guard_required_before_live": true,
+    "native_context_safety_margin_tokens": 2048,
+    "episode_total_logical_calls": null,
+    "episode_total_native_tokens": null,
+    "episode_total_wall_time_seconds": null
+  },
+  "repair": {
+    "precommit_credit_per_cycle": 1,
+    "selection_retries": 0,
+    "provider_automatic_retries": 0,
+    "successful_cycle_max_logical_calls": 5
+  },
+  "observation": {
+    "atomic_unit": "host_trigger_completed_action_batch_or_user_message_or_agent_report",
+    "processing": "earliest_contiguous_prefix",
+    "pending_after_commit": "skip_selection",
+    "no_same_cycle_catchup_loop": true
+  },
+  "reminder": {
+    "max_refs": 3,
+    "max_note_codepoints": 1200,
+    "max_rendered_utf8_bytes": 16384,
+    "transport": "user_turn_auxiliary_labelled",
+    "postcommit_failure": "do_not_rollback"
+  },
+  "implementation_complete": false,
+  "real_model_calls_this_delivery": 0
+}
