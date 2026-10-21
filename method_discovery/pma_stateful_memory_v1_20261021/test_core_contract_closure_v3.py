@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from .engine import CycleEngine
+from .budget import TokenProxy
 from .proposal import build_candidate
 from .source import SourceCatalog
 from .source import ContractError, canonical
@@ -17,13 +18,34 @@ from .test_schema_advanced import rich_state
 
 
 def seeded_store(path, *, historical_state=False, repeated_user=False,
-                 retired_requirement=False):
+                 retired_requirement=False, repeated_tool=False,
+                 closed_gap=False):
     seed, ledger = rich_state()
     if repeated_user:
         ledger["u0"] = leaf("task task")
         seed["B"]["G"]["specifications"][0]["source_refs"] = [{
             "source_id": "u0", "start": 5, "end": 9, "quote": "task"}]
     requirement = seed["B"]["G"]["specifications"][0]
+    if repeated_tool:
+        tool = ledger["tool"]
+        ledger["tool"] = leaf("feature absent feature absent", source_id="tool",
+                                source_kind="tool_result")
+        ledger["tool"].update(event_id=tool["event_id"],
+                              event_seq=tool["event_seq"], ga_turn=tool["ga_turn"])
+        seed["B"]["W"]["states"][0]["claim"]["support_refs"] = [{
+            "source_id": "tool", "start": 15, "end": 29,
+            "quote": "feature absent"}]
+        seed["B"]["W"]["states"][0]["claim"]["challenge_refs"] = [{
+            "source_id": "tool", "start": 0, "end": 14,
+            "quote": "feature absent"}]
+    if closed_gap:
+        gap = seed["B"]["DeltaE"][0]
+        gap["status"] = "supported"
+        gap["closure"] = {"kind": "environment_supported",
+            "conclusion": "local information known", "evidence_refs": [{
+                "source_id": "tool", "start": 0, "end": 14,
+                "quote": "feature absent"}], "state_refs": [{"type": "state",
+                "record_id": "s", "revision": 1}]}
     if retired_requirement:
         replacement = {**deepcopy(requirement), "requirement_id": "replacement"}
         requirement["status"] = "superseded"
@@ -60,6 +82,97 @@ def seeded_store(path, *, historical_state=False, repeated_user=False,
 
 
 class ClosureV3Tests(unittest.TestCase):
+    def test_exact_alias_matrix_in_three_real_role_messages(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = seeded_store(Path(root) / "db", repeated_tool=True,
+                                 closed_gap=True, repeated_user=True)
+            try:
+                inner = ScriptedProvider()
+                def provider(role, messages, call_id, max_output):
+                    answer = inner(role, messages, call_id, max_output)
+                    if role != "maintenance":
+                        return answer
+                    payload = json.loads(messages[1]["content"])
+                    aliases = [item for item in payload["source_catalog"] if
+                        item["source_id"] == "tool" and item[
+                            "exact_stored_ref"] and item["purpose"] ==
+                            "maintenance"]
+                    by_span = {(item["start"], item["end"]): item for item in aliases}
+                    self.assertEqual(set(by_span), {(0, 14), (15, 29)})
+                    self.assertNotEqual(by_span[(0, 14)]["evidence_id"],
+                                        by_span[(15, 29)]["evidence_id"])
+                    patch = json.loads(answer)
+                    old = payload["before_view"]["B"]["W"]["states"][0]
+                    new = deepcopy(old)
+                    new["revision"] = 2
+                    new["supersedes"] = [{"type": "state", "record_id": "s",
+                                          "revision": 1}]
+                    new["claim"]["support_refs"] = [{"evidence_id": by_span[
+                        (15, 29)]["evidence_id"], "quote": "feature absent"}]
+                    new["claim"]["challenge_refs"] = [{"evidence_id": by_span[
+                        (0, 14)]["evidence_id"], "quote": "feature absent"}]
+                    patch["world_patch"]["state_upserts"] = [new]
+                    return canonical(patch).decode()
+                result = CycleEngine(store, provider, task_text="task").run(
+                    "all-aliases")
+                self.assertEqual(result["status"], "committed_selection_silent")
+                for call in inner.calls:
+                    payload = json.loads(call["messages"][1]["content"])
+                    spans = {item["start"] for item in payload["source_catalog"] if
+                        item["source_id"] == "tool" and item[
+                            "exact_stored_ref"] and item["end"] - item[
+                            "start"] == 14}
+                    self.assertEqual(spans, {0, 15}, call["role"])
+                self.assertEqual(store.snapshot()["B"]["DeltaE"][0][
+                    "closure"]["evidence_refs"][0]["start"], 0)
+                self.assertEqual(store.snapshot()["B"]["W"]["states"][0][
+                    "claim"]["support_refs"][0]["start"], 15)
+            finally:
+                store.close()
+
+    def test_historical_state_cannot_be_selected_as_current_head(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = seeded_store(Path(root) / "db", historical_state=True)
+            try:
+                inner = ScriptedProvider()
+                def provider(role, messages, call_id, max_output):
+                    answer = inner(role, messages, call_id, max_output)
+                    if role != "selection":
+                        return answer
+                    decision = json.loads(answer)
+                    decision.update(decision="remind", refs=[{"type": "state",
+                        "record_id": "s", "revision": 1}],
+                        context_for_action="use archived state")
+                    return canonical(decision).decode()
+                result = CycleEngine(store, provider, task_text="task").run(
+                    "old-ref")
+                self.assertEqual(result["status"], "committed_selection_failed")
+                self.assertEqual(result["error_code"], "selection_invisible_ref")
+            finally:
+                store.close()
+
+    def test_historical_context_counts_toward_selection_budget(self):
+        class RejectHistoricalSelection(TokenProxy):
+            def measure(self, messages, tools=None):
+                result = super().measure(messages, tools)
+                if (messages[0]["content"].startswith(
+                        "Stateful proactive memory selection") and
+                        '"kind":"archived_state"' in messages[1]["content"]):
+                    return {**result, "proxy_tokens": 32769}
+                return result
+        with tempfile.TemporaryDirectory() as root:
+            store = seeded_store(Path(root) / "db", historical_state=True)
+            try:
+                provider = ScriptedProvider()
+                result = CycleEngine(store, provider, task_text="task",
+                    token_proxy=RejectHistoricalSelection()).run("selection-budget")
+                self.assertEqual(result["status"], "committed_selection_failed")
+                self.assertEqual(result["error_code"], "input_budget_exceeded")
+                self.assertEqual([item["role"] for item in provider.calls],
+                                 ["maintenance", "audit"])
+            finally:
+                store.close()
+
     def test_each_actual_role_message_contains_its_wire_type_closure(self):
         with tempfile.TemporaryDirectory() as root:
             store = seeded_store(Path(root) / "db", historical_state=True)
@@ -184,6 +297,12 @@ class ClosureV3Tests(unittest.TestCase):
                 altered["transition_changes"][0]["reason"] = "different reason"
                 with self.assertRaisesRegex(ContractError, "identity_conflict"):
                     reopened.compare_and_swap(**altered)
+                forged = deepcopy(captured)
+                forged["update_id"] = "forged-transition"
+                forged["transition_changes"][0]["to_status"] = "active"
+                with self.assertRaisesRegex(ContractError,
+                                            "transition_change_mismatch"):
+                    reopened.compare_and_swap(**forged)
             finally:
                 reopened.close()
 

@@ -8,7 +8,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .schema import validate_snapshot, validate_requirement_retirement_transition
-from .source import ContractError, canonical, digest, fields, integer, nonempty, validate_leaf
+from .source import (ContractError, canonical, digest, fields, integer, nonempty,
+                     validate_leaf, validate_source_ref)
 
 
 def _decode(raw: bytes) -> dict:
@@ -266,6 +267,38 @@ class MemoryStore:
                          base: dict, candidate: dict, archive_delta: list[tuple[str, str,
                          int, dict]], transition_changes: list[dict] | None = None) -> dict:
         changes = transition_changes if transition_changes is not None else []
+        if type(changes) is not list:
+            raise ContractError("invalid_transition_changes")
+        old_states = {item["record_id"]: item for item in base["B"]["W"]["states"]}
+        new_states = {item["record_id"]: item for item in candidate["B"]["W"]["states"]}
+        seen_changes = set()
+        for item in changes:
+            item = fields(item, {"operation", "before_ref", "after_ref",
+                                 "from_status", "to_status", "reason",
+                                 "evidence_refs"})
+            before_ref = fields(item["before_ref"], {"type", "record_id", "revision"})
+            after_ref = fields(item["after_ref"], {"type", "record_id", "revision"})
+            identifier = before_ref["record_id"]
+            before_state, after_state = old_states.get(identifier), new_states.get(
+                identifier)
+            if (item["operation"] != "record_transition" or
+                    before_ref["type"] != "state" or after_ref["type"] != "state" or
+                    after_ref["record_id"] != identifier or identifier in seen_changes or
+                    before_state is None or after_state is None or
+                    before_state["revision"] != before_ref["revision"] or
+                    after_state["revision"] != after_ref["revision"] or
+                    after_state["revision"] != before_state["revision"] + 1 or
+                    item["from_status"] != before_state["use_status"] or
+                    item["to_status"] != after_state["use_status"] or
+                    item["to_status"] not in {"historical_only", "contested",
+                                              "retracted"}):
+                raise ContractError("transition_change_mismatch")
+            seen_changes.add(identifier)
+            nonempty(item["reason"], "transition.reason")
+            if type(item["evidence_refs"]) is not list:
+                raise ContractError("invalid_transition_evidence")
+            for ref in item["evidence_refs"]:
+                validate_source_ref(ref, self.sources())
         fingerprint = digest([cycle_id, digest(base), digest(candidate),
                               [list(item) for item in archive_delta], changes])
         existing = self.commit_result(update_id)
