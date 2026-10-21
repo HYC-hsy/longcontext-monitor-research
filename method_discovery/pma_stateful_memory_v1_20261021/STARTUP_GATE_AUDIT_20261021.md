@@ -15,6 +15,11 @@ untouched. No one-use authorization or SQLite episode was created.
 | Same GA command without the repository `PYTHONPATH` | 13 tests, 11 errors and 1 failure from `ModuleNotFoundError: method_discovery`; environment invocation error, not counted as a passing run |
 | `docker version --format '{{.Server.Version}}'` with context `desktop-linux` | Failed: Docker Desktop Linux Engine named pipe absent. `com.docker.service` was stopped; Docker Desktop executable at the checked standard installation path was absent. No container test was attempted. |
 
+A later attempt to start the existing `com.docker.service` failed with
+`CouldNotStartService` (the service could not be opened on this machine). It
+remained stopped and the Docker Linux Engine pipe remained absent. No system
+installation or privilege change was made.
+
 ## Sending gates not met
 
 1. `GenericAgent-main/agent_loop.py` accepts the candidate only with
