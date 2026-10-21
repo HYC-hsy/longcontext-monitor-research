@@ -18,6 +18,7 @@ Do not output an internal stored SourceRef. No extra fields in a wire ref.
 
 MAINTENANCE_SYSTEM = """Stateful proactive memory maintenance, protocol maintenance-proposal/1.
 Propose exactly one complete JSON object. Its top-level fields are exactly:
+Output raw JSON only: no Markdown code fence, language tag, or surrounding prose.
 protocol, request_id, active_task_version, base_state_version, world_patch,
 specification_upserts, gap_upserts, gap_resolutions, gap_reopens, focus.
 world_patch fields are exactly entity_upserts, state_upserts, relation_upserts,
@@ -226,7 +227,8 @@ def repair(*, original_messages: list[dict], base: dict, rejected: object,
         "last_raw_response": raw_response, "validation_error": error,
         "instruction": "Return a complete replacement object for the original base; "
                        "retain unrelated supported changes. No incremental delta "
-                       "on the rejected candidate."}).decode("utf-8")}]
+                       "on the rejected candidate. Output raw JSON only; do not "
+                       "wrap it in a Markdown code fence or add prose."}).decode("utf-8")}]
 
 
 def selection(payload: dict) -> list[dict]:
