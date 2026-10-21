@@ -6,7 +6,7 @@ a claim that the whole specification is accepted.
 
 | Checklist | Implemented path | Executed check / remaining gap |
 | --- | --- | --- |
-| 1. State schema | `schema.validate_snapshot` | `test_contracts`, `test_schema_advanced`; migration combinations incomplete. |
+| 1. State schema | `schema.validate_snapshot` | `test_contracts`, `test_schema_advanced`, including one explicit user-epoch retirement case; migration combinations incomplete. |
 | 2. Sources and evidence | `source.SourceCatalog` | Unicode, exact span, ambiguity, purpose, role, visibility and cache in `test_contracts`; no live host provenance. |
 | 3. Workset | `retrieval.WorksetBuilder`, `projection.project_snapshot` | `test_retrieval`, `test_projection`, backlog test; complete optional/mandatory matrix unverified. |
 | 4. Reversible audit codec | `audit.AuditCodec` | Reconstruction, order/hash, archive witness and reduced representation in `test_audit`; no provider semantics proof. |
@@ -19,7 +19,7 @@ a claim that the whole specification is accepted.
 | 11. Full fake chain | `offline_fixture` | Eight finite method-local scenarios, 27 fake role calls, eight synthetic FakeTask actions; **not** `single_run`/Harbor/Docker or source-bound certification. |
 | 12. New input count | `budget.TokenProxy`, real package message builders | Each fake call records chars, UTF-8 bytes and o200k_base proxy tokens in `FAKE_CHAIN_FINAL.jsonl`; no provider usage/cost. |
 
-All 43 focused tests passed in `evidence/TEST_OUTPUT_POST_EXTRA.txt`. Test
+All 44 focused tests passed in `evidence/TEST_OUTPUT_44.txt`. Test
 fixture conclusions are scripted; a valid but wrong audit `clean` can still
 commit a wrong state and a source-valid reminder can overstate its implication.
 There was no real model, Task, official evaluator, training or scoring-model
