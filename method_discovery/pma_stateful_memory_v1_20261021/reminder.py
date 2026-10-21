@@ -135,10 +135,9 @@ def render_reminder(decision: dict, *, snapshot: dict, cycle_id: str,
     return rendered
 
 
-def attach_once(*, store, reminder: dict, task_messages: list[dict],
-                request_id: str, cycle_id: str,
-                send: Callable[[list[dict]], object]) -> object:
-    """The label is an auxiliary user turn, not a replacement user command."""
+def begin_delivery(*, store, reminder: dict, task_messages: list[dict],
+                   request_id: str, cycle_id: str) -> dict:
+    """Reserve one request; returning its messages does not confirm delivery."""
     snapshot = store.snapshot()
     commit = store.commit_for_cycle(cycle_id)
     if commit is None or reminder.get("reminder_id") != "reminder-" + digest([
@@ -159,12 +158,38 @@ def attach_once(*, store, reminder: dict, task_messages: list[dict],
     messages.append({"role": "user", "content":
         "Auxiliary memory information; not a new user requirement.\n" +
         canonical(reminder).decode("utf-8")})
-    store.journal(cycle_id, "delivery_attempt", {"reminder_id": reminder["reminder_id"],
-        "request_id": request_id, "messages_sha256": digest(messages)})
-    response = send(messages)
+    binding = {"reminder_id": reminder["reminder_id"],
+               "request_id": request_id, "messages_sha256": digest(messages)}
+    store.journal(cycle_id, "delivery_attempt", binding)
+    return {"messages": messages, "binding": binding}
+
+
+def confirm_delivery(*, store, cycle_id: str, binding: dict,
+                     accepted: bool) -> None:
+    """Confirm only the exact reserved request after Task acceptance."""
+    if accepted is not True:
+        raise ContractError("task_response_not_accepted")
+    expected = {key: binding.get(key) for key in (
+        "reminder_id", "request_id", "messages_sha256")}
+    attempts = [row["body"] for row in store.journal_rows(cycle_id)
+                if row["phase"] == "delivery_attempt"]
+    if (any(type(value) is not str or not value for value in expected.values()) or
+            attempts != [expected] or
+            store.delivery_result(expected["reminder_id"]) is not None):
+        raise ContractError("delivery_confirmation_binding_mismatch")
+    store.delivery(expected["reminder_id"], expected["request_id"],
+                   {"status": "included_in_accepted_request", **expected})
+
+
+def attach_once(*, store, reminder: dict, task_messages: list[dict],
+                request_id: str, cycle_id: str,
+                send: Callable[[list[dict]], object]) -> object:
+    """Synchronous compatibility wrapper for the in-process fake GA path."""
+    prepared = begin_delivery(store=store, reminder=reminder,
+        task_messages=task_messages, request_id=request_id, cycle_id=cycle_id)
+    response = send(prepared["messages"])
     if type(response) is not dict or response.get("accepted") is not True:
         raise ContractError("task_response_not_accepted")
-    store.delivery(reminder["reminder_id"], request_id,
-                   {"status": "included_in_accepted_request",
-                    "request_id": request_id, "messages_sha256": digest(messages)})
+    confirm_delivery(store=store, cycle_id=cycle_id,
+                     binding=prepared["binding"], accepted=True)
     return response

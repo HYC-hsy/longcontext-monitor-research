@@ -5,7 +5,8 @@ import unittest
 from copy import deepcopy
 from pathlib import Path
 
-from .reminder import attach_once, render_reminder, validate_selection
+from .reminder import (attach_once, begin_delivery, confirm_delivery,
+                       render_reminder, validate_selection)
 from .source import ContractError, digest
 from .store import MemoryStore
 from .test_contracts import empty_snapshot, leaf
@@ -64,6 +65,39 @@ class ReminderTests(unittest.TestCase):
                 attach_once(store=store, reminder=reminder, task_messages=messages,
                             request_id="req", cycle_id="c", send=uncertain)
             self.assertEqual(len(seen), 1)
+            store.close()
+
+    def test_split_delivery_requires_matching_accepted_request(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = MemoryStore(Path(root) / "state.sqlite3")
+            store.initialize(empty_snapshot(), leaf("task"))
+            base = store.snapshot()
+            candidate = deepcopy(base)
+            candidate["state_version"] = 1
+            store.compare_and_swap(update_id="update", cycle_id="c", base=base,
+                candidate=candidate, archive_delta=[])
+            reminder = {"reminder_id": "reminder-" + digest([
+                candidate["episode_id"], "c", "update"])[:24],
+                "state_version": 1, "task_version": 1}
+            original = [{"role": "user", "content": "task"}]
+            prepared = begin_delivery(store=store, reminder=reminder,
+                task_messages=original, request_id="req-1", cycle_id="c")
+            self.assertEqual(original, [{"role": "user", "content": "task"}])
+            self.assertIsNone(store.delivery_result(reminder["reminder_id"]))
+            with self.assertRaisesRegex(ContractError, "task_response_not_accepted"):
+                confirm_delivery(store=store, cycle_id="c",
+                    binding=prepared["binding"], accepted=False)
+            with self.assertRaisesRegex(ContractError, "binding_mismatch"):
+                confirm_delivery(store=store, cycle_id="c",
+                    binding={**prepared["binding"], "request_id": "other"},
+                    accepted=True)
+            with self.assertRaisesRegex(ContractError, "outcome_unknown"):
+                begin_delivery(store=store, reminder=reminder,
+                    task_messages=original, request_id="req-2", cycle_id="c")
+            confirm_delivery(store=store, cycle_id="c",
+                binding=prepared["binding"], accepted=True)
+            self.assertEqual(store.delivery_result(reminder["reminder_id"])[
+                "request_id"], "req-1")
             store.close()
 
 
