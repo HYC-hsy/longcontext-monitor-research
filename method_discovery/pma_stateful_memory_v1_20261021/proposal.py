@@ -202,6 +202,9 @@ def build_candidate(*, proposal: dict, base: dict, catalog: SourceCatalog,
         ("relation", base["B"]["W"]["relations"], "relation_id"),
         ("requirement", base["B"]["G"]["specifications"], "requirement_id"),
         ("gap", base["B"]["DeltaE"] + base["B"]["DeltaA"], "gap_id"))}
+    if len(set(mapping.values())) != len(mapping) or any(value in identifiers
+            for value in mapping.values() for identifiers in existing.values()):
+        raise ContractError("local_id_collision")
     for kind, items, key in (("entity", proposal["world_patch"]["entity_upserts"], "entity_id"),
                              ("state", proposal["world_patch"]["state_upserts"], "record_id"),
                              ("relation", proposal["world_patch"]["relation_upserts"], "relation_id"),

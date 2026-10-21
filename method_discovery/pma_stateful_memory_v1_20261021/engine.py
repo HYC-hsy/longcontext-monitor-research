@@ -123,10 +123,12 @@ class CycleEngine:
                 if context and ledger[source_id]["source_kind"] == "tool_result":
                     entry["source_context_status"] = context.get(
                         "source_context_status", "available")
+                    entry["result_source_id"] = source_id
                     entry["executed_actions"] = [{"source_id": action["source_id"],
                         "event_id": action["event_id"], "field_path": action["field_path"],
                         "text": action["text"], "truncated": action["truncated"],
-                        "text_sha256": action["text_sha256"]} for action in
+                        "text_sha256": action["text_sha256"],
+                        "result_source_id": source_id} for action in
                         context.get("executed_actions", [])]
                 visible.append(entry)
         for entry in work["observation_batch"]["events"]:
@@ -141,6 +143,12 @@ class CycleEngine:
                     add(source["source_id"], ref["start"], ref["end"], True)
                 for action in source.get("executed_actions", []):
                     add(action["source_id"], 0, len(action["text"]))
+            for old in bundle.get("historical_requirements", []):
+                for ref in old["source_refs"]:
+                    add(ref["source_id"], ref["start"], ref["end"], True)
+        for old in work["mandatory"].get("historical_requirements", []):
+            for ref in old["source_refs"]:
+                add(ref["source_id"], ref["start"], ref["end"], True)
         for ref in work["mandatory"]["G"]["original_user_sources"]:
             add(ref["source_id"], ref["start"], ref["end"])
         for source_id in (goals or {}).get("messages", []):
@@ -316,11 +324,15 @@ class CycleEngine:
                                                "revision": identity[1]},
                                 "body": historical})
                             seen_history.add(identity)
+                archived_requirements = [*body["mandatory"].get(
+                    "historical_requirements", []), *(old for bundle in
+                    body["optional_bundles"] for old in bundle.get(
+                        "historical_requirements", []))]
                 contextual.extend({"kind": "archived_requirement",
                     "record_ref": {"type": "requirement", "requirement_id": item[
                         "requirement_id"], "revision": item["revision"],
                         "task_version": item["task_version"]}, "body": item}
-                    for item in body["mandatory"].get("historical_requirements", []))
+                    for item in archived_requirements)
                 view = AuditCodec().encode(before_view, after_view,
                     binding=audit_binding, sources=[v for v in visible if
                         v["purpose"] == "audit"],
@@ -332,6 +344,45 @@ class CycleEngine:
                     goal_ledger=self._goal_context(goals, ledger, body[
                         "observation_batch"]["processing_range"]["to_event_seq"]))
                 audit_messages = audit(view)
+                stage = "audit_preflight"
+                try:
+                    self.proxy.enforce(audit_messages)
+                except ContractError as budget_error:
+                    if budget_error.code != "input_budget_exceeded" or credit == 0:
+                        raise
+                    # If even the unchanged required view cannot fit, no model
+                    # candidate can repair this host/workset budget failure.
+                    baseline_view = AuditCodec().encode(before_view, before_view,
+                        binding=audit_binding, sources=[v for v in visible if
+                            v["purpose"] == "audit"],
+                        observations=body["observation_batch"],
+                        operation_index=[], resolve_manifest=[],
+                        contextual_objects=contextual,
+                        goal_ledger=self._goal_context(goals, ledger, body[
+                            "observation_batch"]["processing_range"]["to_event_seq"]))
+                    self.proxy.enforce(audit(baseline_view))
+                    request = repair(original_messages=messages, base=before_view,
+                        rejected={"candidate": after_view, "proposal": proposal},
+                        raw_response="", error="candidate_budget_exceeded",
+                        mode="replacement_proposal")
+                    self.proxy.enforce(request)
+                    credit = 0
+                    self.store.journal(cycle_id, "repair_credit_used", {
+                        "mode": "candidate_budget", "error_code": budget_error.code})
+                    calls += 1
+                    stage = "provider"
+                    replacement_raw = self._call(cycle_id, "candidate_repair",
+                                                 request, calls, 8192)
+                    stage = "model_validation"
+                    proposal = validate_proposal(strict_loads(replacement_raw),
+                        request_id=binding["request_id"], task_version=goals["epoch"],
+                        base_version=snapshot["state_version"])
+                    candidate = build_candidate(proposal=proposal, base=snapshot,
+                        catalog=catalog, cycle_id=cycle_id,
+                        processed_to=body["observation_batch"]["processing_range"][
+                            "to_event_seq"], goal_ledger=goals,
+                        visible_existing_ids=mutable_ids, archive=self.store.archive())
+                    continue
                 calls += 1
                 stage = "provider"
                 raw = self._call(cycle_id, "audit", audit_messages, calls, 8192)
@@ -473,6 +524,10 @@ class CycleEngine:
                     "phase2_view_id": view_id}, "committed_view": projected,
                     "recent_activity": body["observation_batch"],
                     "source_catalog": visible, "selected_refs": refs,
+                    "historical_requirements": [*work["mandatory"].get(
+                        "historical_requirements", []), *(old for bundle in
+                        work["optional_bundles"] for old in bundle.get(
+                            "historical_requirements", []))],
                     "budget_notice": {"input_proxy_tokens_limit": 32768,
                         "output_provider_tokens_limit": 2048},
                     "reviewed_this_cycle_refs": reviewed,

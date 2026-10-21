@@ -248,22 +248,26 @@ class WorksetBuilder:
                                 snapshot["B"]["G"]["specifications"]}
         historical_requirements = []
         seen_requirements = set()
-        for gap in gaps:
-            if gap["status"] in {"open", "blocked"}:
-                continue
-            for ref in gap["goal_refs"]:
-                head = current_requirements.get(ref["requirement_id"])
-                if head and (head["revision"], head["task_version"]) == (
-                        ref["revision"], ref["task_version"]):
-                    continue
-                identity = ("requirement", ref["requirement_id"], ref["revision"])
-                if identity in seen_requirements:
-                    continue
-                old = archive.get(identity)
-                if old is None or old["task_version"] != ref["task_version"]:
-                    raise ContractError("source_unavailable", str(identity))
-                historical_requirements.append(old)
-                seen_requirements.add(identity)
+        def historical_for(linked_gaps):
+            found = []
+            for gap in linked_gaps:
+                for ref in gap["goal_refs"]:
+                    head = current_requirements.get(ref["requirement_id"])
+                    if head and (head["revision"], head["task_version"]) == (
+                            ref["revision"], ref["task_version"]):
+                        continue
+                    identity = ("requirement", ref["requirement_id"], ref["revision"])
+                    old = archive.get(identity)
+                    if old is None or old["task_version"] != ref["task_version"]:
+                        raise ContractError("source_unavailable", str(identity))
+                    found.append(old)
+            return found
+        for bundle in mandatory_bundles:
+            for old in historical_for(bundle["linked_closed_gaps"]):
+                identity = ("requirement", old["requirement_id"], old["revision"])
+                if identity not in seen_requirements:
+                    historical_requirements.append(old)
+                    seen_requirements.add(identity)
         mandatory["historical_requirements"] = historical_requirements
         batch = {"cycle_id": cycle_id,
                  "base_committed_event_seq": snapshot["committed_event_seq"],
@@ -306,6 +310,8 @@ class WorksetBuilder:
                 continue
             bundle = _complete_bundle(record, world, ledger,
                                       linked_closed(record["record_id"]), archive)
+            bundle["historical_requirements"] = historical_for(
+                bundle["linked_closed_gaps"])
             work.optional_bundles.append(bundle)
             if measure(work.payload()) > self.input_limit:
                 work.optional_bundles.pop()
