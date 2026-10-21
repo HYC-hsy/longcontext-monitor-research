@@ -72,7 +72,8 @@ class AuditCodec:
     def encode(self, before: dict, candidate: dict, *, binding: dict,
                sources: list[dict], observations: dict,
                operation_index: list[dict], resolve_manifest: list[dict],
-               contextual_objects: list[dict] | None = None) -> dict:
+               contextual_objects: list[dict] | None = None,
+               goal_ledger: dict | None = None) -> dict:
         before_layout = deepcopy(before)
         candidate_layout = deepcopy(candidate)
         shared = []
@@ -119,6 +120,9 @@ class AuditCodec:
                 "candidate_layout": candidate_layout,
                 "contextual_objects": contextual_objects or [],
                 "source_catalog": sources, "observations": observations,
+                "goal_ledger": goal_ledger,
+                "budget_notice": {"input_proxy_tokens_limit": 32768,
+                                  "output_provider_tokens_limit": 8192},
                 "required_coverage": required_coverage,
                 "resolve_manifest": resolve_manifest, "view_omissions": []}
         self.verify(view, before, candidate)
@@ -238,6 +242,8 @@ def validate_audit_result(raw: object, *, view: dict,
             raise ContractError("issue_target_not_candidate")
         if type(issue["related_targets"]) is not list or type(issue["witnesses"]) is not list:
             raise ContractError("invalid_issue_array")
+        if not issue["witnesses"]:
+            raise ContractError("missing_issue_witness")
         for related in issue["related_targets"]:
             _bound_field(related, targets)
         nonempty(issue["explanation"], "explanation")

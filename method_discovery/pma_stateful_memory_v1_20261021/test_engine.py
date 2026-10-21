@@ -55,10 +55,10 @@ class ScriptedProvider:
                 evidence_id = next(item["evidence_id"] for item in
                     content["source_catalog"] if item["source_kind"] == "tool_result"
                     and item["purpose"] == "maintenance")
-                entities = [{"entity_id": "e1", "entity_type": "environment",
+                entities = [{"entity_id": "@e1", "entity_type": "environment",
                              "display_name": "synthetic workspace"}]
-                states = [{"record_id": "s1", "revision": 1, "entity_id": "e1",
-                    "scope": {"task_id": "task", "entity_ids": ["e1"], "conditions": []},
+                states = [{"record_id": "@s1", "revision": 1, "entity_id": "@e1",
+                    "scope": {"task_id": "task", "entity_ids": ["@e1"], "conditions": []},
                     "use_status": "active", "updated_at_step": 1, "supersedes": [],
                     "kind": "knowledge", "claim": {"text": "observed result",
                         "assertion_origin": "tool_observation",
@@ -66,7 +66,7 @@ class ScriptedProvider:
                             "evidence_id": evidence_id, "quote": "observed result"}],
                         "challenge_refs": []}}]
             if self.create_requirement and role == "maintenance":
-                additions = [{"requirement_id": "r1", "revision": 1,
+                additions = [{"requirement_id": "@r1", "revision": 1,
                     "task_version": 1, "interpretation": "perform task",
                     "source_refs": [{"evidence_id": next(item["evidence_id"] for item
                         in content["source_catalog"] if item["source_id"] == "u0" and
@@ -97,7 +97,16 @@ class ScriptedProvider:
                             "id": "r1", "revision": 1},
                         "field_path": "interpretation"},
                     "related_targets": [], "explanation": "synthetic issue",
-                    "witnesses": [], "repair_constraint": "remove the unsupported reading"}]
+                    "witnesses": [{"kind": "field", "field": {
+                        "snapshot": "candidate", "target": {"kind": "requirement",
+                            "id": next(item["id"] for item in content["required_coverage"]
+                                       if item["kind"] == "requirement"),
+                            "revision": 1}, "field_path": "interpretation"},
+                        "exact_value": "perform task"}],
+                    "repair_constraint": "remove the unsupported reading"}]
+                answer["issues"][0]["target"]["target"]["id"] = next(
+                    item["id"] for item in content["required_coverage"]
+                    if item["kind"] == "requirement")
             elif outcome == "unusable":
                 answer.update({"outcome": "unusable",
                     "unusable_reason": {"code": "insufficient_context",
@@ -235,7 +244,8 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(result["status"], "committed_reminder_ready")
         self.assertEqual(result["logical_calls"], 3)
         reminder = result["reminder"]
-        self.assertEqual(reminder["anchors"][0]["ref"]["requirement_id"], "r1")
+        self.assertEqual(reminder["anchors"][0]["ref"]["requirement_id"],
+                         self.store.snapshot()["B"]["G"]["specifications"][0]["requirement_id"])
         self.assertIsNone(self.store.delivery_result(reminder["reminder_id"]))
         original = [{"role": "system", "content": "task agent"},
                     {"role": "user", "content": "task"}]
@@ -329,7 +339,8 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(result["status"], "committed_selection_silent")
         selected = json.loads(provider.calls[-1]["messages"][1]["content"])[
             "selected_refs"]
-        self.assertIn({"type": "state", "record_id": "s1", "revision": 1}, selected)
+        state_id = self.store.snapshot()["B"]["W"]["states"][0]["record_id"]
+        self.assertIn({"type": "state", "record_id": state_id, "revision": 1}, selected)
         self.assertEqual(self.store.snapshot()["B"]["W"]["states"][0][
             "claim"]["support_refs"][0]["source_id"], "tool-1")
 
@@ -340,7 +351,8 @@ class EngineTests(unittest.TestCase):
         audit_view = json.loads(provider.calls[1]["messages"][1]["content"])
         self.assertEqual(audit_view["operation_index"][0]["operation"],
                          "specification_upserts")
-        self.assertEqual(audit_view["operation_index"][0]["target_ref"]["id"], "r1")
+        requirement_id = self.store.snapshot()["B"]["G"]["specifications"][0]["requirement_id"]
+        self.assertEqual(audit_view["operation_index"][0]["target_ref"]["id"], requirement_id)
 
     def test_goal_epoch_change_blocks_commit(self):
         provider = ScriptedProvider()

@@ -78,10 +78,15 @@ class MemoryStore:
         return {key: _decode(raw) for key, raw in self.db.execute(
             "SELECT source_id,body FROM sources")}
 
-    def archive(self) -> dict[tuple[str, int], dict]:
-        return {(key, revision): _decode(raw) for key, revision, raw in
-                self.db.execute("SELECT object_id,revision,body FROM archive "
-                                "WHERE object_kind='state'")}
+    def archive(self) -> dict:
+        result = {}
+        for kind, key, revision, raw in self.db.execute(
+                "SELECT object_kind,object_id,revision,body FROM archive"):
+            # Preserve the existing state lookup contract; non-state histories
+            # use typed keys so equal object IDs cannot alias one another.
+            result[(key, revision) if kind == "state" else
+                   (kind, key, revision)] = _decode(raw)
+        return result
 
     def initialize(self, snapshot: dict, task_leaf: dict) -> None:
         validate_leaf(task_leaf)
@@ -295,3 +300,8 @@ class MemoryStore:
         row = self.db.execute("SELECT result FROM deliveries WHERE reminder_id=?",
                               (reminder_id,)).fetchone()
         return _decode(row[0]) if row else None
+
+    def delivery_attempt_cycles(self, reminder_id: str) -> list[str]:
+        return [cycle_id for cycle_id, raw in self.db.execute(
+            "SELECT cycle_id,body FROM journal WHERE phase='delivery_attempt'")
+            if _decode(raw).get("reminder_id") == reminder_id]

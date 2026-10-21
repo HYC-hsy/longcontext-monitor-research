@@ -244,6 +244,27 @@ class WorksetBuilder:
                     mandatory_bundles.append(bundle)
         mandatory = {"G": snapshot["B"]["G"], "open_gaps": open_gaps,
                      "F": snapshot["B"]["F"], "bundles": mandatory_bundles}
+        current_requirements = {item["requirement_id"]: item for item in
+                                snapshot["B"]["G"]["specifications"]}
+        historical_requirements = []
+        seen_requirements = set()
+        for gap in gaps:
+            if gap["status"] in {"open", "blocked"}:
+                continue
+            for ref in gap["goal_refs"]:
+                head = current_requirements.get(ref["requirement_id"])
+                if head and (head["revision"], head["task_version"]) == (
+                        ref["revision"], ref["task_version"]):
+                    continue
+                identity = ("requirement", ref["requirement_id"], ref["revision"])
+                if identity in seen_requirements:
+                    continue
+                old = archive.get(identity)
+                if old is None or old["task_version"] != ref["task_version"]:
+                    raise ContractError("source_unavailable", str(identity))
+                historical_requirements.append(old)
+                seen_requirements.add(identity)
+        mandatory["historical_requirements"] = historical_requirements
         batch = {"cycle_id": cycle_id,
                  "base_committed_event_seq": snapshot["committed_event_seq"],
                  "frozen_tip_event_seq": frozen_tip,

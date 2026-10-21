@@ -21,9 +21,7 @@ def _selected(snapshot: dict, ref: dict) -> tuple[dict, str, str]:
         episode = item["episode"]
         text = (f"Past episode: {episode['conditions']['text']}; "
                 f"action: {episode['action_text']}; result: {episode['result']['text']}")
-        if item["lesson"]:
-            text += f"; conditional lesson: {item['lesson']['text']}"
-        return item, text, "episode_and_lesson"
+        return item, text, "episode"
     if ref["type"] == "requirement":
         fields(ref, {"type", "requirement_id", "revision", "task_version"})
         item = next((item for item in belief["G"]["specifications"] if
@@ -87,14 +85,15 @@ def render_reminder(decision: dict, *, snapshot: dict, cycle_id: str,
         item, content, component = _selected(snapshot, ref)
         if ref["type"] == "state":
             origin = (item["claim"]["assertion_origin"] if item["kind"] ==
-                      "knowledge" else "mixed_episode_and_inference")
+                      "knowledge" else item["episode"]["result"]["assertion_origin"])
             temporal = (item["claim"]["time_role"] if item["kind"] ==
-                        "knowledge" else "past_episode_with_optional_lesson")
+                        "knowledge" else "past_episode")
             status = item["use_status"]
             scope = item["scope"]
-            mode = ("conditional_experience" if item["kind"] == "procedural" else
-                    "uncertain_claim" if status == "contested" else
-                    "historical_record" if status == "historical_only" else
+            mode = ("uncertain_claim" if status == "contested" else
+                    "historical_record" if status == "historical_only" or
+                    temporal == "past_episode" else
+                    "conditional_experience" if item["kind"] == "procedural" else
                     "current_claim")
         elif ref["type"] == "requirement":
             origin, temporal, status, scope, mode = (
@@ -105,10 +104,23 @@ def render_reminder(decision: dict, *, snapshot: dict, cycle_id: str,
                 "model_gap", "task_version_bound", item["status"], None, "gap")
         anchors.append({"ref": ref, "component": component, "render_mode": mode,
             "origin_badge": origin, "temporal_badge": temporal,
+            "use_status": status,
+            "gap_kind": item["gap_kind"] if ref["type"] == "gap" else None,
             "uncertainty_badge": "contested" if status == "contested" else None,
             "content": content, "scope": scope,
             "reviewed_this_cycle": canonical(ref) in reviewed,
             "committed_event_seq": snapshot["committed_event_seq"]})
+        if ref["type"] == "state" and item["kind"] == "procedural" and item["lesson"]:
+            anchors.append({"ref": ref, "component": "lesson",
+                "render_mode": "uncertain_claim" if status == "contested" else
+                               "historical_record" if status == "historical_only" else
+                               "conditional_experience",
+                "origin_badge": "inference", "temporal_badge": "general_hypothesis",
+                "use_status": status, "gap_kind": None,
+                "uncertainty_badge": "contested" if status == "contested" else None,
+                "content": item["lesson"]["text"], "scope": scope,
+                "reviewed_this_cycle": canonical(ref) in reviewed,
+                "committed_event_seq": snapshot["committed_event_seq"]})
     reminder_id = "reminder-" + digest([snapshot["episode_id"], cycle_id,
                                         commit_id])[:24]
     rendered = {"state_version": snapshot["state_version"],
@@ -131,6 +143,8 @@ def attach_once(*, store, reminder: dict, task_messages: list[dict],
     if any(row["phase"] == "delivery_attempt" and row["body"].get(
             "reminder_id") == reminder["reminder_id"] for row in
             store.journal_rows(cycle_id)):
+        raise ContractError("delivery_outcome_unknown_check_journal")
+    if store.delivery_attempt_cycles(reminder["reminder_id"]):
         raise ContractError("delivery_outcome_unknown_check_journal")
     snapshot = store.snapshot()
     if (snapshot["state_version"] != reminder["state_version"] or

@@ -30,6 +30,31 @@ gap_ref, reason, changed_at_step. Use complete new versions, not partial edits.
 Source references in new output are {evidence_id,quote}; only visible IDs and
 exact, contiguous, uniquely matching quotes are accepted. Do not write stored
 {source_id,start,end,quote} objects in a new proposal.
+Scope={task_id:string,entity_ids:[existing Entity ID,...],conditions:[string,...]}.
+StateRef={type:"state",record_id:string,revision:integer>=1};
+RequirementRef={type:"requirement",requirement_id:string,revision:integer>=1,
+task_version:integer>=1}; GapRef={type:"gap",gap_id:string,revision:integer>=1,
+task_version:integer>=1}; GoalDeltaRef={type:"goal_delta",goal_delta_id:string,
+from_task_version:integer>=1,to_task_version:integer>from_task_version}.
+Claim assertion_origin=user_requirement|user_report|tool_observation|
+agent_report|inference; time_role=present_fact|past_episode|general_hypothesis.
+An inference uses general_hypothesis. use_status=active|historical_only|
+contested|retracted. kind=knowledge|procedural. Procedural episode is
+{conditions:Claim,action_text:string,action_refs:[EvidenceRef,...],
+result:Claim,time_role:"past_episode"}; optional lesson=null or Claim with
+assertion_origin:"inference",time_role:"general_hypothesis" and at least
+one support_ref. entity_type=file|function|tool|environment|artifact|
+attempt|other. Requirement status=active|superseded; retirement=null for
+active, otherwise {kind:"goal_changed",goal_delta_ref:GoalDeltaRef} or
+{kind:"interpretation_replaced",replacement_requirement_refs:[RequirementRef,...],
+source_refs:[EvidenceRef,...]}. Gap gap_kind=epistemic|achievement;
+status=open|blocked|supported|superseded. Open/blocked closure=null;
+supported closure={kind:"environment_supported",conclusion:string,
+evidence_refs:[EvidenceRef,...],state_refs:[StateRef,...]}; superseded
+closure={kind:"goal_changed",goal_delta_ref:GoalDeltaRef} or
+{kind:"merged_into",replacement_gap_ref:GapRef}. No extra fields in any
+object. All array fields must be present even when empty, except arrays
+explicitly required nonempty by the binding contract.
 
 record_transitions contain record_ref,to_status,reason,evidence_refs and may
 only change availability to historical_only, contested, or retracted. A
@@ -60,6 +85,20 @@ Source witnesses use {kind:source,ref:{evidence_id,quote}}. Field witnesses
 use {kind:field,field:BoundField,exact_value:JSONValue}. Every gap resolution
 needs one closure assessment bound to the exact gap_before/gap_after identity,
 closure_kind and basis; unsupported/uncertain must cite a blocking issue.
+BoundField={snapshot:"base"|"candidate"|"archive",target:AuditTargetRef,
+field_path:string}; AuditTargetRef={kind:"state"|"gap"|"requirement"|
+"entity"|"relation"|"focus",id:string,revision?:integer}.
+witnesses must be a nonempty list, including a FieldWitness of an exact
+empty support_refs field when no source supports a claim; do not invent a quote.
+ClosureAssessment={resolution_id:string,gap_before:GapRef,gap_after:GapRef,
+closure_kind:"environment_supported"|"goal_changed"|"merged_into",
+verdict:"supported"|"unsupported"|"uncertain",assessed_scope:object,
+explanation:string,basis_refs:[EvidenceRef|GoalDeltaRef|GapRef,...],
+blocking_issue_ids:[string,...]}. unusable_reason=null unless outcome is
+unusable, when it is {code:"insufficient_context"|"ambiguous_input"|
+"cannot_complete_audit",detail:string}; unusable must have no conclusions.
+No extra fields. Copy the exact binding from the input. EvidenceRef is
+{evidence_id,quote}, never an internal stored SourceRef.
 Check the entire bound candidate and every listed current target, including unchanged
 retained claims directly contradicted by this step's observations. Return clean only
 when the full coverage and every gap resolution are supportable. A valid source quote
@@ -70,6 +109,14 @@ If an honest complete audit is impossible, return unusable with its defined reas
 Return one complete JSON object and no surrounding prose."""
 
 SELECTION_SYSTEM = """Stateful proactive memory selection, protocol reminder-decision/1.
+Return exactly one of these JSON objects (no protocol field):
+{decision:"silent",state_version:integer,task_version:integer,phase2_view_id:string}
+or {decision:"remind",state_version:integer,task_version:integer,
+phase2_view_id:string,refs:[TypedRef],context_for_action:string}.
+TypedRef is StateRef {type:"state",record_id:string,revision:integer},
+RequirementRef {type:"requirement",requirement_id:string,revision:integer,
+task_version:integer}, or GapRef {type:"gap",gap_id:string,revision:integer,
+task_version:integer}. No extra fields are allowed.
 Use only the committed state and selected refs in this request. Either return strict
 silent, or remind with at most three distinct visible committed refs and a conditional
 context_for_action. Do not claim that a historical episode or inferred lesson is a

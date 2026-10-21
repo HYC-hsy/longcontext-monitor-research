@@ -81,11 +81,23 @@ class CycleEngine:
             "public_response_sha256": digest(raw), "characters": len(raw)})
         return raw
 
+    def _counted(self, cycle_id: str, result: dict) -> dict:
+        rows = self.store.journal_rows(cycle_id)
+        phases = [row["phase"] for row in rows]
+        return {**result, "prepared_calls": phases.count("call_prepared"),
+            "logical_calls": phases.count("call_attempt"),
+            "observable_attempts": phases.count("call_attempt"),
+            "responses_received": phases.count("call_returned")}
+
     def _catalog(self, ledger: dict, work: dict,
-                 purposes: tuple[str, ...] = ("maintenance", "audit")) -> tuple[SourceCatalog, list[dict]]:
+                 purposes: tuple[str, ...] = ("maintenance", "audit"),
+                 goals: dict | None = None) -> tuple[SourceCatalog, list[dict]]:
         catalog = SourceCatalog(ledger, work["source_window_id"])
         visible = []
         seen = set()
+        source_context = {source["source_id"]: source for bundle in
+            [*work["mandatory"]["bundles"], *work["optional_bundles"]]
+            for source in bundle["sources"]}
         def add(source_id: str, start: int, end: int,
                 exact_stored_ref: bool = False) -> None:
             if start == end:
@@ -97,12 +109,26 @@ class CycleEngine:
                 seen.add(identity)
                 span = catalog.add(source_id, start, end, purpose,
                                    exact_stored_ref=exact_stored_ref)
-                visible.append({"evidence_id": span.evidence_id,
+                entry = {"evidence_id": span.evidence_id,
                     "source_id": source_id, "source_kind": ledger[source_id]["source_kind"],
                     "event_seq": ledger[source_id]["event_seq"],
                     "start": start, "end": end, "purpose": purpose,
                     "exact_stored_ref": exact_stored_ref,
-                    "text": ledger[source_id]["text"][start:end]})
+                    "text": ledger[source_id]["text"][start:end],
+                    "event_id": ledger[source_id]["event_id"],
+                    "field_path": ledger[source_id]["field_path"],
+                    "truncated": ledger[source_id]["truncated"],
+                    "text_sha256": ledger[source_id]["text_sha256"]}
+                context = source_context.get(source_id)
+                if context and ledger[source_id]["source_kind"] == "tool_result":
+                    entry["source_context_status"] = context.get(
+                        "source_context_status", "available")
+                    entry["executed_actions"] = [{"source_id": action["source_id"],
+                        "event_id": action["event_id"], "field_path": action["field_path"],
+                        "text": action["text"], "truncated": action["truncated"],
+                        "text_sha256": action["text_sha256"]} for action in
+                        context.get("executed_actions", [])]
+                visible.append(entry)
         for entry in work["observation_batch"]["events"]:
             for leaf in entry["source_leaves"]:
                 add(leaf["source_id"], 0, len(leaf["text"]))
@@ -113,9 +139,25 @@ class CycleEngine:
                     add(source["source_id"], span["start"], span["end"])
                 for ref in source["exact_refs"]:
                     add(source["source_id"], ref["start"], ref["end"], True)
+                for action in source.get("executed_actions", []):
+                    add(action["source_id"], 0, len(action["text"]))
         for ref in work["mandatory"]["G"]["original_user_sources"]:
             add(ref["source_id"], ref["start"], ref["end"])
+        for source_id in (goals or {}).get("messages", []):
+            add(source_id, 0, len(ledger[source_id]["text"]))
         return catalog, visible
+
+    @staticmethod
+    def _goal_context(goals: dict, ledger: dict, processed_to: int) -> dict:
+        return {"epoch": goals["epoch"], "deltas": list(goals["deltas"].values()),
+            "messages": [{"source_id": source_id,
+                "event_id": ledger[source_id]["event_id"],
+                "event_seq": ledger[source_id]["event_seq"],
+                "field_path": ledger[source_id]["field_path"],
+                "text": ledger[source_id]["text"],
+                "text_sha256": ledger[source_id]["text_sha256"],
+                "within_processing_prefix": ledger[source_id]["event_seq"] <= processed_to}
+                for source_id in goals["messages"]]}
 
     def run(self, trigger_id: str) -> dict:
         if not trigger_id:
@@ -140,6 +182,7 @@ class CycleEngine:
         if not pending and snapshot["state_version"] > 0:
             result = {"cycle_id": cycle_id, "status": "no_pending",
                       "logical_calls": 0}
+            result = self._counted(cycle_id, result)
             self.store.journal(cycle_id, "cycle_result", result)
             return result
         self.store.journal(cycle_id, "cycle_started", {"base_hash": digest(snapshot),
@@ -166,7 +209,7 @@ class CycleEngine:
                 [event["payload"] for event in recent])
             ranked = index.select(query)
             def prepare_maintenance(body):
-                catalog, visible = self._catalog(ledger, body)
+                catalog, visible = self._catalog(ledger, body, goals=goals)
                 before_view = project_snapshot(snapshot, snapshot, body)
                 binding = {"cycle_id": cycle_id,
                     "request_id": f"{cycle_id}/maintenance",
@@ -178,11 +221,15 @@ class CycleEngine:
                     "source_window_id": body["source_window_id"]}
                 payload = {"protocol": "maintenance-input/1", "binding": binding,
                     "before_view": before_view,
+                    "goal_ledger": self._goal_context(goals, ledger, body[
+                        "observation_batch"]["processing_range"]["to_event_seq"]),
                     "observation_batch": body["observation_batch"],
                     "working_set": {"mandatory": body["mandatory"],
                                     "optional_bundles": body["optional_bundles"],
                                     "omissions": body["omissions"]},
                     "source_catalog": visible,
+                    "budget_notice": {"input_proxy_tokens_limit": 32768,
+                        "output_provider_tokens_limit": 8192},
                     "mutation_scope": {"visible_existing_refs": sorted(
                         [{"kind": kind, "id": identifier} for kind, identifier in
                          visible_existing(snapshot, body)],
@@ -246,6 +293,7 @@ class CycleEngine:
                                  item["closure"] else None} for item in resolving]
                 audit_binding = {"cycle_id": cycle_id,
                     "task_version": goals["epoch"],
+                    "goal_ledger_hash": digest(goals),
                     "base_state_hash": digest(snapshot),
                     "candidate_state_hash": digest(candidate["candidate"]),
                     "source_window_id": work.source_window_id}
@@ -268,6 +316,11 @@ class CycleEngine:
                                                "revision": identity[1]},
                                 "body": historical})
                             seen_history.add(identity)
+                contextual.extend({"kind": "archived_requirement",
+                    "record_ref": {"type": "requirement", "requirement_id": item[
+                        "requirement_id"], "revision": item["revision"],
+                        "task_version": item["task_version"]}, "body": item}
+                    for item in body["mandatory"].get("historical_requirements", []))
                 view = AuditCodec().encode(before_view, after_view,
                     binding=audit_binding, sources=[v for v in visible if
                         v["purpose"] == "audit"],
@@ -275,7 +328,9 @@ class CycleEngine:
                     operation_index=_operation_index(before_view, after_view,
                                                      candidate["canonical_patch"]),
                     resolve_manifest=manifest,
-                    contextual_objects=contextual)
+                    contextual_objects=contextual,
+                    goal_ledger=self._goal_context(goals, ledger, body[
+                        "observation_batch"]["processing_range"]["to_event_seq"]))
                 audit_messages = audit(view)
                 calls += 1
                 stage = "provider"
@@ -284,8 +339,11 @@ class CycleEngine:
                 try:
                     response = strict_loads(raw)
                     result = validate_audit_result(response, view=view,
-                        catalog=catalog, archive={("state", item["record_ref"][
-                            "record_id"], item["record_ref"]["revision"]): item["body"]
+                        catalog=catalog, archive={(
+                            "state", item["record_ref"]["record_id"], item["record_ref"]["revision"])
+                            if item["kind"] == "archived_state" else
+                            ("requirement", item["record_ref"]["requirement_id"],
+                             item["record_ref"]["revision"]): item["body"]
                             for item in contextual})
                 except ContractError as error:
                     if credit == 0:
@@ -302,8 +360,11 @@ class CycleEngine:
                                                correction, calls, 8192)
                     stage = "model_validation"
                     result = validate_audit_result(strict_loads(corrected_raw), view=view,
-                        catalog=catalog, archive={("state", item["record_ref"][
-                            "record_id"], item["record_ref"]["revision"]): item["body"]
+                        catalog=catalog, archive={(
+                            "state", item["record_ref"]["record_id"], item["record_ref"]["revision"])
+                            if item["kind"] == "archived_state" else
+                            ("requirement", item["record_ref"]["requirement_id"],
+                             item["record_ref"]["revision"]): item["body"]
                             for item in contextual})
                 if result["outcome"] == "unusable":
                     raise ContractError("model_unusable")
@@ -345,6 +406,7 @@ class CycleEngine:
             else:
                 outcome = self._select(cycle_id, candidate["candidate"],
                     committed, body, view["required_coverage"], calls)
+            outcome = self._counted(cycle_id, outcome)
             self.store.journal(cycle_id, "cycle_result", outcome)
             return outcome
         except BaseException as error:
@@ -358,12 +420,14 @@ class CycleEngine:
                        "failure_stage": stage,
                        "logical_calls": calls, "frontier": self.store.snapshot()[
                            "committed_event_seq"]}
+            failure = self._counted(cycle_id, failure)
             self.store.journal(cycle_id, "cycle_result", failure)
             return failure
 
     def _select(self, cycle_id: str, snapshot: dict, committed: dict,
                 body: dict, reviewed_coverage: list[dict],
                 calls: int) -> dict:
+        selection_started = False
         try:
             if snapshot["B"]["G"]["task_version"] != self.store.goals()["epoch"]:
                 raise ContractError("selection_stale")
@@ -394,7 +458,8 @@ class CycleEngine:
                 return refs, projected
             def prepare_selection(work):
                 refs, projected = refs_for(work)
-                _catalog, visible = self._catalog(ledger, work, ("selection",))
+                _catalog, visible = self._catalog(ledger, work, ("selection",),
+                                                   goals=self.store.goals())
                 coverage = {(item["kind"], item["id"], item.get("revision")) for
                             item in reviewed_coverage}
                 reviewed = [ref for ref in refs if (ref["type"], ref.get(
@@ -408,6 +473,8 @@ class CycleEngine:
                     "phase2_view_id": view_id}, "committed_view": projected,
                     "recent_activity": body["observation_batch"],
                     "source_catalog": visible, "selected_refs": refs,
+                    "budget_notice": {"input_proxy_tokens_limit": 32768,
+                        "output_provider_tokens_limit": 2048},
                     "reviewed_this_cycle_refs": reviewed,
                     "not_reviewed_this_cycle_refs": not_reviewed}
             def measure(work):
@@ -419,6 +486,7 @@ class CycleEngine:
             select_input = prepare_selection(selection_work)
             refs = select_input["selected_refs"]
             phase2_view_id = select_input["binding"]["phase2_view_id"]
+            selection_started = True
             answer_raw = self._call(cycle_id, "selection", selection(select_input),
                                     calls + 1, 2048)
             if (self.store.goals()["epoch"] != snapshot["B"]["G"]["task_version"] or
@@ -441,4 +509,4 @@ class CycleEngine:
                       "committed_selection_failed")
             return {"cycle_id": cycle_id, "status": status,
                     "commit": committed, "error_code": code,
-                    "logical_calls": calls + 1}
+                    "logical_calls": calls + int(selection_started)}

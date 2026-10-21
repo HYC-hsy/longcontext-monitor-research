@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from .schema import validate_snapshot
+from .schema import validate_snapshot, enum, refs
 from .source import ContractError, SourceCatalog, digest, fields, integer, nonempty
 
 
@@ -75,6 +75,15 @@ def validate_proposal(raw: object, *, request_id: str,
             fields(item, required)
     for item in patch["relation_upserts"]:
         fields(item["anchored_by"], {"type", "record_id", "revision"})
+    for item in patch["record_transitions"]:
+        fields(item["record_ref"], {"type", "record_id", "revision"})
+        if item["record_ref"]["type"] != "state":
+            raise ContractError("invalid_state_ref")
+        enum(item["to_status"], {"historical_only", "contested", "retracted"},
+             "transition_status")
+        nonempty(item["reason"], "transition.reason")
+        if type(item["evidence_refs"]) is not list:
+            raise ContractError("invalid_array", "transition.evidence_refs")
     for item in patch["state_upserts"]:
         if type(item) is not dict:
             raise ContractError("wrong_object_type", "state")
@@ -187,6 +196,20 @@ def build_candidate(*, proposal: dict, base: dict, catalog: SourceCatalog,
                       task_version=goal_ledger["epoch"],
                       base_version=base["state_version"])
     mapping = _local_id_map(proposal, cycle_id)
+    existing = {kind: {item[key] for item in items} for kind, items, key in (
+        ("entity", base["B"]["W"]["entities"], "entity_id"),
+        ("state", base["B"]["W"]["states"], "record_id"),
+        ("relation", base["B"]["W"]["relations"], "relation_id"),
+        ("requirement", base["B"]["G"]["specifications"], "requirement_id"),
+        ("gap", base["B"]["DeltaE"] + base["B"]["DeltaA"], "gap_id"))}
+    for kind, items, key in (("entity", proposal["world_patch"]["entity_upserts"], "entity_id"),
+                             ("state", proposal["world_patch"]["state_upserts"], "record_id"),
+                             ("relation", proposal["world_patch"]["relation_upserts"], "relation_id"),
+                             ("requirement", proposal["specification_upserts"], "requirement_id"),
+                             ("gap", proposal["gap_upserts"], "gap_id")):
+        for item in items:
+            if item[key] not in existing[kind] and item[key] not in mapping:
+                raise ContractError("new_object_requires_local_id", item[key])
     patch = _wire_to_internal(_replace_local_ids(proposal, mapping), catalog)
     new_ids = {("entity", item["entity_id"]) for item in patch["world_patch"][
         "entity_upserts"] if item["entity_id"] not in {old["entity_id"] for old in
@@ -253,6 +276,7 @@ def build_candidate(*, proposal: dict, base: dict, catalog: SourceCatalog,
     for transition in patch["world_patch"]["record_transitions"]:
         fields(transition, {"record_ref", "to_status", "reason", "evidence_refs"})
         ref = transition["record_ref"]
+        refs(transition["evidence_refs"], ledger)
         old = next((item for item in world["states"] if item["record_id"] ==
                     ref["record_id"]), None)
         if old is None or old["revision"] != ref["revision"]:
@@ -299,8 +323,9 @@ def build_candidate(*, proposal: dict, base: dict, catalog: SourceCatalog,
     elif focus["op"] == "clear":
         belief["F"] = None
     combined_archive = dict(archive)
-    combined_archive.update({(identifier, revision): body for kind, identifier,
-                             revision, body in archive_delta if kind == "state"})
+    combined_archive.update({(identifier, revision) if kind == "state" else
+        (kind, identifier, revision): body for kind, identifier, revision, body
+        in archive_delta})
     validate_snapshot(candidate, ledger, combined_archive, goal_ledger["deltas"])
     update_id = "update-" + digest([cycle_id, proposal["request_id"],
                                      base["state_version"], digest(candidate)])[:24]

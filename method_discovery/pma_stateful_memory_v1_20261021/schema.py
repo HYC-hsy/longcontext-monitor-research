@@ -47,17 +47,21 @@ def state_ref(value: object, heads: dict[str, dict], archive: dict,
     raise ContractError("version_mismatch", record_id)
 
 
-def requirement_ref(value: object, requirements: dict[str, dict]) -> dict:
+def requirement_ref(value: object, requirements: dict[str, dict], archive: dict | None = None,
+                    *, historical: bool = False) -> dict:
     ref = fields(value, {"type", "requirement_id", "revision", "task_version"})
     if ref["type"] != "requirement":
         raise ContractError("invalid_requirement_ref")
     item = requirements.get(nonempty(ref["requirement_id"], "requirement_id"))
     integer(ref["revision"], "revision", 1)
     integer(ref["task_version"], "task_version", 1)
-    if item is None or (item["revision"], item["task_version"]) != (
+    if item is not None and (item["revision"], item["task_version"]) == (
             ref["revision"], ref["task_version"]):
-        raise ContractError("version_mismatch", ref["requirement_id"])
-    return ref
+        return ref
+    old = (archive or {}).get(("requirement", ref["requirement_id"], ref["revision"]))
+    if historical and old is not None and old["task_version"] == ref["task_version"]:
+        return ref
+    raise ContractError("version_mismatch", ref["requirement_id"])
 
 
 def gap_ref(value: object, gaps: dict[str, dict]) -> dict:
@@ -169,14 +173,22 @@ def validate_snapshot(snapshot: object, ledger: dict[str, dict],
             kind = retirement.get("kind")
             if kind == "goal_changed":
                 fields(retirement, {"kind", "goal_delta_ref"})
-                goal_delta_ref(retirement["goal_delta_ref"], goal_deltas)
+                delta = goal_delta_ref(retirement["goal_delta_ref"], goal_deltas)
+                if delta["from_task_version"] != item["task_version"] or delta[
+                        "to_task_version"] != task_version:
+                    raise ContractError("retirement_goal_delta_mismatch")
             elif kind == "interpretation_replaced":
                 fields(retirement, {"kind", "replacement_requirement_refs", "source_refs"})
                 refs(retirement["source_refs"], ledger, {"user_requirement"}, required=True)
-                for ref in array(retirement["replacement_requirement_refs"],
-                                 "replacement_requirement_refs"):
+                replacements = array(retirement["replacement_requirement_refs"],
+                                     "replacement_requirement_refs")
+                if not replacements:
+                    raise ContractError("missing_requirement_replacement")
+                for ref in replacements:
                     replacement = requirements[requirement_ref(ref, requirements)[
                         "requirement_id"]]
+                    if replacement["requirement_id"] == item["requirement_id"]:
+                        raise ContractError("invalid_requirement_replacement")
                     if replacement["status"] != "active" or replacement["task_version"] != task_version:
                         raise ContractError("invalid_requirement_replacement")
             else:
@@ -230,6 +242,9 @@ def validate_snapshot(snapshot: object, ledger: dict[str, dict],
                 lesson = fields(item["lesson"], {"text", "assertion_origin",
                                                  "time_role", "support_refs", "challenge_refs"})
                 claim(lesson, ledger)
+                if lesson["assertion_origin"] != "inference" or lesson[
+                        "time_role"] != "general_hypothesis":
+                    raise ContractError("lesson_origin_or_time_role")
                 if not lesson["support_refs"]:
                     raise ContractError("lesson_missing_support")
         else:
@@ -256,7 +271,7 @@ def validate_snapshot(snapshot: object, ledger: dict[str, dict],
         state_ref(item["anchored_by"], heads, archive, historical=True)
     history = {(record_id, item["revision"]): item for record_id, item in
                heads.items()}
-    history.update(archive)
+    history.update({key: body for key, body in archive.items() if len(key) == 2})
     visited, active = set(), set()
     def check_supersedes(node):
         if node in active:
@@ -288,8 +303,9 @@ def validate_snapshot(snapshot: object, ledger: dict[str, dict],
             nonempty(item["reason"], "reason")
             if not array(item["goal_refs"], "goal_refs"):
                 raise ContractError("gap_missing_goal")
+            is_current = item["status"] in {"open", "blocked"}
             for ref in item["goal_refs"]:
-                requirement_ref(ref, requirements)
+                requirement_ref(ref, requirements, archive, historical=not is_current)
             for ref in array(item["record_refs"], "record_refs"):
                 state_ref(ref, heads, archive, historical=True)
             enum(item["status"], {"open", "blocked", "supported", "superseded"},
@@ -301,7 +317,8 @@ def validate_snapshot(snapshot: object, ledger: dict[str, dict],
             if closure is not None or item["task_version"] != task_version:
                 raise ContractError("open_gap_contract")
             for ref in item["goal_refs"]:
-                if requirements[ref["requirement_id"]]["status"] != "active":
+                if requirements[ref["requirement_id"]]["status"] != "active" or (
+                    requirements[ref["requirement_id"]]["task_version"] != task_version):
                     raise ContractError("open_gap_inactive_goal")
         elif type(closure) is not dict:
             raise ContractError("missing_gap_closure")

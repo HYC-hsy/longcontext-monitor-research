@@ -58,10 +58,13 @@ class AuditTests(unittest.TestCase):
                           catalog=self.catalog)["outcome"], "clean")
         issues = self.clean()
         issues["outcome"] = "issues"
-        issues["issues"] = [self.issue(), {**self.issue(), "issue_id": "i2",
-                                               "witnesses": []}]
+        issues["issues"] = [self.issue(), {**self.issue(), "issue_id": "i2"}]
         self.assertEqual(validate_audit_result(issues, view=self.view,
                          catalog=self.catalog)["outcome"], "issues")
+        issues["issues"][1]["witnesses"] = []
+        with self.assertRaisesRegex(ContractError, "missing_issue_witness"):
+            validate_audit_result(issues, view=self.view, catalog=self.catalog)
+        issues["issues"][1]["witnesses"] = self.issue()["witnesses"]
         issues["issues"][1]["target"]["field_path"] = "does_not_exist"
         with self.assertRaisesRegex(ContractError, "invalid_field_path"):
             validate_audit_result(issues, view=self.view, catalog=self.catalog)
