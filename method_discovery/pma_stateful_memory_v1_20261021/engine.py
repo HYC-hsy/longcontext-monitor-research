@@ -45,7 +45,8 @@ def _contextual_objects(work: dict, snapshot: dict) -> list[dict]:
     return result
 
 
-def _operation_index(before: dict, candidate: dict, patch: dict) -> list[dict]:
+def _operation_index(before: dict, candidate: dict, patch: dict,
+                     catalog: SourceCatalog, visible: list[dict]) -> list[dict]:
     paths = (("entity_upserts", "W", "entities", "entity_id", "entity"),
              ("state_upserts", "W", "states", "record_id", "state"),
              ("relation_upserts", "W", "relations", "relation_id", "relation"),
@@ -72,8 +73,34 @@ def _operation_index(before: dict, candidate: dict, patch: dict) -> list[dict]:
             target = {"kind": kind, "id": identifier}
             if "revision" in body:
                 target["revision"] = body["revision"]
-            entries.append({"operation": operation, "target_ref": target,
-                "changed_field_paths": _diff(old.get(identifier), body)})
+            entry = {"operation": operation, "target_ref": target,
+                     "changed_field_paths": _diff(old.get(identifier), body)}
+            if operation == "record_transitions":
+                entry.update({"before_ref": item["record_ref"],
+                    "after_ref": {"type": "state", "record_id": identifier,
+                                  "revision": body["revision"]},
+                    "from_status": old[identifier]["use_status"],
+                    "to_status": item["to_status"], "reason": item["reason"]})
+                wire_refs = []
+                for ref in item["evidence_refs"]:
+                    validate_source_ref(ref, catalog.ledger)
+                    span = catalog.add(ref["source_id"], ref["start"],
+                        ref["end"], "audit", exact_stored_ref=True)
+                    if not any(row["evidence_id"] == span.evidence_id for row in visible):
+                        leaf = catalog.ledger[ref["source_id"]]
+                        visible.append({"evidence_id": span.evidence_id,
+                            "source_id": ref["source_id"], "source_kind": leaf[
+                                "source_kind"], "event_seq": leaf["event_seq"],
+                            "event_id": leaf["event_id"], "field_path": leaf[
+                                "field_path"], "start": ref["start"],
+                            "end": ref["end"], "purpose": "audit",
+                            "exact_stored_ref": True, "text": ref["quote"],
+                            "truncated": leaf["truncated"],
+                            "text_sha256": leaf["text_sha256"]})
+                    wire_refs.append({"evidence_id": span.evidence_id,
+                                      "quote": ref["quote"]})
+                entry["evidence_refs"] = wire_refs
+            entries.append(entry)
     if patch["focus"]["op"] != "keep":
         entries.append({"operation": "focus_" + patch["focus"]["op"],
             "target_ref": {"kind": "focus", "id": "F"},
@@ -344,12 +371,13 @@ class CycleEngine:
                 audit_binding["before_view_hash"] = digest(before_view)
                 audit_binding["candidate_view_hash"] = digest(after_view)
                 contextual = _contextual_objects(body, snapshot)
+                operation_index = _operation_index(before_view, after_view,
+                    candidate["canonical_patch"], catalog, visible)
                 view = AuditCodec().encode(before_view, after_view,
                     binding=audit_binding, sources=[v for v in visible if
                         v["purpose"] == "audit"],
                     observations=body["observation_batch"],
-                    operation_index=_operation_index(before_view, after_view,
-                                                     candidate["canonical_patch"]),
+                    operation_index=operation_index,
                     resolve_manifest=manifest,
                     contextual_objects=contextual,
                     goal_ledger=self._goal_context(goals, ledger, body[
@@ -458,7 +486,8 @@ class CycleEngine:
             stage = "commit"
             committed = self.store.compare_and_swap(update_id=candidate["update_id"],
                 cycle_id=cycle_id, base=snapshot, candidate=candidate["candidate"],
-                archive_delta=candidate["archive_delta"])
+                archive_delta=candidate["archive_delta"],
+                transition_changes=candidate["transition_changes"])
             self.store.journal(cycle_id, "committed", committed)
             remaining = self.store.events_after(candidate["candidate"][
                 "committed_event_seq"])

@@ -60,6 +60,101 @@ def seeded_store(path, *, historical_state=False, repeated_user=False,
 
 
 class ClosureV3Tests(unittest.TestCase):
+    def test_transition_version_record_rolls_back_with_commit(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = seeded_store(Path(root) / "db")
+            try:
+                before = store.snapshot()
+                store.db.execute("CREATE TRIGGER reject_version BEFORE INSERT ON "
+                    "commit_versions BEGIN SELECT RAISE(ABORT,'synthetic failure'); END")
+                inner = ScriptedProvider()
+                def provider(role, messages, call_id, max_output):
+                    answer = inner(role, messages, call_id, max_output)
+                    if role != "maintenance":
+                        return answer
+                    payload = json.loads(messages[1]["content"])
+                    evidence = next(item for item in payload["source_catalog"] if
+                        item["source_id"] == "tool-2" and item["purpose"] ==
+                        "maintenance")
+                    parsed = json.loads(answer)
+                    parsed["world_patch"]["record_transitions"] = [{
+                        "record_ref": {"type": "state", "record_id": "s",
+                                       "revision": 1}, "to_status": "contested",
+                        "reason": "synthetic contradiction", "evidence_refs": [{
+                            "evidence_id": evidence["evidence_id"],
+                            "quote": "next result"}]}]
+                    return canonical(parsed).decode()
+                result = CycleEngine(store, provider, task_text="task").run(
+                    "abort-version")
+                self.assertEqual(result["status"], "runtime_failed")
+                self.assertEqual(store.snapshot(), before)
+                self.assertEqual(store.archive(), {})
+                self.assertEqual(store.db.execute("SELECT count(*) FROM "
+                    "commit_versions").fetchone()[0], 1)
+                self.assertIsNone(store.commit_for_cycle(result["cycle_id"]))
+            finally:
+                store.close()
+
+    def test_transition_reason_survives_restart_and_commit_identity(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "db"
+            store = seeded_store(path)
+            captured = {}
+            actual_cas = store.compare_and_swap
+            def spy(**kwargs):
+                captured.update(deepcopy(kwargs))
+                return actual_cas(**kwargs)
+            store.compare_and_swap = spy
+            inner = ScriptedProvider()
+            def provider(role, messages, call_id, max_output):
+                answer = inner(role, messages, call_id, max_output)
+                if role == "maintenance":
+                    payload = json.loads(messages[1]["content"])
+                    span = next(item for item in payload["source_catalog"] if
+                        item["source_id"] == "tool-2" and item["purpose"] ==
+                        "maintenance")
+                    parsed = json.loads(answer)
+                    parsed["world_patch"]["record_transitions"] = [{
+                        "record_ref": {"type": "state", "record_id": "s",
+                                       "revision": 1},
+                        "to_status": "historical_only", "reason": "new observation",
+                        "evidence_refs": [{"evidence_id": span["evidence_id"],
+                                           "quote": "next result"}]}]
+                    return canonical(parsed).decode()
+                return answer
+            try:
+                result = CycleEngine(store, provider, task_text="task").run(
+                    "transition")
+                self.assertEqual(result["status"], "committed_selection_silent")
+                audit = json.loads(next(item for item in inner.calls if item[
+                    "role"] == "audit")["messages"][1]["content"])
+                operation = next(item for item in audit["operation_index"] if
+                                 item["operation"] == "record_transitions")
+                self.assertEqual(operation["reason"], "new observation")
+                self.assertEqual(operation["before_ref"]["revision"], 1)
+                self.assertEqual(operation["after_ref"]["revision"], 2)
+                self.assertEqual(len(operation["evidence_refs"]), 1)
+                evidence_id = operation["evidence_refs"][0]["evidence_id"]
+                self.assertTrue(any(item["evidence_id"] == evidence_id for item
+                                    in audit["source_catalog"]))
+                update_id = result["commit"]["update_id"]
+            finally:
+                store.close()
+            reopened = MemoryStore(path)
+            try:
+                change = reopened.version_changes(update_id)[0]
+                self.assertEqual(change["reason"], "new observation")
+                self.assertEqual(change["evidence_refs"][0]["source_id"], "tool-2")
+                self.assertEqual(reopened.state_version_change("s", 2), change)
+                self.assertEqual(reopened.compare_and_swap(**captured), result[
+                    "commit"])
+                altered = deepcopy(captured)
+                altered["transition_changes"][0]["reason"] = "different reason"
+                with self.assertRaisesRegex(ContractError, "identity_conflict"):
+                    reopened.compare_and_swap(**altered)
+            finally:
+                reopened.close()
+
     def test_committed_retirement_keeps_exact_old_replacement(self):
         with tempfile.TemporaryDirectory() as root:
             store = seeded_store(Path(root) / "db", repeated_user=True,

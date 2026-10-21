@@ -37,6 +37,9 @@ class MemoryStore:
                 update_id TEXT PRIMARY KEY, cycle_id TEXT NOT NULL,
                 base_hash TEXT NOT NULL, candidate_hash TEXT NOT NULL,
                 event_seq INTEGER NOT NULL, result BLOB NOT NULL);
+            CREATE TABLE IF NOT EXISTS commit_versions (
+                update_id TEXT PRIMARY KEY REFERENCES commits(update_id),
+                request_fingerprint TEXT NOT NULL, transitions BLOB NOT NULL);
             CREATE TABLE IF NOT EXISTS journal (
                 cycle_id TEXT NOT NULL, entry_seq INTEGER NOT NULL,
                 phase TEXT NOT NULL, body BLOB NOT NULL,
@@ -241,6 +244,19 @@ class MemoryStore:
                               (update_id,)).fetchone()
         return _decode(row[0]) if row else None
 
+    def version_changes(self, update_id: str) -> list[dict] | None:
+        row = self.db.execute("SELECT transitions FROM commit_versions WHERE "
+                              "update_id=?", (update_id,)).fetchone()
+        return _decode(row[0]) if row else None
+
+    def state_version_change(self, record_id: str, revision: int) -> dict | None:
+        for (raw,) in self.db.execute("SELECT transitions FROM commit_versions"):
+            for item in _decode(raw):
+                if item["after_ref"] == {"type": "state", "record_id": record_id,
+                                          "revision": revision}:
+                    return item
+        return None
+
     def commit_for_cycle(self, cycle_id: str) -> dict | None:
         row = self.db.execute("SELECT result FROM commits WHERE cycle_id=?",
                               (cycle_id,)).fetchone()
@@ -248,11 +264,18 @@ class MemoryStore:
 
     def compare_and_swap(self, *, update_id: str, cycle_id: str,
                          base: dict, candidate: dict, archive_delta: list[tuple[str, str,
-                         int, dict]]) -> dict:
+                         int, dict]], transition_changes: list[dict] | None = None) -> dict:
+        changes = transition_changes if transition_changes is not None else []
+        fingerprint = digest([cycle_id, digest(base), digest(candidate),
+                              [list(item) for item in archive_delta], changes])
         existing = self.commit_result(update_id)
         if existing is not None:
             if existing["candidate_hash"] != digest(candidate):
                 raise ContractError("update_id_hash_conflict")
+            row = self.db.execute("SELECT request_fingerprint FROM commit_versions "
+                                  "WHERE update_id=?", (update_id,)).fetchone()
+            if row is None or row[0] != fingerprint:
+                raise ContractError("update_id_identity_conflict")
             return existing
         with self.transaction():
             current = self.snapshot()
@@ -288,6 +311,8 @@ class MemoryStore:
                             (update_id, cycle_id, result["base_hash"],
                              result["candidate_hash"], result["event_seq"],
                              canonical(result)))
+            self.db.execute("INSERT INTO commit_versions VALUES(?,?,?)",
+                            (update_id, fingerprint, canonical(changes)))
             return result
 
     def delivery(self, reminder_id: str, request_id: str, result: dict) -> dict:

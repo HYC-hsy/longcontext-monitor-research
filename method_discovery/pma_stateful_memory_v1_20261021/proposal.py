@@ -270,6 +270,7 @@ def build_candidate(*, proposal: dict, base: dict, catalog: SourceCatalog,
             goal["original_user_sources"].append(ref)
     world = belief["W"]
     archive_delta = []
+    transition_changes = []
     for item in patch["world_patch"]["entity_upserts"]:
         _upsert(world["entities"], item, "entity_id", archive_delta=archive_delta,
                 kind="entity", visible_existing_ids=visible_existing_ids)
@@ -289,6 +290,12 @@ def build_candidate(*, proposal: dict, base: dict, catalog: SourceCatalog,
         new["revision"] += 1
         new["use_status"] = transition["to_status"]
         new["supersedes"].append(ref)
+        transition_changes.append({"operation": "record_transition",
+            "before_ref": deepcopy(ref), "after_ref": {"type": "state",
+                "record_id": ref["record_id"], "revision": new["revision"]},
+            "from_status": old["use_status"], "to_status": new["use_status"],
+            "reason": transition["reason"],
+            "evidence_refs": deepcopy(transition["evidence_refs"])})
         _upsert(world["states"], new, "record_id", archive_delta=archive_delta,
                 kind="state", visible_existing_ids=visible_existing_ids,
                 require_supersedes=True)
@@ -334,8 +341,9 @@ def build_candidate(*, proposal: dict, base: dict, catalog: SourceCatalog,
     validate_requirement_retirement_transition(base, candidate,
                                                combined_archive, goal_ledger)
     update_id = "update-" + digest([cycle_id, proposal["request_id"],
-                                     base["state_version"], digest(candidate)])[:24]
+        base["state_version"], digest(candidate), transition_changes])[:24]
     return {"update_id": update_id, "base": base, "candidate": candidate,
             "canonical_patch": patch, "local_id_map": mapping,
             "archive_delta": archive_delta,
+            "transition_changes": transition_changes,
             "candidate_hash": digest(candidate)}
