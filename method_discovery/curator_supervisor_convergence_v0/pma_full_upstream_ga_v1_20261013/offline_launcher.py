@@ -178,7 +178,12 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
                                        else "isolated"))
     executed_stateful_sources = {}
     if stateful:
-        frozen = manifest['native_shared_certification']['source_files']
+        certification = manifest.get('native_shared_certification')
+        if certification is None and manifest.get('zero_model_fixture_only') is True:
+            from .stateful_certification import source_identity
+            frozen = source_identity(STAGE.parents[2])
+        else:
+            frozen = certification['source_files']
         task_names = ('agent_loop.py', 'agentmain.py', 'ga.py', 'llmcore.py',
                       'stateful_memory_bridge.py', 'event_spool.py')
         host_names = tuple(core_target.glob('*.py')) + tuple(run_target.glob('*.py')) + (bm25_target / 'bm25_search.py',)
