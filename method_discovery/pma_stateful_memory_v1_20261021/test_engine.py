@@ -233,6 +233,15 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(self.store.snapshot()["B"]["W"]["states"][0][
             "claim"]["support_refs"][0]["source_id"], "tool-1")
 
+    def test_audit_operation_index_names_actual_changed_object(self):
+        provider = ScriptedProvider(create_requirement=True)
+        result = CycleEngine(self.store, provider, task_text="task").run("operation")
+        self.assertEqual(result["status"], "committed_selection_silent")
+        audit_view = json.loads(provider.calls[1]["messages"][1]["content"])
+        self.assertEqual(audit_view["operation_index"][0]["operation"],
+                         "specification_upserts")
+        self.assertEqual(audit_view["operation_index"][0]["target_ref"]["id"], "r1")
+
     def test_goal_epoch_change_blocks_commit(self):
         provider = ScriptedProvider()
         def change_goal(role, messages, call_id, max_output):

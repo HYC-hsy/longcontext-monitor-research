@@ -286,6 +286,10 @@ def validate_audit_result(raw: object, *, view: dict,
         nonempty(item["explanation"], "closure.explanation")
         if item["verdict"] not in {"supported", "unsupported", "uncertain"}:
             raise ContractError("invalid_closure_verdict")
+        if any(issue_id not in issue_ids for issue_id in item["blocking_issue_ids"]):
+            raise ContractError("unknown_blocking_issue")
+        if item["verdict"] == "supported" and item["blocking_issue_ids"]:
+            raise ContractError("contradictory_assessment")
         if result["outcome"] == "clean" and item["verdict"] != "supported":
             raise ContractError("contradictory_assessment")
         if item["verdict"] != "supported" and not (
@@ -295,7 +299,25 @@ def validate_audit_result(raw: object, *, view: dict,
             if type(ref) is not dict:
                 raise ContractError("invalid_basis_ref")
             if "evidence_id" in ref:
-                catalog.resolve(ref, purpose="audit")
-            elif ref.get("type") not in {"gap", "goal_delta"}:
+                catalog.resolve(ref, purpose="audit", allowed_kinds=(
+                    {"tool_result", "user_report"} if item["closure_kind"] ==
+                    "environment_supported" else None))
+            elif ref.get("type") == "goal_delta":
+                if ref not in view["candidate_layout"]["B"]["G"]["goal_deltas"]:
+                    raise ContractError("unknown_goal_delta")
+            elif ref.get("type") == "gap":
+                replacement = (expected["gap_after"].get("closure") or {}).get(
+                    "replacement_gap_ref")
+                if ref != replacement or ("gap", ref.get("gap_id")) not in targets[
+                        "candidate"]:
+                    raise ContractError("unknown_gap_ref")
+            else:
                 raise ContractError("invalid_basis_ref")
+        expected_kind = {"environment_supported": "evidence_id",
+                         "goal_changed": "goal_delta",
+                         "merged_into": "gap"}.get(item["closure_kind"])
+        if expected_kind is None or not any((expected_kind == "evidence_id" and
+                "evidence_id" in ref) or ref.get("type") == expected_kind for ref in
+                item["basis_refs"]):
+            raise ContractError("closure_basis_mismatch")
     return result

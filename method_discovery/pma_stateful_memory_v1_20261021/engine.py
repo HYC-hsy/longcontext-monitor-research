@@ -4,13 +4,49 @@ from __future__ import annotations
 
 from typing import Callable
 
-from .audit import AuditCodec, validate_audit_result
+from .audit import AuditCodec, _diff, validate_audit_result
 from .budget import TokenProxy
 from .prompts import audit, maintenance, repair, selection
 from .proposal import build_candidate, validate_proposal
 from .reminder import render_reminder, validate_selection
 from .retrieval import MemoryIndex, WorksetBuilder, query_text
 from .source import ContractError, SourceCatalog, digest, strict_loads
+
+
+def _operation_index(before: dict, candidate: dict, patch: dict) -> list[dict]:
+    paths = (("entity_upserts", "W", "entities", "entity_id", "entity"),
+             ("state_upserts", "W", "states", "record_id", "state"),
+             ("relation_upserts", "W", "relations", "relation_id", "relation"),
+             ("record_transitions", "W", "states", "record_id", "state"),
+             ("specification_upserts", "G", "specifications", "requirement_id",
+              "requirement"),
+             ("gap_upserts", "B", None, "gap_id", "gap"),
+             ("gap_resolutions", "B", None, "gap_id", "gap"),
+             ("gap_reopens", "B", None, "gap_id", "gap"))
+    entries = []
+    for operation, parent, name, id_field, kind in paths:
+        items = patch["world_patch"][operation] if operation in patch[
+            "world_patch"] else patch[operation]
+        def collection(snapshot):
+            belief = snapshot["B"]
+            return (belief["DeltaE"] + belief["DeltaA"] if name is None else
+                    belief[parent][name])
+        old = {item[id_field]: item for item in collection(before)}
+        new = {item[id_field]: item for item in collection(candidate)}
+        for item in items:
+            identifier = (item["record_ref"]["record_id"] if operation ==
+                          "record_transitions" else item[id_field])
+            body = new[identifier]
+            target = {"kind": kind, "id": identifier}
+            if "revision" in body:
+                target["revision"] = body["revision"]
+            entries.append({"operation": operation, "target_ref": target,
+                "changed_field_paths": _diff(old.get(identifier), body)})
+    if patch["focus"]["op"] != "keep":
+        entries.append({"operation": "focus_" + patch["focus"]["op"],
+            "target_ref": {"kind": "focus", "id": "F"},
+            "changed_field_paths": _diff(before["B"]["F"], candidate["B"]["F"])})
+    return entries
 
 
 class CycleEngine:
@@ -177,12 +213,14 @@ class CycleEngine:
                         rejected=raw, raw_response=raw, error=error.code,
                         mode="maintenance_contract")
             while True:
-                resolving = proposal["gap_resolutions"]
+                resolving = candidate["canonical_patch"]["gap_resolutions"]
                 manifest = [{"resolution_id": item["gap_id"],
                              "gap_before": next((gap for gap in snapshot["B"][
                                 "DeltaE"] + snapshot["B"]["DeltaA"] if
                                 gap["gap_id"] == item["gap_id"]), None),
-                             "gap_after": item,
+                             "gap_after": next((gap for gap in candidate["candidate"][
+                                 "B"]["DeltaE"] + candidate["candidate"]["B"]["DeltaA"]
+                                 if gap["gap_id"] == item["gap_id"]), None),
                              "closure_kind": item["closure"]["kind"] if
                                  item["closure"] else None} for item in resolving]
                 audit_binding = {"cycle_id": cycle_id,
@@ -194,8 +232,8 @@ class CycleEngine:
                     binding=audit_binding, sources=[v for v in visible if
                         v["purpose"] == "audit"],
                     observations=body["observation_batch"],
-                    operation_index=[{"op": name, "count": len(value)} for name,
-                        value in proposal["world_patch"].items()],
+                    operation_index=_operation_index(snapshot, candidate["candidate"],
+                                                     candidate["canonical_patch"]),
                     resolve_manifest=manifest,
                     contextual_objects=[*body["mandatory"]["bundles"],
                                         *body["optional_bundles"]])
