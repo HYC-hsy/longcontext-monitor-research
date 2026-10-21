@@ -193,8 +193,10 @@ Use only the committed state and selected refs in this request. Either return st
 silent, or remind with one to three distinct refs from selected_refs, bound to
 visible committed heads. Retracted States and inactive Requirements cannot be
 selected; archived contextual objects are not selectable heads. State status may
-be historical_only or contested and Gap status may be open/blocked/supported/
-superseded. context_for_action must be a nonempty conditional advisory string. Do not claim that a historical episode or inferred lesson is a
+be historical_only or contested. Only open/blocked Gaps are selectable;
+supported/superseded Gaps, when visible, are context only and must not appear
+in selected_refs. context_for_action must be a nonempty conditional advisory
+string. Do not claim that a historical episode or inferred lesson is a
 current tool-observed fact. Do not override the original user task, execute tools, or
 approve task completion. context_for_action is at most 1200 Unicode code
 points; the host-derived final reminder must fit 16384 UTF-8 bytes or the

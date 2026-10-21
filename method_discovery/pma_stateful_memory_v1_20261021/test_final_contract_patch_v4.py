@@ -397,3 +397,62 @@ class ActualMessagesV4Tests(unittest.TestCase):
                     json.loads(call['messages'][1]['content'])
             finally:
                 store.close()
+
+
+    def test_actual_selection_messages_exclude_closed_gap_refs(self):
+        import json
+        from .engine import CycleEngine
+        from .test_engine import ScriptedProvider
+        from .test_core_contract_closure_v3 import seeded_store
+        with tempfile.TemporaryDirectory() as root:
+            store = seeded_store(Path(root) / 'db', closed_gap=True)
+            try:
+                base = store.snapshot()
+                patch = proposal('mixed-gap-statuses')
+                patch['base_state_version'] = base['state_version']
+                closed = deepcopy(base['B']['DeltaA'][0])
+                closed.update(revision=2, status='superseded', closure={
+                    'kind': 'merged_into', 'replacement_gap_ref': {'type': 'gap',
+                        'gap_id': 'ge', 'revision': 1, 'task_version': 1}})
+                patch['gap_resolutions'] = [closed]
+                for status in ('open', 'blocked'):
+                    gap = deepcopy(base['B']['DeltaA'][0])
+                    gap.update(gap_id='@' + status, status=status)
+                    patch['gap_upserts'].append(gap)
+                built = build_candidate(proposal=patch, base=base,
+                    catalog=SourceCatalog(store.sources(), 'mixed-gap-statuses'),
+                    cycle_id='mixed-gap-statuses', processed_to=1,
+                    goal_ledger=store.goals(), archive=store.archive(),
+                    visible_existing_ids={('gap', 'ga'), ('gap', 'ge'),
+                                          ('requirement', 'req'), ('state', 's')})
+                store.compare_and_swap(update_id=built['update_id'],
+                    cycle_id='mixed-gap-statuses', base=base,
+                    candidate=built['candidate'], archive_delta=built['archive_delta'])
+                provider = ScriptedProvider()
+                result = CycleEngine(store, provider, task_text='task').run('mixed-selection')
+                self.assertEqual(result['status'], 'committed_selection_silent')
+                call = next(item for item in provider.calls if item['role'] == 'selection')
+                system = call['messages'][0]['content']
+                self.assertIn('Only open/blocked Gaps are selectable', system)
+                self.assertIn('supported/superseded Gaps, when visible, are context only', system)
+                self.assertIn('must not appear\nin selected_refs', system)
+                payload = json.loads(call['messages'][1]['content'])
+                gaps = payload['committed_view']['B']['DeltaE'] + payload['committed_view']['B']['DeltaA']
+                self.assertEqual({item['status'] for item in gaps},
+                                 {'open', 'blocked', 'supported', 'superseded'})
+                selected = {item['gap_id'] for item in payload['selected_refs'] if item['type'] == 'gap'}
+                self.assertEqual(selected, {item['gap_id'] for item in gaps
+                                           if item['status'] in {'open', 'blocked'}})
+                for gap in gaps:
+                    if gap['status'] in {'supported', 'superseded'}:
+                        decision = {**payload['binding'], 'decision': 'remind',
+                            'refs': [{'type': 'gap', 'gap_id': gap['gap_id'],
+                                      'revision': gap['revision'], 'task_version': gap['task_version']}],
+                            'context_for_action': 'Developer negative control.'}
+                        del decision['cycle_id']
+                        with self.assertRaisesRegex(ContractError, 'selection_invisible_ref'):
+                            validate_selection(decision, snapshot=store.snapshot(),
+                                phase2_view_id=payload['binding']['phase2_view_id'],
+                                selected_refs=payload['selected_refs'])
+            finally:
+                store.close()
