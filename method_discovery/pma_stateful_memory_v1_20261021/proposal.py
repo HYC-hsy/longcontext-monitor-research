@@ -109,13 +109,14 @@ def _wire_to_internal(value: object, catalog: SourceCatalog) -> object:
 
 
 def _upsert(items: list[dict], item: dict, key: str, *,
-            archive_delta: list, kind: str, visible_existing_ids: set[str],
+            archive_delta: list, kind: str,
+            visible_existing_ids: set[tuple[str, str]],
             require_supersedes: bool = False) -> None:
     identifier = nonempty(item.get(key), key)
     for index, old in enumerate(items):
         if old[key] != identifier:
             continue
-        if identifier not in visible_existing_ids:
+        if (kind, identifier) not in visible_existing_ids:
             raise ContractError("invisible_existing_object", identifier)
         if "revision" in old:
             if item.get("revision") != old["revision"] + 1:
@@ -135,7 +136,7 @@ def _upsert(items: list[dict], item: dict, key: str, *,
 
 def build_candidate(*, proposal: dict, base: dict, catalog: SourceCatalog,
                     cycle_id: str, processed_to: int, goal_ledger: dict,
-                    visible_existing_ids: set[str], archive: dict) -> dict:
+                    visible_existing_ids: set[tuple[str, str]], archive: dict) -> dict:
     """Build once from base. Repair calls this again with a replacement proposal."""
     validate_proposal(proposal, request_id=proposal["request_id"],
                       task_version=goal_ledger["epoch"],

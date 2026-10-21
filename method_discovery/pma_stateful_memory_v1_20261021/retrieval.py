@@ -106,13 +106,38 @@ def _record_source_refs(record: dict) -> list[dict]:
 
 
 def _complete_bundle(record: dict, world: dict, ledger: dict,
-                     linked_gaps: list[dict], context_chars: int = 80) -> dict:
+                     linked_gaps: list[dict], archive: dict | None = None,
+                     context_chars: int = 80) -> dict:
+    archive = archive or {}
     entity_ids = {record["entity_id"]}
+    entity_ids.update(record.get("scope", {}).get("entity_ids", []))
+    current = {item["record_id"]: item for item in world["states"]}
+    linked_versions = []
+    seen_versions = {(record["record_id"], record["revision"])}
+    for gap in linked_gaps:
+        direct_refs = list(gap["record_refs"])
+        if gap["closure"] and gap["closure"]["kind"] == "environment_supported":
+            direct_refs += gap["closure"]["state_refs"]
+        for ref in direct_refs:
+            identity = (ref["record_id"], ref["revision"])
+            if identity in seen_versions:
+                continue
+            seen_versions.add(identity)
+            item = current.get(identity[0])
+            if item is None or item["revision"] != identity[1]:
+                item = archive.get(identity)
+            if item is None:
+                raise ContractError("source_unavailable", str(identity))
+            linked_versions.append(item)
+            entity_ids.add(item["entity_id"])
+            entity_ids.update(item.get("scope", {}).get("entity_ids", []))
     relations = [relation for relation in world["relations"]
                  if relation["anchored_by"]["record_id"] == record["record_id"]]
     for relation in relations:
         entity_ids.update((relation["from_entity_id"], relation["to_entity_id"]))
     source_refs = list(_record_source_refs(record))
+    for linked in linked_versions:
+        source_refs.extend(_record_source_refs(linked))
     for gap in linked_gaps:
         if gap["closure"] and gap["closure"]["kind"] == "environment_supported":
             source_refs.extend(gap["closure"]["evidence_refs"])
@@ -147,6 +172,7 @@ def _complete_bundle(record: dict, world: dict, ledger: dict,
             else:
                 sources[-1]["executed_actions"] = actions
     return {"state": record,
+            "linked_state_versions": linked_versions,
             "entities": [item for item in world["entities"]
                          if item["entity_id"] in entity_ids],
             "relations": relations, "linked_closed_gaps": linked_gaps,
@@ -188,15 +214,17 @@ class WorksetBuilder:
                 if gap["gap_id"] == snapshot["B"]["F"]["gap_ref"]["gap_id"]
                 for ref in gap["record_refs"])
         mandatory_bundles = []
+        def linked_closed(record_id: str) -> list[dict]:
+            return [gap for gap in gaps if gap["status"] not in {"open", "blocked"}
+                    and (any(ref["record_id"] == record_id for ref in
+                             gap["record_refs"]) or
+                         gap["closure"] and gap["closure"]["kind"] ==
+                         "environment_supported" and any(ref["record_id"] ==
+                             record_id for ref in gap["closure"]["state_refs"]))]
         for record in world["states"]:
             if record["record_id"] in required_ids:
-                linked = [gap for gap in gaps if gap["status"] not in {"open", "blocked"}
-                          and (any(ref["record_id"] == record["record_id"] for ref in
-                                   gap["record_refs"]) or
-                               gap["closure"] and gap["closure"]["kind"] ==
-                               "environment_supported" and any(ref["record_id"] ==
-                                   record["record_id"] for ref in gap["closure"]["state_refs"]))]
-                mandatory_bundles.append(_complete_bundle(record, world, ledger, linked))
+                mandatory_bundles.append(_complete_bundle(record, world, ledger,
+                    linked_closed(record["record_id"]), archive))
         head_revisions = {item["record_id"]: item["revision"] for item in
                           world["states"]}
         for ref in required_refs:
@@ -210,7 +238,7 @@ class WorksetBuilder:
                 if not any(bundle["state"]["record_id"] == identity[0] and
                            bundle["state"]["revision"] == identity[1] for bundle in
                            mandatory_bundles):
-                    bundle = _complete_bundle(historical, world, ledger, [])
+                    bundle = _complete_bundle(historical, world, ledger, [], archive)
                     bundle["historical_revision"] = True
                     mandatory_bundles.append(bundle)
         mandatory = {"G": snapshot["B"]["G"], "open_gaps": open_gaps,
@@ -253,7 +281,8 @@ class WorksetBuilder:
         for record in ranked:
             if record["record_id"] in included:
                 continue
-            bundle = _complete_bundle(record, world, ledger, [])
+            bundle = _complete_bundle(record, world, ledger,
+                                      linked_closed(record["record_id"]), archive)
             work.optional_bundles.append(bundle)
             if measure(work.payload()) > self.input_limit:
                 work.optional_bundles.pop()

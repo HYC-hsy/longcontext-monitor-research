@@ -7,6 +7,7 @@ import unittest
 from .retrieval import MemoryIndex, WorksetBuilder, query_text
 from .source import ContractError
 from .test_contracts import empty_snapshot, leaf
+from .test_schema_advanced import rich_state
 
 
 def record(index, kind="knowledge"):
@@ -80,6 +81,25 @@ class RetrievalTests(unittest.TestCase):
                           for bundle in work.mandatory["bundles"]],
                          [("r0", 2), ("r0", 1)])
         self.assertTrue(work.mandatory["bundles"][1]["historical_revision"])
+
+    def test_optional_state_carries_direct_closed_gap_and_old_version(self):
+        snapshot, ledger = rich_state()
+        old = deepcopy(snapshot["B"]["W"]["states"][0])
+        head = snapshot["B"]["W"]["states"][0]
+        head["revision"] = 2
+        snapshot["B"]["DeltaA"][0]["record_refs"] = []
+        closed = snapshot["B"]["DeltaE"][0]
+        closed["status"] = "supported"
+        closed["closure"] = {"kind": "environment_supported",
+            "conclusion": "feature absent", "evidence_refs": [{"source_id": "tool",
+                "start": 0, "end": 14, "quote": "feature absent"}],
+            "state_refs": []}
+        work = WorksetBuilder(input_limit=100000).build(snapshot, [], ledger,
+            [head], "cycle", 0, lambda body: len(json.dumps(body)),
+            archive={("s", 1): old})
+        bundle = work.optional_bundles[0]
+        self.assertEqual(bundle["linked_closed_gaps"][0]["gap_id"], "ge")
+        self.assertEqual(bundle["linked_state_versions"][0]["revision"], 1)
 
 
 if __name__ == "__main__":

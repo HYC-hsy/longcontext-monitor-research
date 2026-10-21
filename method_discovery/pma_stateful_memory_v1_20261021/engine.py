@@ -8,6 +8,7 @@ from .audit import AuditCodec, _diff, validate_audit_result
 from .budget import TokenProxy
 from .prompts import audit, maintenance, repair, selection
 from .proposal import build_candidate, validate_proposal
+from .projection import project_snapshot, visible_existing
 from .reminder import render_reminder, validate_selection
 from .retrieval import MemoryIndex, WorksetBuilder, query_text
 from .source import ContractError, SourceCatalog, digest, strict_loads
@@ -157,6 +158,7 @@ class CycleEngine:
             ranked = index.select(query)
             def prepare_maintenance(body):
                 catalog, visible = self._catalog(ledger, body)
+                before_view = project_snapshot(snapshot, snapshot, body)
                 binding = {"cycle_id": cycle_id,
                     "request_id": f"{cycle_id}/maintenance",
                     "task_id": snapshot["task_id"],
@@ -166,14 +168,16 @@ class CycleEngine:
                     "base_state_hash": digest(snapshot),
                     "source_window_id": body["source_window_id"]}
                 payload = {"protocol": "maintenance-input/1", "binding": binding,
-                    "before_view": snapshot,
+                    "before_view": before_view,
                     "observation_batch": body["observation_batch"],
                     "working_set": {"mandatory": body["mandatory"],
                                     "optional_bundles": body["optional_bundles"],
                                     "omissions": body["omissions"]},
                     "source_catalog": visible,
-                    "mutation_scope": {"visible_existing_refs": [r["record_id"] for r
-                        in snapshot["B"]["W"]["states"]],
+                    "mutation_scope": {"visible_existing_refs": sorted(
+                        [{"kind": kind, "id": identifier} for kind, identifier in
+                         visible_existing(snapshot, body)],
+                        key=lambda item: (item["kind"], item["id"])),
                         "new_local_ids_allowed": True}}
                 binding["maintenance_view_id"] = digest(payload)
                 return payload, catalog, visible
@@ -185,6 +189,8 @@ class CycleEngine:
                                           archive=self.store.archive())
             body = work.payload()
             maintenance_input, catalog, visible = prepare_maintenance(body)
+            before_view = maintenance_input["before_view"]
+            mutable_ids = visible_existing(snapshot, body)
             binding = maintenance_input["binding"]
             messages = maintenance(maintenance_input)
             proposal = None
@@ -201,15 +207,14 @@ class CycleEngine:
                         catalog=catalog, cycle_id=cycle_id,
                         processed_to=body["observation_batch"]["processing_range"][
                             "to_event_seq"], goal_ledger=goals,
-                        visible_existing_ids={r["record_id"] for r in
-                            snapshot["B"]["W"]["states"]}, archive=self.store.archive())
+                        visible_existing_ids=mutable_ids, archive=self.store.archive())
                 except ContractError as error:
                     if credit == 0:
                         raise
                     credit = 0
                     self.store.journal(cycle_id, "repair_credit_used",
                         {"mode": "maintenance_contract", "error_code": error.code})
-                    messages = repair(original_messages=messages, base=snapshot,
+                    messages = repair(original_messages=messages, base=before_view,
                         rejected=raw, raw_response=raw, error=error.code,
                         mode="maintenance_contract")
             while True:
@@ -228,11 +233,14 @@ class CycleEngine:
                     "base_state_hash": digest(snapshot),
                     "candidate_state_hash": digest(candidate["candidate"]),
                     "source_window_id": work.source_window_id}
-                view = AuditCodec().encode(snapshot, candidate["candidate"],
+                after_view = project_snapshot(candidate["candidate"], snapshot, body)
+                audit_binding["before_view_hash"] = digest(before_view)
+                audit_binding["candidate_view_hash"] = digest(after_view)
+                view = AuditCodec().encode(before_view, after_view,
                     binding=audit_binding, sources=[v for v in visible if
                         v["purpose"] == "audit"],
                     observations=body["observation_batch"],
-                    operation_index=_operation_index(snapshot, candidate["candidate"],
+                    operation_index=_operation_index(before_view, after_view,
                                                      candidate["canonical_patch"]),
                     resolve_manifest=manifest,
                     contextual_objects=[*body["mandatory"]["bundles"],
@@ -251,7 +259,7 @@ class CycleEngine:
                     self.store.journal(cycle_id, "repair_credit_used",
                         {"mode": "audit_contract", "error_code": error.code})
                     correction = repair(original_messages=audit_messages,
-                        base=snapshot, rejected=candidate["candidate"],
+                        base=before_view, rejected=after_view,
                         raw_response=raw, error=error.code, mode="audit_contract")
                     calls += 1
                     corrected_raw = self._call(cycle_id, "audit_correction",
@@ -268,8 +276,8 @@ class CycleEngine:
                 self.store.journal(cycle_id, "repair_credit_used",
                     {"mode": "candidate_semantic", "issue_ids": [issue["issue_id"]
                         for issue in result["issues"]]})
-                repair_messages = repair(original_messages=messages, base=snapshot,
-                    rejected={"candidate": candidate["candidate"],
+                repair_messages = repair(original_messages=messages, base=before_view,
+                    rejected={"candidate": after_view,
                               "proposal": proposal, "issues": result["issues"]},
                     raw_response=raw, error="blocking_issues", mode="replacement_proposal")
                 calls += 1
@@ -282,8 +290,7 @@ class CycleEngine:
                     catalog=catalog, cycle_id=cycle_id,
                     processed_to=body["observation_batch"]["processing_range"][
                         "to_event_seq"], goal_ledger=goals,
-                    visible_existing_ids={r["record_id"] for r in
-                        snapshot["B"]["W"]["states"]}, archive=self.store.archive())
+                    visible_existing_ids=mutable_ids, archive=self.store.archive())
             committed = self.store.compare_and_swap(update_id=candidate["update_id"],
                 cycle_id=cycle_id, base=snapshot, candidate=candidate["candidate"],
                 archive_delta=candidate["archive_delta"])
