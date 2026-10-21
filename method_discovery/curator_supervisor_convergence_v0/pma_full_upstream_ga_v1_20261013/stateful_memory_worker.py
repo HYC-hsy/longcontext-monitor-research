@@ -180,7 +180,31 @@ async def serve(args) -> None:
         mode = "fake-only"
         counter = lambda payload: {"status": "accepted", "synthetic": True}
     else:
-        raise RuntimeError("live auxiliary provider is not yet configured")
+        if not all((args.task_profile_file, args.task_profile_name,
+                    args.task_profile_sha256, args.pma_profile_file,
+                    args.pma_profile_sha256, args.context_window)):
+            raise RuntimeError("bound private profiles and context window required")
+        def bound_profile(path, expected, name):
+            raw = Path(path).resolve(strict=True).read_bytes()
+            if hashlib.sha256(raw).hexdigest() != expected:
+                raise RuntimeError("stateful private profile hash mismatch")
+            profile = json.loads(raw)[name]
+            if not isinstance(profile, dict) or not profile.get("model"):
+                raise RuntimeError("stateful model profile invalid")
+            return profile
+        task_profile = bound_profile(args.task_profile_file,
+            args.task_profile_sha256, args.task_profile_name)
+        role_profile = bound_profile(args.pma_profile_file,
+            args.pma_profile_sha256, "claude_monitor_opus48")
+        from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.stateful_native_count import PrivateNativeCounter
+        from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.stateful_role_provider import StatefulRoleProvider
+        counter = PrivateNativeCounter(profile=task_profile,
+            window=args.context_window,
+            record=lambda row: _durable(archive / "native_count.jsonl", row))
+        provider = StatefulRoleProvider(profile=role_profile,
+            context_window=args.context_window, archive=archive,
+            run_id=args.run_id, task_id=args.task_id)
+        mode = "profile"
     episode = StatefulEpisode(run_id=args.run_id, task_id=args.task_id,
         archive=archive, private=private, provider=provider, counter=counter)
     dispatcher = EventDispatcher(episode, requests, responses)
@@ -215,4 +239,10 @@ if __name__ == "__main__":
     parser.add_argument("--requests", required=True)
     parser.add_argument("--responses", required=True)
     parser.add_argument("--fake-replies")
+    parser.add_argument("--task-profile-file")
+    parser.add_argument("--task-profile-name")
+    parser.add_argument("--task-profile-sha256")
+    parser.add_argument("--pma-profile-file")
+    parser.add_argument("--pma-profile-sha256")
+    parser.add_argument("--context-window", type=int)
     asyncio.run(serve(parser.parse_args()))
