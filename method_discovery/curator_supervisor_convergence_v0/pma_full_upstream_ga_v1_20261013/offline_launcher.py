@@ -176,6 +176,25 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
                                            "pma-ga-live-manifest-v5",
                                            "pos-ga-single-manifest-v1"}
                                        else "isolated"))
+    executed_stateful_sources = {}
+    if stateful:
+        frozen = manifest['native_shared_certification']['source_files']
+        task_names = ('agent_loop.py', 'agentmain.py', 'ga.py', 'llmcore.py',
+                      'stateful_memory_bridge.py', 'event_spool.py')
+        host_names = tuple(core_target.glob('*.py')) + tuple(run_target.glob('*.py')) + (bm25_target / 'bm25_search.py',)
+        checks = [(source / name, (('method_discovery/curator_supervisor_convergence_v0/'
+                                   'pma_full_upstream_ga_v1_20261013/') if
+                                  name == 'event_spool.py' else
+                                  'GenericAgent-main/') + name)
+                  for name in task_names]
+        checks += [(path, path.relative_to(host_stage).as_posix())
+                   for path in host_names]
+        for staged, name in checks:
+            actual = hashlib.sha256(staged.read_bytes()).hexdigest()
+            expected = frozen.get(name)
+            if expected is None or actual != expected:
+                raise RuntimeError('stateful deployed source differs: ' + name)
+            executed_stateful_sources[name] = actual
     if pos:
         # The generic bundle copier omits every directory named "tests". The
         # pinned PMA vendor identity includes such files; restore only this
@@ -275,6 +294,7 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
               "native_evaluator_calls": 0, "fake_provider_only": fake_gateway}
     if stateful:
         record['stateful_host_bundle_tree_sha256'] = digest_tree(host_stage)
+        record['executed_stateful_source_sha256'] = executed_stateful_sources
         record['stateful_task_spool_sha256'] = hashlib.sha256(
             (source / 'event_spool.py').read_bytes()).hexdigest()
     (root / "archive" / "prepared.json").write_text(
