@@ -128,9 +128,9 @@ class StatefulMemoryBridge:
             result_text = canonical({"status": receipt["status"],
                                      "result": receipt["result"]}).decode("utf-8")
             leaves.extend((_leaf(action_text, f"{event_id}/{tool_id}/action",
-                                 tool_id, "tool.arguments", "executed_action", turn, seq),
+                                 event_id, f"tools.{tool_id}.arguments", "executed_action", turn, seq),
                            _leaf(result_text, f"{event_id}/{tool_id}/result",
-                                 tool_id, "tool.result", "tool_result", turn, seq)))
+                                 event_id, f"tools.{tool_id}.result", "tool_result", turn, seq)))
         event = {"event_id": event_id, "event_seq": seq, "kind": "action_batch",
             "occurred_at_step": turn,
             "source_ids": [leaf["source_id"] for leaf in leaves],

@@ -270,6 +270,9 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
             try: response_gen.close()
             except Exception: pass
             yield "\n[Task Agent response interrupted for monitor correction.]\n"
+            if stateful is not None:
+                stateful.finish({'result': 'TASK_RESPONSE_CANCELLED', 'turn': turn})
+                raise
             if pma_upstream is not None:
                 pma_upstream.actor_step(turn, status='provider_cancelled')
             if pos is not None:
