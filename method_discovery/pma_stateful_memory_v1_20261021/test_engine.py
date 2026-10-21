@@ -279,6 +279,46 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(result["status"], "committed_selection_failed")
         self.assertEqual(self.store.snapshot()["committed_event_seq"], 1)
 
+    def test_goal_change_after_commit_makes_selection_stale_without_rollback(self):
+        provider = ScriptedProvider()
+        original = self.store.compare_and_swap
+        def commit_then_user_revision(**kwargs):
+            committed = original(**kwargs)
+            revised = leaf("new task", source_id="later-user")
+            revised.update(event_id="later-message", event_seq=2, ga_turn=2)
+            self.store.append_event({"event_id": "later-message", "event_seq": 2,
+                "kind": "user_message", "occurred_at_step": 2,
+                "source_ids": ["later-user"], "payload": {}}, [revised])
+            return committed
+        self.store.compare_and_swap = commit_then_user_revision
+        result = CycleEngine(self.store, provider, task_text="task").run(
+            "postcommit-goal-change")
+        self.assertEqual(result["status"], "committed_selection_stale")
+        self.assertEqual(self.store.snapshot()["committed_event_seq"], 1)
+        self.assertEqual(self.store.goals()["epoch"], 2)
+        self.assertEqual([item["role"] for item in provider.calls],
+                         ["maintenance", "audit"])
+
+    def test_goal_change_during_selection_cannot_prepare_old_reminder(self):
+        provider = ScriptedProvider(create_requirement=True, remind=True)
+        def changed_during_selection(role, messages, call_id, max_output):
+            answer = provider(role, messages, call_id, max_output)
+            if role == "selection":
+                revised = leaf("new task", source_id="later-user")
+                revised.update(event_id="later-message", event_seq=2, ga_turn=2)
+                self.store.append_event({"event_id": "later-message",
+                    "event_seq": 2, "kind": "user_message", "occurred_at_step": 2,
+                    "source_ids": ["later-user"], "payload": {}}, [revised])
+            return answer
+        result = CycleEngine(self.store, changed_during_selection,
+                             task_text="task").run("during-selection")
+        self.assertEqual(result["status"], "committed_selection_stale")
+        self.assertNotIn("reminder", result)
+        self.assertEqual(self.store.snapshot()["state_version"], 1)
+        self.assertEqual(self.store.goals()["epoch"], 2)
+        self.assertEqual([item["role"] for item in provider.calls],
+                         ["maintenance", "audit", "selection"])
+
     def test_postcommit_index_rebuilt_before_selection(self):
         provider = ScriptedProvider(create_state=True)
         result = CycleEngine(self.store, provider, task_text="task").run("new-state")

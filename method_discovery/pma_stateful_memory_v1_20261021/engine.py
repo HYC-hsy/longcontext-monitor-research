@@ -421,6 +421,9 @@ class CycleEngine:
             phase2_view_id = select_input["binding"]["phase2_view_id"]
             answer_raw = self._call(cycle_id, "selection", selection(select_input),
                                     calls + 1, 2048)
+            if (self.store.goals()["epoch"] != snapshot["B"]["G"]["task_version"] or
+                    self.store.snapshot()["state_version"] != snapshot["state_version"]):
+                raise ContractError("selection_stale")
             decision = validate_selection(strict_loads(answer_raw), snapshot=snapshot,
                 phase2_view_id=phase2_view_id, selected_refs=refs)
             if decision["decision"] == "silent":

@@ -128,7 +128,8 @@ def main() -> None:
                 ("characters", "utf8_bytes", "proxy_tokens")} for item in
                 result["request_sizes"]]
         rows.append(json.dumps(result, ensure_ascii=False, sort_keys=True))
-    record_name = ("FAKE_CHAIN_STATUS_V1.jsonl" if "--record-status" in sys.argv[1:]
+    record_name = ("FAKE_CHAIN_POST_STALE.jsonl" if "--record-post-stale" in sys.argv[1:]
+                   else "FAKE_CHAIN_STATUS_V1.jsonl" if "--record-status" in sys.argv[1:]
                    else "FAKE_CHAIN_FINAL.jsonl" if "--record-final" in sys.argv[1:]
                    else None)
     if record_name:
