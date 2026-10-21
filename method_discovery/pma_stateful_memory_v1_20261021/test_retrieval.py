@@ -64,6 +64,23 @@ class RetrievalTests(unittest.TestCase):
         self.assertEqual(smaller.optional_bundles, [])
         self.assertEqual(smaller.omissions[0]["record_id"], "r0")
 
+    def test_open_gap_pins_old_revision_and_current_head(self):
+        snapshot = empty_snapshot()
+        snapshot["B"]["W"]["entities"] = [{"entity_id": "e"}]
+        current = record(0)
+        current["revision"] = 2
+        old = record(0)
+        snapshot["B"]["W"]["states"] = [current]
+        snapshot["B"]["DeltaE"] = [{"gap_id": "g", "status": "open",
+            "record_refs": [{"type": "state", "record_id": "r0", "revision": 1}]}]
+        work = WorksetBuilder(input_limit=100000).build(snapshot, [], {}, [],
+            "cycle", 0, lambda body: len(json.dumps(body)),
+            archive={("r0", 1): old})
+        self.assertEqual([(bundle["state"]["record_id"], bundle["state"]["revision"])
+                          for bundle in work.mandatory["bundles"]],
+                         [("r0", 2), ("r0", 1)])
+        self.assertTrue(work.mandatory["bundles"][1]["historical_revision"])
+
 
 if __name__ == "__main__":
     unittest.main()

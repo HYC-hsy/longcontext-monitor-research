@@ -175,12 +175,14 @@ class WorksetBuilder:
 
     def build(self, snapshot: dict, events: list[dict], ledger: dict,
               ranked: list[dict], cycle_id: str, frozen_tip: int,
-              measure: Callable[[dict], int]) -> Workset:
+              measure: Callable[[dict], int],
+              archive: dict[tuple[str, int], dict] | None = None) -> Workset:
+        archive = archive or {}
         world = snapshot["B"]["W"]
         gaps = snapshot["B"]["DeltaE"] + snapshot["B"]["DeltaA"]
         open_gaps = [gap for gap in gaps if gap["status"] in {"open", "blocked"}]
-        required_ids = {ref["record_id"] for gap in open_gaps
-                        for ref in gap["record_refs"]}
+        required_refs = [ref for gap in open_gaps for ref in gap["record_refs"]]
+        required_ids = {ref["record_id"] for ref in required_refs}
         if snapshot["B"]["F"]:
             required_ids.update(ref["record_id"] for gap in open_gaps
                 if gap["gap_id"] == snapshot["B"]["F"]["gap_ref"]["gap_id"]
@@ -195,6 +197,22 @@ class WorksetBuilder:
                                "environment_supported" and any(ref["record_id"] ==
                                    record["record_id"] for ref in gap["closure"]["state_refs"]))]
                 mandatory_bundles.append(_complete_bundle(record, world, ledger, linked))
+        head_revisions = {item["record_id"]: item["revision"] for item in
+                          world["states"]}
+        for ref in required_refs:
+            identity = (ref["record_id"], ref["revision"])
+            if ref["record_id"] not in head_revisions:
+                raise ContractError("missing_current_head", ref["record_id"])
+            if head_revisions.get(ref["record_id"]) != ref["revision"]:
+                historical = archive.get(identity)
+                if historical is None:
+                    raise ContractError("source_unavailable", str(identity))
+                if not any(bundle["state"]["record_id"] == identity[0] and
+                           bundle["state"]["revision"] == identity[1] for bundle in
+                           mandatory_bundles):
+                    bundle = _complete_bundle(historical, world, ledger, [])
+                    bundle["historical_revision"] = True
+                    mandatory_bundles.append(bundle)
         mandatory = {"G": snapshot["B"]["G"], "open_gaps": open_gaps,
                      "F": snapshot["B"]["F"], "bundles": mandatory_bundles}
         batch = {"cycle_id": cycle_id,

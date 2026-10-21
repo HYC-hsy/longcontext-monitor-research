@@ -145,7 +145,8 @@ class CycleEngine:
                 payload, _catalog, _visible = prepare_maintenance(body)
                 return self.proxy.measure(maintenance(payload))["proxy_tokens"]
             work = WorksetBuilder().build(snapshot, pending, ledger, ranked,
-                                          cycle_id, frozen_tip, measure)
+                                          cycle_id, frozen_tip, measure,
+                                          archive=self.store.archive())
             body = work.payload()
             maintenance_input, catalog, visible = prepare_maintenance(body)
             binding = maintenance_input["binding"]

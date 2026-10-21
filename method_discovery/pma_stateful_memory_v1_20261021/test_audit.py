@@ -4,7 +4,7 @@ from copy import deepcopy
 import unittest
 
 from .audit import AuditCodec, validate_audit_result
-from .source import ContractError, SourceCatalog, digest
+from .source import ContractError, SourceCatalog, canonical, digest
 from .test_contracts import empty_snapshot, leaf
 
 
@@ -75,6 +75,21 @@ class AuditTests(unittest.TestCase):
         result["issues"] = [self.issue()]
         with self.assertRaisesRegex(ContractError, "contradictory_audit_outcome"):
             validate_audit_result(result, view=self.view, catalog=self.catalog)
+
+    def test_codec_shared_body_is_single_without_changing_reconstruction(self):
+        before = deepcopy(self.after)
+        after = deepcopy(before)
+        before["B"]["G"]["specifications"][0]["interpretation"] = "long " * 1000
+        after["B"]["G"]["specifications"][0]["interpretation"] = "long " * 1000
+        after["state_version"] = before["state_version"] + 1
+        view = AuditCodec().encode(before, after, binding={"cycle_id": "size"},
+            sources=[], observations={"events": []}, operation_index=[],
+            resolve_manifest=[])
+        AuditCodec().verify(view, before, after)
+        self.assertEqual(len(view["shared_objects"]), 2)
+        self.assertLess(len(canonical(view)), len(canonical({
+            "before": before, "candidate": after, "source_catalog": [],
+            "observations": {"events": []}})))
 
 
 if __name__ == "__main__":

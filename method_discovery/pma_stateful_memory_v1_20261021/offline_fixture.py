@@ -70,12 +70,19 @@ def scenario(name: str) -> dict:
                     task_delivery = "included_in_accepted_request"
                 except ContractError as error:
                     task_delivery = error.code
+            cycle_ids = [first_result["cycle_id"]]
+            if replay_result:
+                cycle_ids.append(replay_result["cycle_id"])
+            measured = [row["body"]["input_size"] for cycle_id in cycle_ids
+                for row in store.journal_rows(cycle_id) if row["phase"] ==
+                "call_prepared"]
             return {"scenario": name, "first_status": first_result["status"],
                 "replay_status": replay_result["status"] if replay_result else None,
                 "committed_frontier": store.snapshot()["committed_event_seq"],
                 "state_version": store.snapshot()["state_version"],
                 "fake_role_calls": len(provider.calls),
                 "roles": [call["role"] for call in provider.calls],
+                "request_sizes": measured,
                 "fake_task_events": task_events,
                 "task_delivery": task_delivery,
                 "task_request_sha256": task_request_hash,
