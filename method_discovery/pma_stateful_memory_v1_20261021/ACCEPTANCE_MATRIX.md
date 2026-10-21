@@ -14,12 +14,12 @@ a claim that the whole specification is accepted.
 | 6. AuditResult | `audit.validate_audit_result` | Clean/issues/unusable, mixed-invalid and closure basis in `test_audit`, `test_audit_closure`. |
 | 7. Calls/repair | `engine.CycleEngine.run` | 3/4/5 fake-call paths, one maintenance correction, same-trigger idempotency and typed failure outcomes in `test_engine`; no live transport. |
 | 8. Pending/frontier | `store`, `retrieval`, `engine` | Failed prefix replay, original event identity, backlog skip selection, atomic batch, budget-related backlog in tests and fake chain. |
-| 9. Selection/delivery | `reminder`, `engine._select` | Strict silent/remind, stale goal, idempotent FakeTask delivery, postcommit failure in `test_reminder`, `test_engine`. |
+| 9. Selection/delivery | `reminder`, `engine._select` | Strict silent/remind, stale goal before and during selection, idempotent FakeTask delivery, postcommit failure in `test_reminder`, `test_engine`. |
 | 10. Index/review marking | `retrieval.MemoryIndex`, `engine._select` | Postcommit index rebuild and reviewed/not-reviewed projection in tests; all archive-linked cases unverified. |
 | 11. Full fake chain | `offline_fixture` | Eight finite method-local scenarios, 27 fake role calls, eight synthetic FakeTask actions; **not** `single_run`/Harbor/Docker or source-bound certification. |
 | 12. New input count | `budget.TokenProxy`, real package message builders | Each fake call records chars, UTF-8 bytes and o200k_base proxy tokens in `FAKE_CHAIN_FINAL.jsonl`; no provider usage/cost. |
 
-All 46 focused tests passed in `evidence/TEST_OUTPUT_STATUS_V1.txt`. Test
+All 48 focused tests passed in `evidence/TEST_OUTPUT_48.txt`. Test
 fixture conclusions are scripted; a valid but wrong audit `clean` can still
 commit a wrong state and a source-valid reminder can overstate its implication.
 There was no real model, Task, official evaluator, training or scoring-model
