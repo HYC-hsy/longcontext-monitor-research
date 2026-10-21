@@ -179,6 +179,8 @@ class SourceCatalog:
         if allowed_kinds is not None and leaf["source_kind"] not in allowed_kinds:
             raise ContractError("source_role_misuse", span.source_id)
         domain = leaf["text"][span.start:span.end]
+        if span.exact_stored_ref and quote != domain:
+            raise ContractError("quote_mismatch", evidence_id)
         positions = [index for index in range(len(domain) - len(quote) + 1)
                      if domain.startswith(quote, index)]
         if not positions:

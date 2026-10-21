@@ -48,19 +48,22 @@ class CycleEngine:
         catalog = SourceCatalog(ledger, work["source_window_id"])
         visible = []
         seen = set()
-        def add(source_id: str, start: int, end: int) -> None:
+        def add(source_id: str, start: int, end: int,
+                exact_stored_ref: bool = False) -> None:
             if start == end:
                 return
             for purpose in ("maintenance", "audit"):
-                identity = (source_id, start, end, purpose)
+                identity = (source_id, start, end, purpose, exact_stored_ref)
                 if identity in seen:
                     continue
                 seen.add(identity)
-                span = catalog.add(source_id, start, end, purpose)
+                span = catalog.add(source_id, start, end, purpose,
+                                   exact_stored_ref=exact_stored_ref)
                 visible.append({"evidence_id": span.evidence_id,
                     "source_id": source_id, "source_kind": ledger[source_id]["source_kind"],
                     "event_seq": ledger[source_id]["event_seq"],
                     "start": start, "end": end, "purpose": purpose,
+                    "exact_stored_ref": exact_stored_ref,
                     "text": ledger[source_id]["text"][start:end]})
         for entry in work["observation_batch"]["events"]:
             for leaf in entry["source_leaves"]:
@@ -70,6 +73,8 @@ class CycleEngine:
             for source in bundle["sources"]:
                 for span in source["visible_spans"]:
                     add(source["source_id"], span["start"], span["end"])
+                for ref in source["exact_refs"]:
+                    add(source["source_id"], ref["start"], ref["end"], True)
         for ref in work["mandatory"]["G"]["original_user_sources"]:
             add(ref["source_id"], ref["start"], ref["end"])
         return catalog, visible

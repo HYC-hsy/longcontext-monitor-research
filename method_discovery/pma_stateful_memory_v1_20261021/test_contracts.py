@@ -58,6 +58,32 @@ class ContractTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             validate_snapshot(snapshot, {"u0": source})
 
+    def test_overlapping_quote_ambiguity_and_exact_stored_ref(self):
+        source = leaf("aaa", source_id="t", source_kind="tool_result")
+        catalog = SourceCatalog({"t": source}, "window")
+        context = catalog.add("t", 0, 3, "audit")
+        with self.assertRaisesRegex(ContractError, "ambiguous_quote"):
+            catalog.resolve({"evidence_id": context.evidence_id, "quote": "aa"},
+                            purpose="audit", allowed_kinds={"tool_result"})
+        exact = catalog.add("t", 0, 2, "audit", exact_stored_ref=True)
+        self.assertEqual(catalog.resolve({"evidence_id": exact.evidence_id,
+            "quote": "aa"}, purpose="audit")["end"], 2)
+        with self.assertRaisesRegex(ContractError, "quote_mismatch"):
+            catalog.resolve({"evidence_id": exact.evidence_id, "quote": "a"},
+                            purpose="audit")
+
+    def test_cached_literal_never_bypasses_role_or_current_visibility(self):
+        source = leaf("observed", source_id="t", source_kind="tool_result")
+        first = SourceCatalog({"t": source}, "window-1")
+        span = first.add("t", 0, 8, "audit")
+        wire = {"evidence_id": span.evidence_id, "quote": "observed"}
+        first.resolve(wire, purpose="audit", allowed_kinds={"tool_result"})
+        with self.assertRaisesRegex(ContractError, "source_role_misuse"):
+            first.resolve(wire, purpose="audit", allowed_kinds={"user_report"})
+        second = SourceCatalog({"t": source}, "window-2")
+        with self.assertRaisesRegex(ContractError, "invisible_reference"):
+            second.resolve(wire, purpose="audit")
+
 
 if __name__ == "__main__":
     unittest.main()
