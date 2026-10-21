@@ -127,6 +127,9 @@ def prepare(args: argparse.Namespace) -> dict:
                       if getattr(args, 'certification_dir', None) else None), plan=plan)
     if args.fake_only and not pos:
         manifest['zero_model_fixture_only'] = True
+        if candidate == 'pma_stateful_memory_v1':
+            manifest['stateful_fake_replies_sha256'] = hashlib.sha256(
+                Path(__file__).with_name('stateful_fixture_replies.json').read_bytes()).hexdigest()
     _write_new(root / 'manifest.json', manifest)
     # Keep Windows Harbor paths below MAX_PATH while retaining a fresh random ID.
     run_id = ('pos-' if pos else 'pma-') + uuid.uuid4().hex[:16]
@@ -177,7 +180,8 @@ def run(args: argparse.Namespace) -> dict:
         bench_root=args.bench_root, official_source_git=args.official_source_git,
         harbor_source_root=args.harbor_source_root, python_home=args.python_home,
         zero_model_fixture=args.zero_model_fixture,
-        candidate_profile_fixture=args.candidate_profile_fixture)
+        candidate_profile_fixture=args.candidate_profile_fixture,
+        stateful_fake_replies=getattr(args, 'stateful_fake_replies', None))
     result = run_batch(options)
     return {'run_id': identity['run_id'], 'arm': result['arms'][0] if result['arms'] else None,
             'stop_reason': result['stop_reason']}
@@ -224,6 +228,8 @@ def main() -> None:
     launched.add_argument('--python-home', default='cpython-3.12.12-linux-x86_64-gnu')
     launched.add_argument('--zero-model-fixture', action='store_true')
     launched.add_argument('--candidate-profile-fixture', action='store_true')
+    launched.add_argument('--stateful-fake-replies',
+                          help='finite local host-role script, zero-model fixture only')
     pos_plan = commands.add_parser('prepare-pos', help='unarmed fixed-source PoS serial plan')
     pos_plan.add_argument('--task', action='append', required=True,
                           help='canonical registered task ID, repeat in desired serial order')

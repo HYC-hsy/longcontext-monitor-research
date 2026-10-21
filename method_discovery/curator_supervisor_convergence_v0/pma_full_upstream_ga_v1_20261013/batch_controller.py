@@ -57,6 +57,11 @@ def run_batch(args: argparse.Namespace) -> dict:
     if profile_fixture != (manifest.get('candidate_profile_fixture_only') is True and
                            granted.get('candidate_profile_fixture_only') is True):
         raise RuntimeError('candidate profile fixture identity mismatch')
+    stateful_replies = getattr(args, 'stateful_fake_replies', None)
+    if bool(stateful_replies) != (fixture and
+            manifest.get('config', {}).get('research_candidate') ==
+            'pma_stateful_memory_v1'):
+        raise RuntimeError('stateful fake replies require exact zero-model candidate')
     native_plan = manifest.get("schema") in {"pma-ga-live-manifest-v2",
                                                 "pma-ga-live-manifest-v3",
                                                 "pma-ga-live-manifest-v4",
@@ -119,6 +124,8 @@ def run_batch(args: argparse.Namespace) -> dict:
             command += ['--research-candidate', binding['research_candidate']]
         if fixture:
             command += ['--zero-model-fixture']
+        if stateful_replies:
+            command += ['--stateful-fake-replies', str(Path(stateful_replies).resolve(strict=True))]
         if profile_fixture:
             command += ['--candidate-profile-fixture']
         completed = subprocess.run(command, check=False)

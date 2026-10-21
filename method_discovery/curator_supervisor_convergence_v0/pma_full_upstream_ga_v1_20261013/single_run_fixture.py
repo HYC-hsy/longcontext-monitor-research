@@ -20,7 +20,8 @@ def main() -> None:
     parser.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
     parser.add_argument('--research-candidate', choices=(
         'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
-        'pos_pma_complement_v1', 'pos_pma_shared_view_v1'), default='U')
+        'pos_pma_complement_v1', 'pos_pma_shared_view_v1',
+        'pma_stateful_memory_v1'), default='U')
     parser.add_argument('--output', type=Path, required=True)
     for name in ('official-source-git', 'task-profile-file',
                  'ga-source', 'runtime-root', 'worker-python', 'harbor-python',
@@ -43,10 +44,15 @@ def main() -> None:
                                             'pos_pma_shared_view_v1'} or
             not args.pma_profile_file):
         raise RuntimeError('profile fixture requires synthetic candidate and fake PMA profile')
+    stateful = args.research_candidate == 'pma_stateful_memory_v1'
+    if stateful and (args.condition != 'B' or args.candidate_profile_fixture or
+                     not args.service_fixture):
+        raise RuntimeError('stateful fixture requires the isolated B service fixture')
     identity = prepare(argparse.Namespace(output=str(root), task=args.task,
         condition=args.condition, occurrence=1, fake_only=True,
         synthetic_pos_fixture=args.condition == 'P',
         candidate_profile_fixture=args.candidate_profile_fixture,
+        task_complete_response=stateful,
         research_candidate=args.research_candidate,
         official_source_git=args.official_source_git,
         task_profile_file=args.task_profile_file,
@@ -94,6 +100,8 @@ def main() -> None:
             'batch_id': identity['run_id'],
             'config_sha256': manifest['config_sha256'],
             'output_root': identity['output_root']}
+    if stateful:
+        auth['task_complete_response_policy'] = 'complete-response-v1'
     authorization = root / 'authorization.json'
     authorization.write_text(json.dumps(auth, indent=2), encoding='utf-8')
     command = [sys.executable, '-m',
@@ -110,10 +118,15 @@ def main() -> None:
         '--python-home', args.python_home]
     if args.candidate_profile_fixture:
         command += ['--candidate-profile-fixture']
+    if stateful:
+        command += ['--stateful-fake-replies', str(Path(__file__).with_name(
+            'stateful_fixture_replies.json'))]
     if args.pma_profile_file:
         command += ['--pma-profile-file', args.pma_profile_file]
     try:
         environment = dict(os.environ)
+        if stateful:
+            environment['GA_TASK_COMPLETE_RESPONSE'] = '1'
         if args.service_fixture:
             environment['PMA_SERVICE_FIXTURE'] = '1'
         with (root / 'controller.stdout.txt').open('wb') as out, (

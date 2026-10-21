@@ -268,13 +268,13 @@ def _worker_clearance(root: Path, worker: subprocess.Popen | None, run_id: str) 
 
 
 def _advance_worker_stop(root: Path, worker: subprocess.Popen | None,
-                         deadline: float, pending_at: float | None,
+                         deadline: float | None, pending_at: float | None,
                          stop_at: float | None) -> tuple[float | None, float | None]:
     if (root / 'control/agent_end_pending.json').is_file() and pending_at is None:
         pending_at = time.monotonic()
     if worker is None or worker.poll() is not None:
         return pending_at, stop_at
-    if (time.time() >= deadline or
+    if ((deadline is not None and time.time() >= deadline) or
             (pending_at is not None and time.monotonic() - pending_at >= 2)):
         if stop_at is None:
             (root / 'host_private/stop.request').touch()
@@ -363,11 +363,26 @@ def run_live(args) -> dict:
                            authorized.get('candidate_profile_fixture_only') is True):
         raise RuntimeError('candidate profile fixture identity differs')
     candidate = getattr(args, 'research_candidate', 'U')
+    stateful = candidate == 'pma_stateful_memory_v1'
+    replies = getattr(args, 'stateful_fake_replies', None)
+    if bool(replies) != (stateful and fixture):
+        raise RuntimeError('finite stateful role replies must match zero-model identity')
+    if replies and _sha(Path(replies).resolve(strict=True)) != manifest.get(
+            'stateful_fake_replies_sha256'):
+        raise RuntimeError('stateful finite role replies differ from frozen fixture')
     expected_candidate = (manifest['planned_order'][0]['research_candidate']
         if manifest['schema'] in {'pma-ga-live-manifest-v5',
                                   'pos-ga-single-manifest-v1'} else 'U')
     if candidate != expected_candidate or (args.condition == 'A' and candidate != 'U'):
         raise RuntimeError('PMA candidate differs from frozen plan')
+    if stateful and (args.condition != 'B' or fixture and not
+            manifest.get('zero_model_fixture_only') or
+            task_policy != 'complete-response-v1' or
+            authorized.get('task_complete_response_policy') != task_policy or
+            actual_task_policy != task_policy or
+            manifest.get('config', {}).get('task_turns_max', 'missing') is not None or
+            manifest.get('config', {}).get('agent_wall_seconds', 'missing') is not None):
+        raise RuntimeError('stateful authorization, policy or uncapped identity mismatch')
     if (manifest.get('schema') in {'pma-ga-live-manifest-v3',
                                    'pma-ga-live-manifest-v4',
                                    'pma-ga-live-manifest-v5',
@@ -530,8 +545,9 @@ def run_live(args) -> dict:
         spec['pos_binding_sha256'] = _sha(binding_path)
     spec_path = root / 'control' / 'harbor_spec.json'
     spec_path.write_text(json.dumps(spec, indent=2), encoding='utf-8')
-    agent_seconds = manifest['config']['agent_wall_seconds'] if args.condition == 'P' else 14400
-    deadline = time.time() + agent_seconds
+    agent_seconds = (None if stateful else manifest['config']['agent_wall_seconds']
+                     if args.condition == 'P' else 14400)
+    deadline = None if agent_seconds is None else time.time() + agent_seconds
     worker = harbor = None
     worker_logs = []
     first_error = None
@@ -544,9 +560,16 @@ def run_live(args) -> dict:
             for name in ('worker.stdout.log', 'worker.stderr.log'):
                 worker_logs.append((root / 'archive' / name).open('wb'))
             worker_env = dict(os.environ)
-            worker_env['PYTHONPATH'] = os.pathsep.join((str(STAGE),
+            host_stage = root / 'control/stateful_host_stage'
+            worker_env['PYTHONPATH'] = (os.pathsep.join((str(host_stage),
+                str(root / 'control/ga_stage'))) if stateful else
+                os.pathsep.join((str(STAGE),
                 str(STAGE / 'vendor' / 'pma_89e5c0d' / 'src'),
-                str(STAGE / 'vendor' / 'pma_89e5c0d' / 'external' / 'harbor' / 'src')))
+                str(STAGE / 'vendor' / 'pma_89e5c0d' / 'external' / 'harbor' / 'src'))))
+            if stateful:
+                worker_env.update(GA_STATEFUL_MEMORY_ENABLED='1',
+                    GA_STATEFUL_MEMORY_MODE='live', GA_STATEFUL_UNCAPPED_TOTAL='1',
+                    GA_PMA_CAPTURE_TASK_REQUESTS='1', GA_PROVIDER_MAX_RETRIES='0')
             worker_env['PMA_MEMORY_PROFILE_FILE'] = str(memory_profile_path)
             worker_env['PMA_MEMORY_PROFILE_SHA256'] = manifest['pma_profile_sha256']
             worker_env['LITELLM_LOCAL_MODEL_COST_MAP'] = 'True'
@@ -555,31 +578,57 @@ def run_live(args) -> dict:
                     root / 'archive/fake_host_calls.jsonl')
             worker_env.pop('PMA_MEMORY_API_BASE', None)
             worker_env.pop('PMA_MEMORY_API_KEY', None)
-            worker_script = ('candidate_transport_worker.py' if candidate_profile
+            worker_script = ('stateful_memory_worker.py' if stateful else
+                             'candidate_transport_worker.py' if candidate_profile
                              else 'worker_main.py')
-            worker_path = STAGE / worker_script
+            worker_path = ((host_stage / 'method_discovery' /
+                'curator_supervisor_convergence_v0' /
+                'pma_full_upstream_ga_v1_20261013' / worker_script)
+                if stateful else STAGE / worker_script)
             if profile_fixture:
                 worker_path = (STAGE.parents[2] / 'method_discovery' /
                     'pos_pma_complement_v1_20261019/test_fake_host_entry.py')
-            worker = subprocess.Popen([
+            worker_args = [
                 str(Path(args.worker_python).resolve(strict=True)), str(worker_path),
                 '--run-id', args.run_id, '--task-id', args.task,
                 '--private-root', str(root / 'host_private'),
                 '--requests', str(root / 'control' / 'spool' / 'requests'),
-                '--responses', str(root / 'control' / 'spool' / 'responses'),
-                '--deadline-epoch', str(deadline),
-                '--research-candidate', candidate,
-                *(['--fake-memory', '--fake-memory-update'] if fixture and not candidate_profile else [])],
+                '--responses', str(root / 'control' / 'spool' / 'responses')]
+            if stateful:
+                if fixture:
+                    worker_args += ['--fake-replies', str(Path(
+                        args.stateful_fake_replies).resolve(strict=True))]
+                else:
+                    task_json = root / 'bundle/source/mykey.json'
+                    worker_args += ['--task-profile-file', str(task_json),
+                        '--task-profile-name', manifest['config']['task_profile_name'],
+                        '--task-profile-sha256', _sha(task_json),
+                        '--pma-profile-file', str(memory_profile_path),
+                        '--pma-profile-sha256', manifest['pma_profile_sha256'],
+                        '--context-window', str(manifest['config'][
+                            'native_context_guard_window_tokens'])]
+            else:
+                worker_args += ['--deadline-epoch', str(deadline),
+                    '--research-candidate', candidate,
+                    *(['--fake-memory', '--fake-memory-update'] if fixture and
+                      not candidate_profile else [])]
+            worker = subprocess.Popen(worker_args,
                 cwd=STAGE, env=worker_env,
                 stdout=worker_logs[0], stderr=worker_logs[1])
             ready = root / 'host_private' / 'worker_ready.json'
-            ready_limit = min(deadline, time.time() + 20)
+            ready_limit = min(deadline, time.time() + 20) if deadline else time.time() + 20
             while not ready.is_file():
                 if worker.poll() is not None or time.time() >= ready_limit:
                     raise RuntimeError('PMA host worker not ready')
                 time.sleep(.05)
             ready_data = json.loads(ready.read_text(encoding='utf-8'))
-            if (ready_data.get('run_id'), ready_data.get('task_id'),
+            if stateful:
+                if (ready_data.get('run_id'), ready_data.get('task_id'),
+                        ready_data.get('research_candidate'), ready_data.get('mode')) != (
+                        args.run_id, args.task, candidate,
+                        'fake-only' if fixture else 'profile'):
+                    raise RuntimeError('stateful private worker ready identity mismatch')
+            elif (ready_data.get('run_id'), ready_data.get('task_id'),
                     ready_data.get('fake_memory'), ready_data.get('research_candidate')) != (
                     args.run_id, args.task, fixture and not candidate_profile, candidate):
                 raise RuntimeError('PMA worker identity or transport mode mismatch')
@@ -603,7 +652,7 @@ def run_live(args) -> dict:
             '--extra-docker-compose', str(root / 'bundle/isolation.compose.json'),
             '--n-concurrent', '1', '--max-retries', '0', '--yes',
             '--enable-verification',
-            '--agent-timeout-multiplier', str(agent_seconds /
+            '--agent-timeout-multiplier', str(1 if stateful else agent_seconds /
                 manifest['assets'][args.task]['native_agent_seconds'])
                 if _native_schema(manifest) else '16',
             '--verifier-timeout-multiplier', '1']
@@ -614,9 +663,13 @@ def run_live(args) -> dict:
         kwargs = {'llm_no': 0, 'run_id': args.run_id, 'task_id': args.task,
                   'expected_model': 'claude-opus-4-8', 'python_home': args.python_home,
                   'ga_source_sha256': prepared['ga_bundle_tree_sha256'],
-                  'timeout_sec': 180 if fixture else agent_seconds,
-                  'max_turns': 2 if fixture else manifest.get('config', {}).get('task_turns_max', 300),
-                  'llm_config_name': args.task_profile, 'condition_id': 'pma-neutral'}
+                  'timeout_sec': (180 if fixture else
+                      manifest['assets'][args.task]['native_agent_seconds'] if stateful
+                      else agent_seconds),
+                  'max_turns': (0 if stateful else 2 if fixture else
+                      manifest.get('config', {}).get('task_turns_max', 300)),
+                  'llm_config_name': args.task_profile,
+                  'condition_id': ('stateful-memory-v1' if stateful else 'pma-neutral')}
         for key, value in kwargs.items():
             command += ['--ak', f'{key}={value}']
         env = dict(os.environ)
@@ -638,13 +691,16 @@ def run_live(args) -> dict:
                    GA_RUN_ISOLATION=('networked-host-keyed-v1' if
                        _native_schema(manifest) else
                        'no-network-unix-inference-v1'),
-                   GA_PMA_UPSTREAM_ENABLED='1' if args.condition == 'B' else '0',
+                   GA_PMA_UPSTREAM_ENABLED='1' if args.condition == 'B' and not stateful else '0',
                    GA_PMA_CAPTURE_TASK_REQUESTS='1',
                    GA_PMA_ENABLED='0', GA_MONITOR_ENABLED='0', GA_M0_MONITOR_ENABLED='0')
         if task_policy == 'complete-response-v1' or (
                 args.condition != 'P' and env.get('GA_TASK_COMPLETE_RESPONSE') == '1'):
             env['GA_TASK_COMPLETE_RESPONSE'] = '1'
-            env['GA_TASK_DEADLINE_EPOCH'] = str(deadline)
+            if stateful:
+                env.pop('GA_TASK_DEADLINE_EPOCH', None)
+            else:
+                env['GA_TASK_DEADLINE_EPOCH'] = str(deadline)
         elif manifest.get('schema') == 'pos-ga-single-manifest-v1':
             env.pop('GA_TASK_COMPLETE_RESPONSE', None)
             env.pop('GA_TASK_DEADLINE_EPOCH', None)
@@ -669,7 +725,16 @@ def run_live(args) -> dict:
                 env['GA_POS_PROFILE_FILE'] = '/opt/genericagent/mykey.json'
                 env['GA_POS_PROFILE_NAME'] = manifest['config']['task_profile_name']
                 env['GA_POS_BINDING_FILE'] = '/run/pos-archive/binding.json'
-        if args.condition == 'B':
+        if stateful:
+            env.update(GA_STATEFUL_MEMORY_ENABLED='1', GA_STATEFUL_MEMORY_MODE='live',
+                GA_STATEFUL_UNCAPPED_TOTAL='1', GA_STATEFUL_LIVE_AUTHORIZED='1',
+                GA_STATEFUL_REQUESTS='/run/pma-bridge/requests',
+                GA_STATEFUL_RESPONSES='/run/pma-bridge/responses',
+                GA_PROVIDER_MAX_RETRIES='0')
+            for stale in ('GA_PMA_UPSTREAM_DEADLINE_EPOCH', 'GA_POS_DEADLINE_EPOCH',
+                          'GA_MONITOR_RUN_DEADLINE_EPOCH'):
+                env.pop(stale, None)
+        elif args.condition == 'B':
             env.update(GA_PMA_UPSTREAM_REQUESTS='/run/pma-bridge/requests',
                        GA_PMA_UPSTREAM_RESPONSES='/run/pma-bridge/responses',
                        GA_PMA_UPSTREAM_DEADLINE_EPOCH=str(deadline))
@@ -681,20 +746,22 @@ def run_live(args) -> dict:
                 env.get('GA_TASK_COMPLETE_RESPONSE') == '1' else 'disabled'),
             'evaluator_timeout_sec': manifest['assets'][args.task].get(
                 'native_verifier_seconds', 900),
-            'outer_timeout_sec': agent_seconds + manifest['assets'][args.task].get(
+            'outer_timeout_sec': (agent_seconds if agent_seconds is not None else
+                manifest['assets'][args.task]['native_agent_seconds']) + manifest['assets'][args.task].get(
                 'native_verifier_seconds', 900) + 600}, indent=2), encoding='utf-8')
         with (root / 'archive/harbor.stdout.log').open('wb') as out, (
                 root / 'archive/harbor.stderr.log').open('wb') as err:
             harbor = subprocess.Popen(command, cwd=repo, env=env, stdout=out, stderr=err)
-            outer_deadline = deadline + manifest['assets'][args.task].get(
-                'native_verifier_seconds', 900) + 600
+            outer_timeout_seconds = ((agent_seconds if agent_seconds is not None else
+                manifest['assets'][args.task]['native_agent_seconds']) +
+                manifest['assets'][args.task].get('native_verifier_seconds', 900) + 600)
+            outer_deadline = time.time() + outer_timeout_seconds
             while harbor.poll() is None:
                 pending_end_at, stop_requested_at = _advance_worker_stop(
                     root, worker, deadline, pending_end_at, stop_requested_at)
                 _worker_clearance(root, worker, args.run_id)
                 if time.time() >= outer_deadline:
-                    raise subprocess.TimeoutExpired(command, agent_seconds +
-                        manifest['assets'][args.task].get('native_verifier_seconds', 900) + 600)
+                    raise subprocess.TimeoutExpired(command, outer_timeout_seconds)
                 time.sleep(.25)
             result = harbor.returncode
     except BaseException as exc:
@@ -856,7 +923,9 @@ def main() -> None:
     parser.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
     parser.add_argument('--research-candidate', choices=(
         'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
-        'pos_pma_complement_v1', 'pos_pma_shared_view_v1'), default='U')
+        'pos_pma_complement_v1', 'pos_pma_shared_view_v1',
+        'pma_stateful_memory_v1'), default='U')
+    parser.add_argument('--stateful-fake-replies')
     parser.add_argument('--task-profile', default='native_claude_cc_vibe_opus48')
     parser.add_argument('--pma-profile-file')
     parser.add_argument('--harbor-source-root')
