@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import sys
+import __future__
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -29,7 +30,15 @@ def _pinned_bm25():
         spec = importlib.util.spec_from_file_location(name, _BM25_PATH)
         module = importlib.util.module_from_spec(spec)
         sys.modules[name] = module
-        spec.loader.exec_module(module)
+        if sys.version_info < (3, 10):
+            # The pinned file uses PEP 604 annotations; postpone only their
+            # evaluation on an older offline Python. Its algorithm is unchanged.
+            code = compile(source.decode("utf-8"), str(_BM25_PATH), "exec",
+                           flags=__future__.annotations.compiler_flag,
+                           dont_inherit=True)
+            exec(code, module.__dict__)
+        else:
+            spec.loader.exec_module(module)
     return module
 
 
@@ -97,22 +106,51 @@ def _record_source_refs(record: dict) -> list[dict]:
 
 
 def _complete_bundle(record: dict, world: dict, ledger: dict,
-                     linked_gaps: list[dict]) -> dict:
+                     linked_gaps: list[dict], context_chars: int = 80) -> dict:
     entity_ids = {record["entity_id"]}
     relations = [relation for relation in world["relations"]
                  if relation["anchored_by"]["record_id"] == record["record_id"]]
     for relation in relations:
         entity_ids.update((relation["from_entity_id"], relation["to_entity_id"]))
-    source_ids = {ref["source_id"] for ref in _record_source_refs(record)}
+    source_refs = list(_record_source_refs(record))
     for gap in linked_gaps:
         if gap["closure"] and gap["closure"]["kind"] == "environment_supported":
-            source_ids.update(ref["source_id"] for ref in
-                              gap["closure"]["evidence_refs"])
+            source_refs.extend(gap["closure"]["evidence_refs"])
+    by_source = {}
+    for ref in source_refs:
+        by_source.setdefault(ref["source_id"], []).append(ref)
+    sources = []
+    for source_id in sorted(by_source):
+        leaf = ledger[source_id]
+        intervals = sorted((max(0, ref["start"] - context_chars),
+                            min(len(leaf["text"]), ref["end"] + context_chars))
+                           for ref in by_source[source_id])
+        merged = []
+        for start, end in intervals:
+            if merged and start <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+            else:
+                merged.append((start, end))
+        sources.append({"source_id": source_id, "event_id": leaf["event_id"],
+            "source_kind": leaf["source_kind"], "truncated": leaf["truncated"],
+            "text_sha256": leaf["text_sha256"],
+            "visible_spans": [{"start": start, "end": end,
+                               "text": leaf["text"][start:end]}
+                              for start, end in merged],
+            "exact_refs": by_source[source_id]})
+        if leaf["source_kind"] == "tool_result":
+            actions = [item for item in ledger.values()
+                       if item["event_id"] == leaf["event_id"] and
+                       item["source_kind"] == "executed_action"]
+            if not actions:
+                sources[-1]["source_context_status"] = "source_context_unavailable"
+            else:
+                sources[-1]["executed_actions"] = actions
     return {"state": record,
             "entities": [item for item in world["entities"]
                          if item["entity_id"] in entity_ids],
             "relations": relations, "linked_closed_gaps": linked_gaps,
-            "sources": [ledger[source_id] for source_id in sorted(source_ids)]}
+            "sources": sources}
 
 
 @dataclass
