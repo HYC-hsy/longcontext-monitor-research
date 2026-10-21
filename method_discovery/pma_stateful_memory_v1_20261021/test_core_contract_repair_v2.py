@@ -208,6 +208,32 @@ class CoreContractRepairTests(unittest.TestCase):
                 "start": 0, "end": 14, "quote": "feature absent"}], "challenge_refs": []}
         with self.assertRaisesRegex(ContractError, "lesson_"):
             validate_snapshot(snap, ledger)
+        state["revision"] = 2
+        state["supersedes"] = [{"type": "state", "record_id": "s", "revision": 1}]
+        base, _ = rich_state()
+        catalog = SourceCatalog(ledger, "lesson-window")
+        def wire(value):
+            if type(value) is dict and set(value) == {"source_id", "start", "end", "quote"}:
+                span = catalog.add(value["source_id"], value["start"], value["end"],
+                                   "maintenance")
+                return {"evidence_id": span.evidence_id, "quote": value["quote"]}
+            if type(value) is dict:
+                return {key: wire(item) for key, item in value.items()}
+            if type(value) is list:
+                return [wire(item) for item in value]
+            return value
+        proposal = {"protocol": "maintenance-proposal/1", "request_id": "lesson",
+            "active_task_version": 1, "base_state_version": 1,
+            "world_patch": {"entity_upserts": [], "state_upserts": [wire(state)],
+                "relation_upserts": [], "record_transitions": []},
+            "specification_upserts": [], "gap_upserts": [], "gap_resolutions": [],
+            "gap_reopens": [], "focus": {"op": "keep"}}
+        with self.assertRaisesRegex(ContractError, "lesson_"):
+            build_candidate(proposal=proposal, base=base,
+                catalog=catalog, cycle_id="lesson",
+                processed_to=0, goal_ledger={"epoch": 1, "deltas": {},
+                "messages": ["u0"]}, visible_existing_ids={("state", "s"),
+                    ("entity", "e")}, archive={})
 
     def test_transition_cannot_restore_active(self):
         base = empty_snapshot()
@@ -311,6 +337,12 @@ class CoreContractRepairTests(unittest.TestCase):
         anchor = render_reminder(decision, snapshot=snap, cycle_id="c",
             commit_id="k", reviewed_refs=[])["anchors"][0]
         self.assertEqual(anchor["gap_kind"], "epistemic")
+        huge = deepcopy(snap)
+        huge["B"]["W"]["states"][0]["claim"]["text"] = "x" * 20000
+        decision["refs"] = [{"type": "state", "record_id": "s", "revision": 1}]
+        with self.assertRaisesRegex(ContractError, "reminder_rendered_over_limit"):
+            render_reminder(decision, snapshot=huge, cycle_id="c",
+                            commit_id="k", reviewed_refs=[])
 
     def test_procedural_episode_and_inference_lesson_render_separately(self):
         snap, ledger = rich_state()
@@ -520,6 +552,30 @@ class CoreContractRepairTests(unittest.TestCase):
             self.assertEqual(result["logical_calls"], 0)
             self.assertEqual(provider.calls, [])
             self.assertEqual(fixture.store.snapshot()["committed_event_seq"], 0)
+        finally:
+            fixture.tearDown()
+
+    def test_new_goal_during_maintenance_cannot_commit_frozen_candidate(self):
+        fixture = engine_fixtures.EngineTests("test_clean_commit_silent_and_same_trigger_idempotence")
+        fixture.setUp()
+        try:
+            inner = engine_fixtures.ScriptedProvider()
+            def provider(role, messages, call_id, max_output):
+                answer = inner(role, messages, call_id, max_output)
+                if role == "maintenance":
+                    user = leaf("later goal", source_id="later-user")
+                    user.update(event_id="later-goal", event_seq=2, ga_turn=2)
+                    fixture.store.append_event({"event_id": "later-goal",
+                        "event_seq": 2, "kind": "user_message", "occurred_at_step": 2,
+                        "source_ids": ["later-user"], "payload": {}}, [user])
+                return answer
+            result = CycleEngine(fixture.store, provider, task_text="task").run(
+                "goal-race")
+            self.assertEqual(result["status"], "runtime_failed")
+            self.assertEqual(result["error_code"], "goal_epoch_mismatch")
+            self.assertEqual([call["role"] for call in inner.calls],
+                             ["maintenance", "audit"])
+            self.assertEqual(fixture.store.snapshot()["state_version"], 0)
         finally:
             fixture.tearDown()
 

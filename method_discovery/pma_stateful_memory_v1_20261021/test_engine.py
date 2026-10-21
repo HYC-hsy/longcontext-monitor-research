@@ -175,6 +175,9 @@ class EngineTests(unittest.TestCase):
                     "initial-failure")
                 self.assertEqual(result["status"], "init_failed")
                 self.assertEqual(result["failure_stage"], "provider")
+                self.assertEqual(result["logical_calls"], 1)
+                self.assertEqual(result["observable_attempts"], 1)
+                self.assertEqual(result["responses_received"], 0)
                 self.assertEqual(store.snapshot()["state_version"], 0)
                 self.assertEqual([item["role"] for item in provider.calls],
                                  ["maintenance"])
@@ -307,7 +310,7 @@ class EngineTests(unittest.TestCase):
         self.store.compare_and_swap = commit_then_user_revision
         result = CycleEngine(self.store, provider, task_text="task").run(
             "postcommit-goal-change")
-        self.assertEqual(result["status"], "committed_selection_stale")
+        self.assertEqual(result["status"], "committed_backlog_pending")
         self.assertEqual(self.store.snapshot()["committed_event_seq"], 1)
         self.assertEqual(self.store.goals()["epoch"], 2)
         self.assertEqual([item["role"] for item in provider.calls],

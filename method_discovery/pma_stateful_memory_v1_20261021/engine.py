@@ -450,11 +450,12 @@ class CycleEngine:
                 cycle_id=cycle_id, base=snapshot, candidate=candidate["candidate"],
                 archive_delta=candidate["archive_delta"])
             self.store.journal(cycle_id, "committed", committed)
-            if candidate["candidate"]["committed_event_seq"] != frozen_tip:
+            remaining = self.store.events_after(candidate["candidate"][
+                "committed_event_seq"])
+            if candidate["candidate"]["committed_event_seq"] != frozen_tip or remaining:
                 outcome = {"cycle_id": cycle_id, "status": "committed_backlog_pending",
                     "commit": committed, "logical_calls": calls,
-                    "pending_after_batch_count": body["observation_batch"][
-                        "pending_after_batch_count"]}
+                    "pending_after_batch_count": len(remaining)}
             else:
                 outcome = self._select(cycle_id, candidate["candidate"],
                     committed, body, view["required_coverage"], calls)
