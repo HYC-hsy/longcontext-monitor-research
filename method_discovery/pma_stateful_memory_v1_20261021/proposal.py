@@ -24,6 +24,16 @@ def validate_proposal(raw: object, *, request_id: str,
     if (proposal["active_task_version"] != task_version or
             proposal["base_state_version"] != base_version):
         raise ContractError("version_mismatch")
+    def reject_stored_wire(value):
+        if type(value) is dict:
+            if set(value) == {"source_id", "start", "end", "quote"}:
+                raise ContractError("stored_ref_in_wire_proposal")
+            for member in value.values():
+                reject_stored_wire(member)
+        elif type(value) is list:
+            for member in value:
+                reject_stored_wire(member)
+    reject_stored_wire(proposal)
     patch = fields(proposal["world_patch"], PATCH_FIELDS)
     for key in PATCH_FIELDS:
         if type(patch[key]) is not list:
@@ -32,11 +42,6 @@ def validate_proposal(raw: object, *, request_id: str,
                 "gap_reopens"):
         if type(proposal[key]) is not list:
             raise ContractError("invalid_array", key)
-    focus = proposal["focus"]
-    if type(focus) is not dict or focus.get("op") not in {"keep", "set", "clear"}:
-        raise ContractError("invalid_focus_operation")
-    fields(focus, {"op"} if focus["op"] == "keep" else
-           {"op", "value"} if focus["op"] == "set" else {"op", "reason"})
     seen: set[tuple[str, str]] = set()
     groups = [("entity", patch["entity_upserts"], "entity_id"),
               ("state", patch["state_upserts"], "record_id"),
@@ -57,6 +62,46 @@ def validate_proposal(raw: object, *, request_id: str,
             if identity in seen:
                 raise ContractError("conflicting_operations", identifier)
             seen.add(identity)
+    item_contracts = (
+        (patch["entity_upserts"], {"entity_id", "entity_type", "display_name"}),
+        (patch["relation_upserts"], {"relation_id", "from_entity_id",
+                                     "to_entity_id", "predicate", "anchored_by"}),
+        (patch["record_transitions"], {"record_ref", "to_status", "reason",
+                                       "evidence_refs"}),
+        (proposal["specification_upserts"], {"requirement_id", "revision",
+            "task_version", "interpretation", "source_refs", "status", "retirement"}))
+    for items, required in item_contracts:
+        for item in items:
+            fields(item, required)
+    for item in patch["relation_upserts"]:
+        fields(item["anchored_by"], {"type", "record_id", "revision"})
+    for item in patch["state_upserts"]:
+        if type(item) is not dict:
+            raise ContractError("wrong_object_type", "state")
+        common = {"record_id", "revision", "entity_id", "scope", "use_status",
+                  "updated_at_step", "supersedes", "kind"}
+        fields(item, common | ({"claim"} if item.get("kind") == "knowledge" else
+                               {"episode", "lesson"}))
+    gap_fields = {"gap_id", "revision", "task_version", "gap_kind", "target",
+                  "reason", "goal_refs", "record_refs", "status", "closure"}
+    for key in ("gap_upserts", "gap_resolutions", "gap_reopens"):
+        for item in proposal[key]:
+            fields(item, gap_fields)
+            if type(item["goal_refs"]) is not list or type(item["record_refs"]) is not list:
+                raise ContractError("invalid_array", key + ".refs")
+            for ref in item["goal_refs"]:
+                fields(ref, {"type", "requirement_id", "revision", "task_version"})
+            for ref in item["record_refs"]:
+                fields(ref, {"type", "record_id", "revision"})
+    focus = proposal["focus"]
+    if type(focus) is not dict or focus.get("op") not in {"keep", "set", "clear"}:
+        raise ContractError("invalid_focus_operation")
+    fields(focus, {"op"} if focus["op"] == "keep" else
+           {"op", "value"} if focus["op"] == "set" else {"op", "reason"})
+    if focus["op"] == "set":
+        fields(focus["value"], {"gap_ref", "reason", "changed_at_step"})
+        fields(focus["value"]["gap_ref"], {"type", "gap_id", "revision",
+                                           "task_version"})
     return proposal
 
 
@@ -143,6 +188,45 @@ def build_candidate(*, proposal: dict, base: dict, catalog: SourceCatalog,
                       base_version=base["state_version"])
     mapping = _local_id_map(proposal, cycle_id)
     patch = _wire_to_internal(_replace_local_ids(proposal, mapping), catalog)
+    new_ids = {("entity", item["entity_id"]) for item in patch["world_patch"][
+        "entity_upserts"] if item["entity_id"] not in {old["entity_id"] for old in
+        base["B"]["W"]["entities"]}}
+    new_ids.update(("state", item["record_id"]) for item in patch["world_patch"][
+        "state_upserts"] if item["record_id"] not in {old["record_id"] for old in
+        base["B"]["W"]["states"]})
+    new_ids.update(("requirement", item["requirement_id"]) for item in patch[
+        "specification_upserts"] if item["requirement_id"] not in {old[
+            "requirement_id"] for old in base["B"]["G"]["specifications"]})
+    new_ids.update(("gap", item["gap_id"]) for item in patch["gap_upserts"] if
+        item["gap_id"] not in {old["gap_id"] for old in base["B"]["DeltaE"] +
+                               base["B"]["DeltaA"]})
+    known_ids = {(kind, item[key]) for kind, items, key in (
+        ("entity", base["B"]["W"]["entities"], "entity_id"),
+        ("state", base["B"]["W"]["states"], "record_id"),
+        ("requirement", base["B"]["G"]["specifications"], "requirement_id"),
+        ("gap", base["B"]["DeltaE"] + base["B"]["DeltaA"], "gap_id"))
+        for item in items}
+    def require_visible(kind: str, identifier: str) -> None:
+        identifier = nonempty(identifier, kind + "_id")
+        identity = (kind, identifier)
+        if identity in known_ids and identity not in visible_existing_ids:
+            raise ContractError("invisible_existing_reference", identifier)
+        if identity not in known_ids and identity not in new_ids:
+            raise ContractError("unknown_reference", identifier)
+    for item in patch["world_patch"]["state_upserts"]:
+        require_visible("entity", item["entity_id"])
+    for item in patch["world_patch"]["relation_upserts"]:
+        require_visible("entity", item["from_entity_id"])
+        require_visible("entity", item["to_entity_id"])
+        require_visible("state", item["anchored_by"]["record_id"])
+    for item in [*patch["gap_upserts"], *patch["gap_resolutions"],
+                 *patch["gap_reopens"]]:
+        for ref in item["goal_refs"]:
+            require_visible("requirement", ref["requirement_id"])
+        for ref in item["record_refs"]:
+            require_visible("state", ref["record_id"])
+    if patch["focus"]["op"] == "set":
+        require_visible("gap", patch["focus"]["value"]["gap_ref"]["gap_id"])
     candidate = deepcopy(base)
     candidate["state_version"] += 1
     candidate["committed_event_seq"] = integer(processed_to, "processed_to")

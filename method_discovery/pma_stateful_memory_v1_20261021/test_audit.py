@@ -8,6 +8,7 @@ from .budget import TokenProxy
 from .prompts import audit as audit_messages
 from .source import ContractError, SourceCatalog, canonical, digest
 from .test_contracts import empty_snapshot, leaf
+from .test_schema_advanced import rich_state
 
 
 class AuditTests(unittest.TestCase):
@@ -99,6 +100,38 @@ class AuditTests(unittest.TestCase):
             "observations": {"events": []}}))
         self.assertLess(deduplicated["proxy_tokens"], repeated["proxy_tokens"])
         self.assertLess(deduplicated["utf8_bytes"], repeated["utf8_bytes"])
+
+    def test_archived_version_is_related_witness_not_candidate_target(self):
+        before, ledger = rich_state()
+        after = deepcopy(before)
+        after["state_version"] += 1
+        archived = deepcopy(before["B"]["W"]["states"][0])
+        after["B"]["W"]["states"][0]["revision"] = 2
+        after["B"]["W"]["states"][0]["supersedes"] = [{"type": "state",
+            "record_id": "s", "revision": 1}]
+        view = AuditCodec().encode(before, after, binding={"cycle_id": "archive"},
+            sources=[], observations={"events": []}, operation_index=[],
+            resolve_manifest=[], contextual_objects=[{"kind": "archived_state",
+                "record_ref": {"type": "state", "record_id": "s", "revision": 1},
+                "body": archived}])
+        catalog = SourceCatalog(ledger, "window")
+        historical_field = {"snapshot": "archive", "target": {"kind": "state",
+            "id": "s", "revision": 1}, "field_path": "claim.text"}
+        result = {"protocol": "audit-result/1", "binding": view["binding"],
+            "coverage": view["required_coverage"], "outcome": "issues",
+            "issues": [{"issue_id": "i", "kind": "observation_conflict",
+                "target": {"snapshot": "candidate", "target": {"kind": "state",
+                    "id": "s", "revision": 2}, "field_path": "claim.text"},
+                "related_targets": [historical_field], "explanation": "synthetic",
+                "witnesses": [{"kind": "field", "field": historical_field,
+                               "exact_value": "feature absent"}],
+                "repair_constraint": "retain evidence"}],
+            "closure_assessments": [], "unusable_reason": None}
+        self.assertEqual(validate_audit_result(result, view=view,
+            catalog=catalog, archive={("state", "s", 1): archived})["outcome"],
+            "issues")
+        with self.assertRaisesRegex(ContractError, "unknown_target_id"):
+            validate_audit_result(result, view=view, catalog=catalog, archive={})
 
 
 if __name__ == "__main__":

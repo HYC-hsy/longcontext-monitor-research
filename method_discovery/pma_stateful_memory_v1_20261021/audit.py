@@ -184,7 +184,8 @@ def _bound_field(value: object, targets: dict) -> dict:
         raise ContractError("invalid_bound_snapshot")
     target = fields(value["target"], {"kind", "id"}, {"revision"})
     identity = (target["kind"], target["id"])
-    body = targets[value["snapshot"]].get(identity)
+    key = (*identity, target.get("revision")) if value["snapshot"] == "archive" else identity
+    body = targets[value["snapshot"]].get(key)
     if body is None:
         raise ContractError("unknown_target_id", target["id"])
     if "revision" in body and body["revision"] != target.get("revision"):
@@ -250,8 +251,10 @@ def validate_audit_result(raw: object, *, view: dict,
             elif witness.get("kind") == "field":
                 fields(witness, {"kind", "field", "exact_value"})
                 bound = _bound_field(witness["field"], targets)
-                body = targets[bound["snapshot"]][(bound["target"]["kind"],
-                                                    bound["target"]["id"])]
+                identity = (bound["target"]["kind"], bound["target"]["id"])
+                key = (*identity, bound["target"].get("revision")) if bound[
+                    "snapshot"] == "archive" else identity
+                body = targets[bound["snapshot"]][key]
                 if canonical(_field_value(body, bound["field_path"])) != canonical(
                         witness["exact_value"]):
                     raise ContractError("field_witness_mismatch")

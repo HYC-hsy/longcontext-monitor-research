@@ -81,7 +81,8 @@ class CycleEngine:
             "public_response_sha256": digest(raw), "characters": len(raw)})
         return raw
 
-    def _catalog(self, ledger: dict, work: dict) -> tuple[SourceCatalog, list[dict]]:
+    def _catalog(self, ledger: dict, work: dict,
+                 purposes: tuple[str, ...] = ("maintenance", "audit")) -> tuple[SourceCatalog, list[dict]]:
         catalog = SourceCatalog(ledger, work["source_window_id"])
         visible = []
         seen = set()
@@ -89,7 +90,7 @@ class CycleEngine:
                 exact_stored_ref: bool = False) -> None:
             if start == end:
                 return
-            for purpose in ("maintenance", "audit"):
+            for purpose in purposes:
                 identity = (source_id, start, end, purpose, exact_stored_ref)
                 if identity in seen:
                     continue
@@ -236,6 +237,22 @@ class CycleEngine:
                 after_view = project_snapshot(candidate["candidate"], snapshot, body)
                 audit_binding["before_view_hash"] = digest(before_view)
                 audit_binding["candidate_view_hash"] = digest(after_view)
+                current_revisions = {item["record_id"]: item["revision"] for item in
+                    snapshot["B"]["W"]["states"]}
+                contextual = []
+                seen_history = set()
+                for bundle in [*body["mandatory"]["bundles"],
+                               *body["optional_bundles"]]:
+                    for historical in [bundle["state"],
+                                       *bundle.get("linked_state_versions", [])]:
+                        identity = (historical["record_id"], historical["revision"])
+                        if (current_revisions.get(identity[0]) != identity[1] and
+                                identity not in seen_history):
+                            contextual.append({"kind": "archived_state",
+                                "record_ref": {"type": "state", "record_id": identity[0],
+                                               "revision": identity[1]},
+                                "body": historical})
+                            seen_history.add(identity)
                 view = AuditCodec().encode(before_view, after_view,
                     binding=audit_binding, sources=[v for v in visible if
                         v["purpose"] == "audit"],
@@ -243,15 +260,16 @@ class CycleEngine:
                     operation_index=_operation_index(before_view, after_view,
                                                      candidate["canonical_patch"]),
                     resolve_manifest=manifest,
-                    contextual_objects=[*body["mandatory"]["bundles"],
-                                        *body["optional_bundles"]])
+                    contextual_objects=contextual)
                 audit_messages = audit(view)
                 calls += 1
                 raw = self._call(cycle_id, "audit", audit_messages, calls, 8192)
                 try:
                     response = strict_loads(raw)
                     result = validate_audit_result(response, view=view,
-                        catalog=catalog, archive={})
+                        catalog=catalog, archive={("state", item["record_ref"][
+                            "record_id"], item["record_ref"]["revision"]): item["body"]
+                            for item in contextual})
                 except ContractError as error:
                     if credit == 0:
                         raise
@@ -265,7 +283,9 @@ class CycleEngine:
                     corrected_raw = self._call(cycle_id, "audit_correction",
                                                correction, calls, 8192)
                     result = validate_audit_result(strict_loads(corrected_raw), view=view,
-                        catalog=catalog, archive={})
+                        catalog=catalog, archive={("state", item["record_ref"][
+                            "record_id"], item["record_ref"]["revision"]): item["body"]
+                            for item in contextual})
                 if result["outcome"] == "unusable":
                     raise ContractError("model_unusable")
                 if result["outcome"] == "clean":
@@ -302,7 +322,7 @@ class CycleEngine:
                         "pending_after_batch_count"]}
             else:
                 outcome = self._select(cycle_id, candidate["candidate"],
-                    committed, body, visible, calls)
+                    committed, body, view["required_coverage"], calls)
             self.store.journal(cycle_id, "cycle_result", outcome)
             return outcome
         except BaseException as error:
@@ -314,7 +334,7 @@ class CycleEngine:
             return failure
 
     def _select(self, cycle_id: str, snapshot: dict, committed: dict,
-                body: dict, visible: list[dict],
+                body: dict, reviewed_coverage: list[dict],
                 calls: int) -> dict:
         try:
             if snapshot["B"]["G"]["task_version"] != self.store.goals()["epoch"]:
@@ -329,26 +349,48 @@ class CycleEngine:
                                self.store.events_after(max(0, snapshot[
                                    "committed_event_seq"] - 8))])
             selected = current_index.select(query)
-            refs = [{"type": "state", "record_id": item["record_id"],
-                     "revision": item["revision"]} for item in selected]
-            refs += [{"type": "requirement", "requirement_id": item["requirement_id"],
-                      "revision": item["revision"], "task_version": item["task_version"]}
-                     for item in snapshot["B"]["G"]["specifications"] if
-                     item["status"] == "active"]
-            refs += [{"type": "gap", "gap_id": item["gap_id"],
-                      "revision": item["revision"], "task_version": item["task_version"]}
-                     for item in snapshot["B"]["DeltaE"] + snapshot["B"]["DeltaA"]
-                     if item["status"] in {"open", "blocked"}]
-            phase2_view_id = digest([cycle_id, committed["candidate_hash"], refs])
-            select_input = {"binding": {"cycle_id": cycle_id,
-                "state_version": snapshot["state_version"],
-                "task_version": snapshot["B"]["G"]["task_version"],
-                "phase2_view_id": phase2_view_id},
-                "committed_view": snapshot, "recent_activity": body[
-                    "observation_batch"], "source_catalog": visible,
-                "selected_refs": refs,
-                "reviewed_this_cycle_refs": refs,
-                "not_reviewed_this_cycle_refs": []}
+            def refs_for(work):
+                projected = project_snapshot(snapshot, snapshot, work)
+                refs = [{"type": "state", "record_id": item["record_id"],
+                         "revision": item["revision"]} for item in projected[
+                             "B"]["W"]["states"] if item["use_status"] != "retracted"]
+                refs += [{"type": "requirement", "requirement_id": item[
+                    "requirement_id"], "revision": item["revision"],
+                    "task_version": item["task_version"]} for item in projected[
+                        "B"]["G"]["specifications"] if item["status"] == "active"]
+                refs += [{"type": "gap", "gap_id": item["gap_id"],
+                          "revision": item["revision"],
+                          "task_version": item["task_version"]} for item in
+                         projected["B"]["DeltaE"] + projected["B"]["DeltaA"] if
+                         item["status"] in {"open", "blocked"}]
+                return refs, projected
+            def prepare_selection(work):
+                refs, projected = refs_for(work)
+                _catalog, visible = self._catalog(ledger, work, ("selection",))
+                coverage = {(item["kind"], item["id"], item.get("revision")) for
+                            item in reviewed_coverage}
+                reviewed = [ref for ref in refs if (ref["type"], ref.get(
+                    "record_id", ref.get("requirement_id", ref.get("gap_id"))),
+                    ref.get("revision")) in coverage]
+                not_reviewed = [ref for ref in refs if ref not in reviewed]
+                view_id = digest([cycle_id, committed["candidate_hash"], refs])
+                return {"binding": {"cycle_id": cycle_id,
+                    "state_version": snapshot["state_version"],
+                    "task_version": snapshot["B"]["G"]["task_version"],
+                    "phase2_view_id": view_id}, "committed_view": projected,
+                    "recent_activity": body["observation_batch"],
+                    "source_catalog": visible, "selected_refs": refs,
+                    "reviewed_this_cycle_refs": reviewed,
+                    "not_reviewed_this_cycle_refs": not_reviewed}
+            def measure(work):
+                return self.proxy.measure(selection(prepare_selection(work)))[
+                    "proxy_tokens"]
+            selection_work = WorksetBuilder().build(snapshot, [], ledger, selected,
+                cycle_id + "/selection", snapshot["committed_event_seq"], measure,
+                archive=self.store.archive()).payload()
+            select_input = prepare_selection(selection_work)
+            refs = select_input["selected_refs"]
+            phase2_view_id = select_input["binding"]["phase2_view_id"]
             answer_raw = self._call(cycle_id, "selection", selection(select_input),
                                     calls + 1, 2048)
             decision = validate_selection(strict_loads(answer_raw), snapshot=snapshot,
@@ -358,7 +400,7 @@ class CycleEngine:
                         "commit": committed, "logical_calls": calls + 1}
             reminder = render_reminder(decision, snapshot=snapshot,
                 cycle_id=cycle_id, commit_id=committed["update_id"],
-                reviewed_refs=refs)
+                reviewed_refs=select_input["reviewed_this_cycle_refs"])
             return {"cycle_id": cycle_id, "status": "committed_reminder_ready",
                     "commit": committed, "reminder": reminder,
                     "logical_calls": calls + 1}
