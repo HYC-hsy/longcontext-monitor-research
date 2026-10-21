@@ -99,6 +99,7 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
     single = plan is not None and plan.get('schema') in {
         'pma-ga-single-plan-v1', 'pma-ga-single-plan-v2'}
     candidate = plan.get('research_candidate', 'U') if single else 'U'
+    stateful = candidate == 'pma_stateful_memory_v1'
     if plan is None:
         slots = [dict(order=o, task=t, repeat=r, condition=c)
                  for o, t, r, c in ORDER]
@@ -109,13 +110,18 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
                     'official_source_git_commit', 'task', 'condition', 'occurrence'}
         if versioned:
             required.add('research_candidate')
+        if stateful:
+            required.add('task_complete_response_policy')
         if (set(plan) != required or
                 plan['execution_authorized'] is not False or
                 plan['official_source_git_commit'] !=
                 '2fd12b88aafdd04a52c298e3940bcb189f9766d6' or
                 not isinstance(plan['task'], str) or
                 plan['condition'] not in {'A', 'B'} or
-                candidate not in ({'U', 'V1', 'D1'} if versioned else {'U'}) or
+                candidate not in ({'U', 'V1', 'D1', 'pma_stateful_memory_v1'}
+                                  if versioned else {'U'}) or
+                (stateful and (plan['condition'] != 'B' or
+                 plan.get('task_complete_response_policy') != 'complete-response-v1')) or
                 (plan['condition'] == 'A' and candidate != 'U') or
                 type(plan['occurrence']) is not int or plan['occurrence'] < 1):
             raise RuntimeError('single-run plan schema mismatch')
@@ -183,7 +189,8 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
                         'official_evaluator_members': desc['evaluator_members'],
                         'native_tests_tree_sha256': tests_hash,
                         'native_test_sh_sha256': test_sh_hash,
-                        'agent_timeout_multiplier': 14400 / desc['native_agent_seconds'],
+                        'agent_timeout_multiplier': (1 if stateful else
+                            14400 / desc['native_agent_seconds']),
                         'verifier_timeout_multiplier': 1}
     method = {'conditions': {'A': 'GA_only', 'B': 'GA_plus_fixed_upstream_PMA'},
               'task_turns_max': 300, 'agent_wall_seconds': 14400,
@@ -194,6 +201,13 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
               'evaluation': 'native_Harbor_SHARED_pending_lifecycle_certification'}
     if schema == 'pma-ga-live-manifest-v5':
         method['research_candidate'] = candidate
+        if candidate == 'pma_stateful_memory_v1':
+            method.update(conditions={'B': 'GA_plus_stateful_proactive_memory_v1'},
+                task_turns_max=None, agent_wall_seconds=None,
+                research_cumulative_calls=None, research_cumulative_tokens=None,
+                research_cumulative_cost=None,
+                task_complete_response_policy='complete-response-v1',
+                auxiliary_provider_retries=0, task_provider_retries=0)
     config_hash = hashlib.sha256(json.dumps(method, sort_keys=True,
         separators=(',', ':')).encode('utf-8')).hexdigest()
     certification = None

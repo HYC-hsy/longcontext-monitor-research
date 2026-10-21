@@ -106,6 +106,10 @@ def prepare(args: argparse.Namespace) -> dict:
     if not pos and candidate != 'U':
         plan['schema'] = 'pma-ga-single-plan-v2'
         plan['research_candidate'] = candidate
+        if candidate == 'pma_stateful_memory_v1':
+            if args.condition != 'B' or not args.task_complete_response:
+                raise RuntimeError('stateful candidate requires B carrier and complete response')
+            plan['task_complete_response_policy'] = 'complete-response-v1'
     _write_new(root / 'plan.json', plan)
     if pos:
         from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import prepare as prepare_pos
@@ -152,7 +156,9 @@ def run(args: argparse.Namespace) -> dict:
                 (manifest.get('candidate_profile_fixture_only') is True and
                  granted.get('candidate_profile_fixture_only') is True)):
         raise RuntimeError('single-run identity or fixture mode differs from approval')
-    if manifest.get('schema') == 'pos-ga-single-manifest-v1':
+    if (manifest.get('schema') == 'pos-ga-single-manifest-v1' or
+            manifest.get('config', {}).get('research_candidate') ==
+            'pma_stateful_memory_v1'):
         policy = manifest.get('config', {}).get('task_complete_response_policy', 'disabled')
         actual = 'complete-response-v1' if os.environ.get('GA_TASK_COMPLETE_RESPONSE') == '1' else 'disabled'
         if (policy not in {'disabled', 'complete-response-v1'} or
@@ -193,7 +199,8 @@ def main() -> None:
     prepared.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
     prepared.add_argument('--research-candidate', choices=(
         'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
-        'pos_pma_complement_v1', 'pos_pma_shared_view_v1'), default='U')
+        'pos_pma_complement_v1', 'pos_pma_shared_view_v1',
+        'pma_stateful_memory_v1'), default='U')
     prepared.add_argument('--occurrence', type=int, default=1)
     prepared.add_argument('--output', required=True)
     prepared.add_argument('--official-source-git', required=True)

@@ -95,16 +95,23 @@ def validate_plan(manifest: dict, granted: dict) -> list[dict]:
             raise RuntimeError('single-run authorization incomplete')
         row, bound = arms[0], bindings[0]
         versioned = manifest['schema'] == 'pma-ga-live-manifest-v5'
+        stateful = row.get('research_candidate') == 'pma_stateful_memory_v1'
         expected = {'order', 'task', 'repeat', 'condition'}
         if versioned:
             expected.add('research_candidate')
         if (set(row) != expected or
                 row['order'] != 1 or type(row['repeat']) is not int or
                 row['repeat'] < 1 or row['condition'] not in {'A', 'B'} or
-                row.get('research_candidate', 'U') not in {'U', 'V1', 'D1'} or
+                row.get('research_candidate', 'U') not in {'U', 'V1', 'D1',
+                    'pma_stateful_memory_v1'} or
                 (row['condition'] == 'A' and row.get('research_candidate', 'U') != 'U') or
                 (versioned and manifest.get('config', {}).get('research_candidate') !=
                  row['research_candidate']) or
+                (stateful and (row['condition'] != 'B' or
+                 manifest.get('config', {}).get('task_complete_response_policy') !=
+                    'complete-response-v1' or
+                 granted.get('task_complete_response_policy') !=
+                    'complete-response-v1')) or
                 set(manifest.get('assets', {})) != {row['task']} or
                 _identity(bound) != _identity(row) or
                 bound.get('run_id') != granted.get('run_id') or
