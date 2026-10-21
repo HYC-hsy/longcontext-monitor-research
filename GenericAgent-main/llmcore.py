@@ -624,6 +624,10 @@ class ProviderResponseCancelled(Exception):
 
 
 def _task_deadline(sess):
+    if (os.environ.get('GA_STATEFUL_MEMORY_ENABLED') == '1' and
+            os.environ.get('GA_STATEFUL_MEMORY_MODE') == 'live' and
+            os.environ.get('GA_STATEFUL_UNCAPPED_TOTAL') == '1'):
+        return None
     raw = (os.environ.get('GA_TASK_DEADLINE_EPOCH') or
            os.environ.get('GA_POS_DEADLINE_EPOCH') or
            os.environ.get('GA_PMA_UPSTREAM_DEADLINE_EPOCH') or
@@ -645,12 +649,13 @@ def _task_check_wait(sess, deadline, seconds=0):
         if consume_cancel is not None and consume_cancel():
             sess.last_response_acceptance = 'cancelled'
             raise ProviderResponseCancelled('provider response cancelled')
-        if time.time() >= deadline:
+        if deadline is not None and time.time() >= deadline:
             sess.last_response_acceptance = 'task_deadline'
             raise TaskResponseRejected('task_deadline')
         remaining = until - time.monotonic()
         if remaining <= 0: return
-        time.sleep(min(0.1, remaining, max(0.0, deadline - time.time())))
+        time.sleep(min(0.1, remaining, max(0.0, deadline - time.time()))
+                   if deadline is not None else min(0.1, remaining))
 
 
 def _stream_with_retry(sess, url, headers, payload, parse_fn):
@@ -1319,6 +1324,12 @@ class NativeClaudeSession(BaseSession):
             if payload_bytes > candidate_limit:
                 raise ValueError('candidate complete Task/PoS request exceeds frozen byte budget')
         url = auto_make_url(self.api_base, "messages") + '?beta=true'
+        if (os.environ.get('GA_STATEFUL_MEMORY_ENABLED') == '1' and
+                os.environ.get('GA_STATEFUL_MEMORY_MODE') == 'live'):
+            preflight = getattr(self, 'stateful_native_preflight', None)
+            if not callable(preflight):
+                raise RuntimeError('stateful native context preflight unavailable')
+            preflight(payload)
         integrity_parser = bool(getattr(self, 'task_complete_response', False) or
                                 getattr(self, 'candidate_auxiliary_integrity', False))
         parse_fn = (lambda r: _parse_claude_sse(r.iter_lines(), strict=integrity_parser)) if self.stream else (lambda r: _parse_claude_json(
