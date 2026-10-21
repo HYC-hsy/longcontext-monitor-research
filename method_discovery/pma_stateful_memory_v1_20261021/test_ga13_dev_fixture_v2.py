@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 
 from .engine import CycleEngine
+from .budget import TokenProxy
+from .source import digest
 from .store import MemoryStore
 from .test_contracts import empty_snapshot, leaf
 from .test_engine import ScriptedProvider
@@ -74,5 +76,17 @@ class GA13DevelopmentFixture(unittest.TestCase):
                 self.assertEqual(len(provider.calls), 3)
                 self.assertEqual(len(raw), ARCHIVE.stat().st_size)
                 self.assertEqual(len(hashlib.sha256(raw).hexdigest()), 64)
+                proxy = TokenProxy()
+                print(json.dumps({"fixture": "ga13_development_v2",
+                    "archive_sha256": hashlib.sha256(raw).hexdigest(),
+                    "archive_bytes": len(raw), "action_line": action_line,
+                    "result_line": result_line, "call_id": CALL,
+                    "source_identity": "archived_observation_only",
+                    "candidate_identity": "developer_fake",
+                    "calls": [{"role": call["role"],
+                        "messages_sha256": digest(call["messages"]),
+                        "request_size": {key: proxy.measure(call["messages"])[key]
+                            for key in ("characters", "utf8_bytes", "proxy_tokens")}}
+                        for call in provider.calls]}, sort_keys=True))
             finally:
                 store.close()

@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from .engine import CycleEngine
+from .budget import TokenProxy
 from .reminder import attach_once
 from .source import digest
 from .store import MemoryStore
@@ -26,8 +27,19 @@ class FiniteProvider:
         self.roles = []
         self.calls = []
         self.audit_count = 0
+        self.proxy = TokenProxy()
 
     def __call__(self, role, messages, call_id, max_output):
+        response = self._answer(role, messages, call_id, max_output)
+        self.calls[-1]["request_size"] = self.proxy.measure(messages)
+        response_text = json.dumps(response, ensure_ascii=False, sort_keys=True)
+        self.calls[-1]["response_size"] = {"characters": len(response_text),
+            "utf8_bytes": len(response_text.encode("utf-8")),
+            "proxy_tokens": len(self.proxy.encoding.encode(response_text))}
+        self.calls[-1]["response_sha256"] = digest(response)
+        return response
+
+    def _answer(self, role, messages, call_id, max_output):
         self.roles.append(role)
         self.calls.append({"phase": self.phase, "role": role, "call_id": call_id,
                            "messages_sha256": digest(messages)})
@@ -214,6 +226,13 @@ class MultiRoundV2Tests(unittest.TestCase):
                     "task_delivery": "included_in_accepted_request",
                     "frontier": snapshot["committed_event_seq"],
                     "state_version": snapshot["state_version"],
+                    "message_sizes": [{"phase": row["phase"], "role": row["role"],
+                        "request": {key: row["request_size"][key] for key in
+                            ("characters", "utf8_bytes", "proxy_tokens")},
+                        "response": row["response_size"],
+                        "request_sha256": row["messages_sha256"],
+                        "response_sha256": row["response_sha256"]}
+                        for row in provider.calls],
                     "real_model_calls": 0, "official_evaluator_calls": 0},
                     sort_keys=True))
             finally:
