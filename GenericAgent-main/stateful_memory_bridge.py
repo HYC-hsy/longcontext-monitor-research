@@ -203,3 +203,81 @@ class StatefulMemoryBridge:
         finally:
             self.closed = True
             self.store.close()
+
+
+class StatefulLiveBridge:
+    """Task-side client: no bank, provider profile or auxiliary raw logs."""
+
+    def __init__(self, client, *, episode_id):
+        self.client = client
+        self.episode_id = episode_id
+        self.closed = False
+        self.last_result = None
+
+    @classmethod
+    def from_environment(cls, task, *, turn_offset=0):
+        if turn_offset != 0 or os.environ.get("GA_STATEFUL_MEMORY_MODE") != "live":
+            raise StatefulBridgeError("stateful live requires a fresh episode")
+        if os.environ.get("GA_STATEFUL_LIVE_AUTHORIZED") != "1":
+            raise StatefulBridgeError("stateful live authorization binding absent")
+        required = ("GA_STATEFUL_REQUESTS", "GA_STATEFUL_RESPONSES",
+                    "GA_BENCH_RUN_ID", "GA_BENCH_TASK_ID")
+        if any(not os.environ.get(key) for key in required):
+            raise StatefulBridgeError("stateful spool identity missing")
+        from event_spool import EventClient
+        client = EventClient(Path(os.environ["GA_STATEFUL_REQUESTS"]),
+            Path(os.environ["GA_STATEFUL_RESPONSES"]),
+            os.environ["GA_BENCH_RUN_ID"], os.environ["GA_BENCH_TASK_ID"],
+            deadline_monotonic=None,
+            worker_exit=Path(os.environ["GA_STATEFUL_RESPONSES"]) /
+                "worker_exit.json")
+        bridge = cls(client, episode_id=os.environ["GA_BENCH_RUN_ID"])
+        bridge.last_result = client.exchange("initialize", task=task)
+        if not bridge.last_result["status"].startswith("committed_"):
+            raise StatefulBridgeError("init_failed")
+        return bridge
+
+    def record_incomplete(self, turn, reason, actions=(), receipts=(), *,
+                          started_unknown_ids=(), not_executed_ids=(),
+                          unclassified_ids=(), terminal=None, error_type=None,
+                          error_message=None):
+        self.client.exchange("incomplete_batch", turn=turn,
+            batch_id=f"ga-action-batch-{self.episode_id}-{turn}",
+            reason=reason, actions=list(actions), receipts=list(receipts),
+            started_unknown_ids=list(started_unknown_ids),
+            not_executed_ids=list(not_executed_ids),
+            unclassified_ids=list(unclassified_ids), terminal=terminal,
+            error_type=error_type)
+
+    def record_report(self, turn, content):
+        if content:
+            self.client.exchange("agent_report", turn=turn, content=content)
+
+    def complete_batch(self, turn, actions, receipts):
+        if not actions:
+            return None
+        self.last_result = self.client.exchange("action_batch", turn=turn,
+            batch_id=f"ga-action-batch-{self.episode_id}-{turn}",
+            actions=actions, receipts=receipts)
+        return self.last_result
+
+    def chat(self, client, messages, tools, turn):
+        request_id = f"task-{self.episode_id}-{turn}"
+        prepared = self.client.exchange("prepare_task", request_id=request_id,
+            messages=messages)
+        effective = prepared["messages"] if prepared["has_reminder"] else messages
+        response = yield from client.chat(messages=effective, tools=tools)
+        if not getattr(response, "complete_response_accepted", False):
+            raise StatefulBridgeError("Task response not completely accepted")
+        if prepared["has_reminder"]:
+            self.client.exchange("confirm_task", cycle_id=prepared["cycle_id"],
+                binding=prepared["binding"], accepted=True)
+        return response
+
+    def finish(self, terminal):
+        if self.closed:
+            return
+        try:
+            self.last_result = self.client.exchange("finish", terminal=terminal)
+        finally:
+            self.closed = True

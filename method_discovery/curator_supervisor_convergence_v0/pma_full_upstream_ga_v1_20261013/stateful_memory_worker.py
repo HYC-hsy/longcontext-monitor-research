@@ -191,9 +191,13 @@ async def serve(args) -> None:
         reason = "worker_exception"
         raise
     finally:
-        (private / "worker_exit.json").write_text(json.dumps({
+        exit_record = {
             "run_id": args.run_id, "task_id": args.task_id,
-            "reason": reason, "last_sequence": episode.sequence},
+            "reason": reason, "last_sequence": episode.sequence}
+        (private / "worker_exit.json").write_text(json.dumps(exit_record,
+            sort_keys=True), encoding="utf-8")
+        # The Task may observe only this bounded status, never the private log.
+        (responses / "worker_exit.json").write_text(json.dumps(exit_record,
             sort_keys=True), encoding="utf-8")
 
 

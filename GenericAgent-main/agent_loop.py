@@ -89,23 +89,30 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                 'GA_MONITOR_ENABLED', 'GA_M0_MONITOR_ENABLED',
                 'GA_POS_PMA_COMPLEMENT', 'GA_POS_PMA_SHARED_VIEW')):
             raise ValueError('stateful memory is exclusive of prior auxiliary modes')
-        if (os.environ.get('GA_STATEFUL_MEMORY_MODE') != 'fake-only' or
-                os.environ.get('GA_TASK_COMPLETE_RESPONSE') != '1' or
+        stateful_mode = os.environ.get('GA_STATEFUL_MEMORY_MODE')
+        if stateful_mode not in {'fake-only', 'live'}:
+            raise ValueError('stateful memory requires fake-only or bound live mode')
+        if (os.environ.get('GA_TASK_COMPLETE_RESPONSE') != '1' or
                 not getattr(getattr(client, 'backend', None),
                             'task_complete_response', False)):
-            raise ValueError('stateful memory requires fake-only complete-response Task')
+            raise ValueError('stateful memory requires bound complete-response Task')
         from urllib.parse import urlsplit
         backend = client.backend
         if getattr(backend, 'max_retries', None) != 0:
-            raise ValueError('stateful fake Task requires effective max_retries=0')
-        endpoint = urlsplit(getattr(backend, 'api_base', ''))
-        if (endpoint.scheme != 'http' or endpoint.hostname not in
-                {'127.0.0.1', 'localhost', '::1'} or
-                getattr(backend, 'api_key', None) != 'synthetic-only'):
-            raise ValueError('stateful fake Task requires loopback and synthetic key')
-        from stateful_memory_bridge import StatefulMemoryBridge
-        stateful = StatefulMemoryBridge.from_environment(initial_content,
-                                                         turn_offset=turn_offset)
+            raise ValueError('stateful Task requires effective max_retries=0')
+        if stateful_mode == 'fake-only':
+            endpoint = urlsplit(getattr(backend, 'api_base', ''))
+            if (endpoint.scheme != 'http' or endpoint.hostname not in
+                    {'127.0.0.1', 'localhost', '::1'} or
+                    getattr(backend, 'api_key', None) != 'synthetic-only'):
+                raise ValueError('stateful fake Task requires loopback and synthetic key')
+            from stateful_memory_bridge import StatefulMemoryBridge
+            stateful = StatefulMemoryBridge.from_environment(initial_content,
+                                                             turn_offset=turn_offset)
+        else:
+            from stateful_memory_bridge import StatefulLiveBridge
+            stateful = StatefulLiveBridge.from_environment(initial_content,
+                                                           turn_offset=turn_offset)
         handler.parent._stateful_memory_bridge = stateful
     shared_view = os.environ.get('GA_POS_PMA_SHARED_VIEW') == '1'
     if shared_view and os.environ.get('GA_POS_PMA_COMPLEMENT') == '1':
