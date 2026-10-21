@@ -242,14 +242,37 @@ def validate_snapshot(snapshot: object, ledger: dict[str, dict],
             if identity == (item["record_id"], item["revision"]) or identity in seen_edges:
                 raise ContractError("supersedes_cycle_or_duplicate")
             seen_edges.add(identity)
+    relation_ids = set()
     for item in array(world["relations"], "relations"):
         item = fields(item, {"relation_id", "from_entity_id", "predicate",
                              "to_entity_id", "anchored_by"})
-        nonempty(item["relation_id"], "relation_id")
+        relation_id = nonempty(item["relation_id"], "relation_id")
+        if relation_id in relation_ids:
+            raise ContractError("duplicate_id", relation_id)
+        relation_ids.add(relation_id)
         if item["from_entity_id"] not in entities or item["to_entity_id"] not in entities:
             raise ContractError("unknown_relation_entity")
         nonempty(item["predicate"], "predicate")
         state_ref(item["anchored_by"], heads, archive, historical=True)
+    history = {(record_id, item["revision"]): item for record_id, item in
+               heads.items()}
+    history.update(archive)
+    visited, active = set(), set()
+    def check_supersedes(node):
+        if node in active:
+            raise ContractError("supersedes_cycle")
+        if node in visited:
+            return
+        active.add(node)
+        for edge in history[node]["supersedes"]:
+            target = (edge["record_id"], edge["revision"])
+            if target not in history:
+                raise ContractError("version_mismatch", edge["record_id"])
+            check_supersedes(target)
+        active.remove(node)
+        visited.add(node)
+    for node in history:
+        check_supersedes(node)
     gaps = {}
     for lane, kind in (("DeltaE", "epistemic"), ("DeltaA", "achievement")):
         for item in array(belief[lane], lane):
@@ -305,6 +328,13 @@ def validate_snapshot(snapshot: object, ledger: dict[str, dict],
                 raise ContractError("gap_merge_cycle")
         else:
             raise ContractError("gap_closure_kind")
+    for item in gaps.values():
+        chain, current = set(), item
+        while current["status"] == "superseded" and current["closure"]["kind"] == "merged_into":
+            if current["gap_id"] in chain:
+                raise ContractError("gap_merge_cycle")
+            chain.add(current["gap_id"])
+            current = gaps[current["closure"]["replacement_gap_ref"]["gap_id"]]
     if belief["F"] is not None:
         focus = fields(belief["F"], {"gap_ref", "reason", "changed_at_step"})
         target = gaps[gap_ref(focus["gap_ref"], gaps)["gap_id"]]

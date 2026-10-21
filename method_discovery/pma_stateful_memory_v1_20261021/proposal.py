@@ -195,6 +195,17 @@ def build_candidate(*, proposal: dict, base: dict, catalog: SourceCatalog,
                     {"open", "blocked"}):
                 raise ContractError("gap_operation_status", key)
             lane = "DeltaE" if item["gap_kind"] == "epistemic" else "DeltaA"
+            prior = next((gap for gap in belief[lane] if gap["gap_id"] ==
+                          item["gap_id"]), None)
+            if key == "gap_upserts" and prior is not None and prior["status"] not in {
+                    "open", "blocked"}:
+                raise ContractError("gap_upsert_requires_open_base")
+            if key == "gap_resolutions" and (prior is None or prior["status"] not in {
+                    "open", "blocked"}):
+                raise ContractError("gap_resolution_requires_open_base")
+            if key == "gap_reopens" and (prior is None or prior["status"] not in {
+                    "supported", "superseded"}):
+                raise ContractError("gap_reopen_requires_closed_base")
             _upsert(belief[lane], item, "gap_id", archive_delta=archive_delta,
                     kind="gap", visible_existing_ids=visible_existing_ids)
     focus = patch["focus"]

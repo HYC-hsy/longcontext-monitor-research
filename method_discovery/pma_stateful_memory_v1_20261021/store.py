@@ -129,7 +129,9 @@ class MemoryStore:
             raise ContractError("incomplete_atomic_event")
         for leaf in leaves:
             validate_leaf(leaf)
-            if leaf["event_seq"] != seq or leaf["event_id"] != event["event_id"]:
+            # A leaf keeps its own tool_use/message identity; event_seq binds it
+            # to the host's indivisible action batch.
+            if leaf["event_seq"] != seq:
                 raise ContractError("event_leaf_identity")
         raw = canonical(event)
         event_hash = digest(event)

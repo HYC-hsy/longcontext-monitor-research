@@ -175,7 +175,9 @@ class CycleEngine:
                     observations=body["observation_batch"],
                     operation_index=[{"op": name, "count": len(value)} for name,
                         value in proposal["world_patch"].items()],
-                    resolve_manifest=manifest)
+                    resolve_manifest=manifest,
+                    contextual_objects=[*body["mandatory"]["bundles"],
+                                        *body["optional_bundles"]])
                 audit_messages = audit(view)
                 calls += 1
                 raw = self._call(cycle_id, "audit", audit_messages, calls, 8192)

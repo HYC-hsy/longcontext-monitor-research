@@ -23,7 +23,7 @@ class StoreTests(unittest.TestCase):
 
     def action(self, seq=1, text="exit 0"):
         source = leaf(text, source_id=f"out-{seq}", source_kind="tool_result")
-        source.update(event_id=f"batch-{seq}", event_seq=seq, ga_turn=seq,
+        source.update(event_id=f"tool-use-{seq}", event_seq=seq, ga_turn=seq,
                       field_path="result.stdout")
         event = {"event_id": f"batch-{seq}", "event_seq": seq,
                  "kind": "action_batch", "occurred_at_step": seq,
@@ -35,6 +35,8 @@ class StoreTests(unittest.TestCase):
         self.store.append_event(event, [source])
         self.store.append_event(event, [source])
         self.assertEqual(len(self.store.events_after(0)), 1)
+        self.assertEqual(self.store.sources()[source["source_id"]]["event_id"],
+                         "tool-use-1")
         changed = deepcopy(source)
         changed["text"] = "different"
         with self.assertRaises(ContractError):
