@@ -24,6 +24,21 @@ def _durable(path: Path, row: dict) -> None:
         os.fsync(stream.fileno())
 
 
+def load_bound_profile(path: str, expected: str, name: str) -> dict:
+    source = Path(path).resolve(strict=True)
+    raw = source.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != expected:
+        raise RuntimeError("stateful private profile hash mismatch")
+    if source.suffix == '.py':
+        import runpy
+        profile = runpy.run_path(str(source))[name]
+    else:
+        profile = json.loads(raw)[name]
+    if not isinstance(profile, dict) or not profile.get("model"):
+        raise RuntimeError("stateful model profile invalid")
+    return profile
+
+
 class StatefulEpisode:
     def __init__(self, *, run_id: str, task_id: str, archive: Path,
                  private: Path, provider, counter=None):
@@ -184,17 +199,9 @@ async def serve(args) -> None:
                     args.task_profile_sha256, args.pma_profile_file,
                     args.pma_profile_sha256, args.context_window)):
             raise RuntimeError("bound private profiles and context window required")
-        def bound_profile(path, expected, name):
-            raw = Path(path).resolve(strict=True).read_bytes()
-            if hashlib.sha256(raw).hexdigest() != expected:
-                raise RuntimeError("stateful private profile hash mismatch")
-            profile = json.loads(raw)[name]
-            if not isinstance(profile, dict) or not profile.get("model"):
-                raise RuntimeError("stateful model profile invalid")
-            return profile
-        task_profile = bound_profile(args.task_profile_file,
+        task_profile = load_bound_profile(args.task_profile_file,
             args.task_profile_sha256, args.task_profile_name)
-        role_profile = bound_profile(args.pma_profile_file,
+        role_profile = load_bound_profile(args.pma_profile_file,
             args.pma_profile_sha256, "claude_monitor_opus48")
         from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.stateful_native_count import PrivateNativeCounter
         from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.stateful_role_provider import StatefulRoleProvider

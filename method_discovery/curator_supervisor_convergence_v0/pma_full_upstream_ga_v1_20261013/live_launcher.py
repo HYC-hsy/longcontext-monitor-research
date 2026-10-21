@@ -612,10 +612,10 @@ def run_live(args) -> dict:
                     worker_args += ['--fake-replies', str(Path(
                         args.stateful_fake_replies).resolve(strict=True))]
                 else:
-                    task_json = root / 'bundle/source/mykey.json'
-                    worker_args += ['--task-profile-file', str(task_json),
+                    worker_args += ['--task-profile-file', str(Path(
+                        args.task_profile_file).resolve(strict=True)),
                         '--task-profile-name', manifest['config']['task_profile_name'],
-                        '--task-profile-sha256', _sha(task_json),
+                        '--task-profile-sha256', manifest['task_profile_sha256'],
                         '--pma-profile-file', str(memory_profile_path),
                         '--pma-profile-sha256', manifest['pma_profile_sha256'],
                         '--context-window', str(manifest['config'][

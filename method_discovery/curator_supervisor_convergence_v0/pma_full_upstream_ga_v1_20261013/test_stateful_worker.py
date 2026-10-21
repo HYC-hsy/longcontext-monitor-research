@@ -1,6 +1,7 @@
 """Real subprocess/spool with finite role replies; no model network."""
 
 import json
+import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -10,9 +11,24 @@ import time
 import unittest
 
 from .event_spool import EventClient
+from .stateful_memory_worker import load_bound_profile
 
 
 class StatefulWorkerTests(unittest.TestCase):
+    def test_bound_private_task_profile_is_not_container_gateway_profile(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'task.py'
+            source.write_text("native = {'model': 'claude-synthetic', "
+                              "'apikey': 'private-test-only', "
+                              "'apibase': 'https://private.example.invalid'}\n",
+                              encoding='utf-8')
+            digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            loaded = load_bound_profile(str(source), digest, 'native')
+            self.assertEqual(loaded['model'], 'claude-synthetic')
+            self.assertEqual(loaded['apikey'], 'private-test-only')
+            with self.assertRaisesRegex(RuntimeError, 'hash mismatch'):
+                load_bound_profile(str(source), '0' * 64, 'native')
+
     def test_private_worker_commits_and_confirms_one_reminder(self):
         repo = Path(__file__).resolve().parents[3]
         ga = repo / "GenericAgent-main"
