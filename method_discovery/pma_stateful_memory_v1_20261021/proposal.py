@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from .schema import validate_snapshot, enum, refs
+from .schema import (validate_snapshot, validate_requirement_retirement_transition,
+                     enum, refs)
 from .source import ContractError, SourceCatalog, digest, fields, integer, nonempty
 
 
@@ -330,6 +331,8 @@ def build_candidate(*, proposal: dict, base: dict, catalog: SourceCatalog,
         (kind, identifier, revision): body for kind, identifier, revision, body
         in archive_delta})
     validate_snapshot(candidate, ledger, combined_archive, goal_ledger["deltas"])
+    validate_requirement_retirement_transition(base, candidate,
+                                               combined_archive, goal_ledger)
     update_id = "update-" + digest([cycle_id, proposal["request_id"],
                                      base["state_version"], digest(candidate)])[:24]
     return {"update_id": update_id, "base": base, "candidate": candidate,

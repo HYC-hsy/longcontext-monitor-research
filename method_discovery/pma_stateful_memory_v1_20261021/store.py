@@ -7,7 +7,7 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-from .schema import validate_snapshot
+from .schema import validate_snapshot, validate_requirement_retirement_transition
 from .source import ContractError, canonical, digest, fields, integer, nonempty, validate_leaf
 
 
@@ -278,6 +278,8 @@ class MemoryStore:
                                 (kind, object_id, revision, canonical(body)))
             validate_snapshot(candidate, self.sources(), self.archive(),
                               self.goals()["deltas"])
+            validate_requirement_retirement_transition(base, candidate,
+                                                       self.archive(), self.goals())
             result = {"update_id": update_id, "cycle_id": cycle_id,
                       "base_hash": digest(base), "candidate_hash": digest(candidate),
                       "event_seq": candidate["committed_event_seq"]}

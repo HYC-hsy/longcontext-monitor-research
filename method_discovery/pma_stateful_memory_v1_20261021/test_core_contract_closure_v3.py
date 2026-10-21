@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 
 from .engine import CycleEngine
+from .proposal import build_candidate
+from .source import SourceCatalog
 from .source import ContractError, canonical
 from .store import MemoryStore
 from .test_contracts import empty_snapshot, leaf
@@ -58,6 +60,64 @@ def seeded_store(path, *, historical_state=False, repeated_user=False,
 
 
 class ClosureV3Tests(unittest.TestCase):
+    def test_committed_retirement_keeps_exact_old_replacement(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = seeded_store(Path(root) / "db", repeated_user=True,
+                                 retired_requirement=True)
+            try:
+                before = store.snapshot()
+                active = next(item for item in before["B"]["G"]["specifications"]
+                              if item["requirement_id"] == "replacement")
+                catalog = SourceCatalog(store.sources(), "retirement-window")
+                user = catalog.add("u0", 5, 9, "maintenance",
+                                   exact_stored_ref=True)
+                patch = {"protocol": "maintenance-proposal/1", "request_id": "revise",
+                    "active_task_version": 1, "base_state_version": 1,
+                    "world_patch": {"entity_upserts": [], "state_upserts": [],
+                        "relation_upserts": [], "record_transitions": []},
+                    "specification_upserts": [{**active, "revision": 2,
+                        "interpretation": "revised interpretation", "source_refs": [{
+                            "evidence_id": user.evidence_id, "quote": "task"}]}],
+                    "gap_upserts": [], "gap_resolutions": [], "gap_reopens": [],
+                    "focus": {"op": "keep"}}
+                for gap in before["B"]["DeltaE"] + before["B"]["DeltaA"]:
+                    updated = deepcopy(gap)
+                    updated["revision"] = 2
+                    updated["goal_refs"][0]["revision"] = 2
+                    patch["gap_upserts"].append(updated)
+                built = build_candidate(proposal=patch, base=before,
+                    catalog=catalog, cycle_id="revise", processed_to=2,
+                    goal_ledger=store.goals(), archive=store.archive(),
+                    visible_existing_ids={("requirement", "replacement"),
+                        ("gap", "ge"), ("gap", "ga"), ("state", "s")})
+                store.compare_and_swap(update_id=built["update_id"],
+                    cycle_id="revise", base=before, candidate=built["candidate"],
+                    archive_delta=built["archive_delta"])
+                current = store.snapshot()
+                old = next(item for item in current["B"]["G"]["specifications"]
+                           if item["requirement_id"] == "req")
+                self.assertEqual(old["retirement"]["replacement_requirement_refs"][0][
+                    "revision"], 1)
+                self.assertIn(("requirement", "replacement", 1), store.archive())
+                new = deepcopy(current)
+                new["state_version"] += 1
+                new["B"]["G"]["specifications"].append({**deepcopy(old),
+                    "requirement_id": "copied-retirement", "revision": 1})
+                with self.assertRaisesRegex(ContractError,
+                                            "invalid_requirement_replacement"):
+                    store.compare_and_swap(update_id="copied", cycle_id="copied",
+                        base=current, candidate=new, archive_delta=[])
+                self.assertEqual(store.snapshot(), current)
+                with self.assertRaisesRegex(ContractError, "version_mismatch"):
+                    invalid = deepcopy(current)
+                    invalid["B"]["G"]["specifications"][0]["retirement"][
+                        "replacement_requirement_refs"][0]["revision"] = 99
+                    from .schema import validate_snapshot
+                    validate_snapshot(invalid, store.sources(), store.archive(),
+                                      store.goals()["deltas"])
+            finally:
+                store.close()
+
     def test_current_requirement_exact_alias_reused_through_revision(self):
         with tempfile.TemporaryDirectory() as root:
             store = seeded_store(Path(root) / "db", repeated_user=True)

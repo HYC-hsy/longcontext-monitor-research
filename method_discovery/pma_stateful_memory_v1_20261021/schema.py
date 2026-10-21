@@ -64,6 +64,54 @@ def requirement_ref(value: object, requirements: dict[str, dict], archive: dict 
     raise ContractError("version_mismatch", ref["requirement_id"])
 
 
+def validate_requirement_retirement_transition(base: dict, candidate: dict,
+                                               archive: dict, goal_ledger: dict) -> None:
+    """New relationships target current heads; unchanged ones retain history."""
+    if candidate["B"]["G"]["task_version"] != goal_ledger["epoch"]:
+        raise ContractError("goal_epoch_mismatch")
+    old = {item["requirement_id"]: item for item in base["B"]["G"][
+        "specifications"]}
+    current = {item["requirement_id"]: item for item in candidate["B"]["G"][
+        "specifications"]}
+    for identifier, item in current.items():
+        retirement = item["retirement"]
+        if not retirement or retirement["kind"] != "interpretation_replaced":
+            continue
+        prior = old.get(identifier)
+        unchanged = (prior is not None and prior["status"] == "superseded" and
+            prior["retirement"] is not None and canonical(prior["retirement"]) ==
+            canonical(retirement))
+        if unchanged:
+            continue
+        for ref in retirement["replacement_requirement_refs"]:
+            replacement = current.get(ref["requirement_id"])
+            if (replacement is None or replacement["status"] != "active" or
+                    replacement["revision"] != ref["revision"] or
+                    replacement["task_version"] != ref["task_version"] or
+                    replacement["task_version"] != goal_ledger["epoch"]):
+                raise ContractError("invalid_requirement_replacement")
+    graph = {}
+    for item in [*current.values(), *(body for key, body in archive.items() if
+                 len(key) == 3 and key[0] == "requirement")]:
+        retirement = item["retirement"]
+        if retirement and retirement["kind"] == "interpretation_replaced":
+            graph.setdefault(item["requirement_id"], set()).update(ref[
+                "requirement_id"] for ref in retirement["replacement_requirement_refs"])
+    active, done = set(), set()
+    def visit(identifier):
+        if identifier in active:
+            raise ContractError("requirement_replacement_cycle")
+        if identifier in done:
+            return
+        active.add(identifier)
+        for target in graph.get(identifier, ()):
+            visit(target)
+        active.remove(identifier)
+        done.add(identifier)
+    for identifier in graph:
+        visit(identifier)
+
+
 def gap_ref(value: object, gaps: dict[str, dict]) -> dict:
     ref = fields(value, {"type", "gap_id", "revision", "task_version"})
     if ref["type"] != "gap":
@@ -185,11 +233,9 @@ def validate_snapshot(snapshot: object, ledger: dict[str, dict],
                 if not replacements:
                     raise ContractError("missing_requirement_replacement")
                 for ref in replacements:
-                    validated = requirement_ref(ref, requirements)
-                    replacement = requirements[validated["requirement_id"]]
-                    if replacement["requirement_id"] == item["requirement_id"]:
-                        raise ContractError("invalid_requirement_replacement")
-                    if replacement["status"] != "active" or replacement["task_version"] != task_version:
+                    validated = requirement_ref(ref, requirements, archive,
+                                                historical=True)
+                    if validated["requirement_id"] == item["requirement_id"]:
                         raise ContractError("invalid_requirement_replacement")
             else:
                 raise ContractError("invalid_retirement")
