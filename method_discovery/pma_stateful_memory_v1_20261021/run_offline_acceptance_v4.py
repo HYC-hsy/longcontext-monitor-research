@@ -10,11 +10,15 @@ from .run_offline_acceptance_v2 import PACKAGE, REPO, git, sha
 
 
 MODULE = 'method_discovery.pma_stateful_memory_v1_20261021'
-DEST = PACKAGE / 'evidence' / 'final_contract_patch_v4'
+DEST = PACKAGE / 'evidence' / 'final_contract_patch_v4' / 'run_02'
 BASELINE = '9cddc758aaff9b982f8e2debd88bf280a2adc8e3'
 V3_SOURCE = 'df2e0f8acc3f41be44d6bfd4a06341a264eee953'
 LABELS = ('original_82', 'unittest_all', 'fake_scenarios', 'continuous_episode',
           'ga13_development_v4', 'contracts_without_tokenizer')
+SCENARIOS = ('initial_task', 'clean_remind', 'clean_silent', 'issues_repair_clean',
+             'audit_correction_exhausted', 'failed_then_replayed',
+             'prefix_backlog', 'goal_epoch_stale')
+LABELS += tuple('scenario_' + name for name in SCENARIOS)
 
 
 def offline_child(label):
@@ -28,6 +32,10 @@ def offline_child(label):
     def missing_cache(path):
         raise RuntimeError('offline_tokenizer_cache_missing: ' + path)
     tiktoken.load.read_file = missing_cache
+    if label.startswith('scenario_'):
+        from .offline_fixture import scenario
+        print(json.dumps(scenario(label[len('scenario_'):]), sort_keys=True))
+        return
     if label == 'fake_scenarios':
         runpy.run_module(MODULE + '.offline_fixture', run_name='__main__')
         return
