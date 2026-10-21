@@ -380,6 +380,58 @@ class ClosureV3Tests(unittest.TestCase):
                             "archived_requirement" and item["record_ref"][
                             "requirement_id"] == "replacement" and item[
                             "record_ref"]["revision"] == 1 for item in context))
+                user = leaf("new task", source_id="u1")
+                user.update(event_id="user-4", event_seq=4, ga_turn=4)
+                store.append_event({"event_id": "user-4", "event_seq": 4,
+                    "kind": "user_message", "occurred_at_step": 4,
+                    "source_ids": ["u1"], "payload": {}}, [user])
+                before_goal = store.snapshot()
+                delta = store.goals()["deltas"]["goal-delta-2"]
+                active = next(item for item in before_goal["B"]["G"][
+                    "specifications"] if item["requirement_id"] == "replacement")
+                catalog = SourceCatalog(store.sources(), "later-goal")
+                old_source = catalog.add("u0", 5, 9, "maintenance",
+                                         exact_stored_ref=True)
+                new_source = catalog.add("u1", 0, len(user["text"]), "maintenance")
+                patch = {"protocol": "maintenance-proposal/1", "request_id":
+                    "later-goal", "active_task_version": 2,
+                    "base_state_version": before_goal["state_version"],
+                    "world_patch": {"entity_upserts": [], "state_upserts": [],
+                        "relation_upserts": [], "record_transitions": []},
+                    "specification_upserts": [{**active,
+                        "revision": active["revision"] + 1,
+                        "source_refs": [{"evidence_id": old_source.evidence_id,
+                            "quote": "task"}], "status": "superseded",
+                        "retirement": {"kind": "goal_changed",
+                            "goal_delta_ref": delta}},
+                        {"requirement_id": "@fresh", "revision": 1,
+                         "task_version": 2, "interpretation": "new task",
+                         "source_refs": [{"evidence_id": new_source.evidence_id,
+                             "quote": user["text"]}], "status": "active",
+                         "retirement": None}],
+                    "gap_upserts": [], "gap_resolutions": [], "gap_reopens": [],
+                    "focus": {"op": "keep"}}
+                for gap in before_goal["B"]["DeltaE"] + before_goal["B"]["DeltaA"]:
+                    updated = deepcopy(gap)
+                    updated["revision"] += 1
+                    updated["status"] = "superseded"
+                    updated["closure"] = {"kind": "goal_changed",
+                                          "goal_delta_ref": delta}
+                    patch["gap_resolutions"].append(updated)
+                migrated = build_candidate(proposal=patch, base=before_goal,
+                    catalog=catalog, cycle_id="new-goal", processed_to=4,
+                    goal_ledger=store.goals(), archive=store.archive(),
+                    visible_existing_ids={("requirement", "replacement"),
+                        ("gap", "ge"), ("gap", "ga"), ("state", "s")})
+                store.compare_and_swap(update_id=migrated["update_id"],
+                    cycle_id="new-goal", base=before_goal,
+                    candidate=migrated["candidate"],
+                    archive_delta=migrated["archive_delta"])
+                retained = next(item for item in store.snapshot()["B"]["G"][
+                    "specifications"] if item["requirement_id"] == "req")
+                self.assertEqual(retained["retirement"][
+                    "replacement_requirement_refs"][0]["revision"], 1)
+                self.assertIn(("requirement", "replacement", 2), store.archive())
             finally:
                 store.close()
 
