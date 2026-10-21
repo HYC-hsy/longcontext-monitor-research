@@ -175,7 +175,7 @@ def validate_snapshot(snapshot: object, ledger: dict[str, dict],
                 fields(retirement, {"kind", "goal_delta_ref"})
                 delta = goal_delta_ref(retirement["goal_delta_ref"], goal_deltas)
                 if delta["from_task_version"] != item["task_version"] or delta[
-                        "to_task_version"] != task_version:
+                        "to_task_version"] > task_version:
                     raise ContractError("retirement_goal_delta_mismatch")
             elif kind == "interpretation_replaced":
                 fields(retirement, {"kind", "replacement_requirement_refs", "source_refs"})
@@ -185,8 +185,8 @@ def validate_snapshot(snapshot: object, ledger: dict[str, dict],
                 if not replacements:
                     raise ContractError("missing_requirement_replacement")
                 for ref in replacements:
-                    replacement = requirements[requirement_ref(ref, requirements)[
-                        "requirement_id"]]
+                    validated = requirement_ref(ref, requirements)
+                    replacement = requirements[validated["requirement_id"]]
                     if replacement["requirement_id"] == item["requirement_id"]:
                         raise ContractError("invalid_requirement_replacement")
                     if replacement["status"] != "active" or replacement["task_version"] != task_version:

@@ -2,10 +2,11 @@
 
 import tempfile
 import unittest
+from copy import deepcopy
 from pathlib import Path
 
 from .reminder import attach_once, render_reminder, validate_selection
-from .source import ContractError
+from .source import ContractError, digest
 from .store import MemoryStore
 from .test_contracts import empty_snapshot, leaf
 
@@ -38,7 +39,13 @@ class ReminderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             store = MemoryStore(Path(root) / "state.sqlite3")
             store.initialize(empty_snapshot(), leaf("task"))
-            reminder = {"reminder_id": "r", "state_version": 0,
+            base = store.snapshot()
+            candidate = deepcopy(base)
+            candidate["state_version"] = 1
+            store.compare_and_swap(update_id="update", cycle_id="c", base=base,
+                candidate=candidate, archive_delta=[])
+            reminder = {"reminder_id": "reminder-" + digest([
+                candidate["episode_id"], "c", "update"])[:24], "state_version": 1,
                         "task_version": 1}
             messages = [{"role": "user", "content": "task"}]
             seen = []
@@ -49,6 +56,9 @@ class ReminderTests(unittest.TestCase):
                 attach_once(store=store, reminder=reminder, task_messages=messages,
                             request_id="req", cycle_id="c", send=uncertain)
             self.assertEqual(len(seen), 1)
+            with self.assertRaisesRegex(ContractError, "reminder_cycle_binding_mismatch"):
+                attach_once(store=store, reminder=reminder, task_messages=messages,
+                            request_id="req", cycle_id="another-cycle", send=uncertain)
             self.assertEqual(messages, [{"role": "user", "content": "task"}])
             with self.assertRaisesRegex(ContractError, "outcome_unknown"):
                 attach_once(store=store, reminder=reminder, task_messages=messages,

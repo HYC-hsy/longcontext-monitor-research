@@ -13,6 +13,8 @@ from .reminder import render_reminder
 from .schema import validate_snapshot
 from .source import ContractError, SourceCatalog, digest
 from .store import MemoryStore
+from .retrieval import WorksetBuilder
+from .prompts import maintenance as maintenance_messages
 from .test_contracts import empty_snapshot, leaf
 from . import test_engine as engine_fixtures
 from .test_schema_advanced import rich_state
@@ -94,6 +96,64 @@ class CoreContractRepairTests(unittest.TestCase):
                 with self.assertRaisesRegex(ContractError, "version_mismatch"):
                     validate_snapshot(bad, store.sources(), store.archive(),
                                       store.goals()["deltas"])
+                invented = deepcopy(store.snapshot())
+                invented["B"]["DeltaA"][0]["goal_refs"][0]["revision"] = 99
+                with self.assertRaisesRegex(ContractError, "version_mismatch"):
+                    validate_snapshot(invented, store.sources(), store.archive(),
+                                      store.goals()["deltas"])
+            finally:
+                store.close()
+
+    def test_same_goal_interpretation_revision_migrates_open_gaps_atomically(self):
+        seed, ledger = rich_state()
+        seed["committed_event_seq"] = 1
+        with tempfile.TemporaryDirectory() as root:
+            store = MemoryStore(Path(root) / "revision.sqlite3")
+            try:
+                store.initialize(empty_snapshot(), ledger["u0"])
+                action = leaf("check feature", source_id="action", source_kind="executed_action")
+                action.update(event_id="tool-use", event_seq=1, ga_turn=1,
+                              field_path="action.arguments")
+                store.append_event({"event_id": "batch-1", "event_seq": 1,
+                    "kind": "action_batch", "occurred_at_step": 1,
+                    "source_ids": ["action", "tool"], "payload": {"actions": [
+                        {"tool_use_id": "tool-use"}]}}, [action, ledger["tool"]])
+                store.compare_and_swap(update_id="fixture-seed", cycle_id="seed",
+                    base=store.snapshot(), candidate=seed, archive_delta=[])
+                base = store.snapshot()
+                catalog = SourceCatalog(store.sources(), "same-goal")
+                user = catalog.add("u0", 0, 4, "maintenance")
+                req = deepcopy(base["B"]["G"]["specifications"][0])
+                req.update(revision=2, interpretation="corrected task interpretation",
+                           source_refs=[{"evidence_id": user.evidence_id,
+                                         "quote": "task"}])
+                revised = []
+                for gap in base["B"]["DeltaE"] + base["B"]["DeltaA"]:
+                    item = deepcopy(gap)
+                    item["revision"] = 2
+                    item["goal_refs"][0]["revision"] = 2
+                    revised.append(item)
+                proposal = {"protocol": "maintenance-proposal/1", "request_id": "revise",
+                    "active_task_version": 1, "base_state_version": 1,
+                    "world_patch": {"entity_upserts": [], "state_upserts": [],
+                        "relation_upserts": [], "record_transitions": []},
+                    "specification_upserts": [req], "gap_upserts": revised,
+                    "gap_resolutions": [], "gap_reopens": [], "focus": {"op": "keep"}}
+                built = build_candidate(proposal=proposal, base=base, catalog=catalog,
+                    cycle_id="revise", processed_to=1, goal_ledger=store.goals(),
+                    visible_existing_ids={("requirement", "req"), ("gap", "ge"),
+                                          ("gap", "ga"), ("state", "s")},
+                    archive=store.archive())
+                self._audit_clean(base, built["candidate"], catalog)
+                store.compare_and_swap(update_id=built["update_id"], cycle_id="revise",
+                    base=base, candidate=built["candidate"],
+                    archive_delta=built["archive_delta"])
+                self.assertEqual(store.snapshot()["B"]["G"]["specifications"][0][
+                    "revision"], 2)
+                self.assertTrue(all(gap["goal_refs"][0]["revision"] == 2 for gap in
+                    store.snapshot()["B"]["DeltaE"] + store.snapshot()["B"]["DeltaA"]))
+                self.assertEqual(store.archive()[("requirement", "req", 1)][
+                    "interpretation"], "complete task")
             finally:
                 store.close()
 
@@ -161,6 +221,128 @@ class CoreContractRepairTests(unittest.TestCase):
             "gap_reopens": [], "focus": {"op": "keep"}}
         with self.assertRaisesRegex(ContractError, "transition_status"):
             validate_proposal(proposal, request_id="req", task_version=1, base_version=0)
+        for replacement in (None, 7, ""):
+            bad = deepcopy(proposal)
+            bad["world_patch"]["record_transitions"][0]["to_status"] = "contested"
+            bad["world_patch"]["record_transitions"][0]["reason"] = replacement
+            with self.assertRaisesRegex(ContractError, "invalid_text"):
+                validate_proposal(bad, request_id="req", task_version=1, base_version=0)
+        bad = deepcopy(proposal)
+        bad["world_patch"]["record_transitions"][0]["to_status"] = "contested"
+        bad["world_patch"]["record_transitions"][0]["evidence_refs"] = None
+        with self.assertRaisesRegex(ContractError, "invalid_array"):
+            validate_proposal(bad, request_id="req", task_version=1, base_version=0)
+        bad = deepcopy(proposal)
+        bad["world_patch"]["record_transitions"] = []
+        bad["world_patch"]["entity_upserts"] = [{"entity_id": "made-up",
+            "entity_type": "other", "display_name": "synthetic"}]
+        with self.assertRaisesRegex(ContractError, "new_object_requires_local_id"):
+            build_candidate(proposal=bad, base=base,
+                catalog=SourceCatalog({"u0": leaf("task")}, "w"), cycle_id="c",
+                processed_to=0, goal_ledger={"epoch": 1, "deltas": {},
+                "messages": ["u0"]}, visible_existing_ids=set(), archive={})
+
+    def test_transition_references_must_be_visible_and_valid(self):
+        base, ledger = rich_state()
+        catalog = SourceCatalog(ledger, "transition-window")
+        visible = catalog.add("tool", 0, len(ledger["tool"]["text"]), "maintenance")
+        proposal = {"protocol": "maintenance-proposal/1", "request_id": "req",
+            "active_task_version": 1, "base_state_version": 1,
+            "world_patch": {"entity_upserts": [], "state_upserts": [],
+                "relation_upserts": [], "record_transitions": [{"record_ref": {
+                    "type": "state", "record_id": "s", "revision": 1},
+                    "to_status": "contested", "reason": "new synthetic contradiction",
+                    "evidence_refs": [{"evidence_id": visible.evidence_id,
+                                       "quote": "feature absent"}]}]},
+            "specification_upserts": [], "gap_upserts": [], "gap_resolutions": [],
+            "gap_reopens": [], "focus": {"op": "keep"}}
+        built = build_candidate(proposal=proposal, base=base, catalog=catalog,
+            cycle_id="transition", processed_to=0,
+            goal_ledger={"epoch": 1, "deltas": {}, "messages": ["u0"]},
+            visible_existing_ids={("state", "s")}, archive={})
+        self.assertEqual(built["candidate"]["B"]["W"]["states"][0]["use_status"],
+                         "contested")
+        self.assertEqual(built["candidate"]["B"]["W"]["states"][0]["revision"], 2)
+        self.assertEqual(built["candidate"]["B"]["W"]["states"][0]["claim"],
+                         base["B"]["W"]["states"][0]["claim"])
+        unknown = deepcopy(proposal)
+        unknown["world_patch"]["record_transitions"][0]["evidence_refs"][0][
+            "evidence_id"] = "ev_unknown"
+        with self.assertRaisesRegex(ContractError, "invisible_reference"):
+            build_candidate(proposal=unknown, base=base, catalog=catalog,
+                cycle_id="transition", processed_to=0,
+                goal_ledger={"epoch": 1, "deltas": {}, "messages": ["u0"]},
+                visible_existing_ids={("state", "s")}, archive={})
+
+    def test_missing_historical_action_is_visible_as_unknown_not_success(self):
+        snap, ledger = rich_state()
+        work = WorksetBuilder(input_limit=100000).build(snap, [], ledger,
+            snap["B"]["W"]["states"], "c", 0,
+            lambda body: len(json.dumps(body)), archive={}).payload()
+        engine = CycleEngine.__new__(CycleEngine)
+        _catalog, sources = engine._catalog(ledger, work)
+        tool = next(item for item in sources if item["source_id"] == "tool" and
+                    item["purpose"] == "maintenance")
+        self.assertEqual(tool["source_context_status"],
+                         "source_context_unavailable")
+        sent = maintenance_messages({"source_catalog": sources})
+        self.assertIn("source_context_unavailable", sent[1]["content"])
+
+    def test_anchor_status_time_origin_and_gap_kind_table(self):
+        snap, ledger = rich_state()
+        decision = {"decision": "remind", "state_version": 1,
+            "task_version": 1, "phase2_view_id": "v", "refs": [{"type": "state",
+                "record_id": "s", "revision": 1}], "context_for_action": "consider"}
+        state = snap["B"]["W"]["states"][0]
+        for status, temporal, expected in (
+                ("active", "present_fact", "current_claim"),
+                ("active", "past_episode", "historical_record"),
+                ("historical_only", "present_fact", "historical_record"),
+                ("contested", "present_fact", "uncertain_claim")):
+            state["use_status"] = status
+            state["claim"]["time_role"] = temporal
+            validate_snapshot(snap, ledger)
+            anchor = render_reminder(decision, snapshot=snap, cycle_id="c",
+                commit_id="k", reviewed_refs=[])["anchors"][0]
+            self.assertEqual((anchor["render_mode"], anchor["use_status"],
+                              anchor["temporal_badge"]), (expected, status, temporal))
+        decision["refs"] = [{"type": "gap", "gap_id": "ge", "revision": 1,
+                            "task_version": 1}]
+        anchor = render_reminder(decision, snapshot=snap, cycle_id="c",
+            commit_id="k", reviewed_refs=[])["anchors"][0]
+        self.assertEqual(anchor["gap_kind"], "epistemic")
+
+    def test_procedural_episode_and_inference_lesson_render_separately(self):
+        snap, ledger = rich_state()
+        action = leaf("check feature", source_id="action", source_kind="executed_action")
+        action.update(event_id="tool-use", event_seq=1, ga_turn=1,
+                      field_path="action.arguments")
+        ledger["action"] = action
+        state = snap["B"]["W"]["states"][0]
+        observed = deepcopy(state.pop("claim"))
+        observed["time_role"] = "past_episode"
+        state["kind"] = "procedural"
+        state["episode"] = {"conditions": deepcopy(observed),
+            "action_text": "check feature", "action_refs": [{"source_id": "action",
+                "start": 0, "end": 13, "quote": "check feature"}],
+            "result": deepcopy(observed), "time_role": "past_episode"}
+        state["lesson"] = {"text": "check before generalizing",
+            "assertion_origin": "inference", "time_role": "general_hypothesis",
+            "support_refs": deepcopy(observed["support_refs"]),
+            "challenge_refs": []}
+        validate_snapshot(snap, ledger)
+        decision = {"decision": "remind", "state_version": 1,
+            "task_version": 1, "phase2_view_id": "v", "refs": [{"type": "state",
+                "record_id": "s", "revision": 1}], "context_for_action": "consider"}
+        reminder = render_reminder(decision, snapshot=snap, cycle_id="c",
+            commit_id="k", reviewed_refs=[])
+        self.assertEqual([anchor["component"] for anchor in reminder["anchors"]],
+                         ["episode", "lesson"])
+        self.assertEqual([anchor["origin_badge"] for anchor in reminder["anchors"]],
+                         ["tool_observation", "inference"])
+        self.assertEqual(reminder["anchors"][1]["temporal_badge"],
+                         "general_hypothesis")
+        self.assertEqual(reminder["anchors"][0]["use_status"], "active")
 
     def test_historical_knowledge_is_not_current_anchor(self):
         snap, _ = rich_state()
@@ -291,6 +473,53 @@ class CoreContractRepairTests(unittest.TestCase):
                              "revised task")
             self.assertTrue(any(item["source_id"] == "u1" for item in
                 audit["source_catalog"]))
+        finally:
+            fixture.tearDown()
+
+    def test_two_user_revisions_freeze_full_goal_ledger_but_not_frontier(self):
+        fixture = engine_fixtures.EngineTests("test_clean_commit_silent_and_same_trigger_idempotence")
+        fixture.setUp()
+        try:
+            fixture.store.append_event(*engine_fixtures.event(2, "huge " * 40000))
+            for seq in (3, 4):
+                user = leaf(f"revision {seq}", source_id=f"user-{seq}")
+                user.update(event_id=f"user-event-{seq}", event_seq=seq, ga_turn=seq)
+                fixture.store.append_event({"event_id": f"user-event-{seq}",
+                    "event_seq": seq, "kind": "user_message", "occurred_at_step": seq,
+                    "source_ids": [user["source_id"]], "payload": {}}, [user])
+            provider = engine_fixtures.ScriptedProvider()
+            result = CycleEngine(fixture.store, provider, task_text="task").run(
+                "two-revisions")
+            self.assertEqual(result["status"], "committed_backlog_pending")
+            self.assertEqual(result["commit"]["event_seq"], 1)
+            goal = json.loads(provider.calls[0]["messages"][1]["content"])[
+                "goal_ledger"]
+            self.assertEqual(goal["epoch"], 3)
+            self.assertEqual(len(goal["deltas"]), 2)
+            self.assertEqual([item["within_processing_prefix"] for item in goal[
+                "messages"]], [True, False, False])
+            self.assertEqual([call["role"] for call in provider.calls],
+                             ["maintenance", "audit"])
+        finally:
+            fixture.tearDown()
+
+    def test_required_goal_text_over_budget_fails_before_provider(self):
+        fixture = engine_fixtures.EngineTests("test_clean_commit_silent_and_same_trigger_idempotence")
+        fixture.setUp()
+        try:
+            user = leaf("new requirement " * 50000, source_id="huge-user")
+            user.update(event_id="huge-user-event", event_seq=2, ga_turn=2)
+            fixture.store.append_event({"event_id": "huge-user-event",
+                "event_seq": 2, "kind": "user_message", "occurred_at_step": 2,
+                "source_ids": ["huge-user"], "payload": {}}, [user])
+            provider = engine_fixtures.ScriptedProvider()
+            result = CycleEngine(fixture.store, provider, task_text="task").run(
+                "oversized-goal")
+            self.assertEqual(result["status"], "runtime_failed")
+            self.assertEqual(result["error_code"], "input_budget_exceeded")
+            self.assertEqual(result["logical_calls"], 0)
+            self.assertEqual(provider.calls, [])
+            self.assertEqual(fixture.store.snapshot()["committed_event_seq"], 0)
         finally:
             fixture.tearDown()
 

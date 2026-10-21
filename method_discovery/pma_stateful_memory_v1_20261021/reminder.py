@@ -93,7 +93,8 @@ def render_reminder(decision: dict, *, snapshot: dict, cycle_id: str,
             mode = ("uncertain_claim" if status == "contested" else
                     "historical_record" if status == "historical_only" or
                     temporal == "past_episode" else
-                    "conditional_experience" if item["kind"] == "procedural" else
+                    "conditional_experience" if item["kind"] == "procedural" or
+                    origin == "inference" else
                     "current_claim")
         elif ref["type"] == "requirement":
             origin, temporal, status, scope, mode = (
@@ -138,6 +139,11 @@ def attach_once(*, store, reminder: dict, task_messages: list[dict],
                 request_id: str, cycle_id: str,
                 send: Callable[[list[dict]], object]) -> object:
     """The label is an auxiliary user turn, not a replacement user command."""
+    snapshot = store.snapshot()
+    commit = store.commit_for_cycle(cycle_id)
+    if commit is None or reminder.get("reminder_id") != "reminder-" + digest([
+            snapshot["episode_id"], cycle_id, commit["update_id"]])[:24]:
+        raise ContractError("reminder_cycle_binding_mismatch")
     if store.delivery_result(reminder["reminder_id"]) is not None:
         raise ContractError("reminder_already_delivered")
     if any(row["phase"] == "delivery_attempt" and row["body"].get(
@@ -146,7 +152,6 @@ def attach_once(*, store, reminder: dict, task_messages: list[dict],
         raise ContractError("delivery_outcome_unknown_check_journal")
     if store.delivery_attempt_cycles(reminder["reminder_id"]):
         raise ContractError("delivery_outcome_unknown_check_journal")
-    snapshot = store.snapshot()
     if (snapshot["state_version"] != reminder["state_version"] or
             store.goals()["epoch"] != reminder["task_version"]):
         raise ContractError("selection_stale")

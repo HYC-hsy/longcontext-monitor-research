@@ -312,6 +312,9 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(self.store.goals()["epoch"], 2)
         self.assertEqual([item["role"] for item in provider.calls],
                          ["maintenance", "audit"])
+        self.assertEqual(result["logical_calls"], 2)
+        self.assertEqual(result["observable_attempts"], 2)
+        self.assertEqual(result["responses_received"], 2)
 
     def test_goal_change_during_selection_cannot_prepare_old_reminder(self):
         provider = ScriptedProvider(create_requirement=True, remind=True)

@@ -224,6 +224,7 @@ class CycleEngine:
                     "task_id": snapshot["task_id"],
                     "episode_id": snapshot["episode_id"],
                     "active_task_version": goals["epoch"],
+                    "goal_ledger_hash": digest(goals),
                     "base_state_version": snapshot["state_version"],
                     "base_state_hash": digest(snapshot),
                     "source_window_id": body["source_window_id"]}

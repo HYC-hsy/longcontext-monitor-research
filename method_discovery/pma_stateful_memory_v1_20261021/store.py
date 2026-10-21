@@ -241,6 +241,11 @@ class MemoryStore:
                               (update_id,)).fetchone()
         return _decode(row[0]) if row else None
 
+    def commit_for_cycle(self, cycle_id: str) -> dict | None:
+        row = self.db.execute("SELECT result FROM commits WHERE cycle_id=?",
+                              (cycle_id,)).fetchone()
+        return _decode(row[0]) if row else None
+
     def compare_and_swap(self, *, update_id: str, cycle_id: str,
                          base: dict, candidate: dict, archive_delta: list[tuple[str, str,
                          int, dict]]) -> dict:
