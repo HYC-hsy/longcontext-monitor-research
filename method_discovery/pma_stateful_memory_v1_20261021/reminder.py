@@ -143,6 +143,8 @@ def attach_once(*, store, reminder: dict, task_messages: list[dict],
     store.journal(cycle_id, "delivery_attempt", {"reminder_id": reminder["reminder_id"],
         "request_id": request_id, "messages_sha256": digest(messages)})
     response = send(messages)
+    if type(response) is not dict or response.get("accepted") is not True:
+        raise ContractError("task_response_not_accepted")
     store.delivery(reminder["reminder_id"], request_id,
                    {"status": "included_in_accepted_request",
                     "request_id": request_id, "messages_sha256": digest(messages)})

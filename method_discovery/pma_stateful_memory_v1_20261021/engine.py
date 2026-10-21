@@ -47,10 +47,15 @@ class CycleEngine:
     def _catalog(self, ledger: dict, work: dict) -> tuple[SourceCatalog, list[dict]]:
         catalog = SourceCatalog(ledger, work["source_window_id"])
         visible = []
+        seen = set()
         def add(source_id: str, start: int, end: int) -> None:
             if start == end:
                 return
             for purpose in ("maintenance", "audit"):
+                identity = (source_id, start, end, purpose)
+                if identity in seen:
+                    continue
+                seen.add(identity)
                 span = catalog.add(source_id, start, end, purpose)
                 visible.append({"evidence_id": span.evidence_id,
                     "source_id": source_id, "source_kind": ledger[source_id]["source_kind"],
@@ -107,30 +112,36 @@ class CycleEngine:
             recent = self.store.events_after(max(0, frozen_tip - 8))
             query = query_text(self.task_text, [], [event["payload"] for event in recent])
             ranked = index.select(query)
+            def prepare_maintenance(body):
+                catalog, visible = self._catalog(ledger, body)
+                binding = {"cycle_id": cycle_id,
+                    "request_id": f"{cycle_id}/maintenance",
+                    "task_id": snapshot["task_id"],
+                    "episode_id": snapshot["episode_id"],
+                    "active_task_version": goals["epoch"],
+                    "base_state_version": snapshot["state_version"],
+                    "base_state_hash": digest(snapshot),
+                    "source_window_id": body["source_window_id"]}
+                payload = {"protocol": "maintenance-input/1", "binding": binding,
+                    "before_view": snapshot,
+                    "observation_batch": body["observation_batch"],
+                    "working_set": {"mandatory": body["mandatory"],
+                                    "optional_bundles": body["optional_bundles"],
+                                    "omissions": body["omissions"]},
+                    "source_catalog": visible,
+                    "mutation_scope": {"visible_existing_refs": [r["record_id"] for r
+                        in snapshot["B"]["W"]["states"]],
+                        "new_local_ids_allowed": True}}
+                binding["maintenance_view_id"] = digest(payload)
+                return payload, catalog, visible
             def measure(body):
-                return self.proxy.measure(maintenance({"protocol": "maintenance-input/1",
-                    "before_view": snapshot, "working_set": body,
-                    "source_catalog": []}))["proxy_tokens"]
+                payload, _catalog, _visible = prepare_maintenance(body)
+                return self.proxy.measure(maintenance(payload))["proxy_tokens"]
             work = WorksetBuilder().build(snapshot, pending, ledger, ranked,
                                           cycle_id, frozen_tip, measure)
             body = work.payload()
-            catalog, visible = self._catalog(ledger, body)
-            binding = {"cycle_id": cycle_id, "request_id": f"{cycle_id}/maintenance",
-                "task_id": snapshot["task_id"], "episode_id": snapshot["episode_id"],
-                "active_task_version": goals["epoch"],
-                "base_state_version": snapshot["state_version"],
-                "base_state_hash": digest(snapshot),
-                "source_window_id": work.source_window_id}
-            maintenance_input = {"protocol": "maintenance-input/1",
-                "binding": binding, "before_view": snapshot,
-                "observation_batch": body["observation_batch"],
-                "working_set": {"mandatory": body["mandatory"],
-                                "optional_bundles": body["optional_bundles"],
-                                "omissions": body["omissions"]},
-                "source_catalog": visible,
-                "mutation_scope": {"visible_existing_refs": [r["record_id"] for r in
-                    snapshot["B"]["W"]["states"]], "new_local_ids_allowed": True}}
-            maintenance_input["binding"]["maintenance_view_id"] = digest(maintenance_input)
+            maintenance_input, catalog, visible = prepare_maintenance(body)
+            binding = maintenance_input["binding"]
             messages = maintenance(maintenance_input)
             proposal = None
             candidate = None
@@ -163,7 +174,9 @@ class CycleEngine:
                              "gap_before": next((gap for gap in snapshot["B"][
                                 "DeltaE"] + snapshot["B"]["DeltaA"] if
                                 gap["gap_id"] == item["gap_id"]), None),
-                             "gap_after": item} for item in resolving]
+                             "gap_after": item,
+                             "closure_kind": item["closure"]["kind"] if
+                                 item["closure"] else None} for item in resolving]
                 audit_binding = {"cycle_id": cycle_id,
                     "task_version": goals["epoch"],
                     "base_state_hash": digest(snapshot),

@@ -268,6 +268,22 @@ def validate_audit_result(raw: object, *, view: dict,
         item = fields(item, {"resolution_id", "gap_before", "gap_after",
                              "closure_kind", "verdict", "assessed_scope",
                              "explanation", "basis_refs", "blocking_issue_ids"})
+        expected = next(entry for entry in manifest if entry["resolution_id"] ==
+                        item["resolution_id"])
+        def gap_identity(body):
+            if body is None:
+                return None
+            return {"type": "gap", "gap_id": body["gap_id"],
+                    "revision": body["revision"],
+                    "task_version": body["task_version"]}
+        if (item["gap_before"] != gap_identity(expected["gap_before"]) or
+                item["gap_after"] != gap_identity(expected["gap_after"]) or
+                item["closure_kind"] != expected["closure_kind"]):
+            raise ContractError("closure_assessment_mismatch")
+        if type(item["blocking_issue_ids"]) is not list or type(
+                item["basis_refs"]) is not list or type(item["assessed_scope"]) is not dict:
+            raise ContractError("invalid_closure_assessment")
+        nonempty(item["explanation"], "closure.explanation")
         if item["verdict"] not in {"supported", "unsupported", "uncertain"}:
             raise ContractError("invalid_closure_verdict")
         if result["outcome"] == "clean" and item["verdict"] != "supported":
@@ -275,9 +291,11 @@ def validate_audit_result(raw: object, *, view: dict,
         if item["verdict"] != "supported" and not (
                 set(item["blocking_issue_ids"]) & issue_ids):
             raise ContractError("missing_blocking_issue")
-        if type(item["basis_refs"]) is not list:
-            raise ContractError("invalid_basis_refs")
         for ref in item["basis_refs"]:
-            if type(ref) is dict and "evidence_id" in ref:
+            if type(ref) is not dict:
+                raise ContractError("invalid_basis_ref")
+            if "evidence_id" in ref:
                 catalog.resolve(ref, purpose="audit")
+            elif ref.get("type") not in {"gap", "goal_delta"}:
+                raise ContractError("invalid_basis_ref")
     return result
