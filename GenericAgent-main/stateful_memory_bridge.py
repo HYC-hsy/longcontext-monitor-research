@@ -123,18 +123,20 @@ class StatefulMemoryBridge:
         leaves = []
         for action, receipt in zip(actions, receipts):
             tool_id = action["id"]
+            source_event_id = f"{event_id}/{tool_id}"
             action_text = canonical({"name": action["name"],
                                      "arguments": action["arguments"]}).decode("utf-8")
             result_text = canonical({"status": receipt["status"],
                                      "result": receipt["result"]}).decode("utf-8")
             leaves.extend((_leaf(action_text, f"{event_id}/{tool_id}/action",
-                                 event_id, f"tools.{tool_id}.arguments", "executed_action", turn, seq),
+                                 source_event_id, f"tools.{tool_id}.arguments", "executed_action", turn, seq),
                            _leaf(result_text, f"{event_id}/{tool_id}/result",
-                                 event_id, f"tools.{tool_id}.result", "tool_result", turn, seq)))
+                                 source_event_id, f"tools.{tool_id}.result", "tool_result", turn, seq)))
         event = {"event_id": event_id, "event_seq": seq, "kind": "action_batch",
             "occurred_at_step": turn,
             "source_ids": [leaf["source_id"] for leaf in leaves],
-            "payload": {"actions": [{"tool_use_id": action["id"]}
+            "payload": {"actions": [{"tool_use_id": f"{event_id}/{action['id']}",
+                                    "ga_tool_use_id": action["id"]}
                                     for action in actions]}}
         self.store.append_event(event, leaves)
         result = self.engine.run(event_id)

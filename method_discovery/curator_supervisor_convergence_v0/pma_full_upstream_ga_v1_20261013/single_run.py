@@ -12,13 +12,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sys
 import uuid
-
-from .batch_controller import run_batch
-from .export_official_evaluator import COMMIT
-from .prepare_six_task_manifest import prepare as prepare_manifest
-from .six_task_plan import validate_plan
-
 
 def _write_new(path: Path, value: dict) -> None:
     with path.open('x', encoding='utf-8', newline='\n') as stream:
@@ -26,7 +21,62 @@ def _write_new(path: Path, value: dict) -> None:
         stream.write('\n')
 
 
+def prepare_stateful_fake(args: argparse.Namespace) -> dict:
+    """Unarmed, local-only candidate plan; no official Task materialization."""
+    if not args.fake_only:
+        raise RuntimeError('stateful candidate preparation is fake-only')
+    root = Path(args.output).resolve(strict=False)
+    root.mkdir(parents=True, exist_ok=False)
+    plan = {'schema': 'pma-stateful-ga-fake-plan-v1',
+            'research_candidate': 'pma_stateful_memory_v1',
+            'mode': 'fake-only', 'execution_authorized': False,
+            'task': 'synthetic-local-task', 'run_id': 'stateful-' + uuid.uuid4().hex[:16]}
+    _write_new(root / 'plan.json', plan)
+    return plan
+
+
+def run_stateful_fake(args: argparse.Namespace) -> dict:
+    if not args.fake_only:
+        raise RuntimeError('stateful candidate run is fake-only')
+    root = Path(args.output).resolve(strict=True)
+    plan = json.loads((root / 'plan.json').read_text(encoding='utf-8'))
+    if plan.get('schema') != 'pma-stateful-ga-fake-plan-v1' or set(plan) != {
+            'schema', 'research_candidate', 'mode', 'execution_authorized',
+            'task', 'run_id'} or plan['research_candidate'] != 'pma_stateful_memory_v1' or \
+            plan['mode'] != 'fake-only' or plan['execution_authorized'] is not False or \
+            plan['task'] != 'synthetic-local-task' or not plan['run_id'].startswith('stateful-'):
+        raise RuntimeError('stateful fake plan identity mismatch')
+    if (root / 'result.json').exists() or (root / 'fixture').exists():
+        raise RuntimeError('stateful fake run already started')
+    # Reuse the tested GA synthetic fixture: actual NativeToolClient, GA loop,
+    # tool dispatch, core store, and finite role scripts; no Harbor claim.
+    repo = Path(__file__).resolve().parents[3]
+    ga_root = repo / 'GenericAgent-main'
+    if str(ga_root) not in sys.path:
+        sys.path.insert(0, str(ga_root))
+    from tests.test_stateful_memory_ga_bridge import run_fixture
+    facts = run_fixture(root / 'fixture', run_id=plan['run_id'])
+    required = (facts['task_posts'] == 3 and facts['role_attempts'] == 9 and
+        facts['tool_calls'] == 2 and facts['reminder_counts'] == [0, 1, 1] and
+        facts['delivery_attempts'] == 1 and facts['bridge_closed'])
+    result = {'schema': 'pma-stateful-ga-fake-result-v1',
+        'run_id': plan['run_id'], 'integration_ok': bool(required),
+        'task_posts': facts['task_posts'], 'role_attempts': facts['role_attempts'],
+        'tool_calls': facts['tool_calls'], 'reminder_counts': facts['reminder_counts'],
+        'action_batches': facts['action_batches'],
+        'committed_event_seq': facts['committed_event_seq'],
+        'pending_kinds': facts['pending_kinds'],
+        'bridge_closed': facts['bridge_closed'], 'harbor_tested': False,
+        'real_model_calls': 0, 'official_evaluator_calls': 0}
+    _write_new(root / 'result.json', result)
+    if not required:
+        raise RuntimeError('stateful GA fake integration contract failed')
+    return result
+
+
 def prepare(args: argparse.Namespace) -> dict:
+    from .export_official_evaluator import COMMIT
+    from .prepare_six_task_manifest import prepare as prepare_manifest
     root = Path(args.output).resolve(strict=False)
     root.mkdir(parents=True, exist_ok=False)
     pos = args.condition == 'P'
@@ -87,6 +137,8 @@ def prepare(args: argparse.Namespace) -> dict:
 
 
 def run(args: argparse.Namespace) -> dict:
+    from .batch_controller import run_batch
+    from .six_task_plan import validate_plan
     root = Path(args.output).resolve(strict=True)
     manifest = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))
     identity = json.loads((root / 'run_identity.json').read_text(encoding='utf-8'))
@@ -128,6 +180,14 @@ def run(args: argparse.Namespace) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
+    stateful_prepared = commands.add_parser('prepare-stateful-fake',
+        help='unarmed stateful-memory local GA fake plan; never a live manifest')
+    stateful_prepared.add_argument('--output', required=True)
+    stateful_prepared.add_argument('--fake-only', action='store_true')
+    stateful_run = commands.add_parser('run-stateful-fake',
+        help='one bounded actual GA loop with local fake transport')
+    stateful_run.add_argument('--output', required=True)
+    stateful_run.add_argument('--fake-only', action='store_true')
     prepared = commands.add_parser('prepare', help='fixed-Git asset and image check; no calls')
     prepared.add_argument('--task', required=True)
     prepared.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
@@ -176,7 +236,11 @@ def main() -> None:
     pos_fake.add_argument('--python-home', default='cpython-3.12.12-linux-x86_64-gnu')
     pos_fake.add_argument('--timeout-sec', type=int, default=180)
     args = parser.parse_args()
-    if args.command == 'prepare-pos':
+    if args.command == 'prepare-stateful-fake':
+        outcome = prepare_stateful_fake(args)
+    elif args.command == 'run-stateful-fake':
+        outcome = run_stateful_fake(args)
+    elif args.command == 'prepare-pos':
         from method_discovery.pos_upstream_ga_v1_20261017.prepare_plan import prepare as prepare_pos
         outcome = prepare_pos(source=args.official_source_git, tasks=args.task,
                               reference=args.frozen_reference_manifest, output=args.output)

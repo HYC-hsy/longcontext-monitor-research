@@ -79,7 +79,10 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
     pma_upstream = None
     pos = None
     stateful = None
-    stateful_enabled = os.environ.get('GA_STATEFUL_MEMORY_ENABLED') == '1'
+    stateful_setting = os.environ.get('GA_STATEFUL_MEMORY_ENABLED', '0')
+    if stateful_setting not in {'0', '1'}:
+        raise ValueError('invalid stateful-memory enable value')
+    stateful_enabled = stateful_setting == '1'
     if stateful_enabled:
         if any(os.environ.get(name) == '1' for name in (
                 'GA_POS_ENABLED', 'GA_PMA_UPSTREAM_ENABLED', 'GA_PMA_ENABLED',
