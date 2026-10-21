@@ -174,6 +174,14 @@ class EngineTests(unittest.TestCase):
         replay = CycleEngine(self.store, fixed, task_text="task").run("trigger-4")
         self.assertEqual(replay["status"], "committed_selection_silent")
         self.assertEqual(self.store.snapshot()["committed_event_seq"], 1)
+        replay_input = json.loads(fixed.calls[0]["messages"][1]["content"])[
+            "observation_batch"]
+        self.assertEqual(replay_input["events"][0]["event_id"], "batch-1")
+        self.assertEqual(replay_input["events"][0]["delivery_kind"], "replayed")
+        self.assertEqual(replay_input["events"][0]["previous_attempt_ids"],
+                         [result["cycle_id"]])
+        self.assertEqual(replay_input["previous_attempt_diagnostics"][0][
+            "epistemic_status"], "diagnostic_not_evidence")
 
     def test_issues_repair_reaudit_five_calls(self):
         provider = ScriptedProvider(outcomes=["issues"], create_requirement=True)

@@ -210,6 +210,25 @@ class MemoryStore:
                 self.db.execute("SELECT phase,body FROM journal WHERE cycle_id=? "
                                 "ORDER BY entry_seq", (cycle_id,))]
 
+    def failed_attempts_for(self, event_ids: set[str]) -> list[dict]:
+        cycles = {}
+        for cycle_id, phase, raw in self.db.execute(
+                "SELECT cycle_id,phase,body FROM journal ORDER BY rowid"):
+            body = _decode(raw)
+            entry = cycles.setdefault(cycle_id, {})
+            if phase == "workset_frozen":
+                entry["event_ids"] = body["event_ids"]
+            elif phase == "cycle_result" and body["status"] == "failed":
+                entry["failure_class"] = body["error_code"]
+        return [{"attempt_id": cycle_id,
+                 "event_ids": [event_id for event_id in entry["event_ids"] if
+                               event_id in event_ids],
+                 "failure_class": entry["failure_class"],
+                 "detail": "prior cycle failed before commit",
+                 "epistemic_status": "diagnostic_not_evidence"}
+                for cycle_id, entry in cycles.items() if "event_ids" in entry and
+                "failure_class" in entry and event_ids.intersection(entry["event_ids"])]
+
     def commit_result(self, update_id: str) -> dict | None:
         row = self.db.execute("SELECT result FROM commits WHERE update_id=?",
                               (update_id,)).fetchone()

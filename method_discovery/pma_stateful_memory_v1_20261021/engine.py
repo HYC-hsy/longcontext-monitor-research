@@ -149,6 +149,13 @@ class CycleEngine:
         credit = 1
         try:
             ledger = self.store.sources()
+            prior_attempts = self.store.failed_attempts_for({event["event_id"]
+                for event in pending})
+            pending = [{**event, "delivery_kind": "replayed",
+                "previous_attempt_ids": [attempt["attempt_id"] for attempt in
+                    prior_attempts if event["event_id"] in attempt["event_ids"]]}
+                if any(event["event_id"] in attempt["event_ids"] for attempt in
+                       prior_attempts) else event for event in pending]
             index = MemoryIndex(snapshot)
             if index.state_hash != digest(snapshot):
                 raise ContractError("index_unavailable")
@@ -187,8 +194,13 @@ class CycleEngine:
                 return self.proxy.measure(maintenance(payload))["proxy_tokens"]
             work = WorksetBuilder().build(snapshot, pending, ledger, ranked,
                                           cycle_id, frozen_tip, measure,
-                                          archive=self.store.archive())
+                                          archive=self.store.archive(),
+                                          previous_attempt_diagnostics=prior_attempts)
             body = work.payload()
+            self.store.journal(cycle_id, "workset_frozen", {"event_ids": [item[
+                "event_id"] for item in body["observation_batch"]["events"]],
+                "source_window_id": work.source_window_id,
+                "workset_hash": digest(body)})
             maintenance_input, catalog, visible = prepare_maintenance(body)
             before_view = maintenance_input["before_view"]
             mutable_ids = visible_existing(snapshot, body)

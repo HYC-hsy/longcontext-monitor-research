@@ -202,7 +202,8 @@ class WorksetBuilder:
     def build(self, snapshot: dict, events: list[dict], ledger: dict,
               ranked: list[dict], cycle_id: str, frozen_tip: int,
               measure: Callable[[dict], int],
-              archive: dict[tuple[str, int], dict] | None = None) -> Workset:
+              archive: dict[tuple[str, int], dict] | None = None,
+              previous_attempt_diagnostics: list[dict] | None = None) -> Workset:
         archive = archive or {}
         world = snapshot["B"]["W"]
         gaps = snapshot["B"]["DeltaE"] + snapshot["B"]["DeltaA"]
@@ -249,7 +250,8 @@ class WorksetBuilder:
                  "processing_range": {"from_event_seq": snapshot[
                      "committed_event_seq"] + 1,
                      "to_event_seq": snapshot["committed_event_seq"]},
-                 "events": [], "previous_attempt_diagnostics": [],
+                 "events": [], "previous_attempt_diagnostics":
+                     previous_attempt_diagnostics or [],
                  "pending_after_batch_count": len(events)}
         work = Workset(mandatory, batch, [], [],
                        digest([cycle_id, snapshot["state_version"], frozen_tip]))
