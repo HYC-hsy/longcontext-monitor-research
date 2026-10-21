@@ -89,9 +89,19 @@ class StatefulMemoryBridge:
             return
         self.pending = (result["cycle_id"], reminder)
 
-    def record_incomplete(self, turn, reason, action_ids=()):
+    def record_incomplete(self, turn, reason, actions=(), receipts=(), *,
+                          started_unknown_ids=(), not_executed_ids=(),
+                          unclassified_ids=(), terminal=None, error_type=None,
+                          error_message=None):
+        """Preserve observed facts; absent receipts are never invented."""
         self.store.journal("host-" + self.episode_id, "incomplete_batch",
-            {"turn": turn, "reason": reason, "action_ids": list(action_ids)})
+            {"turn": turn, "reason": reason, "actions": list(actions),
+             "receipts": list(receipts),
+             "started_result_unknown_ids": list(started_unknown_ids),
+             "not_executed_ids": list(not_executed_ids),
+             "unclassified_ids": list(unclassified_ids),
+             "terminal": terminal, "error_type": error_type,
+             "error_message": error_message})
 
     def record_report(self, turn, content):
         if not content:
@@ -113,8 +123,10 @@ class StatefulMemoryBridge:
         if (len(actions) != len(receipts) or any(not action.get("id") for action in actions)
                 or [action["id"] for action in actions] !=
                    [receipt["tool_use_id"] for receipt in receipts]):
+            recorded = {receipt.get("tool_use_id") for receipt in receipts}
             self.record_incomplete(turn, "missing_or_unpaired_result",
-                                   [action.get("id", "") for action in actions])
+                actions, receipts, unclassified_ids=[action.get("id", "")
+                    for action in actions if action.get("id") not in recorded])
             raise StatefulBridgeError("incomplete GA action batch")
         event_id = f"ga-action-batch-{self.episode_id}-{turn}"
         prior = next((row for row in self.store.events_after(0) if

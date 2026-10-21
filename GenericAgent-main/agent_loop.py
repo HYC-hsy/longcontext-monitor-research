@@ -1,4 +1,4 @@
-import inspect, json, re, os
+import inspect, json, re, os, sys
 from dataclasses import dataclass
 from typing import Any, Optional
 from research_runtime import CompletionProposal, decide_completion, emit as _research_emit, telemetry_enabled as _telemetry_enabled, consume_provider_call as _consume_provider_call, register_pending_pma_reminder as _register_pending_pma_reminder, sha256_json as _sha256_json
@@ -96,6 +96,8 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
             raise ValueError('stateful memory requires fake-only complete-response Task')
         from urllib.parse import urlsplit
         backend = client.backend
+        if getattr(backend, 'max_retries', None) != 0:
+            raise ValueError('stateful fake Task requires effective max_retries=0')
         endpoint = urlsplit(getattr(backend, 'api_base', ''))
         if (endpoint.scheme != 'http' or endpoint.hostname not in
                 {'127.0.0.1', 'localhost', '::1'} or
@@ -384,6 +386,7 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                 'provider_error': provider_error_response})
        
         tool_results = []; pos_receipts = []; stateful_receipts = []
+        stateful_batch_incomplete = False
         next_prompts = set(); exit_reason = {}
         for ii, tc in enumerate(tool_calls):
             tool_name, args, tid = tc['tool_name'], tc['args'], tc.get('id', '')
@@ -391,6 +394,13 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
             barrier = getattr(handler.parent, 'monitor_correction_barrier', None)
             if ((interruption is not None and interruption.is_requested()) or
                     (barrier is not None and barrier.is_active())):
+                if stateful is not None and stateful_actions:
+                    stateful.record_incomplete(turn, 'cancelled_before_execution',
+                        stateful_actions, stateful_receipts,
+                        not_executed_ids=[item['id'] for item in
+                                          stateful_actions[len(stateful_receipts):]],
+                        terminal={'result': 'CANCELLED_BEFORE_EXECUTION'})
+                    stateful_batch_incomplete = True
                 if pos_actions is not None:
                     for item in pos_actions[ii:]: item['status'] = 'cancelled'
                 for pending in tool_calls[ii:]:
@@ -425,8 +435,16 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                 except StopIteration as e: outcome = e.value
                 except BaseException as error:
                     if stateful is not None and tool_name != 'no_tool':
-                        stateful.record_incomplete(turn, 'tool_result_unknown_after_start',
-                            [item['id'] for item in stateful_actions])
+                        try:
+                            stateful.record_incomplete(turn, 'tool_result_unknown_after_start',
+                                stateful_actions, stateful_receipts,
+                                started_unknown_ids=[tid],
+                                not_executed_ids=[item['id'] for item in
+                                    stateful_actions[len(stateful_receipts) + 1:]],
+                                error_type=type(error).__name__,
+                                error_message=str(error))
+                        except BaseException:
+                            pass  # Never replace the original tool exception.
                     if pos is not None and tool_name != 'no_tool':
                         pos_record('tool_result_unknown_after_start', {
                             'turn': turn, 'id': tid, 'name': tool_name,
@@ -464,7 +482,15 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
             next_prompts.add(outcome.next_prompt)
         if stateful is not None:
             stateful.record_report(turn, response.content or '')
-            if stateful_actions:
+            if stateful_actions and not stateful_batch_incomplete and \
+                    len(stateful_receipts) != len(stateful_actions):
+                stateful.record_incomplete(turn, 'early_terminal_before_batch_complete',
+                    stateful_actions, stateful_receipts,
+                    not_executed_ids=[item['id'] for item in
+                                      stateful_actions[len(stateful_receipts):]],
+                    terminal=_pos_public_value(exit_reason))
+                stateful_batch_incomplete = True
+            if stateful_actions and not stateful_batch_incomplete:
                 stateful.complete_batch(turn, stateful_actions, stateful_receipts)
         if pos is not None:
             pos_record('decision_batch_completed', {'turn': turn,
@@ -624,7 +650,11 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
         if stateful_enabled:
             bridge = getattr(parent, '_stateful_memory_bridge', None)
             if bridge is not None and bridge is not old_stateful:
-                bridge.finish({'result': 'GENERATOR_CLOSED_OR_FAILED'})
+                if sys.exc_info()[0] is not None:
+                    try: bridge.finish({'result': 'GENERATOR_CLOSED_OR_FAILED'})
+                    except BaseException: pass  # Preserve the original failure.
+                else:
+                    bridge.finish({'result': 'GENERATOR_CLOSED_OR_FAILED'})
             if old_stateful is sentinel:
                 if hasattr(parent, '_stateful_memory_bridge'):
                     delattr(parent, '_stateful_memory_bridge')

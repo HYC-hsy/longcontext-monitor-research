@@ -19,7 +19,10 @@ source at event sequence zero. Each completed GA action batch supplies paired
 has one stable event/trigger ID; each tool has a unique batch-scoped leaf
 identity while retaining the GA tool-use ID in the batch payload. The core
 `CycleEngine` runs once per complete batch. An incomplete batch is journaled
-as a diagnostic and cannot advance the event frontier. Terminal agent reports
+with all planned actions, actually obtained receipts, started/result-unknown
+IDs, not-executed IDs and the original terminal/error type. It cannot advance
+the event frontier or replace the original tool exception/normal exit reason.
+Terminal agent reports
 already received are retained as pending events; `finish` does not run a new
 maintenance, audit, or selection cycle.
 
@@ -30,6 +33,10 @@ inserted again, although ordinary GA history retains its prior text. An
 unknown transport result leaves a delivery attempt in the journal and is not
 resent. State update failure retains the core's old snapshot and pending
 event; an exhausted fake role script is fatal to this bounded fixture.
+The fake fixture locally sets `GA_PROVIDER_MAX_RETRIES=0` and restores any
+outer value. The candidate additionally checks the backend's effective retry
+count before initialization or any Task/auxiliary send; old modes retain
+llmcore's existing override behavior.
 
 Verification levels are separate: the direct GA fake chain exercises native
 SSE request/response, real GA tool dispatch and the new core store. It is
