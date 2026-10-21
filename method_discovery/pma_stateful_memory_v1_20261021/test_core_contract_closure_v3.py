@@ -354,6 +354,26 @@ class ClosureV3Tests(unittest.TestCase):
                     store.compare_and_swap(update_id="copied", cycle_id="copied",
                         base=current, candidate=new, archive_delta=[])
                 self.assertEqual(store.snapshot(), current)
+                cycle = deepcopy(current)
+                cycle["state_version"] += 1
+                replacement = next(item for item in cycle["B"]["G"][
+                    "specifications"] if item["requirement_id"] == "replacement")
+                replacement["status"] = "superseded"
+                replacement["retirement"] = {"kind": "interpretation_replaced",
+                    "replacement_requirement_refs": [{"type": "requirement",
+                        "requirement_id": "req", "revision": 1,
+                        "task_version": 1}],
+                    "source_refs": deepcopy(replacement["source_refs"])}
+                cycle["B"]["G"]["specifications"].append({**deepcopy(replacement),
+                    "requirement_id": "third", "revision": 1,
+                    "status": "active", "retirement": None})
+                for gap in cycle["B"]["DeltaE"] + cycle["B"]["DeltaA"]:
+                    gap["goal_refs"][0]["requirement_id"] = "third"
+                    gap["goal_refs"][0]["revision"] = 1
+                with self.assertRaisesRegex(ContractError,
+                                            "invalid_requirement_replacement"):
+                    store.compare_and_swap(update_id="cycle", cycle_id="cycle",
+                        base=current, candidate=cycle, archive_delta=[])
                 with self.assertRaisesRegex(ContractError, "version_mismatch"):
                     invalid = deepcopy(current)
                     invalid["B"]["G"]["specifications"][0]["retirement"][

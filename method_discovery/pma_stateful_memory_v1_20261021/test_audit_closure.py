@@ -9,6 +9,51 @@ from .test_schema_advanced import rich_state
 
 
 class AuditClosureTests(unittest.TestCase):
+    def test_goal_changed_and_merged_into_basis_unions(self):
+        for kind in ("goal_changed", "merged_into"):
+            with self.subTest(kind=kind):
+                before, ledger = rich_state()
+                after = deepcopy(before)
+                after["state_version"] += 1
+                gap = after["B"]["DeltaE"][0]
+                gap["revision"] = 2
+                gap["status"] = "superseded"
+                if kind == "goal_changed":
+                    delta = {"type": "goal_delta", "goal_delta_id": "d2",
+                        "from_task_version": 1, "to_task_version": 2}
+                    after["B"]["G"]["goal_deltas"] = [delta]
+                    basis = delta
+                    gap["closure"] = {"kind": kind, "goal_delta_ref": delta}
+                else:
+                    basis = {"type": "gap", "gap_id": "ga", "revision": 1,
+                             "task_version": 1}
+                    gap["closure"] = {"kind": kind,
+                                      "replacement_gap_ref": basis}
+                catalog = SourceCatalog(ledger, "branch-" + kind)
+                view = AuditCodec().encode(before, after, binding={"cycle_id": kind},
+                    sources=[], observations={"events": []}, operation_index=[],
+                    resolve_manifest=[{"resolution_id": "ge",
+                        "gap_before": before["B"]["DeltaE"][0],
+                        "gap_after": gap, "closure_kind": kind}])
+                result = {"protocol": "audit-result/1", "binding": view["binding"],
+                    "coverage": view["required_coverage"], "outcome": "clean",
+                    "issues": [], "closure_assessments": [{"resolution_id": "ge",
+                        "gap_before": {"type": "gap", "gap_id": "ge",
+                            "revision": 1, "task_version": 1},
+                        "gap_after": {"type": "gap", "gap_id": "ge",
+                            "revision": 2, "task_version": 1},
+                        "closure_kind": kind, "verdict": "supported",
+                        "assessed_scope": {}, "explanation": "synthetic branch",
+                        "basis_refs": [basis], "blocking_issue_ids": []}],
+                    "unusable_reason": None}
+                self.assertEqual(validate_audit_result(result, view=view,
+                    catalog=catalog)["outcome"], "clean")
+                invalid = deepcopy(result)
+                invalid["closure_assessments"][0]["basis_refs"] = []
+                with self.assertRaisesRegex(ContractError,
+                                            "closure_basis_mismatch"):
+                    validate_audit_result(invalid, view=view, catalog=catalog)
+
     def setUp(self):
         before, ledger = rich_state()
         after = deepcopy(before)
