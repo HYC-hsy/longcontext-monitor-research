@@ -256,7 +256,13 @@ class StatefulLiveBridge:
     def native_preflight(self, payload):
         """Count the already wrapped Task payload in the private host."""
         result = self.client.exchange("count_tokens", payload=payload)
-        if result.get("status") != "accepted":
+        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True,
+                         separators=(',', ':')).encode('utf-8')
+        expected = hashlib.sha256(raw).hexdigest()
+        if (result.get("status") != "accepted" or
+                (not result.get('synthetic') and
+                 (result.get('payload_sha256') != expected or
+                  result.get('model') != payload.get('model')))):
             raise StatefulBridgeError("native context preflight rejected")
 
     def complete_batch(self, turn, actions, receipts):
