@@ -42,3 +42,9 @@ Raw private-byte hashes (not hashes of this public summary):
 ## Acceptance boundary
 
 Verified: configuration selection, preparation, bound launch, GA-only identity, real provider HTTP attempt, native evaluation invocation and cleanup. Not verified: an effective Task response, real tool execution, or a full GA task-solving loop. This task stops at the supplier's access denial; resolving the subscription/group entitlement requires an authorized account decision, not a code or protocol fallback.
+
+## Follow-up access diagnosis (read-only, no new model request)
+
+The local October 20 run `pos-41c50cafd3b24b87` recorded HTTP 200 Task responses. Its deployed private Task profile SHA-256 is `ed09a811b654b83097bee77942704eae2539d67291bf55aa34476692081ff02e`, identical to the deployed profile in `pma-a927e53b0aef4e8e`. The first Task requests in both records used model `claude-opus-4-8`, a streaming `task_agent` call, seven tools, four configured transport retries, and the same provider URL SHA-256 `b6262b54fa2488ae34b4ddfaa8aae0fac288f4cdc61708bdc29b518d9464d5aa`. The deployed old and current `NativeClaudeSession` source has the same authentication-header selection and `messages?beta=true` URL construction. This rules out the observed configuration/profile/route mismatch hypotheses; it does not prove that the service's server-side key-to-group or subscription state remained unchanged.
+
+The new attempt's HTTP 403 explicitly says `SUBSCRIPTION_NOT_FOUND` / no active subscription for this group. This is not evidence that the model API is generally offline, and it is not a measured account balance. An expired subscription or changed key-group entitlement requires inspection in the existing provider account. Because an identical request had just been denied and no local input defect was found, this follow-up made no redundant generation or account probe and did not alter credentials, profile, model, or group.
