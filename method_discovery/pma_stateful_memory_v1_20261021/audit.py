@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from .source import ContractError, SourceCatalog, canonical, digest, fields, nonempty
+from .source import (ContractError, SourceCatalog, canonical, digest, fields,
+                     integer, nonempty)
 
 
 LISTS = (("G", "specifications", "requirement_id", "requirement"),
@@ -184,9 +185,14 @@ def _field_value(body: dict, path: str) -> object:
 
 def _bound_field(value: object, targets: dict) -> dict:
     value = fields(value, {"snapshot", "target", "field_path"})
-    if value["snapshot"] not in {"base", "candidate", "archive"}:
+    if type(value["snapshot"]) is not str or value["snapshot"] not in {
+            "base", "candidate", "archive"}:
         raise ContractError("invalid_bound_snapshot")
     target = fields(value["target"], {"kind", "id"}, {"revision"})
+    nonempty(target["kind"], "target.kind")
+    nonempty(target["id"], "target.id")
+    if "revision" in target:
+        integer(target["revision"], "target.revision", 1)
     identity = (target["kind"], target["id"])
     key = (*identity, target.get("revision")) if value["snapshot"] == "archive" else identity
     body = targets[value["snapshot"]].get(key)
@@ -222,7 +228,8 @@ def _validate_audit_result(raw: object, *, view: dict, catalog: SourceCatalog,
     result = fields(raw, required)
     if result["protocol"] != protocol or result["binding"] != view["binding"]:
         raise ContractError("binding_mismatch")
-    if result["outcome"] not in {"clean", "issues", "unusable"}:
+    if type(result["outcome"]) is not str or result["outcome"] not in {
+            "clean", "issues", "unusable"}:
         raise ContractError("invalid_audit_outcome")
     for key in ("issues", "closure_assessments"):
         if type(result[key]) is not list:
@@ -236,7 +243,8 @@ def _validate_audit_result(raw: object, *, view: dict, catalog: SourceCatalog,
             raise ContractError("coverage_mismatch")
     if result["outcome"] == "unusable":
         reason = fields(result["unusable_reason"], {"code", "detail"})
-        if reason["code"] not in {"insufficient_context", "ambiguous_input",
+        if type(reason["code"]) is not str or reason["code"] not in {
+                                   "insufficient_context", "ambiguous_input",
                                    "cannot_complete_audit"}:
             raise ContractError("invalid_unusable_reason")
         if result["issues"] or result["closure_assessments"]:
@@ -254,7 +262,8 @@ def _validate_audit_result(raw: object, *, view: dict, catalog: SourceCatalog,
         issue = fields(issue, {"issue_id", "kind", "target", "related_targets",
                                "explanation", "witnesses", "repair_constraint"})
         issue_id = nonempty(issue["issue_id"], "issue_id")
-        if issue_id in issue_ids or issue["kind"] not in ISSUE_KINDS:
+        if (issue_id in issue_ids or type(issue["kind"]) is not str or
+                issue["kind"] not in ISSUE_KINDS):
             raise ContractError("invalid_issue_kind_or_id")
         issue_ids.add(issue_id)
         main = _bound_field(issue["target"], targets)
@@ -290,13 +299,15 @@ def _validate_audit_result(raw: object, *, view: dict, catalog: SourceCatalog,
     if len(result["closure_assessments"]) != len(manifest):
         raise ContractError("closure_assessment_mismatch")
     expected_ids = {item["resolution_id"] for item in manifest}
-    actual_ids = [item.get("resolution_id") for item in result["closure_assessments"]]
+    actual_ids = []
+    for item in result["closure_assessments"]:
+        fields(item, {"resolution_id", "gap_before", "gap_after",
+                             "closure_kind", "verdict", "assessed_scope",
+                             "explanation", "basis_refs", "blocking_issue_ids"})
+        actual_ids.append(nonempty(item["resolution_id"], "resolution_id"))
     if set(actual_ids) != expected_ids or len(actual_ids) != len(expected_ids):
         raise ContractError("closure_assessment_mismatch")
     for item in result["closure_assessments"]:
-        item = fields(item, {"resolution_id", "gap_before", "gap_after",
-                             "closure_kind", "verdict", "assessed_scope",
-                             "explanation", "basis_refs", "blocking_issue_ids"})
         expected = next(entry for entry in manifest if entry["resolution_id"] ==
                         item["resolution_id"])
         def gap_identity(body):
@@ -313,8 +324,11 @@ def _validate_audit_result(raw: object, *, view: dict, catalog: SourceCatalog,
                 item["basis_refs"]) is not list or type(item["assessed_scope"]) is not dict:
             raise ContractError("invalid_closure_assessment")
         nonempty(item["explanation"], "closure.explanation")
-        if item["verdict"] not in {"supported", "unsupported", "uncertain"}:
+        if type(item["verdict"]) is not str or item["verdict"] not in {
+                "supported", "unsupported", "uncertain"}:
             raise ContractError("invalid_closure_verdict")
+        for issue_id in item["blocking_issue_ids"]:
+            nonempty(issue_id, "blocking_issue_id")
         if any(issue_id not in issue_ids for issue_id in item["blocking_issue_ids"]):
             raise ContractError("unknown_blocking_issue")
         if item["verdict"] == "supported" and item["blocking_issue_ids"]:
