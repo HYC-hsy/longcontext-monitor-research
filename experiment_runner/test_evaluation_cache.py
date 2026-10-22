@@ -131,7 +131,12 @@ class BundleTests(unittest.TestCase):
         destination.mkdir()
         outside = self.root / 'outside'
         outside.mkdir()
-        (destination / 'root').symlink_to(outside, target_is_directory=True)
+        try:
+            (destination / 'root').symlink_to(outside, target_is_directory=True)
+        except OSError as exc:
+            if os.name == 'nt' and getattr(exc, 'winerror', None) == 1314:
+                self.skipTest('Windows symlink privilege unavailable')
+            raise
         with self.assertRaises(cache.CacheMiss):
             cache.restore_bundle(self.bundle, self.identity, destination)
         self.assertEqual(list(outside.iterdir()), [])
@@ -139,7 +144,12 @@ class BundleTests(unittest.TestCase):
     def test_restore_and_absolute_link_preserved(self):
         python = self.source / self.identity['python_executable'][1:]
         link = python.parent / 'python'
-        link.symlink_to(self.identity['python_executable'])
+        try:
+            link.symlink_to(self.identity['python_executable'])
+        except OSError as exc:
+            if os.name == 'nt' and getattr(exc, 'winerror', None) == 1314:
+                self.skipTest('Windows symlink privilege unavailable')
+            raise
         bundle = cache.publish_bundle(self.source, self.root / 'linked-store', self.identity)
         destination = self.root / 'target'
         destination.mkdir()
@@ -244,6 +254,9 @@ class BundleTests(unittest.TestCase):
             self.assertEqual(command[0], 'docker')
             if '--network' not in command:
                 self.assertIn('/builder/build.sh', command)
+                mounted = next(item.split(':/builder/build.sh:ro')[0] for item in command
+                    if item.endswith(':/builder/build.sh:ro'))
+                self.assertNotIn(b'\r', Path(mounted).read_bytes())
                 return SimpleNamespace(stdout='BUNDLE=/output/' + self.bundle.name + '\n')
             self.assertIn('none', command)
             self.assertIn('/bin/bash', command)  # container entrypoint, not host

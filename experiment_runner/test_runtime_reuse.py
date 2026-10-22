@@ -1,6 +1,7 @@
 """Zero-model, zero-Docker tests for the additive reuse planner."""
 import copy
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -242,7 +243,12 @@ class GitSnapshotTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             subprocess.run(['git', 'init', '-q', tmp], check=True)
-            (root / 'link.py').symlink_to('outside.py')
+            try:
+                (root / 'link.py').symlink_to('outside.py')
+            except OSError as exc:
+                if os.name == 'nt' and getattr(exc, 'winerror', None) == 1314:
+                    self.skipTest('Windows symlink privilege unavailable')
+                raise
             subprocess.run(['git', '-C', tmp, 'add', '.'], check=True)
             with self.assertRaises(ValueError):
                 reuse.tracked_snapshot(root)

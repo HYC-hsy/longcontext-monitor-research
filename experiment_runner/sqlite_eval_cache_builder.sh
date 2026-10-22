@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # CONTAINER-ONLY online dependency builder. Invoked by evaluation_cache.py build.
+# Keep LF bytes: Docker mounts this script directly into a Linux container.
 # Host requires only its existing Python >=3.11 and Docker, not Bash/python3.
 # No tests, scoring, model calls or Task image changes. Docker acceptance unrun
 # in patch-authoring environment; host orchestrator marks readiness after success.

@@ -194,9 +194,10 @@ def publish_bundle(source_root, cache_root, identity):
         (staging / 'manifest.json').write_bytes(raw)
         (staging / 'COMPLETE').write_text(hashlib.sha256(raw).hexdigest() + '\n')
         verify_bundle(staging, identity, _allow_staging=True)
-        for name in ('payload.tar', 'manifest.json', 'COMPLETE'):
-            with open(staging / name, 'rb') as stream:
-                os.fsync(stream.fileno())
+        if os.name == 'posix':
+            for name in ('payload.tar', 'manifest.json', 'COMPLETE'):
+                with open(staging / name, 'rb') as stream:
+                    os.fsync(stream.fileno())
         # mkdir lock, unlike rename over a directory, does not overwrite a racer.
         lock = cache_root / ('.publish-' + key)
         try:
@@ -208,11 +209,12 @@ def publish_bundle(source_root, cache_root, identity):
                 verify_bundle(target, identity)
             else:
                 staging.rename(target)
-                fd = os.open(cache_root, os.O_RDONLY)
-                try:
-                    os.fsync(fd)
-                finally:
-                    os.close(fd)
+                if os.name == 'posix':
+                    fd = os.open(cache_root, os.O_RDONLY)
+                    try:
+                        os.fsync(fd)
+                    finally:
+                        os.close(fd)
         finally:
             lock.rmdir()
         return target
@@ -397,12 +399,20 @@ def build_bundle(cache_root, base_image):
     script = module.with_name('sqlite_eval_cache_builder.sh')
     if not script.is_file():
         raise CacheMiss('container builder script missing')
-    online = ['docker', 'run', '--rm', '--user', 'root', '--entrypoint', '/bin/bash',
-              '-e', 'BASE_IMAGE=' + base_image,
-              '-v', str(module) + ':/builder/evaluation_cache.py:ro',
-              '-v', str(script) + ':/builder/build.sh:ro',
-              '-v', str(root) + ':/output', base_image, '/builder/build.sh']
-    result = subprocess.run(online, check=True, shell=False, capture_output=True, text=True)
+    # Docker Desktop mounts Windows working-tree bytes as-is; the container's
+    # Bash must receive LF even when Git checked the script out with CRLF.
+    with tempfile.TemporaryDirectory(prefix='eval-builder-') as temporary:
+        mounted_script = Path(temporary) / 'build.sh'
+        script_bytes = script.read_bytes().replace(b'\r\n', b'\n')
+        if b'\r' in script_bytes:
+            raise CacheMiss('builder script has unsupported line endings')
+        mounted_script.write_bytes(script_bytes)
+        online = ['docker', 'run', '--rm', '--user', 'root', '--entrypoint', '/bin/bash',
+                  '-e', 'BASE_IMAGE=' + base_image,
+                  '-v', str(module) + ':/builder/evaluation_cache.py:ro',
+                  '-v', str(mounted_script) + ':/builder/build.sh:ro',
+                  '-v', str(root) + ':/output', base_image, '/builder/build.sh']
+        result = subprocess.run(online, check=True, shell=False, capture_output=True, text=True)
     lines = [line.removeprefix('BUNDLE=/output/') for line in result.stdout.splitlines()
              if line.startswith('BUNDLE=/output/')]
     if len(lines) != 1 or not re.fullmatch(r'[0-9a-f]{64}', lines[0]):
