@@ -96,8 +96,12 @@ the original memory bank; they do not affect the BM25 threshold or top-k policy.
 
 ## Offline verification
 
-Python 3.12 is required by the vendor project. The narrow memory imports require
-the real shortuuid package; BM25 and trigger use the standard library. These tests
+Prefer the development machine's existing Python/virtual environment that already
+runs PMA. Python 3.12.13 was the actual reference test environment, not a mandatory
+version. Revalidate in the existing local environment; make only minimal fixes for
+specific compatibility errors, without proactively rebuilding or switching environments.
+The narrow memory imports require the real shortuuid package; BM25 and trigger use
+the standard library. These tests
 use unittest and scripted model responses, not Harbor or a provider. They import
 and execute the actual vendor MemoryAgent, UniversalMemory and MemoryEntry.
 
