@@ -14,6 +14,12 @@ RUN = ('method_discovery/curator_supervisor_convergence_v0/'
        'pma_full_upstream_ga_v1_20261013/')
 CORE = 'method_discovery/pma_stateful_memory_v1_20261021/'
 SOURCE_FILES = tuple(dict.fromkeys(V3_SOURCE_FILES + (
+    'experiment_runner/__init__.py',
+    'experiment_runner/__main__.py',
+    'experiment_runner/dataset_catalog.py',
+    'experiment_runner/methods.py',
+    'experiment_runner/runtime_policy.py',
+    RUN + 'run_selection.py',
     'GenericAgent-main/ga.py',
     'GenericAgent-main/stateful_memory_bridge.py',
     'long_context_bench/scripts/isolated_run_bundle.py',
@@ -67,6 +73,26 @@ def verify_evidence(evidence: Path, *, require_committed: bool = True) -> dict:
     load = lambda name: json.loads((evidence / name).read_text(encoding='utf-8'))
     execution, result, terminal = (load(name) for name in (
         'execution_identity.json', 'live_result.json', 'stateful_task_terminal.json'))
+    tested_policy = execution.get('runtime_policy')
+    if tested_policy is not None:
+        from experiment_runner.runtime_policy import validate_resolved_policy
+        validate_resolved_policy(tested_policy, {
+            'native_agent_seconds': tested_policy['official_agent_seconds'],
+            'native_verifier_seconds': tested_policy['official_verifier_seconds']})
+        policy_path = evidence / 'runtime_policy_effective.json'
+        hashes[policy_path.name] = (_committed_source_sha(checkout,
+            policy_path.relative_to(checkout).as_posix()) if require_committed
+            else _hash(policy_path))
+        effective = load(policy_path.name)
+        if (effective.get('runtime_policy') != tested_policy or
+                effective.get('config_sha256') != execution.get('config_sha256') or
+                not execution.get('config_sha256') or
+                effective.get('run_id') != result.get('run_id') or
+                effective.get('effective_agent_seconds') != tested_policy['effective_agent_seconds'] or
+                effective.get('preserved_timeout_caches', {}).get('_verifier_timeout_sec') !=
+                    tested_policy['official_verifier_seconds'] or
+                effective.get('task_files_modified') is not False):
+            raise RuntimeError('stateful fixture runtime policy was not observed as configured')
     ready, exited, requests = (load(name) for name in (
         'worker_ready.json', 'worker_exit.json', 'task_requests.json'))
     started, ended = load('agent_start_identity.json'), load('agent_end_native.json')
@@ -102,4 +128,6 @@ def verify_evidence(evidence: Path, *, require_committed: bool = True) -> dict:
         raise RuntimeError('stateful same-run fake chain incomplete')
     return {'run_id': run_id, 'task': task, 'source_files': len(SOURCE_FILES),
             'host_events': len(events), 'task_requests': requests['request_count'],
+            'tested_runtime_policy': tested_policy,
             'file_sha256': hashes}
+

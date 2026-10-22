@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from experiment_runner.methods import candidate_names
 
 from .export_official_evaluator import SIX_TASKS
 
@@ -56,9 +57,7 @@ def validate_plan(manifest: dict, granted: dict) -> list[dict]:
         if (set(row) != {'order', 'task', 'repeat', 'condition', 'research_candidate'} or
                 row['order'] != 1 or type(row['repeat']) is not int or
                 row['repeat'] < 1 or row['condition'] != 'P' or
-                row['research_candidate'] not in {'PoS', 'PoS-citation-fixed',
-                                                  'pos_pma_complement_v1',
-                                                  'pos_pma_shared_view_v1'} or
+                row['research_candidate'] not in candidate_names('P') or
                 (row['research_candidate'] in {'pos_pma_complement_v1',
                                                'pos_pma_shared_view_v1'} and
                  manifest.get('config', {}).get('name') !=
@@ -102,8 +101,7 @@ def validate_plan(manifest: dict, granted: dict) -> list[dict]:
         if (set(row) != expected or
                 row['order'] != 1 or type(row['repeat']) is not int or
                 row['repeat'] < 1 or row['condition'] not in {'A', 'B'} or
-                row.get('research_candidate', 'U') not in {'U', 'V1', 'D1',
-                    'pma_stateful_memory_v1'} or
+                row.get('research_candidate', 'U') not in candidate_names(row['condition']) or
                 (row['condition'] == 'A' and row.get('research_candidate', 'U') != 'U') or
                 (versioned and manifest.get('config', {}).get('research_candidate') !=
                  row['research_candidate']) or
@@ -113,8 +111,9 @@ def validate_plan(manifest: dict, granted: dict) -> list[dict]:
                  granted.get('task_complete_response_policy') !=
                     'complete-response-v1')) or
                 (stateful and (manifest.get('config', {}).get('agent_time_protocol') !=
-                    'diagnostic-uncapped-v1' or granted.get('agent_time_protocol') !=
-                    'diagnostic-uncapped-v1')) or
+                    ('runtime-policy-v1' if 'runtime_policy' in manifest.get('config', {}) else
+                     'diagnostic-uncapped-v1') or granted.get('agent_time_protocol') !=
+                    manifest.get('config', {}).get('agent_time_protocol'))) or
                 set(manifest.get('assets', {})) != {row['task']} or
                 _identity(bound) != _identity(row) or
                 bound.get('run_id') != granted.get('run_id') or
@@ -202,3 +201,4 @@ def validate_plan(manifest: dict, granted: dict) -> list[dict]:
         run_ids.add(run_id)
         roots.add(root)
     return bindings
+

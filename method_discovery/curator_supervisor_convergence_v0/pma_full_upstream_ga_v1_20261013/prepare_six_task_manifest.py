@@ -13,6 +13,7 @@ from pathlib import Path
 import runpy
 import subprocess
 from tempfile import TemporaryDirectory
+from experiment_runner.methods import candidate_names
 
 from long_context_bench.scripts.isolated_run_bundle import digest_tree
 
@@ -24,6 +25,9 @@ from .export_official_evaluator import SIX_TASKS
 
 STAGE = Path(__file__).resolve().parent
 SOURCE_FILES = (
+    'experiment_runner/__init__.py',
+    'experiment_runner/methods.py',
+    'experiment_runner/runtime_policy.py',
     'long_context_bench/adapters/harbor_ga_agent.py',
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'archive_six_task_native_base.py',
@@ -112,6 +116,8 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
             required.add('research_candidate')
         if stateful:
             required.add('task_complete_response_policy')
+            if 'runtime_policy' in plan:
+                required.add('runtime_policy')
             required.add('agent_time_protocol')
         if (set(plan) != required or
                 plan['execution_authorized'] is not False or
@@ -119,12 +125,12 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
                 '2fd12b88aafdd04a52c298e3940bcb189f9766d6' or
                 not isinstance(plan['task'], str) or
                 plan['condition'] not in {'A', 'B'} or
-                candidate not in ({'U', 'V1', 'D1', 'pma_stateful_memory_v1'}
+                candidate not in (candidate_names(plan['condition'])
                                   if versioned else {'U'}) or
                 (stateful and (plan['condition'] != 'B' or
                  plan.get('task_complete_response_policy') != 'complete-response-v1')) or
                 (stateful and plan.get('agent_time_protocol') !=
-                 'diagnostic-uncapped-v1') or
+                 ('runtime-policy-v1' if 'runtime_policy' in plan else 'diagnostic-uncapped-v1')) or
                 (plan['condition'] == 'A' and candidate != 'U') or
                 type(plan['occurrence']) is not int or plan['occurrence'] < 1):
             raise RuntimeError('single-run plan schema mismatch')
@@ -219,10 +225,17 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
                 research_cumulative_calls=None, research_cumulative_tokens=None,
                 research_cumulative_cost=None,
                 task_complete_response_policy='complete-response-v1',
-                agent_time_protocol='diagnostic-uncapped-v1',
+                agent_time_protocol=plan['agent_time_protocol'],
                 auxiliary_provider_retries=0, task_provider_retries=0,
                 native_context_guard_window_tokens=guard_window,
                 native_context_guard_basis=guard_basis)
+    if single and 'runtime_policy' in plan:
+        from experiment_runner.runtime_policy import resolve_policy
+        policy = resolve_policy(plan['runtime_policy'], assets[plan['task']], method)
+        method['runtime_policy'] = policy
+        method['task_turns_max'] = policy['effective_task_turns']
+        method['agent_wall_seconds'] = policy['effective_agent_seconds']
+        assets[plan['task']]['agent_timeout_multiplier'] = 1
     config_hash = hashlib.sha256(json.dumps(method, sort_keys=True,
         separators=(',', ':')).encode('utf-8')).hexdigest()
     certification = None
@@ -318,3 +331,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+

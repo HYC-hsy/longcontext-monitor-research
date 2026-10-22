@@ -179,9 +179,16 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
     if os.environ.get('GA_PMA_ENABLED') == '1':
         from pma_baseline.runtime import from_environment
         pma = from_environment(initial_content)
-    while (stateful_enabled and stateful_mode == 'live' and
-           os.environ.get('GA_STATEFUL_UNCAPPED_TOTAL') == '1') or \
-            local_turn < handler.max_turns:
+    # A frozen experiment turn policy must not be rewritten by enter_plan_mode.
+    explicit_turn_policy = (stateful_enabled and stateful_mode == 'live' and
+                            os.environ.get('GA_EXPERIMENT_TASK_TURNS') is not None)
+    def within_turn_limit():
+        if explicit_turn_policy:
+            return max_turns is None or local_turn < max_turns
+        return ((stateful_enabled and stateful_mode == 'live' and
+                 os.environ.get('GA_STATEFUL_UNCAPPED_TOTAL') == '1') or
+                local_turn < handler.max_turns)
+    while within_turn_limit():
         wait_correction = getattr(handler.parent, 'wait_monitor_correction', None)
         if wait_correction is not None and not wait_correction():
             break
@@ -720,3 +727,4 @@ def _compact_tool_args(name, args):
         if cs: q += '\ncandidates:\n' + '\n'.join(f'- {c}' for c in cs)
         return q
     s = json.dumps(a, ensure_ascii=False); return (s[:120]+'...') if len(s)>120 else s
+

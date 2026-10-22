@@ -39,6 +39,9 @@ def collect(source: Path, target: Path, task_profile: Path,
         'host_events.jsonl': run / 'host_private/archive/events.jsonl',
         'research_events.jsonl': jobs[0],
     })
+    execution = json.loads((source / 'execution_identity.json').read_text(encoding='utf-8'))
+    if execution.get('runtime_policy') is not None:
+        mapping['runtime_policy_effective.json'] = run / 'archive/runtime_policy_effective.json'
     secrets = private_values(task_profile, pma_profile)
     files = []
     for name, path in sorted(mapping.items()):
@@ -95,3 +98,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+

@@ -12,10 +12,11 @@ from adapters import harbor_ga_agent as original
 from .networked_transport_setup import start_networked_transport
 
 
-EXPECTED_ADAPTER_SHA256 = "f50894cdb160793dcba83bcf4ecd2b73ff48e2bad427abef4551db87faadfb55"
+EXPECTED_ADAPTER_SHA256 = "092394995b153dd173dba553c20ad4c25ef23300df72596507a51e52b6841d0e"
 EXPECTED_STATEFUL_DIAGNOSTIC_ADAPTER_SHA256 = (
     "8a4513c6b28befe747d581d22e94cd2715f20234c63115e0ea424a56d033c3a0")
 FORWARD = (
+    "GA_EXPERIMENT_TASK_TURNS",
     "GA_STATEFUL_MEMORY_ENABLED",
     "GA_STATEFUL_MEMORY_MODE",
     "GA_STATEFUL_UNCAPPED_TOTAL",
@@ -82,8 +83,9 @@ class HarborGenericAgent(original.HarborGenericAgent):
             if (os.environ.get('GA_STATEFUL_MEMORY_ENABLED') != '1' or
                     self.condition_id != 'stateful-memory-v1'):
                 raise RuntimeError('uncapped diagnostic requires stateful identity')
-            environment = _UncappedAgentExecution(environment, self.run_id,
-                                                   self.timeout_sec)
+            # The pinned base adapter now supports an uncapped wrapper natively.
+            # Do not also apply the historical string-rewriting overlay.
+            self.timeout_sec = None
         try:
             await super().run(instruction, environment, context)
         except RuntimeError as exc:
@@ -129,3 +131,4 @@ class _UncappedAgentExecution:
             kwargs['timeout_sec'] = None
             self.long_exec_seen = True
         return await self._environment.exec(command, *args, **kwargs)
+

@@ -11,7 +11,6 @@ import json
 from pathlib import Path
 import re
 
-from .single_run import prepare, run
 from .export_official_evaluator import COMMIT
 
 
@@ -39,28 +38,25 @@ def _slots(plan: dict) -> list[dict]:
     return slots
 
 
-def execute(args: argparse.Namespace) -> list[dict]:
-    plan = json.loads(Path(args.plan).read_text(encoding='utf-8'))
-    slots = _slots(plan)
-    root = Path(args.output).resolve(strict=False)
-    if args.mode == 'prepare':
+def execute_serial(slots, output, mode, prepare_call, run_call, directory_name):
+    """One attempt per slot; callers supply existing drivers and identity checks."""
+    if mode not in {'prepare', 'run'}:
+        raise ValueError('mode must be prepare or run')
+    root = Path(output).resolve(strict=False)
+    if mode == 'prepare':
         root.mkdir(parents=True, exist_ok=False)
     else:
         root = root.resolve(strict=True)
-    result_path = root / ('selection_preparation.json' if args.mode == 'prepare'
+    result_path = root / ('selection_preparation.json' if mode == 'prepare'
                           else 'selection_result.json')
     if result_path.exists():
         raise FileExistsError(result_path)
     results = []
     for order, row in enumerate(slots, 1):
-        directory = root / f'{order:02d}-{row["task"]}-{row["condition"]}-r{row["occurrence"]}'
-        if args.mode == 'prepare':
+        directory = root / directory_name(order, row)
+        if mode == 'prepare':
             try:
-                outcome = prepare(argparse.Namespace(output=str(directory), **row,
-                    official_source_git=args.official_source_git,
-                    task_profile_file=args.task_profile_file,
-                    pma_profile_file=args.pma_profile_file, fake_only=args.fake_only,
-                    certification_dir=args.certification_dir))
+                outcome = prepare_call(directory, row)
                 results.append({'order': order, **row, 'status': 'prepared_not_authorized',
                                 'identity': outcome})
             except BaseException as exc:
@@ -73,14 +69,13 @@ def execute(args: argparse.Namespace) -> list[dict]:
                 results.append({'order': order, **row, 'status': 'not_started_missing_approval'})
                 break
             try:
-                outcome = run(argparse.Namespace(output=str(directory),
-                    authorization=str(authorization), ga_source=args.ga_source,
-                    runtime_root=args.runtime_root, task_profile_file=args.task_profile_file,
-                    pma_profile_file=args.pma_profile_file,
-                    worker_python=args.worker_python, harbor_python=args.harbor_python,
-                    bench_root=args.bench_root, official_source_git=args.official_source_git,
-                    harbor_source_root=args.harbor_source_root, python_home=args.python_home,
-                    zero_model_fixture=args.fake_only))
+                outcome = run_call(directory, row, authorization)
+                if (not isinstance(outcome, dict) or 'stop_reason' not in outcome or
+                        'arm' not in outcome or
+                        (outcome['arm'] is not None and
+                         (not isinstance(outcome['arm'], dict) or
+                          'disposition' not in outcome['arm']))):
+                    raise ValueError('single-run returned an invalid outcome')
                 results.append({'order': order, **row, 'status': 'attempted',
                                 'result': outcome})
                 if (outcome['stop_reason'] or outcome['arm'] is None or
@@ -95,12 +90,40 @@ def execute(args: argparse.Namespace) -> list[dict]:
                                 'error_type': type(exc).__name__, 'error': str(exc)})
                 break
     with result_path.open('x', encoding='utf-8', newline='\n') as stream:
-        json.dump({'schema': 'pma-ga-selection-result-v1', 'mode': args.mode,
+        json.dump({'schema': 'pma-ga-selection-result-v1', 'mode': mode,
                    'slots': results, 'remaining_not_started': [
                        {'order': index, **row, 'status': 'not_started'} for index, row in
                        enumerate(slots[len(results):], len(results) + 1)]},
                   stream, indent=2, ensure_ascii=False)
     return results
+
+
+def execute(args: argparse.Namespace) -> list[dict]:
+    from .single_run import prepare, run
+    plan = json.loads(Path(args.plan).read_text(encoding='utf-8'))
+    slots = _slots(plan)
+
+    def prepare_call(directory, row):
+        return prepare(argparse.Namespace(output=str(directory), **row,
+            official_source_git=args.official_source_git,
+            task_profile_file=args.task_profile_file,
+            pma_profile_file=args.pma_profile_file, fake_only=args.fake_only,
+            certification_dir=args.certification_dir,
+            candidate_profile_fixture=False, task_complete_response=False,
+            synthetic_pos_fixture=False, research_candidate='U'))
+
+    def run_call(directory, row, authorization):
+        return run(argparse.Namespace(output=str(directory), authorization=str(authorization),
+            ga_source=args.ga_source, runtime_root=args.runtime_root,
+            task_profile_file=args.task_profile_file, pma_profile_file=args.pma_profile_file,
+            worker_python=args.worker_python, harbor_python=args.harbor_python,
+            bench_root=args.bench_root, official_source_git=args.official_source_git,
+            harbor_source_root=args.harbor_source_root, python_home=args.python_home,
+            zero_model_fixture=args.fake_only, candidate_profile_fixture=False,
+            stateful_fake_replies=None))
+
+    return execute_serial(slots, args.output, args.mode, prepare_call, run_call,
+        lambda order, row: f'{order:02d}-{row["task"]}-{row["condition"]}-r{row["occurrence"]}')
 
 
 def main() -> None:
@@ -136,3 +159,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+

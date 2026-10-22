@@ -3,6 +3,7 @@
 from __future__ import annotations
 import base64
 import json
+import math
 import os
 import posixpath
 import re
@@ -77,7 +78,7 @@ class M4GenericAgent(BaseAgent):
         ga_source_sha256: str,
         task_id: str = "tb2:fix-code-vulnerability",
         collector_endpoint: str = "http://host.docker.internal:14319/v1/traces",
-        timeout_sec: int | str = 900,
+        timeout_sec: int | str | None = 900,
         telemetry_service_name: str = "genericagent-harbor-tb2",
         metadata_schema_version: str = "harbor-ga-m4-agent/2",
         baseline_condition: str = "original",
@@ -121,7 +122,11 @@ class M4GenericAgent(BaseAgent):
         self.ga_source_sha256 = ga_source_sha256
         self.task_id = task_id
         self.collector_endpoint = collector_endpoint
-        self.timeout_sec = int(timeout_sec)
+        self.timeout_sec = (None if timeout_sec is None or timeout_sec == 'uncapped'
+                            else float(timeout_sec))
+        if isinstance(timeout_sec, bool) or (self.timeout_sec is not None and
+                (not math.isfinite(self.timeout_sec) or self.timeout_sec <= 0)):
+            raise ValueError('timeout_sec must be positive or explicitly uncapped')
         self.telemetry_service_name = telemetry_service_name
         self.metadata_schema_version = metadata_schema_version
         self.baseline_condition = baseline_condition
@@ -420,7 +425,12 @@ class M4GenericAgent(BaseAgent):
             if value:
                 env[name] = value
 
-        iterations = max(1, self.timeout_sec // 2)
+        iterations = (None if self.timeout_sec is None else
+                      max(1, math.ceil(self.timeout_sec / 2)))
+        if iterations is None and self.monitor_enabled:
+            raise ValueError('legacy monitor does not support uncapped adapter time')
+        wait_loop = ('while true; do' if iterations is None else
+                     f'for i in $(seq 1 {iterations}); do')
         output = f"{task_dir}/output.txt"
         # Establish identity before the long await: Harbor can cancel it at its
         # outer deadline before the normal result/metadata path is reached.
@@ -460,7 +470,7 @@ trap archive_output EXIT
 pid=$!
 found=0
 timed_out=1
-for i in $(seq 1 {iterations}); do
+{wait_loop}
   archive_output
   if grep -Fxq {_q(ROUND_END)} {_q(output)} 2>/dev/null; then found=1; timed_out=0; break; fi
   if ! kill -0 "$pid" 2>/dev/null; then timed_out=0; break; fi
@@ -480,7 +490,7 @@ exit 125
         try:
             result = await environment.exec(
                 command, cwd="/app", env=env,
-                timeout_sec=self.timeout_sec + 90, user="root",
+                timeout_sec=(None if self.timeout_sec is None else self.timeout_sec + 90), user="root",
             )
         except BaseException:
             # Preserve the original cancellation/transport error, even if cleanup fails.
@@ -543,3 +553,4 @@ class HarborGenericAgent(M4GenericAgent):
 
 
 __all__ = ["HarborGenericAgent", "M4GenericAgent"]
+

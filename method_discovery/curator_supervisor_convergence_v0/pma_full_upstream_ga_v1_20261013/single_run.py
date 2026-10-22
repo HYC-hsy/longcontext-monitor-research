@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import sys
 import uuid
+from experiment_runner.methods import candidate_names, validate_binding
 
 def _write_new(path: Path, value: dict) -> None:
     with path.open('x', encoding='utf-8', newline='\n') as stream:
@@ -77,6 +78,10 @@ def run_stateful_fake(args: argparse.Namespace) -> dict:
 def prepare(args: argparse.Namespace) -> dict:
     from .export_official_evaluator import COMMIT
     from .prepare_six_task_manifest import prepare as prepare_manifest
+    runtime_policy = getattr(args, 'runtime_policy', None)
+    validate_binding(args.condition, getattr(args, 'research_candidate', 'U'))
+    if runtime_policy is not None and getattr(args, 'research_candidate', 'U') != 'pma_stateful_memory_v1':
+        raise ValueError('runtime policy overrides currently require pma_stateful_memory_v1')
     root = Path(args.output).resolve(strict=False)
     root.mkdir(parents=True, exist_ok=False)
     pos = args.condition == 'P'
@@ -100,8 +105,7 @@ def prepare(args: argparse.Namespace) -> dict:
         if plan['synthetic_fixture'] and not args.fake_only:
             raise RuntimeError('synthetic PoS package is zero-model only')
     candidate = getattr(args, 'research_candidate', 'U')
-    if pos and candidate not in {'PoS', 'PoS-citation-fixed',
-                                  'pos_pma_complement_v1', 'pos_pma_shared_view_v1'}:
+    if pos and candidate not in candidate_names('P'):
         raise RuntimeError('PoS plan requires explicit fixed method identity')
     if not pos and candidate != 'U':
         plan['schema'] = 'pma-ga-single-plan-v2'
@@ -110,9 +114,16 @@ def prepare(args: argparse.Namespace) -> dict:
             if args.condition != 'B' or not args.task_complete_response:
                 raise RuntimeError('stateful candidate requires B carrier and complete response')
             plan['task_complete_response_policy'] = 'complete-response-v1'
-            if not getattr(args, 'stateful_uncapped_diagnostic', False):
-                raise RuntimeError('stateful live/fake entry requires explicit diagnostic protocol')
-            plan['agent_time_protocol'] = 'diagnostic-uncapped-v1'
+            if runtime_policy is None:
+                if not getattr(args, 'stateful_uncapped_diagnostic', False):
+                    raise RuntimeError('stateful entry requires an explicit runtime policy or diagnostic flag')
+                plan['agent_time_protocol'] = 'diagnostic-uncapped-v1'
+            else:
+                if getattr(args, 'stateful_uncapped_diagnostic', False):
+                    raise RuntimeError('runtime policy and legacy diagnostic flag are mutually exclusive')
+                plan['agent_time_protocol'] = 'runtime-policy-v1'
+    if runtime_policy is not None:
+        plan['runtime_policy'] = runtime_policy
     _write_new(root / 'plan.json', plan)
     if pos:
         from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import prepare as prepare_pos
@@ -172,8 +183,9 @@ def run(args: argparse.Namespace) -> dict:
                 actual != policy):
             raise RuntimeError('Task response policy differs from frozen PoS authorization')
         if manifest.get('config', {}).get('research_candidate') == 'pma_stateful_memory_v1' and (
-                manifest['config'].get('agent_time_protocol') != 'diagnostic-uncapped-v1' or
-                granted.get('agent_time_protocol') != 'diagnostic-uncapped-v1'):
+                manifest['config'].get('agent_time_protocol') != (
+                    'runtime-policy-v1' if 'runtime_policy' in manifest['config'] else 'diagnostic-uncapped-v1') or
+                granted.get('agent_time_protocol') != manifest['config'].get('agent_time_protocol')):
             raise RuntimeError('stateful Agent time protocol differs from authorization')
     if (root / 'batch_result.json').exists() or Path(identity['run_root']).exists():
         raise FileExistsError('single-run result or run root already exists')
@@ -208,10 +220,7 @@ def main() -> None:
     prepared = commands.add_parser('prepare', help='fixed-Git asset and image check; no calls')
     prepared.add_argument('--task', required=True)
     prepared.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
-    prepared.add_argument('--research-candidate', choices=(
-        'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
-        'pos_pma_complement_v1', 'pos_pma_shared_view_v1',
-        'pma_stateful_memory_v1'), default='U')
+    prepared.add_argument('--research-candidate', choices=sorted(candidate_names()), default='U')
     prepared.add_argument('--occurrence', type=int, default=1)
     prepared.add_argument('--output', required=True)
     prepared.add_argument('--official-source-git', required=True)
@@ -226,6 +235,8 @@ def main() -> None:
                           help='bind nonstandard unlimited cumulative Agent time')
     prepared.add_argument('--certification-dir',
                           help='committed A/B Harbor evidence for future authorized use')
+    prepared.add_argument('--runtime-policy-file',
+                          help='explicit JSON runtime overrides, frozen before authorization')
     launched = commands.add_parser('run', help='requires an independent one-use approval')
     launched.add_argument('--output', required=True)
     launched.add_argument('--authorization', required=True)
@@ -258,6 +269,8 @@ def main() -> None:
     pos_fake.add_argument('--python-home', default='cpython-3.12.12-linux-x86_64-gnu')
     pos_fake.add_argument('--timeout-sec', type=int, default=180)
     args = parser.parse_args()
+    if getattr(args, 'runtime_policy_file', None):
+        args.runtime_policy = json.loads(Path(args.runtime_policy_file).read_text(encoding='utf-8'))
     if args.command == 'prepare-stateful-fake':
         outcome = prepare_stateful_fake(args)
     elif args.command == 'run-stateful-fake':
@@ -290,3 +303,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+

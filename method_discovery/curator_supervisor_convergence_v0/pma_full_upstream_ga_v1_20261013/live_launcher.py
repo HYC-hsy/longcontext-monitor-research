@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import subprocess
 import time
+from experiment_runner.methods import clean_candidate_environment
 import tomllib
 
 from long_context_bench.scripts.isolated_run_bundle import digest_tree
@@ -420,12 +421,15 @@ def run_live(args) -> dict:
             task_policy != 'complete-response-v1' or
             authorized.get('task_complete_response_policy') != task_policy or
             actual_task_policy != task_policy or
-            manifest.get('config', {}).get('task_turns_max', 'missing') is not None or
-            manifest.get('config', {}).get('agent_wall_seconds', 'missing') is not None):
+            ('runtime_policy' not in manifest.get('config', {}) and (
+             manifest.get('config', {}).get('task_turns_max', 'missing') is not None or
+             manifest.get('config', {}).get('agent_wall_seconds', 'missing') is not None))):
         raise RuntimeError('stateful authorization, policy or uncapped identity mismatch')
+    runtime_policy = manifest.get('config', {}).get('runtime_policy')
+    expected_protocol = ('runtime-policy-v1' if runtime_policy is not None else
+                         'diagnostic-uncapped-v1')
     if stateful and (manifest['config'].get('agent_time_protocol') !=
-            'diagnostic-uncapped-v1' or authorized.get('agent_time_protocol') !=
-            'diagnostic-uncapped-v1'):
+            expected_protocol or authorized.get('agent_time_protocol') != expected_protocol):
         raise RuntimeError('stateful diagnostic Agent time binding mismatch')
     if (manifest.get('schema') in {'pma-ga-live-manifest-v3',
                                    'pma-ga-live-manifest-v4',
@@ -492,7 +496,7 @@ def run_live(args) -> dict:
         compose_path.write_text(json.dumps(compose), encoding='utf-8')
     if prepared['public_task_tree_sha256'] != manifest['assets'][args.task]['public_task_tree_sha256']:
         raise RuntimeError('PMA public task package differs from frozen identity')
-    diagnostic_task = _derive_uncapped_task(root) if stateful else None
+    diagnostic_task = _derive_uncapped_task(root) if stateful and runtime_policy is None else None
     if diagnostic_task is not None:
         diagnostic_task['original_task_tree_sha256'] = prepared['public_task_tree_sha256']
         (root / 'archive/diagnostic_task_identity.json').write_text(
@@ -512,9 +516,17 @@ def run_live(args) -> dict:
         'authorization_sha256': _sha(authorization_path),
         'audited_code_commit': authorized['audited_code_commit'],
     }
+    runtime_policy = manifest.get('config', {}).get('runtime_policy')
+    if runtime_policy is not None:
+        from experiment_runner.runtime_policy import validate_resolved_policy
+        if not stateful:
+            raise RuntimeError('runtime policy is not supported by this legacy candidate')
+        validate_resolved_policy(runtime_policy, manifest['assets'][args.task])
+        spec['runtime_policy'] = runtime_policy
     if stateful:
-        spec['agent_time_protocol'] = 'diagnostic-uncapped-v1'
-        spec['diagnostic_task_identity'] = diagnostic_task
+        spec['agent_time_protocol'] = manifest['config']['agent_time_protocol']
+        if diagnostic_task is not None:
+            spec['diagnostic_task_identity'] = diagnostic_task
     if _native_schema(manifest):
         spec.update(repeat=args.repeat, batch_id=authorized['batch_id'],
                     config_sha256=manifest['config_sha256'],
@@ -601,9 +613,12 @@ def run_live(args) -> dict:
         spec['pos_binding_sha256'] = _sha(binding_path)
     spec_path = root / 'control' / 'harbor_spec.json'
     spec_path.write_text(json.dumps(spec, indent=2), encoding='utf-8')
-    agent_seconds = (None if stateful else manifest['config']['agent_wall_seconds']
+    agent_seconds = (runtime_policy['effective_agent_seconds'] if runtime_policy is not None
+                     else None if stateful else manifest['config']['agent_wall_seconds']
                      if args.condition == 'P' else 14400)
-    deadline = None if agent_seconds is None else time.time() + agent_seconds
+    # Harbor owns the phase clock. Do not start a second stateful deadline
+    # before worker readiness/environment setup and shorten the Agent phase.
+    deadline = None if stateful or agent_seconds is None else time.time() + agent_seconds
     worker = harbor = None
     worker_logs = []
     first_error = None
@@ -615,7 +630,7 @@ def run_live(args) -> dict:
         if args.condition == 'B' or candidate_profile:
             for name in ('worker.stdout.log', 'worker.stderr.log'):
                 worker_logs.append((root / 'archive' / name).open('wb'))
-            worker_env = dict(os.environ)
+            worker_env = clean_candidate_environment(os.environ)
             host_stage = root / 'control/stateful_host_stage'
             worker_env['PYTHONPATH'] = (os.pathsep.join((str(host_stage),
                 str(root / 'control/ga_stage'))) if stateful else
@@ -719,16 +734,23 @@ def run_live(args) -> dict:
         kwargs = {'llm_no': 0, 'run_id': args.run_id, 'task_id': args.task,
                   'expected_model': 'claude-opus-4-8', 'python_home': args.python_home,
                   'ga_source_sha256': prepared['ga_bundle_tree_sha256'],
-                  'timeout_sec': (180 if fixture else
+                  'timeout_sec': (('uncapped' if agent_seconds is None else agent_seconds)
+                      if runtime_policy is not None else 180 if fixture else
                       manifest['assets'][args.task]['native_agent_seconds'] if stateful
                       else agent_seconds),
-                  'max_turns': (0 if stateful else 2 if fixture else
+                  'max_turns': ((runtime_policy['effective_task_turns'] or 0)
+                      if runtime_policy is not None else 0 if stateful else 2 if fixture else
                       manifest.get('config', {}).get('task_turns_max', 300)),
                   'llm_config_name': args.task_profile,
                   'condition_id': ('stateful-memory-v1' if stateful else 'pma-neutral')}
         for key, value in kwargs.items():
             command += ['--ak', f'{key}={value}']
-        env = dict(os.environ)
+        env = clean_candidate_environment(os.environ)
+        # This field is frozen in the manifest, never inherited from a shell.
+        env.pop('GA_EXPERIMENT_TASK_TURNS', None)
+        if runtime_policy is not None:
+            turns = runtime_policy['effective_task_turns']
+            env['GA_EXPERIMENT_TASK_TURNS'] = 'uncapped' if turns is None else str(turns)
         for name in ('PMA_MEMORY_API_KEY', 'OPENROUTER_API_KEY', 'ANTHROPIC_API_KEY'):
             env.pop(name, None)
         python_roots = [str(repo), str(repo / 'GenericAgent-main'),
@@ -751,7 +773,7 @@ def run_live(args) -> dict:
                    GA_PMA_CAPTURE_TASK_REQUESTS='1',
                    GA_PMA_ENABLED='0', GA_MONITOR_ENABLED='0', GA_M0_MONITOR_ENABLED='0')
         if stateful:
-            env['GA_STATEFUL_AGENT_TIME_PROTOCOL'] = 'diagnostic-uncapped-v1'
+            env['GA_STATEFUL_AGENT_TIME_PROTOCOL'] = expected_protocol
         if task_policy == 'complete-response-v1' or (
                 args.condition != 'P' and env.get('GA_TASK_COMPLETE_RESPONSE') == '1'):
             env['GA_TASK_COMPLETE_RESPONSE'] = '1'
@@ -796,6 +818,11 @@ def run_live(args) -> dict:
             env.update(GA_PMA_UPSTREAM_REQUESTS='/run/pma-bridge/requests',
                        GA_PMA_UPSTREAM_RESPONSES='/run/pma-bridge/responses',
                        GA_PMA_UPSTREAM_DEADLINE_EPOCH=str(deadline))
+        outer_timeout_seconds = (runtime_policy['outer_timeout_seconds']
+            if runtime_policy is not None else None if stateful else
+            (agent_seconds if agent_seconds is not None else
+             manifest['assets'][args.task]['native_agent_seconds']) +
+            manifest['assets'][args.task].get('native_verifier_seconds', 900) + 600)
         (root / 'archive' / 'live_command_public.json').write_text(json.dumps({
             'argv': command, 'public_env': {name: env[name] for name in (
                 'GA_RUN_ISOLATION', 'GA_PMA_UPSTREAM_ENABLED', 'GA_MONITOR_ENABLED')},
@@ -804,16 +831,12 @@ def run_live(args) -> dict:
                 env.get('GA_TASK_COMPLETE_RESPONSE') == '1' else 'disabled'),
             'evaluator_timeout_sec': manifest['assets'][args.task].get(
                 'native_verifier_seconds', 900),
-            'diagnostic_task_identity': diagnostic_task,
-            'outer_timeout_sec': None if stateful else (agent_seconds if agent_seconds is not None else
-                manifest['assets'][args.task]['native_agent_seconds']) + manifest['assets'][args.task].get(
-                'native_verifier_seconds', 900) + 600}, indent=2), encoding='utf-8')
+            'outer_timeout_sec': outer_timeout_seconds,
+            'runtime_policy': runtime_policy,
+            'diagnostic_task_identity': diagnostic_task}, indent=2), encoding='utf-8')
         with (root / 'archive/harbor.stdout.log').open('wb') as out, (
                 root / 'archive/harbor.stderr.log').open('wb') as err:
             harbor = subprocess.Popen(command, cwd=repo, env=env, stdout=out, stderr=err)
-            outer_timeout_seconds = None if stateful else ((agent_seconds if agent_seconds is not None else
-                manifest['assets'][args.task]['native_agent_seconds']) +
-                manifest['assets'][args.task].get('native_verifier_seconds', 900) + 600)
             outer_deadline = (None if outer_timeout_seconds is None else
                               time.time() + outer_timeout_seconds)
             while harbor.poll() is None:
@@ -1016,3 +1039,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+
