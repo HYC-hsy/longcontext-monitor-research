@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from gap_memory_agent import GapMemoryAgent
-from gap_prompts import ATTENTION, MAINTENANCE, phase2_system
+from gap_prompts import ATTENTION, MAINTENANCE, PHASE2_REPLACEMENTS, phase2_system
 from gap_store import GapMemory
 from memory_agent.memory.memory_agent import (
     BANK_TOOLS, MemoryAgent, PHASE1_SYSTEM, PHASE2_SYSTEM,
@@ -46,6 +46,71 @@ class GapAgentTests(unittest.TestCase):
         self.assertEqual(agent.transport_phase, "selection")
         self.assertEqual(agent.last_gap_report["mode"], "direct_two_phase")
         return agent, result
+
+    def test_prompt_contract_is_role_local_and_vendor_is_unchanged(self):
+        original = PHASE2_SYSTEM
+        model = ScriptedLLM(reply(), reply("<no_intervention/>"))
+        self.run_cycle(model)
+        self.assertEqual(model.inputs[0]["system"], PHASE1_SYSTEM + MAINTENANCE)
+        for heading in ("Test-quality checks:", "Maintain existing gaps:",
+                        "Preserve useful resolutions:"):
+            self.assertEqual(MAINTENANCE.count(heading), 1)
+        self.assertEqual(ATTENTION.count("The gap view is fallible memory"), 1)
+        self.assertEqual(model.inputs[1]["system"], phase2_system())
+        for old, new in PHASE2_REPLACEMENTS:
+            self.assertEqual(original.count(old), 1)
+            self.assertNotIn(old, model.inputs[1]["system"])
+            self.assertEqual(model.inputs[1]["system"].count(new), 1)
+        self.assertEqual(PHASE2_SYSTEM, original)
+        self.assertTrue(all(ord(char) < 128 for char in MAINTENANCE + ATTENTION +
+                            "".join(part for pair in PHASE2_REPLACEMENTS for part in pair)))
+
+    def test_resolution_can_save_procedural_experience_and_delete_gap(self):
+        bank = GapMemory()
+        resolved = bank.save_gap("Verification command not yet run")
+        model = ScriptedLLM(reply(calls=[
+            ("memory_save_procedural", {"content": "Ran the check; observed report; applies to this build"}),
+            ("memory_delete", {"memory_id": resolved})]),
+            reply("<no_intervention/>"))
+        agent, result = self.run_cycle(model, bank)
+        self.assertEqual([op.action for op in result.operations], ["save_procedural", "delete_gap"])
+        self.assertEqual(bank.entries, [])
+        self.assertEqual(len(bank.procedural), 1)
+        self.assertNotIn("Verification command not yet run", model.inputs[1]["prompt"])
+        self.assertEqual(agent.last_gap_report["formal_gaps"], [])
+
+    def test_partial_resolution_revises_one_gap_without_closing_other(self):
+        bank = GapMemory()
+        partial = bank.save_gap("Local and remote checks remain")
+        other = bank.save_gap("Independent requirement still open")
+        model = ScriptedLLM(reply(calls=[
+            ("memory_delete", {"memory_id": partial}),
+            ("memory_save_gap", {"content": "Remote check remains"})]),
+            reply("<no_intervention/>"))
+        _, result = self.run_cycle(model, bank)
+        self.assertEqual([op.action for op in result.operations], ["delete_gap", "save_gap"])
+        self.assertEqual([entry.content for entry in bank.entries],
+                         ["Independent requirement still open", "Remote check remains"])
+        self.assertEqual(bank.entries[0].id, other)
+        self.assertIn("Remote check remains", model.inputs[1]["prompt"])
+
+    def test_duplicate_deletion_does_not_automatically_create_experience(self):
+        bank = GapMemory()
+        duplicate = bank.save_gap("Duplicate claim")
+        model = ScriptedLLM(reply(calls=[("memory_delete", {"memory_id": duplicate})]),
+                            reply("<no_intervention/>"))
+        self.run_cycle(model, bank)
+        self.assertEqual(bank.entries, [])
+        self.assertEqual(bank.procedural, [])
+
+    def test_status_only_never_closes_gap(self):
+        bank = GapMemory()
+        entry = bank.save_gap("Acceptance still unverified")
+        model = ScriptedLLM(reply(calls=[("memory_update_status", {"content": "COMPLETE"})]),
+                            reply("<no_intervention/>"))
+        self.run_cycle(model, bank)
+        self.assertEqual(bank.status, "COMPLETE")
+        self.assertEqual([gap.id for gap in bank.entries], [entry])
 
     def test_vendor_process_two_calls_and_updated_phase2(self):
         model = ScriptedLLM(
@@ -91,8 +156,8 @@ class GapAgentTests(unittest.TestCase):
         self.assertEqual([x["function"]["name"] for x in gap.inputs[0]["tools"]],
                          [x["function"]["name"] for x in before] + ["memory_save_gap"])
         self.assertEqual(gap.inputs[0]["system"], PHASE1_SYSTEM + MAINTENANCE)
-        self.assertEqual(gap.inputs[1]["system"], PHASE2_SYSTEM + ATTENTION)
-        self.assertEqual(phase2_system(), PHASE2_SYSTEM + ATTENTION)
+        self.assertEqual(gap.inputs[1]["system"], phase2_system())
+        self.assertTrue(phase2_system().endswith(ATTENTION))
         self.assertNotIn("tools", gap.inputs[1])
         self.assertEqual(agent.gaps.entries, [])
 
