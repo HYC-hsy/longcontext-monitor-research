@@ -7,6 +7,7 @@ deliberately unusable BaseLLM; only the upstream memory LiteLLM may infer.
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import hashlib
 import json
 import os
@@ -45,7 +46,7 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
                        memory_api_key: str | None = None,
                        memory_profile: dict[str, Any] | None = None,
                        research_candidate: str = "U") -> MemoryEnabledTerminus2:
-    if research_candidate not in {"U", "V1", "D1", "S", "R", "S2", "R2"}:
+    if research_candidate not in {"U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0"}:
         raise ValueError("unknown research candidate")
     if memory_profile is not None:
         if (memory_profile.get("provider"), memory_profile.get("api_mode"),
@@ -84,6 +85,21 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
             use_bm25_prefilter=original.use_bm25_prefilter,
             keep_thinking=original.keep_thinking,
             use_structured_tools=original.use_structured_tools)
+        agent._research_candidate = research_candidate
+    elif research_candidate == "pma_gap_memory_v0":
+        from gap_memory_agent import GapMemoryAgent
+        from gap_store import GapMemory
+        original = agent._memory_agent
+        bank = GapMemory.from_dict(agent._memory.to_dict())
+        agent._memory = bank
+        agent._memory_agent = GapMemoryAgent(
+            task="", llm=agent._memory_llm, memory=bank,
+            max_memory_in_prompt=original.max_memory_in_prompt,
+            use_bm25_prefilter=original.use_bm25_prefilter,
+            keep_thinking=original.keep_thinking,
+            use_structured_tools=original.use_structured_tools)
+        if agent._memory is not agent._memory_agent.memory or agent._memory is not agent._memory_agent.gaps:
+            raise RuntimeError("gap bank identity mismatch")
         agent._research_candidate = research_candidate
     elif research_candidate != "U":
         # Preserve the original trigger, process, two provider calls, BM25 and
@@ -183,6 +199,18 @@ class PMAEpisode:
                 raise ValueError("unknown PMA event kind")
             self._record(event, result)
             candidate_agent = self.agent._memory_agent
+            if (getattr(self.agent, '_research_candidate', None) == 'pma_gap_memory_v0'
+                    and result.get('triggered')):
+                with (self.archive / 'gap_cycle.jsonl').open('a', encoding='utf-8') as stream:
+                    stream.write(json.dumps({
+                        'run_id': self.run_id, 'task_id': self.task_id,
+                        'event_id': event_id, 'sequence': sequence,
+                        'step': 1 if kind == 'task_start' else result.get('step_count'),
+                        'report': deepcopy(candidate_agent.last_gap_report),
+                        'formal_gaps': [entry.to_dict() for entry in self.agent._memory.entries],
+                    }, ensure_ascii=False, sort_keys=True) + '\n')
+                    stream.flush()
+                    os.fsync(stream.fileno())
             if hasattr(candidate_agent, "last_delivery_status"):
                 with (self.archive / "candidate_audit.jsonl").open("a", encoding="utf-8") as stream:
                     stream.write(json.dumps({
@@ -218,6 +246,8 @@ class PMAEpisode:
         self.agent._pending_injection = None
         self.agent._injection_used = False
         self.agent._task_description = text
+        if getattr(self.agent, "_research_candidate", None) == "pma_gap_memory_v0":
+            self.agent._memory_agent.task = text
         if hasattr(self.agent._memory, "register_leaf"):
             self.agent._memory.register_leaf(event["event_id"], "task_instruction",
                 text, event["sequence"], "initial_user_content", event["source_record_sha256"])

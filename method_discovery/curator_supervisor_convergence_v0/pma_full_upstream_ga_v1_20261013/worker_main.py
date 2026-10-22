@@ -37,16 +37,29 @@ def append_private_audit(path: Path, row: dict) -> None:
 def install_transport_audit(agent, archive: Path) -> None:
     """Observe the original two calls without changing its exception policy."""
     original = agent._memory_llm.call
+    calls = 0
 
     async def audited_call(*, prompt, system, tools=None):
-        phase = "bank_management" if tools else "context_decision"
+        nonlocal calls
+        calls += 1
+        candidate_agent = agent._memory_agent
+        phase = (candidate_agent.transport_phase if getattr(agent, '_research_candidate', None)
+                 == 'pma_gap_memory_v0' else "bank_management" if tools else "context_decision")
         started = time.time()
         status = "complete"
         append_private_audit(archive / "memory_payload.jsonl", {
             "phase": phase, "prompt": prompt, "system": system,
-            "tools": tools, "started_epoch": started})
+            "tools": tools, "started_epoch": started,
+            "cycle_step": getattr(candidate_agent, '_step', None), "call_sequence": calls})
         try:
-            return await original(prompt=prompt, system=system, tools=tools)
+            response = await original(prompt=prompt, system=system, tools=tools)
+            if getattr(agent, '_research_candidate', None) == 'pma_gap_memory_v0':
+                append_private_audit(archive / 'gap_visible_transport.jsonl', {
+                    'phase': phase, 'call_sequence': calls,
+                    'cycle_step': getattr(candidate_agent, '_step', None),
+                    'content': getattr(response, 'content', None),
+                    'tool_calls': getattr(response, 'tool_calls', None)})
+            return response
         except BaseException as exc:
             status = type(exc).__name__
             raise
@@ -59,6 +72,8 @@ def install_transport_audit(agent, archive: Path) -> None:
 
 
 async def serve(args: argparse.Namespace) -> None:
+    if args.deadline_epoch is None and args.research_candidate != 'pma_gap_memory_v0':
+        raise RuntimeError('uncapped PMA worker requires gap candidate identity')
     vendor = Path(__file__).resolve().parent / "vendor" / "pma_89e5c0d"
     sources = (Path(inspect.getfile(MemoryEnabledTerminus2)).resolve(),
                Path(inspect.getfile(Terminus2)).resolve())
@@ -93,6 +108,22 @@ async def serve(args: argparse.Namespace) -> None:
         from harbor.llms.base import LLMResponse
 
         async def offline_memory(*, prompt, system, tools=None):
+            if args.research_candidate == 'pma_gap_memory_v0':
+                phase = agent._memory_agent.transport_phase
+                if phase == 'maintenance':
+                    calls = []
+                    if agent._memory_agent._step == 1:
+                        calls.append(SimpleNamespace(function=SimpleNamespace(
+                            name='memory_save_gap', arguments={
+                                'content': 'Confirm the synthetic task result before completion.'})))
+                    return LLMResponse(content='', tool_calls=calls)
+                if phase in {'gap_review', 'gap_rereview'}:
+                    return LLMResponse(content='ACCEPT')
+                if phase == 'selection':
+                    return LLMResponse(content=(
+                        '<context_for_action>Verify the synthetic result.</context_for_action>'
+                        if agent._memory_agent._step == 1 else '<no_intervention/>'))
+                raise RuntimeError('unexpected gap fake role')
             if tools:
                 if getattr(args, "fake_memory_update", False) and "PMA_OFFLINE_TOOL_OK" in prompt:
                     call = SimpleNamespace(function=SimpleNamespace(
@@ -130,14 +161,14 @@ async def serve(args: argparse.Namespace) -> None:
             if stopped.is_set() or (private / "stop.request").exists():
                 reason = "host_stop"
                 break
-            if time.time() >= args.deadline_epoch:
+            if args.deadline_epoch is not None and time.time() >= args.deadline_epoch:
                 reason = "deadline"
                 break
             active = asyncio.create_task(dispatcher.serve_once())
             while not active.done():
                 await asyncio.wait({active}, timeout=0.05)
                 if (stopped.is_set() or (private / "stop.request").exists()
-                        or time.time() >= args.deadline_epoch):
+                        or (args.deadline_epoch is not None and time.time() >= args.deadline_epoch)):
                     reason = "stopped_or_deadline_in_flight_unknown"
                     active.cancel()
                     break
@@ -172,10 +203,10 @@ def main() -> None:
     parser.add_argument("--private-root", required=True)
     parser.add_argument("--requests", required=True)
     parser.add_argument("--responses", required=True)
-    parser.add_argument("--deadline-epoch", type=float, required=True)
+    parser.add_argument("--deadline-epoch", type=lambda value: None if value == 'uncapped' else float(value), required=True)
     parser.add_argument("--fake-memory", action="store_true")
     parser.add_argument("--fake-memory-update", action="store_true")
-    parser.add_argument("--research-candidate", choices=("U", "V1", "D1", "S", "R", "S2", "R2"), default="U")
+    parser.add_argument("--research-candidate", choices=("U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0"), default="U")
     asyncio.run(serve(parser.parse_args()))
 
 

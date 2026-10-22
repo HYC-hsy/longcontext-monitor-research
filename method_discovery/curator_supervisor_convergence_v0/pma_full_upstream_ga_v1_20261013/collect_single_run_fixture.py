@@ -31,6 +31,10 @@ def collect(condition: str, source: Path, target: Path, secrets: list[str]) -> l
     if condition == 'B':
         mapping['memory_payload.jsonl'] = run / 'host_private/archive/memory_payload.jsonl'
         mapping['memory_events.jsonl'] = run / 'host_private/archive/events.jsonl'
+        for name in ('gap_cycle.jsonl', 'gap_visible_transport.jsonl'):
+            path = run / 'host_private/archive' / name
+            if path.is_file():
+                mapping[name] = path
     for path in sorted((run / 'archive/fake_provider_requests').glob('*')):
         if path.suffix in {'.json', '.sse'}:
             mapping['fake_requests/' + path.name] = path
@@ -61,7 +65,8 @@ def main() -> None:
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--task-profile-file', type=Path, required=True)
     parser.add_argument('--pma-profile-file', type=Path, required=True)
-    parser.add_argument('--research-candidate', choices=('U', 'V1', 'D1'), default='U')
+    parser.add_argument('--research-candidate', choices=('U', 'V1', 'D1',
+        'pma_gap_memory_v0'), default='U')
     args = parser.parse_args()
     if args.b is None and args.research_candidate != 'U':
         parser.error('A-only certification requires U')

@@ -173,7 +173,7 @@ def _require_evaluation_state_contract(manifest: dict) -> None:
         if manifest.get('zero_model_fixture_only') is True:
             return
         from .single_run_certification import (HARBOR_COMMIT, SOURCE_FILES,
-                                               CANDIDATE_SOURCE_FILES,
+                                               CANDIDATE_SOURCE_FILES, GAP_SOURCE_FILES,
                                                source_identity, verify_evidence)
         cert = manifest.get('native_shared_certification')
         checkout = STAGE.parents[2]
@@ -192,12 +192,13 @@ def _require_evaluation_state_contract(manifest: dict) -> None:
                     cert.get('evidence') != verify_stateful_evidence(evidence)):
                 raise RuntimeError('stateful same-run native certification differs')
             return
-        expected_files = CANDIDATE_SOURCE_FILES if research is not None else SOURCE_FILES
+        expected_files = (GAP_SOURCE_FILES if research == 'pma_gap_memory_v0' else
+                          CANDIDATE_SOURCE_FILES if research is not None else SOURCE_FILES)
         if (manifest.get('status') != 'prepared_not_executed' or
                 not isinstance(cert, dict) or cert.get('harbor_commit') != HARBOR_COMMIT or
                 set(cert.get('source_files', {})) != set(expected_files) or
                 cert.get('source_files') != source_identity(checkout,
-                    candidate=research is not None)):
+                    candidate=research is not None, gap=research == 'pma_gap_memory_v0')):
             raise RuntimeError('single-run native lifecycle source certification differs')
         evidence = (checkout / cert.get('evidence_path', '')).resolve(strict=True)
         if (not evidence.is_relative_to(checkout) or
@@ -687,7 +688,7 @@ def run_live(args) -> dict:
                         worker_args += ['--context-window', str(manifest['config'][
                             'native_context_guard_window_tokens'])]
             else:
-                worker_args += ['--deadline-epoch', str(deadline),
+                worker_args += ['--deadline-epoch', 'uncapped' if deadline is None else str(deadline),
                     '--research-candidate', candidate,
                     *(['--fake-memory', '--fake-memory-update'] if fixture and
                       not candidate_profile else [])]
@@ -732,7 +733,7 @@ def run_live(args) -> dict:
             '--extra-docker-compose', str(root / 'bundle/isolation.compose.json'),
             '--n-concurrent', '1', '--max-retries', '0', '--yes',
             '--enable-verification',
-            '--agent-timeout-multiplier', str(1 if stateful else agent_seconds /
+            '--agent-timeout-multiplier', str(1 if stateful or agent_seconds is None else agent_seconds /
                 manifest['assets'][args.task]['native_agent_seconds'])
                 if _native_schema(manifest) else '16',
             '--verifier-timeout-multiplier', '1']
@@ -751,7 +752,9 @@ def run_live(args) -> dict:
                       if runtime_policy is not None else 0 if stateful else 2 if fixture else
                       manifest.get('config', {}).get('task_turns_max', 300)),
                   'llm_config_name': args.task_profile,
-                  'condition_id': ('stateful-memory-v1' if stateful else 'pma-neutral')}
+                  'condition_id': ('stateful-memory-v1' if stateful else
+                                   'pma-gap-memory-v0' if candidate == 'pma_gap_memory_v0'
+                                   else 'pma-neutral')}
         for key, value in kwargs.items():
             command += ['--ak', f'{key}={value}']
         env = clean_candidate_environment(os.environ)
@@ -828,7 +831,8 @@ def run_live(args) -> dict:
         elif args.condition == 'B':
             env.update(GA_PMA_UPSTREAM_REQUESTS='/run/pma-bridge/requests',
                        GA_PMA_UPSTREAM_RESPONSES='/run/pma-bridge/responses',
-                       GA_PMA_UPSTREAM_DEADLINE_EPOCH=str(deadline))
+                       GA_PMA_UPSTREAM_CANDIDATE=candidate,
+                       GA_PMA_UPSTREAM_DEADLINE_EPOCH='uncapped' if deadline is None else str(deadline))
         outer_timeout_seconds = (runtime_policy['outer_timeout_seconds']
             if runtime_policy is not None else None if stateful else
             (agent_seconds if agent_seconds is not None else
@@ -1033,7 +1037,7 @@ def main() -> None:
     parser.add_argument('--research-candidate', choices=(
         'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
         'pos_pma_complement_v1', 'pos_pma_shared_view_v1',
-        'pma_stateful_memory_v1'), default='U')
+        'pma_stateful_memory_v1', 'pma_gap_memory_v0'), default='U')
     parser.add_argument('--stateful-fake-replies')
     parser.add_argument('--task-profile', default='native_claude_cc_vibe_opus48')
     parser.add_argument('--pma-profile-file')

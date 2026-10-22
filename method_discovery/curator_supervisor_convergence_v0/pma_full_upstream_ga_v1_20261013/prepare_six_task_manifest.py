@@ -27,6 +27,7 @@ STAGE = Path(__file__).resolve().parent
 SOURCE_FILES = (
     'experiment_runner/__init__.py',
     'experiment_runner/methods.py',
+    'experiment_runner/__main__.py',
     'experiment_runner/runtime_policy.py',
     'long_context_bench/adapters/harbor_ga_agent.py',
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
@@ -119,10 +120,10 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
             required.add('research_candidate')
         if stateful:
             required.add('task_complete_response_policy')
-            if 'runtime_policy' in plan:
-                required.add('runtime_policy')
             required.add('agent_time_protocol')
             required.update(key for key in runtime_policies if key in plan)
+        if 'runtime_policy' in plan:
+            required.add('runtime_policy')
         if (set(plan) != required or
                 plan['execution_authorized'] is not False or
                 plan['official_source_git_commit'] !=
@@ -282,7 +283,8 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
         conditions = (('A',) if single and plan['condition'] == 'A' and
                       not (evidence / 'B').exists() else ('A', 'B'))
         certification = {'source_files': (source_identity(checkout) if stateful else
-                             source_identity(checkout, candidate=research is not None)),
+                             source_identity(checkout, candidate=research is not None,
+                                 gap=research == 'pma_gap_memory_v0')),
                          'evidence_path': evidence.relative_to(checkout).as_posix(),
                          'evidence': (verify_evidence(evidence) if stateful else
                              verify_evidence(evidence, research_candidate=research,

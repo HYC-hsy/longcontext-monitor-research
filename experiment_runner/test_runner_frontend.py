@@ -78,6 +78,25 @@ class FrontendTests(unittest.TestCase):
             if directory.is_dir():
                 (directory / 'authorization.json').write_text('{}')
 
+    def test_gap_runtime_policy_is_frozen_without_stateful_transport(self):
+        self.config['method'] = 'pma-gap'
+        self.config['slots'] = [{'task': 'sqlite-with-gcov'}]
+        self.config['runtime_policy'] = {'agent_timeout': 'uncapped',
+            'task_turns': 'uncapped', 'verifier_timeout': 'official'}
+        plan = build_plan(self.config)
+        slot = plan['slots'][0]
+        self.assertEqual(slot['adapter']['research_candidate'], 'pma_gap_memory_v0')
+        self.assertIsNone(slot['effective_runtime_policy']['effective_agent_seconds'])
+        backend = FakeBackend()
+        self.assertEqual(execute(plan, self.output, 'prepare', backend)[0]['status'],
+                         'prepared_not_authorized')
+        self.assertEqual(backend.prepared[0].runtime_policy,
+                         self.config['runtime_policy'])
+        self.assertFalse(backend.prepared[0].task_complete_response)
+        self.config['native_context_policy'] = 'off'
+        with self.assertRaisesRegex(ValueError, 'stateful transport policy'):
+            build_plan(self.config)
+
     def test_prepare_and_serial_run_use_adapter(self):
         backend = FakeBackend()
         rows = execute(self.plan, self.output, 'prepare', backend)

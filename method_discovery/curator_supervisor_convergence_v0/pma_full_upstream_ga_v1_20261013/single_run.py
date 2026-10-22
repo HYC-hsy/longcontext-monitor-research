@@ -80,8 +80,9 @@ def prepare(args: argparse.Namespace) -> dict:
     from .prepare_six_task_manifest import prepare as prepare_manifest
     runtime_policy = getattr(args, 'runtime_policy', None)
     validate_binding(args.condition, getattr(args, 'research_candidate', 'U'))
-    if runtime_policy is not None and getattr(args, 'research_candidate', 'U') != 'pma_stateful_memory_v1':
-        raise ValueError('runtime policy overrides currently require pma_stateful_memory_v1')
+    if runtime_policy is not None and getattr(args, 'research_candidate', 'U') not in {
+            'pma_stateful_memory_v1', 'pma_gap_memory_v0'}:
+        raise ValueError('runtime policy overrides require a supported candidate')
     root = Path(args.output).resolve(strict=False)
     root.mkdir(parents=True, exist_ok=False)
     pos = args.condition == 'P'

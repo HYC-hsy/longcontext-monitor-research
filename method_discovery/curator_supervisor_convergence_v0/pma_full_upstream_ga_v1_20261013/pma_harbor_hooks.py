@@ -333,6 +333,11 @@ class NativeSharedTrialHooks(PMATrialHooks):
                 self.trial._verifier_timeout_sec != expected_verifier or
                 getattr(self.trial.agent, 'condition_id', None) != 'stateful-memory-v1'):
             raise RuntimeError('stateful diagnostic Harbor timeout not effective')
+        if self.spec.get('research_candidate') == 'pma_gap_memory_v0' and (
+                policy is None or self.trial._agent_timeout_sec != expected_agent or
+                self.trial._verifier_timeout_sec != expected_verifier or
+                getattr(self.trial.agent, 'condition_id', None) != 'pma-gap-memory-v0'):
+            raise RuntimeError('gap diagnostic Harbor runtime policy not effective')
         container, raw = await self._inspect()
         mounts = {m['Destination']: m for m in raw.get('Mounts', [])}
         if raw['Image'] != self.spec['image_id'] or raw['HostConfig']['NetworkMode'] == 'none':

@@ -44,6 +44,16 @@ CANDIDATE_SOURCE_FILES = SOURCE_FILES + (
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'decision_reminder_agent.py',
 )
+GAP_SOURCE_FILES = SOURCE_FILES + (
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'episode.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'gap_memory_agent.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'gap_store.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'gap_prompts.py',
+)
 EVIDENCE_FILES = (
     'execution_identity.json',
     'live_result.json', 'agent_start_identity.json', 'agent_end_native.json',
@@ -78,7 +88,8 @@ def verify_evidence(evidence: Path, *, require_committed: bool = True,
     hashes = {}
     for condition in conditions:
         current = source_identity(checkout,
-            candidate=research_candidate is not None and condition == 'B')
+            candidate=research_candidate is not None and condition == 'B',
+            gap=research_candidate == 'pma_gap_memory_v0' and condition == 'B')
         base = evidence / condition
         required = [name for name in EVIDENCE_FILES
                     if condition == 'B' or name != 'memory_payload.jsonl']
@@ -145,8 +156,14 @@ def verify_evidence(evidence: Path, *, require_committed: bool = True,
                 raise RuntimeError('generic PMA reminder did not enter Task request')
             phases = [json.loads(line).get('phase') for line in
                       (base / 'memory_payload.jsonl').read_text(encoding='utf-8').splitlines()]
-            if not {'bank_management', 'context_decision'} <= set(phases):
+            required_phases = ({'maintenance', 'gap_review', 'selection'}
+                if research_candidate == 'pma_gap_memory_v0' else
+                {'bank_management', 'context_decision'})
+            if not required_phases <= set(phases):
                 raise RuntimeError('generic PMA two-stage transport absent')
+            if research_candidate == 'pma_gap_memory_v0' and not (
+                    base / 'gap_cycle.jsonl').is_file():
+                raise RuntimeError('gap candidate cycle evidence absent')
         else:
             if any(row.get('event_type') == 'pma_reminder_appended' for row in events):
                 raise RuntimeError('generic Task-only fixture used PMA')
@@ -164,8 +181,9 @@ def verify_evidence(evidence: Path, *, require_committed: bool = True,
     return {'outcomes': outcomes, 'file_sha256': hashes}
 
 
-def source_identity(checkout: Path, *, candidate: bool = False) -> dict:
-    files = CANDIDATE_SOURCE_FILES if candidate else SOURCE_FILES
+def source_identity(checkout: Path, *, candidate: bool = False,
+                    gap: bool = False) -> dict:
+    files = GAP_SOURCE_FILES if gap else CANDIDATE_SOURCE_FILES if candidate else SOURCE_FILES
     return {name: _committed_source_sha(checkout, name) for name in files}
 
 

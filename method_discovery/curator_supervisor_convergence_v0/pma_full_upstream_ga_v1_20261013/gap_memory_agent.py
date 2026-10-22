@@ -37,6 +37,7 @@ class GapMemoryAgent(MemoryAgent):
         self.gaps = bank
         self._tools = deepcopy(BANK_TOOLS) + [deepcopy(GAP_TOOL)]
         self.last_gap_report = {}
+        self.transport_phase = None
         self._active = False
 
     def get_tools_schema(self):
@@ -83,6 +84,7 @@ class GapMemoryAgent(MemoryAgent):
 
     async def _call_llm_phase1(self, user_prompt):
         try:
+            self.transport_phase = "maintenance"
             kwargs = {"prompt": user_prompt, "system": PHASE1_SYSTEM + MAINTENANCE}
             if self.use_structured_tools:
                 kwargs["tools"] = self.get_tools_schema()
@@ -154,6 +156,8 @@ class GapMemoryAgent(MemoryAgent):
 
     async def _review(self):
         prompt = self._review_material()
+        self.transport_phase = ("gap_review" if not self.last_gap_report["reviews"]
+                                else "gap_rereview")
         response = await self.llm.call(prompt=prompt, system=REVIEW)
         raw = getattr(response, "content", None)
         match = re.fullmatch(r"(ACCEPT|REVISE)(?::([\s\S]*))?", raw.strip()) if isinstance(raw, str) else None
@@ -182,6 +186,7 @@ class GapMemoryAgent(MemoryAgent):
             }
             if self.use_structured_tools:
                 kwargs["tools"] = tools
+            self.transport_phase = "gap_repair"
             response = await self.llm.call(**kwargs)
             self._dispatch(response, gap_only=True)
             if self._gap_error:
@@ -207,4 +212,5 @@ class GapMemoryAgent(MemoryAgent):
             system = PHASE2_SYSTEM
         self._sent_phase2 = actual
         self.last_gap_report["actual_phase2_prompt"] = actual
+        self.transport_phase = "selection"
         return await self.llm.call(prompt=actual, system=system)

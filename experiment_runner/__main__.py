@@ -89,7 +89,7 @@ def build_plan(config):
         seen.add(identity)
         if 'runtime_policy' in config and not method.supports_runtime_policy:
             raise ValueError(f'explicit runtime policy unsupported by adapter {method.name}')
-        if any(key in config for key in ('native_context_policy', 'research_capture_policy')) and not method.supports_runtime_policy:
+        if any(key in config for key in ('native_context_policy', 'research_capture_policy')) and method.research_candidate != 'pma_stateful_memory_v1':
             raise ValueError(f'stateful transport policy unsupported by adapter {method.name}')
         normalized.append({'task': task, 'method': method.name, 'occurrence': occurrence,
                            'adapter': asdict(method)})
@@ -190,7 +190,7 @@ def execute(plan, output, mode, backend=None):
             if (single.get('runtime_policy') != row['requested_runtime_policy'] or
                     manifest.get('config', {}).get('runtime_policy') != row['effective_runtime_policy']):
                 raise ValueError('driver ignored or changed the requested runtime policy')
-        if method.supports_runtime_policy:
+        if method.research_candidate == 'pma_stateful_memory_v1':
             from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.stateful_runtime_policy import policies
             expected_policies = policies(config)
             if any(single.get(key) != value or manifest.get('config', {}).get(key) != value

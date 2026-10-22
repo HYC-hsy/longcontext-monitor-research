@@ -93,9 +93,10 @@ def run_batch(args: argparse.Namespace) -> dict:
         **({'agent_time_protocol': manifest['config'].get('agent_time_protocol'),
             'native_context_policy': manifest['config']['native_context_policy'],
             'research_capture_policy': manifest['config']['research_capture_policy'],
-            **({'runtime_policy': manifest['config']['runtime_policy']}
-               if 'runtime_policy' in manifest['config'] else {})} if
+            } if
            first.get('research_candidate') == 'pma_stateful_memory_v1' else {}),
+        **({'runtime_policy': manifest['config']['runtime_policy']}
+           if 'runtime_policy' in manifest['config'] else {}),
         **first))
     record = {"schema": "pma-ga-batch-result-v2" if native_plan else "pma-ga-batch-result-v1", "arms": [],
               "not_started": [], "stop_reason": None}

@@ -36,7 +36,7 @@ class UpstreamPMAClient:
         self.run_id, self.task_id = run_id, task_id
         self.requests = Path(requests).resolve(strict=True)
         self.responses = Path(responses).resolve(strict=True)
-        self.deadline = float(deadline)
+        self.deadline = (None if deadline == 'uncapped' else float(deadline))
         self.sequence = 0
         if not self.requests.is_dir() or not self.responses.is_dir():
             raise PMABridgeError('PMA spool unavailable')
@@ -50,6 +50,9 @@ class UpstreamPMAClient:
                     'GA_PMA_UPSTREAM_DEADLINE_EPOCH')
         if any(not os.environ.get(name) for name in required):
             raise PMABridgeError('PMA run identity or spool configuration absent')
+        if (os.environ['GA_PMA_UPSTREAM_DEADLINE_EPOCH'] == 'uncapped' and
+                os.environ.get('GA_PMA_UPSTREAM_CANDIDATE') != 'pma_gap_memory_v0'):
+            raise PMABridgeError('uncapped PMA deadline requires gap candidate identity')
         client = cls(run_id=os.environ['GA_BENCH_RUN_ID'],
                      task_id=os.environ['GA_BENCH_TASK_ID'],
                      requests=os.environ['GA_PMA_UPSTREAM_REQUESTS'],
@@ -59,7 +62,7 @@ class UpstreamPMAClient:
         return client
 
     def exchange(self, kind, **fields):
-        if time.time() >= self.deadline:
+        if self.deadline is not None and time.time() >= self.deadline:
             raise PMABridgeError('PMA shared deadline expired')
         self.sequence += 1
         event_id = uuid.uuid4().hex
@@ -79,7 +82,7 @@ class UpstreamPMAClient:
                 os.unlink(pending)
         response = self.responses / request.name
         while not response.is_file():
-            if time.time() >= self.deadline:
+            if self.deadline is not None and time.time() >= self.deadline:
                 raise PMABridgeError('PMA result unknown; do not replay accepted event')
             time.sleep(.02)
         try:
