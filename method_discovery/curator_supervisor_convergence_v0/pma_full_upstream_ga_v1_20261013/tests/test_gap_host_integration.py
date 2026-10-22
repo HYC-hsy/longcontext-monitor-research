@@ -1,4 +1,4 @@
-"""Gap candidate through the real upstream episode and its message boundary."""
+"""Direct gap view through the real upstream episode and its message boundary."""
 
 import asyncio
 import json
@@ -19,7 +19,7 @@ def event(kind, number, **fields):
 
 
 class GapHostTests(unittest.TestCase):
-    def test_task_binding_same_bank_and_accepted_cycle(self):
+    def test_task_binding_same_bank_and_two_phase_cycle(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
             agent = construct_upstream(root / "upstream", research_candidate="pma_gap_memory_v0")
@@ -37,8 +37,6 @@ class GapHostTests(unittest.TestCase):
                         name="memory_save_gap", arguments=json.dumps({
                             "content": "Verify the synthetic result."})))
                     return LLMResponse(content="", tool_calls=[call])
-                if phase == "gap_review":
-                    return LLMResponse(content="ACCEPT")
                 if phase == "selection":
                     return LLMResponse(content="<context_for_action>Check result.</context_for_action>")
                 raise AssertionError(phase)
@@ -59,28 +57,32 @@ class GapHostTests(unittest.TestCase):
             self.assertEqual(asyncio.run(run())["status"], "saved")
             self.assertEqual(agent._memory_agent.task, "Original synthetic task text")
             self.assertEqual([row[0] for row in seen],
-                             ["maintenance", "gap_review", "selection"])
-            self.assertEqual(json.loads(seen[1][1])["original_task"],
-                             "Original synthetic task text")
+                             ["maintenance", "selection"])
+            self.assertIn("Original synthetic task text", seen[0][1])
+            self.assertIn("Verify the synthetic result.", seen[1][1])
             cycle = json.loads((root / "archive/gap_cycle.jsonl").read_text().splitlines()[0])
-            self.assertEqual(cycle["report"]["status"], "accepted")
+            self.assertEqual(cycle["report"]["mode"], "direct_two_phase")
+            self.assertEqual(cycle["report"]["actual_phase2_prompt"], seen[1][1])
             self.assertEqual(len(cycle["formal_gaps"]), 1)
             saved = json.loads((root / "archive/memory.json").read_text())
             self.assertEqual(len(saved["gaps"]), 1)
 
-    def test_invalid_review_is_stale_not_formal(self):
+    def test_gap_tool_failure_is_recorded_without_review_or_rollback(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
             agent = construct_upstream(root / "upstream", research_candidate="pma_gap_memory_v0")
 
+            seen = []
+
             async def scripted(*, prompt, system, tools=None):
                 phase = agent._memory_agent.transport_phase
+                seen.append(phase)
                 if phase == "maintenance":
-                    call = SimpleNamespace(function=SimpleNamespace(
-                        name="memory_save_gap", arguments=json.dumps({"content": "Draft gap"})))
-                    return LLMResponse(content="", tool_calls=[call])
-                if phase == "gap_review":
-                    return LLMResponse(content="I cannot review this.")
+                    calls = [SimpleNamespace(function=SimpleNamespace(name=name,
+                             arguments=json.dumps(args))) for name, args in [
+                                 ("memory_save_gap", {"content": "Saved gap"}),
+                                 ("memory_delete", {"memory_id": "gap_missing"})]]
+                    return LLMResponse(content="", tool_calls=calls)
                 return LLMResponse(content="<no_intervention/>")
 
             agent._memory_llm.call = scripted
@@ -89,9 +91,10 @@ class GapHostTests(unittest.TestCase):
             asyncio.run(episode.handle(event("task_start", 1,
                 initial_user_content="Original synthetic task text")))
             cycle = json.loads((root / "archive/gap_cycle.jsonl").read_text().splitlines()[0])
-            self.assertEqual(cycle["report"]["status"], "stale")
-            self.assertEqual(cycle["formal_gaps"], [])
-            self.assertIn("stale", cycle["report"]["actual_phase2_prompt"])
+            self.assertEqual(seen, ["maintenance", "selection"])
+            self.assertEqual(cycle["formal_gaps"][0]["content"], "Saved gap")
+            self.assertEqual(cycle["report"]["errors"][0]["memory_id"], "gap_missing")
+            self.assertIn("Saved gap", cycle["report"]["actual_phase2_prompt"])
 
 
 if __name__ == "__main__":
