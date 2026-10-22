@@ -47,8 +47,8 @@ restored, including on failure.
 
 ## Runtime policy: one resolved value, not multiple hidden defaults
 
-Explicit `runtime_policy` is currently supported by `pma-stateful` only.
-Other compatibility drivers reject it. For `pma-stateful`, omitting the field
+Explicit `runtime_policy` is supported by `pma-stateful` and `pma-gap` only.
+Other compatibility drivers reject it. For these candidates, omitting the field
 resolves and passes the explicit official-Agent/method-default-turns policy.
 Other legacy drivers retain their existing behavior; no claim is made that
 their old defaults are official benchmark defaults.
@@ -72,7 +72,7 @@ configuration hash is computed. Run uses that frozen policy, not a new CLI or
 shell override. A changed task/method/configuration/manifest requires a fresh
 preparation and matching existing authorization; it cannot reuse the old run.
 
-For `pma-stateful`, the separate transport policies may be set at the top level:
+Only `pma-stateful` accepts the separate transport policies at the top level:
 `"native_context_policy": "off"` and
 `"research_capture_policy": "best_effort"`. Both default to `required` when
 omitted; other methods reject explicit overrides. The frontend passes these to
