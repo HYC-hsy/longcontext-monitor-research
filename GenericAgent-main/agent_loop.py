@@ -180,8 +180,11 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
         from pma_baseline.runtime import from_environment
         pma = from_environment(initial_content)
     # A frozen experiment turn policy must not be rewritten by enter_plan_mode.
-    explicit_turn_policy = (stateful_enabled and stateful_mode == 'live' and
-                            os.environ.get('GA_EXPERIMENT_TASK_TURNS') is not None)
+    explicit_turn_policy = (
+        (stateful_enabled and stateful_mode == 'live' or
+         os.environ.get('GA_PMA_UPSTREAM_ENABLED') == '1' and
+         os.environ.get('GA_PMA_UPSTREAM_CANDIDATE') == 'pma_gap_memory_v0') and
+        os.environ.get('GA_EXPERIMENT_TASK_TURNS') is not None)
     def within_turn_limit():
         if explicit_turn_policy:
             return max_turns is None or local_turn < max_turns
