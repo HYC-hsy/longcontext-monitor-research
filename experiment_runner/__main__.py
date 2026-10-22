@@ -209,10 +209,19 @@ def execute(plan, output, mode, backend=None):
                     'single_plan_sha256': hashlib.sha256((directory / 'plan.json').read_bytes()).hexdigest()}
         if binding != expected:
             raise ValueError('prepared slot method/protocol/manifest binding changed')
+        stateful_replies = None
+        if env.get('fake_only', False) and resolve(row['method']).research_candidate == 'pma_stateful_memory_v1':
+            driver = importlib.import_module(DRIVER + '.single_run')
+            fixture = Path(driver.__file__).resolve().with_name('stateful_fixture_replies.json')
+            actual_hash = hashlib.sha256(fixture.read_bytes()).hexdigest()
+            manifest = json.loads((directory / 'manifest.json').read_text(encoding='utf-8'))
+            if manifest.get('stateful_fake_replies_sha256') != actual_hash:
+                raise ValueError('stateful fixture replies identity mismatch')
+            stateful_replies = str(fixture)
         args = dict(output=str(directory), authorization=str(authorization), **profiles,
                     **paths, official_source_git=config['dataset']['source_git'],
                     zero_model_fixture=env.get('fake_only', False), candidate_profile_fixture=False,
-                    stateful_fake_replies=None)
+                    stateful_fake_replies=stateful_replies)
         args.setdefault('python_home', 'cpython-3.12.12-linux-x86_64-gnu')
         with method_environment(resolve(row['method'])):
             return backend.run(argparse.Namespace(**args))

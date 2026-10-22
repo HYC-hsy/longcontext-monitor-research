@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import importlib
 import json
 import os
@@ -24,6 +25,10 @@ class FakeBackend:
             'condition': args.condition, 'research_candidate': args.research_candidate,
             'task_complete_response_policy': 'complete-response-v1' if args.task_complete_response else 'disabled'}))
         manifest = {'fixture': True}
+        if args.fake_only and args.research_candidate == 'pma_stateful_memory_v1':
+            driver = importlib.import_module(DRIVER + '.single_run')
+            replies = Path(driver.__file__).with_name('stateful_fixture_replies.json')
+            manifest['stateful_fake_replies_sha256'] = hashlib.sha256(replies.read_bytes()).hexdigest()
         if hasattr(args, 'runtime_policy'):
             from experiment_runner.runtime_policy import resolve_policy
             single = json.loads((root / 'plan.json').read_text())
@@ -85,6 +90,49 @@ class FrontendTests(unittest.TestCase):
         self.assertTrue(succeeded(rows, 2, 'run'))
         self.assertEqual(len(backend.runs), 2)
         self.assertFalse(backend.runs[0].candidate_profile_fixture)
+        self.assertIsNone(backend.runs[0].stateful_fake_replies)
+
+    def test_stateful_fake_replies_match_frozen_fixture(self):
+        self.config['environment']['fake_only'] = True
+        plan = build_plan(self.config)
+        backend = FakeBackend()
+        self.assertTrue(succeeded(execute(plan, self.output, 'prepare', backend), 2, 'prepare'))
+        self.authorize()
+        self.assertTrue(succeeded(execute(plan, self.output, 'run', backend), 2, 'run'))
+        replies = Path(backend.runs[0].stateful_fake_replies)
+        self.assertEqual(replies.name, 'stateful_fixture_replies.json')
+        self.assertEqual(hashlib.sha256(replies.read_bytes()).hexdigest(),
+            json.loads(next(self.output.glob('01-*/manifest.json')).read_text())[
+                'stateful_fake_replies_sha256'])
+
+    def test_stateful_fake_replies_identity_mismatch_rejected(self):
+        self.config['environment']['fake_only'] = True
+        plan = build_plan(self.config)
+        backend = FakeBackend()
+        execute(plan, self.output, 'prepare', backend)
+        self.authorize()
+        directory = next(self.output.glob('01-*/'))
+        manifest_path = directory / 'manifest.json'
+        manifest = json.loads(manifest_path.read_text())
+        manifest['stateful_fake_replies_sha256'] = '0' * 64
+        manifest_path.write_text(json.dumps(manifest))
+        binding_path = directory / 'frontend_binding.json'
+        binding = json.loads(binding_path.read_text())
+        binding['manifest_sha256'] = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+        binding_path.write_text(json.dumps(binding))
+        rows = execute(plan, self.output, 'run', backend)
+        self.assertEqual(rows[0]['status'], 'not_started_validation_failure')
+        self.assertIn('identity mismatch', rows[0]['error'])
+        self.assertFalse(backend.runs)
+
+    def test_ga_only_fake_has_no_stateful_replies(self):
+        self.config['method'] = 'ga-only'
+        self.config['environment']['fake_only'] = True
+        plan = build_plan(self.config)
+        backend = FakeBackend()
+        execute(plan, self.output, 'prepare', backend)
+        self.authorize()
+        self.assertTrue(succeeded(execute(plan, self.output, 'run', backend), 2, 'run'))
         self.assertIsNone(backend.runs[0].stateful_fake_replies)
 
     def test_default_stateful_policy_is_explicit_official(self):
