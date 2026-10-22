@@ -343,7 +343,7 @@ def _advance_worker_stop(root: Path, worker: subprocess.Popen | None,
 def _native_trial_result(root: Path) -> dict:
     """Read this fresh Harbor job's result, without interpreting task answers."""
     def bootstrap_failure():
-        for name in ('persistent_bundle_v1', 'bootstrap_retry_v1'):
+        for name in ('persistent_bundle_v1', 'bootstrap_retry_v1', 'download_retry_v1'):
             receipt = root / 'archive' / f'{name}.json'
             if receipt.is_file():
                 row = json.loads(receipt.read_text(encoding='utf-8'))
@@ -574,6 +574,7 @@ def run_live(args) -> dict:
         spec['evaluation_bootstrap_protocol'] = manifest['config'].get(
             'evaluation_bootstrap_protocol', 'original')
         spec['evaluation_cache'] = manifest['config'].get('evaluation_cache')
+        spec['evaluation_download_retry'] = manifest['config'].get('evaluation_download_retry')
     verify_live_spec(spec)
     if _sha(Path(args.task_profile_file)) != manifest['task_profile_sha256']:
         raise RuntimeError('PMA Task profile differs from frozen identity')

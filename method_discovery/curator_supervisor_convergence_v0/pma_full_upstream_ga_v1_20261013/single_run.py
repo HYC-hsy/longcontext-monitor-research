@@ -81,9 +81,17 @@ def prepare(args: argparse.Namespace) -> dict:
     runtime_policy = getattr(args, 'runtime_policy', None)
     bootstrap = getattr(args, 'evaluation_bootstrap_protocol', 'original')
     cache = getattr(args, 'evaluation_cache', None)
-    if bootstrap not in {'original', 'bootstrap_retry_v1', 'persistent_bundle_v1'} or (bootstrap != 'original' and
+    retry = getattr(args, 'evaluation_download_retry', None)
+    if bootstrap not in {'original', 'bootstrap_retry_v1', 'persistent_bundle_v1',
+                          'download_retry_v1'} or (bootstrap in {'bootstrap_retry_v1', 'persistent_bundle_v1'} and
             (args.task != 'sqlite-with-gcov' or getattr(args, 'fake_only', False))):
         raise ValueError('evaluation bootstrap protocol requires real sqlite-with-gcov')
+    if bootstrap == 'download_retry_v1':
+        if (not isinstance(retry, dict) or set(retry) != {'max_attempts'} or
+                type(retry['max_attempts']) is not int or not 1 <= retry['max_attempts'] <= 10):
+            raise ValueError('invalid evaluation download retry policy')
+    elif retry is not None:
+        raise ValueError('download retry policy requires download_retry_v1')
     if (bootstrap == 'persistent_bundle_v1') != (cache is not None):
         raise ValueError('persistent bundle requires an explicit cache binding')
     if cache is not None:
@@ -148,6 +156,8 @@ def prepare(args: argparse.Namespace) -> dict:
         plan['evaluation_bootstrap_protocol'] = bootstrap
     if cache is not None:
         plan['evaluation_cache'] = cache
+    if retry is not None:
+        plan['evaluation_download_retry'] = retry
     if reuse is not None:
         plan['runtime_reuse'] = reuse
         plan['current_config_sha256'] = args.current_config_sha256

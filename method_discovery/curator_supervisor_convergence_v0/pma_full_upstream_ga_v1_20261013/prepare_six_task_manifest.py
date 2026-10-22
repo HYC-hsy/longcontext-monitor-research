@@ -46,6 +46,8 @@ SOURCE_FILES = (
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'evaluation_bootstrap.py',
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'download_retry.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'networked_transport_setup.py',
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'offline_launcher.py',
@@ -130,6 +132,8 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
             required.add('evaluation_bootstrap_protocol')
         if 'evaluation_cache' in plan:
             required.add('evaluation_cache')
+        if 'evaluation_download_retry' in plan:
+            required.add('evaluation_download_retry')
         if 'runtime_reuse' in plan:
             required.update({'runtime_reuse', 'current_config_sha256'})
         if (set(plan) != required or
@@ -146,14 +150,23 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
                  ('runtime-policy-v1' if 'runtime_policy' in plan else 'diagnostic-uncapped-v1')) or
                 (plan['condition'] == 'A' and candidate != 'U') or
                 (plan.get('evaluation_bootstrap_protocol', 'original') not in
-                 {'original', 'bootstrap_retry_v1', 'persistent_bundle_v1'}) or
+                 {'original', 'bootstrap_retry_v1', 'persistent_bundle_v1',
+                  'download_retry_v1'}) or
                 ((plan.get('evaluation_bootstrap_protocol') == 'persistent_bundle_v1') !=
                  ('evaluation_cache' in plan)) or
+                ((plan.get('evaluation_bootstrap_protocol') == 'download_retry_v1') !=
+                 ('evaluation_download_retry' in plan)) or
+                ('evaluation_download_retry' in plan and
+                 (not isinstance(plan['evaluation_download_retry'], dict) or
+                  set(plan['evaluation_download_retry']) != {'max_attempts'} or
+                  type(plan['evaluation_download_retry']['max_attempts']) is not int or
+                  not 1 <= plan['evaluation_download_retry']['max_attempts'] <= 10)) or
                 ('runtime_reuse' in plan and
                  (candidate != 'pma_gap_memory_v0' or
                   not isinstance(plan.get('current_config_sha256'), str) or
                   len(plan['current_config_sha256']) != 64)) or
-                (plan.get('evaluation_bootstrap_protocol', 'original') != 'original' and
+                (plan.get('evaluation_bootstrap_protocol', 'original') in
+                 {'bootstrap_retry_v1', 'persistent_bundle_v1'} and
                  plan['task'] != 'sqlite-with-gcov') or
                 type(plan['occurrence']) is not int or plan['occurrence'] < 1):
             raise RuntimeError('single-run plan schema mismatch')
@@ -266,6 +279,8 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
         assets[plan['task']]['agent_timeout_multiplier'] = 1
     if single and 'evaluation_bootstrap_protocol' in plan:
         method['evaluation_bootstrap_protocol'] = plan['evaluation_bootstrap_protocol']
+    if single and 'evaluation_download_retry' in plan:
+        method['evaluation_download_retry'] = plan['evaluation_download_retry']
     if single and 'evaluation_cache' in plan:
         from experiment_runner.evaluation_cache import verify_bundle, require_offline_ready
         cache = plan['evaluation_cache']

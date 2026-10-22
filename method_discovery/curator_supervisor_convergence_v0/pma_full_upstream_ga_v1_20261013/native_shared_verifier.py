@@ -17,6 +17,8 @@ from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_p
 
 from .evaluation_bootstrap import (BootstrapFailed, PROTOCOL as BOOTSTRAP_PROTOCOL,
                                    commands as bootstrap_commands, effective_script, prepare)
+from .download_retry import (PROTOCOL as DOWNLOAD_PROTOCOL,
+                             plan as download_plan, prepare as prepare_downloads)
 
 
 class NativeSharedVerifier(Verifier):
@@ -86,16 +88,21 @@ class NativeSharedVerifier(Verifier):
             'files': actual, 'source_commit': spec['official_source_git_commit'],
             'test_sh_sha256': required['tests/test.sh']})
         protocol = spec.get('evaluation_bootstrap_protocol', 'original')
-        if protocol not in {'original', BOOTSTRAP_PROTOCOL, 'persistent_bundle_v1'}:
+        if protocol not in {'original', BOOTSTRAP_PROTOCOL, 'persistent_bundle_v1',
+                            DOWNLOAD_PROTOCOL}:
             raise RuntimeError('unknown evaluation bootstrap protocol')
         bootstrap = None
-        effective_path = f'/logs/verifier/{protocol}/test.sh'
-        if protocol in {BOOTSTRAP_PROTOCOL, 'persistent_bundle_v1'}:
+        effective_path = None
+        if protocol in {BOOTSTRAP_PROTOCOL, 'persistent_bundle_v1', DOWNLOAD_PROTOCOL}:
             if (spec.get('evaluation_protocol') != 'official_shared_v2' or
-                    spec.get('task_id') != 'sqlite-with-gcov'):
+                    (protocol != DOWNLOAD_PROTOCOL and
+                     spec.get('task_id') != 'sqlite-with-gcov')):
                 raise RuntimeError('bootstrap protocol outside pinned official SQLite task')
             original = self.task.paths.test_path_for(self.environment.os).read_bytes()
-            effective = effective_script(original, task=spec['task_id'])
+            download = (download_plan(original, spec['evaluation_download_retry']['max_attempts'])
+                        if protocol == DOWNLOAD_PROTOCOL else None)
+            effective = (download.effective if download is not None else
+                         effective_script(original, task=spec['task_id']))
             if hashlib.sha256(original).hexdigest() != required['tests/test.sh']:
                 raise RuntimeError('bootstrap original does not match uploaded verifier')
             # No artifact from a previous attempt may satisfy this invocation.
@@ -111,6 +118,11 @@ class NativeSharedVerifier(Verifier):
                          'original_sha256': hashlib.sha256(original).hexdigest(),
                          'effective_sha256': hashlib.sha256(effective).hexdigest(),
                          'status': 'preparing', 'stages': [], 'test_starts': 0}
+            if download is not None:
+                bootstrap.update(coverage=download.coverage,
+                                 max_attempts=spec['evaluation_download_retry']['max_attempts'],
+                                 preparation_commands_sha256=hashlib.sha256(json.dumps(
+                                     download.stages, separators=(',', ':')).encode()).hexdigest())
             if protocol == BOOTSTRAP_PROTOCOL:
                 bootstrap['preparation_commands_sha256'] = hashlib.sha256(json.dumps(
                     bootstrap_commands(), separators=(',', ':')).encode('utf-8')).hexdigest()
@@ -124,6 +136,11 @@ class NativeSharedVerifier(Verifier):
             try:
                 if protocol == BOOTSTRAP_PROTOCOL:
                     await prepare(self.environment.exec, record)
+                elif protocol == DOWNLOAD_PROTOCOL:
+                    await self.environment.exec(
+                        command=f'mkdir -p /logs/verifier/{protocol}', user='root',
+                        timeout_sec=30)
+                    await prepare_downloads(self.environment.exec, record, download.stages)
                 else:
                     cache = spec['evaluation_cache']
                     frozen = json.loads(Path(spec['manifest_path']).read_text(encoding='utf-8'))
@@ -151,25 +168,27 @@ class NativeSharedVerifier(Verifier):
                             expected_manifest_sha256=cache['manifest_sha256'])
                     except Exception as exc:
                         raise BootstrapFailed('cache_prepare', None, type(exc).__name__) from exc
-                await self.environment.exec(command=f'mkdir -p /logs/verifier/{protocol}',
-                                            user='root', timeout_sec=30)
-                with TemporaryDirectory(prefix='pma-eval-bootstrap-') as temporary:
-                    local = Path(temporary) / 'test.sh'
-                    local.write_bytes(effective)
-                    await self.environment.upload_file(source_path=local,
-                                                       target_path=effective_path)
-                readback = await self.environment.exec(
-                    command=f'sha256sum {effective_path}', user='root', timeout_sec=30)
-                if (readback.return_code or (readback.stdout or '').split(' ', 1)[0] !=
-                        bootstrap['effective_sha256']):
-                    raise BootstrapFailed('effective_readback', readback.return_code,
-                                          'effective verifier bytes differ')
-                executable = await self.environment.exec(
-                    command=f'chmod +x {effective_path} && test -x {effective_path}',
-                    user='root', timeout_sec=30)
-                if executable.return_code:
-                    raise BootstrapFailed('effective_executable', executable.return_code,
-                                          'effective verifier not executable')
+                if download is None or download.coverage != 'uncovered_original_once':
+                    effective_path = f'/logs/verifier/{protocol}/test.sh'
+                    await self.environment.exec(command=f'mkdir -p /logs/verifier/{protocol}',
+                                                user='root', timeout_sec=30)
+                    with TemporaryDirectory(prefix='pma-eval-bootstrap-') as temporary:
+                        local = Path(temporary) / 'test.sh'
+                        local.write_bytes(effective)
+                        await self.environment.upload_file(source_path=local,
+                                                           target_path=effective_path)
+                    readback = await self.environment.exec(
+                        command=f'sha256sum {effective_path}', user='root', timeout_sec=30)
+                    if (readback.return_code or (readback.stdout or '').split(' ', 1)[0] !=
+                            bootstrap['effective_sha256']):
+                        raise BootstrapFailed('effective_readback', readback.return_code,
+                                              'effective verifier bytes differ')
+                    executable = await self.environment.exec(
+                        command=f'chmod +x {effective_path} && test -x {effective_path}',
+                        user='root', timeout_sec=30)
+                    if executable.return_code:
+                        raise BootstrapFailed('effective_executable', executable.return_code,
+                                              'effective verifier not executable')
                 bootstrap['status'] = 'ready'
             except BootstrapFailed as exc:
                 bootstrap.update(status='bootstrap_failed', failed_stage=exc.stage,
@@ -196,7 +215,8 @@ class NativeSharedVerifier(Verifier):
                     _atomic(archive / f'{protocol}_test_started.json', {
                         'run_id': spec['run_id'], 'protocol': protocol,
                         'effective_sha256': bootstrap['effective_sha256']})
-                    kwargs['command'] = str(command).replace('/tests/test.sh', effective_path, 1)
+                    if effective_path is not None:
+                        kwargs['command'] = str(command).replace('/tests/test.sh', effective_path, 1)
                 execution = {'command': str(command), 'status': 'started'}
                 executions.append(execution)
                 try:

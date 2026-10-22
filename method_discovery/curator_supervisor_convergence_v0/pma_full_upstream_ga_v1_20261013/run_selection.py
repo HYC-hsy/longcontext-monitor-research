@@ -38,10 +38,42 @@ def _slots(plan: dict) -> list[dict]:
     return slots
 
 
-def execute_serial(slots, output, mode, prepare_call, run_call, directory_name):
+def _isolated_slot_failure(outcome, directory):
+    """Only a persisted, ended, cleaned single-task attempt may be followed."""
+    arm = outcome.get('arm') or {}
+    status = arm.get('status') or {}
+    if (arm.get('disposition') not in {'arm_failed_isolated',
+                                      'stop_batch_native_evaluation_unavailable'} or
+            outcome.get('stop_reason') not in {None,
+                                               'stop_batch_native_evaluation_unavailable'} or
+            status.get('primary_failure') is not None or
+            status.get('cleanup_confirmed') is not True or
+            status.get('remaining_containers') != [] or status.get('cleanup_errors') or
+            (status.get('owned_volume_clearance') or {}).get('status') != 'clean' or
+            arm.get('run_id') != status.get('run_id')):
+        return False
+    root = Path(arm.get('run_root', ''))
+    if not root.is_relative_to(directory.resolve()) or not root.is_dir():
+        return False
+    try:
+        started = json.loads((root / 'archive/agent_start_identity.json').read_text(
+            encoding='utf-8'))
+        ended = json.loads((root / 'archive/agent_end_native.json').read_text(
+            encoding='utf-8'))
+    except (OSError, ValueError):
+        return False
+    return (started.get('run_id') == arm['run_id'] and
+            ended.get('run_id') == arm['run_id'] and
+            ended.get('writers_stopped') is True)
+
+
+def execute_serial(slots, output, mode, prepare_call, run_call, directory_name,
+                   *, on_slot_failure='stop'):
     """One attempt per slot; callers supply existing drivers and identity checks."""
     if mode not in {'prepare', 'run'}:
         raise ValueError('mode must be prepare or run')
+    if on_slot_failure not in {'stop', 'continue'}:
+        raise ValueError('invalid slot failure policy')
     root = Path(output).resolve(strict=False)
     if mode == 'prepare':
         root.mkdir(parents=True, exist_ok=False)
@@ -76,10 +108,14 @@ def execute_serial(slots, output, mode, prepare_call, run_call, directory_name):
                          (not isinstance(outcome['arm'], dict) or
                           'disposition' not in outcome['arm']))):
                     raise ValueError('single-run returned an invalid outcome')
+                failed = (outcome['stop_reason'] or outcome['arm'] is None or
+                          outcome['arm']['disposition'] != 'completed')
+                continued = bool(failed and on_slot_failure == 'continue' and
+                                 _isolated_slot_failure(outcome, directory))
                 results.append({'order': order, **row, 'status': 'attempted',
-                                'result': outcome})
-                if (outcome['stop_reason'] or outcome['arm'] is None or
-                        outcome['arm']['disposition'] != 'completed'):
+                                'result': outcome,
+                                'continued_after_isolated_failure': continued})
+                if failed and not continued:
                     break
             except BaseException as exc:
                 started = any(directory.rglob('research_events.jsonl')) or any(

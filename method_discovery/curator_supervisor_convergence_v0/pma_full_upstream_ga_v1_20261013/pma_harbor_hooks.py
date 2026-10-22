@@ -93,11 +93,21 @@ def verify_live_spec(spec: dict) -> None:
     if spec.get('runtime_policy') != policy:
         raise RuntimeError('runtime policy differs from the authorized manifest')
     bootstrap = frozen.get('config', {}).get('evaluation_bootstrap_protocol', 'original')
-    if (bootstrap not in {'original', 'bootstrap_retry_v1', 'persistent_bundle_v1'} or
+    if (bootstrap not in {'original', 'bootstrap_retry_v1', 'persistent_bundle_v1',
+                          'download_retry_v1'} or
             spec.get('evaluation_bootstrap_protocol', 'original') != bootstrap or
-            (bootstrap != 'original' and (spec.get('task_id') != 'sqlite-with-gcov' or
+            (bootstrap in {'bootstrap_retry_v1', 'persistent_bundle_v1'} and
+             (spec.get('task_id') != 'sqlite-with-gcov' or
              spec.get('evaluation_protocol') != 'official_shared_v2'))):
         raise RuntimeError('evaluation bootstrap differs from authorized manifest')
+    retry = frozen.get('config', {}).get('evaluation_download_retry')
+    if (spec.get('evaluation_download_retry') != retry or
+            (bootstrap == 'download_retry_v1') != (retry is not None) or
+            (retry is not None and (not isinstance(retry, dict) or
+             set(retry) != {'max_attempts'} or
+             type(retry['max_attempts']) is not int or
+             not 1 <= retry['max_attempts'] <= 10))):
+        raise RuntimeError('evaluation download retry differs from authorized manifest')
     cache = frozen.get('config', {}).get('evaluation_cache')
     if (bootstrap == 'persistent_bundle_v1') != (cache is not None) or spec.get('evaluation_cache') != cache:
         raise RuntimeError('evaluation cache differs from authorized manifest')

@@ -35,6 +35,11 @@ class FakeBackend:
             single['evaluation_cache'] = args.evaluation_cache
             (root / 'plan.json').write_text(json.dumps(single))
             manifest.setdefault('config', {})['evaluation_cache'] = args.evaluation_cache
+        if hasattr(args, 'evaluation_download_retry'):
+            single = json.loads((root / 'plan.json').read_text())
+            single['evaluation_download_retry'] = args.evaluation_download_retry
+            (root / 'plan.json').write_text(json.dumps(single))
+            manifest.setdefault('config', {})['evaluation_download_retry'] = args.evaluation_download_retry
         if args.fake_only and args.research_candidate == 'pma_stateful_memory_v1':
             driver = importlib.import_module(DRIVER + '.single_run')
             replies = Path(driver.__file__).with_name('stateful_fixture_replies.json')
@@ -119,6 +124,43 @@ class FrontendTests(unittest.TestCase):
         self.config['evaluation_cache'] = {**cache, 'manifest_sha256': 'b' * 64}
         with self.assertRaisesRegex(ValueError, 'configuration/adapter/catalog changed'):
             execute(build_plan(self.config), self.output, 'run', backend)
+
+    def test_download_retry_is_frozen_and_reaches_driver_without_cache(self):
+        self.config.update(method='pma-gap', slots=[{'task': 'db-wal-recovery'}],
+                           evaluation_bootstrap_protocol='download_retry_v1',
+                           evaluation_download_retry={'max_attempts': 3},
+                           on_slot_failure='continue')
+        self.public['tasks'].append({'task': 'db-wal-recovery',
+                                     'agent_timeout_sec': 900,
+                                     'verifier_timeout_sec': 900})
+        plan = build_plan(self.config)
+        backend = FakeBackend()
+        self.assertEqual(execute(plan, self.output, 'prepare', backend)[0]['status'],
+                         'prepared_not_authorized')
+        self.assertEqual(backend.prepared[0].evaluation_download_retry, {'max_attempts': 3})
+        self.assertNotIn('evaluation_cache', vars(backend.prepared[0]))
+        manifest = json.loads(next(self.output.glob('01-*/manifest.json')).read_text())
+        self.assertEqual(manifest['config']['evaluation_download_retry'], {'max_attempts': 3})
+        self.assertEqual(plan['config']['on_slot_failure'], 'continue')
+        changed = {**self.config, 'evaluation_download_retry': {'max_attempts': 2}}
+        with self.assertRaisesRegex(ValueError, 'configuration/adapter/catalog changed'):
+            execute(build_plan(changed), self.output, 'run', backend)
+
+    def test_download_retry_defaults_and_rejects_bad_options(self):
+        self.config['evaluation_bootstrap_protocol'] = 'download_retry_v1'
+        path = self.root / 'config.json'
+        path.write_text(json.dumps(self.config))
+        loaded = load_config(path)
+        self.assertEqual(loaded['evaluation_download_retry'], {'max_attempts': 3})
+        self.config['evaluation_download_retry'] = {'max_attempts': 0}
+        path.write_text(json.dumps(self.config))
+        with self.assertRaisesRegex(ValueError, 'max_attempts'):
+            load_config(path)
+        self.config['evaluation_download_retry'] = {'max_attempts': 3}
+        self.config['evaluation_bootstrap_protocol'] = 'original'
+        path.write_text(json.dumps(self.config))
+        with self.assertRaisesRegex(ValueError, 'requires download_retry_v1'):
+            load_config(path)
 
     def test_cache_config_is_absolute_and_requires_offline_receipt(self):
         config = {**self.config, 'evaluation_bootstrap_protocol': 'persistent_bundle_v1',

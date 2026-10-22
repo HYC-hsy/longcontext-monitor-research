@@ -33,14 +33,28 @@ def load_config(path):
         raise ValueError('configuration must be an object')
     allowed = {'schema', 'dataset', 'method', 'slots', 'environment', 'runtime_policy',
                'native_context_policy', 'research_capture_policy', 'execution',
-               'evaluation_bootstrap_protocol', 'evaluation_cache', 'runtime_reuse'}
+               'evaluation_bootstrap_protocol', 'evaluation_cache',
+               'evaluation_download_retry', 'on_slot_failure', 'runtime_reuse'}
     if set(config) - allowed or config.get('schema') != 'ga-experiment-plan-v1':
         raise ValueError('unknown configuration schema or keys')
     if config.get('execution', 'serial') != 'serial':
         raise ValueError('only serial execution is supported')
-    if config.get('evaluation_bootstrap_protocol', 'original') not in {
-            'original', 'bootstrap_retry_v1', 'persistent_bundle_v1'}:
+    protocol = config.get('evaluation_bootstrap_protocol', 'original')
+    if protocol not in {'original', 'bootstrap_retry_v1', 'persistent_bundle_v1',
+                        'download_retry_v1'}:
         raise ValueError('unsupported evaluation bootstrap protocol')
+    retry = config.get('evaluation_download_retry')
+    if protocol == 'download_retry_v1':
+        if retry is None:
+            retry = {'max_attempts': 3}
+            config['evaluation_download_retry'] = retry
+        if (not isinstance(retry, dict) or set(retry) != {'max_attempts'} or
+                type(retry['max_attempts']) is not int or not 1 <= retry['max_attempts'] <= 10):
+            raise ValueError('download retry requires max_attempts in 1..10')
+    elif retry is not None:
+        raise ValueError('evaluation_download_retry requires download_retry_v1')
+    if config.get('on_slot_failure', 'stop') not in {'stop', 'continue'}:
+        raise ValueError('invalid on_slot_failure policy')
     cache = config.get('evaluation_cache')
     if (config.get('evaluation_bootstrap_protocol') == 'persistent_bundle_v1') != (cache is not None):
         raise ValueError('persistent bundle protocol requires exactly one evaluation_cache')
@@ -102,7 +116,8 @@ def build_plan(config):
         if not isinstance(row, dict) or set(row) - {'task', 'method', 'occurrence'}:
             raise ValueError('invalid slot fields')
         task = safe_task(row.get('task'))
-        if (config.get('evaluation_bootstrap_protocol', 'original') != 'original'
+        if (config.get('evaluation_bootstrap_protocol', 'original') in {
+                'bootstrap_retry_v1', 'persistent_bundle_v1'}
                 and task != 'sqlite-with-gcov'):
             raise ValueError('non-original bootstrap supports only sqlite-with-gcov')
         method = resolve(row.get('method', config.get('method')))
@@ -209,6 +224,8 @@ def execute(plan, output, mode, backend=None):
             args['evaluation_bootstrap_protocol'] = config['evaluation_bootstrap_protocol']
         if 'evaluation_cache' in config:
             args['evaluation_cache'] = config['evaluation_cache']
+        if 'evaluation_download_retry' in config:
+            args['evaluation_download_retry'] = config['evaluation_download_retry']
         if 'runtime_reuse' in config:
             args['runtime_reuse'] = config['runtime_reuse']
             args['current_config_sha256'] = digest({k: v for k, v in config.items()
@@ -229,6 +246,10 @@ def execute(plan, output, mode, backend=None):
         if (single.get('evaluation_cache') != config.get('evaluation_cache') or
                 manifest.get('config', {}).get('evaluation_cache') != config.get('evaluation_cache')):
             raise ValueError('driver ignored evaluation cache identity')
+        if (single.get('evaluation_download_retry') != config.get('evaluation_download_retry') or
+                manifest.get('config', {}).get('evaluation_download_retry') !=
+                config.get('evaluation_download_retry')):
+            raise ValueError('driver ignored evaluation download retry identity')
         if 'runtime_reuse' in config:
             if (single.get('runtime_reuse') != config['runtime_reuse'] or
                     manifest.get('config', {}).get('runtime_reuse') != config['runtime_reuse']):
@@ -273,7 +294,8 @@ def execute(plan, output, mode, backend=None):
         with method_environment(resolve(row['method'])):
             return backend.run(argparse.Namespace(**args))
 
-    return controller(plan['slots'], root, mode, prepare_call, run_call, _directory)
+    return controller(plan['slots'], root, mode, prepare_call, run_call, _directory,
+                      on_slot_failure=config.get('on_slot_failure', 'stop'))
 
 
 def succeeded(results, expected, mode):
