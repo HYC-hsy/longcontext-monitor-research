@@ -30,6 +30,11 @@ class FakeBackend:
             single['evaluation_bootstrap_protocol'] = args.evaluation_bootstrap_protocol
             (root / 'plan.json').write_text(json.dumps(single))
             manifest['config'] = {'evaluation_bootstrap_protocol': args.evaluation_bootstrap_protocol}
+        if hasattr(args, 'evaluation_cache'):
+            single = json.loads((root / 'plan.json').read_text())
+            single['evaluation_cache'] = args.evaluation_cache
+            (root / 'plan.json').write_text(json.dumps(single))
+            manifest.setdefault('config', {})['evaluation_cache'] = args.evaluation_cache
         if args.fake_only and args.research_candidate == 'pma_stateful_memory_v1':
             driver = importlib.import_module(DRIVER + '.single_run')
             replies = Path(driver.__file__).with_name('stateful_fixture_replies.json')
@@ -99,6 +104,39 @@ class FrontendTests(unittest.TestCase):
             prepare(argparse.Namespace(condition='B', research_candidate='pma_stateful_memory_v1',
                 runtime_policy=None, evaluation_bootstrap_protocol='bootstrap_retry_v1',
                 task='sqlite-with-gcov', fake_only=True, output=str(self.root / 'no-start')))
+
+    def test_persistent_cache_binding_reaches_backend_and_is_frozen(self):
+        cache = {'bundle_path': str(self.root / 'bundle'), 'manifest_sha256': 'a' * 64,
+                 'identity': {'protocol': 'persistent_bundle_v1'}}
+        self.config['evaluation_bootstrap_protocol'] = 'persistent_bundle_v1'
+        self.config['evaluation_cache'] = cache
+        plan = build_plan(self.config)
+        backend = FakeBackend()
+        self.assertTrue(succeeded(execute(plan, self.output, 'prepare', backend), 2, 'prepare'))
+        self.assertEqual(backend.prepared[0].evaluation_cache, cache)
+        manifest = json.loads(next(self.output.glob('01-*/manifest.json')).read_text())
+        self.assertEqual(manifest['config']['evaluation_cache'], cache)
+        self.config['evaluation_cache'] = {**cache, 'manifest_sha256': 'b' * 64}
+        with self.assertRaisesRegex(ValueError, 'configuration/adapter/catalog changed'):
+            execute(build_plan(self.config), self.output, 'run', backend)
+
+    def test_cache_config_is_absolute_and_requires_offline_receipt(self):
+        config = {**self.config, 'evaluation_bootstrap_protocol': 'persistent_bundle_v1',
+                  'evaluation_cache': {'bundle_path': 'bundle',
+                      'manifest_sha256': 'a' * 64, 'identity': {'protocol': 'persistent_bundle_v1'}}}
+        path = self.root / 'config.json'
+        path.write_text(json.dumps(config), encoding='utf-8')
+        (self.root / 'bundle').mkdir()
+        with patch('experiment_runner.evaluation_cache.verify_bundle'), patch(
+                'experiment_runner.evaluation_cache.require_offline_ready') as ready:
+            loaded = load_config(path)
+        self.assertEqual(loaded['evaluation_cache']['bundle_path'], str(self.root / 'bundle'))
+        ready.assert_called_once_with(str(self.root / 'bundle'), 'a' * 64)
+        with patch('experiment_runner.evaluation_cache.verify_bundle'), patch(
+                'experiment_runner.evaluation_cache.require_offline_ready',
+                side_effect=RuntimeError('offline acceptance missing')):
+            with self.assertRaisesRegex(RuntimeError, 'offline acceptance missing'):
+                load_config(path)
 
     def test_gap_runtime_policy_is_frozen_without_stateful_transport(self):
         self.config['method'] = 'pma-gap'

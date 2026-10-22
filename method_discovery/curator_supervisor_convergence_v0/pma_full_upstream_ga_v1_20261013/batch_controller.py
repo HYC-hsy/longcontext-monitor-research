@@ -90,8 +90,9 @@ def run_batch(args: argparse.Namespace) -> dict:
         authorization_path=str(authorization_path), authorization_sha256=auth_hash,
         audited_code_commit=granted["audited_code_commit"], task_id=first["task"],
         evaluation_protocol='official_shared_v2',
-        evaluation_bootstrap_protocol=manifest['config'].get(
+        evaluation_bootstrap_protocol=manifest.get('config', {}).get(
             'evaluation_bootstrap_protocol', 'original'),
+        evaluation_cache=manifest.get('config', {}).get('evaluation_cache'),
         candidate_profile_fixture_only=profile_fixture,
         **({'agent_time_protocol': manifest['config'].get('agent_time_protocol'),
             'native_context_policy': manifest['config']['native_context_policy'],
@@ -99,7 +100,7 @@ def run_batch(args: argparse.Namespace) -> dict:
             } if
            first.get('research_candidate') == 'pma_stateful_memory_v1' else {}),
         **({'runtime_policy': manifest['config']['runtime_policy']}
-           if 'runtime_policy' in manifest['config'] else {}),
+           if 'runtime_policy' in manifest.get('config', {}) else {}),
         **first))
     record = {"schema": "pma-ga-batch-result-v2" if native_plan else "pma-ga-batch-result-v1", "arms": [],
               "not_started": [], "stop_reason": None}

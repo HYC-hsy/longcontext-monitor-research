@@ -80,9 +80,19 @@ def prepare(args: argparse.Namespace) -> dict:
     from .prepare_six_task_manifest import prepare as prepare_manifest
     runtime_policy = getattr(args, 'runtime_policy', None)
     bootstrap = getattr(args, 'evaluation_bootstrap_protocol', 'original')
-    if bootstrap not in {'original', 'bootstrap_retry_v1'} or (bootstrap != 'original' and
+    cache = getattr(args, 'evaluation_cache', None)
+    if bootstrap not in {'original', 'bootstrap_retry_v1', 'persistent_bundle_v1'} or (bootstrap != 'original' and
             (args.task != 'sqlite-with-gcov' or getattr(args, 'fake_only', False))):
         raise ValueError('evaluation bootstrap protocol requires real sqlite-with-gcov')
+    if (bootstrap == 'persistent_bundle_v1') != (cache is not None):
+        raise ValueError('persistent bundle requires an explicit cache binding')
+    if cache is not None:
+        from experiment_runner.evaluation_cache import verify_bundle, require_offline_ready
+        verify_bundle(cache['bundle_path'], cache['identity'])
+        require_offline_ready(cache['bundle_path'], cache['manifest_sha256'])
+    reuse = getattr(args, 'runtime_reuse', None)
+    if reuse is not None and getattr(args, 'research_candidate', 'U') != 'pma_gap_memory_v0':
+        raise ValueError('runtime reuse supports only the gap candidate')
     validate_binding(args.condition, getattr(args, 'research_candidate', 'U'))
     if runtime_policy is not None and getattr(args, 'research_candidate', 'U') not in {
             'pma_stateful_memory_v1', 'pma_gap_memory_v0'}:
@@ -136,6 +146,11 @@ def prepare(args: argparse.Namespace) -> dict:
         plan['runtime_policy'] = runtime_policy
     if bootstrap != 'original':
         plan['evaluation_bootstrap_protocol'] = bootstrap
+    if cache is not None:
+        plan['evaluation_cache'] = cache
+    if reuse is not None:
+        plan['runtime_reuse'] = reuse
+        plan['current_config_sha256'] = args.current_config_sha256
     _write_new(root / 'plan.json', plan)
     if pos:
         from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import prepare as prepare_pos

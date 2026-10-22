@@ -18,6 +18,9 @@ VENDOR_FILES = (
     'vendor/pma_89e5c0d/src/memory_agent/memory/universal_memory.py',
 )
 SOURCE_FILES = tuple(dict.fromkeys(V3_SOURCE_FILES + (
+    'experiment_runner/__main__.py',
+    'experiment_runner/evaluation_cache.py',
+    'experiment_runner/runtime_reuse.py',
     'GenericAgent-main/research_runtime.py',
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'archive_live_six_task.py',

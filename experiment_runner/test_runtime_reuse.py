@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from experiment_runner import runtime_reuse as reuse
@@ -38,6 +39,37 @@ def compare(before, after, **kwargs):
 
 
 class PromptReuseTests(unittest.TestCase):
+    def test_integrated_gate_rechecks_proof_and_short_suite(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            baseline, current = root / 'baseline', root / 'current'
+            baseline.mkdir()
+            current.mkdir()
+            config = root / 'config.json'
+            config.write_text('{"timeout": 10}')
+            binding = {'baseline_checkout': str(baseline),
+                'baseline_evidence': 'proof', 'baseline_config': str(config),
+                'documentation': []}
+            proof = {'evidence_path': 'proof', 'proof': {'file_sha256': {}},
+                     'proof_fingerprint': 'verified'}
+            before = sources()
+            after = sources(PROMPT.replace('"maintain"', '"maintain better"'))
+            with patch.object(reuse, '_git', return_value=b''), patch.object(
+                    reuse, 'verify_baseline', return_value=proof), patch.object(
+                    reuse, 'tracked_snapshot', side_effect=[before, after]), patch.object(
+                    reuse.subprocess, 'run', return_value=SimpleNamespace(
+                        returncode=0, stdout='', stderr='Ran 23 tests in 0.1s\n\nOK\n')):
+                gate = reuse.verify_short_gate(current, binding,
+                                               reuse.fingerprint({'timeout': 10}))
+            self.assertEqual(gate['kind'], 'verified_prompt_runtime_reuse_v1')
+            self.assertEqual(gate['short_checks']['tests'], 23)
+            self.assertNotEqual(gate['baseline_source_fingerprint'],
+                                gate['current_source_fingerprint'])
+            self.assertFalse(gate['execution_authorized'])
+            with patch.object(reuse, '_git', return_value=b''), self.assertRaisesRegex(
+                    ValueError, 'configuration differ'):
+                reuse.verify_short_gate(current, binding, '0' * 64)
+
     def test_prompt_literals_only(self):
         after = sources(PROMPT.replace('"maintain"', '"maintain better"')
                         .replace('"new-a"', '"new words"'))

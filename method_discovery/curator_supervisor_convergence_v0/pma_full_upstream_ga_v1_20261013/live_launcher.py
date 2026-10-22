@@ -172,13 +172,26 @@ def _require_evaluation_state_contract(manifest: dict) -> None:
                                   'pma-ga-live-manifest-v5'}:
         if manifest.get('zero_model_fixture_only') is True:
             return
-        from .single_run_certification import (HARBOR_COMMIT, SOURCE_FILES,
+        from .single_run_certification import (HARBOR_COMMIT, SOURCE_FILES as SINGLE_SOURCE_FILES,
                                                CANDIDATE_SOURCE_FILES, GAP_SOURCE_FILES,
                                                source_identity, verify_evidence)
         cert = manifest.get('native_shared_certification')
         checkout = STAGE.parents[2]
         research = (manifest['planned_order'][0]['research_candidate']
                     if manifest['schema'] == 'pma-ga-live-manifest-v5' else None)
+        if isinstance(cert, dict) and cert.get('kind') == 'verified_prompt_runtime_reuse_v1':
+            if (research != 'pma_gap_memory_v0' or
+                    manifest.get('status') != 'prepared_not_executed' or
+                    cert.get('harbor_commit') != HARBOR_COMMIT or
+                    cert.get('source_files') != source_identity(checkout,
+                        candidate=True, gap=True)):
+                raise RuntimeError('prompt reuse current source identity differs')
+            from experiment_runner.runtime_reuse import verify_short_gate
+            if cert.get('reuse_gate') != verify_short_gate(checkout,
+                    manifest['config']['runtime_reuse'],
+                    manifest['config']['current_config_sha256']):
+                raise RuntimeError('prompt reuse baseline proof or short checks differ')
+            return
         if research == 'pma_stateful_memory_v1':
             from .stateful_certification import (SOURCE_FILES as STATEFUL_SOURCE_FILES,
                 source_identity as stateful_source_identity,
@@ -193,7 +206,7 @@ def _require_evaluation_state_contract(manifest: dict) -> None:
                 raise RuntimeError('stateful same-run native certification differs')
             return
         expected_files = (GAP_SOURCE_FILES if research == 'pma_gap_memory_v0' else
-                          CANDIDATE_SOURCE_FILES if research is not None else SOURCE_FILES)
+                          CANDIDATE_SOURCE_FILES if research is not None else SINGLE_SOURCE_FILES)
         if (manifest.get('status') != 'prepared_not_executed' or
                 not isinstance(cert, dict) or cert.get('harbor_commit') != HARBOR_COMMIT or
                 set(cert.get('source_files', {})) != set(expected_files) or
@@ -329,31 +342,32 @@ def _advance_worker_stop(root: Path, worker: subprocess.Popen | None,
 
 def _native_trial_result(root: Path) -> dict:
     """Read this fresh Harbor job's result, without interpreting task answers."""
+    def bootstrap_failure():
+        for name in ('persistent_bundle_v1', 'bootstrap_retry_v1'):
+            receipt = root / 'archive' / f'{name}.json'
+            if receipt.is_file():
+                row = json.loads(receipt.read_text(encoding='utf-8'))
+                if row.get('status') in {'bootstrap_failed', 'test_entry_failed',
+                                         'reports_missing'}:
+                    return row['status']
+        return None
     candidates = []
     for path in (root / 'jobs').glob('*/*/result.json'):
         data = json.loads(path.read_text(encoding='utf-8'))
         if isinstance(data, dict) and 'verifier_result' in data:
             candidates.append((path, data))
     if len(candidates) != 1:
-        bootstrap_path = root / 'archive/bootstrap_retry_v1.json'
-        if bootstrap_path.is_file():
-            bootstrap = json.loads(bootstrap_path.read_text(encoding='utf-8'))
-            if bootstrap.get('status') in {'bootstrap_failed', 'test_entry_failed'}:
-                return {'status': 'unavailable', 'reason': bootstrap['status'],
-                        'candidates': len(candidates)}
+        reason = bootstrap_failure()
+        if reason:
+            return {'status': 'unavailable', 'reason': reason,
+                    'candidates': len(candidates)}
         return {'status': 'unavailable', 'reason': 'one_trial_result_not_found',
                 'candidates': len(candidates)}
     path, data = candidates[0]
     verifier = data.get('verifier_result')
     rewards = verifier.get('rewards') if isinstance(verifier, dict) else None
     if not isinstance(rewards, dict) or not rewards:
-        bootstrap_path = root / 'archive/bootstrap_retry_v1.json'
-        bootstrap = (json.loads(bootstrap_path.read_text(encoding='utf-8'))
-                     if bootstrap_path.is_file() else None)
-        reason = (bootstrap['status'] if isinstance(bootstrap, dict) and
-                  bootstrap.get('status') in {'bootstrap_failed', 'test_entry_failed',
-                                              'reports_missing'}
-                  else 'native_reward_missing')
+        reason = bootstrap_failure() or 'native_reward_missing'
         return {'status': 'unavailable', 'reason': reason,
                 'result_path': str(path.relative_to(root)),
                 'exception_info': data.get('exception_info')}
@@ -559,6 +573,7 @@ def run_live(args) -> dict:
                         for item in _evaluator_members(manifest, args.task)])
         spec['evaluation_bootstrap_protocol'] = manifest['config'].get(
             'evaluation_bootstrap_protocol', 'original')
+        spec['evaluation_cache'] = manifest['config'].get('evaluation_cache')
     verify_live_spec(spec)
     if _sha(Path(args.task_profile_file)) != manifest['task_profile_sha256']:
         raise RuntimeError('PMA Task profile differs from frozen identity')

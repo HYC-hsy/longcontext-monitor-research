@@ -6,7 +6,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
 from tempfile import TemporaryDirectory
+from experiment_runner.evaluation_cache import prepare_cached
 
 from harbor.models.trial.paths import EnvironmentPaths
 from harbor.verifier.verifier import Verifier
@@ -84,11 +86,11 @@ class NativeSharedVerifier(Verifier):
             'files': actual, 'source_commit': spec['official_source_git_commit'],
             'test_sh_sha256': required['tests/test.sh']})
         protocol = spec.get('evaluation_bootstrap_protocol', 'original')
-        if protocol not in {'original', BOOTSTRAP_PROTOCOL}:
+        if protocol not in {'original', BOOTSTRAP_PROTOCOL, 'persistent_bundle_v1'}:
             raise RuntimeError('unknown evaluation bootstrap protocol')
         bootstrap = None
-        effective_path = '/logs/verifier/bootstrap_retry_v1/test.sh'
-        if protocol == BOOTSTRAP_PROTOCOL:
+        effective_path = f'/logs/verifier/{protocol}/test.sh'
+        if protocol in {BOOTSTRAP_PROTOCOL, 'persistent_bundle_v1'}:
             if (spec.get('evaluation_protocol') != 'official_shared_v2' or
                     spec.get('task_id') != 'sqlite-with-gcov'):
                 raise RuntimeError('bootstrap protocol outside pinned official SQLite task')
@@ -108,19 +110,48 @@ class NativeSharedVerifier(Verifier):
             bootstrap = {'run_id': spec['run_id'], 'protocol': protocol,
                          'original_sha256': hashlib.sha256(original).hexdigest(),
                          'effective_sha256': hashlib.sha256(effective).hexdigest(),
-                         'preparation_commands_sha256': hashlib.sha256(json.dumps(
-                             bootstrap_commands(), separators=(',', ':')).encode('utf-8')).hexdigest(),
                          'status': 'preparing', 'stages': [], 'test_starts': 0}
-            receipt_path = archive / 'bootstrap_retry_v1.json'
-            stage_dir = archive / 'bootstrap_retry_v1_stages'
+            if protocol == BOOTSTRAP_PROTOCOL:
+                bootstrap['preparation_commands_sha256'] = hashlib.sha256(json.dumps(
+                    bootstrap_commands(), separators=(',', ':')).encode('utf-8')).hexdigest()
+            receipt_path = archive / f'{protocol}.json'
+            stage_dir = archive / f'{protocol}_stages'
             stage_dir.mkdir(exist_ok=False)
             def record(row):
                 bootstrap['stages'].append(row)
                 _atomic(stage_dir / f'{len(bootstrap["stages"]):03d}.json',
                         {'run_id': spec['run_id'], **row})
             try:
-                await prepare(self.environment.exec, record)
-                await self.environment.exec(command='mkdir -p /logs/verifier/bootstrap_retry_v1',
+                if protocol == BOOTSTRAP_PROTOCOL:
+                    await prepare(self.environment.exec, record)
+                else:
+                    cache = spec['evaluation_cache']
+                    frozen = json.loads(Path(spec['manifest_path']).read_text(encoding='utf-8'))
+                    asset = frozen['assets'][spec['task_id']]
+                    try:
+                        container = subprocess.run(['docker', 'inspect', ended['container_id']],
+                            check=True, capture_output=True, text=True, timeout=30)
+                        containers = json.loads(container.stdout)
+                        inspected = subprocess.run(['docker', 'image', 'inspect', spec['image_id']],
+                            check=True, capture_output=True, text=True, timeout=30)
+                        images = json.loads(inspected.stdout)
+                    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                        raise BootstrapFailed('image_identity', None, type(exc).__name__) from exc
+                    if (len(containers) != 1 or containers[0]['Image'] != spec['image_id'] or
+                            len(images) != 1 or images[0]['Id'] != spec['image_id'] or
+                            asset['repo_digest'] not in images[0]['RepoDigests'] or
+                            images[0]['Os'] + '/' + images[0]['Architecture'] != asset['platform'] or
+                            cache['identity']['base_image'] != asset['repo_digest'] or
+                            cache['identity']['architecture'] != 'x86_64' or
+                            asset['platform'] != 'linux/amd64'):
+                        raise BootstrapFailed('image_identity', None, 'actual container image differs from cache')
+                    try:
+                        await prepare_cached(self.environment.exec, self.environment.upload_file,
+                            cache['bundle_path'], cache['identity'], record,
+                            expected_manifest_sha256=cache['manifest_sha256'])
+                    except Exception as exc:
+                        raise BootstrapFailed('cache_prepare', None, type(exc).__name__) from exc
+                await self.environment.exec(command=f'mkdir -p /logs/verifier/{protocol}',
                                             user='root', timeout_sec=30)
                 with TemporaryDirectory(prefix='pma-eval-bootstrap-') as temporary:
                     local = Path(temporary) / 'test.sh'
@@ -162,7 +193,7 @@ class NativeSharedVerifier(Verifier):
                         raise RuntimeError('verifier test entry repeated')
                     bootstrap['test_starts'] = 1
                     bootstrap['status'] = 'tests_started'
-                    _atomic(archive / 'bootstrap_retry_v1_test_started.json', {
+                    _atomic(archive / f'{protocol}_test_started.json', {
                         'run_id': spec['run_id'], 'protocol': protocol,
                         'effective_sha256': bootstrap['effective_sha256']})
                     kwargs['command'] = str(command).replace('/tests/test.sh', effective_path, 1)

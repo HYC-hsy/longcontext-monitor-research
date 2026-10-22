@@ -128,6 +128,10 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
             required.add('runtime_policy')
         if 'evaluation_bootstrap_protocol' in plan:
             required.add('evaluation_bootstrap_protocol')
+        if 'evaluation_cache' in plan:
+            required.add('evaluation_cache')
+        if 'runtime_reuse' in plan:
+            required.update({'runtime_reuse', 'current_config_sha256'})
         if (set(plan) != required or
                 plan['execution_authorized'] is not False or
                 plan['official_source_git_commit'] !=
@@ -142,7 +146,13 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
                  ('runtime-policy-v1' if 'runtime_policy' in plan else 'diagnostic-uncapped-v1')) or
                 (plan['condition'] == 'A' and candidate != 'U') or
                 (plan.get('evaluation_bootstrap_protocol', 'original') not in
-                 {'original', 'bootstrap_retry_v1'}) or
+                 {'original', 'bootstrap_retry_v1', 'persistent_bundle_v1'}) or
+                ((plan.get('evaluation_bootstrap_protocol') == 'persistent_bundle_v1') !=
+                 ('evaluation_cache' in plan)) or
+                ('runtime_reuse' in plan and
+                 (candidate != 'pma_gap_memory_v0' or
+                  not isinstance(plan.get('current_config_sha256'), str) or
+                  len(plan['current_config_sha256']) != 64)) or
                 (plan.get('evaluation_bootstrap_protocol', 'original') != 'original' and
                  plan['task'] != 'sqlite-with-gcov') or
                 type(plan['occurrence']) is not int or plan['occurrence'] < 1):
@@ -256,6 +266,24 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
         assets[plan['task']]['agent_timeout_multiplier'] = 1
     if single and 'evaluation_bootstrap_protocol' in plan:
         method['evaluation_bootstrap_protocol'] = plan['evaluation_bootstrap_protocol']
+    if single and 'evaluation_cache' in plan:
+        from experiment_runner.evaluation_cache import verify_bundle, require_offline_ready
+        cache = plan['evaluation_cache']
+        if not isinstance(cache, dict) or set(cache) != {
+                'bundle_path', 'manifest_sha256', 'identity'}:
+            raise RuntimeError('invalid evaluation cache binding')
+        verify_bundle(cache['bundle_path'], cache['identity'])
+        require_offline_ready(cache['bundle_path'], cache['manifest_sha256'])
+        asset = assets[plan['task']]
+        if (cache['identity']['base_image'] != asset['repo_digest'] or
+                asset['platform'] != 'linux/amd64' or
+                cache['identity']['architecture'] != 'x86_64' or
+                cache['identity']['original_sha256'] != asset['native_test_sh_sha256']):
+            raise RuntimeError('cache differs from frozen Task image or evaluator')
+        method['evaluation_cache'] = cache
+    if single and 'runtime_reuse' in plan:
+        method['runtime_reuse'] = plan['runtime_reuse']
+        method['current_config_sha256'] = plan['current_config_sha256']
     config_hash = hashlib.sha256(json.dumps(method, sort_keys=True,
         separators=(',', ':')).encode('utf-8')).hexdigest()
     certification = None
@@ -280,6 +308,20 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
             'source_identity_kind': 'HEAD_Git_blob_bytes_SHA256_with_clean_worktree',
             'evidence': verify_evidence(evidence, checkout, slots),
             'harbor_commit': '459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc'}
+    elif single and 'runtime_reuse' in plan:
+        baseline_evidence = (Path(plan['runtime_reuse']['baseline_checkout']) /
+                             plan['runtime_reuse']['baseline_evidence']).resolve(strict=True)
+        if evidence is not None and evidence.resolve(strict=True) != baseline_evidence:
+            raise RuntimeError('runtime reuse evidence must be the verified baseline evidence')
+        from experiment_runner.runtime_reuse import verify_short_gate
+        from .single_run_certification import (HARBOR_COMMIT, source_identity)
+        checkout = STAGE.parents[2]
+        certification = {
+            'kind': 'verified_prompt_runtime_reuse_v1',
+            'source_files': source_identity(checkout, candidate=True, gap=True),
+            'reuse_gate': verify_short_gate(checkout, plan['runtime_reuse'],
+                                            plan['current_config_sha256']),
+            'harbor_commit': HARBOR_COMMIT}
     elif evidence is not None and schema in {'pma-ga-live-manifest-v4',
                                              'pma-ga-live-manifest-v5'}:
         if stateful:

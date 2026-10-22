@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import subprocess
 import sys
 
@@ -218,6 +219,58 @@ def verify_baseline(root: Path, evidence: str) -> dict:
     return {'commit': commit, 'evidence_path': relative,
             'verifier': VERIFIER_MODULE + '.verify_evidence',
             'proof': proof, 'proof_fingerprint': fingerprint(proof)}
+
+
+def verify_short_gate(current: Path, binding: dict, current_config_sha256: str) -> dict:
+    """Recompute baseline proof and run pinned gap tests; never trust a passed flag.
+
+    This is only for a later prompt-literal edit on an otherwise identical,
+    committed checkout/config. It cannot certify the current cache integration.
+    """
+    if not isinstance(binding, dict) or set(binding) != {
+            'baseline_checkout', 'baseline_evidence', 'baseline_config', 'documentation'}:
+        raise ValueError('invalid runtime reuse binding')
+    if not isinstance(binding['documentation'], list) or any(
+            not isinstance(p, str) for p in binding['documentation']):
+        raise ValueError('invalid runtime reuse documentation list')
+    current = Path(current).resolve(strict=True)
+    baseline = Path(binding['baseline_checkout']).resolve(strict=True)
+    if _git(current, 'status', '--porcelain', '--untracked-files=normal'):
+        raise ValueError('current checkout must be clean and committed')
+    baseline_config = json.loads(Path(binding['baseline_config']).read_text(encoding='utf-8'))
+    if fingerprint(baseline_config) != current_config_sha256:
+        raise ValueError('baseline and current experiment configuration differ')
+    proof = verify_baseline(baseline, binding['baseline_evidence'])
+    evidence_paths = [proof['evidence_path'] + '/' + p for p in proof['proof']['file_sha256']]
+    plan = compare_sources(tracked_snapshot(baseline), tracked_snapshot(current),
+        baseline_config=current_config_sha256, current_config=current_config_sha256,
+        non_runtime_paths=binding['documentation'],
+        verified_evidence_paths=evidence_paths)
+    if plan['full_check_required'] or plan['classification'] not in {
+            'prompt_text_only', 'non_runtime_only', 'unchanged'}:
+        raise ValueError('runtime or configuration changed; full Harbor check required')
+    vendor = current / D / 'vendor/pma_89e5c0d'
+    env = {**os.environ, 'PYTHONPATH': os.pathsep.join((str(current),
+        str(current / D), str(vendor / 'src'), str(vendor / 'external/harbor/src')))}
+    command = [sys.executable, '-B', '-m', 'unittest', 'discover', '-s',
+        str(current / D / 'tests'), '-p', 'test_gap*.py', '-v']
+    tested = subprocess.run(command, cwd=current, env=env, capture_output=True,
+                            text=True, timeout=180)
+    if tested.returncode:
+        raise ValueError('short prompt/agent/host checks failed: ' + tested.stderr[-1000:])
+    count = re.search(r'Ran (\d+) tests? in ', tested.stderr)
+    if count is None or int(count.group(1)) < 3 or 'OK' not in tested.stderr:
+        raise ValueError('short checks did not report a complete passing suite')
+    return {'kind': 'verified_prompt_runtime_reuse_v1',
+            'baseline_proof': proof, 'classification': plan['classification'],
+            'baseline_source_fingerprint': plan['baseline']['source_fingerprint'],
+            'current_source_fingerprint': plan['current']['source_fingerprint'],
+            'current_runtime_fingerprint': plan['current']['runtime_fingerprint'],
+            'current_prompt_fingerprint': plan['current']['prompt_fingerprint'],
+            'config_sha256': current_config_sha256,
+            'short_checks': {'command': command[2:], 'return_code': tested.returncode,
+                'tests': int(count.group(1)), 'result': 'OK'},
+            'execution_authorized': False}
 
 
 def main(argv=None):

@@ -33,14 +33,33 @@ def load_config(path):
         raise ValueError('configuration must be an object')
     allowed = {'schema', 'dataset', 'method', 'slots', 'environment', 'runtime_policy',
                'native_context_policy', 'research_capture_policy', 'execution',
-               'evaluation_bootstrap_protocol'}
+               'evaluation_bootstrap_protocol', 'evaluation_cache', 'runtime_reuse'}
     if set(config) - allowed or config.get('schema') != 'ga-experiment-plan-v1':
         raise ValueError('unknown configuration schema or keys')
     if config.get('execution', 'serial') != 'serial':
         raise ValueError('only serial execution is supported')
     if config.get('evaluation_bootstrap_protocol', 'original') not in {
-            'original', 'bootstrap_retry_v1'}:
+            'original', 'bootstrap_retry_v1', 'persistent_bundle_v1'}:
         raise ValueError('unsupported evaluation bootstrap protocol')
+    cache = config.get('evaluation_cache')
+    if (config.get('evaluation_bootstrap_protocol') == 'persistent_bundle_v1') != (cache is not None):
+        raise ValueError('persistent bundle protocol requires exactly one evaluation_cache')
+    if cache is not None:
+        if not isinstance(cache, dict) or set(cache) != {'bundle_path', 'manifest_sha256', 'identity'}:
+            raise ValueError('invalid evaluation cache binding')
+        from .evaluation_cache import verify_bundle, require_offline_ready
+        cache['bundle_path'] = str((path.parent / cache['bundle_path']).resolve(strict=True))
+        verify_bundle(cache['bundle_path'], cache['identity'])
+        require_offline_ready(cache['bundle_path'], cache['manifest_sha256'])
+    reuse = config.get('runtime_reuse')
+    if reuse is not None:
+        if not isinstance(reuse, dict) or set(reuse) != {
+                'baseline_checkout', 'baseline_evidence', 'baseline_config', 'documentation'}:
+            raise ValueError('invalid runtime reuse binding')
+        for key in ('baseline_checkout', 'baseline_config'):
+            reuse[key] = str((path.parent / reuse[key]).resolve(strict=True))
+        if not isinstance(reuse['baseline_evidence'], str) or not isinstance(reuse['documentation'], list):
+            raise ValueError('invalid runtime reuse evidence or documentation')
     from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.stateful_runtime_policy import policies
     policies(config)
     env = config.get('environment', {})
@@ -85,8 +104,10 @@ def build_plan(config):
         task = safe_task(row.get('task'))
         if (config.get('evaluation_bootstrap_protocol', 'original') != 'original'
                 and task != 'sqlite-with-gcov'):
-            raise ValueError('bootstrap_retry_v1 supports only sqlite-with-gcov')
+            raise ValueError('non-original bootstrap supports only sqlite-with-gcov')
         method = resolve(row.get('method', config.get('method')))
+        if 'runtime_reuse' in config and method.research_candidate != 'pma_gap_memory_v0':
+            raise ValueError('runtime reuse supports only the gap candidate')
         occurrence = row.get('occurrence', 1)
         if type(occurrence) is not int or occurrence < 1:
             raise ValueError('occurrence must be a positive integer')
@@ -186,6 +207,12 @@ def execute(plan, output, mode, backend=None):
                 args[key] = config[key]
         if 'evaluation_bootstrap_protocol' in config:
             args['evaluation_bootstrap_protocol'] = config['evaluation_bootstrap_protocol']
+        if 'evaluation_cache' in config:
+            args['evaluation_cache'] = config['evaluation_cache']
+        if 'runtime_reuse' in config:
+            args['runtime_reuse'] = config['runtime_reuse']
+            args['current_config_sha256'] = digest({k: v for k, v in config.items()
+                                                   if k != 'runtime_reuse'})
         outcome = backend.prepare(argparse.Namespace(**args))
         single = json.loads((directory / 'plan.json').read_text())
         actual_candidate = single.get('research_candidate', single.get('method', 'U'))
@@ -199,6 +226,13 @@ def execute(plan, output, mode, backend=None):
         if (single.get('evaluation_bootstrap_protocol', 'original') != expected_bootstrap or
                 manifest.get('config', {}).get('evaluation_bootstrap_protocol', 'original') != expected_bootstrap):
             raise ValueError('driver ignored evaluation bootstrap protocol')
+        if (single.get('evaluation_cache') != config.get('evaluation_cache') or
+                manifest.get('config', {}).get('evaluation_cache') != config.get('evaluation_cache')):
+            raise ValueError('driver ignored evaluation cache identity')
+        if 'runtime_reuse' in config:
+            if (single.get('runtime_reuse') != config['runtime_reuse'] or
+                    manifest.get('config', {}).get('runtime_reuse') != config['runtime_reuse']):
+                raise ValueError('driver ignored runtime reuse binding')
         if 'effective_runtime_policy' in row:
             if (single.get('runtime_policy') != row['requested_runtime_policy'] or
                     manifest.get('config', {}).get('runtime_policy') != row['effective_runtime_policy']):

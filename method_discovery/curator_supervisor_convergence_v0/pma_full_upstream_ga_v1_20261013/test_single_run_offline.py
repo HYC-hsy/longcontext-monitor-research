@@ -9,6 +9,7 @@ import shutil
 import time
 import unittest
 import uuid
+from types import SimpleNamespace
 
 from .control_processes import scan, probe_registered, stop_registered
 from .archive_live_six_task import redact, UnsafePublicProjection
@@ -19,6 +20,36 @@ from .single_run_certification import verify_evidence
 
 
 class SingleRunOfflineTests(unittest.TestCase):
+    def test_cached_plan_reaches_real_single_run_manifest_api(self):
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from .single_run import prepare
+        with TemporaryDirectory() as directory:
+            base = Path(directory)
+            for name in ('task.py', 'pma.json'):
+                (base / name).write_text('fixture')
+            cache = {'bundle_path': str(base), 'manifest_sha256': 'a' * 64,
+                     'identity': {'protocol': 'persistent_bundle_v1'}}
+            args = SimpleNamespace(output=str(base / 'prepared'), condition='B',
+                research_candidate='pma_gap_memory_v0', task='sqlite-with-gcov',
+                occurrence=1, fake_only=False, runtime_policy=None,
+                task_complete_response=False, official_source_git=str(base),
+                task_profile_file=str(base / 'task.py'),
+                pma_profile_file=str(base / 'pma.json'), certification_dir=None,
+                evaluation_bootstrap_protocol='persistent_bundle_v1',
+                evaluation_cache=cache)
+            with patch('experiment_runner.evaluation_cache.verify_bundle'), patch(
+                    'experiment_runner.evaluation_cache.require_offline_ready'), patch(
+                    'method_discovery.curator_supervisor_convergence_v0.'
+                    'pma_full_upstream_ga_v1_20261013.prepare_six_task_manifest.prepare',
+                    return_value={'config': {'evaluation_cache': cache}}) as backend:
+                prepare(args)
+            submitted = backend.call_args.kwargs['plan']
+            self.assertEqual(submitted['evaluation_cache'], cache)
+            self.assertEqual(submitted['evaluation_bootstrap_protocol'], 'persistent_bundle_v1')
+            self.assertEqual(json.loads((base / 'prepared/plan.json').read_text())[
+                'evaluation_cache'], cache)
+
     def test_committed_fixture_binds_executed_source_and_bytes(self):
         from tempfile import TemporaryDirectory
         from unittest.mock import patch
@@ -28,7 +59,10 @@ class SingleRunOfflineTests(unittest.TestCase):
             verify_evidence(old_fixture)
         fixture = (Path(__file__).parent / 'decision_reminder_v1_20261017' /
                    'certification_fixture_u')
-        self.assertEqual(set(verify_evidence(fixture)['outcomes']), {'A', 'B'})
+        # This immutable certificate predates the newly bound cache/runtime
+        # source, so it must now reject rather than certify the current tree.
+        with self.assertRaises(RuntimeError):
+            verify_evidence(fixture)
         with patch('method_discovery.curator_supervisor_convergence_v0.'
                    'pma_full_upstream_ga_v1_20261013.single_run_certification.'
                    'source_identity', return_value={'changed': 'source'}):
@@ -86,7 +120,7 @@ class SingleRunOfflineTests(unittest.TestCase):
                 harbor_python='unused', bench_root='unused',
                 harbor_source_root='unused', python_home='unused'))()
             with patch('method_discovery.curator_supervisor_convergence_v0.'
-                       'pma_full_upstream_ga_v1_20261013.run_selection.prepare',
+                       'pma_full_upstream_ga_v1_20261013.single_run.prepare',
                        side_effect=lambda a: Path(a.output).mkdir() or {'run_id': 'one'}):
                 args.mode = 'prepare'
                 self.assertEqual(len(execute(args)), 1)
@@ -94,7 +128,7 @@ class SingleRunOfflineTests(unittest.TestCase):
             slot = root / '01-constraints-scheduling-A-r1'
             (slot / 'authorization.json').write_text('{}', encoding='utf-8')
             with patch('method_discovery.curator_supervisor_convergence_v0.'
-                       'pma_full_upstream_ga_v1_20261013.run_selection.run',
+                       'pma_full_upstream_ga_v1_20261013.single_run.run',
                        return_value={'stop_reason': None,
                                      'arm': {'disposition': 'completed'}}):
                 args.mode = 'run'

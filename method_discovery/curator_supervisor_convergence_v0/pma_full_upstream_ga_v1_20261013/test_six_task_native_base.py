@@ -158,7 +158,10 @@ class SixTaskNativeBaseTests(unittest.TestCase):
         if not manifest_path.exists():
             self.skipTest('generated evidence-bound draft not present')
         manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
-        live_launcher._require_evaluation_state_contract(manifest)
+        # Historical certificate is immutable; the cache integration changed
+        # executable source and must not inherit this old identity.
+        with self.assertRaisesRegex(RuntimeError, 'evidence/identity not frozen'):
+            live_launcher._require_evaluation_state_contract(manifest)
         changed = copy.deepcopy(manifest)
         name = next(iter(changed['native_shared_certification']['source_files']))
         changed['native_shared_certification']['source_files'][name] = '0' * 64

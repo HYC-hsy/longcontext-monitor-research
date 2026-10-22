@@ -117,6 +117,31 @@ from the method adapter, not a hidden manual shell prerequisite.
 
 ## Certification and tests
 
+### Explicit SQLite dependency cache and prompt-only reuse
+
+The optional `persistent_bundle_v1` preparation is selected by adding
+`"evaluation_bootstrap_protocol": "persistent_bundle_v1"` and an
+`evaluation_cache` object containing exactly `bundle_path`, `manifest_sha256`
+and `identity` (the latter copied from the locally verified bundle manifest).
+The bundle is host-persistent, outside run cleanup. Plan, single-run plan,
+manifest/config hash, batch preflight, live spec and verifier all bind these
+values. A missing/corrupt bundle fails preparation; it never falls back to a
+network download or a test run. The verifier checks the actual stopped
+container's image ID and the frozen image RepoDigest/platform before restore.
+Only the original SQLite test suffix is executed once after offline preparation.
+This is a disclosed preparation protocol change, not the original test.sh bytes.
+
+For a later literal-only gap prompt edit, `runtime_reuse` may name a clean
+baseline checkout, its committed A/B evidence, a baseline configuration file,
+and exact reviewed Markdown documentation paths. The gate re-verifies that
+baseline in its own checkout, compares all tracked source and config identities,
+and runs the pinned gap prompt/agent/host tests in a fresh subprocess using the
+vendor import paths. The manifest keeps the **current** source identity and
+stores baseline proof separately. Any executable/configuration change, dirty
+checkout, missing proof or failed short check requires the full Harbor fixture.
+This cache integration itself is executable change and cannot use that shortcut.
+Neither shortcut authorizes an episode or supersedes the one-use run binding.
+
 New runtime code changes invalidate certificates bound to old code. Do not edit
 old evidence. The existing `single_run_fixture` now accepts
 `--runtime-policy-file policy.json`, so the same formal Harbor fixture can
