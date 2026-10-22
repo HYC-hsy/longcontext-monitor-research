@@ -96,6 +96,9 @@ def validate_plan(manifest: dict, granted: dict) -> list[dict]:
         row, bound = arms[0], bindings[0]
         versioned = manifest['schema'] == 'pma-ga-live-manifest-v5'
         stateful = row.get('research_candidate') == 'pma_stateful_memory_v1'
+        if stateful:
+            from .stateful_runtime_policy import require_same_policies
+            require_same_policies(manifest.get('config', {}), granted)
         expected = {'order', 'task', 'repeat', 'condition'}
         if versioned:
             expected.add('research_candidate')
@@ -202,3 +205,4 @@ def validate_plan(manifest: dict, granted: dict) -> list[dict]:
         run_ids.add(run_id)
         roots.add(root)
     return bindings
+

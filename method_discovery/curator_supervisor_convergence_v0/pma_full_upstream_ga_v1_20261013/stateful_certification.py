@@ -26,7 +26,7 @@ SOURCE_FILES = tuple(dict.fromkeys(V3_SOURCE_FILES + (
         'batch_controller.py', 'event_spool.py', 'single_run.py',
         'single_run_fixture.py', 'stateful_fixture_replies.json',
         'stateful_memory_worker.py', 'stateful_native_count.py',
-        'stateful_role_provider.py', 'stateful_certification.py',
+        'stateful_role_provider.py', 'stateful_runtime_policy.py', 'stateful_certification.py',
         'collect_stateful_fixture.py')),
 )))
 REQUIRED = (
@@ -103,3 +103,4 @@ def verify_evidence(evidence: Path, *, require_committed: bool = True) -> dict:
     return {'run_id': run_id, 'task': task, 'source_files': len(SOURCE_FILES),
             'host_events': len(events), 'task_requests': requests['request_count'],
             'file_sha256': hashes}
+

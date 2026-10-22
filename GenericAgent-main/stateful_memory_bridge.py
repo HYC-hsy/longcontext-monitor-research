@@ -208,7 +208,14 @@ class StatefulMemoryBridge:
 class StatefulLiveBridge:
     """Task-side client: no bank, provider profile or auxiliary raw logs."""
 
-    def __init__(self, client, *, episode_id):
+    def __init__(self, client, *, episode_id, native_context_policy="required",
+                 research_capture_policy="required"):
+        if native_context_policy not in ("required", "off"):
+            raise StatefulBridgeError("invalid native context policy")
+        if research_capture_policy not in ("required", "best_effort"):
+            raise StatefulBridgeError("invalid research capture policy")
+        self.native_context_policy = native_context_policy
+        self.research_capture_policy = research_capture_policy
         self.client = client
         self.episode_id = episode_id
         self.closed = False
@@ -232,8 +239,12 @@ class StatefulLiveBridge:
             deadline_monotonic=None,
             worker_exit=Path(os.environ["GA_STATEFUL_RESPONSES"]) /
                 "worker_exit.json")
-        bridge = cls(client, episode_id=os.environ["GA_BENCH_RUN_ID"])
-        bridge.last_result = client.exchange("initialize", task=task)
+        bridge = cls(client, episode_id=os.environ["GA_BENCH_RUN_ID"],
+            native_context_policy=os.environ.get("GA_STATEFUL_NATIVE_CONTEXT_POLICY", "required"),
+            research_capture_policy=os.environ.get("GA_STATEFUL_RESEARCH_CAPTURE_POLICY", "required"))
+        bridge.last_result = client.exchange("initialize", task=task,
+            native_context_policy=bridge.native_context_policy,
+            research_capture_policy=bridge.research_capture_policy)
         if not bridge.last_result["status"].startswith("committed_"):
             raise StatefulBridgeError("init_failed")
         return bridge
@@ -256,6 +267,8 @@ class StatefulLiveBridge:
 
     def native_preflight(self, payload):
         """Count the already wrapped Task payload in the private host."""
+        if self.native_context_policy == "off":
+            raise StatefulBridgeError("native context counting is disabled")
         result = self.client.exchange("count_tokens", payload=payload)
         raw = json.dumps(payload, ensure_ascii=False, sort_keys=True,
                          separators=(',', ':')).encode('utf-8')
@@ -275,6 +288,9 @@ class StatefulLiveBridge:
         return self.last_result
 
     def chat(self, client, messages, tools, turn):
+        backend = getattr(client, "backend", client)
+        backend.stateful_native_context_policy = self.native_context_policy
+        backend.research_capture_policy = self.research_capture_policy
         request_id = f"task-{self.episode_id}-{turn}"
         prepared = self.client.exchange("prepare_task", request_id=request_id,
             messages=messages)
@@ -299,3 +315,4 @@ class StatefulLiveBridge:
             raise
         finally:
             self.closed = True
+
