@@ -524,7 +524,7 @@ def run_live(args) -> dict:
     runtime_policy = manifest.get('config', {}).get('runtime_policy')
     if runtime_policy is not None:
         from experiment_runner.runtime_policy import validate_resolved_policy
-        if not stateful:
+        if not stateful and candidate != 'pma_gap_memory_v0':
             raise RuntimeError('runtime policy is not supported by this legacy candidate')
         validate_resolved_policy(runtime_policy, manifest['assets'][args.task])
         spec['runtime_policy'] = runtime_policy
