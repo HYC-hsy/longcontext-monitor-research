@@ -1,8 +1,9 @@
-import os, json, re, time, requests, sys, threading, urllib3, base64, importlib, uuid, pathlib, hashlib, copy
+import os, json, re, time, requests, sys, threading, urllib3, base64, importlib, uuid, pathlib, hashlib, copy, contextvars
 from datetime import datetime
 from research_runtime import emit as _research_emit, new_id as _research_id, payload_summary as _payload_summary, sha256_json as _sha256_json, telemetry_enabled as _telemetry_enabled, consume_pending_intervention as _consume_pending_intervention, consume_pending_pma_reminder as _consume_pending_pma_reminder, register_provider_call as _register_provider_call, current_provider_call as _current_provider_call
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 _RESP_CACHE_KEY = str(uuid.uuid4()); _RESP_CODEX_KEY = str(uuid.uuid4())
+_parser_capture_emit = contextvars.ContextVar('parser_capture_emit', default=None)
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path: sys.path.append(_ROOT)
 
@@ -102,7 +103,7 @@ def trim_messages_history(history, sess):
         transform_id = _research_id('history')
         before = {'message_count': len(history), 'bytes': sum(len(json.dumps(m, ensure_ascii=False)) for m in history),
                   'sha256': _sha256_json(history)}
-        _research_emit('history_transform_started', before, history_transform_id=transform_id)
+        _session_research_emit(sess, 'history_transform_started', before, history_transform_id=transform_id)
     cap = sess.context_win * 3
     candidate_limit = getattr(sess, 'candidate_request_byte_limit', None)
     if candidate_limit is not None:
@@ -116,13 +117,13 @@ def trim_messages_history(history, sess):
     compress_history_tags(history, interval=getattr(sess, 'cut_msg_interval', 5))
     print(f'[Debug] Current context: {cost()} chars, {len(history)} messages.')
     if cost() <= cap:
-        if observing: _research_emit('history_transform_finished', {**before, 'changed': False}, history_transform_id=transform_id)
+        if observing: _session_research_emit(sess, 'history_transform_finished', {**before, 'changed': False}, history_transform_id=transform_id)
         return
     compress_history_tags(history, keep_recent=4, force=True)
     if cost() <= target:
         if observing:
             after = {'message_count': len(history), 'bytes': cost(), 'sha256': _sha256_json(history)}
-            _research_emit('history_transform_finished', {**after, 'changed': after['sha256'] != before['sha256']}, history_transform_id=transform_id)
+            _session_research_emit(sess, 'history_transform_finished', {**after, 'changed': after['sha256'] != before['sha256']}, history_transform_id=transform_id)
         return
     while len(history) > 9 and cost() > target:
         history.pop(0)
@@ -131,7 +132,7 @@ def trim_messages_history(history, sess):
     print(f'[Debug] Trimmed context, current: {cost()} chars, {len(history)} messages.')
     if observing:
         after = {'message_count': len(history), 'bytes': cost(), 'sha256': _sha256_json(history)}
-        _research_emit('history_transform_finished', {**after, 'changed': after['sha256'] != before['sha256'],
+        _session_research_emit(sess, 'history_transform_finished', {**after, 'changed': after['sha256'] != before['sha256'],
                        'removed_messages': before['message_count'] - after['message_count']}, history_transform_id=transform_id)
 
 def auto_make_url(base, path):
@@ -485,7 +486,7 @@ def _record_usage(usage, api_mode):
         print(f"[Cache] input={inp} creation={cache_creation} read={cache_read}")
     provider_call = _current_provider_call()
     if provider_call:
-        _research_emit("provider_usage", {
+        (_parser_capture_emit.get() or _research_emit)("provider_usage", {
             "api_mode": api_mode,
             "call_type": provider_call.get("call_type", "task_agent"),
             "input_tokens": inp,
@@ -658,42 +659,104 @@ def _task_check_wait(sess, deadline, seconds=0):
                    if deadline is not None else min(0.1, remaining))
 
 
+class ResearchCaptureFailed(RuntimeError):
+    """Archive failure, never a retryable generation transport failure."""
+
+
+def _transport_policy(sess, name, allowed):
+    value = getattr(sess, name, 'required')
+    if value not in allowed:
+        raise ValueError('invalid ' + name)
+    return value
+
+
+def _capture_gap(stage):
+    # Never include exception messages, payloads, credentials, or URLs. Even a
+    # broken diagnostic sink must not turn best-effort capture into a blocker.
+    print('[Research capture gap] ' + stage)
+    try:
+        _research_emit('research_capture_gap', {'stage': stage})
+    except Exception:
+        pass
+
+
+def _session_research_emit(sess, event, data, **kwargs):
+    policy = _transport_policy(sess, 'research_capture_policy',
+                               ('required', 'best_effort'))
+    try:
+        return _research_emit(event, data, **kwargs)
+    except Exception:
+        if policy == 'required':
+            raise ResearchCaptureFailed('required research capture failed: ' + event) from None
+        _capture_gap(event)
+
+
 def _stream_with_retry(sess, url, headers, payload, parse_fn):
+    capture_policy = _transport_policy(sess, 'research_capture_policy',
+                                       ('required', 'best_effort'))
     if getattr(sess, '_research_capture_failed', False):
         raise RuntimeError('required research capture failed after an accepted response')
     pma_capture = os.environ.get('GA_PMA_CAPTURE_TASK_REQUESTS') == '1'
     strict = bool(getattr(sess, 'task_complete_response', False))
     auxiliary_integrity = bool(getattr(sess, 'candidate_auxiliary_integrity', False))
-    capture_required = pma_capture or strict
+    capture_requested = pma_capture or strict
+    capture_required = capture_requested and capture_policy == 'required'
+
+    def capture_failure(stage):
+        if capture_policy == 'required':
+            sess._research_capture_failed = True
+            raise ResearchCaptureFailed('required research capture failed: ' + stage) from None
+        _capture_gap(stage)
+
+    def emit(event, data, **kwargs):
+        # Ask for an actual archive receipt even when its absence is optional.
+        if 'required_sink' in kwargs:
+            kwargs['required_sink'] = capture_requested
+        try:
+            result = _research_emit(event, data, **kwargs)
+        except Exception:
+            capture_failure(event)
+            return None
+        if result is None and capture_requested and capture_policy == 'best_effort':
+            _capture_gap(event)
+        return result
     deadline = _task_deadline(sess) if strict else None
     payload_sha256 = _sha256_json(payload) if strict else None
     if strict: sess.last_response_acceptance = 'pending'
-    observing = _telemetry_enabled() or capture_required
-    llm_call_id = _research_id('llm') if observing else None
+    observing = _telemetry_enabled() or capture_requested
+    llm_call_id = None
+    secrets = (str(getattr(sess, 'api_key', '') or ''), url.split('?', 1)[0])
+    _register_provider_call({})
     if observing:
-        intervention_link = _consume_pending_intervention()
-        reminder_link = _consume_pending_pma_reminder()
-        capture = bool(getattr(sess, 'research_capture_payload', False)) or capture_required
-        secrets = (str(getattr(sess, 'api_key', '') or ''), url.split('?', 1)[0]) if capture_required else ()
-        request_info = _payload_summary(payload, capture_content=capture, secrets=secrets)
-        call_type = str(getattr(sess, 'research_call_type', 'task_agent'))
-        request_info.update({'provider_url': '[REDACTED]' if capture_required else url.split('?', 1)[0],
-                             'provider_url_sha256': hashlib.sha256(url.split('?', 1)[0].encode()).hexdigest() if capture_required else None,
-                             'max_retries': sess.max_retries,
-                             'call_type': call_type})
-        if intervention_link: request_info.update(intervention_link)
-        if reminder_link: request_info.update(reminder_link)
-        request_event = _research_emit('provider_request_ready', request_info,
-                                       llm_call_id=llm_call_id, required_sink=capture_required)
-        if capture_required and request_event is None:
-            raise RuntimeError('required research request capture unavailable before send')
-        _register_provider_call({
-            'llm_call_id': llm_call_id,
-            'provider_request_event_id': request_event['event_id'] if request_event else None,
-            'call_type': call_type,
-            **(intervention_link or {}),
-            **(reminder_link or {}),
-        })
+        try:
+            llm_call_id = _research_id('llm')
+            call_type = str(getattr(sess, 'research_call_type', 'task_agent'))
+            _register_provider_call({'llm_call_id': llm_call_id, 'call_type': call_type})
+            intervention_link = _consume_pending_intervention()
+            reminder_link = _consume_pending_pma_reminder()
+            capture = bool(getattr(sess, 'research_capture_payload', False)) or capture_requested
+            request_info = _payload_summary(payload, capture_content=capture, secrets=secrets)
+            request_info.update({'provider_url': '[REDACTED]' if capture_requested else url.split('?', 1)[0],
+                                 'provider_url_sha256': hashlib.sha256(url.split('?', 1)[0].encode()).hexdigest() if capture_requested else None,
+                                 'max_retries': sess.max_retries,
+                                 'call_type': call_type})
+            if intervention_link: request_info.update(intervention_link)
+            if reminder_link: request_info.update(reminder_link)
+            request_event = emit('provider_request_ready', request_info,
+                                           llm_call_id=llm_call_id, required_sink=capture_required)
+            if capture_required and request_event is None:
+                raise RuntimeError('required research request capture unavailable before send')
+            _register_provider_call({
+                'llm_call_id': llm_call_id,
+                'provider_request_event_id': request_event['event_id'] if request_event else None,
+                'call_type': call_type,
+                **(intervention_link or {}),
+                **(reminder_link or {}),
+            })
+        except ResearchCaptureFailed:
+            raise
+        except Exception:
+            capture_failure('provider_request_ready')
     def _delay(resp, attempt):
         try: ra = float((resp.headers or {}).get("retry-after"))
         except: ra = None
@@ -705,7 +768,7 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
         if consume_cancel is not None and consume_cancel():
             raise ProviderResponseCancelled("provider response cancelled before retry")
         streamed = False
-        attempt_event = _research_emit('provider_request_attempt', {'attempt': attempt + 1},
+        attempt_event = emit('provider_request_attempt', {'attempt': attempt + 1},
                                        llm_call_id=llm_call_id, required_sink=capture_required)
         if capture_required and attempt_event is None:
             raise RuntimeError('required research attempt capture unavailable before send')
@@ -739,12 +802,12 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                     error_metadata = _safe_http_error_metadata(r, response_body)
                     if _retryable_http_error(r.status_code, body) and attempt < sess.max_retries:
                         d = _delay(r, attempt)
-                        retry_event = _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code,
+                        retry_event = emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code,
                                        'outcome': 'retryable_http_error', 'retry_delay_seconds': d,
                                        'relay_wrapped_upstream_error': r.status_code == 400,
                                        **error_metadata},
-                                       llm_call_id=llm_call_id, required_sink=strict)
-                        if strict and retry_event is None:
+                                       llm_call_id=llm_call_id, required_sink=capture_required)
+                        if capture_required and retry_event is None:
                             sess._research_capture_failed = True
                             raise TaskResponseRejected('capture_failed')
                         print(f"[LLM Retry] HTTP {r.status_code}, retry in {d:.1f}s ({attempt+1}/{sess.max_retries+1})")
@@ -752,7 +815,7 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                         else: time.sleep(d)
                         continue
                     err = f"!!!Error: HTTP {r.status_code}" + (f": {body}" if body else "")
-                    error_event = _research_emit('provider_response', {
+                    error_event = emit('provider_response', {
                         'attempt': attempt + 1, 'status_code': r.status_code,
                         'outcome': 'http_error', **error_metadata},
                         llm_call_id=llm_call_id, required_sink=capture_required)
@@ -777,7 +840,11 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                             consume_cancel = getattr(sess, '_consume_cancel_request', None)
                             if consume_cancel is not None and consume_cancel():
                                 raise ProviderResponseCancelled("provider response cancelled")
-                            chunk = next(gen)
+                            capture_token = _parser_capture_emit.set(emit)
+                            try:
+                                chunk = next(gen)
+                            finally:
+                                _parser_capture_emit.reset(capture_token)
                             if strict: buffered.append(chunk)
                             else: streamed = True; yield chunk
                     except StopIteration as e:
@@ -799,7 +866,7 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                                              'elapsed_seconds': round(time.monotonic() - attempt_started, 6),
                                              'content_type': content_type if content_type in (
                                                  'text/event-stream', 'application/json') else None})
-                            diagnostic = _research_emit('task_response_integrity', evidence,
+                            diagnostic = emit('task_response_integrity', evidence,
                                 llm_call_id=llm_call_id, required_sink=capture_required)
                             if capture_required and diagnostic is None:
                                 sess._research_capture_failed = True
@@ -808,7 +875,7 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                             if category != 'complete':
                                 sess.last_response_acceptance = category
                                 retry = category == 'incomplete_stream' and attempt < sess.max_retries
-                                outcome_event = _research_emit('provider_response', {
+                                outcome_event = emit('provider_response', {
                                     'attempt': attempt + 1, 'status_code': r.status_code,
                                     'outcome': 'retry_incomplete_stream' if retry else 'rejected_' + category},
                                     llm_call_id=llm_call_id, required_sink=capture_required)
@@ -825,18 +892,24 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                             sess.last_response_acceptance = category
                             if category != 'complete':
                                 raise AuxiliaryResponseRejected(category)
-                        if capture_required:
-                            visible = [block for block in (e.value or [])
-                                       if isinstance(block, dict) and
-                                       block.get('type') in ('text', 'tool_use')]
-                            content_event = _research_emit('provider_response_content', {
-                                'attempt': attempt + 1,
-                                'parsed_visible_blocks': _payload_summary(
-                                    {'content': visible}, capture_content=True,
-                                    secrets=secrets)['content']['content'],
-                                'hidden_thinking_excluded': True,
-                            }, llm_call_id=llm_call_id, required_sink=True)
-                            if content_event is None:
+                        if capture_requested:
+                            content_event = None
+                            try:
+                                visible = [block for block in (e.value or [])
+                                           if isinstance(block, dict) and
+                                           block.get('type') in ('text', 'tool_use')]
+                                content_event = emit('provider_response_content', {
+                                    'attempt': attempt + 1,
+                                    'parsed_visible_blocks': _payload_summary(
+                                        {'content': visible}, capture_content=True,
+                                        secrets=secrets)['content']['content'],
+                                    'hidden_thinking_excluded': True,
+                                }, llm_call_id=llm_call_id, required_sink=capture_required)
+                            except ResearchCaptureFailed:
+                                raise
+                            except Exception:
+                                capture_failure('provider_response_content')
+                            if capture_required and content_event is None:
                                 sess._research_capture_failed = True
                                 if strict:
                                     sess.last_response_acceptance = 'capture_failed'
@@ -844,7 +917,7 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                                 if auxiliary_integrity:
                                     raise AuxiliaryResponseRejected('capture_failed')
                         if strict: _task_check_wait(sess, deadline)
-                        success_event = _research_emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code, 'outcome': 'success'},
+                        success_event = emit('provider_response', {'attempt': attempt + 1, 'status_code': r.status_code, 'outcome': 'success'},
                                                        llm_call_id=llm_call_id, required_sink=capture_required)
                         if capture_required and success_event is None:
                             sess._research_capture_failed = True
@@ -870,9 +943,11 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                     if clear_active is not None: clear_active(r)
                     if response_deadline is not None:
                         response_deadline.cancel()
+        except ResearchCaptureFailed:
+            raise
         except TaskResponseRejected as error:
             if strict:
-                _research_emit('task_response_terminal', {
+                emit('task_response_terminal', {
                     'attempt': attempt + 1, 'category': error.category,
                     'elapsed_seconds': round(time.monotonic() - attempt_started, 6),
                     'payload_sha256': payload_sha256}, llm_call_id=llm_call_id)
@@ -882,11 +957,11 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
         except ProviderResponseCancelled:
             if strict: sess.last_response_acceptance = 'cancelled'
             if strict:
-                _research_emit('task_response_terminal', {
+                emit('task_response_terminal', {
                     'attempt': attempt + 1, 'category': 'cancelled',
                     'elapsed_seconds': round(time.monotonic() - attempt_started, 6),
                     'payload_sha256': payload_sha256}, llm_call_id=llm_call_id)
-            _research_emit('provider_response', {
+            emit('provider_response', {
                 'attempt': attempt + 1, 'outcome': 'cancelled',
                 'streamed_before_cancel': streamed,
             }, llm_call_id=llm_call_id)
@@ -895,7 +970,7 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                 requests.exceptions.ChunkedEncodingError) as e:
             consume_cancel = getattr(sess, '_consume_cancel_request', None)
             if consume_cancel is not None and consume_cancel():
-                _research_emit('provider_response', {
+                emit('provider_response', {
                     'attempt': attempt + 1, 'outcome': 'cancelled',
                     'streamed_before_cancel': streamed,
                     'transport_error_type': type(e).__name__,
@@ -911,11 +986,11 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
             partial_retry_safe = getattr(sess, 'transactional_response', False)
             if attempt < sess.max_retries and (not streamed or partial_retry_safe):
                 d = _delay(None, attempt)
-                retry_event = _research_emit('provider_response', {'attempt': attempt + 1, 'outcome': 'retryable_transport_error',
+                retry_event = emit('provider_response', {'attempt': attempt + 1, 'outcome': 'retryable_transport_error',
                                'error_type': type(e).__name__, 'retry_delay_seconds': d,
                                 'streamed_before_error': streamed}, llm_call_id=llm_call_id,
-                                required_sink=strict)
-                if strict and retry_event is None:
+                                required_sink=capture_required)
+                if capture_required and retry_event is None:
                     sess._research_capture_failed = True
                     raise TaskResponseRejected('capture_failed') from None
                 print(f"[LLM Retry] {type(e).__name__}, retry in {d:.1f}s ({attempt+1}/{sess.max_retries+1})")
@@ -924,7 +999,7 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                 if strict: _task_check_wait(sess, deadline, d)
                 else: time.sleep(d)
                 continue
-            _research_emit('provider_response', {
+            emit('provider_response', {
                 'attempt': attempt + 1, 'outcome': 'transport_error',
                 'error_type': type(e).__name__, 'streamed_before_error': streamed,
             }, llm_call_id=llm_call_id)
@@ -932,7 +1007,7 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                 category = ('response_deadline' if response_deadline_hit is not None and
                             response_deadline_hit.is_set() else 'transport_error')
                 sess.last_response_acceptance = category
-                _research_emit('task_response_terminal', {
+                emit('task_response_terminal', {
                     'attempt': attempt + 1, 'category': category,
                     'exception_type': type(e).__name__,
                     'elapsed_seconds': round(time.monotonic() - attempt_started, 6),
@@ -949,7 +1024,7 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
             # only when an explicit cancellation request is still pending.
             consume_cancel = getattr(sess, '_consume_cancel_request', None)
             if consume_cancel is not None and consume_cancel():
-                _research_emit('provider_response', {
+                emit('provider_response', {
                     'attempt': attempt + 1, 'outcome': 'cancelled',
                     'streamed_before_cancel': streamed,
                     'transport_error_type': type(e).__name__,
@@ -960,7 +1035,7 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
             err = f"\n\n[!!! 流异常中断 {type(e).__name__}: {e} !!!]" if streamed else f"!!!Error: {type(e).__name__}: {e}"
             if strict:
                 sess.last_response_acceptance = 'parser_exception'
-                _research_emit('task_response_terminal', {
+                emit('task_response_terminal', {
                     'attempt': attempt + 1, 'category': 'parser_exception',
                     'exception_type': type(e).__name__,
                     'elapsed_seconds': round(time.monotonic() - attempt_started, 6),
@@ -1096,6 +1171,8 @@ def _msgs_claude2oai(messages):
 
 class BaseSession:
     def __init__(self, cfg):
+        self.stateful_native_context_policy = cfg.get('stateful_native_context_policy', 'required')
+        self.research_capture_policy = cfg.get('research_capture_policy', 'required')
         self.api_key = cfg['apikey']
         self.api_base = cfg['apibase'].rstrip('/')
         self.model = cfg.get('model', '')
@@ -1324,7 +1401,10 @@ class NativeClaudeSession(BaseSession):
             if payload_bytes > candidate_limit:
                 raise ValueError('candidate complete Task/PoS request exceeds frozen byte budget')
         url = auto_make_url(self.api_base, "messages") + '?beta=true'
-        if (os.environ.get('GA_STATEFUL_MEMORY_ENABLED') == '1' and
+        native_policy = _transport_policy(self, 'stateful_native_context_policy',
+                                          ('required', 'off'))
+        if (native_policy == 'required' and
+                os.environ.get('GA_STATEFUL_MEMORY_ENABLED') == '1' and
                 os.environ.get('GA_STATEFUL_MEMORY_MODE') == 'live'):
             preflight = getattr(self, 'stateful_native_preflight', None)
             if not callable(preflight):
@@ -1750,17 +1830,17 @@ class NativeToolClient:
             self.backend.system = original_system + '\n\n' + system_overlay
             previous_limit = getattr(self.backend, 'candidate_request_byte_limit', None)
             self.backend.candidate_request_byte_limit = overlay_request_byte_limit
-            _research_emit('candidate_task_budget_resolved', {
-                'complete_request_byte_limit': overlay_request_byte_limit,
-                'panel_utf8_bytes': len(system_overlay.encode('utf-8')),
-                'ga_history_context_win': self.backend.context_win,
-                'output_reserve_max_tokens': self.backend.max_tokens,
-                'basis': ('ordinary_GA_history_policy_provider_limit_unknown'
-                          if overlay_request_byte_limit is None else
-                          'serialized_utf8_bytes_not_provider_token_limit'),
-            })
             generator = self.chat(scoped_messages, tools=tools)
             try:
+                _session_research_emit(self.backend, 'candidate_task_budget_resolved', {
+                    'complete_request_byte_limit': overlay_request_byte_limit,
+                    'panel_utf8_bytes': len(system_overlay.encode('utf-8')),
+                    'ga_history_context_win': self.backend.context_win,
+                    'output_reserve_max_tokens': self.backend.max_tokens,
+                    'basis': ('ordinary_GA_history_policy_provider_limit_unknown'
+                              if overlay_request_byte_limit is None else
+                              'serialized_utf8_bytes_not_provider_token_limit'),
+                })
                 while True:
                     try:
                         chunk = next(generator)
@@ -1856,3 +1936,4 @@ def fast_ask(prompt, cfg_name):
     sess = resolve_session(cfg_name)
     if not sess: raise ValueError(f"fast_ask: '{cfg_name}' unsupported")
     return "".join(sess.raw_ask([{"role": "user", "content": prompt}]))
+
