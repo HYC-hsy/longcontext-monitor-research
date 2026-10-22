@@ -40,6 +40,15 @@ class DownloadRetryTests(unittest.TestCase):
         self.assertEqual(sum(name == 'uv_install' for name, _ in selected.stages), 1)
         self.assertIn('UV_HTTP_RETRIES=2', dict(selected.stages)['uv_dependencies'])
 
+    def test_combined_apt_command_keeps_original_package_list(self):
+        original = UV_SCRIPT.replace(b'apt-get update\napt-get install -y curl git\n',
+            b'apt-get update && DEBIAN_FRONTEND=noninteractive '
+            b'apt-get install -y expect curl\n')
+        selected = plan(original, 3)
+        self.assertEqual(selected.coverage, 'apt_curl_uvx')
+        self.assertIn('DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=2 '
+                      'install -y expect curl', dict(selected.stages)['apt_install'])
+
     def test_first_download_failure_stops_before_installer_and_tests(self):
         seen, records = [], []
         async def run(*, command, user, timeout_sec):
@@ -69,7 +78,8 @@ class DownloadRetryTests(unittest.TestCase):
         selected = plan(original, 3)
         self.assertEqual(selected.coverage, 'pip')
         self.assertEqual(selected.stages[0][1],
-                         'pip install --retries 3 pytest==8.4.2 requests==2.32.5 '
+                         'pip install --retries 3 --resume-retries 0 '
+                         'pytest==8.4.2 requests==2.32.5 '
                          'pytest-json-ctrf==0.3.5')
         self.assertTrue(selected.effective.endswith(original.split(b'\n\n', 1)[1]))
 

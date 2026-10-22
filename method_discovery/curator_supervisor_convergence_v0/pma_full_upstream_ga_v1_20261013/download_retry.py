@@ -64,9 +64,16 @@ def plan(original: bytes, max_attempts: int) -> DownloadPlan:
         apt_update = [x for x in prefix if x == b'apt-get update\n']
         installs = [x for x in prefix if re.fullmatch(
             rb'(?:DEBIAN_FRONTEND=noninteractive )?apt-get install -y [A-Za-z0-9.+\- ]+\n', x)]
+        combined = [x for x in prefix if re.fullmatch(
+            rb'apt-get update && DEBIAN_FRONTEND=noninteractive '
+            rb'apt-get install -y [A-Za-z0-9.+\- ]+\n', x)]
+        if len(combined) == 1 and not apt_update and not installs:
+            apt_update = [b'apt-get update\n']
+            installs = [combined[0].split(b' && ', 1)[1]]
         installer = f'curl -LsSf {UV_INSTALLER} | sh\n'.encode()
         other = [x for x in prefix if x.strip() and not x.lstrip().startswith(b'#') and
                  x not in apt_update and x not in installs and x != installer]
+        other = [x for x in other if x not in combined]
         warmup = _uvx_warmup(b''.join(lines[boundary + 1:]), retries)
         if (len(apt_update) == len(installs) == 1 and prefix.count(installer) == 1
                 and not other and warmup):
@@ -106,7 +113,8 @@ def plan(original: bytes, max_attempts: int) -> DownloadPlan:
                     for t in tokens[2:]) and
                 b'pytest --ctrf /logs/verifier/ctrf.json ' in b''.join(lines[index + 1:]) and
                 not any(b'apt-get ' in x or b'curl ' in x for x in lines[:index])):
-            command = 'pip install --retries ' + str(max_attempts) + ' ' + ' '.join(tokens[2:])
+            command = ('pip install --retries ' + str(max_attempts) +
+                       ' --resume-retries 0 ' + ' '.join(tokens[2:]))
             effective = b''.join(lines[:index] + lines[index + 1:])
             return DownloadPlan(digest, effective, 'pip',
                                 (('pip_dependencies', command),))

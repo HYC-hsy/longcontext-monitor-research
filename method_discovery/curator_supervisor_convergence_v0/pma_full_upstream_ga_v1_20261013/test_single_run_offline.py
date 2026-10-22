@@ -20,6 +20,33 @@ from .single_run_certification import verify_evidence
 
 
 class SingleRunOfflineTests(unittest.TestCase):
+    def test_download_retry_reaches_real_manifest_api_for_non_sqlite(self):
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from .single_run import prepare
+        with TemporaryDirectory() as directory:
+            base = Path(directory)
+            for name in ('task.py', 'pma.json'):
+                (base / name).write_text('fixture')
+            args = SimpleNamespace(output=str(base / 'prepared'), condition='B',
+                research_candidate='pma_gap_memory_v0', task='db-wal-recovery',
+                occurrence=1, fake_only=False, runtime_policy=None,
+                task_complete_response=False, official_source_git=str(base),
+                task_profile_file=str(base / 'task.py'),
+                pma_profile_file=str(base / 'pma.json'), certification_dir=None,
+                evaluation_bootstrap_protocol='download_retry_v1',
+                evaluation_download_retry={'max_attempts': 3})
+            with patch('method_discovery.curator_supervisor_convergence_v0.'
+                       'pma_full_upstream_ga_v1_20261013.prepare_six_task_manifest.prepare',
+                       return_value={'config': {'evaluation_bootstrap_protocol':
+                                               'download_retry_v1'}}) as backend:
+                prepare(args)
+            submitted = backend.call_args.kwargs['plan']
+            self.assertEqual(submitted['evaluation_download_retry'], {'max_attempts': 3})
+            self.assertEqual(submitted['evaluation_bootstrap_protocol'], 'download_retry_v1')
+            self.assertEqual(json.loads((base / 'prepared/plan.json').read_text())[
+                'evaluation_download_retry'], {'max_attempts': 3})
+
     def test_cached_plan_reaches_real_single_run_manifest_api(self):
         from tempfile import TemporaryDirectory
         from unittest.mock import patch
