@@ -30,6 +30,7 @@ SHA-256 and command output hashes are recorded. Each preparation command has a
 600-second request timeout; there is no shell loop around APT and no replay of
 the whole test script. A failed stage is `bootstrap_failed`, with zero test
 starts. Once ready, Harbor enters the byte-preserved test suffix exactly once.
+If entry setup fails before that call, `test_entry_failed` records zero starts.
 Test assertion failure is not a bootstrap failure. Missing/invalid current
 CTRF still makes reward unavailable, even if the shell returns zero.
 
@@ -49,12 +50,12 @@ this does not change the task image or repository package requirements.
 
 Final commands and exit codes:
 
-- `python -B -m unittest ...tests.test_evaluation_bootstrap -q`: 14 passed,
+- `python -B -m unittest ...tests.test_evaluation_bootstrap -q`: 15 passed,
   0 failures/errors/skips, exit 0.
 - `python -B -m unittest discover -s experiment_runner -t . -p test_*.py -v`:
   68 passed, 0 failures/errors/skips, exit 0.
 - `python -B -m unittest ...test_live_evaluator_delivery ...test_live_wiring
-  ...tests.test_evaluation_bootstrap -q`: 20 passed, exit 0.
+  ...tests.test_evaluation_bootstrap -q`: 23 passed, exit 0.
 - With `PMA_OFFICIAL_SOURCE_GIT=E:\pma_d1_tb2_source_20261017`,
   `python -B -m pytest .../test_live_evaluator_delivery.py -q`: 12 passed,
   exit 0. The first invocation without that required fixed-source setting had

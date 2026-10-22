@@ -219,6 +219,8 @@ class NativeSharedVerifier(Verifier):
         finally:
             self.environment.exec = original_exec
             if bootstrap is not None:
+                if bootstrap['status'] == 'ready':
+                    bootstrap['status'] = 'test_entry_failed'
                 if (bootstrap['status'] == 'tests_started' and
                         not all((self.trial_paths.verifier_dir / Path(path).name).is_file()
                                 for path in spec['expected_native_reports'])):

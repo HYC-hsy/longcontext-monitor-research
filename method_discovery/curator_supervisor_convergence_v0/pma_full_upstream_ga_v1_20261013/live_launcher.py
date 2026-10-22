@@ -338,8 +338,8 @@ def _native_trial_result(root: Path) -> dict:
         bootstrap_path = root / 'archive/bootstrap_retry_v1.json'
         if bootstrap_path.is_file():
             bootstrap = json.loads(bootstrap_path.read_text(encoding='utf-8'))
-            if bootstrap.get('status') == 'bootstrap_failed':
-                return {'status': 'unavailable', 'reason': 'bootstrap_failed',
+            if bootstrap.get('status') in {'bootstrap_failed', 'test_entry_failed'}:
+                return {'status': 'unavailable', 'reason': bootstrap['status'],
                         'candidates': len(candidates)}
         return {'status': 'unavailable', 'reason': 'one_trial_result_not_found',
                 'candidates': len(candidates)}
@@ -351,7 +351,8 @@ def _native_trial_result(root: Path) -> dict:
         bootstrap = (json.loads(bootstrap_path.read_text(encoding='utf-8'))
                      if bootstrap_path.is_file() else None)
         reason = (bootstrap['status'] if isinstance(bootstrap, dict) and
-                  bootstrap.get('status') in {'bootstrap_failed', 'reports_missing'}
+                  bootstrap.get('status') in {'bootstrap_failed', 'test_entry_failed',
+                                              'reports_missing'}
                   else 'native_reward_missing')
         return {'status': 'unavailable', 'reason': reason,
                 'result_path': str(path.relative_to(root)),

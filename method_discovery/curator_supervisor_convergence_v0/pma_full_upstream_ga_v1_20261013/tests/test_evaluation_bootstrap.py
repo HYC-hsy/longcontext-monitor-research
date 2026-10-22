@@ -113,7 +113,7 @@ class BootstrapFailureTests(unittest.IsolatedAsyncioTestCase):
 class VerifierBoundaryTests(unittest.IsolatedAsyncioTestCase):
     async def _exercise(self, *, protocol='bootstrap_retry_v1', fail_stage=None,
                         make_report=True, stale_report=False, assertion_failure=False,
-                        raise_after_start=False):
+                        raise_after_start=False, raise_before_start=False):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
             archive, tests, verifier_dir = (root / name for name in ('archive', 'tests', 'verifier'))
@@ -158,6 +158,8 @@ class VerifierBoundaryTests(unittest.IsolatedAsyncioTestCase):
             async def upload_dir(*, source_dir, target_dir):
                 return None
             async def fake_super(self):
+                if raise_before_start:
+                    raise RuntimeError('synthetic test entry setup failed')
                 await self.environment.exec(command='(/tests/test.sh) > /logs/verifier/test-stdout.txt 2>&1')
                 if raise_after_start:
                     raise RuntimeError('synthetic verifier transport interrupted')
@@ -219,6 +221,12 @@ class VerifierBoundaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(error, RuntimeError)
         self.assertEqual(receipt['status'], 'reports_missing')
         self.assertEqual(receipt['test_starts'], 1)
+
+    async def test_entry_setup_failure_is_not_bootstrap_failure(self):
+        _, error, receipt, _, _ = await self._exercise(raise_before_start=True)
+        self.assertIsInstance(error, RuntimeError)
+        self.assertEqual(receipt['status'], 'test_entry_failed')
+        self.assertEqual(receipt['test_starts'], 0)
 
     async def test_test_assertion_failure_is_not_bootstrap_failure(self):
         result, error, receipt, _, _ = await self._exercise(assertion_failure=True)
