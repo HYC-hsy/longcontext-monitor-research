@@ -59,7 +59,8 @@ def run_fixture(root, run_id='synthetic-stateful-1'):
                    'GA_POS_ENABLED': '0', 'GA_PMA_ENABLED': '0',
                    'GA_PMA_UPSTREAM_ENABLED': '0', 'GA_MONITOR_ENABLED': '0'}
     with mock.patch.dict(os.environ, env), ScriptedServer([
-                    stream(tools=['touch']), stream(tools=['touch']),
+                    stream(text='GA_PLAN_MARKER_ALPHA', tools=['touch']),
+                    stream(tools=['touch']),
                     stream(text='Synthetic task complete.', stop='end_turn')]) as server:
         backend = llmcore.NativeClaudeSession({
             'apikey': 'synthetic-only', 'apibase': server.url,
@@ -119,6 +120,7 @@ class StatefulGATest(unittest.TestCase):
         for stage in ('maintenance', 'selection'):
             queries = [row['query'] for row in facts['retrieval_queries']
                        if row['stage'] == stage]
+            self.assertTrue(any('GA_PLAN_MARKER_ALPHA' in query for query in queries))
             self.assertTrue(any('synthetic-artifact.txt' in query for query in queries))
             self.assertTrue(any('"name":"touch"' in query for query in queries))
 
@@ -376,7 +378,7 @@ class StatefulGATest(unittest.TestCase):
         self.assertEqual(facts['action_batches'], 2)
         self.assertTrue(any('"written":1' in row['text']
                             for row in facts['result_sources']))
-        self.assertEqual(facts['committed_event_seq'], 2)
+        self.assertEqual(facts['committed_event_seq'], 3)
         self.assertEqual(facts['pending_kinds'], ['agent_report'])
         self.assertEqual(facts['delivery_attempts'], 1)
         self.assertEqual(facts['role_attempts'], 9)
