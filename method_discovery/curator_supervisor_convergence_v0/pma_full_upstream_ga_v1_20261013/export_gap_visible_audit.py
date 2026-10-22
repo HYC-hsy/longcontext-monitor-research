@@ -168,7 +168,10 @@ def export(run_root: Path, output: Path, secrets: list[str], run_id: str) -> dic
         'bytes': trajectory_path.stat().st_size, 'sha256': file_sha(trajectory_path),
         'rows': len(trajectory['steps'])}
 
-    if len(gap) != 19 or len(payload) != 90 or len(visible) != 90 or len(transport) != 90:
+    direct = all(entry['value']['report'].get('mode') == 'direct_two_phase' for entry in gap)
+    if (not gap or len(payload) != len(visible) or len(payload) != len(transport) or
+            (direct and len(payload) != 2 * len(gap)) or
+            (not direct and (len(gap) != 19 or len(payload) != 90))):
         raise ValueError('completed run source counts changed')
     by_call = {}
     for items in (payload, visible):
@@ -178,8 +181,11 @@ def export(run_root: Path, output: Path, secrets: list[str], run_id: str) -> dic
             if key in by_call and ('request' if items is payload else 'response') in by_call[key]:
                 raise ValueError('duplicate role call identity')
             by_call.setdefault(key, {})['request' if items is payload else 'response'] = entry
-    if len(by_call) != 90 or any(set(value) != {'request', 'response'} for value in by_call.values()):
+    if len(by_call) != len(payload) or any(set(value) != {'request', 'response'} for value in by_call.values()):
         raise ValueError('role request/response mismatch')
+    if direct and any([phase for (step, _, phase) in sorted(by_call) if step == n] !=
+                      ['maintenance', 'selection'] for n in range(1, len(gap) + 1)):
+        raise ValueError('direct two-phase call order differs')
     if [x['value']['phase'] for x in transport] != [x['value']['phase'] for x in visible]:
         raise ValueError('transport phase order mismatch')
     transport_by_sequence = {n: entry for n, entry in enumerate(transport, 1)}
@@ -228,7 +234,7 @@ def export(run_root: Path, output: Path, secrets: list[str], run_id: str) -> dic
     action_by_call = {e['value']['llm_call_id']: e for e in task_by_kind['action_selected']}
     response_by_call = {e['value']['llm_call_id']: e for e in task_by_kind['provider_response']}
     attempt_by_call = {e['value']['llm_call_id']: e for e in task_by_kind['provider_request_attempt']}
-    if len(ready) != 19 or len(content_by_call) != 19:
+    if not ready or len(ready) != len(content_by_call) or len(ready) != len(steps):
         raise ValueError('Task call identity count mismatch')
     receipts = {}
     for turn, request in enumerate(ready, 1):
@@ -320,7 +326,7 @@ def export(run_root: Path, output: Path, secrets: list[str], run_id: str) -> dic
             'response_event_id': matched['response_event'],
             'subsequent_visible_response_blocks': matched['visible_response_blocks'],
             'subsequent_tool_receipts': matched['matched_tool_receipts_from_later_Task_request']})
-    if len(reminders) != 3:
+    if len(reminders) != len(task_by_kind.get('pma_reminder_appended', [])):
         raise ValueError('reminder count differs from recorded delivery')
 
     output.mkdir(parents=True, exist_ok=False)
