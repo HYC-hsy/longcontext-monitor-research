@@ -1,0 +1,107 @@
+```json
+{
+  "protocol": "audit-result/1",
+  "binding": {
+    "audit_view_hash": "274c6c92448af46da2be9997d414c3e8833e10aa7b04d0f74581dc6ed62f377a",
+    "base_state_hash": "f50efea42f96c2a1cab8fa92ce8869717cbfca68c73b67d91f93c93c795e6d0d",
+    "before_view_hash": "f50efea42f96c2a1cab8fa92ce8869717cbfca68c73b67d91f93c93c795e6d0d",
+    "candidate_state_hash": "0a4f91686f3a16daad02749a2cff400e3daf5af0cc3403bf7b7518adc672605c",
+    "candidate_view_hash": "0a4f91686f3a16daad02749a2cff400e3daf5af0cc3403bf7b7518adc672605c",
+    "cycle_id": "cycle-290320689346976869b6ad86",
+    "goal_ledger_hash": "97e7c07118e0bfc0568d44b9d1d3c6f2adab41342c3c7c55005fef690c0dd6ea",
+    "source_window_id": "3bb7192f89b97ff17a1fb13a1a4c762ebc73a2547b61ce4da0ce4b8d7ddd0f8d",
+    "task_version": 1
+  },
+  "coverage": [
+    {"kind": "requirement", "id": "requirement-f798d23460d30da74f43", "revision": 1},
+    {"kind": "requirement", "id": "requirement-03af599ad867f45e6a65", "revision": 1},
+    {"kind": "requirement", "id": "requirement-afded871d22a1caf623d", "revision": 1},
+    {"kind": "requirement", "id": "requirement-f2277dd155f42c84d5e3", "revision": 1},
+    {"kind": "entity", "id": "entity-876e4ceb63541264f830"},
+    {"kind": "entity", "id": "entity-0084bee36ce5071fe793"},
+    {"kind": "entity", "id": "entity-fac17f91ce5fc0047b52"},
+    {"kind": "entity", "id": "entity-ad369dd62956dbe168ef"},
+    {"kind": "gap", "id": "gap-f9c3c8f756cda6ca6071", "revision": 1},
+    {"kind": "gap", "id": "gap-ca98cff36c081b2ccc1a", "revision": 1},
+    {"kind": "gap", "id": "gap-88e4b67f5b0c794c9d92", "revision": 1},
+    {"kind": "gap", "id": "gap-df819ab8d3ff07ad0694", "revision": 1},
+    {"kind": "gap", "id": "gap-d53be7e3c44bbac2c41c", "revision": 1},
+    {"kind": "gap", "id": "gap-0ea9890ed7e85806aed7", "revision": 1},
+    {"kind": "focus", "id": "F"}
+  ],
+  "outcome": "issues",
+  "issues": [
+    {
+      "issue_id": "issue-001",
+      "kind": "unsupported_claim",
+      "target": {
+        "snapshot": "candidate",
+        "target": {"kind": "requirement", "id": "requirement-afded871d22a1caf623d", "revision": 1},
+        "field_path": "interpretation"
+      },
+      "related_targets": [],
+      "explanation": "The interpretation states 'Install compiled SQLite to /app/sqlite directory' but the cited source quote only contains 'Compile SQLite in /app/sqlite'. The word 'Install' and the concept of installation as a distinct operation are not present in the source quote. The transformation from 'Compile in' to 'Install to' changes the semantic meaning beyond what the source supports.",
+      "witnesses": [
+        {
+          "kind": "field",
+          "field": {
+            "snapshot": "candidate",
+            "target": {"kind": "requirement", "id": "requirement-afded871d22a1caf623d", "revision": 1},
+            "field_path": "interpretation"
+          },
+          "exact_value": "Install compiled SQLite to /app/sqlite directory"
+        },
+        {
+          "kind": "source",
+          "ref": {
+            "evidence_id": "ev_52aa8f4981c2bee6fdf884df",
+            "quote": "Compile SQLite in /app/sqlite"
+          }
+        }
+      ],
+      "repair_constraint": "Revise interpretation to use terminology directly from the source quote without introducing unsupported operations like 'Install'. Consider phrasing such as 'Build SQLite with output in /app/sqlite directory' or similar that preserves the compile-focused language."
+    },
+    {
+      "issue_id": "issue-002",
+      "kind": "scope_overreach",
+      "target": {
+        "snapshot": "candidate",
+        "target": {"kind": "gap", "id": "gap-0ea9890ed7e85806aed7", "revision": 1},
+        "field_path": "target"
+      },
+      "related_targets": [],
+      "explanation": "The gap target specifies adding '/app/sqlite/bin' to PATH, assuming binaries will be located in a 'bin' subdirectory. However, no requirement or source establishes this directory structure. The only location mentioned is '/app/sqlite' without any subdirectory specification.",
+      "witnesses": [
+        {
+          "kind": "field",
+          "field": {
+            "snapshot": "candidate",
+            "target": {"kind": "gap", "id": "gap-0ea9890ed7e85806aed7", "revision": 1},
+            "field_path": "target"
+          },
+          "exact_value": "Add /app/sqlite/bin to PATH environment variable"
+        },
+        {
+          "kind": "field",
+          "field": {
+            "snapshot": "candidate",
+            "target": {"kind": "requirement", "id": "requirement-afded871d22a1caf623d", "revision": 1},
+            "field_path": "interpretation"
+          },
+          "exact_value": "Install compiled SQLite to /app/sqlite directory"
+        },
+        {
+          "kind": "source",
+          "ref": {
+            "evidence_id": "ev_52aa8f4981c2bee6fdf884df",
+            "quote": "Compile SQLite in /app/sqlite"
+          }
+        }
+      ],
+      "repair_constraint": "Remove the assumed '/bin' subdirectory from the gap target. Use '/app/sqlite' as the PATH location, or create an epistemic gap to determine the actual binary location after extraction and build."
+    }
+  ],
+  "closure_assessments": [],
+  "unusable_reason": null
+}
+```

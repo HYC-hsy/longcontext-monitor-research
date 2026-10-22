@@ -1,0 +1,230 @@
+```json
+{
+  "protocol": "maintenance-proposal/1",
+  "request_id": "cycle-290320689346976869b6ad86/maintenance",
+  "active_task_version": 1,
+  "base_state_version": 0,
+  "world_patch": {
+    "entity_upserts": [
+      {
+        "entity_id": "@local_sqlite_tarball",
+        "entity_type": "artifact",
+        "display_name": "SQLite source tarball"
+      },
+      {
+        "entity_id": "@local_sqlite_build",
+        "entity_type": "environment",
+        "display_name": "SQLite build environment"
+      },
+      {
+        "entity_id": "@local_sqlite_installation",
+        "entity_type": "artifact",
+        "display_name": "SQLite installation at /app/sqlite"
+      },
+      {
+        "entity_id": "@local_path_configuration",
+        "entity_type": "environment",
+        "display_name": "PATH environment configuration"
+      }
+    ],
+    "state_upserts": [],
+    "relation_upserts": [],
+    "record_transitions": []
+  },
+  "specification_upserts": [
+    {
+      "requirement_id": "@local_req_extract",
+      "revision": 1,
+      "task_version": 1,
+      "interpretation": "Extract SQLite source from pre-vendored tarball at /app/vendor/sqlite-fossil-release.tar.gz without network access",
+      "source_refs": [
+        {
+          "evidence_id": "ev_95e47aca64772fa6fca5870b",
+          "quote": "The SQLite source snapshot is pre-vendored at /app/vendor/sqlite-fossil-release.tar.gz; use it instead of fetching sources over the network."
+        }
+      ],
+      "status": "active",
+      "retirement": null
+    },
+    {
+      "requirement_id": "@local_req_gcov",
+      "revision": 1,
+      "task_version": 1,
+      "interpretation": "Compile SQLite with gcov instrumentation for code coverage analysis",
+      "source_refs": [
+        {
+          "evidence_id": "ev_95e47aca64772fa6fca5870b",
+          "quote": "Compile SQLite in /app/sqlite with gcov instrumentation"
+        }
+      ],
+      "status": "active",
+      "retirement": null
+    },
+    {
+      "requirement_id": "@local_req_build_location",
+      "revision": 1,
+      "task_version": 1,
+      "interpretation": "Build SQLite with output placed in /app/sqlite directory",
+      "source_refs": [
+        {
+          "evidence_id": "ev_95e47aca64772fa6fca5870b",
+          "quote": "Compile SQLite in /app/sqlite"
+        }
+      ],
+      "status": "active",
+      "retirement": null
+    },
+    {
+      "requirement_id": "@local_req_path",
+      "revision": 1,
+      "task_version": 1,
+      "interpretation": "Make SQLite binaries available in PATH for command-line access",
+      "source_refs": [
+        {
+          "evidence_id": "ev_95e47aca64772fa6fca5870b",
+          "quote": "make it available in the PATH"
+        }
+      ],
+      "status": "active",
+      "retirement": null
+    }
+  ],
+  "gap_upserts": [
+    {
+      "gap_id": "@local_gap_verify_source",
+      "revision": 1,
+      "task_version": 1,
+      "gap_kind": "epistemic",
+      "target": "Verify that /app/vendor/sqlite-fossil-release.tar.gz exists and can be extracted",
+      "reason": "Must confirm source tarball is present before attempting extraction",
+      "goal_refs": [
+        {
+          "type": "requirement",
+          "requirement_id": "@local_req_extract",
+          "revision": 1,
+          "task_version": 1
+        }
+      ],
+      "record_refs": [],
+      "status": "open",
+      "closure": null
+    },
+    {
+      "gap_id": "@local_gap_extract",
+      "revision": 1,
+      "task_version": 1,
+      "gap_kind": "achievement",
+      "target": "Extract SQLite source from tarball to working directory",
+      "reason": "Source code must be extracted before compilation can begin",
+      "goal_refs": [
+        {
+          "type": "requirement",
+          "requirement_id": "@local_req_extract",
+          "revision": 1,
+          "task_version": 1
+        }
+      ],
+      "record_refs": [],
+      "status": "open",
+      "closure": null
+    },
+    {
+      "gap_id": "@local_gap_configure_gcov",
+      "revision": 1,
+      "task_version": 1,
+      "gap_kind": "achievement",
+      "target": "Configure SQLite build with gcov instrumentation flags",
+      "reason": "Build must be configured with appropriate CFLAGS for gcov coverage",
+      "goal_refs": [
+        {
+          "type": "requirement",
+          "requirement_id": "@local_req_gcov",
+          "revision": 1,
+          "task_version": 1
+        }
+      ],
+      "record_refs": [],
+      "status": "open",
+      "closure": null
+    },
+    {
+      "gap_id": "@local_gap_compile",
+      "revision": 1,
+      "task_version": 1,
+      "gap_kind": "achievement",
+      "target": "Compile SQLite with gcov instrumentation to /app/sqlite",
+      "reason": "Source must be compiled to produce instrumented binaries in target location",
+      "goal_refs": [
+        {
+          "type": "requirement",
+          "requirement_id": "@local_req_gcov",
+          "revision": 1,
+          "task_version": 1
+        },
+        {
+          "type": "requirement",
+          "requirement_id": "@local_req_build_location",
+          "revision": 1,
+          "task_version": 1
+        }
+      ],
+      "record_refs": [],
+      "status": "open",
+      "closure": null
+    },
+    {
+      "gap_id": "@local_gap_binary_location",
+      "revision": 1,
+      "task_version": 1,
+      "gap_kind": "epistemic",
+      "target": "Determine actual location of compiled SQLite binaries within /app/sqlite",
+      "reason": "Binary path must be known to configure PATH correctly",
+      "goal_refs": [
+        {
+          "type": "requirement",
+          "requirement_id": "@local_req_path",
+          "revision": 1,
+          "task_version": 1
+        }
+      ],
+      "record_refs": [],
+      "status": "open",
+      "closure": null
+    },
+    {
+      "gap_id": "@local_gap_path",
+      "revision": 1,
+      "task_version": 1,
+      "gap_kind": "achievement",
+      "target": "Add SQLite binary location to PATH environment variable",
+      "reason": "SQLite binaries must be accessible from command line",
+      "goal_refs": [
+        {
+          "type": "requirement",
+          "requirement_id": "@local_req_path",
+          "revision": 1,
+          "task_version": 1
+        }
+      ],
+      "record_refs": [],
+      "status": "open",
+      "closure": null
+    }
+  ],
+  "gap_resolutions": [],
+  "gap_reopens": [],
+  "focus": {
+    "op": "set",
+    "value": {
+      "gap_ref": {
+        "type": "gap",
+        "gap_id": "@local_gap_verify_source",
+        "revision": 1,
+        "task_version": 1
+      },
+      "reason": "First step is to verify the source tarball exists before proceeding with extraction and build",
+      "changed_at_step": 0
+    }
+  }
+}
+```
