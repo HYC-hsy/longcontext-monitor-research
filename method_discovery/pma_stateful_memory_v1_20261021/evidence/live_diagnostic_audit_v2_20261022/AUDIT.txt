@@ -1,0 +1,51 @@
+Stateful proactive memory v1 — audit-result/2 live diagnostic
+Date: 2026-10-22. This is a relaxed-Agent-time diagnostic, not a result under the original 900-second Agent protocol.
+
+Code and protocol
+- Execution code: 0d459efa49afa44385d52dcff42c5c290dfd3c30.
+- Protocol: audit-result/2. Model output no longer echoes coverage; host required_coverage remains in the audit input and final accepted view is used for selection.
+- Same-entry fake Harbor certification: pma-a94f7bceea2b4e30; committed evidence/audit_v2_fake_v13; verify_evidence(require_committed=True) passed before this live run.
+- Core tests: 112 OK; GA bridge: 13 OK; Task complete-response: 20 OK; host targeted: 13 OK. These are separate suites, not one combined test count.
+
+One authorized real episode
+- run_id: pma-bd6bc64353d049ed; candidate: pma_stateful_memory_v1; task: sqlite-with-gcov; condition B.
+- Manifest SHA-256: 6e26a766be8c13ca58951cd6e648ef9dad1831cb59ff05f7d7aeed84728f65d1. Manifest kept execution_authorized=false; a separate one-use authorization was validated and then removed. Its SHA-256 before removal was f71cda17fe77c4103ef6278b5c0192d8175a2ce9b61bec100c0764295acbb302.
+- Complete-response-v1 and diagnostic-uncapped-v1 were bound. No fake mode was enabled. Agent cumulative time was uncapped for this diagnostic; native verifier would retain 900 seconds if reached.
+- Task profile SHA-256: ed09a811b654b83097bee77942704eae2539d67291bf55aa34476692081ff02e. Auxiliary profile SHA-256: cc5f784b069034f44bc4527d15acd70191b1f7fc5810556c087b7b35e0ae00f1. Private profile contents and endpoint are not in this public record.
+
+Observed method sequence
+1. Initial maintenance returned; initial audit returned issues; the single shared candidate-repair opportunity was used; re-audit returned clean.
+2. One initial state commit was recorded at event_seq=0. Selection returned and one reminder delivery attempt was recorded. It was not confirmed as delivered to Task.
+3. Five auxiliary generation attempts received five responses: maintenance 1, audit 2, candidate_repair 1, selection 1. Model envelope decoding: fenced_json 4, raw_json 1. Journal cycle result: committed_reminder_ready, logical_calls=5, observable_attempts=5, responses_received=5.
+4. Five auxiliary native count requests returned HTTP 200. The sixth count request, for the first Task generation payload, returned HTTP 403 in 0.630281 seconds. Its error type was HTTPError. It did not produce a native input count. The generated Task payload was not sent to the generation endpoint.
+5. No Task generation response, Task action batch, tool execution, or confirmed reminder delivery occurred. Thus this run does not demonstrate a complete Task or method effectiveness.
+
+Failed count binding (safe metadata, not the private request)
+- Model: claude-opus-4-8.
+- Count endpoint SHA-256: 424982630d23725b1bc01ef8a20204abe99da4ef26890a5ad3748dd3d279fe29, the same endpoint identity recorded for the preceding accepted counts.
+- Final generation-payload SHA-256: 72c07a8ba3ab04a7ee7f45690c2914d633627b63c65e283528aed2e402c11573.
+- Count-projection SHA-256: 4aac0301cb912097bd35e2d94a6be749a46d8a871ce2a29b3e3d181b52ca39a0. Attempt and failure records match on both hashes.
+- Effective count connect/read timeouts: 60/300 seconds; this failure was not a read timeout.
+- HTTP response status: 403. The private captured exception identifies an HTTP forbidden response but does not establish whether the cause was credential scope, policy, billing, request content, or another supplier-side rule. No balance conclusion follows from this record. No extra probe or repeat episode was made.
+
+Termination and cleanup
+- Task terminal: EXCEPTION, after initialization and before Task generation. This is an infrastructure/count-preflight failure, not an observed task score.
+- Official native evaluation: 0 executions; reward=unavailable. frozen_product=false; evaluation_released=false.
+- Harbor process return code 0 and host worker return code 0 describe orderly infrastructure shutdown, not Task success. Batch disposition: stop_batch_native_evaluation_unavailable.
+- Sidecar stopped; worker exited; cleanup_confirmed=true; remaining_containers=[]; cleanup_errors=[]; owned volume clearance clean. One-use authorization removed and no matching run process remained.
+- This run_id, its authorization, and its environment will not be reused or restarted.
+
+Private originals and hashes (not uploaded)
+- Local root: E:\LongContext\stateful_sqlite_diagnostic_20261022_v4. The following hashes refer to original bytes, not this public report.
+- run_identity.json: 210f1e15b16950d5c3a5126a4e71b6032489931ed17508b09cd115479b51e6a1
+- batch_result.json: ac3b879975fafbc00d04127ee8e8c88f714f62fc54e3148f1b722d0bfb670b28
+- live_console_transcript.txt: ebd44df3a5a5eb4b520255a8097dcc2dc73066ccd8a952b8e7f393763a8f9cfb
+- host_private/memory.sqlite3: ce9cd58c716701b21b5d8d9bd978d40b7188fc064668e0ecb6e16479e90cb079
+- host_private/archive/native_count.jsonl: cfb19ed5ab3dc95df894e449ba84d9368858e66ae4717bf8fe8dd20ad1d4a36f
+- host_private/archive/provider_events.jsonl: c740c511eb2c43e33c9fbd799c0cf1cca1c853cb8d87d2941f47e572057dd70f
+- host_private/archive/role_calls.jsonl: 3f2c238a7def92212cfc8060f9f04186b543625b88f90201caf4ae72bce11982
+- host_private/archive/events.jsonl: f7c34484a598f3cdb401608a8557afc0eddc6c601ff9c121d882dde81a9aa2c2
+- host_private/archive/failures.jsonl: b3ae7dd1bae33091cd8d2b6f907a8e7bbfb40f6d8f90c8791fbc4b6953e0650c
+
+Evidence boundary
+The private original HTTP exception, model request/response bodies, task payload and provider traces have not been copied into this public file. This is a safe structured extraction, not a verbatim transcript or a substitute for the original bytes. The HTTP 403 occurred at native count before Task generation; no Task model response exists to publish. Whether the initial candidate was semantically correct, including the previously noted compile-location ambiguity, is not proven by the clean audit response.
