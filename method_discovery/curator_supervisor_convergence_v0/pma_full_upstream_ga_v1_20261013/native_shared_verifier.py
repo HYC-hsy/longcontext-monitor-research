@@ -14,7 +14,7 @@ from harbor.verifier.verifier import Verifier
 from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.pilot_harbor_hooks import _atomic
 
 from .evaluation_bootstrap import (BootstrapFailed, PROTOCOL as BOOTSTRAP_PROTOCOL,
-                                   effective_script, prepare)
+                                   commands as bootstrap_commands, effective_script, prepare)
 
 
 class NativeSharedVerifier(Verifier):
@@ -108,6 +108,8 @@ class NativeSharedVerifier(Verifier):
             bootstrap = {'run_id': spec['run_id'], 'protocol': protocol,
                          'original_sha256': hashlib.sha256(original).hexdigest(),
                          'effective_sha256': hashlib.sha256(effective).hexdigest(),
+                         'preparation_commands_sha256': hashlib.sha256(json.dumps(
+                             bootstrap_commands(), separators=(',', ':')).encode('utf-8')).hexdigest(),
                          'status': 'preparing', 'stages': [], 'test_starts': 0}
             receipt_path = archive / 'bootstrap_retry_v1.json'
             stage_dir = archive / 'bootstrap_retry_v1_stages'
@@ -127,7 +129,7 @@ class NativeSharedVerifier(Verifier):
                                                        target_path=effective_path)
                 readback = await self.environment.exec(
                     command=f'sha256sum {effective_path}', user='root', timeout_sec=30)
-                if (readback.return_code or readback.stdout.split(' ', 1)[0] !=
+                if (readback.return_code or (readback.stdout or '').split(' ', 1)[0] !=
                         bootstrap['effective_sha256']):
                     raise BootstrapFailed('effective_readback', readback.return_code,
                                           'effective verifier bytes differ')
@@ -217,6 +219,10 @@ class NativeSharedVerifier(Verifier):
         finally:
             self.environment.exec = original_exec
             if bootstrap is not None:
+                if (bootstrap['status'] == 'tests_started' and
+                        not all((self.trial_paths.verifier_dir / Path(path).name).is_file()
+                                for path in spec['expected_native_reports'])):
+                    bootstrap['status'] = 'reports_missing'
                 _atomic(receipt_path, bootstrap)
             _atomic(archive / 'native_test_execution.json', {
                 'run_id': spec['run_id'], 'executions': executions,

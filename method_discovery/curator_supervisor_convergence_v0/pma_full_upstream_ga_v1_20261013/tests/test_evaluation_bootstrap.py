@@ -112,7 +112,8 @@ class BootstrapFailureTests(unittest.IsolatedAsyncioTestCase):
 
 class VerifierBoundaryTests(unittest.IsolatedAsyncioTestCase):
     async def _exercise(self, *, protocol='bootstrap_retry_v1', fail_stage=None,
-                        make_report=True, stale_report=False, assertion_failure=False):
+                        make_report=True, stale_report=False, assertion_failure=False,
+                        raise_after_start=False):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
             archive, tests, verifier_dir = (root / name for name in ('archive', 'tests', 'verifier'))
@@ -158,6 +159,8 @@ class VerifierBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 return None
             async def fake_super(self):
                 await self.environment.exec(command='(/tests/test.sh) > /logs/verifier/test-stdout.txt 2>&1')
+                if raise_after_start:
+                    raise RuntimeError('synthetic verifier transport interrupted')
                 if make_report:
                     (verifier_dir / 'ctrf.json').write_text(json.dumps({'results': {
                         'tests': [{'name': 'synthetic'}],
@@ -207,6 +210,12 @@ class VerifierBoundaryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_started_without_report_is_unavailable(self):
         _, error, receipt, _, _ = await self._exercise(make_report=False)
+        self.assertIsInstance(error, RuntimeError)
+        self.assertEqual(receipt['status'], 'reports_missing')
+        self.assertEqual(receipt['test_starts'], 1)
+
+    async def test_interrupted_test_start_records_missing_report(self):
+        _, error, receipt, _, _ = await self._exercise(raise_after_start=True)
         self.assertIsInstance(error, RuntimeError)
         self.assertEqual(receipt['status'], 'reports_missing')
         self.assertEqual(receipt['test_starts'], 1)

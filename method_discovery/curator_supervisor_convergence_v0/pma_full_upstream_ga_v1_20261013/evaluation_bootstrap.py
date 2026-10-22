@@ -56,7 +56,7 @@ def commands() -> tuple[tuple[str, str], ...]:
          f"uvx {PACKAGE_ARGUMENTS} python -c 'import importlib.metadata as m; "
          'print(m.version("pytest")); print(m.version("pytest-json-ctrf"))\''),
         ('plugin_contract', '. "$HOME/.local/bin/env" && bash -o pipefail -c '
-         f"'uvx {PACKAGE_ARGUMENTS} pytest --help | grep -F -- --ctrf'"),
+         f"'UV_OFFLINE=1 uvx {PACKAGE_ARGUMENTS} pytest --help | grep -F -- --ctrf'"),
     )
 
 
