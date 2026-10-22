@@ -206,8 +206,9 @@ class EngineTests(unittest.TestCase):
         self.assertEqual([role for role, _ in attempts],
                          ["maintenance", "maintenance", "audit", "selection"])
         correction = json.loads(attempts[1][1][-1]["content"])
-        self.assertEqual(correction["last_raw_response"],
-                         '{"protocol":"maintenance-proposal/1","world_patch":[]}')
+        self.assertEqual(attempts[1][1][2], {"role": "assistant", "content":
+                         '{"protocol":"maintenance-proposal/1","world_patch":[]}'})
+        self.assertNotIn("last_raw_response", correction)
         self.assertEqual(correction["repair_mode"], "maintenance_contract")
         self.assertEqual(self.store.snapshot()["committed_event_seq"], 1)
 

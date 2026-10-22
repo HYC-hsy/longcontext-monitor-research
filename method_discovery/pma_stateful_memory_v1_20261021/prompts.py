@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 from .source import canonical
 
 
@@ -242,6 +244,60 @@ def repair(*, original_messages: list[dict], base: dict, rejected: object,
                        "the rejected candidate. Do not return a StateSnapshot or "
                        "AuditResult. Output raw JSON only; do not wrap it in a "
                        "Markdown code fence or add prose."}).decode("utf-8")}]
+
+
+def continuous_repair(*, original_messages: list[dict], maintenance_raw: str,
+                      error: str, mode: str, local_id_map: dict | None = None,
+                      issues: list[dict] | None = None) -> list[dict]:
+    """Continue the maintainer's actual conversation, without copying its input.
+
+    The host supplies validated issues and the exact candidate normalization map.
+    No audit response is an assistant turn in this conversation. Missing context
+    is an error, never an invitation to reconstruct or truncate a model turn.
+    """
+    if mode not in {"maintenance_contract", "replacement_proposal"}:
+        raise ValueError("unsupported proposal repair mode")
+    if (len(original_messages) != 2 or
+            [item.get("role") for item in original_messages] != ["system", "user"] or
+            any(not isinstance(item.get("content"), str) or not item["content"]
+                for item in original_messages) or
+            not isinstance(maintenance_raw, str) or not isinstance(error, str) or
+            not error):
+        raise ValueError("continuous repair requires complete original context")
+    feedback = {"repair_mode": mode, "validation_error": error}
+    if mode == "replacement_proposal":
+        if not isinstance(local_id_map, dict):
+            raise ValueError("candidate repair requires exact local_id_map")
+        if error == "blocking_issues":
+            if not isinstance(issues, list) or not issues:
+                raise ValueError("semantic repair requires validated issues")
+            feedback["issues"] = issues
+        elif error != "candidate_budget_exceeded" or issues is not None:
+            raise ValueError("unsupported candidate repair feedback")
+        feedback["local_id_map"] = local_id_map
+    elif local_id_map is not None or issues is not None:
+        raise ValueError("contract repair cannot contain candidate feedback")
+    feedback["instruction"] = (
+        "Return a complete maintenance-proposal/1 replacement proposal relative "
+        "to the original committed base identified by binding.base_state_version "
+        "in the preceding maintenance request; before_view is its visible "
+        "projection. Retain unrelated supported changes. The host applies this "
+        "proposal once to that original base, not to the rejected candidate. "
+        "This is not a patch to the previous proposal. local_id_map, when present, "
+        "maps your original @local names to host-normalized candidate IDs in "
+        "the issues; use the original @local names for new objects in the full "
+        "replacement. Diagnostics are not new evidence. Do not return a "
+        "StateSnapshot or AuditResult. Output raw JSON only; no Markdown fence "
+        "or surrounding prose.")
+    conversation = deepcopy(original_messages)
+    if maintenance_raw.strip():
+        conversation.append({"role": "assistant", "content": maintenance_raw})
+    else:
+        # The exact empty/whitespace response remains in host diagnostics. Do
+        # not invent an assistant answer or send an invalid empty provider turn.
+        feedback["previous_response_empty"] = True
+    return conversation + [
+        {"role": "user", "content": canonical(feedback).decode("utf-8")}]
 
 
 def audit_correction(*, original_messages: list[dict], raw_response: str,

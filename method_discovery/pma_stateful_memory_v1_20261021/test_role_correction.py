@@ -102,7 +102,7 @@ class RoleCorrectionTests(unittest.TestCase):
         correction = json.loads(calls[1][1][-1]["content"])
         self.assertEqual(correction["repair_mode"], "maintenance_contract")
         self.assertIn("maintenance-proposal/1", correction["instruction"])
-        self.assertIn("once to original_base", correction["instruction"])
+        self.assertIn("once to that original base", correction["instruction"])
         self.assertEqual(self.store.snapshot()["state_version"], 1)
 
     def test_shared_credit_exhaustion_does_not_call_audit_correction(self):

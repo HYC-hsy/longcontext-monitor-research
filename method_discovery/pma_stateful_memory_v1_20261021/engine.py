@@ -7,7 +7,8 @@ from typing import Callable
 
 from .audit import AuditCodec, _diff, validate_audit_result
 from .budget import TokenProxy
-from .prompts import audit, audit_correction, maintenance, repair, selection
+from .prompts import (audit, audit_correction, continuous_repair, maintenance,
+                      selection)
 from .proposal import build_candidate, validate_proposal
 from .projection import project_snapshot, visible_existing
 from .reminder import render_reminder, validate_selection
@@ -138,7 +139,8 @@ class CycleEngine:
         if type(raw) is not str:
             raise ContractError("provider_nontext_response")
         self.store.journal(cycle_id, "call_returned", {"call_id": call_id,
-            "public_response_sha256": digest(raw), "characters": len(raw)})
+            "public_response_sha256": digest(raw), "characters": len(raw),
+            **({"empty_response_raw": raw} if not raw.strip() else {})})
         return raw
 
     def _counted(self, cycle_id: str, result: dict) -> dict:
@@ -385,9 +387,10 @@ class CycleEngine:
                     credit = 0
                     self.store.journal(cycle_id, "repair_credit_used",
                         {"mode": "maintenance_contract", "error_code": error.code})
-                    messages = repair(original_messages=messages, base=before_view,
-                        rejected=raw, raw_response=raw, error=error.code,
+                    messages = continuous_repair(original_messages=messages,
+                        maintenance_raw=raw, error=error.code,
                         mode="maintenance_contract")
+            maintenance_raw = raw
             while True:
                 resolving = candidate["canonical_patch"]["gap_resolutions"]
                 manifest = [{"resolution_id": item["gap_id"],
@@ -438,9 +441,10 @@ class CycleEngine:
                         goal_ledger=self._goal_context(goals, ledger, body[
                             "observation_batch"]["processing_range"]["to_event_seq"]))
                     self.proxy.enforce(audit(baseline_view))
-                    request = repair(original_messages=messages, base=before_view,
-                        rejected={"candidate": after_view, "proposal": proposal},
-                        raw_response="", error="candidate_budget_exceeded",
+                    request = continuous_repair(original_messages=messages,
+                        maintenance_raw=maintenance_raw,
+                        local_id_map=candidate["local_id_map"],
+                        error="candidate_budget_exceeded",
                         mode="replacement_proposal")
                     self.proxy.enforce(request)
                     credit = 0
@@ -518,10 +522,10 @@ class CycleEngine:
                 self.store.journal(cycle_id, "repair_credit_used",
                     {"mode": "candidate_semantic", "issue_ids": [issue["issue_id"]
                         for issue in result["issues"]]})
-                repair_messages = repair(original_messages=messages, base=before_view,
-                    rejected={"candidate": after_view,
-                              "proposal": proposal, "issues": result["issues"]},
-                    raw_response=raw, error="blocking_issues", mode="replacement_proposal")
+                repair_messages = continuous_repair(original_messages=messages,
+                    maintenance_raw=maintenance_raw,
+                    local_id_map=candidate["local_id_map"], issues=result["issues"],
+                    error="blocking_issues", mode="replacement_proposal")
                 calls += 1
                 stage = "provider"
                 replacement_raw = self._call(cycle_id, "candidate_repair",
