@@ -7,7 +7,7 @@ from typing import Callable
 
 from .audit import AuditCodec, _diff, validate_audit_result
 from .budget import TokenProxy
-from .prompts import audit, maintenance, repair, selection
+from .prompts import audit, audit_correction, maintenance, repair, selection
 from .proposal import build_candidate, validate_proposal
 from .projection import project_snapshot, visible_existing
 from .reminder import render_reminder, validate_selection
@@ -378,6 +378,8 @@ class CycleEngine:
                         visible_existing_ids=mutable_ids, archive=self.store.archive())
                 except ContractError as error:
                     self._record_model_error(cycle_id, error, credit)
+                    if error.code == "model_refusal":
+                        raise
                     if credit == 0:
                         raise
                     credit = 0
@@ -479,14 +481,15 @@ class CycleEngine:
                             for item in contextual})
                 except ContractError as error:
                     self._record_model_error(cycle_id, error, credit)
+                    if error.code == "model_refusal":
+                        raise
                     if credit == 0:
                         raise
                     credit = 0
                     self.store.journal(cycle_id, "repair_credit_used",
                         {"mode": "audit_contract", "error_code": error.code})
-                    correction = repair(original_messages=audit_messages,
-                        base=before_view, rejected=after_view,
-                        raw_response=raw, error=error.code, mode="audit_contract")
+                    correction = audit_correction(original_messages=audit_messages,
+                        raw_response=raw, error=error.code)
                     calls += 1
                     stage = "provider"
                     corrected_raw = self._call(cycle_id, "audit_correction",

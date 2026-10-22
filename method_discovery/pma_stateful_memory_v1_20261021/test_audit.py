@@ -108,14 +108,13 @@ class AuditTests(unittest.TestCase):
             validate_audit_result(issues, view=self.view, catalog=self.catalog)
 
     def test_audit_and_correction_requests_describe_v2_without_echo(self):
-        from .prompts import repair
+        from .prompts import audit_correction
         messages = audit_messages(self.view)
         self.assertIn("audit-result/2", messages[0]["content"])
         self.assertIn("required_coverage", messages[1]["content"])
         self.assertIn("No coverage field is allowed", messages[0]["content"])
-        corrected = repair(original_messages=messages, base=self.before,
-            rejected=self.after, raw_response="invalid", error="malformed_output",
-            mode="audit_contract")
+        corrected = audit_correction(original_messages=messages,
+            raw_response="invalid", error="malformed_output")
         self.assertEqual(corrected[:2], messages)
         self.assertEqual(len(corrected), 3)
 

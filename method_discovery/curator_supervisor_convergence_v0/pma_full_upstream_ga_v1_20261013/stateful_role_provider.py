@@ -93,6 +93,12 @@ class StatefulRoleProvider:
         if (getattr(session, '_research_capture_failed', False) and
                 self.policies['research_capture_policy'] == 'required'):
             raise RuntimeError('stateful auxiliary required capture failed')
+        integrity = getattr(blocks, 'integrity', None) or {}
+        if integrity.get('stop_reason') == 'refusal':
+            self._record('role_calls.jsonl', {'call_id': call_id,
+                'role': role, 'status': 'refused', 'stop_reason': 'refusal'})
+            from method_discovery.pma_stateful_memory_v1_20261021.source import ContractError
+            raise ContractError('model_refusal')
         response = '\n'.join(block['text'] for block in blocks
                              if block.get('type') == 'text')
         if not response:

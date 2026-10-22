@@ -52,6 +52,13 @@ def decode_model_object(raw: str, *, record: Callable[[dict], None] | None = Non
         "payload_byte_end": (len(raw[:end].encode("utf-8", "surrogatepass"))
                              if payload is not None else None),
     }
+    # This is a whole-response refusal observed in a real auxiliary audit.
+    # Text merely quoted inside a valid JSON object is not a refusal signal.
+    if trimmed == "I cannot discuss that.":
+        if record:
+            record({**diagnostic, "envelope_kind": "rejected",
+                    "failure_layer": "refusal", "error_code": "model_refusal"})
+        raise ContractError("model_refusal")
     if failure_layer is not None:
         if record:
             record({**diagnostic, "failure_layer": failure_layer,
