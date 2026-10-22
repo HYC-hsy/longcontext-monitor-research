@@ -25,6 +25,11 @@ class FakeBackend:
             'condition': args.condition, 'research_candidate': args.research_candidate,
             'task_complete_response_policy': 'complete-response-v1' if args.task_complete_response else 'disabled'}))
         manifest = {'fixture': True}
+        if hasattr(args, 'evaluation_bootstrap_protocol'):
+            single = json.loads((root / 'plan.json').read_text())
+            single['evaluation_bootstrap_protocol'] = args.evaluation_bootstrap_protocol
+            (root / 'plan.json').write_text(json.dumps(single))
+            manifest['config'] = {'evaluation_bootstrap_protocol': args.evaluation_bootstrap_protocol}
         if args.fake_only and args.research_candidate == 'pma_stateful_memory_v1':
             driver = importlib.import_module(DRIVER + '.single_run')
             replies = Path(driver.__file__).with_name('stateful_fixture_replies.json')
@@ -34,9 +39,9 @@ class FakeBackend:
             single = json.loads((root / 'plan.json').read_text())
             single['runtime_policy'] = args.runtime_policy
             (root / 'plan.json').write_text(json.dumps(single))
-            manifest['config'] = {'runtime_policy': resolve_policy(args.runtime_policy,
+            manifest.setdefault('config', {})['runtime_policy'] = resolve_policy(args.runtime_policy,
                 {'native_agent_seconds': 900, 'native_verifier_seconds': 900},
-                {'task_turns_max': None})}
+                {'task_turns_max': None})
             for key in ('native_context_policy', 'research_capture_policy'):
                 value = getattr(args, key, 'required')
                 single[key] = value
@@ -77,6 +82,23 @@ class FrontendTests(unittest.TestCase):
         for directory in self.output.iterdir():
             if directory.is_dir():
                 (directory / 'authorization.json').write_text('{}')
+
+    def test_versioned_evaluator_bootstrap_is_frozen_and_real_only(self):
+        self.config['evaluation_bootstrap_protocol'] = 'bootstrap_retry_v1'
+        plan = build_plan(self.config)
+        backend = FakeBackend()
+        self.assertTrue(succeeded(execute(plan, self.output, 'prepare', backend), 2, 'prepare'))
+        self.assertEqual(backend.prepared[0].evaluation_bootstrap_protocol,
+                         'bootstrap_retry_v1')
+        self.assertEqual(json.loads(next(self.output.glob('01-*/manifest.json')).read_text())[
+            'config']['evaluation_bootstrap_protocol'], 'bootstrap_retry_v1')
+        self.config['environment']['fake_only'] = True
+        with self.assertRaisesRegex(ValueError, 'real sqlite'):
+            from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.single_run import prepare
+            # The actual backend rejects fake-only before materializing a task.
+            prepare(argparse.Namespace(condition='B', research_candidate='pma_stateful_memory_v1',
+                runtime_policy=None, evaluation_bootstrap_protocol='bootstrap_retry_v1',
+                task='sqlite-with-gcov', fake_only=True, output=str(self.root / 'no-start')))
 
     def test_gap_runtime_policy_is_frozen_without_stateful_transport(self):
         self.config['method'] = 'pma-gap'

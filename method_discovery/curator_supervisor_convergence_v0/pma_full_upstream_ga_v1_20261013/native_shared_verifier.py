@@ -6,11 +6,15 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from harbor.models.trial.paths import EnvironmentPaths
 from harbor.verifier.verifier import Verifier
 
 from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.pilot_harbor_hooks import _atomic
+
+from .evaluation_bootstrap import (BootstrapFailed, PROTOCOL as BOOTSTRAP_PROTOCOL,
+                                   effective_script, prepare)
 
 
 class NativeSharedVerifier(Verifier):
@@ -79,17 +83,98 @@ class NativeSharedVerifier(Verifier):
             'run_id': spec['run_id'], 'container_id': ended['container_id'],
             'files': actual, 'source_commit': spec['official_source_git_commit'],
             'test_sh_sha256': required['tests/test.sh']})
+        protocol = spec.get('evaluation_bootstrap_protocol', 'original')
+        if protocol not in {'original', BOOTSTRAP_PROTOCOL}:
+            raise RuntimeError('unknown evaluation bootstrap protocol')
+        bootstrap = None
+        effective_path = '/logs/verifier/bootstrap_retry_v1/test.sh'
+        if protocol == BOOTSTRAP_PROTOCOL:
+            if (spec.get('evaluation_protocol') != 'official_shared_v2' or
+                    spec.get('task_id') != 'sqlite-with-gcov'):
+                raise RuntimeError('bootstrap protocol outside pinned official SQLite task')
+            original = self.task.paths.test_path_for(self.environment.os).read_bytes()
+            effective = effective_script(original, task=spec['task_id'])
+            if hashlib.sha256(original).hexdigest() != required['tests/test.sh']:
+                raise RuntimeError('bootstrap original does not match uploaded verifier')
+            # No artifact from a previous attempt may satisfy this invocation.
+            absent = await self.environment.exec(
+                command='test ! -e /logs/verifier/ctrf.json && '
+                        'test ! -e /logs/verifier/reward.txt && '
+                        'test ! -e /logs/verifier/reward.json',
+                user='root', timeout_sec=30)
+            if absent.return_code or any((self.trial_paths.verifier_dir / name).exists()
+                                         for name in ('ctrf.json', 'reward.txt', 'reward.json')):
+                raise RuntimeError('previous verifier artifacts exist before bootstrap')
+            bootstrap = {'run_id': spec['run_id'], 'protocol': protocol,
+                         'original_sha256': hashlib.sha256(original).hexdigest(),
+                         'effective_sha256': hashlib.sha256(effective).hexdigest(),
+                         'status': 'preparing', 'stages': [], 'test_starts': 0}
+            receipt_path = archive / 'bootstrap_retry_v1.json'
+            stage_dir = archive / 'bootstrap_retry_v1_stages'
+            stage_dir.mkdir(exist_ok=False)
+            def record(row):
+                bootstrap['stages'].append(row)
+                _atomic(stage_dir / f'{len(bootstrap["stages"]):03d}.json',
+                        {'run_id': spec['run_id'], **row})
+            try:
+                await prepare(self.environment.exec, record)
+                await self.environment.exec(command='mkdir -p /logs/verifier/bootstrap_retry_v1',
+                                            user='root', timeout_sec=30)
+                with TemporaryDirectory(prefix='pma-eval-bootstrap-') as temporary:
+                    local = Path(temporary) / 'test.sh'
+                    local.write_bytes(effective)
+                    await self.environment.upload_file(source_path=local,
+                                                       target_path=effective_path)
+                readback = await self.environment.exec(
+                    command=f'sha256sum {effective_path}', user='root', timeout_sec=30)
+                if (readback.return_code or readback.stdout.split(' ', 1)[0] !=
+                        bootstrap['effective_sha256']):
+                    raise BootstrapFailed('effective_readback', readback.return_code,
+                                          'effective verifier bytes differ')
+                executable = await self.environment.exec(
+                    command=f'chmod +x {effective_path} && test -x {effective_path}',
+                    user='root', timeout_sec=30)
+                if executable.return_code:
+                    raise BootstrapFailed('effective_executable', executable.return_code,
+                                          'effective verifier not executable')
+                bootstrap['status'] = 'ready'
+            except BootstrapFailed as exc:
+                bootstrap.update(status='bootstrap_failed', failed_stage=exc.stage,
+                                 return_code=exc.return_code, error_type=type(exc).__name__)
+                _atomic(receipt_path, bootstrap)
+                raise
+            except Exception as exc:
+                bootstrap.update(status='bootstrap_failed', failed_stage='effective_upload',
+                                 return_code=None, error_type=type(exc).__name__)
+                _atomic(receipt_path, bootstrap)
+                raise
         self._skip_tests_upload = True
         original_exec = self.environment.exec
         executions = []
 
         async def recorded_exec(*args, **kwargs):
             command = kwargs.get('command', args[0] if args else '')
-            result = await original_exec(*args, **kwargs)
             if 'tests/test.sh' in str(command) and '/logs/verifier/' in str(command):
-                executions.append({'command': str(command),
-                                   'return_code': result.return_code,
-                                   'stdout': result.stdout, 'stderr': result.stderr})
+                if bootstrap is not None:
+                    if bootstrap['test_starts']:
+                        raise RuntimeError('verifier test entry repeated')
+                    bootstrap['test_starts'] = 1
+                    bootstrap['status'] = 'tests_started'
+                    _atomic(archive / 'bootstrap_retry_v1_test_started.json', {
+                        'run_id': spec['run_id'], 'protocol': protocol,
+                        'effective_sha256': bootstrap['effective_sha256']})
+                    kwargs['command'] = str(command).replace('/tests/test.sh', effective_path, 1)
+                execution = {'command': str(command), 'status': 'started'}
+                executions.append(execution)
+                try:
+                    result = await original_exec(*args, **kwargs)
+                except Exception as exc:
+                    execution.update(status='unknown', error_type=type(exc).__name__)
+                    raise
+                execution.update(status='returned', return_code=result.return_code,
+                                 stdout=result.stdout, stderr=result.stderr)
+                return result
+            result = await original_exec(*args, **kwargs)
             return result
 
         self.environment.exec = recorded_exec
@@ -123,10 +208,16 @@ class NativeSharedVerifier(Verifier):
                 'all_reports_executed': all(row['present_parseable_executed']
                                             for row in report_status)})
             if any(not row['present_parseable_executed'] for row in report_status):
+                if bootstrap is not None:
+                    bootstrap['status'] = 'reports_missing'
                 raise RuntimeError('native evaluator report missing, incomplete or no tests executed')
+            if bootstrap is not None:
+                bootstrap['status'] = 'evaluation_completed'
             return result
         finally:
             self.environment.exec = original_exec
+            if bootstrap is not None:
+                _atomic(receipt_path, bootstrap)
             _atomic(archive / 'native_test_execution.json', {
                 'run_id': spec['run_id'], 'executions': executions,
                 'observed': bool(executions)})

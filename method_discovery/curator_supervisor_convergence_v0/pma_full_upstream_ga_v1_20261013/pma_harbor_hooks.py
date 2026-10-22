@@ -92,6 +92,12 @@ def verify_live_spec(spec: dict) -> None:
     policy = frozen.get('config', {}).get('runtime_policy')
     if spec.get('runtime_policy') != policy:
         raise RuntimeError('runtime policy differs from the authorized manifest')
+    bootstrap = frozen.get('config', {}).get('evaluation_bootstrap_protocol', 'original')
+    if (bootstrap not in {'original', 'bootstrap_retry_v1'} or
+            spec.get('evaluation_bootstrap_protocol', 'original') != bootstrap or
+            (bootstrap != 'original' and (spec.get('task_id') != 'sqlite-with-gcov' or
+             spec.get('evaluation_protocol') != 'official_shared_v2'))):
+        raise RuntimeError('evaluation bootstrap differs from authorized manifest')
     if policy is not None:
         from experiment_runner.runtime_policy import validate_resolved_policy
         validate_resolved_policy(policy, frozen['assets'][spec['task_id']])

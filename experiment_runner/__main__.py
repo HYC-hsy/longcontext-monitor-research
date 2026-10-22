@@ -32,11 +32,15 @@ def load_config(path):
     if not isinstance(config, dict):
         raise ValueError('configuration must be an object')
     allowed = {'schema', 'dataset', 'method', 'slots', 'environment', 'runtime_policy',
-               'native_context_policy', 'research_capture_policy', 'execution'}
+               'native_context_policy', 'research_capture_policy', 'execution',
+               'evaluation_bootstrap_protocol'}
     if set(config) - allowed or config.get('schema') != 'ga-experiment-plan-v1':
         raise ValueError('unknown configuration schema or keys')
     if config.get('execution', 'serial') != 'serial':
         raise ValueError('only serial execution is supported')
+    if config.get('evaluation_bootstrap_protocol', 'original') not in {
+            'original', 'bootstrap_retry_v1'}:
+        raise ValueError('unsupported evaluation bootstrap protocol')
     from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.stateful_runtime_policy import policies
     policies(config)
     env = config.get('environment', {})
@@ -79,6 +83,9 @@ def build_plan(config):
         if not isinstance(row, dict) or set(row) - {'task', 'method', 'occurrence'}:
             raise ValueError('invalid slot fields')
         task = safe_task(row.get('task'))
+        if (config.get('evaluation_bootstrap_protocol', 'original') != 'original'
+                and task != 'sqlite-with-gcov'):
+            raise ValueError('bootstrap_retry_v1 supports only sqlite-with-gcov')
         method = resolve(row.get('method', config.get('method')))
         occurrence = row.get('occurrence', 1)
         if type(occurrence) is not int or occurrence < 1:
@@ -177,6 +184,8 @@ def execute(plan, output, mode, backend=None):
         for key in ('native_context_policy', 'research_capture_policy'):
             if key in config:
                 args[key] = config[key]
+        if 'evaluation_bootstrap_protocol' in config:
+            args['evaluation_bootstrap_protocol'] = config['evaluation_bootstrap_protocol']
         outcome = backend.prepare(argparse.Namespace(**args))
         single = json.loads((directory / 'plan.json').read_text())
         actual_candidate = single.get('research_candidate', single.get('method', 'U'))
@@ -186,6 +195,10 @@ def execute(plan, output, mode, backend=None):
         if single.get('task_complete_response_policy', 'disabled') != expected_response:
             raise ValueError('driver prepared a different Task response protocol')
         manifest = json.loads((directory / 'manifest.json').read_text())
+        expected_bootstrap = config.get('evaluation_bootstrap_protocol', 'original')
+        if (single.get('evaluation_bootstrap_protocol', 'original') != expected_bootstrap or
+                manifest.get('config', {}).get('evaluation_bootstrap_protocol', 'original') != expected_bootstrap):
+            raise ValueError('driver ignored evaluation bootstrap protocol')
         if 'effective_runtime_policy' in row:
             if (single.get('runtime_policy') != row['requested_runtime_policy'] or
                     manifest.get('config', {}).get('runtime_policy') != row['effective_runtime_policy']):

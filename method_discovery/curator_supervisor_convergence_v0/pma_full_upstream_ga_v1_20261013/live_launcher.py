@@ -335,13 +335,25 @@ def _native_trial_result(root: Path) -> dict:
         if isinstance(data, dict) and 'verifier_result' in data:
             candidates.append((path, data))
     if len(candidates) != 1:
+        bootstrap_path = root / 'archive/bootstrap_retry_v1.json'
+        if bootstrap_path.is_file():
+            bootstrap = json.loads(bootstrap_path.read_text(encoding='utf-8'))
+            if bootstrap.get('status') == 'bootstrap_failed':
+                return {'status': 'unavailable', 'reason': 'bootstrap_failed',
+                        'candidates': len(candidates)}
         return {'status': 'unavailable', 'reason': 'one_trial_result_not_found',
                 'candidates': len(candidates)}
     path, data = candidates[0]
     verifier = data.get('verifier_result')
     rewards = verifier.get('rewards') if isinstance(verifier, dict) else None
     if not isinstance(rewards, dict) or not rewards:
-        return {'status': 'unavailable', 'reason': 'native_reward_missing',
+        bootstrap_path = root / 'archive/bootstrap_retry_v1.json'
+        bootstrap = (json.loads(bootstrap_path.read_text(encoding='utf-8'))
+                     if bootstrap_path.is_file() else None)
+        reason = (bootstrap['status'] if isinstance(bootstrap, dict) and
+                  bootstrap.get('status') in {'bootstrap_failed', 'reports_missing'}
+                  else 'native_reward_missing')
+        return {'status': 'unavailable', 'reason': reason,
                 'result_path': str(path.relative_to(root)),
                 'exception_info': data.get('exception_info')}
     return {'status': 'native_recorded', 'rewards': rewards,
@@ -544,6 +556,8 @@ def run_live(args) -> dict:
                         'relative': '/'.join(item['path'].split('/')[1:]),
                         'sha256': item['sha256']}
                         for item in _evaluator_members(manifest, args.task)])
+        spec['evaluation_bootstrap_protocol'] = manifest['config'].get(
+            'evaluation_bootstrap_protocol', 'original')
     verify_live_spec(spec)
     if _sha(Path(args.task_profile_file)) != manifest['task_profile_sha256']:
         raise RuntimeError('PMA Task profile differs from frozen identity')

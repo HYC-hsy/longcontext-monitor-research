@@ -44,6 +44,8 @@ SOURCE_FILES = (
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'native_shared_verifier.py',
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'evaluation_bootstrap.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'networked_transport_setup.py',
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'offline_launcher.py',
@@ -124,6 +126,8 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
             required.update(key for key in runtime_policies if key in plan)
         if 'runtime_policy' in plan:
             required.add('runtime_policy')
+        if 'evaluation_bootstrap_protocol' in plan:
+            required.add('evaluation_bootstrap_protocol')
         if (set(plan) != required or
                 plan['execution_authorized'] is not False or
                 plan['official_source_git_commit'] !=
@@ -137,6 +141,10 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
                 (stateful and plan.get('agent_time_protocol') !=
                  ('runtime-policy-v1' if 'runtime_policy' in plan else 'diagnostic-uncapped-v1')) or
                 (plan['condition'] == 'A' and candidate != 'U') or
+                (plan.get('evaluation_bootstrap_protocol', 'original') not in
+                 {'original', 'bootstrap_retry_v1'}) or
+                (plan.get('evaluation_bootstrap_protocol', 'original') != 'original' and
+                 plan['task'] != 'sqlite-with-gcov') or
                 type(plan['occurrence']) is not int or plan['occurrence'] < 1):
             raise RuntimeError('single-run plan schema mismatch')
         slot = dict(order=1, task=plan['task'],
@@ -246,6 +254,8 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
         method['task_turns_max'] = policy['effective_task_turns']
         method['agent_wall_seconds'] = policy['effective_agent_seconds']
         assets[plan['task']]['agent_timeout_multiplier'] = 1
+    if single and 'evaluation_bootstrap_protocol' in plan:
+        method['evaluation_bootstrap_protocol'] = plan['evaluation_bootstrap_protocol']
     config_hash = hashlib.sha256(json.dumps(method, sort_keys=True,
         separators=(',', ':')).encode('utf-8')).hexdigest()
     certification = None

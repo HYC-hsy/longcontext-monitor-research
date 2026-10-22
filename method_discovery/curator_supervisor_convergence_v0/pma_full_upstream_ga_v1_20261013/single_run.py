@@ -79,6 +79,10 @@ def prepare(args: argparse.Namespace) -> dict:
     from .export_official_evaluator import COMMIT
     from .prepare_six_task_manifest import prepare as prepare_manifest
     runtime_policy = getattr(args, 'runtime_policy', None)
+    bootstrap = getattr(args, 'evaluation_bootstrap_protocol', 'original')
+    if bootstrap not in {'original', 'bootstrap_retry_v1'} or (bootstrap != 'original' and
+            (args.task != 'sqlite-with-gcov' or getattr(args, 'fake_only', False))):
+        raise ValueError('evaluation bootstrap protocol requires real sqlite-with-gcov')
     validate_binding(args.condition, getattr(args, 'research_candidate', 'U'))
     if runtime_policy is not None and getattr(args, 'research_candidate', 'U') not in {
             'pma_stateful_memory_v1', 'pma_gap_memory_v0'}:
@@ -130,6 +134,8 @@ def prepare(args: argparse.Namespace) -> dict:
             plan.update(runtime_policies)
     if runtime_policy is not None:
         plan['runtime_policy'] = runtime_policy
+    if bootstrap != 'original':
+        plan['evaluation_bootstrap_protocol'] = bootstrap
     _write_new(root / 'plan.json', plan)
     if pos:
         from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import prepare as prepare_pos
