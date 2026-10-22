@@ -15,6 +15,7 @@ from pathlib import Path
 import time
 
 from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.event_spool import EventDispatcher
+from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.stateful_runtime_policy import ResearchArchive, policies, require_same_policies
 
 
 def _durable(path: Path, row: dict) -> None:
@@ -41,9 +42,13 @@ def load_bound_profile(path: str, expected: str, name: str) -> dict:
 
 class StatefulEpisode:
     def __init__(self, *, run_id: str, task_id: str, archive: Path,
-                 private: Path, provider, counter=None):
+                 private: Path, provider, counter=None,
+                 native_context_policy="required", research_capture_policy="required"):
         self.run_id, self.task_id = run_id, task_id
         self.archive, self.private, self.provider = archive, private, provider
+        self.policies = policies(dict(native_context_policy=native_context_policy,
+            research_capture_policy=research_capture_policy))
+        self.capture = ResearchArchive(research_capture_policy)
         self.bridge = None
         self.counter = counter
         self.sequence = 0
@@ -103,10 +108,13 @@ class StatefulEpisode:
     def _handle(self, event: dict) -> dict:
         kind = event["kind"]
         if kind == "count_tokens":
+            if self.policies["native_context_policy"] == "off":
+                raise RuntimeError("native context counting is disabled")
             if self.counter is None:
                 raise RuntimeError("native context counter unavailable")
             return self.counter(event["payload"])
         if kind == "initialize":
+            require_same_policies(self.policies, event)
             return self._one_business_event(event, "initial", lambda:
                 self._initialize(event.get("task")))
         bridge = self.bridge
@@ -167,13 +175,13 @@ class StatefulEpisode:
         if event.get("sequence") != self.sequence + 1:
             raise ValueError("stateful spool sequence mismatch")
         self.sequence += 1
-        _durable(self.archive / "events.jsonl", {"sequence": self.sequence,
+        self.capture.write(_durable, self.archive / "events.jsonl", {"sequence": self.sequence,
             "event_id": event["event_id"], "kind": event["kind"],
             "business_id": event.get("batch_id", event.get("request_id"))})
         try:
             result = self._handle(event)
         except BaseException as error:
-            _durable(self.archive / "failures.jsonl", {"sequence": self.sequence,
+            self.capture.write(_durable, self.archive / "failures.jsonl", {"sequence": self.sequence,
                 "event_id": event["event_id"], "kind": event["kind"],
                 "error_type": type(error).__name__})
             raise
@@ -181,6 +189,8 @@ class StatefulEpisode:
 
 
 async def serve(args) -> None:
+    runtime = policies(vars(args))
+    capture = ResearchArchive(runtime["research_capture_policy"])
     private = Path(args.private_root).resolve()
     requests = Path(args.requests).resolve(strict=True)
     responses = Path(args.responses).resolve(strict=True)
@@ -188,16 +198,18 @@ async def serve(args) -> None:
         raise RuntimeError("stateful host-private/spool boundary invalid")
     private.mkdir(parents=True)
     archive = private / "archive"
-    archive.mkdir()
+    capture.write(lambda path, _: path.mkdir(), archive, {})
     if args.fake_replies:
         from method_discovery.pma_stateful_memory_v1_20261021.ga_fake_provider import FiniteGAFakeProvider
         provider = FiniteGAFakeProvider.from_file(args.fake_replies)
         mode = "fake-only"
-        counter = lambda payload: {"status": "accepted", "synthetic": True}
+        counter = (lambda payload: {"status": "accepted", "synthetic": True}) if (
+            runtime["native_context_policy"] == "required") else None
     else:
         if not all((args.task_profile_file, args.task_profile_name,
                     args.task_profile_sha256, args.pma_profile_file,
-                    args.pma_profile_sha256, args.context_window)):
+                    args.pma_profile_sha256)) or (
+                runtime["native_context_policy"] == "required" and not args.context_window):
             raise RuntimeError("bound private profiles and context window required")
         task_profile = load_bound_profile(args.task_profile_file,
             args.task_profile_sha256, args.task_profile_name)
@@ -207,17 +219,18 @@ async def serve(args) -> None:
         from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.stateful_role_provider import StatefulRoleProvider
         counter = PrivateNativeCounter(profile=task_profile,
             window=args.context_window,
-            record=lambda row: _durable(archive / "native_count.jsonl", row))
+            record=lambda row: capture.write(_durable, archive / "native_count.jsonl", row)) if (
+                runtime["native_context_policy"] == "required") else None
         provider = StatefulRoleProvider(profile=role_profile,
             context_window=args.context_window, archive=archive,
-            run_id=args.run_id, task_id=args.task_id)
+            run_id=args.run_id, task_id=args.task_id, **runtime)
         mode = "profile"
     episode = StatefulEpisode(run_id=args.run_id, task_id=args.task_id,
-        archive=archive, private=private, provider=provider, counter=counter)
+        archive=archive, private=private, provider=provider, counter=counter, **runtime)
     dispatcher = EventDispatcher(episode, requests, responses)
     (private / "worker_ready.json").write_text(json.dumps({
         "run_id": args.run_id, "task_id": args.task_id,
-        "research_candidate": "pma_stateful_memory_v1", "mode": mode},
+        "research_candidate": "pma_stateful_memory_v1", "mode": mode, **runtime},
         sort_keys=True), encoding="utf-8")
     reason = "host_stop"
     try:
@@ -252,4 +265,6 @@ if __name__ == "__main__":
     parser.add_argument("--pma-profile-file")
     parser.add_argument("--pma-profile-sha256")
     parser.add_argument("--context-window", type=int)
+    parser.add_argument("--native-context-policy", choices=("required", "off"), default="required")
+    parser.add_argument("--research-capture-policy", choices=("required", "best_effort"), default="required")
     asyncio.run(serve(parser.parse_args()))

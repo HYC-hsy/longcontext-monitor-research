@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from .schema import (validate_snapshot, validate_requirement_retirement_transition,
-                     enum, refs)
+                     array, enum, refs)
 from .source import ContractError, SourceCatalog, digest, fields, integer, nonempty
 
 
@@ -242,6 +242,9 @@ def build_candidate(*, proposal: dict, base: dict, catalog: SourceCatalog,
             raise ContractError("unknown_reference", identifier)
     for item in patch["world_patch"]["state_upserts"]:
         require_visible("entity", item["entity_id"])
+        scope = fields(item["scope"], {"task_id", "entity_ids", "conditions"})
+        for entity_id in array(scope["entity_ids"], "scope.entity_ids"):
+            require_visible("entity", entity_id)
     for item in patch["world_patch"]["relation_upserts"]:
         require_visible("entity", item["from_entity_id"])
         require_visible("entity", item["to_entity_id"])

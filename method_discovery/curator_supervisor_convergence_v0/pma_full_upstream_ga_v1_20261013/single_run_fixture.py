@@ -33,6 +33,10 @@ def main() -> None:
     parser.add_argument('--service-fixture', action='store_true')
     parser.add_argument('--runtime-policy-file', type=Path,
                         help='exercise the same explicit policy as the planned run')
+    parser.add_argument('--native-context-policy', choices=('required', 'off'),
+                        default='required')
+    parser.add_argument('--research-capture-policy', choices=('required', 'best_effort'),
+                        default='required')
     parser.add_argument('--candidate-profile-fixture', action='store_true',
                         help='isolated synthetic P with real independent PMA host process')
     args = parser.parse_args()
@@ -59,6 +63,8 @@ def main() -> None:
         runtime_policy=(json.loads(args.runtime_policy_file.read_text(encoding='utf-8'))
                         if args.runtime_policy_file else None),
         stateful_uncapped_diagnostic=(stateful and not args.runtime_policy_file),
+        native_context_policy=args.native_context_policy,
+        research_capture_policy=args.research_capture_policy,
         research_candidate=args.research_candidate,
         official_source_git=args.official_source_git,
         task_profile_file=args.task_profile_file,
@@ -114,6 +120,8 @@ def main() -> None:
     if stateful:
         auth['task_complete_response_policy'] = 'complete-response-v1'
         auth['agent_time_protocol'] = manifest['config']['agent_time_protocol']
+        auth['native_context_policy'] = manifest['config']['native_context_policy']
+        auth['research_capture_policy'] = manifest['config']['research_capture_policy']
     authorization = root / 'authorization.json'
     authorization.write_text(json.dumps(auth, indent=2), encoding='utf-8')
     command = [sys.executable, '-m',

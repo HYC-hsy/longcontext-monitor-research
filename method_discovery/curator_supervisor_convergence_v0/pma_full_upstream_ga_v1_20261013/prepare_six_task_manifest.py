@@ -104,6 +104,9 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
         'pma-ga-single-plan-v1', 'pma-ga-single-plan-v2'}
     candidate = plan.get('research_candidate', 'U') if single else 'U'
     stateful = candidate == 'pma_stateful_memory_v1'
+    if stateful:
+        from .stateful_runtime_policy import policies
+        runtime_policies = policies(plan)
     if plan is None:
         slots = [dict(order=o, task=t, repeat=r, condition=c)
                  for o, t, r, c in ORDER]
@@ -119,6 +122,7 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
             if 'runtime_policy' in plan:
                 required.add('runtime_policy')
             required.add('agent_time_protocol')
+            required.update(key for key in runtime_policies if key in plan)
         if (set(plan) != required or
                 plan['execution_authorized'] is not False or
                 plan['official_source_git_commit'] !=
@@ -212,7 +216,9 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
         method['research_candidate'] = candidate
         if candidate == 'pma_stateful_memory_v1':
             guard_window = task_settings.get('context_win')
-            if guard_window is None:
+            if runtime_policies['native_context_policy'] == 'off':
+                guard_window, guard_basis = None, 'disabled_by_frozen_policy'
+            elif guard_window is None:
                 guard_window = 1000000
                 guard_basis = ('Anthropic_Claude_Opus_4_8_official_1M_context;'
                                'private_proxy_limit_unknown_fail_on_provider_rejection')
@@ -228,7 +234,7 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
                 agent_time_protocol=plan['agent_time_protocol'],
                 auxiliary_provider_retries=0, task_provider_retries=0,
                 native_context_guard_window_tokens=guard_window,
-                native_context_guard_basis=guard_basis)
+                native_context_guard_basis=guard_basis, **runtime_policies)
     if single and 'runtime_policy' in plan:
         from experiment_runner.runtime_policy import resolve_policy
         policy = resolve_policy(plan['runtime_policy'], assets[plan['task']], method)

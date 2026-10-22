@@ -138,7 +138,8 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
             'curator_supervisor_convergence_v0' / 'pma_full_upstream_ga_v1_20261013')
         run_target.mkdir(parents=True)
         for name in ('event_spool.py', 'stateful_memory_worker.py',
-                     'stateful_native_count.py', 'stateful_role_provider.py'):
+                     'stateful_native_count.py', 'stateful_role_provider.py',
+                     'stateful_runtime_policy.py'):
             shutil.copy2(STAGE / name, run_target / name)
         bm25 = (STAGE / 'vendor/pma_89e5c0d/src/memory_agent/memory/bm25_search.py')
         bm25_target = run_target / 'vendor/pma_89e5c0d/src/memory_agent/memory'

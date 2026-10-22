@@ -405,6 +405,9 @@ def run_live(args) -> dict:
         raise RuntimeError('candidate profile fixture identity differs')
     candidate = getattr(args, 'research_candidate', 'U')
     stateful = candidate == 'pma_stateful_memory_v1'
+    if stateful:
+        from .stateful_runtime_policy import require_same_policies
+        runtime_policies = require_same_policies(manifest['config'], authorized)
     replies = getattr(args, 'stateful_fake_replies', None)
     if bool(replies) != (stateful and fixture):
         raise RuntimeError('finite stateful role replies must match zero-model identity')
@@ -527,6 +530,7 @@ def run_live(args) -> dict:
         spec['agent_time_protocol'] = manifest['config']['agent_time_protocol']
         if diagnostic_task is not None:
             spec['diagnostic_task_identity'] = diagnostic_task
+        spec.update(runtime_policies)
     if _native_schema(manifest):
         spec.update(repeat=args.repeat, batch_id=authorized['batch_id'],
                     config_sha256=manifest['config_sha256'],
@@ -666,6 +670,8 @@ def run_live(args) -> dict:
                 '--requests', str(root / 'control' / 'spool' / 'requests'),
                 '--responses', str(root / 'control' / 'spool' / 'responses')]
             if stateful:
+                worker_args += ['--native-context-policy', runtime_policies['native_context_policy'],
+                    '--research-capture-policy', runtime_policies['research_capture_policy']]
                 if fixture:
                     worker_args += ['--fake-replies', str(Path(
                         args.stateful_fake_replies).resolve(strict=True))]
@@ -675,8 +681,9 @@ def run_live(args) -> dict:
                         '--task-profile-name', manifest['config']['task_profile_name'],
                         '--task-profile-sha256', manifest['task_profile_sha256'],
                         '--pma-profile-file', str(memory_profile_path),
-                        '--pma-profile-sha256', manifest['pma_profile_sha256'],
-                        '--context-window', str(manifest['config'][
+                        '--pma-profile-sha256', manifest['pma_profile_sha256']]
+                    if runtime_policies['native_context_policy'] == 'required':
+                        worker_args += ['--context-window', str(manifest['config'][
                             'native_context_guard_window_tokens'])]
             else:
                 worker_args += ['--deadline-epoch', str(deadline),
@@ -694,6 +701,7 @@ def run_live(args) -> dict:
                 time.sleep(.05)
             ready_data = json.loads(ready.read_text(encoding='utf-8'))
             if stateful:
+                require_same_policies(runtime_policies, ready_data)
                 if (ready_data.get('run_id'), ready_data.get('task_id'),
                         ready_data.get('research_candidate'), ready_data.get('mode')) != (
                         args.run_id, args.task, candidate,
@@ -810,6 +818,8 @@ def run_live(args) -> dict:
                 GA_STATEFUL_UNCAPPED_TOTAL='1', GA_STATEFUL_LIVE_AUTHORIZED='1',
                 GA_STATEFUL_REQUESTS='/run/pma-bridge/requests',
                 GA_STATEFUL_RESPONSES='/run/pma-bridge/responses',
+                GA_STATEFUL_NATIVE_CONTEXT_POLICY=runtime_policies['native_context_policy'],
+                GA_STATEFUL_RESEARCH_CAPTURE_POLICY=runtime_policies['research_capture_policy'],
                 GA_PROVIDER_MAX_RETRIES='0')
             for stale in ('GA_PMA_UPSTREAM_DEADLINE_EPOCH', 'GA_POS_DEADLINE_EPOCH',
                           'GA_MONITOR_RUN_DEADLINE_EPOCH'):

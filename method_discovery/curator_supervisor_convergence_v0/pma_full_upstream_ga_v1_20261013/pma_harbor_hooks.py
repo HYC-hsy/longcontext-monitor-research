@@ -155,6 +155,9 @@ def verify_live_spec(spec: dict) -> None:
         if head != granted.get('audited_code_commit') or head != spec.get('audited_code_commit'):
             raise RuntimeError('PMA running code differs from authorized commit')
         if spec.get('research_candidate') == 'pma_stateful_memory_v1':
+            from .stateful_runtime_policy import require_same_policies
+            require_same_policies(frozen.get('config', {}), spec)
+            require_same_policies(frozen.get('config', {}), granted)
             diagnostic = spec.get('diagnostic_task_identity') or {}
             task_root = Path(spec['run_root']) / 'public_task'
             expected_protocol = ('runtime-policy-v1' if policy is not None else

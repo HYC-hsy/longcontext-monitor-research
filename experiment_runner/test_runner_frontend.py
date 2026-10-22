@@ -32,6 +32,11 @@ class FakeBackend:
             manifest['config'] = {'runtime_policy': resolve_policy(args.runtime_policy,
                 {'native_agent_seconds': 900, 'native_verifier_seconds': 900},
                 {'task_turns_max': None})}
+            for key in ('native_context_policy', 'research_capture_policy'):
+                value = getattr(args, key, 'required')
+                single[key] = value
+                manifest['config'][key] = value
+            (root / 'plan.json').write_text(json.dumps(single))
         (root / 'manifest.json').write_text(json.dumps(manifest))
         return {'run_id': str(len(self.prepared)), 'execution_authorized': False}
 
@@ -124,6 +129,36 @@ class FrontendTests(unittest.TestCase):
         rows = execute(plan, self.output, 'prepare', backend)
         self.assertTrue(succeeded(rows, 2, 'prepare'))
         self.assertEqual(backend.prepared[0].runtime_policy, self.config['runtime_policy'])
+
+    def test_stateful_transport_policies_freeze_and_reach_prepare(self):
+        self.config.update(native_context_policy='off', research_capture_policy='best_effort')
+        plan = build_plan(self.config)
+        self.assertNotEqual(plan['plan_sha256'], self.plan['plan_sha256'])
+        backend = FakeBackend()
+        rows = execute(plan, self.output, 'prepare', backend)
+        self.assertTrue(succeeded(rows, 2, 'prepare'))
+        self.assertEqual(backend.prepared[0].native_context_policy, 'off')
+        self.assertEqual(backend.prepared[0].research_capture_policy, 'best_effort')
+        directory = next(self.output.glob('01-*/'))
+        single = json.loads((directory / 'plan.json').read_text())
+        manifest = json.loads((directory / 'manifest.json').read_text())
+        for key, value in (('native_context_policy', 'off'),
+                           ('research_capture_policy', 'best_effort')):
+            self.assertEqual(single[key], value)
+            self.assertEqual(manifest['config'][key], value)
+        self.config['native_context_policy'] = 'required'
+        with self.assertRaisesRegex(ValueError, 'changed'):
+            execute(build_plan(self.config), self.output, 'run', backend)
+
+    def test_stateful_transport_policy_rejects_invalid_or_legacy(self):
+        self.config['native_context_policy'] = 'unknown'
+        path = self.root / 'invalid.json'
+        path.write_text(json.dumps(self.config))
+        with self.assertRaisesRegex(ValueError, 'invalid stateful'):
+            load_config(path)
+        self.config.update(native_context_policy='off', method='pma')
+        with self.assertRaisesRegex(ValueError, 'unsupported'):
+            build_plan(self.config)
 
     def test_ignored_policy_rejected(self):
         self.config['runtime_policy'] = {'agent_timeout': 'uncapped'}

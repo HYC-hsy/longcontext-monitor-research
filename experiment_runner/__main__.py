@@ -31,11 +31,14 @@ def load_config(path):
     config = json.loads(path.read_text(encoding='utf-8'))
     if not isinstance(config, dict):
         raise ValueError('configuration must be an object')
-    allowed = {'schema', 'dataset', 'method', 'slots', 'environment', 'runtime_policy', 'execution'}
+    allowed = {'schema', 'dataset', 'method', 'slots', 'environment', 'runtime_policy',
+               'native_context_policy', 'research_capture_policy', 'execution'}
     if set(config) - allowed or config.get('schema') != 'ga-experiment-plan-v1':
         raise ValueError('unknown configuration schema or keys')
     if config.get('execution', 'serial') != 'serial':
         raise ValueError('only serial execution is supported')
+    from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.stateful_runtime_policy import policies
+    policies(config)
     env = config.get('environment', {})
     if not isinstance(env, dict) or set(env) - {'paths', 'profiles', 'certifications', 'fake_only'}:
         raise ValueError('invalid environment section')
@@ -86,6 +89,8 @@ def build_plan(config):
         seen.add(identity)
         if 'runtime_policy' in config and not method.supports_runtime_policy:
             raise ValueError(f'explicit runtime policy unsupported by adapter {method.name}')
+        if any(key in config for key in ('native_context_policy', 'research_capture_policy')) and not method.supports_runtime_policy:
+            raise ValueError(f'stateful transport policy unsupported by adapter {method.name}')
         normalized.append({'task': task, 'method': method.name, 'occurrence': occurrence,
                            'adapter': asdict(method)})
     public = catalog(config['dataset'], [row['task'] for row in normalized])
@@ -169,6 +174,9 @@ def execute(plan, output, mode, backend=None):
                     candidate_profile_fixture=False, synthetic_pos_fixture=False)
         if 'requested_runtime_policy' in row:
             args['runtime_policy'] = row['requested_runtime_policy']
+        for key in ('native_context_policy', 'research_capture_policy'):
+            if key in config:
+                args[key] = config[key]
         outcome = backend.prepare(argparse.Namespace(**args))
         single = json.loads((directory / 'plan.json').read_text())
         actual_candidate = single.get('research_candidate', single.get('method', 'U'))
@@ -182,6 +190,12 @@ def execute(plan, output, mode, backend=None):
             if (single.get('runtime_policy') != row['requested_runtime_policy'] or
                     manifest.get('config', {}).get('runtime_policy') != row['effective_runtime_policy']):
                 raise ValueError('driver ignored or changed the requested runtime policy')
+        if method.supports_runtime_policy:
+            from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.stateful_runtime_policy import policies
+            expected_policies = policies(config)
+            if any(single.get(key) != value or manifest.get('config', {}).get(key) != value
+                   for key, value in expected_policies.items()):
+                raise ValueError('driver ignored or changed stateful transport policies')
         binding = {'plan_sha256': plan['plan_sha256'], 'slot': row,
                    'manifest_sha256': hashlib.sha256((directory / 'manifest.json').read_bytes()).hexdigest(),
                    'single_plan_sha256': hashlib.sha256((directory / 'plan.json').read_bytes()).hexdigest()}

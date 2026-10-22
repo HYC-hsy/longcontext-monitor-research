@@ -105,6 +105,10 @@ def prepare(args: argparse.Namespace) -> dict:
         if plan['synthetic_fixture'] and not args.fake_only:
             raise RuntimeError('synthetic PoS package is zero-model only')
     candidate = getattr(args, 'research_candidate', 'U')
+    from .stateful_runtime_policy import policies
+    runtime_policies = policies(vars(args))
+    if candidate != 'pma_stateful_memory_v1' and runtime_policies != policies({}):
+        raise ValueError('runtime policy opt-outs require the stateful candidate')
     if pos and candidate not in candidate_names('P'):
         raise RuntimeError('PoS plan requires explicit fixed method identity')
     if not pos and candidate != 'U':
@@ -122,6 +126,7 @@ def prepare(args: argparse.Namespace) -> dict:
                 if getattr(args, 'stateful_uncapped_diagnostic', False):
                     raise RuntimeError('runtime policy and legacy diagnostic flag are mutually exclusive')
                 plan['agent_time_protocol'] = 'runtime-policy-v1'
+            plan.update(runtime_policies)
     if runtime_policy is not None:
         plan['runtime_policy'] = runtime_policy
     _write_new(root / 'plan.json', plan)
@@ -231,6 +236,8 @@ def main() -> None:
     prepared.add_argument('--candidate-profile-fixture', action='store_true')
     prepared.add_argument('--task-complete-response', action='store_true',
                           help='bind complete-response-v1 for the Task only')
+    prepared.add_argument('--native-context-policy', choices=('required', 'off'), default='required')
+    prepared.add_argument('--research-capture-policy', choices=('required', 'best_effort'), default='required')
     prepared.add_argument('--stateful-uncapped-diagnostic', action='store_true',
                           help='bind nonstandard unlimited cumulative Agent time')
     prepared.add_argument('--certification-dir',

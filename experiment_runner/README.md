@@ -72,6 +72,17 @@ configuration hash is computed. Run uses that frozen policy, not a new CLI or
 shell override. A changed task/method/configuration/manifest requires a fresh
 preparation and matching existing authorization; it cannot reuse the old run.
 
+For `pma-stateful`, the separate transport policies may be set at the top level:
+`"native_context_policy": "off"` and
+`"research_capture_policy": "best_effort"`. Both default to `required` when
+omitted; other methods reject explicit overrides. The frontend passes these to
+the existing `single_run prepare` arguments and verifies the resulting
+single-run plan and hashed manifest configuration. `off` disables the additional
+external native-token count, not the model's own context limit; `best_effort`
+allows research-capture gaps, not loss of the state journal or spool receipts.
+The example config opts into both for the time-relaxed diagnostic. It is still
+unarmed: `prepare` does not create a real execution authorization.
+
 An explicit policy controls all relevant boundaries:
 
 1. Harbor's Agent phase, including its cached timeout after Trial construction.
