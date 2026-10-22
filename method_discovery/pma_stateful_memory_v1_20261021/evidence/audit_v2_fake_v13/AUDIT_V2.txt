@@ -1,0 +1,58 @@
+Stateful memory audit-result/2: bounded offline acceptance
+
+Tested runtime source commit: a7c069eeff7fa2043822a68934d34b407bf40ecb.
+This is a protocol change, not a retroactive correction of pma-0ec81bdaac544d8f.
+The old v1 visible request/response and reward=unavailable remain unchanged.
+
+The live validator now requires exactly protocol, binding, outcome, issues,
+closure_assessments, unusable_reason. It rejects coverage as an extra field.
+An explicit validate_audit_result_v1 remains for offline historical checks;
+the engine never falls back to it. AuditCodec.required_coverage remains in
+each bound request and its view hash. Selection's reviewed_this_cycle_refs
+continues to derive from the FINAL accepted audit view after commit; it means
+included in that request's host-defined scope, not mechanically proven to
+have been considered by the model. Binding, issue and witness validation,
+gap closure checks, shared single repair credit and pending/frontier behavior
+were not relaxed. Audit request preparation now journals protocol and hashes.
+
+Old fourth response, synthetic protocol-only replay: original raw SHA256
+74ce3fde512db0445cff8a00d4b108dd5da8f20d317400b710118375c7ff72e6
+still fails explicit v1 with coverage_mismatch. A test-local COPY with only
+coverage removed and protocol changed to audit-result/2 passes structural
+validation. This is not a new model response or a semantic gold label. In
+particular, whether the repaired interpretation of compiling in /app/sqlite
+is faithful to the original requirement remains a live semantic question.
+
+Offline commands (all model boundaries fake; logs are private, hashes below):
+* python -B -m unittest discover -s method_discovery/pma_stateful_memory_v1_20261021 -t . -p test_*.py -q
+  112 tests, OK, Python exit 0. Raw console SHA256:
+  b3e29ecd39e90eb01f244ca6d00ec6be8b636614dc5b28e82f702ccb4b7a43b6
+* From GenericAgent-main with repository-root PYTHONPATH:
+  python -B -m unittest discover -s tests -p test_stateful_memory_ga_bridge.py -q
+  13 tests, OK, exit 0; raw SHA256:
+  0e8aedfbeb94f2ca223b46dcab2e9f5fb8e9f7ae03e3774d16106d07ba188a62
+  python -B -m unittest discover -s tests -p test_task_complete_response.py -q
+  20 tests, OK, exit 0; raw SHA256:
+  c5857d678a5569af12b98373f50e31161151f5995844a2e9017e79536fa0902f
+* With repository, GA and bench import roots and the existing Harbor Python:
+  python -B -m unittest <five test_stateful_* modules> -q
+  13 tests, OK, exit 0; raw SHA256:
+  9f17b604252ad05fa591f1d33327efad83a2cd77e5df70b4aebf1d9a47049e93
+Earlier wrong-import-environment attempts failed before relevant collection;
+private original outputs remain retained and are not counted as passes.
+
+Same-entry zero-model Harbor fixture: pma-a94f7bceea2b4e30, fresh v13 output.
+Used single_run_fixture --condition B --research-candidate
+pma_stateful_memory_v1 --service-fixture with the fixed official task source,
+existing Task/auxiliary profiles and finite fake responses. It produced two
+real GA request assemblies, one synthetic action_batch, one confirmed reminder
+delivery, synthetic verifier record, host and Harbor exit 0 and confirmed
+cleanup. Host event counts: initialize 1, prepare_task 2, count_tokens 2,
+agent_report 2, action_batch 1, confirm_task 1, finish 1. This certifies
+wiring and control behavior, not model semantic quality or task reward.
+FILE_HASHES.json separates raw private and public bytes for each record.
+No real model, Task or official evaluator was called by this fixture.
+
+No live episode was started during the tests recorded above. The live episode
+requires separate fresh run identity and one-use authorization after committed
+evidence passes require_committed=True verification.
