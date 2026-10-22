@@ -55,6 +55,19 @@ def query_text(task: str, supplements: list[str], steps: list[dict],
                recent_steps: int = 8, commands_per_step: int = 5) -> str:
     parts = [task, *supplements]
     for step in steps[-recent_steps:]:
+        if "source_parts" in step:
+            actions = 0
+            omitted = 0
+            for part in step["source_parts"]:
+                if part["kind"] == "executed_action":
+                    actions += 1
+                    if actions > commands_per_step:
+                        omitted += 1
+                        continue
+                parts.append(part["text"])
+            if omitted:
+                parts.append(f"[{omitted} commands omitted]")
+            continue
         commands = step.get("commands", [])
         parts.extend(str(command) for command in commands[:commands_per_step])
         if len(commands) > commands_per_step:
@@ -62,6 +75,26 @@ def query_text(task: str, supplements: list[str], steps: list[dict],
         if step.get("observation") is not None:
             parts.append(str(step["observation"]))
     return "\n".join(parts)
+
+
+def event_query_steps(events: list[dict], ledger: dict[str, dict],
+                      through_event_seq: int, recent_steps: int = 8) -> list[dict]:
+    """Project only frozen, ledger-backed visible activity into BM25 input."""
+    eligible = [event for event in events
+                if event["event_seq"] <= through_event_seq]
+    steps = []
+    for event in eligible[-recent_steps:]:
+        parts = []
+        for source_id in event["source_ids"]:
+            leaf = ledger.get(source_id)
+            if leaf is None:
+                raise ContractError("source_unavailable", source_id)
+            if leaf["event_seq"] != event["event_seq"]:
+                raise ContractError("event_leaf_identity", source_id)
+            if leaf["source_kind"] in {"executed_action", "tool_result", "agent_report"}:
+                parts.append({"kind": leaf["source_kind"], "text": leaf["text"]})
+        steps.append({"source_parts": parts})
+    return steps
 
 
 class MemoryIndex:

@@ -82,6 +82,9 @@ def run_fixture(root, run_id='synthetic-stateful-1'):
         events = store.events_after(0)
         sources = store.sources()
         facts = {'task_posts': len(server.payloads), 'tool_calls': handler.calls,
+            'retrieval_queries': [json.loads(body) for (body,) in
+                store.db.execute("SELECT body FROM journal WHERE phase='retrieval_query' "
+                                 "ORDER BY rowid")],
             'effective_task_retries': backend.max_retries,
             'task_attempt_events': sum(e['event_type'] == 'provider_request_attempt'
                                        for e in telemetry),
@@ -109,6 +112,16 @@ def run_fixture(root, run_id='synthetic-stateful-1'):
 
 
 class StatefulGATest(unittest.TestCase):
+    def test_actual_ga_receipts_reach_both_retrieval_queries(self):
+        with tempfile.TemporaryDirectory() as temp:
+            facts = run_fixture(Path(temp) / 'run')
+        self.assertGreaterEqual(len(facts['retrieval_queries']), 4)
+        for stage in ('maintenance', 'selection'):
+            queries = [row['query'] for row in facts['retrieval_queries']
+                       if row['stage'] == stage]
+            self.assertTrue(any('synthetic-artifact.txt' in query for query in queries))
+            self.assertTrue(any('"name":"touch"' in query for query in queries))
+
     def test_external_retry_override_is_scoped_to_zero(self):
         with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
                 os.environ, {'GA_PROVIDER_MAX_RETRIES': '2'}):

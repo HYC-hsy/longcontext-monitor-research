@@ -4,7 +4,7 @@ from copy import deepcopy
 import json
 import unittest
 
-from .retrieval import MemoryIndex, WorksetBuilder, query_text
+from .retrieval import MemoryIndex, WorksetBuilder, query_text, event_query_steps
 from .source import ContractError
 from .test_contracts import empty_snapshot, leaf
 from .test_schema_advanced import rich_state
@@ -40,6 +40,43 @@ class RetrievalTests(unittest.TestCase):
                   "observation": "observed"} for _ in range(9)]
         query = query_text("task", [], steps)
         self.assertEqual(query.count("[4 commands omitted]"), 8)
+
+    def test_ledger_backed_query_order_limit_and_cutoff(self):
+        events = []
+        ledger = {}
+        for seq in range(1, 11):
+            ids = []
+            for kind, text in (("agent_report", f"plan-{seq}"),
+                               ("executed_action", f"command-{seq}"),
+                               ("tool_result", f"receipt-{seq}")):
+                source_id = f"{seq}-{kind}"
+                ids.append(source_id)
+                ledger[source_id] = {"event_seq": seq, "source_kind": kind,
+                                     "text": text}
+            events.append({"event_seq": seq, "source_ids": ids, "payload": {}})
+        query = query_text("task", ["user correction"],
+            event_query_steps(events, ledger, 9))
+        self.assertIn("user correction", query)
+        self.assertNotIn("plan-1\n", query)
+        self.assertNotIn("plan-10", query)
+        self.assertLess(query.index("plan-9"), query.index("command-9"))
+        self.assertLess(query.index("command-9"), query.index("receipt-9"))
+        with self.assertRaisesRegex(ContractError, "source_unavailable"):
+            event_query_steps(events, {}, 9)
+
+    def test_activity_terms_rank_optional_history_over_fifty(self):
+        snapshot = empty_snapshot()
+        states = snapshot["B"]["W"]["states"]
+        states.extend(record(index) for index in range(51))
+        states[-1]["claim"]["text"] = "unique_recent_receipt_marker"
+        index = MemoryIndex(snapshot)
+        event = {"event_seq": 2, "source_ids": ["actual-result"], "payload": {}}
+        ledger = {"actual-result": {"event_seq": 2, "source_kind": "tool_result",
+                                    "text": "unique_recent_receipt_marker"}}
+        query = query_text("task", [], event_query_steps([event], ledger, 2))
+        self.assertIn(states[-1], index.select(query))
+        self.assertEqual(len(MemoryIndex({**snapshot, "B": {**snapshot["B"],
+            "W": {**snapshot["B"]["W"], "states": states[:50]}}}).select(query)), 50)
 
     def test_first_event_cannot_be_skipped_and_optional_is_whole(self):
         snapshot = empty_snapshot()

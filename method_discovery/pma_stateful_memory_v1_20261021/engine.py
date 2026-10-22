@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Callable
 
 from .audit import AuditCodec, _diff, validate_audit_result
@@ -10,7 +11,7 @@ from .prompts import audit, maintenance, repair, selection
 from .proposal import build_candidate, validate_proposal
 from .projection import project_snapshot, visible_existing
 from .reminder import render_reminder, validate_selection
-from .retrieval import (MemoryIndex, WorksetBuilder, query_text,
+from .retrieval import (MemoryIndex, WorksetBuilder, query_text, event_query_steps,
                         visible_stored_source_refs)
 from .source import (ContractError, SourceCatalog, digest,
                      validate_source_ref)
@@ -306,7 +307,10 @@ class CycleEngine:
             recent = self.store.events_after(max(0, frozen_tip - 8))
             query = query_text(self.task_text,
                 [ledger[source_id]["text"] for source_id in goals["messages"][1:]],
-                [event["payload"] for event in recent])
+                event_query_steps(recent, ledger, frozen_tip))
+            self.store.journal(cycle_id, "retrieval_query", {"stage": "maintenance",
+                "through_event_seq": frozen_tip, "query": query,
+                "query_sha256": hashlib.sha256(query.encode("utf-8")).hexdigest()})
             ranked = index.select(query)
             def prepare_maintenance(body):
                 catalog, visible = self._catalog(ledger, body, goals=goals)
@@ -577,9 +581,12 @@ class CycleEngine:
             ledger = self.store.sources()
             query = query_text(self.task_text,
                 [ledger[source_id]["text"] for source_id in self.store.goals()[
-                    "messages"][1:]], [event["payload"] for event in
-                               self.store.events_after(max(0, snapshot[
-                                   "committed_event_seq"] - 8))])
+                    "messages"][1:]], event_query_steps(self.store.events_after(
+                    max(0, snapshot["committed_event_seq"] - 8)), ledger,
+                    snapshot["committed_event_seq"]))
+            self.store.journal(cycle_id, "retrieval_query", {"stage": "selection",
+                "through_event_seq": snapshot["committed_event_seq"], "query": query,
+                "query_sha256": hashlib.sha256(query.encode("utf-8")).hexdigest()})
             selected = current_index.select(query)
             def refs_for(work):
                 projected = project_snapshot(snapshot, snapshot, work)
