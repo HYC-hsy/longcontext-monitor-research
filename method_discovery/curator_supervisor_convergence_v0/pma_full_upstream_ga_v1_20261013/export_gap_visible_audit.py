@@ -329,11 +329,42 @@ def export(run_root: Path, output: Path, secrets: list[str], run_id: str) -> dic
     if len(reminders) != len(task_by_kind.get('pma_reminder_appended', [])):
         raise ValueError('reminder count differs from recorded delivery')
 
+    def one_json(name: str, path: Path) -> dict:
+        if not path.resolve(strict=True).is_relative_to(run_root):
+            raise ValueError('evaluation source outside run root')
+        sources[name] = {'file': path.relative_to(run_root).as_posix(),
+                         'bytes': path.stat().st_size, 'sha256': file_sha(path)}
+        return json.loads(path.read_bytes())
+
+    bootstrap = one_json('evaluation_bootstrap', run_root / 'archive/bootstrap_retry_v1.json')
+    native_checks = one_json('native_reports_checked', run_root / 'archive/native_reports_checked.json')
+    report_paths = list((run_root / 'jobs').glob('*/*/verifier/ctrf.json'))
+    if len(report_paths) != 1:
+        raise ValueError('native CTRF report source not unique')
+    ctrf = one_json('native_ctrf', report_paths[0])
+    summary = ctrf['results']['summary']
+    if (bootstrap.get('run_id') != run_id or bootstrap.get('status') != 'evaluation_completed'
+            or bootstrap.get('test_starts') != 1 or native_checks.get('run_id') != run_id
+            or not isinstance(status.get('native_result', {}).get('rewards', {}).get('reward'), (int, float))):
+        raise ValueError('evaluation identity or completion differs')
+    sources['live_result'] = {'file': 'archive/live_result.json',
+        'bytes': (run_root / 'archive/live_result.json').stat().st_size,
+        'sha256': file_sha(run_root / 'archive/live_result.json')}
+    evaluation = {'run_id': run_id, 'protocol': bootstrap['protocol'],
+        'bootstrap_status': bootstrap['status'], 'test_entry_starts': bootstrap['test_starts'],
+        'original_script_sha256': bootstrap['original_sha256'],
+        'effective_script_sha256': bootstrap['effective_sha256'],
+        'ctrf_summary': {key: summary[key] for key in
+            ('tests', 'passed', 'failed', 'skipped', 'pending', 'other')},
+        'reward': status['native_result']['rewards']['reward'],
+        'native_result_status': status['native_result']['status']}
+
     output.mkdir(parents=True, exist_ok=False)
     sanitizer = Sanitizer(secrets)
     public_files = [write_rows(output / 'cycles.jsonl', cycle_output, sanitizer),
                     write_rows(output / 'task_turns.jsonl', task_output, sanitizer),
-                    write_rows(output / 'reminders.jsonl', reminders, sanitizer)]
+                    write_rows(output / 'reminders.jsonl', reminders, sanitizer),
+                    write_rows(output / 'evaluation.jsonl', [evaluation], sanitizer)]
     public_text = b''.join((output / item['file']).read_bytes() for item in public_files)
     if (any(secret.encode('utf-8') in public_text for secret in secrets) or
             BEARER.search(public_text.decode('utf-8')) or
