@@ -47,12 +47,17 @@ class GapMemoryAgent(MemoryAgent):
         self._active = True
         self._observation, self._step = observation, step_count
         self._sent_phase2 = None
-        self.last_gap_report = {"mode": "direct_two_phase", "operations": [], "errors": []}
+        self.last_gap_report = {"mode": "direct_two_phase", "operations": [],
+                                "errors": [], "transport_errors": []}
         try:
             result = await super().process(observation, step_count)
             if self._sent_phase2 is not None:
                 result.user_prompt_phase2 = self._sent_phase2
             self.last_gap_report["operations"] = [vars(op).copy() for op in result.operations]
+            self.last_gap_report["gap_operations"] = [vars(op).copy() for op in result.operations
+                                                       if op.action in {"save_gap", "delete_gap",
+                                                                        "memory_save_gap"}
+                                                       or (op.memory_id or "").startswith("gap_")]
             self.last_gap_report["errors"] = [vars(op).copy() for op in result.operations if not op.success]
             self.last_gap_report["formal_gaps"] = [entry.to_dict() for entry in self.gaps.entries]
             self.last_gap_report["actual_phase2_prompt"] = result.user_prompt_phase2
@@ -75,7 +80,12 @@ class GapMemoryAgent(MemoryAgent):
         kwargs = {"prompt": user_prompt, "system": PHASE1_SYSTEM + MAINTENANCE}
         if self.use_structured_tools:
             kwargs["tools"] = self.get_tools_schema()
-        return await self.llm.call(**kwargs)
+        try:
+            return await self.llm.call(**kwargs)
+        except Exception as exc:
+            self.last_gap_report["transport_errors"].append(
+                {"phase": "maintenance", "type": type(exc).__name__})
+            raise
 
     def _calls(self, response):
         """Retain upstream fallback precedence and use its actual parsers."""
@@ -88,7 +98,9 @@ class GapMemoryAgent(MemoryAgent):
                     raise ValueError("tool arguments must be an object")
                 parsed.append((name, args))
             except Exception as exc:
-                parsed.append(("invalid_tool_arguments", {"error": str(exc)}))
+                original_name = getattr(getattr(call, "function", None), "name", None)
+                parsed.append((original_name or "invalid_tool_arguments",
+                               {"_argument_error": str(exc)}))
         if not calls or any(not args.get("content") for _, args in parsed):
             raw = self._strip_thinking(getattr(response, "content", None) or "")
             if "<tool_call>" in raw:
@@ -101,6 +113,8 @@ class GapMemoryAgent(MemoryAgent):
             key = args.get("memory_id", "")
             gap_delete = name == "memory_delete" and isinstance(key, str) and key.startswith("gap_")
             try:
+                if "_argument_error" in args:
+                    raise ValueError(args["_argument_error"])
                 if name == "memory_save_gap":
                     if set(args) != {"content"}:
                         raise ValueError("gap save requires only content")
@@ -123,4 +137,9 @@ class GapMemoryAgent(MemoryAgent):
         self._sent_phase2 = user_prompt
         self.last_gap_report["actual_phase2_prompt"] = user_prompt
         self.transport_phase = "selection"
-        return await self.llm.call(prompt=user_prompt, system=phase2_system())
+        try:
+            return await self.llm.call(prompt=user_prompt, system=phase2_system())
+        except Exception as exc:
+            self.last_gap_report["transport_errors"].append(
+                {"phase": "selection", "type": type(exc).__name__})
+            raise

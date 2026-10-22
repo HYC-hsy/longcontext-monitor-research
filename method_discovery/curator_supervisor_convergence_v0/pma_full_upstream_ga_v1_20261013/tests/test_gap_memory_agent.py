@@ -170,6 +170,28 @@ class GapAgentTests(unittest.TestCase):
         self.assertFalse(result.should_inject)
         self.assertEqual(agent.gaps.entries, [])
         self.assertEqual(result.user_prompt_phase2, model.inputs[1]["prompt"])
+        self.assertEqual(agent.last_gap_report["transport_errors"],
+                         [{"phase": "maintenance", "type": "RuntimeError"}])
+
+    def test_malformed_gap_arguments_record_failure_without_extra_role(self):
+        response = reply(calls=[("memory_save_gap", {"content": "Already saved"})])
+        response.tool_calls.append(NS(function=NS(name="memory_save_gap", arguments="{")))
+        model = ScriptedLLM(response, reply("<no_intervention/>"))
+        agent, result = self.run_cycle(model)
+        self.assertEqual([op.success for op in result.operations], [True, False])
+        self.assertEqual([e.content for e in agent.gaps.entries], ["Already saved"])
+        self.assertEqual(agent.last_gap_report["errors"][0]["action"], "memory_save_gap")
+
+    def test_phase2_transport_error_adds_no_review_or_retry(self):
+        model = ScriptedLLM(reply(calls=[("memory_save_gap", {"content": "Still formal"})]),
+                            RuntimeError("selection unavailable"))
+        with self.assertLogs("memory_agent.memory.memory_agent", level="ERROR"):
+            agent, result = self.run_cycle(model)
+        self.assertFalse(result.should_inject)
+        self.assertEqual([e.content for e in agent.gaps.entries], ["Still formal"])
+        self.assertEqual(agent.last_gap_report["mode"], "direct_two_phase")
+        self.assertEqual(agent.last_gap_report["transport_errors"],
+                         [{"phase": "selection", "type": "RuntimeError"}])
 
 
 if __name__ == "__main__":
