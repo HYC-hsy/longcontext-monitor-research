@@ -91,6 +91,8 @@ def run_batch(args: argparse.Namespace) -> dict:
         audited_code_commit=granted["audited_code_commit"], task_id=first["task"],
         candidate_profile_fixture_only=profile_fixture,
         **({'agent_time_protocol': manifest['config'].get('agent_time_protocol'),
+            'native_context_policy': manifest['config']['native_context_policy'],
+            'research_capture_policy': manifest['config']['research_capture_policy'],
             **({'runtime_policy': manifest['config']['runtime_policy']}
                if 'runtime_policy' in manifest['config'] else {})} if
            first.get('research_candidate') == 'pma_stateful_memory_v1' else {}),
