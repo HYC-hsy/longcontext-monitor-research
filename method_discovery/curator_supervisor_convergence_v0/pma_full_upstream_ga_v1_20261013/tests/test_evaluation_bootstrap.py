@@ -1,5 +1,6 @@
 """No official task test is run by these evaluator-preparation checks."""
 
+import argparse
 import asyncio
 import hashlib
 import json
@@ -11,11 +12,40 @@ import unittest
 from unittest.mock import patch
 
 from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013 import evaluation_bootstrap as boot
+from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013 import batch_controller
 from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.native_shared_verifier import NativeSharedVerifier
 from harbor.verifier.verifier import Verifier
 
 
 class BootstrapContractTests(unittest.TestCase):
+    def test_batch_preflight_receives_frozen_bootstrap_identity(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binding = {'task': boot.TASK, 'run_root': str(root / 'runs' / 'fresh')}
+            manifest = root / 'manifest.json'
+            manifest.write_text(json.dumps({
+                'schema': 'pma-ga-live-manifest-v5',
+                'config': {'evaluation_bootstrap_protocol': boot.PROTOCOL},
+            }), encoding='utf-8')
+            authorization = root / 'authorization.json'
+            authorization.write_text(json.dumps({
+                'audited_code_commit': 'synthetic-source',
+            }), encoding='utf-8')
+            args = argparse.Namespace(manifest=str(manifest), authorization=str(authorization),
+                                      zero_model_fixture=False, candidate_profile_fixture=False,
+                                      stateful_fake_replies=None)
+            captured = []
+            def stop_after_preflight(spec):
+                captured.append(spec)
+                raise RuntimeError('synthetic preflight stop')
+            with patch.object(batch_controller, 'validate_plan', return_value=[binding]), \
+                    patch.object(batch_controller, 'verify_live_spec', stop_after_preflight):
+                with self.assertRaisesRegex(RuntimeError, 'synthetic preflight stop'):
+                    batch_controller.run_batch(args)
+            self.assertEqual(len(captured), 1)
+            self.assertEqual(captured[0]['evaluation_protocol'], 'official_shared_v2')
+            self.assertEqual(captured[0]['evaluation_bootstrap_protocol'], boot.PROTOCOL)
+
     def test_exact_split_preserves_test_suffix(self):
         original = boot.PREPARATION_PREFIX + boot.TEST_BOUNDARY + b'echo synthetic-sentinel\nexit 3\n'
         with patch.object(boot, 'ORIGINAL_SHA256', hashlib.sha256(original).hexdigest()):

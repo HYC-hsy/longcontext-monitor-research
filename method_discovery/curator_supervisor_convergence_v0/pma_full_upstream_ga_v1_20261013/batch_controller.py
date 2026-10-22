@@ -89,6 +89,9 @@ def run_batch(args: argparse.Namespace) -> dict:
         manifest_path=str(manifest_path), manifest_sha256=manifest_hash,
         authorization_path=str(authorization_path), authorization_sha256=auth_hash,
         audited_code_commit=granted["audited_code_commit"], task_id=first["task"],
+        evaluation_protocol='official_shared_v2',
+        evaluation_bootstrap_protocol=manifest['config'].get(
+            'evaluation_bootstrap_protocol', 'original'),
         candidate_profile_fixture_only=profile_fixture,
         **({'agent_time_protocol': manifest['config'].get('agent_time_protocol'),
             'native_context_policy': manifest['config']['native_context_policy'],
