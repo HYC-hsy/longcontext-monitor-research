@@ -215,6 +215,9 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
               'evaluation': 'native_Harbor_SHARED_pending_lifecycle_certification'}
     if schema == 'pma-ga-live-manifest-v5':
         method['research_candidate'] = candidate
+        if candidate == 'pma_gap_memory_v0':
+            method.update(conditions={'B': 'GA_plus_reviewed_gap_PMA_v0'},
+                          task_turns_max=None)
         if candidate == 'pma_stateful_memory_v1':
             guard_window = task_settings.get('context_win')
             if runtime_policies['native_context_policy'] == 'off':
