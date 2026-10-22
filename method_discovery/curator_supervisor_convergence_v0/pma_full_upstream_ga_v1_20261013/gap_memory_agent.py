@@ -57,7 +57,8 @@ class GapMemoryAgent(MemoryAgent):
             self.last_gap_report["gap_operations"] = [vars(op).copy() for op in result.operations
                                                        if op.action in {"save_gap", "delete_gap",
                                                                         "memory_save_gap"}
-                                                       or (op.memory_id or "").startswith("gap_")]
+                                                       or (isinstance(op.memory_id, str)
+                                                           and op.memory_id.startswith("gap_"))]
             self.last_gap_report["errors"] = [vars(op).copy() for op in result.operations if not op.success]
             self.last_gap_report["formal_gaps"] = [entry.to_dict() for entry in self.gaps.entries]
             self.last_gap_report["actual_phase2_prompt"] = result.user_prompt_phase2
@@ -87,35 +88,31 @@ class GapMemoryAgent(MemoryAgent):
                 {"phase": "maintenance", "type": type(exc).__name__})
             raise
 
-    def _calls(self, response):
-        """Retain upstream fallback precedence and use its actual parsers."""
-        calls = getattr(response, "tool_calls", None) or []
-        parsed = []
-        for call in calls:
-            try:
-                name, args = self._extract_tool_call(call)
-                if not isinstance(args, dict):
-                    raise ValueError("tool arguments must be an object")
-                parsed.append((name, args))
-            except Exception as exc:
-                original_name = getattr(getattr(call, "function", None), "name", None)
-                parsed.append((original_name or "invalid_tool_arguments",
-                               {"_argument_error": str(exc)}))
-        if not calls or any(not args.get("content") for _, args in parsed):
+    def _execute_tool_calls(self, response):
+        """Keep vendor fallback and per-call extraction order; only route gap tools."""
+        operations = []
+        tool_calls = getattr(response, "tool_calls", None) or []
+        has_empty_content = any(
+            not self._extract_tool_call(call)[1].get("content")
+            for call in tool_calls
+        ) if tool_calls else False
+        if not tool_calls or has_empty_content:
             raw = self._strip_thinking(getattr(response, "content", None) or "")
             if "<tool_call>" in raw:
                 parsed = self._parse_tool_calls_from_text(raw)
-        return parsed
-
-    def _execute_tool_calls(self, response):
-        operations = []
-        for name, args in self._calls(response):
-            key = args.get("memory_id", "")
+                if parsed:
+                    tool_calls = [SimpleNamespace(function=SimpleNamespace(name=name, arguments=args))
+                                  for name, args in parsed]
+        for call in tool_calls:
+            name, args = self._extract_tool_call(call)
+            if not name:
+                continue
+            key = args.get("memory_id", "") if isinstance(args, dict) else None
             gap_delete = name == "memory_delete" and isinstance(key, str) and key.startswith("gap_")
             try:
-                if "_argument_error" in args:
-                    raise ValueError(args["_argument_error"])
                 if name == "memory_save_gap":
+                    if not isinstance(args, dict):
+                        raise ValueError("gap tool arguments must be an object")
                     if set(args) != {"content"}:
                         raise ValueError("gap save requires only content")
                     saved = self.gaps.save_gap(args["content"])
@@ -129,7 +126,7 @@ class GapMemoryAgent(MemoryAgent):
                     normalized = SimpleNamespace(content="", tool_calls=[call])
                     operations.extend(super()._execute_tool_calls(normalized))
             except Exception as exc:
-                operations.append(MemoryOperation(name, memory_id=key or None,
+                operations.append(MemoryOperation(name, memory_id=key,
                                                   success=False, error=str(exc)))
         return operations
 

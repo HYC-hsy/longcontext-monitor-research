@@ -12,6 +12,7 @@ from gap_store import GapMemory
 from memory_agent.memory.memory_agent import (
     BANK_TOOLS, MemoryAgent, PHASE1_SYSTEM, PHASE2_SYSTEM,
 )
+from memory_agent.memory.universal_memory import UniversalMemory
 
 
 def reply(content="", calls=()):
@@ -174,13 +175,79 @@ class GapAgentTests(unittest.TestCase):
                          [{"phase": "maintenance", "type": "RuntimeError"}])
 
     def test_malformed_gap_arguments_record_failure_without_extra_role(self):
-        response = reply(calls=[("memory_save_gap", {"content": "Already saved"})])
-        response.tool_calls.append(NS(function=NS(name="memory_save_gap", arguments="{")))
+        response = reply(calls=[("memory_save_gap", {"content": "Already saved"}),
+                                ("memory_save_gap", {"content": ""})])
         model = ScriptedLLM(response, reply("<no_intervention/>"))
         agent, result = self.run_cycle(model)
         self.assertEqual([op.success for op in result.operations], [True, False])
         self.assertEqual([e.content for e in agent.gaps.entries], ["Already saved"])
         self.assertEqual(agent.last_gap_report["errors"][0]["action"], "memory_save_gap")
+
+    def test_invalid_ordinary_delete_ids_do_not_break_reporting_or_reminder(self):
+        for invalid_id in (123, ["gap_x"], {"id": "gap_x"}):
+            with self.subTest(invalid_id=invalid_id):
+                model = ScriptedLLM(
+                    reply(calls=[("memory_save_gap", {"content": "x"}),
+                                 ("memory_delete", {"memory_id": invalid_id})]),
+                    reply("<context_for_action>Useful reminder.</context_for_action>"))
+                agent, result = self.run_cycle(model)
+                self.assertTrue(result.should_inject)
+                self.assertEqual(result.context_for_action, "Useful reminder.")
+                self.assertEqual([e.content for e in agent.gaps.entries], ["x"])
+                self.assertEqual([op.success for op in result.operations], [True, False])
+                self.assertEqual(result.operations[1].memory_id, invalid_id)
+                self.assertEqual(agent.last_gap_report["errors"][0]["memory_id"], invalid_id)
+                self.assertEqual(len(agent.last_gap_report["formal_gaps"]), 1)
+
+    def test_vendor_paired_tool_parser_edges(self):
+        def raw_call(name, arguments):
+            return NS(function=NS(name=name, arguments=arguments))
+
+        for case in ("ordinary_valid", "malformed_json", "non_object",
+                     "prior_delete_then_bad", "delete_xml_fallback"):
+            with self.subTest(case=case):
+                base_bank = UniversalMemory()
+                old = base_bank.save_knowledge("old")
+                gap_bank = GapMemory.from_dict(base_bank.to_dict())
+                if case == "ordinary_valid":
+                    phase1 = reply(calls=[("memory_save_knowledge", {"content": "new"}),
+                                          ("memory_update_status", {"content": "working"})])
+                elif case == "malformed_json":
+                    phase1 = NS(content="", tool_calls=[raw_call("memory_save_knowledge", "{")])
+                elif case == "non_object":
+                    phase1 = NS(content="", tool_calls=[raw_call("memory_save_knowledge", "[1]")])
+                elif case == "prior_delete_then_bad":
+                    phase1 = NS(content="", tool_calls=[
+                        raw_call("memory_delete", json.dumps({"memory_id": old})),
+                        raw_call("memory_save_knowledge", "{")])
+                else:
+                    xml = ("<tool_call><function=memory_save_knowledge>"
+                           "<parameter=content>xml fact</parameter></function></tool_call>")
+                    phase1 = NS(content=xml, tool_calls=[
+                        raw_call("memory_delete", json.dumps({"memory_id": old}))])
+                base_llm = ScriptedLLM(deepcopy(phase1), reply("<no_intervention/>"))
+                gap_llm = ScriptedLLM(deepcopy(phase1), reply("<no_intervention/>"))
+                with self.assertLogs("memory_agent.memory.memory_agent", level="ERROR") if case in {
+                    "malformed_json", "non_object", "prior_delete_then_bad"
+                } else patch("memory_agent.memory.memory_agent.logger"):
+                    base_result = asyncio.run(MemoryAgent(llm=base_llm, memory=base_bank).process("ctx"))
+                if case in {"malformed_json", "non_object", "prior_delete_then_bad"}:
+                    with self.assertLogs("memory_agent.memory.memory_agent", level="ERROR"):
+                        gap_result = asyncio.run(GapMemoryAgent(task="task", llm=gap_llm,
+                                            memory=gap_bank).process("ctx"))
+                else:
+                    gap_result = asyncio.run(GapMemoryAgent(task="task", llm=gap_llm,
+                                        memory=gap_bank).process("ctx"))
+                self.assertEqual(len(base_llm.inputs), 2)
+                self.assertEqual(len(gap_llm.inputs), 2)
+                self.assertEqual(base_bank.status, gap_bank.status)
+                self.assertEqual([e.content for e in base_bank.knowledge],
+                                 [e.content for e in gap_bank.knowledge])
+                self.assertEqual([e.content for e in base_bank.procedural],
+                                 [e.content for e in gap_bank.procedural])
+                self.assertEqual([(op.action, op.success, op.error) for op in base_result.operations],
+                                 [(op.action, op.success, op.error) for op in gap_result.operations])
+                self.assertEqual(base_result.should_inject, gap_result.should_inject)
 
     def test_phase2_transport_error_adds_no_review_or_retry(self):
         model = ScriptedLLM(reply(calls=[("memory_save_gap", {"content": "Still formal"})]),
