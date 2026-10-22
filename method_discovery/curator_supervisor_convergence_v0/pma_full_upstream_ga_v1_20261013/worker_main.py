@@ -117,8 +117,6 @@ async def serve(args: argparse.Namespace) -> None:
                             name='memory_save_gap', arguments={
                                 'content': 'Confirm the synthetic task result before completion.'})))
                     return LLMResponse(content='', tool_calls=calls)
-                if phase in {'gap_review', 'gap_rereview'}:
-                    return LLMResponse(content='ACCEPT')
                 if phase == 'selection':
                     return LLMResponse(content=(
                         '<context_for_action>Verify the synthetic result.</context_for_action>'

@@ -156,11 +156,13 @@ def verify_evidence(evidence: Path, *, require_committed: bool = True,
                 raise RuntimeError('generic PMA reminder did not enter Task request')
             phases = [json.loads(line).get('phase') for line in
                       (base / 'memory_payload.jsonl').read_text(encoding='utf-8').splitlines()]
-            required_phases = ({'maintenance', 'gap_review', 'selection'}
+            required_phases = ({'maintenance', 'selection'}
                 if research_candidate == 'pma_gap_memory_v0' else
                 {'bank_management', 'context_decision'})
             if not required_phases <= set(phases):
                 raise RuntimeError('generic PMA two-stage transport absent')
+            if research_candidate == 'pma_gap_memory_v0' and set(phases) != required_phases:
+                raise RuntimeError('gap candidate made a non-two-stage transport call')
             if research_candidate == 'pma_gap_memory_v0' and not (
                     base / 'gap_cycle.jsonl').is_file():
                 raise RuntimeError('gap candidate cycle evidence absent')
