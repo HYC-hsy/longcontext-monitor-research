@@ -57,19 +57,23 @@ def collect(condition: str, source: Path, target: Path, secrets: list[str]) -> l
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--a', type=Path, required=True)
-    parser.add_argument('--b', type=Path, required=True)
+    parser.add_argument('--b', type=Path)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--task-profile-file', type=Path, required=True)
     parser.add_argument('--pma-profile-file', type=Path, required=True)
     parser.add_argument('--research-candidate', choices=('U', 'V1', 'D1'), default='U')
     args = parser.parse_args()
+    if args.b is None and args.research_candidate != 'U':
+        parser.error('A-only certification requires U')
     args.output.mkdir(parents=True, exist_ok=False)
     secrets = private_values(args.task_profile_file, args.pma_profile_file)
     files = collect('A', args.a, args.output / 'A', secrets)
-    files += collect('B', args.b, args.output / 'B', secrets)
+    if args.b is not None:
+        files += collect('B', args.b, args.output / 'B', secrets)
     summary = verify_evidence(args.output, require_committed=False,
                               research_candidate=(args.research_candidate
-                                  if args.research_candidate != 'U' else None))
+                                  if args.research_candidate != 'U' else None),
+                              conditions=('A', 'B') if args.b is not None else ('A',))
     (args.output / 'FILE_HASHES.json').write_text(json.dumps({
         'schema': 'pma-ga-generic-fixture-redacted-index-v1', 'files': files,
         'certification': summary}, indent=2, ensure_ascii=False), encoding='utf-8')

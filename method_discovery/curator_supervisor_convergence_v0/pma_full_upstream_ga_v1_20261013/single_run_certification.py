@@ -68,11 +68,15 @@ def _committed_evidence_sha(checkout: Path, path: Path) -> str:
 
 
 def verify_evidence(evidence: Path, *, require_committed: bool = True,
-                    research_candidate: str | None = None) -> dict:
+                    research_candidate: str | None = None,
+                    conditions: tuple[str, ...] = ('A', 'B')) -> dict:
+    if conditions not in (('A',), ('A', 'B')) or (conditions == ('A',) and
+            research_candidate is not None):
+        raise ValueError('unsupported single-run certification conditions')
     checkout = Path(__file__).resolve().parents[3]
     outcomes = {}
     hashes = {}
-    for condition in ('A', 'B'):
+    for condition in conditions:
         current = source_identity(checkout,
             candidate=research_candidate is not None and condition == 'B')
         base = evidence / condition

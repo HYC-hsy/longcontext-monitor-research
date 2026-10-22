@@ -279,11 +279,15 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
         if not evidence.is_relative_to(checkout):
             raise RuntimeError('single-run certification must be committed in repository')
         research = candidate if schema == 'pma-ga-live-manifest-v5' else None
+        conditions = (('A',) if single and plan['condition'] == 'A' and
+                      not (evidence / 'B').exists() else ('A', 'B'))
         certification = {'source_files': (source_identity(checkout) if stateful else
                              source_identity(checkout, candidate=research is not None)),
                          'evidence_path': evidence.relative_to(checkout).as_posix(),
                          'evidence': (verify_evidence(evidence) if stateful else
-                             verify_evidence(evidence, research_candidate=research)),
+                             verify_evidence(evidence, research_candidate=research,
+                                             conditions=conditions)),
+                         **({'conditions': list(conditions)} if not stateful else {}),
                          'harbor_commit': HARBOR_COMMIT}
     return {'schema': schema,
             'status': ('prepared_not_executed' if certification else
