@@ -94,8 +94,8 @@ class GA13Provider:
                     "witnesses": [{"kind": "field", "field": target,
                         "exact_value": body["claim"]["text"]}],
                     "repair_constraint": "limit claim to observed command result"}]
-            raw = canonical({"protocol": "audit-result/1", "binding": payload[
-                "binding"], "coverage": payload["required_coverage"],
+            raw = canonical({"protocol": "audit-result/2", "binding": payload[
+                "binding"],
                 "outcome": "issues" if issue else "clean", "issues": issue,
                 "closure_assessments": [], "unusable_reason": None}).decode("utf-8")
         elif role == "selection":

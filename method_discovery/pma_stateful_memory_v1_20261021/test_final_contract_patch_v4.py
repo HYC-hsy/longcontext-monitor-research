@@ -172,8 +172,8 @@ class PromptContractV4Tests(unittest.TestCase):
             sources=[], observations={}, operation_index=[], resolve_manifest=[])
         target = {'snapshot': 'candidate', 'target': {'kind': 'state', 'id': 's',
             'revision': 1}, 'field_path': 'claim.support_refs.0.quote'}
-        result = {'protocol': 'audit-result/1', 'binding': view['binding'],
-            'coverage': view['required_coverage'], 'outcome': 'issues', 'issues': [{
+        result = {'protocol': 'audit-result/2', 'binding': view['binding'],
+            'outcome': 'issues', 'issues': [{
                 'issue_id': 'v4', 'kind': 'observation_conflict', 'target': target,
                 'related_targets': [], 'explanation': 'developer example',
                 'witnesses': [{'kind': 'field', 'field': target,

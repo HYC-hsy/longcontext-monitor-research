@@ -3,7 +3,7 @@
 from copy import deepcopy
 import unittest
 
-from .audit import AuditCodec, validate_audit_result
+from .audit import AuditCodec, validate_audit_result, validate_audit_result_v1
 from .budget import TokenProxy
 from .prompts import audit as audit_messages
 from .source import ContractError, SourceCatalog, canonical, digest
@@ -40,8 +40,8 @@ class AuditTests(unittest.TestCase):
             AuditCodec().verify(changed, self.before, self.after)
 
     def clean(self):
-        return {"protocol": "audit-result/1", "binding": self.view["binding"],
-                "coverage": self.view["required_coverage"], "outcome": "clean",
+        return {"protocol": "audit-result/2", "binding": self.view["binding"],
+                "outcome": "clean",
                 "issues": [], "closure_assessments": [], "unusable_reason": None}
 
     def issue(self, quote="task"):
@@ -72,15 +72,52 @@ class AuditTests(unittest.TestCase):
         with self.assertRaisesRegex(ContractError, "quote_mismatch"):
             validate_audit_result(issues, view=self.view, catalog=self.catalog)
 
-    def test_coverage_and_outcome_not_filtered(self):
+    def test_extra_coverage_and_outcome_not_filtered(self):
         result = self.clean()
         result["coverage"] = []
-        with self.assertRaisesRegex(ContractError, "coverage_mismatch"):
+        with self.assertRaises(ContractError):
             validate_audit_result(result, view=self.view, catalog=self.catalog)
+        historical = {**self.clean(), "protocol": "audit-result/1",
+                      "coverage": self.view["required_coverage"]}
+        self.assertEqual(validate_audit_result_v1(historical, view=self.view,
+                         catalog=self.catalog)["outcome"], "clean")
+        with self.assertRaises(ContractError):
+            validate_audit_result(historical, view=self.view, catalog=self.catalog)
+        with self.assertRaises(ContractError):
+            validate_audit_result_v1(self.clean(), view=self.view,
+                                     catalog=self.catalog)
         result = self.clean()
         result["issues"] = [self.issue()]
         with self.assertRaisesRegex(ContractError, "contradictory_audit_outcome"):
             validate_audit_result(result, view=self.view, catalog=self.catalog)
+
+    def test_v2_unusable_binding_and_target_guards(self):
+        unusable = {**self.clean(), "outcome": "unusable", "unusable_reason": {
+            "code": "insufficient_context", "detail": "cannot decide"}}
+        self.assertEqual(validate_audit_result(unusable, view=self.view,
+                         catalog=self.catalog)["outcome"], "unusable")
+        for changed in ({**self.clean(), "binding": {}},
+                        {**self.clean(), "protocol": "audit-result/1"},
+                        {**self.clean(), "unexpected": True}):
+            with self.assertRaises(ContractError):
+                validate_audit_result(changed, view=self.view,
+                                      catalog=self.catalog)
+        issues = {**self.clean(), "outcome": "issues", "issues": [self.issue()]}
+        issues["issues"][0]["target"]["target"]["id"] = "nonexistent"
+        with self.assertRaisesRegex(ContractError, "unknown_target_id"):
+            validate_audit_result(issues, view=self.view, catalog=self.catalog)
+
+    def test_audit_and_correction_requests_describe_v2_without_echo(self):
+        from .prompts import repair
+        messages = audit_messages(self.view)
+        self.assertIn("audit-result/2", messages[0]["content"])
+        self.assertIn("required_coverage", messages[1]["content"])
+        self.assertIn("No coverage field is allowed", messages[0]["content"])
+        corrected = repair(original_messages=messages, base=self.before,
+            rejected=self.after, raw_response="invalid", error="malformed_output",
+            mode="audit_contract")
+        self.assertEqual(corrected[:2], messages)
+        self.assertEqual(len(corrected), 3)
 
     def test_codec_shared_body_is_single_without_changing_reconstruction(self):
         before = deepcopy(self.after)
@@ -120,8 +157,8 @@ class AuditTests(unittest.TestCase):
         catalog = SourceCatalog(ledger, "window")
         historical_field = {"snapshot": "archive", "target": {"kind": "state",
             "id": "s", "revision": 1}, "field_path": "claim.text"}
-        result = {"protocol": "audit-result/1", "binding": view["binding"],
-            "coverage": view["required_coverage"], "outcome": "issues",
+        result = {"protocol": "audit-result/2", "binding": view["binding"],
+            "outcome": "issues",
             "issues": [{"issue_id": "i", "kind": "observation_conflict",
                 "target": {"snapshot": "candidate", "target": {"kind": "state",
                     "id": "s", "revision": 2}, "field_path": "claim.text"},

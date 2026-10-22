@@ -455,6 +455,11 @@ class CycleEngine:
                             "to_event_seq"], goal_ledger=goals,
                         visible_existing_ids=mutable_ids, archive=self.store.archive())
                     continue
+                self.store.journal(cycle_id, "audit_request_prepared", {
+                    "protocol": "audit-result/2",
+                    "audit_view_hash": view["binding"]["audit_view_hash"],
+                    "required_coverage_sha256": digest(view["required_coverage"]),
+                    "messages_sha256": digest(audit_messages)})
                 calls += 1
                 stage = "provider"
                 raw = self._call(cycle_id, "audit", audit_messages, calls, 8192)

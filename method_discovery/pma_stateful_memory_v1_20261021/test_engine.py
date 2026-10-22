@@ -82,12 +82,11 @@ class ScriptedProvider:
                 "gap_resolutions": [], "gap_reopens": [],
                 "focus": {"op": "keep"}}).decode()
         if role in {"audit", "audit_correction"}:
-            answer = {"protocol": "audit-result/1", "binding": content["binding"],
-                "coverage": content["required_coverage"], "outcome": "clean",
+            answer = {"protocol": "audit-result/2", "binding": content["binding"],
+                "outcome": "clean",
                 "issues": [], "closure_assessments": [], "unusable_reason": None}
             outcome = self.outcomes.pop(0) if self.outcomes else None
             if outcome == "malformed":
-                answer["coverage"] = []
                 answer["unexpected"] = True
             elif outcome == "issues":
                 answer["outcome"] = "issues"
@@ -240,6 +239,12 @@ class EngineTests(unittest.TestCase):
         self.assertEqual([item["role"] for item in provider.calls],
             ["maintenance", "audit", "candidate_repair", "audit", "selection"])
         self.assertEqual(self.store.snapshot()["B"]["G"]["specifications"], [])
+        final_audit = json.loads(provider.calls[3]["messages"][1]["content"])
+        selection = json.loads(provider.calls[4]["messages"][1]["content"])
+        self.assertEqual(selection["reviewed_this_cycle_refs"], [])
+        self.assertEqual(final_audit["required_coverage"], [])
+        self.assertEqual(len([row for row in self.store.journal_rows(result[
+            "cycle_id"]) if row["phase"] == "audit_request_prepared"]), 2)
 
     def test_reminder_ready_not_delivered(self):
         provider = ScriptedProvider(create_requirement=True, remind=True)

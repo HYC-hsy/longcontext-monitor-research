@@ -153,8 +153,8 @@ class FiniteProvider:
                     "assessed_scope": {}, "explanation": "synthetic goal revision",
                     "basis_refs": [item["gap_after"]["closure"]["goal_delta_ref"]],
                     "blocking_issue_ids": []})
-            return json.dumps({"protocol": "audit-result/1",
-                "binding": payload["binding"], "coverage": payload["required_coverage"],
+            return json.dumps({"protocol": "audit-result/2",
+                "binding": payload["binding"],
                 "outcome": outcome, "issues": issues,
                 "closure_assessments": assessments, "unusable_reason": None})
         if role == "selection":

@@ -170,8 +170,8 @@ class CoreContractRepairTests(unittest.TestCase):
         view = AuditCodec().encode(before, candidate, binding={"cycle_id": "offline"},
             sources=[], observations={"events": []}, operation_index=[],
             resolve_manifest=manifest)
-        response = {"protocol": "audit-result/1", "binding": view["binding"],
-            "coverage": view["required_coverage"], "outcome": "clean", "issues": [],
+        response = {"protocol": "audit-result/2", "binding": view["binding"],
+            "outcome": "clean", "issues": [],
             "closure_assessments": [{"resolution_id": item["gap_id"],
                 "gap_before": {"type": "gap", "gap_id": item["gap_id"],
                     "revision": old_gaps[item["gap_id"]]["revision"],
@@ -609,7 +609,7 @@ class CoreContractRepairTests(unittest.TestCase):
             engine = CycleEngine(fixture.store, provider, task_text="task")
             original = engine.proxy.enforce
             def reject_large_candidate(messages, tools=None):
-                if "audit-result/1" in messages[0]["content"]:
+                if "audit-result/2" in messages[0]["content"]:
                     payload = json.loads(messages[1]["content"])
                     if payload["added_objects"]:
                         raise ContractError("input_budget_exceeded", "synthetic candidate")

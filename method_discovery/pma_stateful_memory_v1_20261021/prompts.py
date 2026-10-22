@@ -125,11 +125,13 @@ gap. Do not invent source IDs or derive observations from diagnostic failures.
 Use only evidence IDs visible in this request, with literal contiguous quotes.
 The host will apply a complete proposal once to the original base; no partial commit."""
 
-AUDIT_SYSTEM = """Stateful proactive memory audit, protocol audit-result/1.
+AUDIT_SYSTEM = """Stateful proactive memory audit, protocol audit-result/2.
 Output raw JSON only: no Markdown code fence, language tag, or surrounding prose.
-Return exactly one JSON object with protocol,binding,coverage,outcome,issues,
-closure_assessments,unusable_reason. coverage contains every required_coverage
-ref exactly once. outcome is clean/issues/unusable. clean requires issues=[];
+Return exactly one JSON object with protocol,binding,outcome,issues,
+closure_assessments,unusable_reason. Review every object in the input
+required_coverage, including retained objects, but do not output or copy the
+required_coverage list. No coverage field is allowed. outcome is
+clean/issues/unusable. clean requires issues=[];
 issues requires at least one valid blocking Issue. unusable has no conclusions
 and a reason code insufficient_context, ambiguous_input, or
 cannot_complete_audit. Never filter malformed issues into clean.
@@ -175,7 +177,7 @@ Issue. clean has no Issues and all assessments supported; issues has one or
 more valid Issues; unusable has no Issues or assessments and a valid reason.
 Check the entire bound candidate and every listed current target, including unchanged
 retained claims directly contradicted by this step's observations. Return clean only
-when the full coverage and every gap resolution are supportable. A valid source quote
+when every required_coverage object and gap resolution is supportable. A valid source quote
 proves literal provenance, not semantic entailment. Evaluate scope, time, source role,
 goal interpretation, and information loss. Any valid blocking issue rejects the whole
 candidate. Use the exact bound evidence IDs and field paths; do not guess unseen text.

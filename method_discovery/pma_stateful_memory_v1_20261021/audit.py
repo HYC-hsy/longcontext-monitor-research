@@ -200,20 +200,40 @@ def _bound_field(value: object, targets: dict) -> dict:
 
 def validate_audit_result(raw: object, *, view: dict,
                           catalog: SourceCatalog, archive: dict | None = None) -> dict:
+    """Live v2: review the full bound view without echoing its coverage list."""
+    return _validate_audit_result(raw, view=view, catalog=catalog, archive=archive,
+                                  protocol="audit-result/2")
+
+
+def validate_audit_result_v1(raw: object, *, view: dict,
+                             catalog: SourceCatalog, archive: dict | None = None) -> dict:
+    """Explicit historical v1 validation; never auto-detect or fall back live."""
+    return _validate_audit_result(raw, view=view, catalog=catalog, archive=archive,
+                                  protocol="audit-result/1")
+
+
+def _validate_audit_result(raw: object, *, view: dict, catalog: SourceCatalog,
+                           archive: dict | None, protocol: str) -> dict:
     """One malformed issue invalidates the whole result; never filter to clean."""
-    result = fields(raw, {"protocol", "binding", "coverage", "outcome", "issues",
-                          "closure_assessments", "unusable_reason"})
-    if result["protocol"] != "audit-result/1" or result["binding"] != view["binding"]:
+    required = {"protocol", "binding", "outcome", "issues",
+                "closure_assessments", "unusable_reason"}
+    if protocol == "audit-result/1":
+        required.add("coverage")
+    result = fields(raw, required)
+    if result["protocol"] != protocol or result["binding"] != view["binding"]:
         raise ContractError("binding_mismatch")
     if result["outcome"] not in {"clean", "issues", "unusable"}:
         raise ContractError("invalid_audit_outcome")
-    for key in ("coverage", "issues", "closure_assessments"):
+    for key in ("issues", "closure_assessments"):
         if type(result[key]) is not list:
             raise ContractError("invalid_array", key)
-    expected = {canonical(item) for item in view["required_coverage"]}
-    actual = [canonical(item) for item in result["coverage"]]
-    if set(actual) != expected or len(actual) != len(expected):
-        raise ContractError("coverage_mismatch")
+    if protocol == "audit-result/1":
+        if type(result["coverage"]) is not list:
+            raise ContractError("invalid_array", "coverage")
+        expected = {canonical(item) for item in view["required_coverage"]}
+        actual = [canonical(item) for item in result["coverage"]]
+        if set(actual) != expected or len(actual) != len(expected):
+            raise ContractError("coverage_mismatch")
     if result["outcome"] == "unusable":
         reason = fields(result["unusable_reason"], {"code", "detail"})
         if reason["code"] not in {"insufficient_context", "ambiguous_input",

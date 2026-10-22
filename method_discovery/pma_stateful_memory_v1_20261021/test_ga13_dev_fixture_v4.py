@@ -113,8 +113,8 @@ class GA13Provider:
                         "exact_value": body["claim"]["text"]},
                         source_witness(payload, self.mode)],
                     "repair_constraint": "limit claim to observed command result"}]
-            raw = canonical({"protocol": "audit-result/1", "binding": payload[
-                "binding"], "coverage": payload["required_coverage"],
+            raw = canonical({"protocol": "audit-result/2", "binding": payload[
+                "binding"],
                 "outcome": "issues" if issue else "clean", "issues": issue,
                 "closure_assessments": [], "unusable_reason": None}).decode("utf-8")
         elif role == "selection":
@@ -282,8 +282,8 @@ class GA13WitnessV4Tests(unittest.TestCase):
             'repair_constraint': 'retain receipt', 'witnesses': [
                 {'kind': 'field', 'field': target, 'exact_value': 'sqlite3'},
                 source_witness(view, 'bad_repaired')]}
-        answer = {'protocol': 'audit-result/1', 'binding': view['binding'],
-            'coverage': view['required_coverage'], 'outcome': 'issues', 'issues': [issue],
+        answer = {'protocol': 'audit-result/2', 'binding': view['binding'],
+            'outcome': 'issues', 'issues': [issue],
             'closure_assessments': [], 'unusable_reason': None}
         self.assertEqual(validate_audit_result(answer, view=view,
                                               catalog=catalog)['outcome'], 'issues')

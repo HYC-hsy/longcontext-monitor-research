@@ -35,8 +35,8 @@ class AuditClosureTests(unittest.TestCase):
                     resolve_manifest=[{"resolution_id": "ge",
                         "gap_before": before["B"]["DeltaE"][0],
                         "gap_after": gap, "closure_kind": kind}])
-                result = {"protocol": "audit-result/1", "binding": view["binding"],
-                    "coverage": view["required_coverage"], "outcome": "clean",
+                result = {"protocol": "audit-result/2", "binding": view["binding"],
+                    "outcome": "clean",
                     "issues": [], "closure_assessments": [{"resolution_id": "ge",
                         "gap_before": {"type": "gap", "gap_id": "ge",
                             "revision": 1, "task_version": 1},
@@ -75,8 +75,8 @@ class AuditClosureTests(unittest.TestCase):
                 "gap_after": after_gap, "closure_kind": "environment_supported"}])
 
     def result(self):
-        return {"protocol": "audit-result/1", "binding": self.view["binding"],
-            "coverage": self.view["required_coverage"], "outcome": "clean",
+        return {"protocol": "audit-result/2", "binding": self.view["binding"],
+            "outcome": "clean",
             "issues": [], "closure_assessments": [{"resolution_id": "ge",
                 "gap_before": {"type": "gap", "gap_id": "ge", "revision": 1,
                                "task_version": 1},

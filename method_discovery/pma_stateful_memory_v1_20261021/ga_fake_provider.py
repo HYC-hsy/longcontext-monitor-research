@@ -79,8 +79,8 @@ class FiniteGAFakeProvider:
         elif role in {"audit", "audit_correction"}:
             if shape != "clean":
                 raise ContractError("fake_shape_mismatch")
-            answer = {"protocol": "audit-result/1", "binding": payload["binding"],
-                "coverage": payload["required_coverage"], "outcome": "clean",
+            answer = {"protocol": "audit-result/2", "binding": payload["binding"],
+                "outcome": "clean",
                 "issues": [], "closure_assessments": [], "unusable_reason": None}
         else:
             if shape not in {"silent", "remind"}:
