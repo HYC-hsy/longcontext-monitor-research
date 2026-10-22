@@ -12,7 +12,7 @@ from adapters import harbor_ga_agent as original
 from .networked_transport_setup import start_networked_transport
 
 
-EXPECTED_ADAPTER_SHA256 = "092394995b153dd173dba553c20ad4c25ef23300df72596507a51e52b6841d0e"
+EXPECTED_ADAPTER_SHA256 = "82ac43f2c791bc4d8510e1d851ef7b2c5bead8cdfbb847be36c7ae244821ecce"
 EXPECTED_STATEFUL_DIAGNOSTIC_ADAPTER_SHA256 = (
     "8a4513c6b28befe747d581d22e94cd2715f20234c63115e0ea424a56d033c3a0")
 FORWARD = (
