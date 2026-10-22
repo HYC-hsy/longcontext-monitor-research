@@ -125,6 +125,11 @@ class CycleEngine:
         self.task_text = task_text
         self.proxy = token_proxy or TokenProxy()
 
+    def _budget_notice(self, max_output: int) -> dict:
+        return {"input_proxy_soft_target": 32768,
+                "input_proxy_hard_limit": getattr(self.proxy, "input_limit", None),
+                "output_provider_tokens_limit": max_output}
+
     def _call(self, cycle_id: str, role: str, messages: list[dict],
               number: int, max_output: int) -> str:
         count = self.proxy.enforce(messages)
@@ -335,8 +340,7 @@ class CycleEngine:
                                     "optional_bundles": body["optional_bundles"],
                                     "omissions": body["omissions"]},
                     "source_catalog": visible,
-                    "budget_notice": {"input_proxy_tokens_limit": 32768,
-                        "output_provider_tokens_limit": 8192},
+                    "budget_notice": self._budget_notice(8192),
                     "mutation_scope": {"visible_existing_refs": sorted(
                         [{"kind": kind, "id": identifier} for kind, identifier in
                          visible_existing(snapshot, body)],
@@ -422,7 +426,8 @@ class CycleEngine:
                     resolve_manifest=manifest,
                     contextual_objects=contextual,
                     goal_ledger=self._goal_context(goals, ledger, body[
-                        "observation_batch"]["processing_range"]["to_event_seq"]))
+                        "observation_batch"]["processing_range"]["to_event_seq"]),
+                    budget_notice=self._budget_notice(8192))
                 audit_messages = audit(view)
                 stage = "audit_preflight"
                 try:
@@ -439,7 +444,8 @@ class CycleEngine:
                         operation_index=[], resolve_manifest=[],
                         contextual_objects=contextual,
                         goal_ledger=self._goal_context(goals, ledger, body[
-                            "observation_batch"]["processing_range"]["to_event_seq"]))
+                            "observation_batch"]["processing_range"]["to_event_seq"]),
+                        budget_notice=self._budget_notice(8192))
                     self.proxy.enforce(audit(baseline_view))
                     request = continuous_repair(original_messages=messages,
                         maintenance_raw=maintenance_raw,
@@ -628,8 +634,7 @@ class CycleEngine:
                     "recent_activity": body["observation_batch"],
                     "source_catalog": visible, "selected_refs": refs,
                     "contextual_objects": _contextual_objects(work, snapshot),
-                    "budget_notice": {"input_proxy_tokens_limit": 32768,
-                        "output_provider_tokens_limit": 2048},
+                    "budget_notice": self._budget_notice(2048),
                     "reviewed_this_cycle_refs": reviewed,
                     "not_reviewed_this_cycle_refs": not_reviewed}
             def measure(work):

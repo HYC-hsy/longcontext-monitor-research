@@ -74,7 +74,8 @@ class AuditCodec:
                sources: list[dict], observations: dict,
                operation_index: list[dict], resolve_manifest: list[dict],
                contextual_objects: list[dict] | None = None,
-               goal_ledger: dict | None = None) -> dict:
+               goal_ledger: dict | None = None,
+               budget_notice: dict | None = None) -> dict:
         before_layout = deepcopy(before)
         candidate_layout = deepcopy(candidate)
         shared = []
@@ -122,8 +123,10 @@ class AuditCodec:
                 "contextual_objects": contextual_objects or [],
                 "source_catalog": sources, "observations": observations,
                 "goal_ledger": goal_ledger,
-                "budget_notice": {"input_proxy_tokens_limit": 32768,
-                                  "output_provider_tokens_limit": 8192},
+                "budget_notice": budget_notice or {
+                    "input_proxy_soft_target": 32768,
+                    "input_proxy_hard_limit": None,
+                    "output_provider_tokens_limit": 8192},
                 "required_coverage": required_coverage,
                 "resolve_manifest": resolve_manifest, "view_omissions": []}
         self.verify(view, before, candidate)

@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from .audit import AuditCodec, validate_audit_result
+from .budget import TokenProxy
 from .engine import CycleEngine
 from .proposal import build_candidate, validate_proposal
 from .reminder import render_reminder
@@ -535,7 +536,7 @@ class CoreContractRepairTests(unittest.TestCase):
         finally:
             fixture.tearDown()
 
-    def test_required_goal_text_over_budget_fails_before_provider(self):
+    def test_explicit_strict_goal_budget_fails_before_provider(self):
         fixture = engine_fixtures.EngineTests("test_clean_commit_silent_and_same_trigger_idempotence")
         fixture.setUp()
         try:
@@ -545,8 +546,8 @@ class CoreContractRepairTests(unittest.TestCase):
                 "event_seq": 2, "kind": "user_message", "occurred_at_step": 2,
                 "source_ids": ["huge-user"], "payload": {}}, [user])
             provider = engine_fixtures.ScriptedProvider()
-            result = CycleEngine(fixture.store, provider, task_text="task").run(
-                "oversized-goal")
+            result = CycleEngine(fixture.store, provider, task_text="task",
+                token_proxy=TokenProxy(input_limit=32768)).run("oversized-goal")
             self.assertEqual(result["status"], "runtime_failed")
             self.assertEqual(result["error_code"], "input_budget_exceeded")
             self.assertEqual(result["logical_calls"], 0)

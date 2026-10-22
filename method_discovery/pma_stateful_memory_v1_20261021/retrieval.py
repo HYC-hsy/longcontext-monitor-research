@@ -266,12 +266,16 @@ class Workset:
 
 
 class WorksetBuilder:
-    def __init__(self, *, input_limit: int = 32768) -> None:
+    def __init__(self, *, input_limit: int | None = None,
+                 soft_target: int = 32768) -> None:
+        if input_limit is not None and (type(input_limit) is not int or input_limit < 1):
+            raise ValueError("input_limit must be a positive integer or None")
         self.input_limit = input_limit
+        self.soft_target = soft_target
 
     def build(self, snapshot: dict, events: list[dict], ledger: dict,
               ranked: list[dict], cycle_id: str, frozen_tip: int,
-              measure: Callable[[dict], int],
+              measure: Callable[[dict], int | None],
               archive: dict[tuple[str, int], dict] | None = None,
               previous_attempt_diagnostics: list[dict] | None = None) -> Workset:
         archive = archive or {}
@@ -366,7 +370,9 @@ class WorksetBuilder:
                  "pending_after_batch_count": len(events)}
         work = Workset(mandatory, batch, [], [],
                        digest([cycle_id, snapshot["state_version"], frozen_tip]))
-        if measure(work.payload()) > self.input_limit:
+        mandatory_size = measure(work.payload())
+        if self.input_limit is not None and (mandatory_size is None or
+                                             mandatory_size > self.input_limit):
             raise ContractError("input_budget_exceeded", "mandatory")
         for event in events:
             expected = batch["processing_range"]["to_event_seq"] + 1
@@ -383,7 +389,11 @@ class WorksetBuilder:
             batch["events"].append(entry)
             batch["processing_range"]["to_event_seq"] = event["event_seq"]
             batch["pending_after_batch_count"] -= 1
-            if measure(work.payload()) > self.input_limit:
+            size = measure(work.payload())
+            target = self.input_limit if self.input_limit is not None else self.soft_target
+            if size is None or size > target:
+                if self.input_limit is None and len(batch["events"]) == 1:
+                    continue  # Never discard the earliest complete atomic event.
                 batch["events"].pop()
                 batch["processing_range"]["to_event_seq"] -= 1
                 batch["pending_after_batch_count"] += 1
@@ -399,13 +409,18 @@ class WorksetBuilder:
             bundle["historical_requirements"] = historical_for(
                 bundle["linked_closed_gaps"])
             work.optional_bundles.append(bundle)
-            if measure(work.payload()) > self.input_limit:
+            size = measure(work.payload())
+            target = self.input_limit if self.input_limit is not None else self.soft_target
+            if size is None or size > target:
                 work.optional_bundles.pop()
                 omission = {"record_id": record["record_id"],
-                            "reason": "optional_bundle_overflow"}
+                            "reason": ("proxy_count_unavailable" if size is None else
+                                       "optional_bundle_overflow")}
                 work.omissions.append(omission)
-                if measure(work.payload()) > self.input_limit:
-                    raise ContractError("input_budget_exceeded", "omission_manifest")
+                if self.input_limit is not None:
+                    omitted_size = measure(work.payload())
+                    if omitted_size is None or omitted_size > self.input_limit:
+                        raise ContractError("input_budget_exceeded", "omission_manifest")
             else:
                 included.add(record["record_id"])
         return work

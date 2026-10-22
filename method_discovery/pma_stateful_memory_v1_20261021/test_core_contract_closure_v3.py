@@ -165,7 +165,8 @@ class ClosureV3Tests(unittest.TestCase):
             try:
                 provider = ScriptedProvider()
                 result = CycleEngine(store, provider, task_text="task",
-                    token_proxy=RejectHistoricalSelection()).run("selection-budget")
+                    token_proxy=RejectHistoricalSelection(input_limit=32768)).run(
+                        "selection-budget")
                 self.assertEqual(result["status"], "committed_selection_failed")
                 self.assertEqual(result["error_code"], "input_budget_exceeded")
                 self.assertEqual([item["role"] for item in provider.calls],
