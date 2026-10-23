@@ -336,17 +336,39 @@ def export(run_root: Path, output: Path, secrets: list[str], run_id: str) -> dic
                          'bytes': path.stat().st_size, 'sha256': file_sha(path)}
         return json.loads(path.read_bytes())
 
-    bootstrap = one_json('evaluation_bootstrap', run_root / 'archive/bootstrap_retry_v1.json')
-    native_checks = one_json('native_reports_checked', run_root / 'archive/native_reports_checked.json')
+    receipts = [run_root / 'archive' / f'{name}.json' for name in
+                ('bootstrap_retry_v1', 'download_retry_v1')]
+    receipts = [path for path in receipts if path.is_file()]
+    if len(receipts) != 1:
+        raise ValueError('evaluation preparation receipt not unique')
+    bootstrap = one_json('evaluation_bootstrap', receipts[0])
+    if bootstrap.get('run_id') != run_id or bootstrap.get('protocol') != receipts[0].stem:
+        raise ValueError('evaluation preparation identity differs')
+    for number, path in enumerate(sorted((run_root / 'archive' /
+            f'{receipts[0].stem}_stages').glob('*.json')), 1):
+        one_json(f'evaluation_stage_{number}', path)
     report_paths = list((run_root / 'jobs').glob('*/*/verifier/ctrf.json'))
-    if len(report_paths) != 1:
-        raise ValueError('native CTRF report source not unique')
-    ctrf = one_json('native_ctrf', report_paths[0])
-    summary = ctrf['results']['summary']
-    if (bootstrap.get('run_id') != run_id or bootstrap.get('status') != 'evaluation_completed'
-            or bootstrap.get('test_starts') != 1 or native_checks.get('run_id') != run_id
-            or not isinstance(status.get('native_result', {}).get('rewards', {}).get('reward'), (int, float))):
-        raise ValueError('evaluation identity or completion differs')
+    native = status.get('native_result', {})
+    complete = bootstrap.get('status') == 'evaluation_completed'
+    if complete:
+        checks = one_json('native_reports_checked',
+                          run_root / 'archive/native_reports_checked.json')
+        if len(report_paths) != 1:
+            raise ValueError('native CTRF report source not unique')
+        ctrf = one_json('native_ctrf', report_paths[0])
+        summary = ctrf['results']['summary']
+        if (bootstrap.get('test_starts') != 1 or checks.get('run_id') != run_id or
+                native.get('status') != 'native_recorded' or
+                not isinstance(native.get('rewards', {}).get('reward'), (int, float))):
+            raise ValueError('evaluation identity or completion differs')
+    elif (bootstrap.get('status') == 'bootstrap_failed' and
+          bootstrap.get('test_starts') == 0 and not report_paths and
+          native.get('status') == 'unavailable' and
+          native.get('reason') == 'bootstrap_failed' and
+          not native.get('rewards')):
+        summary = None
+    else:
+        raise ValueError('unrecognized incomplete evaluation state')
     sources['live_result'] = {'file': 'archive/live_result.json',
         'bytes': (run_root / 'archive/live_result.json').stat().st_size,
         'sha256': file_sha(run_root / 'archive/live_result.json')}
@@ -354,10 +376,14 @@ def export(run_root: Path, output: Path, secrets: list[str], run_id: str) -> dic
         'bootstrap_status': bootstrap['status'], 'test_entry_starts': bootstrap['test_starts'],
         'original_script_sha256': bootstrap['original_sha256'],
         'effective_script_sha256': bootstrap['effective_sha256'],
-        'ctrf_summary': {key: summary[key] for key in
-            ('tests', 'passed', 'failed', 'skipped', 'pending', 'other')},
-        'reward': status['native_result']['rewards']['reward'],
-        'native_result_status': status['native_result']['status']}
+        'download_coverage': bootstrap.get('coverage'),
+        'max_download_attempts': bootstrap.get('max_attempts'),
+        'failed_stage': bootstrap.get('failed_stage'),
+        'ctrf_summary': ({key: summary[key] for key in
+            ('tests', 'passed', 'failed', 'skipped', 'pending', 'other')}
+            if summary is not None else None),
+        'reward': native['rewards']['reward'] if complete else 'unavailable',
+        'native_result_status': native['status']}
 
     output.mkdir(parents=True, exist_ok=False)
     sanitizer = Sanitizer(secrets)
