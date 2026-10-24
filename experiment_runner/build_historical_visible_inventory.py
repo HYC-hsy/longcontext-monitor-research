@@ -20,7 +20,7 @@ PREFIXES = {
     'LongContext': ('pos', 'pma', 'gap', 'stateful', 'egv', 'candidate', 'source_memory', 'sr1'),
     'drive': ('ga-real', 'pma_d1', 'pma12_native', 'pma-harbor'),
 }
-EXCLUDED = {'egv1_two_restart_prepared_20261025'}  # active two-slot real batch
+EXCLUDED = set()  # only ended real episodes with live_result are included
 GA_SOURCE = {
     'pma-1792c5ce7df34858': '66705fbba0771788f336884b433c9cb7dfe2372f',
     'pma-a927e53b0aef4e8e': 'f4f0eaafd412f91392b3f806f452b410245b924d',
@@ -94,8 +94,11 @@ def _public_packages() -> tuple[dict[str, dict], list[str]]:
                 'reminder_linked': False,
                 'package_kind': 'ga_historical_visible_projection',
             }
-    generic = REPO / 'experiment_runner/historical_visible_sources_20261025'
-    if generic.is_dir():
+    for generic_name in ('historical_visible_sources_20261025',
+                         'evidence_gap_two_real_visible_20261025'):
+        generic = REPO / 'experiment_runner' / generic_name
+        if not generic.is_dir():
+            continue
         checked.append(str(generic.relative_to(REPO)).replace('\\', '/'))
         for directory in generic.iterdir():
             index = directory / 'INDEX.json'

@@ -4,19 +4,19 @@ The per-run source of truth is [HISTORICAL_VISIBLE_COVERAGE_20261025.json](HISTO
 
 ## Scope and result
 
-A bounded search of existing run indices, reports, selected local run roots, and prior public archives identified **100 distinct ended real Task episodes**: 27 GA-only, 24 original PMA, 28 two-stage PMA-gap, 7 PoS, 4 evidence-bound PMA-gap, 6 stateful memory, 3 PoS+PMA shared-view, and 1 PoS+PMA complement. Fourteen separate real **auxiliary-only diagnostic probes** were excluded from the Task-episode denominator. Synthetic/full-fake fixtures are not counted. The active two-task run was explicitly excluded and neither read for this inventory nor interrupted.
+A bounded search of existing run indices, reports, selected local run roots, and prior public archives identified **102 distinct ended real Task episodes**: 27 GA-only, 24 original PMA, 28 two-stage PMA-gap, 7 PoS, 6 evidence-bound PMA-gap, 6 stateful memory, 3 PoS+PMA shared-view, and 1 PoS+PMA complement. Fourteen separate real **auxiliary-only diagnostic probes** were excluded from the Task-episode denominator. Synthetic/full-fake fixtures are not counted. The two evidence-bound episodes were added only after both reached their recorded terminal/evaluation states; neither was interrupted or rerun for this audit.
 
 The search is not an assertion that these are every experiment ever performed. The JSON records the root prefixes and directories examined. Earlier or moved private roots outside those bounds, runs without a recognizable `live_result.json`, and unpublished research formats remain unenumerated.
 
-Statuses are per evidence category, not a single `complete` flag: A = visible content publicly auditable; B = private source exists but linkage/projection awaits verification; C = not captured or source lost; D = source exists but cannot safely be published; E = mechanism/stage not applicable; F = not established. Aggregate counts among the 100 episodes:
+Statuses are per evidence category, not a single `complete` flag: A = visible content publicly auditable; B = private source exists but linkage/projection awaits verification; C = not captured or source lost; D = source exists but cannot safely be published; E = mechanism/stage not applicable; F = not established. Aggregate counts among the 102 episodes:
 
 | Category | A | B | C | D | E | F |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Task request, public response, actions and receipts | 72 | 0 | 21 | 0 | 5 | 2 |
-| Auxiliary phase requests and public responses | 73 | 0 | 0 | 0 | 27 | 0 |
-| Memory/gap changes | 56 | 0 | 0 | 0 | 27 | 17 |
-| Reminder delivery and follow-up | 46 | 0 | 10 | 0 | 27 | 17 |
-| Native evaluation public status/result | 100 | 0 | 0 | 0 | 0 | 0 |
+| Task request, public response, actions and receipts | 74 | 0 | 21 | 0 | 5 | 2 |
+| Auxiliary phase requests and public responses | 75 | 0 | 0 | 0 | 27 | 0 |
+| Memory/gap changes | 58 | 0 | 0 | 0 | 27 | 17 |
+| Reminder delivery and follow-up | 48 | 0 | 10 | 0 | 27 | 17 |
+| Native evaluation public status/result | 102 | 0 | 0 | 0 | 0 | 0 |
 
 An A for the evaluation category may mean an explicitly **unavailable** reward, not that testing occurred or produced a score. The per-run fields distinguish those cases. An A for a source stream is not proof that a model made a sound inference. A reminder decision without a matching complete later Task request is not counted as delivered.
 
@@ -25,9 +25,10 @@ An A for the evaluation category may mean an explicitly **unavailable** reward, 
 - [GA-only successful SQLite](ga_only_sqlite_visible_20261025/README.md), run `pma-1792c5ce7df34858`: condition A/U, source `66705fbba0771788f336884b433c9cb7dfe2372f`; original `live_result`, research-events and terminal hashes matched the contemporaneous summary. The package has 17 actual Task requests and public responses, 16 tool calls with later Task-visible receipts, the native evaluation summary and a line-by-line original-to-public hash map. Inspect turns 1-4 for source acquisition, 5-13 for toolchain/build, 14 for PATH, 15 for gcov, and 17 for the completion claim. One shell's PATH check is not evidence of all future process environments.
 - [Earlier denied GA-only SQLite](ga_only_sqlite_denied_visible_20261025/README.md), run `pma-a927e53b0aef4e8e`: one attempted Task HTTP call ended in 403, with no complete public model response or action. Its historical reward record must not be used as evidence of task-solving failure.
 - [Twelve other real GA-only A-arm runs](ga_only_historical_visible_20261025/README.md) from the 2026-10-15 A/B batch. Each has the visible Task turn/action/receipt stream, terminal/evaluation projection and per-line provenance. The `pma-` ID prefix does not make an A-arm run a PMA run.
-- [Thirty-three other ended real runs](historical_visible_sources_20261025/README.md) across original PMA, PoS, mixed variants, stateful memory and evidence-bound PMA-gap. These include their retained Task and auxiliary visible streams, memory/trajectory files when present, terminal status and original/public hashes. Sixteen PMA-style packages additionally have exact-text/timestamp reminder-to-request links; 412 of 413 generated reminders matched a later complete Task request with visible response. The unmatched one is reported, not promoted to delivery. Other variants' reminder linkage is left B/F/C where independently unverified.
+- [Thirty-three other ended real runs](historical_visible_sources_20261025/README.md) across original PMA, PoS, mixed variants, stateful memory and evidence-bound PMA-gap. These include their retained Task and auxiliary visible streams, memory/trajectory files when present, terminal status and original/public hashes. Sixteen PMA-style packages additionally have exact-text/timestamp reminder-to-request links; 412 of 413 generated reminders matched a later complete Task request with visible response. The unmatched one is reported, not promoted to delivery. Other variants' reminder linkage is left F/C where independently unverified.
+- [The two newly ended evidence-bound PMA-gap episodes](evidence_gap_two_real_visible_20261025/README.md): SQLite reward 1.0 and HTML/JavaScript-filter reward 0.0. Both have full captured Task and two-stage auxiliary event streams, evidence-bound final memory, original/public row maps, reminder links and a safe native-evaluation summary. These real outcomes were not known when the first 100-run matrix was committed.
 
-These 47 new packages were checked against the **currently present private source bytes** and their final public file/line hashes. Sensitive fields and hidden reasoning were removed or masked with per-package redaction records. Some streams retained only truncated Task-visible tool output; no missing stdout was reconstructed. The existing exporters, rather than a model-generated narrative, preserve the recorded commands, public responses and receipts.
+These 49 new packages were checked against the **currently present private source bytes** and their final public file/line hashes. Sensitive fields and hidden reasoning were removed or masked with per-package redaction records. Some streams retained only truncated Task-visible tool output; no missing stdout was reconstructed. The existing exporters, rather than a model-generated narrative, preserve the recorded commands, public responses and receipts.
 
 ## Previously public packages and irrecoverable gaps
 
@@ -37,7 +38,7 @@ Twenty-five older A/B arms remain in existing redacted archives: [six-task batch
 
 Five stateful-memory attempts stopped during initialization before a Task request (E); one later stateful episode has Task-visible material but its reminder linkage is not independently certified here. Two PoS runs have native evaluation records but no retained Task event source at the inspected paths (F). One original PMA run has a generated reminder without exact text in a later complete Task request; it is not counted as delivered. For nine PoS/mixed runs, auxiliary and Task streams exist but reminder-to-request association has not been independently reconstructed (F); unlike a B, there is no identified unpublished private reminder-link file waiting to be copied. Where the matrix says F for memory transitions, do not infer that no memory existed: the available source does not establish the requested transition history.
 
-Consequently, the successful GA-only SQLite run was **not the only GA-only public-trajectory gap**: thirteen local GA-only packages were backfilled here (the success, the denied attempt, and twelve A-arm runs), while eleven older GA-only October-14 arms retain an unrecoverable full Task prompt/response gap. Full stepwise causal comparison across those October-14 A/B arms is not supported by the surviving hashes and summaries. The 100 public evaluation outcomes can be tabulated, but they cannot all support stepwise behavioral or reminder-effect claims. A reward, source hash, or later memory entry cannot replace absent contemporaneous model-visible content.
+Consequently, the successful GA-only SQLite run was **not the only GA-only public-trajectory gap**: thirteen local GA-only packages were backfilled here (the success, the denied attempt, and twelve A-arm runs), while eleven older GA-only October-14 arms retain an unrecoverable full Task prompt/response gap. Full stepwise causal comparison across those October-14 A/B arms is not supported by the surviving hashes and summaries. The 102 public evaluation outcomes can be tabulated, but they cannot all support stepwise behavioral or reminder-effect claims. A reward, source hash, or later memory entry cannot replace absent contemporaneous model-visible content.
 
 ## Verification and limits
 
