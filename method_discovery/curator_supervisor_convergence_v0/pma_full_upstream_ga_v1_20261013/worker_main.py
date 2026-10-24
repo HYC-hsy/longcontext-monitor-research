@@ -44,7 +44,7 @@ def install_transport_audit(agent, archive: Path) -> None:
         calls += 1
         candidate_agent = agent._memory_agent
         phase = (candidate_agent.transport_phase if getattr(agent, '_research_candidate', None)
-                 == 'pma_gap_memory_v0' else "bank_management" if tools else "context_decision")
+                 in ('pma_gap_memory_v0', 'pma_gap_evidence_v1') else "bank_management" if tools else "context_decision")
         started = time.time()
         status = "complete"
         append_private_audit(archive / "memory_payload.jsonl", {
@@ -53,7 +53,7 @@ def install_transport_audit(agent, archive: Path) -> None:
             "cycle_step": getattr(candidate_agent, '_step', None), "call_sequence": calls})
         try:
             response = await original(prompt=prompt, system=system, tools=tools)
-            if getattr(agent, '_research_candidate', None) == 'pma_gap_memory_v0':
+            if getattr(agent, '_research_candidate', None) in ('pma_gap_memory_v0', 'pma_gap_evidence_v1'):
                 append_private_audit(archive / 'gap_visible_transport.jsonl', {
                     'phase': phase, 'call_sequence': calls,
                     'cycle_step': getattr(candidate_agent, '_step', None),
@@ -71,8 +71,25 @@ def install_transport_audit(agent, archive: Path) -> None:
     agent._memory_llm.call = audited_call
 
 
+def fake_evidence_gap_arguments(candidate_agent, prompt):
+    """Fixture-only selection from actual displayed P1 sources, never invented IDs."""
+    parts = candidate_agent._parts
+    if parts is None or parts.text != prompt:
+        raise RuntimeError('fake evidence fixture has no bound P1 request')
+    for handle, visible in parts.catalog.items():
+        if visible.snapshot.record.source_kind != 'public':
+            continue
+        text = visible.snapshot.blob.text
+        for start, end in visible.visible_spans:
+            quote = text[start:end]
+            if quote and text.count(quote) == 1:
+                return {'content': 'Confirm the synthetic task result before completion.',
+                        'evidence': [{'source': handle, 'quote': quote}]}
+    raise RuntimeError('fake evidence fixture has no uniquely visible public source')
+
+
 async def serve(args: argparse.Namespace) -> None:
-    if args.deadline_epoch is None and args.research_candidate != 'pma_gap_memory_v0':
+    if args.deadline_epoch is None and args.research_candidate not in ('pma_gap_memory_v0', 'pma_gap_evidence_v1'):
         raise RuntimeError('uncapped PMA worker requires gap candidate identity')
     vendor = Path(__file__).resolve().parent / "vendor" / "pma_89e5c0d"
     sources = (Path(inspect.getfile(MemoryEnabledTerminus2)).resolve(),
@@ -108,14 +125,16 @@ async def serve(args: argparse.Namespace) -> None:
         from harbor.llms.base import LLMResponse
 
         async def offline_memory(*, prompt, system, tools=None):
-            if args.research_candidate == 'pma_gap_memory_v0':
+            if args.research_candidate in ('pma_gap_memory_v0', 'pma_gap_evidence_v1'):
                 phase = agent._memory_agent.transport_phase
                 if phase == 'maintenance':
                     calls = []
                     if agent._memory_agent._step == 1:
+                        arguments = (fake_evidence_gap_arguments(agent._memory_agent, prompt)
+                            if args.research_candidate == 'pma_gap_evidence_v1' else
+                            {'content': 'Confirm the synthetic task result before completion.'})
                         calls.append(SimpleNamespace(function=SimpleNamespace(
-                            name='memory_save_gap', arguments={
-                                'content': 'Confirm the synthetic task result before completion.'})))
+                            name='memory_save_gap', arguments=arguments)))
                     return LLMResponse(content='', tool_calls=calls)
                 if phase == 'selection':
                     return LLMResponse(content=(
@@ -204,7 +223,7 @@ def main() -> None:
     parser.add_argument("--deadline-epoch", type=lambda value: None if value == 'uncapped' else float(value), required=True)
     parser.add_argument("--fake-memory", action="store_true")
     parser.add_argument("--fake-memory-update", action="store_true")
-    parser.add_argument("--research-candidate", choices=("U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0"), default="U")
+    parser.add_argument("--research-candidate", choices=("U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0", "pma_gap_evidence_v1"), default="U")
     asyncio.run(serve(parser.parse_args()))
 
 
