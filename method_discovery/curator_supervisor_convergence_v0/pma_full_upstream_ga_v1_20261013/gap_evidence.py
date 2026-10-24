@@ -67,6 +67,7 @@ class SourceRecord:
     source_kind: str = "public"
     parent_revision_id: str | None = None
     parent_wrapper_source_id: str | None = None
+    tool_call_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -118,7 +119,7 @@ class SourceRegistry:
 
 def register_public_source(registry, *, event_id, role, text, order,
                            field_path, record_digest, record_digest_kind,
-                           parent_wrapper_source_id=None):
+                           parent_wrapper_source_id=None, tool_call_id=None):
     _require(isinstance(role, str) and role in {"task_instruction", "tool_observation", "agent_report",
                      "tool_command"}, "invalid_public_role")
     _require(all(_text(x) for x in (event_id, field_path, text, record_digest_kind))
@@ -128,7 +129,7 @@ def register_public_source(registry, *, event_id, role, text, order,
     row = SourceRecord(registry.namespace, source_id, "s" + sha256(source_id)[:12],
                        event_id, field_path, role, order, sha256(text),
                        record_digest, record_digest_kind,
-                       parent_wrapper_source_id=parent_wrapper_source_id)
+                       parent_wrapper_source_id=parent_wrapper_source_id, tool_call_id=tool_call_id)
     parent = None
     if parent_wrapper_source_id is not None:
         parent = registry.sources.get(parent_wrapper_source_id)
@@ -169,6 +170,8 @@ def _snapshot_valid(snapshot):
         valid = (r.source_kind == "public" and r.parent_revision_id is None and
                  _text(r.event_id) and _text(r.field_path) and r.role in
                  {"task_instruction", "tool_observation", "agent_report", "tool_command"})
+    if r.tool_call_id is not None and (r.role != "tool_observation" or not _text(r.tool_call_id)):
+        return False
     if not (valid and r.source_id == identity and r.handle == "s" + sha256(identity)[:12]):
         return False
     p = snapshot.parent_wrapper
@@ -262,7 +265,7 @@ def render_source_blocks(blocks, *, cycle_id, prefix="", suffix=""):
         _require(previous is None or previous[0] == snap, "source_handle_collision")
         combined = (() if previous is None else previous[1]) + spans
         by_handle[r.handle] = (snap, combined)
-        parts.append(f"\n[{r.handle} {r.role}]\n")
+        parts.append(f"\n[{r.handle} {r.role} event_order={r.order} field={r.field_path}]\n")
         parts.append("\n[hidden gap]\n".join(text[a:b] for a, b in spans))
         rows.append((r.source_id, spans))
     parts.append(suffix)

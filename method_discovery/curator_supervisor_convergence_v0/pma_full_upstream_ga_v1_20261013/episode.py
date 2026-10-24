@@ -46,7 +46,7 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
                        memory_api_key: str | None = None,
                        memory_profile: dict[str, Any] | None = None,
                        research_candidate: str = "U") -> MemoryEnabledTerminus2:
-    if research_candidate not in {"U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0"}:
+    if research_candidate not in {"U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0", "pma_gap_evidence_v1"}:
         raise ValueError("unknown research candidate")
     if memory_profile is not None:
         if (memory_profile.get("provider"), memory_profile.get("api_mode"),
@@ -86,9 +86,13 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
             keep_thinking=original.keep_thinking,
             use_structured_tools=original.use_structured_tools)
         agent._research_candidate = research_candidate
-    elif research_candidate == "pma_gap_memory_v0":
-        from gap_memory_agent import GapMemoryAgent
-        from gap_store import GapMemory
+    elif research_candidate in {"pma_gap_memory_v0", "pma_gap_evidence_v1"}:
+        if research_candidate == "pma_gap_evidence_v1":
+            from evidence_gap_agent import EvidenceGapMemoryAgent as GapMemoryAgent
+            from evidence_gap_store import EvidenceGapMemory as GapMemory
+        else:
+            from gap_memory_agent import GapMemoryAgent
+            from gap_store import GapMemory
         original = agent._memory_agent
         bank = GapMemory.from_dict(agent._memory.to_dict())
         agent._memory = bank
@@ -199,7 +203,7 @@ class PMAEpisode:
                 raise ValueError("unknown PMA event kind")
             self._record(event, result)
             candidate_agent = self.agent._memory_agent
-            if (getattr(self.agent, '_research_candidate', None) == 'pma_gap_memory_v0'
+            if (getattr(self.agent, '_research_candidate', None) in {'pma_gap_memory_v0', 'pma_gap_evidence_v1'}
                     and result.get('triggered')):
                 with (self.archive / 'gap_cycle.jsonl').open('a', encoding='utf-8') as stream:
                     stream.write(json.dumps({
@@ -208,6 +212,8 @@ class PMAEpisode:
                         'step': 1 if kind == 'task_start' else result.get('step_count'),
                         'report': deepcopy(candidate_agent.last_gap_report),
                         'formal_gaps': [entry.to_dict() for entry in self.agent._memory.entries],
+                        **({'evidence_report': deepcopy(candidate_agent.last_evidence_report)}
+                           if hasattr(candidate_agent, 'last_evidence_report') else {}),
                     }, ensure_ascii=False, sort_keys=True) + '\n')
                     stream.flush()
                     os.fsync(stream.fileno())
@@ -246,7 +252,7 @@ class PMAEpisode:
         self.agent._pending_injection = None
         self.agent._injection_used = False
         self.agent._task_description = text
-        if getattr(self.agent, "_research_candidate", None) == "pma_gap_memory_v0":
+        if getattr(self.agent, "_research_candidate", None) in {"pma_gap_memory_v0", "pma_gap_evidence_v1"}:
             self.agent._memory_agent.task = text
         if hasattr(self.agent._memory, "register_leaf"):
             self.agent._memory.register_leaf(event["event_id"], "task_instruction",
@@ -256,14 +262,25 @@ class PMAEpisode:
                                                text, event["sequence"])
         if self.agent._reset_status_on_episode:
             self.agent._memory.update_status("")
-        if self.agent._reset_knowledge_on_episode:
-            self.agent._memory.knowledge.clear()
-        if self.agent._reset_procedural_on_episode:
-            self.agent._memory.procedural.clear()
+        for reset, entries in (
+                (self.agent._reset_knowledge_on_episode, self.agent._memory.knowledge),
+                (self.agent._reset_procedural_on_episode, self.agent._memory.procedural)):
+            if reset:
+                if getattr(self.agent, "_research_candidate", None) == "pma_gap_evidence_v1":
+                    for entry in list(entries):
+                        self.agent._memory.delete_bound(entry.id, cycle_id="episode_reset")
+                else:
+                    entries.clear()
         self.agent._accumulate_step(step=1, observation=text)
+        if getattr(self.agent, "_research_candidate", None) == "pma_gap_evidence_v1":
+            from evidence_gap_context import event_identity
+            self.agent._evidence_task_identity = event_identity(event)
         triggered, reason = self.agent._trigger.should_trigger(step_count=1)
         self.started = True
         if triggered:
+            if getattr(self.agent, "_research_candidate", None) == "pma_gap_evidence_v1":
+                from evidence_gap_context import prepare_context
+                prepare_context(self.agent)
             await self.agent._trigger_memory_agent(step_count=1)
         return {"status": "started", "triggered": triggered, "trigger_reason": reason,
                 "initial_envelope_sha256": hashlib.sha256(
@@ -308,13 +325,15 @@ class PMAEpisode:
         analysis = event.get("analysis")
         if analysis is None:
             analysis = event.get("response")
-        if hasattr(self.agent._memory, "register_source"):
+        if (hasattr(self.agent._memory, "register_source") or
+                getattr(self.agent, "_research_candidate", None) == "pma_gap_evidence_v1"):
             # Candidate provenance accepts only GA's explicitly public body;
             # an auxiliary analysis field cannot be treated as visible text.
             analysis = event.get("response")
         if not isinstance(analysis, str):
             raise ValueError("complete public actor response required")
-        plan = event.get("plan")
+        plan = (None if getattr(self.agent, "_research_candidate", None) == "pma_gap_evidence_v1"
+                else event.get("plan"))
         if plan is not None and not isinstance(plan, str):
             raise ValueError("plan must be text or absent")
         step = attempt + 1
@@ -372,8 +391,14 @@ class PMAEpisode:
                                     analysis=analysis, plan=plan, commands=commands)
         if hasattr(self.agent._memory, "register_source"):
             self.agent._accumulated_observations[-1]["_source_event_id"] = event["event_id"]
+        if getattr(self.agent, "_research_candidate", None) == "pma_gap_evidence_v1":
+            from evidence_gap_context import event_identity
+            self.agent._accumulated_observations[-1]["_evidence_identity"] = event_identity(event)
         triggered, reason = self.agent._trigger.should_trigger(step_count=step)
         if triggered:
+            if getattr(self.agent, "_research_candidate", None) == "pma_gap_evidence_v1":
+                from evidence_gap_context import prepare_context
+                prepare_context(self.agent)
             await self.agent._trigger_memory_agent(step_count=step)
         self.last_completed_attempt = attempt
         return {"status": "observed", "triggered": triggered,
