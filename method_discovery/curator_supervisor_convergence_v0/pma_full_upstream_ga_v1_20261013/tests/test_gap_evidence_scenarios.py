@@ -30,9 +30,9 @@ def response(calls=(), content=""):
 
 def cite(prompt, role, quote):
     # Resolve only a handle in the submitted visible source block, not a fabricated ID.
-    matches = re.finditer(r"\[(s[0-9a-f]+) " + role + r"\b[^\]\n]*\]\n", prompt)
+    matches = re.finditer(r"\[([^\s\[\]]+) " + role + r"\b[^\]\n]*\]\n", prompt)
     for match in matches:
-        end = re.search(r"\n\[s[0-9a-f]+ ", prompt[match.end():])
+        end = re.search(r"\n\[[^\s\[\]]+ (?:task_instruction|tool_observation|tool_command|agent_report|memory_derived) ", prompt[match.end():])
         text = prompt[match.end():match.end() + end.start()] if end else prompt[match.end():]
         if quote in text:
             return [{"source": match[1], "quote": quote}]
@@ -144,7 +144,40 @@ class GapEvidenceScenarioTests(unittest.TestCase):
         restored.validate_bank()
         self.assertEqual(restored.to_dict(), bank.to_dict())
 
-    def test_invalid_achievement_gap_replacement_is_atomic_and_phase2_runs(self):
+    def test_repeated_in_place_revisions_keep_id_and_precycle_evidence(self):
+        bank = EvidenceGapMemory()
+        old_text = "Ascending order remains unverified."
+        key = bank.save_gap(old_text)
+
+        def plan(prompt):
+            prior = cite(prompt, "memory_derived", old_text)
+            self.assertEqual(prior[0]["source"], key)
+            return [("memory_save_gap", {"memory_id": key, "content": "First revision",
+                        "evidence": prior}),
+                    ("memory_save_gap", {"memory_id": key, "content": "Second revision",
+                        "evidence": prior}),
+                    ("memory_save_procedural", {"content": "Check ascending values",
+                        "evidence": prior})]
+
+        _, result, model = self.cycle(plan, [source(TASK)], bank)
+        self.assertEqual([op.success for op in result.operations], [True, True, True])
+        self.assertEqual([op.memory_id for op in result.operations[:2]], [key, key])
+        self.assertEqual([(entry.id, entry.content) for entry in bank.entries],
+                         [(key, "Second revision")])
+        self.assertEqual(len(bank.tombstones), 0)
+        current = bank.revisions[bank.active_revisions[key]]
+        previous = bank.revisions[current.previous_revision_id]
+        initial = bank.revisions[previous.previous_revision_id]
+        self.assertEqual(bank.blobs[initial.content_sha256], old_text)
+        self.assertEqual(bank.blobs[previous.content_sha256], "First revision")
+        for receipt in bank.receipts.values():
+            self.assertEqual(receipt.bound_refs[0].parent_revision_id, initial.revision_id)
+        self.assertNotIn("First revision", model.inputs[0]["prompt"])
+        self.assertNotIn("Second revision", model.inputs[0]["prompt"])
+        restored = EvidenceGapMemory.from_dict(bank.to_dict())
+        self.assertEqual(restored.to_dict(), bank.to_dict())
+
+    def test_invalid_in_place_gap_revision_preserves_old_entry_and_phase2_runs(self):
         bank = EvidenceGapMemory()
         old_text = "The requested ascending result has not yet been demonstrated."
         old = bank.save_gap(old_text)
@@ -153,8 +186,8 @@ class GapEvidenceScenarioTests(unittest.TestCase):
         def plan(prompt):
             evidence = cite(prompt, "task_instruction", TASK)
             evidence[0]["quote"] = "invented observation: all sorting properties verified"
-            return [("memory_delete", {"memory_id": old}),
-                    ("memory_save_gap", {"content": "Only performance remains.", "evidence": evidence})]
+            return [("memory_save_gap", {"memory_id": old,
+                    "content": "Only performance remains.", "evidence": evidence})]
 
         agent, result, model = self.cycle(plan, [source(TASK)], bank)
         self.assertFalse(agent.last_evidence_report["accepted"])

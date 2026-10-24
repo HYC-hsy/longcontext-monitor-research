@@ -89,20 +89,23 @@ class EvidenceAgentTests(unittest.TestCase):
         self.assertTrue(agent.last_evidence_report["accepted"])
         bank.validate_bank()
 
-    def test_failed_binding_after_delete_preserves_whole_bank(self):
+    def test_failed_binding_after_delete_keeps_committed_delete(self):
         bank = EvidenceGapMemory()
         old = bank.save_gap("old gap")
-        before = bank.to_dict()
         def plan(evidence):
             evidence[0]["quote"] = "absent quote"
             return reply([("memory_delete", {"memory_id": old}),
                           ("memory_save_gap", {"content": "replacement", "evidence": evidence})])
         agent, result, _ = self.run_cycle(plan, bank)
-        self.assertEqual(bank.to_dict(), before)
-        self.assertFalse(result.operations[0].success)
+        self.assertEqual(bank.entries, [])
+        self.assertEqual([op.success for op in result.operations], [True, False])
+        self.assertEqual(len(bank.tombstones), 1)
+        self.assertEqual(len(bank.receipts), 0)
+        self.assertTrue(agent.last_evidence_report["partial_success"])
         self.assertFalse(agent.last_evidence_report["accepted"])
+        bank.validate_bank()
 
-    def test_preflight_rejects_every_malformed_batch_without_partial_write(self):
+    def test_each_malformed_call_is_rejected_without_undoing_valid_sibling(self):
         bad_arguments = ["{", "[]", "null"]
         for arguments in bad_arguments:
             with self.subTest(arguments=arguments):
@@ -111,16 +114,22 @@ class EvidenceAgentTests(unittest.TestCase):
                     good.tool_calls.append(NS(function=NS(name="memory_save_gap", arguments=arguments)))
                     return good
                 agent, result, _ = self.run_cycle(plan)
-                self.assertFalse(result.operations[0].success)
-                self.assertEqual(agent.memory.entries, [])
+                self.assertEqual([op.success for op in result.operations], [True, False])
+                self.assertEqual([e.content for e in agent.memory.entries], ["new"])
+                self.assertEqual(len(agent.memory.receipts), 1)
+                self.assertTrue(agent.last_evidence_report["partial_success"])
+                agent.memory.validate_bank()
         for name, args in [("unknown", {}), ("memory_delete", {"memory_id": "missing"}),
                            ("memory_delete", {"memory_id": ["bad"]}),
                            ("memory_save_gap", {"content": "missing evidence"})]:
             with self.subTest(name=name, args=args):
                 agent, result, _ = self.run_cycle(lambda evidence: reply([
                     ("memory_save_gap", {"content": "new", "evidence": evidence}), (name, args)]))
-                self.assertFalse(result.operations[0].success)
-                self.assertEqual(agent.memory.entries, [])
+                self.assertEqual([op.success for op in result.operations], [True, False])
+                self.assertEqual([e.content for e in agent.memory.entries], ["new"])
+                self.assertEqual(len(agent.memory.receipts), 1)
+                self.assertTrue(agent.last_evidence_report["partial_success"])
+                agent.memory.validate_bank()
 
     def test_strict_evidence_and_unknown_fields(self):
         for mutate in [lambda e: [], lambda e: [dict(e[0], role="tool_observation")],
@@ -161,8 +170,10 @@ class EvidenceAgentTests(unittest.TestCase):
                     f"<parameter=evidence>{json.dumps(evidence)}</parameter>"
                     "</function></tool_call>" + tail)
             agent, result, _ = self.run_cycle(plan)
-            self.assertEqual(agent.memory.entries, [])
-            self.assertFalse(result.operations[0].success)
+            self.assertEqual([e.content for e in agent.memory.entries], ["new"])
+            self.assertEqual([op.success for op in result.operations], [True, False])
+            self.assertEqual(len(agent.memory.receipts), 1)
+            self.assertTrue(agent.last_evidence_report["partial_success"])
 
     def test_closing_only_xml_is_rejected_not_noop(self):
         for text in ["</tool_call>", "</tool_call >"]:
@@ -192,12 +203,13 @@ class EvidenceAgentTests(unittest.TestCase):
 
     def test_derived_precycle_memory_is_citable_and_new_output_is_not(self):
         bank = EvidenceGapMemory()
-        bank.save_gap("prior bounded inference")
+        key = bank.save_gap("prior bounded inference")
         model = Model(lambda e: reply())
         async def call(**kwargs):
             model.inputs.append(deepcopy(kwargs))
             if len(model.inputs) == 1:
-                handle = re.search(r"\[(s[0-9a-f]+) memory_derived\b[^\]\n]*\]", kwargs["prompt"])[1]
+                handle = re.search(r"\[([^\s\[\]]+) memory_derived\b[^\]\n]*\]", kwargs["prompt"])[1]
+                self.assertEqual(handle, key)
                 return reply([("memory_save_procedural", {"content": "retained inference",
                     "evidence": [{"source": handle, "quote": "prior bounded inference"}]})])
             return reply(content="<no_intervention/>")
@@ -210,10 +222,9 @@ class EvidenceAgentTests(unittest.TestCase):
         self.assertEqual(receipt.bound_refs[0].role, "memory_derived")
         self.assertNotIn("retained inference", model.inputs[0]["prompt"])
 
-    def test_writer_failure_does_not_publish_any_staged_change(self):
+    def test_writer_failure_does_not_undo_prior_committed_operations(self):
         bank = EvidenceGapMemory()
         old = bank.save_gap("keep original")
-        before = bank.to_dict()
         def plan(evidence):
             return reply([("memory_delete", {"memory_id": old}),
                 ("memory_save_gap", {"content": "first", "evidence": evidence}),
@@ -225,9 +236,14 @@ class EvidenceAgentTests(unittest.TestCase):
             return real(draft, kind, *args, **kwargs)
         with patch.object(EvidenceGapMemory, "apply_bound_write", failing):
             agent, result, _ = self.run_cycle(plan, bank)
-        self.assertEqual(bank.to_dict(), before)
-        self.assertFalse(result.operations[0].success)
+        self.assertEqual([op.success for op in result.operations], [True, True, False])
+        self.assertEqual([e.content for e in bank.entries], ["first"])
+        self.assertEqual(bank.procedural, [])
+        self.assertEqual(len(bank.tombstones), 1)
+        self.assertEqual(len(bank.receipts), 1)
+        self.assertNotIn(old, bank.active_revisions)
         self.assertIn("injected writer failure", agent.last_evidence_report["errors"])
+        bank.validate_bank()
 
     def test_post_publication_error_reports_committed_operations(self):
         bank = EvidenceGapMemory()
@@ -311,8 +327,9 @@ class EvidenceAgentTests(unittest.TestCase):
         prompt = model.inputs[0]["prompt"]
         for key, category in [(knowledge, "knowledge"), (procedural, "procedural"),
                               (gap, "gap"), ("status", "status")]:
-            self.assertRegex(prompt, re.escape(key) + r": s[0-9a-f]+ \(" +
-                             category + r"; derived memory\)")
+            self.assertIn(f"{key} ({category}; derived memory)", prompt)
+            self.assertIn(f"[{key} memory_derived ", prompt)
+            self.assertNotRegex(prompt, r"\[s[0-9a-f]+ memory_derived\b")
             self.assertIn(f"{category} 1/1", prompt)
         self.assertIn("Complete current memory view.", prompt)
         self.assertNotIn("Partial retrieval view", prompt)
@@ -320,22 +337,25 @@ class EvidenceAgentTests(unittest.TestCase):
         self.assertEqual(prompt.count("bounded unresolved gap"), 1)
         self.assertEqual(prompt.count("working status"), 1)
 
-    def test_duplicate_delete_and_new_source_handles_reject_entire_batch(self):
+    def test_duplicate_delete_and_new_source_handles_fail_independently(self):
         bank = EvidenceGapMemory()
         old = bank.save_gap("prior")
-        before = bank.to_dict()
         _, result, _ = self.run_cycle(lambda e: reply([
             ("memory_delete", {"memory_id": old}),
             ("memory_delete", {"memory_id": old})]), bank)
-        self.assertFalse(result.operations[0].success)
-        self.assertEqual(bank.to_dict(), before)
+        self.assertEqual([op.success for op in result.operations], [True, False])
+        self.assertEqual(bank.entries, [])
+        self.assertEqual(len(bank.tombstones), 1)
         def plan(evidence):
             return reply([("memory_save_gap", {"content": "new", "evidence": evidence}),
                 ("memory_save_procedural", {"content": "use new", "evidence": [
                     {"source": "new output", "quote": "new"}]})])
         _, result, _ = self.run_cycle(plan, bank)
-        self.assertFalse(result.operations[0].success)
-        self.assertEqual(bank.to_dict(), before)
+        self.assertEqual([op.success for op in result.operations], [True, False])
+        self.assertEqual([e.content for e in bank.entries], ["new"])
+        self.assertEqual(bank.procedural, [])
+        self.assertEqual(len(bank.receipts), 1)
+        bank.validate_bank()
 
     def test_raw_query_bm25_and_phase2_schema_unchanged(self):
         bank = EvidenceGapMemory()
