@@ -107,12 +107,24 @@ class EvidenceGapMemoryAgent(GapMemoryAgent):
             memory_ids = (["status"] if self.memory.status else [])
             memory_ids += [entry.id for entry in self._selected]
             memory_blocks, labels = [], []
+            totals = {"knowledge": len(self.memory.knowledge),
+                      "procedural": len(self.memory.procedural),
+                      "gap": len(self.gaps.entries), "status": int(bool(self.memory.status))}
+            selected = dict.fromkeys(totals, 0)
             for key in dict.fromkeys(memory_ids):
                 row = draft.memory_source(registry, key)
-                labels.append(f"{key}: {row.handle} (derived memory)")
+                category = draft._content(key)[0]
+                selected[category] += 1
+                labels.append(f"{key}: {row.handle} ({category}; derived memory)")
                 memory_blocks.append(RenderBlock(registry.snapshot(row.source_id)))
             prefix = f"## Step {step_count}\n## Current Memory Bank IDs\n"
             prefix += "\n".join(labels) or "(empty)"
+            prefix += "\nSelected / total entries: " + "; ".join(
+                f"{category} {selected[category]}/{total}" for category, total in totals.items())
+            if any(selected[category] < total for category, total in totals.items()):
+                prefix += "\nPartial retrieval view; unshown entries remain in the bank."
+            else:
+                prefix += "\nComplete current memory view."
             prefix += "\n## Visible Memory and Task / Recent Trajectory\n"
             suffix = ("\n## Your Task\nAnalyze the trajectory and update the memory bank. "
                       "Save important facts, record experiences, delete outdated entries. "
@@ -146,10 +158,10 @@ class EvidenceGapMemoryAgent(GapMemoryAgent):
             # Invalid structured arguments must not be replaced by a second plan.
             return [self._extract_tool_call(call) for call in calls]
         raw = self._strip_thinking(getattr(response, "content", None) or "")
-        if "<tool_call" not in raw:
+        if "<tool_call" not in raw and "</tool_call" not in raw:
             return []
         blocks = list(re.finditer(r"<tool_call>(.*?)</tool_call>", raw, re.DOTALL))
-        if len(blocks) != raw.count("<tool_call") or len(blocks) != raw.count("</tool_call>"):
+        if len(blocks) != raw.count("<tool_call") or len(blocks) != raw.count("</tool_call"):
             raise ValueError("malformed XML tool batch")
         parsed = []
         for block in blocks:
@@ -172,6 +184,9 @@ class EvidenceGapMemoryAgent(GapMemoryAgent):
         return parsed
 
     def _execute_tool_calls(self, response):
+        prepared = None
+        committed_report = None
+        operations = []
         try:
             calls = self._parse_batch(response)
             if not calls:
@@ -218,10 +233,19 @@ class EvidenceGapMemoryAgent(GapMemoryAgent):
                     action = "update_status" if kind == "status" else "save_" + kind
                     operations.append(MemoryOperation(action, key, value))
             prepared = self.memory.prepare_publication(draft)
+            committed_report = {**self.last_evidence_report, "accepted": True}
             self.memory.publish(prepared)
-            self.last_evidence_report["accepted"] = True
+            self.last_evidence_report = committed_report
             return operations
         except Exception as exc:
+            if (prepared is not None and self.memory.__dict__ is prepared
+                    and prepared.owner is self.memory
+                    and self.memory._generation == prepared.generation + 1):
+                # Publication is the commit point. A subsequent reporting failure
+                # cannot turn a committed transaction into a rejected batch.
+                self.last_evidence_report = committed_report
+                self.last_evidence_report["post_commit_error"] = str(exc)
+                return operations
             self.last_evidence_report["errors"].append(str(exc))
             return [MemoryOperation("evidence_batch", success=False, error=str(exc))]
         finally:

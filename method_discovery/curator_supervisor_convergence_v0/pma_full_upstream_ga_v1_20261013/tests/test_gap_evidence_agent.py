@@ -37,7 +37,7 @@ class Model:
     async def call(self, **kwargs):
         self.inputs.append(deepcopy(kwargs))
         if len(self.inputs) == 1:
-            match = re.search(r"\[(s[0-9a-f]+) tool_observation\]", kwargs["prompt"])
+            match = re.search(r"\[(s[0-9a-f]+) tool_observation\b[^\]\n]*\]", kwargs["prompt"])
             evidence = [{"source": match[1] if match else "unavailable", "quote": "check passed"}]
             return self.plan(evidence)
         if len(self.inputs) == 2:
@@ -164,6 +164,13 @@ class EvidenceAgentTests(unittest.TestCase):
             self.assertEqual(agent.memory.entries, [])
             self.assertFalse(result.operations[0].success)
 
+    def test_closing_only_xml_is_rejected_not_noop(self):
+        for text in ["</tool_call>", "</tool_call >"]:
+            with self.subTest(text=text):
+                agent, result, _ = self.run_cycle(lambda evidence: reply(content=text))
+                self.assertFalse(result.operations[0].success)
+                self.assertFalse(agent.last_evidence_report["accepted"])
+
     def test_missing_or_stale_preparation_does_not_abort_phase2(self):
         for prepare, raw in [(False, RAW), (True, "different raw")]:
             agent, result, _ = self.run_cycle(lambda e: reply([
@@ -190,7 +197,7 @@ class EvidenceAgentTests(unittest.TestCase):
         async def call(**kwargs):
             model.inputs.append(deepcopy(kwargs))
             if len(model.inputs) == 1:
-                handle = re.search(r"\[(s[0-9a-f]+) memory_derived\]", kwargs["prompt"])[1]
+                handle = re.search(r"\[(s[0-9a-f]+) memory_derived\b[^\]\n]*\]", kwargs["prompt"])[1]
                 return reply([("memory_save_procedural", {"content": "retained inference",
                     "evidence": [{"source": handle, "quote": "prior bounded inference"}]})])
             return reply(content="<no_intervention/>")
@@ -222,6 +229,42 @@ class EvidenceAgentTests(unittest.TestCase):
         self.assertFalse(result.operations[0].success)
         self.assertIn("injected writer failure", agent.last_evidence_report["errors"])
 
+    def test_post_publication_error_reports_committed_operations(self):
+        bank = EvidenceGapMemory()
+        old = bank.save_gap("old gap")
+        original = EvidenceGapMemory.publish
+        def publish_then_raise(owner, prepared):
+            original(owner, prepared)
+            raise RuntimeError("post-publication diagnostic failure")
+        def plan(evidence):
+            return reply([("memory_delete", {"memory_id": old}),
+                ("memory_save_gap", {"content": "replacement", "evidence": evidence})])
+        with patch.object(EvidenceGapMemory, "publish", publish_then_raise):
+            agent, result, model = self.run_cycle(plan, bank)
+        self.assertTrue(all(op.success for op in result.operations))
+        self.assertEqual([op.action for op in result.operations], ["delete_gap", "save_gap"])
+        self.assertEqual([entry.content for entry in bank.entries], ["replacement"])
+        self.assertTrue(agent.last_evidence_report["accepted"])
+        self.assertEqual(agent.last_evidence_report["errors"], [])
+        self.assertEqual(agent.last_evidence_report["post_commit_error"],
+                         "post-publication diagnostic failure")
+        self.assertIn("replacement", model.inputs[1]["prompt"])
+        self.assertNotIn("old gap", model.inputs[1]["prompt"])
+        self.assertEqual(agent.last_gap_report["errors"], [])
+        bank.validate_bank()
+
+    def test_pre_publication_error_still_reports_rejection(self):
+        bank = EvidenceGapMemory()
+        bank.save_gap("retain original")
+        before = bank.to_dict()
+        with patch.object(EvidenceGapMemory, "publish", side_effect=RuntimeError("before commit")):
+            agent, result, _ = self.run_cycle(lambda evidence: reply([
+                ("memory_save_gap", {"content": "rejected", "evidence": evidence})]), bank)
+        self.assertEqual(bank.to_dict(), before)
+        self.assertFalse(result.operations[0].success)
+        self.assertFalse(agent.last_evidence_report["accepted"])
+        self.assertNotIn("post_commit_error", agent.last_evidence_report)
+
     def test_invalid_preparation_and_consumed_preparation_are_nonfatal(self):
         bank = EvidenceGapMemory()
         model = Model(lambda e: reply())
@@ -249,12 +292,33 @@ class EvidenceAgentTests(unittest.TestCase):
             prompt = agent._build_phase1_prompt(RAW, 1)
         self.assertIn(keys[0], prompt)
         self.assertNotIn(keys[-1], prompt)
+        self.assertIn("knowledge 1/52", prompt)
+        self.assertIn("Partial retrieval view; unshown entries remain in the bank.", prompt)
         derived = [v for v in agent._parts.catalog.values()
                    if v.snapshot.record.role == "memory_derived"]
         self.assertEqual(len(derived), 1)
         self.assertEqual(derived[0].snapshot.blob.text, "fact 0")
         self.assertEqual(agent._parts.manifest.request_sha256, sha256(prompt))
         self.assertEqual(len(bank.active_revisions), 0)
+
+    def test_phase1_labels_preserve_bank_categories_without_body_duplication(self):
+        bank = EvidenceGapMemory()
+        knowledge = bank.save_knowledge("identical content")
+        procedural = bank.save_procedural("identical content")
+        gap = bank.save_gap("bounded unresolved gap")
+        bank.update_status("working status")
+        _, _, model = self.run_cycle(lambda evidence: reply(), bank)
+        prompt = model.inputs[0]["prompt"]
+        for key, category in [(knowledge, "knowledge"), (procedural, "procedural"),
+                              (gap, "gap"), ("status", "status")]:
+            self.assertRegex(prompt, re.escape(key) + r": s[0-9a-f]+ \(" +
+                             category + r"; derived memory\)")
+            self.assertIn(f"{category} 1/1", prompt)
+        self.assertIn("Complete current memory view.", prompt)
+        self.assertNotIn("Partial retrieval view", prompt)
+        self.assertEqual(prompt.count("identical content"), 2)
+        self.assertEqual(prompt.count("bounded unresolved gap"), 1)
+        self.assertEqual(prompt.count("working status"), 1)
 
     def test_duplicate_delete_and_new_source_handles_reject_entire_batch(self):
         bank = EvidenceGapMemory()
