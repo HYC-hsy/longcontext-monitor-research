@@ -297,6 +297,33 @@ class EvidenceBankTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'cyclic'):
             EvidenceGapMemory.from_dict(json.loads(json.dumps(data)))
 
+    def test_repeated_rendered_source_roundtrip_and_per_block_integrity(self):
+        bank = EvidenceGapMemory()
+        original, _ = self.parts('original')
+        visible = next(iter(original.catalog.values()))
+        block = RenderBlock(visible.snapshot)
+        parts = render_source_blocks([block, block], cycle_id='repeated')
+        handle = visible.snapshot.record.handle
+        refs = bind_evidence([{'source': handle, 'quote': 'public observation'},
+                              {'source': handle, 'quote': 'public observation'}], parts.catalog)
+        self.assertEqual(len(refs), 1)
+        self.assertEqual(len(parts.manifest.visibility_refs), 2)
+        self.assertEqual(parts.manifest.visibility_refs[0], parts.manifest.visibility_refs[1])
+        draft = bank.fork_write_draft()
+        draft.retain_manifest(parts)
+        draft.apply_bound_write('gap', 'fact', refs, cycle_id='repeated', op_index=0)
+        bank.publish(bank.prepare_publication(draft))
+        saved = json.loads(json.dumps(bank.to_dict()))
+        self.assertEqual(EvidenceGapMemory.from_dict(saved).to_dict(), bank.to_dict())
+        self.assertEqual(len(bank.sources), 1)
+        self.assertEqual(len(next(iter(bank.receipts.values())).bound_refs), 1)
+        for field, value in (('visibility_refs', [parts.manifest.visibility_refs[0], '0' * 64]),
+                             ('visible_spans', [[[0, 18]], [[0, 1]]])):
+            corrupted = json.loads(json.dumps(saved))
+            corrupted['gap_evidence']['manifests']['repeated'][field] = value
+            with self.assertRaises(ValueError):
+                EvidenceGapMemory.from_dict(corrupted)
+
 
 if __name__ == '__main__':
     unittest.main()

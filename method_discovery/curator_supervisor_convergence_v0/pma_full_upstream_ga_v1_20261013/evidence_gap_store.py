@@ -8,7 +8,7 @@ import uuid
 from gap_store import GapMemory
 from gap_evidence import (BoundRef, Receipt, RequestManifest, SourceRecord,
     SourceSnapshot, TextBlob, VisibleSource, bound_ref_valid, register_memory_source,
-    sha256, _snapshot_valid)
+    sha256, _snapshot_valid, _key)
 from source_memory import SourceMemory
 from rpds import HashTrieMap
 
@@ -436,9 +436,13 @@ class EvidenceGapMemory(GapMemory):
                                for span in spans)):
                     raise ValueError("invalid manifest spans")
                 combined[source] = combined.get(source, ()) + spans
-            if len(combined) != len(manifest.visibility_refs) or len(set(manifest.visibility_refs)) != len(combined):
+            if len(manifest.ordered_source_refs) != len(manifest.visibility_refs):
                 raise ValueError("invalid manifest visibility count")
-            for source, ref in zip(combined, manifest.visibility_refs):
+            expected_refs = {source: sha256(_key(manifest.cycle_id, manifest.request_sha256,
+                                                source, spans)) for source, spans in combined.items()}
+            for source, ref in zip(manifest.ordered_source_refs, manifest.visibility_refs):
+                if ref != expected_refs[source]:
+                    raise ValueError("invalid per-block visibility reference")
                 visible = self.visibility.get(ref)
                 if visible is not None and (visible.snapshot.record.source_id != source or
                         visible.visible_spans != combined[source] or visible.cycle_id != manifest.cycle_id):
