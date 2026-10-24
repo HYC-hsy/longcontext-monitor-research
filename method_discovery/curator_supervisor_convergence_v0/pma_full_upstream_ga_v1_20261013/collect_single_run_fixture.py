@@ -8,7 +8,18 @@ import json
 from pathlib import Path
 
 from .archive_live_six_task import private_values, redact
+from .export_gap_visible_audit import Sanitizer
 from .single_run_certification import EVIDENCE_FILES, verify_evidence
+
+
+def _verifiable_evidence_snapshot(raw: bytes, secrets: list[str]) -> tuple[bytes, int]:
+    """Keep hash-bearing synthetic IDs intact, or decline unsafe publication."""
+    value = json.loads(raw)
+    sanitizer = Sanitizer(secrets)
+    projected = sanitizer.clean(value)
+    if sanitizer.removals or projected != value:
+        raise RuntimeError('evidence snapshot needs redaction and cannot retain its binding')
+    return raw, 0
 
 
 def collect(condition: str, source: Path, target: Path, secrets: list[str],
@@ -49,7 +60,10 @@ def collect(condition: str, source: Path, target: Path, secrets: list[str],
     output = []
     for name, path in sorted(mapping.items()):
         raw = path.read_bytes()
-        public, removed = redact(raw, secrets)
+        public, removed = (_verifiable_evidence_snapshot(raw, secrets)
+                           if name == 'memory.json' and
+                           research_candidate == 'pma_gap_evidence_v1' else
+                           redact(raw, secrets))
         destination = target / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         with destination.open('xb') as stream:
