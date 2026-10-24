@@ -89,17 +89,19 @@ def _unique(paths: list[Path], kind: str) -> Path:
 
 
 def export(batch_root: Path, output: Path, secrets: list[str],
-           executed_code_commit: str) -> dict:
+           executed_code_commit: str, expected_slots: int = 20) -> dict:
     if re.fullmatch(r'[0-9a-f]{40}', executed_code_commit) is None:
         raise ValueError('executed code commit must be an exact SHA')
+    if expected_slots < 1:
+        raise ValueError('expected_slots must be positive')
     batch_root = batch_root.resolve(strict=True)
     selection_path = batch_root / 'selection_result.json'
     selection = json.loads(selection_path.read_bytes())
     slots = selection.get('slots', [])
-    if len(slots) != 20 or selection.get('remaining_not_started') != []:
-        raise ValueError('batch has not reached 20 distinct terminal slots')
+    if len(slots) != expected_slots or selection.get('remaining_not_started') != []:
+        raise ValueError('batch has not reached the expected terminal slots')
     output.mkdir(parents=True, exist_ok=False)
-    index = {'schema': 'pma-gap-batch20-visible-projection-v1',
+    index = {'schema': f'pma-gap-batch{expected_slots}-visible-projection-v1',
              'executed_code_commit': executed_code_commit,
              'selection_source_sha256': file_sha(selection_path),
              'selection_source_bytes': selection_path.stat().st_size,
@@ -213,10 +215,11 @@ def main() -> None:
     parser.add_argument('--task-profile', type=Path, required=True)
     parser.add_argument('--pma-profile', type=Path, required=True)
     parser.add_argument('--executed-code-commit', required=True)
+    parser.add_argument('--expected-slots', type=int, default=20)
     args = parser.parse_args()
     print(json.dumps(export(args.batch_root, args.output,
                             private_values(args.task_profile, args.pma_profile),
-                            args.executed_code_commit)))
+                            args.executed_code_commit, args.expected_slots)))
 
 
 if __name__ == '__main__':

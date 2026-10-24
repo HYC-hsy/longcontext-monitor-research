@@ -11,11 +11,13 @@ from pathlib import Path
 from .export_gap_visible_audit import file_sha, sha
 
 
-def verify(batch_root: Path, public_root: Path) -> dict:
+def verify(batch_root: Path, public_root: Path, expected_slots: int = 20) -> dict:
     batch_root = batch_root.resolve(strict=True)
     public_root = public_root.resolve(strict=True)
     index = json.loads((public_root / 'INDEX.json').read_bytes())
-    if index.get('schema') != 'pma-gap-batch20-visible-projection-v1' or len(index['slots']) != 20:
+    if (expected_slots < 1 or index.get('schema') !=
+            f'pma-gap-batch{expected_slots}-visible-projection-v1' or
+            len(index['slots']) != expected_slots):
         raise ValueError('public batch identity or slot count differs')
     if file_sha(batch_root / 'selection_result.json') != index['selection_source_sha256']:
         raise ValueError('private selection result changed')
@@ -77,8 +79,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--batch-root', type=Path, required=True)
     parser.add_argument('--public-root', type=Path, required=True)
+    parser.add_argument('--expected-slots', type=int, default=20)
     args = parser.parse_args()
-    print(json.dumps(verify(args.batch_root, args.public_root)))
+    print(json.dumps(verify(args.batch_root, args.public_root, args.expected_slots)))
 
 
 if __name__ == '__main__':

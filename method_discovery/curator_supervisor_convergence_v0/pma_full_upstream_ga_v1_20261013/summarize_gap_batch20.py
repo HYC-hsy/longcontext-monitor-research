@@ -28,15 +28,17 @@ def _seconds(section: dict | None) -> float | None:
     return round((end - start).total_seconds(), 3)
 
 
-def summarize(batch_root: Path, public_root: Path, authorization_index: Path) -> dict:
-    verified = verify(batch_root, public_root)
+def summarize(batch_root: Path, public_root: Path, authorization_index: Path,
+              expected_slots: int = 20) -> dict:
+    verified = verify(batch_root, public_root, expected_slots)
     index = json.loads((public_root / 'INDEX.json').read_bytes())
     auth = json.loads(authorization_index.read_bytes())
-    if (auth.get('authorizations_removed') is not True or len(auth.get('files', [])) != 20 or
+    if (auth.get('authorizations_removed') is not True or
+            len(auth.get('files', [])) != expected_slots or
             any((batch_root / row['slot'] / 'authorization.json').exists()
                 for row in auth['files'])):
         raise ValueError('one-use authorizations not fully revoked')
-    result = {'schema': 'pma-gap-batch20-result-v1',
+    result = {'schema': f'pma-gap-batch{expected_slots}-result-v1',
               'executed_code_commit': index['executed_code_commit'],
               'method': 'pma-gap', 'research_candidate': 'pma_gap_memory_v0',
               'evaluation_preparation': 'download_retry_v1',
@@ -129,7 +131,7 @@ def summarize(batch_root: Path, public_root: Path, authorization_index: Path) ->
             detail['capture_or_delivery_discrepancy'] = True
         result['slots'].append(detail)
     result['totals'] = {
-        'planned': 20, 'started': len(result['slots']),
+        'planned': expected_slots, 'started': len(result['slots']),
         'native_scored': sum(x['reward'] != 'unavailable' for x in result['slots']),
         'reward_one': sum(x['reward'] == 1.0 for x in result['slots']),
         'reward_zero': sum(x['reward'] == 0.0 for x in result['slots']),
@@ -153,8 +155,10 @@ def main() -> None:
     parser.add_argument('--public-root', type=Path, required=True)
     parser.add_argument('--authorization-index', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--expected-slots', type=int, default=20)
     args = parser.parse_args()
-    result = summarize(args.batch_root, args.public_root, args.authorization_index)
+    result = summarize(args.batch_root, args.public_root, args.authorization_index,
+                       args.expected_slots)
     with args.output.open('xb') as stream:
         stream.write(canonical(result) + b'\n')
     print(json.dumps(result['totals']))
