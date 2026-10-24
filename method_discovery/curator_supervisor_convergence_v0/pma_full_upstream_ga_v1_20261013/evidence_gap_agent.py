@@ -62,17 +62,24 @@ class EvidenceGapMemoryAgent(GapMemoryAgent):
             if not isinstance(raw_observation, str) or not isinstance(blocks, list):
                 raise ValueError("invalid visible context")
             registry = SourceRegistry(self._namespace)
-            rendered = []
+            rendered, registered = [], {}
             for block in blocks:
                 if not isinstance(block, dict):
                     raise ValueError("invalid source block")
+                parent = None
+                if "parent_field_path" in block:
+                    parent = registered[(block["source_id"], block["parent_field_path"])]
                 _, row = register_public_source(
                     registry, event_id=block["source_id"], role=block["role"],
                     text=block["text"], order=block["order"],
                     field_path=block["field_path"], record_digest=block["record_digest"],
                     record_digest_kind=block["record_digest_kind"],
-                    tool_call_id=block.get("tool_call_id"))
-                rendered.append(RenderBlock(registry.snapshot(row.source_id)))
+                    tool_call_id=block.get("tool_call_id"),
+                    parent_wrapper_source_id=parent)
+                registered[(block["source_id"], block["field_path"])] = row.source_id
+                spans = block.get("render_spans")
+                if spans is None or spans:
+                    rendered.append(RenderBlock(registry.snapshot(row.source_id), spans))
             self._prepared = (sha256(raw_observation), registry, rendered, None)
         except (ValueError, TypeError, KeyError) as exc:
             self._prepared = (None, None, None, str(exc))

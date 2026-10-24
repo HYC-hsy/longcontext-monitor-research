@@ -170,7 +170,7 @@ def _snapshot_valid(snapshot):
         valid = (r.source_kind == "public" and r.parent_revision_id is None and
                  _text(r.event_id) and _text(r.field_path) and r.role in
                  {"task_instruction", "tool_observation", "agent_report", "tool_command"})
-    if r.tool_call_id is not None and (r.role != "tool_observation" or not _text(r.tool_call_id)):
+    if r.tool_call_id is not None and (r.role not in {"tool_observation", "tool_command"} or not _text(r.tool_call_id)):
         return False
     if not (valid and r.source_id == identity and r.handle == "s" + sha256(identity)[:12]):
         return False
@@ -181,15 +181,20 @@ def _snapshot_valid(snapshot):
         return False
     pr = p.record
     if not (r.source_kind == pr.source_kind == "public" and
-            r.role == pr.role == "tool_observation" and r.namespace == pr.namespace
+            r.role == pr.role and r.role in {"tool_observation", "tool_command"} and r.namespace == pr.namespace
             and r.parent_wrapper_source_id == pr.source_id and
             (r.event_id, r.order, r.record_digest, r.record_digest_kind) ==
             (pr.event_id, pr.order, pr.record_digest, pr.record_digest_kind) and
-            r.field_path.rsplit("/", 1)[0] == pr.field_path):
+            r.field_path.startswith(pr.field_path + "/")
+            and r.tool_call_id == pr.tool_call_id):
         return False
     try:
         envelope = json.loads(p.blob.text)
-        return isinstance(envelope, dict) and envelope.get(r.field_path.rsplit("/", 1)[-1]) == b.text
+        for field in r.field_path[len(pr.field_path) + 1:].split("/"):
+            if not isinstance(envelope, dict) or field not in envelope:
+                return False
+            envelope = envelope[field]
+        return isinstance(envelope, str) and envelope == b.text
     except (ValueError, TypeError):
         return False
 
