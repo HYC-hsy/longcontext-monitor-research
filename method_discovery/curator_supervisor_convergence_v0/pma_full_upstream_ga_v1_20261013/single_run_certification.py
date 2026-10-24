@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import sys
 
 from .prepare_six_task_manifest import V3_SOURCE_FILES, _committed_source_sha
 
@@ -57,6 +58,11 @@ GAP_SOURCE_FILES = SOURCE_FILES + (
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'gap_prompts.py',
 )
+EVIDENCE_GAP_SOURCE_FILES = GAP_SOURCE_FILES + tuple(
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    + name for name in ('gap_evidence.py', 'evidence_gap_store.py', 'evidence_gap_agent.py',
+                         'evidence_gap_context.py', 'source_memory.py', 'evidence_requirements.txt')
+)
 EVIDENCE_FILES = (
     'execution_identity.json',
     'live_result.json', 'agent_start_identity.json', 'agent_end_native.json',
@@ -80,6 +86,33 @@ def _committed_evidence_sha(checkout: Path, path: Path) -> str:
     return digest
 
 
+def require_bound_gap_memory(path: Path) -> None:
+    """Validate final bank links using its canonical loader, not a reminder proxy."""
+    stage = Path(__file__).resolve().parent
+    original_path = sys.path[:]
+    try:
+        sys.path[:0] = [str(stage), str(stage / 'vendor/pma_89e5c0d/src')]
+        from evidence_gap_store import EvidenceGapMemory
+        modules = {name: stage / (name + '.py') for name in (
+            'evidence_gap_store', 'gap_evidence', 'gap_store', 'source_memory')}
+        modules['memory_agent.memory.universal_memory'] = (
+            stage / 'vendor/pma_89e5c0d/src/memory_agent/memory/universal_memory.py')
+        if any(Path(sys.modules[name].__file__).resolve() != expected.resolve()
+               for name, expected in modules.items()):
+            raise RuntimeError('evidence fixture validator loaded foreign source')
+        memory = EvidenceGapMemory.from_dict(json.loads(path.read_text(encoding='utf-8')))
+    finally:
+        sys.path[:] = original_path
+    for gap in memory.entries:
+        revision = memory.revisions.get(memory.active_revisions.get(gap.id))
+        if revision is None or revision.receipt_id is None:
+            continue
+        receipt = memory.receipts[revision.receipt_id]
+        if receipt.bound_refs:
+            return
+    raise RuntimeError('evidence gap fixture has no committed bound gap')
+
+
 def verify_evidence(evidence: Path, *, require_committed: bool = True,
                     research_candidate: str | None = None,
                     conditions: tuple[str, ...] = ('A', 'B')) -> dict:
@@ -92,7 +125,8 @@ def verify_evidence(evidence: Path, *, require_committed: bool = True,
     for condition in conditions:
         current = source_identity(checkout,
             candidate=research_candidate is not None and condition == 'B',
-            gap=research_candidate == 'pma_gap_memory_v0' and condition == 'B')
+            gap=research_candidate == 'pma_gap_memory_v0' and condition == 'B',
+            evidence_gap=research_candidate == 'pma_gap_evidence_v1' and condition == 'B')
         base = evidence / condition
         required = [name for name in EVIDENCE_FILES
                     if condition == 'B' or name != 'memory_payload.jsonl']
@@ -160,15 +194,23 @@ def verify_evidence(evidence: Path, *, require_committed: bool = True,
             phases = [json.loads(line).get('phase') for line in
                       (base / 'memory_payload.jsonl').read_text(encoding='utf-8').splitlines()]
             required_phases = ({'maintenance', 'selection'}
-                if research_candidate == 'pma_gap_memory_v0' else
+                if research_candidate in ('pma_gap_memory_v0', 'pma_gap_evidence_v1') else
                 {'bank_management', 'context_decision'})
             if not required_phases <= set(phases):
                 raise RuntimeError('generic PMA two-stage transport absent')
-            if research_candidate == 'pma_gap_memory_v0' and set(phases) != required_phases:
+            if (research_candidate in ('pma_gap_memory_v0', 'pma_gap_evidence_v1')
+                    and set(phases) != required_phases):
                 raise RuntimeError('gap candidate made a non-two-stage transport call')
-            if research_candidate == 'pma_gap_memory_v0' and not (
+            if research_candidate in ('pma_gap_memory_v0', 'pma_gap_evidence_v1') and not (
                     base / 'gap_cycle.jsonl').is_file():
                 raise RuntimeError('gap candidate cycle evidence absent')
+            if research_candidate == 'pma_gap_evidence_v1':
+                cycles = [json.loads(line) for line in
+                          (base / 'gap_cycle.jsonl').read_text(encoding='utf-8').splitlines()]
+                if not any(row.get('evidence_report', {}).get('accepted') is True
+                           for row in cycles):
+                    raise RuntimeError('evidence gap fixture has no accepted evidence batch')
+                require_bound_gap_memory(base / 'memory.json')
         else:
             if any(row.get('event_type') == 'pma_reminder_appended' for row in events):
                 raise RuntimeError('generic Task-only fixture used PMA')
@@ -187,8 +229,9 @@ def verify_evidence(evidence: Path, *, require_committed: bool = True,
 
 
 def source_identity(checkout: Path, *, candidate: bool = False,
-                    gap: bool = False) -> dict:
-    files = GAP_SOURCE_FILES if gap else CANDIDATE_SOURCE_FILES if candidate else SOURCE_FILES
+                    gap: bool = False, evidence_gap: bool = False) -> dict:
+    files = (EVIDENCE_GAP_SOURCE_FILES if evidence_gap else GAP_SOURCE_FILES if gap else
+             CANDIDATE_SOURCE_FILES if candidate else SOURCE_FILES)
     return {name: _committed_source_sha(checkout, name) for name in files}
 
 

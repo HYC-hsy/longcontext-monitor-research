@@ -11,7 +11,8 @@ from .archive_live_six_task import private_values, redact
 from .single_run_certification import EVIDENCE_FILES, verify_evidence
 
 
-def collect(condition: str, source: Path, target: Path, secrets: list[str]) -> list[dict]:
+def collect(condition: str, source: Path, target: Path, secrets: list[str],
+            research_candidate: str = "U") -> list[dict]:
     identity = json.loads((source / 'run_identity.json').read_text(encoding='utf-8'))
     run = Path(identity['run_root']).resolve(strict=True)
     if not run.is_relative_to(source.resolve(strict=True)):
@@ -31,6 +32,8 @@ def collect(condition: str, source: Path, target: Path, secrets: list[str]) -> l
     if condition == 'B':
         mapping['memory_payload.jsonl'] = run / 'host_private/archive/memory_payload.jsonl'
         mapping['memory_events.jsonl'] = run / 'host_private/archive/events.jsonl'
+        if research_candidate == 'pma_gap_evidence_v1':
+            mapping['memory.json'] = run / 'host_private/archive/memory.json'
         for name in ('gap_cycle.jsonl', 'gap_visible_transport.jsonl'):
             path = run / 'host_private/archive' / name
             if path.is_file():
@@ -66,7 +69,7 @@ def main() -> None:
     parser.add_argument('--task-profile-file', type=Path, required=True)
     parser.add_argument('--pma-profile-file', type=Path, required=True)
     parser.add_argument('--research-candidate', choices=('U', 'V1', 'D1',
-        'pma_gap_memory_v0'), default='U')
+        'pma_gap_memory_v0', 'pma_gap_evidence_v1'), default='U')
     args = parser.parse_args()
     if args.b is None and args.research_candidate != 'U':
         parser.error('A-only certification requires U')
@@ -74,7 +77,7 @@ def main() -> None:
     secrets = private_values(args.task_profile_file, args.pma_profile_file)
     files = collect('A', args.a, args.output / 'A', secrets)
     if args.b is not None:
-        files += collect('B', args.b, args.output / 'B', secrets)
+        files += collect('B', args.b, args.output / 'B', secrets, args.research_candidate)
     summary = verify_evidence(args.output, require_committed=False,
                               research_candidate=(args.research_candidate
                                   if args.research_candidate != 'U' else None),

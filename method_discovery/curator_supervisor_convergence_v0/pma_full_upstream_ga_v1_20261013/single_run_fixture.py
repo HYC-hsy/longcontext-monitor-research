@@ -22,7 +22,7 @@ def main() -> None:
     parser.add_argument('--research-candidate', choices=(
         'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
         'pos_pma_complement_v1', 'pos_pma_shared_view_v1',
-        'pma_stateful_memory_v1', 'pma_gap_memory_v0'), default='U')
+        'pma_stateful_memory_v1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1'), default='U')
     parser.add_argument('--output', type=Path, required=True)
     for name in ('official-source-git', 'task-profile-file',
                  'ga-source', 'runtime-root', 'worker-python', 'harbor-python',
@@ -86,7 +86,8 @@ def main() -> None:
                                   if stateful
                                   else source_identity(checkout,
                                       candidate=args.research_candidate != 'U',
-                                      gap=args.research_candidate == 'pma_gap_memory_v0')),
+                                      gap=args.research_candidate == 'pma_gap_memory_v0',
+                                      evidence_gap=args.research_candidate == 'pma_gap_evidence_v1')),
                  'vendor_files': (manifest['vendor_files_sha256'] if args.condition == 'P'
                                   else vendor_identity(checkout)),
                  'harbor_commit': harbor_head,

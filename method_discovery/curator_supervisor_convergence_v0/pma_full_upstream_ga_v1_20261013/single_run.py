@@ -103,7 +103,7 @@ def prepare(args: argparse.Namespace) -> dict:
         raise ValueError('runtime reuse supports only the gap candidate')
     validate_binding(args.condition, getattr(args, 'research_candidate', 'U'))
     if runtime_policy is not None and getattr(args, 'research_candidate', 'U') not in {
-            'pma_stateful_memory_v1', 'pma_gap_memory_v0'}:
+            'pma_stateful_memory_v1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1'}:
         raise ValueError('runtime policy overrides require a supported candidate')
     root = Path(args.output).resolve(strict=False)
     root.mkdir(parents=True, exist_ok=False)

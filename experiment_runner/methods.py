@@ -46,6 +46,7 @@ _BUILTINS = (
     Method('ga-only', 'A', 'U'), Method('pma', 'B', 'U'),
     Method('pma-stateful', 'B', 'pma_stateful_memory_v1', True, None, True),
     Method('pma-gap', 'B', 'pma_gap_memory_v0', False, None, True),
+    Method('pma-gap-evidence', 'B', 'pma_gap_evidence_v1', False, None, True),
     Method('pma-v1', 'B', 'V1'), Method('pma-d1', 'B', 'D1'),
     Method('pos', 'P', 'PoS', True),
     Method('pos-citation-fixed', 'P', 'PoS-citation-fixed', True),
