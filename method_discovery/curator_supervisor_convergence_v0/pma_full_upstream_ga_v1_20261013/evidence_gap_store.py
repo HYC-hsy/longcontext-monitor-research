@@ -1,7 +1,7 @@
 """Opt-in evidence bank. Serial atomic publication; task-end durability only."""
 from collections import ChainMap
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from types import MappingProxyType
 import uuid
 
@@ -71,6 +71,7 @@ class Revision:
     receipt_id: str | None = None
     proposal_sha256: str | None = None
     entry_snapshot: tuple = ()
+    previous_revision_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -146,7 +147,7 @@ class EvidenceGapMemory(GapMemory):
         self._reserved_ids = self._reserved_ids.add(key, True)
         return key
 
-    def _revision(self, key, receipt_id=None, proposal=None):
+    def _revision(self, key, receipt_id=None, proposal=None, previous_revision_id=None):
         category, content = self._content(key)
         self._reserved_ids = self._reserved_ids.add(key, True)
         digest = sha256(content)
@@ -159,7 +160,7 @@ class EvidenceGapMemory(GapMemory):
             snapshot["content_sha256"] = digest
         row = Revision("rev_" + uuid.uuid4().hex, key, category, digest,
                        receipt_id, sha256(proposal) if proposal is not None else None,
-                       tuple(snapshot.items()))
+                       tuple(snapshot.items()), previous_revision_id)
         self.revisions = self.revisions.add(row.revision_id, row)
         self.active_revisions[key] = row.revision_id
         return row
@@ -202,7 +203,8 @@ class EvidenceGapMemory(GapMemory):
         draft._draft_generation = self._generation
         return draft
 
-    def apply_bound_write(self, kind, content, refs, *, cycle_id, op_index, run_id=""):
+    def apply_bound_write(self, kind, content, refs, *, cycle_id, op_index, run_id="",
+                          memory_id=None):
         resolver = ChainMap(getattr(self, "_pending_visibility", {}), self.visibility)
         if (kind not in {"knowledge", "procedural", "gap", "status"}
                 or not isinstance(content, str) or not content.strip() or not refs
@@ -211,6 +213,18 @@ class EvidenceGapMemory(GapMemory):
         manifest = self.manifests.get(cycle_id)
         if manifest is None or any(ref.visibility_ref not in manifest.visibility_refs for ref in refs):
             raise ValueError("write references another request")
+        previous = None
+        if memory_id is not None:
+            if (not isinstance(memory_id, str) or not memory_id or kind == "status"
+                    or self._content(memory_id)[0] != kind):
+                raise ValueError("update target must be an existing same-category memory ID")
+            previous = self.active_revisions.get(memory_id)
+            if previous is None:
+                previous = self._revision(memory_id).revision_id
+        elif kind == "status" and self.status:
+            previous = self.active_revisions.get("status")
+            if previous is None:
+                previous = self._revision("status").revision_id
         for ref in refs:
             visible = resolver[ref.visibility_ref]
             self._retain_source(visible.snapshot)
@@ -218,10 +232,18 @@ class EvidenceGapMemory(GapMemory):
         if kind == "status":
             self.update_status(content)
             key = "status"
+        elif memory_id is not None:
+            key = memory_id
+            entries = getattr(self, {"gap": "_gap_entries"}.get(kind, "_" + kind))
+            index = next(i for i, entry in enumerate(entries) if entry.id == key)
+            # Draft lists share entries with the owner: replace, never mutate.
+            entries[index] = replace(entries[index], content=content)
+            self._invalidate_indices(kind)
+            self._generation += 1
         else:
             key = getattr(self, "save_" + kind)(content)
         receipt_id = "receipt_" + uuid.uuid4().hex
-        revision = self._revision(key, receipt_id, content)
+        revision = self._revision(key, receipt_id, content, previous)
         receipt = Receipt(receipt_id, run_id, cycle_id, op_index, "save_" + kind,
                           revision.revision_id, tuple(refs))
         self.receipts = self.receipts.add(receipt_id, receipt)
@@ -340,6 +362,8 @@ class EvidenceGapMemory(GapMemory):
                 visiting.add(key)
                 stack.append((key, True))
                 row = self.revisions[key]
+                if row.previous_revision_id is not None:
+                    stack.append((row.previous_revision_id, False))
                 if row.receipt_id is not None:
                     for ref in self.receipts[row.receipt_id].bound_refs:
                         if ref.parent_revision_id is not None:
@@ -366,7 +390,18 @@ class EvidenceGapMemory(GapMemory):
                             "manifests": "cycle_id"}.get(name, name[:-1] + "_id")
                 if not isinstance(row, constructor) or getattr(row, identity) != key:
                     raise ValueError("invalid historical record identity")
+        successors = {}
+        for row in rows["revisions"].values():
+            if row.previous_revision_id is not None:
+                parent = self.revisions.get(row.previous_revision_id)
+                if (parent is None or parent.memory_id != row.memory_id
+                        or parent.category != row.category
+                        or row.previous_revision_id in successors):
+                    raise ValueError("invalid revision predecessor")
+                successors[row.previous_revision_id] = row.revision_id
         for key, revision_id in self.active_revisions.items():
+            if revision_id in successors:
+                raise ValueError("active revision is not latest")
             kind, content = self._content(key)
             row = self.revisions[revision_id]
             if (row.memory_id, row.category, row.content_sha256) != (key, kind, sha256(content)):

@@ -20,6 +20,9 @@ or offsets. Agent reports are reports, tool commands are intentions, and derived
 memory is not independent observation. Preserve inference, uncertainty, scope,
 and version boundaries in your content; literal binding does not prove truth or
 entailment. When revising, cite the relevant visible observations or prior memory.
+For an existing knowledge, procedural, or gap entry, pass its displayed memory_id
+in the same save tool to revise it in place. The category cannot change. Omit
+memory_id only for a new entry. Do not delete then save to express an update.
 Deletion uses only memory_id. A malformed operation rejects the entire batch.
 """
 WRITERS = {
@@ -52,6 +55,9 @@ class EvidenceGapMemoryAgent(GapMemoryAgent):
                     "source": {"type": "string", "minLength": 1},
                     "quote": {"type": "string", "minLength": 1}},
                     "required": ["source", "quote"], "additionalProperties": False}}
+            if function["name"] != "memory_update_status":
+                params["properties"]["memory_id"] = {"type": "string", "minLength": 1,
+                    "description": "Existing same-category memory ID to update; omit to create."}
             params["required"] = ["content", "evidence"]
             params["additionalProperties"] = False
 
@@ -213,21 +219,26 @@ class EvidenceGapMemoryAgent(GapMemoryAgent):
                         raise ValueError("invalid or repeated delete ID")
                     self._draft._content(key)
                     deletes.add(key)
-                    planned.append((name, key, None))
+                    planned.append((name, key, None, None))
                 elif name in WRITERS:
                     content = args.get("content")
-                    if (set(args) != {"content", "evidence"} or
+                    allowed = {"content", "evidence"}
+                    if name != "memory_update_status":
+                        allowed.add("memory_id")
+                    if (not {"content", "evidence"}.issubset(args) or not set(args) <= allowed or
+                            ("memory_id" in args and
+                             (not isinstance(args["memory_id"], str) or not args["memory_id"])) or
                             not isinstance(content, str) or not content.strip()):
                         raise ValueError("write requires nonempty content and evidence")
                     refs = bind_evidence(args["evidence"], self._parts.catalog)
-                    planned.append((name, content, refs))
+                    planned.append((name, content, refs, args.get("memory_id")))
                 else:
                     raise ValueError("unknown memory operation")
             draft = self._draft
             draft.retain_manifest(self._parts)
             operations = []
             cycle = self._parts.manifest.cycle_id
-            for index, (name, value, refs) in enumerate(planned):
+            for index, (name, value, refs, target) in enumerate(planned):
                 if name == "memory_delete":
                     if not draft.delete_bound(value, cycle_id=cycle, op_index=index):
                         raise ValueError("delete failed")
@@ -236,7 +247,7 @@ class EvidenceGapMemoryAgent(GapMemoryAgent):
                 else:
                     kind = WRITERS[name]
                     key, _ = draft.apply_bound_write(kind, value, refs,
-                                                     cycle_id=cycle, op_index=index)
+                                                     cycle_id=cycle, op_index=index, memory_id=target)
                     action = "update_status" if kind == "status" else "save_" + kind
                     operations.append(MemoryOperation(action, key, value))
             prepared = self.memory.prepare_publication(draft)
