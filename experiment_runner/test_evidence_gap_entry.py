@@ -148,7 +148,7 @@ class EvidenceGapEntryTests(unittest.TestCase):
         added = set(certification.EVIDENCE_GAP_SOURCE_FILES) - set(certification.GAP_SOURCE_FILES)
         self.assertEqual({Path(name).name for name in added}, {
             'gap_evidence.py', 'evidence_gap_store.py', 'evidence_gap_agent.py',
-            'evidence_gap_context.py', 'source_memory.py'})
+            'evidence_gap_context.py', 'source_memory.py', 'evidence_requirements.txt'})
         with patch.object(certification, '_committed_source_sha', return_value='fixture'):
             old = certification.source_identity(Path('.'), gap=True)
             new = certification.source_identity(Path('.'), evidence_gap=True)
