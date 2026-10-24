@@ -61,7 +61,7 @@ GAP_SOURCE_FILES = SOURCE_FILES + (
 EVIDENCE_GAP_SOURCE_FILES = GAP_SOURCE_FILES + tuple(
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     + name for name in ('gap_evidence.py', 'evidence_gap_store.py', 'evidence_gap_agent.py',
-                         'evidence_gap_context.py', 'source_memory.py')
+                         'evidence_gap_context.py', 'source_memory.py', 'evidence_requirements.txt')
 )
 EVIDENCE_FILES = (
     'execution_identity.json',
