@@ -198,6 +198,7 @@ def _snapshot_valid(snapshot):
 class RenderBlock:
     snapshot: SourceSnapshot
     spans: tuple[tuple[int, int], ...] | None = None
+    display_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -261,13 +262,17 @@ def render_source_blocks(blocks, *, cycle_id, prefix="", suffix=""):
         spans = ((0, len(text)),) if block.spans is None else tuple(tuple(s) for s in block.spans)
         _require(bool(spans) and all(len(s) == 2 and all(type(i) is int for i in s)
                  and 0 <= s[0] < s[1] <= len(text) for s in spans), "invalid_visible_spans")
-        previous = by_handle.get(r.handle)
+        handle = r.handle if block.display_id is None else block.display_id
+        _require(_text(handle) and not any(c.isspace() or c in "[]" for c in handle),
+                 "invalid_display_id")
+        _require(r.source_kind == "memory" or handle == r.handle, "public_alias_forbidden")
+        previous = by_handle.get(handle)
         _require(previous is None or previous[0] == snap, "source_handle_collision")
         combined = (() if previous is None else previous[1]) + spans
-        by_handle[r.handle] = (snap, combined)
-        parts.append(f"\n[{r.handle} {r.role} event_order={r.order} field={r.field_path}]\n")
+        by_handle[handle] = (snap, combined)
+        parts.append(f"\n[{handle} {r.role} event_order={r.order} field={r.field_path}]\n")
         parts.append("\n[hidden gap]\n".join(text[a:b] for a, b in spans))
-        rows.append((r.source_id, spans))
+        rows.append((r.source_id, spans, handle))
     parts.append(suffix)
     request = "".join(parts)
     request_hash = sha256(request)
@@ -277,7 +282,7 @@ def render_source_blocks(blocks, *, cycle_id, prefix="", suffix=""):
         catalog[handle] = VisibleSource(snap, spans, visibility, "literal", cycle_id, request_hash)
     manifest = RequestManifest(cycle_id, request_hash, tuple(r[0] for r in rows),
         tuple(r[1] for r in rows),
-        tuple(catalog["s" + sha256(r[0])[:12]].visibility_ref for r in rows),
+        tuple(catalog[r[2]].visibility_ref for r in rows),
         tuple(dict.fromkeys(v.snapshot.record.parent_revision_id for v in catalog.values()
                             if v.snapshot.record.parent_revision_id is not None)))
     return RenderedPhase1Parts(request, MappingProxyType(catalog), manifest)

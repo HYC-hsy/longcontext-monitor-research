@@ -13,7 +13,7 @@ from memory_agent.memory.memory_agent import MemoryOperation, PHASE1_SYSTEM
 
 EVIDENCE_RULES = """
 Every save or status update requires evidence: a nonempty array of objects with
-source (a displayed source handle) and quote (an exact, uniquely matching visible
+source (the displayed memory ID or raw-event source handle) and quote (an exact, uniquely matching visible
 substring). For XML tools, encode that array as JSON in parameter=evidence.
 Use only displayed sources. Source labels are host-assigned; do not invent roles
 or offsets. Agent reports are reports, tool commands are intentions, and derived
@@ -115,8 +115,8 @@ class EvidenceGapMemoryAgent(GapMemoryAgent):
                 row = draft.memory_source(registry, key)
                 category = draft._content(key)[0]
                 selected[category] += 1
-                labels.append(f"{key}: {row.handle} ({category}; derived memory)")
-                memory_blocks.append(RenderBlock(registry.snapshot(row.source_id)))
+                labels.append(f"{key} ({category}; derived memory)")
+                memory_blocks.append(RenderBlock(registry.snapshot(row.source_id), display_id=key))
             prefix = f"## Step {step_count}\n## Current Memory Bank IDs\n"
             prefix += "\n".join(labels) or "(empty)"
             prefix += "\nSelected / total entries: " + "; ".join(
