@@ -1,13 +1,14 @@
 import json
+from dataclasses import asdict, FrozenInstanceError, replace
 import tempfile
 from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from evidence_gap_store import EvidenceGapMemory
+from evidence_gap_store import EvidenceGapMemory, History
 from gap_store import GapMemory
 from gap_evidence import (SourceRegistry, register_public_source, RenderBlock,
-                          render_source_blocks, bind_evidence, sha256)
+                          render_source_blocks, bind_evidence, sha256, register_memory_source)
 from memory_agent.memory.universal_memory import UniversalMemory
 
 
@@ -74,7 +75,7 @@ class EvidenceBankTests(unittest.TestCase):
         self.assertIsNot(draft._knowledge, bank._knowledge)
         self.assertIsNot(draft.active_revisions, bank.active_revisions)
         draft.delete_bound(bank.knowledge[0].id)
-        with patch.object(draft, 'validate_bank', side_effect=ValueError('injected')):
+        with patch.object(draft, 'validate_draft', side_effect=ValueError('injected')):
             with self.assertRaises(ValueError):
                 bank.prepare_publication(draft)
         self.assertEqual(before, bank.to_dict())
@@ -196,6 +197,105 @@ class EvidenceBankTests(unittest.TestCase):
             bank.save_to_file(target)
             self.assertEqual(json.loads(target.read_text()), json.loads(json.dumps(bank.to_dict())))
             self.assertEqual(list(Path(folder).iterdir()), [target])
+
+    def test_history_is_immutable_indexed_and_delta_only(self):
+        old = History(rows=(("a", "one"),))
+        new = old.add("b", "two")
+        self.assertEqual(dict(old.items()), {"a": "one"})
+        self.assertEqual(dict(new.delta(old)), {"b": "two"})
+        with self.assertRaises(FrozenInstanceError):
+            old.previous = new
+        with patch.object(History, '__getitem__', side_effect=AssertionError('items must not relookup')):
+            self.assertEqual(set(new.values()), {"one", "two"})
+            self.assertEqual(dict(new.items()), {"a": "one", "b": "two"})
+        with self.assertRaises(ValueError):
+            list(new.delta(History()))
+
+    def test_publication_hash_work_is_independent_of_history_size(self):
+        import evidence_gap_store as store
+        import gap_evidence as registry
+        bank, counts = EvidenceGapMemory(), []
+        for i in range(101):
+            self.write(bank, 'status', 'constant status', str(i))
+            if i in (9, 99):
+                draft = bank.fork_write_draft()
+                parts, refs = self.parts('next-' + str(i))
+                draft.retain_manifest(parts)
+                draft.apply_bound_write('status', 'constant status', refs,
+                                        cycle_id='next-' + str(i), op_index=0)
+                with patch.object(store, 'sha256', wraps=store.sha256) as a, \
+                     patch.object(registry, 'sha256', wraps=registry.sha256) as b, \
+                     patch.object(draft, 'validate_bank', side_effect=AssertionError('full scan')):
+                    prepared = bank.prepare_publication(draft)
+                    counts.append((a.call_count, b.call_count))
+                bank.publish(prepared)
+        self.assertEqual(counts[0], counts[1])
+        self.assertLess(sum(counts[0]), 20)
+
+    def test_new_delta_corruption_and_detached_history_rejected(self):
+        bank = EvidenceGapMemory()
+        self.write(bank)
+        original = bank.to_dict()
+        for name in bank._HISTORIES:
+            draft = bank.fork_write_draft()
+            setattr(draft, name, History(rows=getattr(draft, name).items()))
+            with self.assertRaises(ValueError):
+                bank.prepare_publication(draft)
+        draft = bank.fork_write_draft()
+        draft.blobs = draft.blobs.add('0' * 64, 'bad digest')
+        with self.assertRaises(ValueError):
+            bank.prepare_publication(draft)
+        draft = bank.fork_write_draft()
+        draft._knowledge.clear()
+        draft.active_revisions.clear()
+        with self.assertRaises(ValueError):
+            bank.prepare_publication(draft)
+        self.assertEqual(bank.to_dict(), original)
+
+    def test_revision_retains_actual_entry_metadata_after_delete(self):
+        bank = EvidenceGapMemory()
+        key, revision = self.write(bank)
+        original = bank.get(key).to_dict()
+        bank.delete_bound(key)
+        snapshot = dict(bank.revisions[revision].entry_snapshot)
+        snapshot['content'] = bank.blobs[snapshot.pop('content_sha256')]
+        self.assertEqual(snapshot, original)
+        self.assertEqual(EvidenceGapMemory.from_dict(bank.to_dict()).to_dict(), bank.to_dict())
+
+    def test_corrupted_manifest_and_receipt_fields_rejected(self):
+        bank = EvidenceGapMemory()
+        self.write(bank)
+        for target, field, value in (('manifests', 'visible_spans', ((),)),
+                                     ('receipts', 'action', 'delete_everything'),
+                                     ('receipts', 'op_index', -100)):
+            data = bank.to_dict()
+            next(iter(data['gap_evidence'][target].values()))[field] = value
+            with self.assertRaises(ValueError):
+                EvidenceGapMemory.from_dict(data)
+
+    def test_internally_consistent_cyclic_lineage_rejected_on_load(self):
+        bank = EvidenceGapMemory()
+        _, first = self.write(bank, content='fact', cycle='first')
+        _, second = self.write(bank, content='fact', cycle='second')
+        data = bank.to_dict()
+        evidence = data['gap_evidence']
+        evidence['visibility'] = {}
+        for target, parent, cycle in ((first, second, 'first'), (second, first, 'second')):
+            registry = SourceRegistry('cyclic')
+            _, record = register_memory_source(registry, revision_id=parent, text='fact')
+            parts = render_source_blocks([RenderBlock(registry.snapshot(record.source_id))], cycle_id=cycle)
+            evidence['sources'][record.source_id] = asdict(record)
+            evidence['manifests'][cycle] = asdict(parts.manifest)
+            visible = parts.catalog[record.handle]
+            evidence['visibility'][visible.visibility_ref] = {
+                'source_id': record.source_id, 'visible_spans': visible.visible_spans,
+                'visibility_ref': visible.visibility_ref, 'display_transform': 'literal',
+                'cycle_id': cycle, 'request_sha256': visible.request_sha256}
+            receipt = evidence['revisions'][target]['receipt_id']
+            refs = bind_evidence([{'source': record.handle, 'quote': 'fact'}], parts.catalog)
+            evidence['receipts'][receipt]['bound_refs'] = [asdict(ref) for ref in refs]
+        with self.assertRaisesRegex(ValueError, 'cyclic'):
+            EvidenceGapMemory.from_dict(json.loads(json.dumps(data)))
 
 
 if __name__ == '__main__':

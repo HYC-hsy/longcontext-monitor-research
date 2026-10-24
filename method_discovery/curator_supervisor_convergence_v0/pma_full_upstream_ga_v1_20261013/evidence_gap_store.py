@@ -10,33 +10,41 @@ from gap_evidence import (BoundRef, Receipt, RequestManifest, SourceRecord,
     SourceSnapshot, TextBlob, VisibleSource, bound_ref_valid, register_memory_source,
     sha256, _snapshot_valid)
 from source_memory import SourceMemory
+from rpds import HashTrieMap
 
 
+@dataclass(frozen=True, init=False)
 class History(Mapping):
-    """Persistent immutable map: adding a delta never copies historical rows."""
+    """Immutable delta chunks indexed by the mature rpds.HashTrieMap HAMT."""
+    previous: object
+    rows: Mapping
+    _index: Mapping
+
     def __init__(self, previous=None, rows=()):
-        self.previous = previous
-        self.rows = MappingProxyType(dict(rows))
+        rows = dict(rows)
+        index = previous._index if previous is not None else HashTrieMap()
+        for key, value in rows.items():
+            if previous is not None and key in previous:
+                raise ValueError("duplicate immutable history identity")
+            index = index.insert(key, value)
+        object.__setattr__(self, "previous", previous)
+        object.__setattr__(self, "rows", MappingProxyType(rows))
+        object.__setattr__(self, "_index", index)
 
     def __getitem__(self, key):
-        node = self
-        while node is not None:
-            if key in node.rows:
-                return node.rows[key]
-            node = node.previous
-        raise KeyError(key)
+        return self._index[key]
+
+    def items(self):
+        return self._index.items()
+
+    def values(self):
+        return self._index.values()
 
     def __iter__(self):
-        seen, node = set(), self
-        while node is not None:
-            for key in node.rows:
-                if key not in seen:
-                    seen.add(key)
-                    yield key
-            node = node.previous
+        return iter(self._index)
 
     def __len__(self):
-        return sum(1 for _ in self)
+        return len(self._index)
 
     def add(self, key, value):
         if key in self:
@@ -44,6 +52,14 @@ class History(Mapping):
                 raise ValueError("immutable history identity changed")
             return self
         return History(self, ((key, value),))
+
+    def delta(self, base):
+        node = self
+        while node is not base:
+            if node is None:
+                raise ValueError("history does not extend draft base")
+            yield from node.rows.items()
+            node = node.previous
 
 
 @dataclass(frozen=True)
@@ -54,6 +70,7 @@ class Revision:
     content_sha256: str
     receipt_id: str | None = None
     proposal_sha256: str | None = None
+    entry_snapshot: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -77,6 +94,8 @@ class EvidenceGapMemory(GapMemory):
         super().__init__(max_status_length)
         for name in self._HISTORIES:
             setattr(self, name, History())
+        self._reserved_ids = History()
+        self._retired_ids = History()
         self.active_revisions = {}
         self._generation = 0
 
@@ -90,25 +109,26 @@ class EvidenceGapMemory(GapMemory):
                     return kind, entry.content
         raise ValueError("memory ID not found")
 
-    def _used_ids(self):
-        return ({e.id for e in self._knowledge + self._procedural + self._gap_entries}
-                | {r.memory_id for r in self.revisions.values()} | {"status"})
+    def _id_in_use(self, key):
+        return (key == "status" or key in self._reserved_ids or
+                any(e.id == key for e in self._knowledge + self._procedural + self._gap_entries))
 
     def _generate_id(self):
-        used = self._used_ids()
         for _ in range(32):
             key = super()._generate_id()
-            if key not in used and not key.startswith("gap_"):
+            if not self._id_in_use(key) and not key.startswith("gap_"):
                 return key
         return uuid.uuid4().hex
 
     def save_knowledge(self, content):
         key = super().save_knowledge(content)
+        self._reserved_ids = self._reserved_ids.add(key, True)
         self._generation += 1
         return key
 
     def save_procedural(self, content):
         key = super().save_procedural(content)
+        self._reserved_ids = self._reserved_ids.add(key, True)
         self._generation += 1
         return key
 
@@ -118,20 +138,28 @@ class EvidenceGapMemory(GapMemory):
         self._generation += 1
 
     def save_gap(self, content):
-        used = self._used_ids()
         key = super().save_gap(content)
         self._generation += 1
-        if key in used:
+        if key in self._reserved_ids:
             key = "gap_" + uuid.uuid4().hex
             self._gap_entries[-1].id = key
+        self._reserved_ids = self._reserved_ids.add(key, True)
         return key
 
     def _revision(self, key, receipt_id=None, proposal=None):
         category, content = self._content(key)
+        self._reserved_ids = self._reserved_ids.add(key, True)
         digest = sha256(content)
         self.blobs = self.blobs.add(digest, content)
+        snapshot = {}
+        if key != "status":
+            entry = next(e for e in self._knowledge + self._procedural + self._gap_entries if e.id == key)
+            snapshot = entry.to_dict()
+            snapshot.pop("content")
+            snapshot["content_sha256"] = digest
         row = Revision("rev_" + uuid.uuid4().hex, key, category, digest,
-                       receipt_id, sha256(proposal) if proposal is not None else None)
+                       receipt_id, sha256(proposal) if proposal is not None else None,
+                       tuple(snapshot.items()))
         self.revisions = self.revisions.add(row.revision_id, row)
         self.active_revisions[key] = row.revision_id
         return row
@@ -212,6 +240,7 @@ class EvidenceGapMemory(GapMemory):
             raise ValueError("memory ID not found")
         row = Tombstone("tomb_" + uuid.uuid4().hex, memory_id, revision, cycle_id, op_index)
         self.tombstones = self.tombstones.add(row.tombstone_id, row)
+        self._retired_ids = self._retired_ids.add(memory_id, True)
         self.active_revisions.pop(memory_id, None)
         self._generation += 1
         return True
@@ -240,7 +269,7 @@ class EvidenceGapMemory(GapMemory):
         if (getattr(draft, "_draft_owner", None) is not self or
                 draft._draft_generation != self._generation):
             raise ValueError("stale or foreign draft")
-        draft.validate_bank()
+        draft.validate_draft(self)
         prepared = PreparedPublication(draft.__dict__)
         prepared.owner = self
         prepared.generation = self._generation
@@ -256,38 +285,125 @@ class EvidenceGapMemory(GapMemory):
             raise ValueError("stale publication")
         self.__dict__ = prepared
 
+    def validate_draft(self, base):
+        """Validate active state and this draft's deltas, never rehash old history."""
+        rows = {name: dict(getattr(self, name).delta(getattr(base, name)))
+                for name in self._HISTORIES}
+        for name in ("_reserved_ids", "_retired_ids"):
+            if any(value is not True for _, value in getattr(self, name).delta(getattr(base, name))):
+                raise ValueError("invalid ID index")
+        new_ids = {e.id for e in self._knowledge + self._procedural + self._gap_entries}
+        old_ids = {e.id for e in base._knowledge + base._procedural + base._gap_entries}
+        deleted = {row.memory_id for row in rows["tombstones"].values() if isinstance(row, Tombstone)}
+        reserved = {key for key, _ in self._reserved_ids.delta(base._reserved_ids)}
+        revision_ids = {row.memory_id for row in rows["revisions"].values() if isinstance(row, Revision)}
+        if (not old_ids.difference(new_ids).issubset(deleted) or
+                not reserved.issubset(new_ids | revision_ids) or
+                {key for key, _ in self._retired_ids.delta(base._retired_ids)} != deleted):
+            raise ValueError("untracked active or ID-index mutation")
+        latest = {}
+        for row in rows["revisions"].values():
+            if isinstance(row, Revision):
+                latest.setdefault(row.memory_id, row.revision_id)
+        for key in new_ids | ({"status"} if self.status else set()):
+            if key in latest and self.active_revisions.get(key) != latest[key]:
+                raise ValueError("new revision missing from active map")
+        self._validate_records(rows)
+        # An old revision cannot be retargeted to a newly created receipt/revision.
+        # New memory sources must point to revisions that existed before this cycle,
+        # except legacy snapshots materialized from the unchanged active base.
+        for source in rows["sources"].values():
+            if source.source_kind == "memory" and source.parent_revision_id not in base.revisions:
+                parent = self.revisions[source.parent_revision_id]
+                if parent.receipt_id is not None or base._content(parent.memory_id)[1] != self.blobs[parent.content_sha256]:
+                    raise ValueError("memory source was not pre-cycle")
+
     def validate_bank(self):
+        self._validate_records({name: getattr(self, name) for name in self._HISTORIES})
+        self._validate_lineage()
+
+    def _validate_lineage(self):
+        """Iterative DFS rejects cyclic ancestry even in internally consistent files."""
+        done = set()
+        for start in self.revisions:
+            stack, visiting = [(start, False)], set()
+            while stack:
+                key, finish = stack.pop()
+                if finish:
+                    visiting.remove(key)
+                    done.add(key)
+                    continue
+                if key in visiting:
+                    raise ValueError("cyclic memory ancestry")
+                if key in done:
+                    continue
+                visiting.add(key)
+                stack.append((key, True))
+                row = self.revisions[key]
+                if row.receipt_id is not None:
+                    for ref in self.receipts[row.receipt_id].bound_refs:
+                        if ref.parent_revision_id is not None:
+                            stack.append((ref.parent_revision_id, False))
+
+    def _validate_records(self, rows):
         entries = self._knowledge + self._procedural + self._gap_entries
         ids = [e.id for e in entries]
         if (len(ids) != len(set(ids)) or "status" in ids or
                 any(not e.id.startswith("gap_") for e in self._gap_entries) or
                 any(e.id.startswith("gap_") for e in self._knowledge + self._procedural)):
             raise ValueError("invalid bank identities")
-        retired = {r.memory_id for r in self.tombstones.values()}
-        if retired.intersection(ids):
+        if any(key in self._retired_ids for key in ids):
             raise ValueError("retired ID is active")
-        for digest, content in self.blobs.items():
+        for digest, content in rows["blobs"].items():
             if not isinstance(content, str) or sha256(content) != digest:
                 raise ValueError("invalid content blob")
+        constructors = {"sources": SourceRecord, "visibility": VisibleSource,
+                        "manifests": RequestManifest, "revisions": Revision,
+                        "receipts": Receipt, "tombstones": Tombstone}
+        for name, constructor in constructors.items():
+            for key, row in rows[name].items():
+                identity = {"sources": "source_id", "visibility": "visibility_ref",
+                            "manifests": "cycle_id"}.get(name, name[:-1] + "_id")
+                if not isinstance(row, constructor) or getattr(row, identity) != key:
+                    raise ValueError("invalid historical record identity")
         for key, revision_id in self.active_revisions.items():
             kind, content = self._content(key)
             row = self.revisions[revision_id]
             if (row.memory_id, row.category, row.content_sha256) != (key, kind, sha256(content)):
                 raise ValueError("active revision mismatch")
-        for row in self.revisions.values():
+        for row in rows["revisions"].values():
+            if (not isinstance(row.memory_id, str) or not row.memory_id or
+                    (row.proposal_sha256 is not None and (not isinstance(row.proposal_sha256, str)
+                     or len(row.proposal_sha256) != 64 or any(c not in "0123456789abcdef" for c in row.proposal_sha256)))):
+                raise ValueError("invalid revision metadata")
+            if row.memory_id not in self._reserved_ids:
+                raise ValueError("unreserved historical memory ID")
             if row.category not in {"knowledge", "procedural", "status", "gap"} or row.content_sha256 not in self.blobs:
                 raise ValueError("invalid revision")
+            if type(row.entry_snapshot) is not tuple or any(type(item) is not tuple for item in row.entry_snapshot):
+                raise ValueError("mutable revision snapshot")
+            if row.entry_snapshot:
+                snapshot = dict(row.entry_snapshot)
+                if (len(snapshot) != len(row.entry_snapshot) or set(snapshot) != {"id", "content_sha256", "created_at", "access_count", "last_accessed"}
+                        or snapshot["id"] != row.memory_id or snapshot["content_sha256"] != row.content_sha256
+                        or not isinstance(snapshot["created_at"], str)
+                        or type(snapshot["access_count"]) is not int or snapshot["access_count"] < 0
+                        or (snapshot["last_accessed"] is not None and not isinstance(snapshot["last_accessed"], str))):
+                    raise ValueError("invalid revision snapshot")
             if row.receipt_id is not None and self.receipts[row.receipt_id].target_revision_id != row.revision_id:
                 raise ValueError("invalid revision receipt")
-        for row in self.sources.values():
+        for row in rows["sources"].values():
             snapshot = self._snapshot(row.source_id)
             if not _snapshot_valid(snapshot):
                 raise ValueError("invalid retained source")
             if row.source_kind == "memory" and self.revisions[row.parent_revision_id].content_sha256 != row.text_sha256:
                 raise ValueError("invalid retained memory source")
-        for ref, visible in self.visibility.items():
+        for ref, visible in rows["visibility"].items():
             row = visible.snapshot.record
             spans = visible.visible_spans
+            if (type(spans) is not tuple or any(type(span) is not tuple for span in spans)
+                    or visible.snapshot != self._snapshot(row.source_id)):
+                raise ValueError("mutable or noncanonical visibility")
             if (ref != visible.visibility_ref or not spans or
                     not all(len(span) == 2 and all(type(i) is int for i in span)
                             and 0 <= span[0] < span[1] <= len(visible.snapshot.blob.text)
@@ -302,15 +418,39 @@ class EvidenceGapMemory(GapMemory):
                     manifest.request_sha256 != visible.request_sha256 or
                     ref not in manifest.visibility_refs or row.source_id not in manifest.ordered_source_refs):
                 raise ValueError("invalid visibility manifest")
-        for manifest in self.manifests.values():
+        for manifest in rows["manifests"].values():
+            if any(type(getattr(manifest, field)) is not tuple for field in
+                   ("ordered_source_refs", "visible_spans", "visibility_refs", "pre_cycle_revision_refs")):
+                raise ValueError("mutable manifest")
             if (not isinstance(manifest.cycle_id, str) or not manifest.cycle_id or
-                    len(manifest.request_sha256) != 64 or
+                    not isinstance(manifest.request_sha256, str) or len(manifest.request_sha256) != 64 or
+                    any(c not in "0123456789abcdef" for c in manifest.request_sha256) or
                     len(manifest.ordered_source_refs) != len(manifest.visible_spans) or
                     any(key not in self.revisions for key in manifest.pre_cycle_revision_refs)):
                 raise ValueError("invalid request manifest")
-        for row in self.receipts.values():
+            combined = {}
+            for source, spans in zip(manifest.ordered_source_refs, manifest.visible_spans):
+                if (not isinstance(source, str) or not source or type(spans) is not tuple or not spans
+                        or any(type(span) is not tuple or len(span) != 2 or
+                               any(type(i) is not int for i in span) or not 0 <= span[0] < span[1]
+                               for span in spans)):
+                    raise ValueError("invalid manifest spans")
+                combined[source] = combined.get(source, ()) + spans
+            if len(combined) != len(manifest.visibility_refs) or len(set(manifest.visibility_refs)) != len(combined):
+                raise ValueError("invalid manifest visibility count")
+            for source, ref in zip(combined, manifest.visibility_refs):
+                visible = self.visibility.get(ref)
+                if visible is not None and (visible.snapshot.record.source_id != source or
+                        visible.visible_spans != combined[source] or visible.cycle_id != manifest.cycle_id):
+                    raise ValueError("manifest visibility pairing mismatch")
+        for row in rows["receipts"].values():
+            if type(row.bound_refs) is not tuple:
+                raise ValueError("mutable receipt")
             revision = self.revisions[row.target_revision_id]
             manifest = self.manifests[row.cycle_id]
+            if (row.action != "save_" + revision.category or type(row.op_index) is not int
+                    or row.op_index < 0 or not isinstance(row.run_id, str)):
+                raise ValueError("invalid receipt operation")
             if (revision.receipt_id != row.receipt_id or not row.bound_refs or
                     not all(bound_ref_valid(ref, self.visibility) and ref.visibility_ref in
                             manifest.visibility_refs for ref in row.bound_refs)):
@@ -322,8 +462,10 @@ class EvidenceGapMemory(GapMemory):
                             (parent.receipt_id is not None and
                              self.receipts[parent.receipt_id].cycle_id == row.cycle_id)):
                         raise ValueError("non-pre-cycle memory parent")
-        for row in self.tombstones.values():
-            if self.revisions[row.revision_id].memory_id != row.memory_id:
+        for row in rows["tombstones"].values():
+            if type(row.op_index) is not int or row.op_index < 0 or not isinstance(row.cycle_id, str):
+                raise ValueError("invalid tombstone operation")
+            if row.memory_id not in self._retired_ids or self.revisions[row.revision_id].memory_id != row.memory_id:
                 raise ValueError("invalid tombstone")
 
     def _snapshot(self, source_id):
@@ -349,6 +491,7 @@ class EvidenceGapMemory(GapMemory):
         memory = super().from_dict(data)
         evidence = data.get("gap_evidence")
         if "gap_evidence" not in data:
+            memory._reserved_ids = History(rows=((e.id, True) for e in memory._knowledge + memory._procedural + memory._gap_entries))
             memory.validate_bank()
             return memory
         required = {"schema", "active_revisions", "max_status_length", *cls._HISTORIES}
@@ -367,6 +510,8 @@ class EvidenceGapMemory(GapMemory):
                 rows = {}
                 for key, value in evidence[name].items():
                     value = dict(value)
+                    if name == "revisions" and "entry_snapshot" in value:
+                        value["entry_snapshot"] = tuple(tuple(item) for item in value["entry_snapshot"])
                     if name == "receipts":
                         value["bound_refs"] = tuple(BoundRef(**r) for r in value["bound_refs"])
                     if name == "manifests":
@@ -387,6 +532,11 @@ class EvidenceGapMemory(GapMemory):
                 tuple(tuple(s) for s in v["visible_spans"]), v["visibility_ref"], v["display_transform"],
                 v["cycle_id"], v["request_sha256"]))
                 for key, v in evidence["visibility"].items()))
+            memory._reserved_ids = History(rows=dict.fromkeys(
+                [e.id for e in memory._knowledge + memory._procedural + memory._gap_entries] +
+                [r.memory_id for r in memory.revisions.values()], True).items())
+            memory._retired_ids = History(rows=dict.fromkeys(
+                (r.memory_id for r in memory.tombstones.values()), True).items())
             memory.validate_bank()
         except (KeyError, TypeError, AttributeError, RecursionError) as exc:
             raise ValueError("malformed evidence bank") from exc
