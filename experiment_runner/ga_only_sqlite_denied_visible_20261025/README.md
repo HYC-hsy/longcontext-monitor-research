@@ -1,0 +1,5 @@
+# Earlier GA-only SQLite provider denial
+
+Run `pma-a927e53b0aef4e8e` was condition A / candidate U, not PMA. Its one real Task-generation HTTP attempt received HTTP 403 (`SUBSCRIPTION_NOT_FOUND`). There was no complete public model response, no tool action, and no auxiliary call. The native verifier subsequently produced reward 0.0, but this is an evaluated infrastructure-failure artifact, not a task-solving result. See `experiment_runner/AUDIT_GA_ONLY_SQLITE_20261022.md`.
+
+`task_turns.jsonl` contains the single prepared Task request and records `visible_response_blocks=[]` with the failure outcome; an empty array here must **not** be read as model silence. `events.jsonl` retains the seven captured events. `evaluation.jsonl` and `INDEX.json` provide the redacted outcome and private-original/public-byte mapping. Private response-error text and all credentials/endpoints are excluded. The export is a re-encoded projection, not original HTTP bytes; it involved no new model or verifier call.
