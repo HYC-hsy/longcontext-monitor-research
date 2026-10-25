@@ -15,8 +15,12 @@ def verify(batch_root: Path, public_root: Path, expected_slots: int = 20) -> dic
     batch_root = batch_root.resolve(strict=True)
     public_root = public_root.resolve(strict=True)
     index = json.loads((public_root / 'INDEX.json').read_bytes())
-    if (expected_slots < 1 or index.get('schema') !=
-            f'pma-gap-batch{expected_slots}-visible-projection-v1' or
+    expected_schema = {
+        'pma_gap_memory_v0': f'pma-gap-batch{expected_slots}-visible-projection-v1',
+        'pma_gap_evidence_v1': f'pma-gap-evidence-batch{expected_slots}-visible-projection-v1',
+    }.get(index.get('research_candidate'))
+    if (expected_slots < 1 or expected_schema is None or
+            index.get('schema') != expected_schema or
             len(index['slots']) != expected_slots):
         raise ValueError('public batch identity or slot count differs')
     if file_sha(batch_root / 'selection_result.json') != index['selection_source_sha256']:
