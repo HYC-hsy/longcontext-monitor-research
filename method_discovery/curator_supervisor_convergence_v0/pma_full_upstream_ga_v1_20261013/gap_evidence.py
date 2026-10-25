@@ -9,7 +9,9 @@ No upstream framework code, permissive alignment, or fallback is imported.
 """
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass
+from functools import wraps
 import hashlib
 import json
 from types import MappingProxyType
@@ -153,7 +155,51 @@ def register_memory_source(registry, *, revision_id, text, order=0):
     return registry._register(row, text)
 
 
+_snapshot_checks = ContextVar("immutable_source_validation_checks", default=None)
+
+
+def cached_source_validation(function):
+    """Reuse immutable snapshot checks inside one synchronous host operation.
+
+    No cross-request/global cache is kept; interval, visibility and snippet
+    checks still run for every reference. Nested calls share the outer scope.
+    """
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        if _snapshot_checks.get() is not None:
+            return function(*args, **kwargs)
+        token = _snapshot_checks.set({})
+        try:
+            return function(*args, **kwargs)
+        finally:
+            _snapshot_checks.reset(token)
+    return wrapped
+
+
 def _snapshot_valid(snapshot):
+    cache = _snapshot_checks.get()
+    # Never cache duck-typed/mutable lookalikes. Hashability additionally excludes
+    # malformed mutable dataclass fields. Equality keys handle reconstructed
+    # canonical snapshots on persistence validation without source-ID trust.
+    frozen = (type(snapshot) is SourceSnapshot and type(snapshot.record) is SourceRecord
+              and type(snapshot.blob) is TextBlob and
+              (snapshot.parent_wrapper is None or
+               (type(snapshot.parent_wrapper) is SourceSnapshot and
+                type(snapshot.parent_wrapper.record) is SourceRecord and
+                type(snapshot.parent_wrapper.blob) is TextBlob and
+                snapshot.parent_wrapper.parent_wrapper is None)))
+    if cache is None or not frozen:
+        return _snapshot_valid_uncached(snapshot)
+    try:
+        hash(snapshot)
+    except TypeError:
+        return _snapshot_valid_uncached(snapshot)
+    if snapshot not in cache:
+        cache[snapshot] = _snapshot_valid_uncached(snapshot)
+    return cache[snapshot]
+
+
+def _snapshot_valid_uncached(snapshot):
     r, b = snapshot.record, snapshot.blob
     if not (_text(r.namespace) and _text(b.text) and type(r.order) is int and
             r.order >= 0 and r.text_sha256 == b.text_sha256 == sha256(b.text) and
