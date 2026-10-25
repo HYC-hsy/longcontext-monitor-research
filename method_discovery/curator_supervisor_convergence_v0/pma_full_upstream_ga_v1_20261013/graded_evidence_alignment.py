@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import re
 
+from fuzzy_candidate_windows import ranked_windows, POLICY as WINDOW_POLICY
 from gap_evidence import BoundRef, sha256
 from gap_evidence_alignment import align_evidence, _validate_catalog
 from vendor.langextract_3a68580.alignment import _find_token_occurrences
@@ -142,42 +143,41 @@ def _fuzzy_candidates(quote, catalog, budget):
     target, _ = _tokens(quote)
     refs, details = {}, []
     skipped, searched, used = 0, 0, 0
-    for visible in catalog.values():
-        for offset, end in visible.visible_spans:
-            chunk = visible.snapshot.blob.text[offset:end]
-            source, tokens = _tokens(chunk)
-            work = len(source) * len(target) ** 2
-            if work > budget - used:
-                skipped += 1
+    windows, selection = ranked_windows(target, catalog)
+    for _, visible, offset, source, tokens in windows:
+        work = len(source) * len(target) ** 2
+        if work > budget - used:
+            skipped += 1
+            continue
+        used += work
+        searched += 1
+        # No upstream lowercasing/stemming: raw lexical equality is only a
+        # locator, never proof. Upstream discards duplicate equal spans.
+        spans = _best_lcs_spans(source, target)
+        for count in sorted(spans, reverse=True):
+            span = spans[count]
+            if not _accept_lcs_match(span, len(target)):
                 continue
-            used += work
-            searched += 1
-            # No upstream lowercasing/stemming: raw lexical equality is only a
-            # locator, never proof. Upstream discards duplicate equal spans.
-            spans = _best_lcs_spans(source, target)
-            for count in sorted(spans, reverse=True):
-                span = spans[count]
-                if not _accept_lcs_match(span, len(target)):
-                    continue
-                start = offset + tokens[span.start].char_interval.start_pos
-                stop = offset + tokens[span.end].char_interval.end_pos
-                if _OMISSION.search(visible.snapshot.blob.text[start:stop]):
-                    continue
-                ref = _ref(visible, start, stop)
-                if ref not in refs:
-                    refs[ref] = None
-                    details.append({"source_id": ref.source_id, "start": start, "end": stop,
-                                    "original_excerpt": visible.snapshot.blob.text[start:stop],
-                                    "difference": "lexical_lcs_candidate_not_semantic_verification",
-                                    "matches": span.matches, "extraction_tokens": len(target),
-                                    "coverage": span.matches / len(target),
-                                    "density": span.matches / span.span_len})
-                # Best acceptable span per chunk, not exhaustive alternatives.
-                break
+            start = offset + tokens[span.start].char_interval.start_pos
+            stop = offset + tokens[span.end].char_interval.end_pos
+            if _OMISSION.search(visible.snapshot.blob.text[start:stop]):
+                continue
+            ref = _ref(visible, start, stop)
+            if ref not in refs:
+                refs[ref] = None
+                details.append({"source_id": ref.source_id, "start": start, "end": stop,
+                                "original_excerpt": visible.snapshot.blob.text[start:stop],
+                                "difference": "lexical_lcs_candidate_not_semantic_verification",
+                                "matches": span.matches, "extraction_tokens": len(target),
+                                "coverage": span.matches / len(target),
+                                "density": span.matches / span.span_len})
+            # Best acceptable span per chunk, not exhaustive alternatives.
+            break
     state = "partial" if skipped and searched else "not_searched" if skipped else "complete"
     return tuple(refs), {"algorithm": "langextract_lcs_raw_tokens",
                          "candidate_enumeration": "non_exhaustive",
                          "candidate_details": details,
+                         "candidate_selection": selection,
                          "fuzzy_search": {"status": state, "work_limit": FUZZY_WORK_LIMIT,
                                           "work_used": used, "skipped_chunks": skipped,
                                           "searched_chunks": searched}}, used
@@ -276,7 +276,8 @@ def quote_metadata_valid(item, resolver):
 
 
 def _search_metadata_valid(metadata):
-    if set(metadata) != {"algorithm", "candidate_enumeration", "candidate_details", "fuzzy_search"}:
+    legacy_keys = {"algorithm", "candidate_enumeration", "candidate_details", "fuzzy_search"}
+    if set(metadata) not in (legacy_keys, legacy_keys | {"candidate_selection"}):
         return False
     if metadata["algorithm"] != "langextract_lcs_raw_tokens" or metadata["candidate_enumeration"] != "non_exhaustive":
         return False
@@ -290,4 +291,19 @@ def _search_metadata_valid(metadata):
         return False
     expected = ("partial" if search["skipped_chunks"] and search["searched_chunks"] else
                 "not_searched" if search["skipped_chunks"] else "complete")
-    return search["status"] == expected
+    if search["status"] != expected:
+        return False
+    if "candidate_selection" in metadata:
+        selection = metadata["candidate_selection"]
+        if not isinstance(selection, dict) or set(selection) != {
+                "policy", "generated_windows", "lexically_pruned_windows"}:
+            return False
+        if selection["policy"] != WINDOW_POLICY:
+            return False
+        if any(type(selection[key]) is not int or selection[key] < 0
+               for key in ("generated_windows", "lexically_pruned_windows")):
+            return False
+        if selection["generated_windows"] != (selection["lexically_pruned_windows"] +
+                search["searched_chunks"] + search["skipped_chunks"]):
+            return False
+    return True

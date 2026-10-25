@@ -66,6 +66,7 @@ EVIDENCE_GAP_SOURCE_FILES = GAP_SOURCE_FILES + tuple(
                          'gap_evidence_alignment.py',
                          'latest_evidence_gap_agent.py', 'latest_evidence_gap_store.py',
                          'graded_evidence_alignment.py', 'vendor/langextract_3a68580/fuzzy.py',
+                         'fuzzy_candidate_windows.py', 'vendor/langextract_3a68580/chunking.py',
                          'vendor/langextract_3a68580/__init__.py',
                          'vendor/langextract_3a68580/alignment.py',
                          'vendor/langextract_3a68580/tokenizer.py',

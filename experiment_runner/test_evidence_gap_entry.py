@@ -155,6 +155,7 @@ class EvidenceGapEntryTests(unittest.TestCase):
             'gap_evidence_alignment.py', 'vendor/langextract_3a68580/__init__.py',
             'latest_evidence_gap_agent.py', 'latest_evidence_gap_store.py',
             'graded_evidence_alignment.py', 'vendor/langextract_3a68580/fuzzy.py',
+            'fuzzy_candidate_windows.py', 'vendor/langextract_3a68580/chunking.py',
             'vendor/langextract_3a68580/alignment.py',
             'vendor/langextract_3a68580/tokenizer.py',
             'vendor/langextract_3a68580/requirements.txt',

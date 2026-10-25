@@ -35,9 +35,9 @@ class FuzzyTests(unittest.TestCase):
         self.assertEqual(len(result.bound_refs), 1)
 
     def test_work_limit_is_not_false_miss_or_task_failure(self):
-        quote = "one two changed " * 100
+        quote = "one two three changed " * 100
         with patch("graded_evidence_alignment._best_lcs_spans") as helper:
-            result = align_graded_evidence([{"quote": quote}], catalog_for("one two three " * 1000))
+            result = align_graded_evidence([{"quote": quote}], catalog_for("one two three four " * 1000))
         helper.assert_not_called()
         self.assertEqual(result.items[0].reason, "approximate_work_limit_not_searched")
         self.assertEqual(result.items[0].metadata["fuzzy_search"]["status"], "not_searched")
