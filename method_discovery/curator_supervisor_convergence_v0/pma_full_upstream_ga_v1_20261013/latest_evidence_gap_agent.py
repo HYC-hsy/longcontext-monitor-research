@@ -169,6 +169,7 @@ class LatestEvidenceGapMemoryAgent(AlignedEvidenceGapMemoryAgent):
         operation.binding_disposition = disposition
         operation.binding_error = alignment.reason if alignment.status == "error" else None
         operation.revision_id = revision_id
+        operation.provenance_summary = draft.alignments[revision_id].provenance_summary
         return operation
 
     @cached_source_validation
@@ -176,11 +177,23 @@ class LatestEvidenceGapMemoryAgent(AlignedEvidenceGapMemoryAgent):
         # Reuse the original parse/validate/per-operation atomic publish loop,
         # bypassing only the old pending-proposal outcome vocabulary.
         operations = EvidenceGapMemoryAgent._execute_tool_calls(self, response)
-        self.last_evidence_report["binding_policy"] = self.policy
+        writes = [op for op in operations if op.success and hasattr(op, "binding_status")]
+        grades = {grade: 0 for grade in sorted(LatestEvidenceGapMemory._GRADES)}
+        provenance = {origin: {"bound": 0, "unbound": 0}
+                      for origin in ("raw", "derived", "mixed", "none")}
+        for operation in writes:
+            grades[operation.binding_status] += 1
+            provenance[operation.provenance_summary][operation.binding_disposition] += 1
+        # These are operation counts, not correctness scores or verified claims.
+        # Explicit retirement is not a content write and does not enter counts.
+        self.last_evidence_report.update(binding_policy=self.policy,
+            content_writes_committed=len(writes), binding_grade_counts=grades,
+            binding_errors=grades["error"], provenance_disposition_counts=provenance)
         for outcome, operation in zip(self.last_evidence_report["operations"], operations):
             outcome["content_status"] = "committed" if operation.success else "rejected"
             if operation.success and hasattr(operation, "binding_status"):
                 outcome.update(binding_status=operation.binding_status,
                     binding_disposition=operation.binding_disposition,
-                    binding_error=operation.binding_error, revision_id=operation.revision_id)
+                    binding_error=operation.binding_error, revision_id=operation.revision_id,
+                    provenance_summary=operation.provenance_summary)
         return operations

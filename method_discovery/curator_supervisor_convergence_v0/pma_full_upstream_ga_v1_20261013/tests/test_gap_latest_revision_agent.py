@@ -200,6 +200,53 @@ class LatestRevisionAgentTests(unittest.TestCase):
                 self.assertIn("NOT truth probabilities", rendered)
                 self.assertIn("tool_observation", rendered)
 
+    def test_cycle_metrics_count_committed_writes_not_deletes_or_claim_truth(self):
+        bank = LatestEvidenceGapMemory()
+        retire = bank.save_gap("retire")
+        target = bank.save_knowledge("revise twice")
+        agent, result, _ = self.cycle([
+            ("memory_save_knowledge", {"memory_id": target, "content": "exact revision",
+                                       "evidence": [{"quote": TEXT}]}),
+            ("memory_save_knowledge", {"memory_id": target, "content": "error revision",
+                                       "evidence": None}),
+            ("memory_save_gap", {"content": "approximate claim", "evidence": [
+                {"quote": "The check passed with most assertions enabled."}]}),
+            ("memory_save_procedural", {"content": "uncited claim"}),
+            ("memory_save_gap", {"memory_id": "missing", "content": "invalid target"}),
+            ("memory_delete", {"memory_id": retire})], bank)
+        report = agent.last_evidence_report
+        self.assertEqual([op.success for op in result.operations], [True, True, True, True, False, True])
+        self.assertEqual(report["content_writes_committed"], 4)
+        self.assertEqual(report["binding_errors"], 1)
+        self.assertEqual(report["binding_grade_counts"], {
+            "exact_unique": 1, "exact_multiple": 0, "normalized_unique": 0,
+            "normalized_multiple": 0, "fuzzy_candidate": 1, "unbound": 1, "error": 1})
+        self.assertEqual(report["provenance_disposition_counts"], {
+            "raw": {"bound": 1, "unbound": 1}, "derived": {"bound": 0, "unbound": 0},
+            "mixed": {"bound": 0, "unbound": 0}, "none": {"bound": 0, "unbound": 2}})
+        self.assertEqual(report["operations"][0]["provenance_summary"], "raw")
+        self.assertEqual(report["operations"][1]["provenance_summary"], "none")
+        empty, _, _ = self.cycle(bank=bank)
+        self.assertEqual(empty.last_evidence_report["content_writes_committed"], 0)
+        self.assertEqual(sum(empty.last_evidence_report["binding_grade_counts"].values()), 0)
+
+    def test_effective_tool_schema_requires_only_content_and_optional_quote_hint(self):
+        agent, _, _ = self.cycle()
+        for tool in agent.get_tools_schema():
+            function = tool["function"]
+            params = function["parameters"]
+            if function["name"] == "memory_delete":
+                self.assertEqual(params["required"], ["memory_id"])
+                continue
+            self.assertEqual(params["required"], ["content"])
+            evidence = params["properties"]["evidence"]
+            self.assertNotIn("minItems", evidence)
+            self.assertEqual(evidence["items"]["required"], ["quote"])
+            self.assertEqual(set(evidence["items"]["properties"]), {"source", "quote"})
+            self.assertNotIn("minLength", evidence["items"]["properties"]["quote"])
+            self.assertNotIn("unique", function["description"].lower())
+            self.assertNotIn("required evidence", function["description"].lower())
+
     def test_derived_memory_match_is_not_semantic_proof(self):
         bank = LatestEvidenceGapMemory()
         self.cycle([("memory_save_gap", {"content": "fallible prior claim"})], bank)
