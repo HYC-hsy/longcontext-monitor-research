@@ -81,7 +81,8 @@ def _project_tool_text(add, identity, role, text, path, tool_call_id=None):
                 container, prefix = members, ""
             elif role == "tool_command" and isinstance(payload.get("args"), dict):
                 fields = {"code_run": ("code", "script"),
-                          "file_write": ("content",)}.get(payload.get("tool_name"), ())
+                          "file_write": ("content",),
+                          "file_patch": ("old_content", "new_content")}.get(payload.get("tool_name"), ())
                 container = _json_members(text, members["args"][1])
                 prefix = "args/"
                 if isinstance(payload.get("id"), str) and payload["id"]:

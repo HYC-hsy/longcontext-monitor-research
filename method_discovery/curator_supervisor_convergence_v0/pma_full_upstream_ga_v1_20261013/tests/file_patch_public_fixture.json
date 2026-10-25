@@ -1,0 +1,35 @@
+{
+  "schema": "file-patch-public-projection-regression-v1",
+  "archive_commit": "4eb7d6e9fe99d9df999920d248d948494e75dab2",
+  "run_id": "pma-c66442d8facc46ca",
+  "source": {
+    "old_handle": "s9a69ae48fd7d",
+    "order": 15,
+    "role": "tool_command",
+    "field_path": "commands/0",
+    "raw": "{\"tool_name\": \"file_patch\", \"args\": {\"path\": \"/app/filter.py\", \"old_content\": \"def remove_javascript_urls(html):\\n    \\\"\\\"\\\"Remove javascript: protocol URLs from href, src, and other attributes.\\\"\\\"\\\"\\n    # Match javascript: URLs in attributes (href, src, action, formaction, etc.)\\n    # This pattern finds attribute=\\\"javascript:...\\\" or attribute='javascript:...'\\n    pattern = r'(\\\\s+(?:href|src|action|formaction|data|xlink:href)\\\\s*=\\\\s*)([\\\"\\\\'])javascript:[^\\\"\\\\']*\\\\2'\\n    html = re.sub(pattern, r'\\\\1\\\\2\\\\2', html, flags=re.IGNORECASE)\\n    \\n    # Also handle unquoted javascript: URLs (though less common in valid HTML)\\n    pattern = r'(\\\\s+(?:href|src|action|formaction|data|xlink:href)\\\\s*=\\\\s*)javascript:[^\\\\s>]*'\\n    html = re.sub(pattern, r'\\\\1\\\"\\\"', html, flags=re.IGNORECASE)\\n    \\n    return html\", \"new_content\": \"def remove_javascript_urls(html):\\n    \\\"\\\"\\\"Remove javascript: protocol URLs from href, src, and other attributes.\\\"\\\"\\\"\\n    # Match javascript: URLs in attributes (href, src, action, formaction, etc.)\\n    # Handle double-quoted attributes: attribute=\\\"javascript:...\\\"\\n    pattern = r'(\\\\s+(?:href|src|action|formaction|data|xlink:href)\\\\s*=\\\\s*)\\\"javascript:[^\\\"]*\\\"'\\n    html = re.sub(pattern, r'\\\\1\\\"\\\"', html, flags=re.IGNORECASE)\\n    \\n    # Handle single-quoted attributes: attribute='javascript:...'\\n    pattern = r\\\"(\\\\s+(?:href|src|action|formaction|data|xlink:href)\\\\s*=\\\\s*)'javascript:[^']*'\\\"\\n    html = re.sub(pattern, r\\\"\\\\1''\\\", html, flags=re.IGNORECASE)\\n    \\n    # Also handle unquoted javascript: URLs (though less common in valid HTML)\\n    pattern = r'(\\\\s+(?:href|src|action|formaction|data|xlink:href)\\\\s*=\\\\s*)javascript:[^\\\\s>]*'\\n    html = re.sub(pattern, r'\\\\1\\\"\\\"', html, flags=re.IGNORECASE)\\n    \\n    return html\", \"_index\": 0, \"_tool_num\": 1}, \"id\": \"toolu_pmJKg7qZM1W6WaoDOtNy7F\"}",
+    "raw_sha256": "f8a63742833d7e0170398dd4e3ac54c729615746bce95ba7fe9cd2da8864b2be"
+  },
+  "cases": [
+    {
+      "cycle_step": 8,
+      "operation_index": 1,
+      "revision_id": "rev_5a7b0c0d84ef410ca881df3c53895909",
+      "quote": "pattern = r'(\\s+(?:href|src|action|formaction|data|xlink:href)\\s*=\\s*)\"javascript:[^\"]*\"'\n    html = re.sub(pattern, r'\\1\"\"', html, flags=re.IGNORECASE)\n    \n    # Handle single-quoted attributes: attribute='javascript:...'\n    pattern = r\"(\\s+(?:href|src|action|formaction|data|xlink:href)\\s*=\\s*)'javascript:[^']*'\"",
+      "expected_interval": [
+        266,
+        583
+      ]
+    },
+    {
+      "cycle_step": 9,
+      "operation_index": 1,
+      "revision_id": "rev_5491dfbcdb9a467bae50ac689db0a631",
+      "quote": "pattern = r'(\\s+(?:href|src|action|formaction|data|xlink:href)\\s*=\\s*)\"javascript:[^\"]*\"'\n    html = re.sub(pattern, r'\\1\"\"', html, flags=re.IGNORECASE)\n    \n    # Handle single-quoted attributes: attribute='javascript:...'\n    pattern = r\"(\\s+(?:href|src|action|formaction|data|xlink:href)\\s*=\\s*)'javascript:[^']*'\"\n    html = re.sub(pattern, r\"\\1''\", html, flags=re.IGNORECASE)",
+      "expected_interval": [
+        266,
+        646
+      ]
+    }
+  ]
+}
