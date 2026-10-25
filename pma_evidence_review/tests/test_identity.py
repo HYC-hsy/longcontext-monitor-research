@@ -4,7 +4,6 @@ import copy
 import gzip
 import hashlib
 import json
-import socket
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,16 +15,14 @@ from pma_evidence_review.review import extraction_request, review
 from pma_evidence_review.transport import CapturedTransport, FakeClient
 from pma_evidence_review.location import locate
 from pma_evidence_review.tests.fixtures import bundle, packet, extraction, result
+from pma_evidence_review.tests.no_network import install_guard
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 class IdentityTests(unittest.TestCase):
     def setUp(self):
-        guard = patch.object(socket.socket, 'connect', side_effect=AssertionError('network forbidden'))
-        blocked = guard.start()
-        self.addCleanup(guard.stop)
-        self.addCleanup(lambda: self.assertEqual(blocked.call_count, 0))
+        install_guard(self)
 
     def test_sqlite_operation_and_deletion_mutations_rejected(self):
         original = build(ROOT, 'sqlite')

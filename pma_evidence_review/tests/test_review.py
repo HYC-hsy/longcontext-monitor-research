@@ -2,11 +2,9 @@
 import asyncio
 import copy
 import json
-import socket
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from pma_evidence_review.inputs import build_from_data, validate, digest
 from pma_evidence_review.review import (parse_claims, parse_results, extraction_request,
@@ -15,14 +13,12 @@ from pma_evidence_review.transport import FakeClient, CapturedTransport, load_pr
 from pma_evidence_review.vendor.rag_models import Claim, VerificationResult
 from pma_evidence_review.vendor.sourcecheck_types import Verdict, ReasonCode
 from pma_evidence_review.tests.fixtures import bundle, packet, extraction, result
+from pma_evidence_review.tests.no_network import install_guard
 
 
 class OfflineTests(unittest.TestCase):
     def setUp(self):
-        self.guard = patch.object(socket.socket, 'connect', side_effect=AssertionError('network forbidden'))
-        self.blocked_network = self.guard.start()
-        self.addCleanup(lambda: self.assertEqual(self.blocked_network.call_count, 0))
-        self.addCleanup(self.guard.stop)
+        install_guard(self)
 
     def test_upstream_extract_claims_basic(self):
         # Adapted TestClaimExtractor.test_extract_claims_basic, async fake exercised below.

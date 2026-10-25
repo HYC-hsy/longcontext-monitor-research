@@ -2,7 +2,6 @@
 import asyncio
 import copy
 import json
-import socket
 import sys
 import tempfile
 import types
@@ -15,16 +14,14 @@ from pma_evidence_review.location import locate
 from pma_evidence_review.review import review, extraction_request, parse_claims, verification_requests
 from pma_evidence_review.transport import CapturedTransport, FakeClient, load_profile_client
 from pma_evidence_review.tests.fixtures import packet, extraction, result
+from pma_evidence_review.tests.no_network import install_guard
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 class IntegrationTests(unittest.TestCase):
     def setUp(self):
-        guard = patch.object(socket.socket,'connect',side_effect=AssertionError('network forbidden'))
-        self.blocked_network = guard.start()
-        self.addCleanup(lambda: self.assertEqual(self.blocked_network.call_count, 0))
-        self.addCleanup(guard.stop)
+        install_guard(self)
 
     def test_graded_locator_original_implementation(self):
         p = packet()
