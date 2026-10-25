@@ -241,6 +241,23 @@ class LatestRevisionTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 LatestEvidenceGapMemory.from_dict(data)
 
+    def test_pristine_upstream_initialization_not_archive_migration(self):
+        from memory_agent.memory.universal_memory import UniversalMemory
+        upstream = UniversalMemory()
+        initialized = LatestEvidenceGapMemory.from_dict(upstream.to_dict())
+        self.assertEqual(initialized.to_dict(), LatestEvidenceGapMemory().to_dict())
+        upstream.save_knowledge("existing knowledge")
+        with self.assertRaisesRegex(ValueError, "schema 2"):
+            LatestEvidenceGapMemory.from_dict(upstream.to_dict())
+        for extra in ({"gaps": []}, {"history": []}, {"gap_alignment_policy": "old"}):
+            data = {**UniversalMemory().to_dict(), **extra}
+            with self.assertRaises(ValueError):
+                LatestEvidenceGapMemory.from_dict(data)
+        upstream = UniversalMemory()
+        upstream.update_status("existing status")
+        with self.assertRaises(ValueError):
+            LatestEvidenceGapMemory.from_dict(upstream.to_dict())
+
     def test_stale_draft_rejected(self):
         draft = self.bank.fork_write_draft()
         self.write("new")

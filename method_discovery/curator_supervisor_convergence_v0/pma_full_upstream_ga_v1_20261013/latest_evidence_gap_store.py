@@ -206,6 +206,15 @@ class LatestEvidenceGapMemory(AlignedEvidenceGapMemory):
     @classmethod
     @cached_source_validation
     def from_dict(cls, data):
+        # The upstream constructor supplies a pristine UniversalMemory bank,
+        # not an archive. Accept only its exact empty serialization shape.
+        if (isinstance(data, dict) and set(data) == {"status", "knowledge", "procedural"}
+                and data["status"] == "" and data["knowledge"] == [] and data["procedural"] == []):
+            base = EvidenceGapMemory.from_dict(data)
+            if (base.status or base._knowledge or base._procedural or base._gap_entries
+                    or base.active_revisions or any(getattr(base, name) for name in base._HISTORIES)):
+                raise ValueError("only a pristine upstream bank can initialize latest policy")
+            return cls(max_status_length=base._max_status_length)
         extra = data.get("gap_alignment")
         if (data.get("gap_alignment_policy") != cls.policy or not isinstance(extra, dict)
                 or "gap_evidence" not in data
