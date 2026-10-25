@@ -10,8 +10,8 @@ import unittest
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 from harbor.llms.base import LLMResponse
 from episode import PMAEpisode, construct_upstream
-from aligned_evidence_gap_agent import AlignedEvidenceGapMemoryAgent
-from aligned_evidence_gap_store import AlignedEvidenceGapMemory
+from latest_evidence_gap_agent import LatestEvidenceGapMemoryAgent as AlignedEvidenceGapMemoryAgent
+from latest_evidence_gap_store import LatestEvidenceGapMemory as AlignedEvidenceGapMemory
 from gap_memory_agent import GapMemoryAgent
 from gap_store import GapMemory
 from memory_agent.memory.memory_agent import MemoryAgent
@@ -56,7 +56,7 @@ class AlignedEvidenceHostTests(unittest.TestCase):
             self.assertEqual(asyncio.run(run())["status"], "saved")
             self.assertEqual([phase for phase, _ in calls], ["maintenance", "selection"])
             self.assertIn("Investigate the missing check.", calls[1][1]["prompt"])
-            self.assertIn("literal_binding=unbound; disposition=unbound", calls[1][1]["prompt"])
+            self.assertIn("binding_status=unbound", calls[1][1]["prompt"])
             self.assertIs(host._memory, bank)
             self.assertEqual(len(bank.entries), 1)
             self.assertEqual(bank.binding(bank.entries[0].id).disposition, "unbound")
@@ -67,6 +67,61 @@ class AlignedEvidenceHostTests(unittest.TestCase):
             saved = json.loads((root / "archive/memory.json").read_text())
             loaded = AlignedEvidenceGapMemory.from_dict(saved)
             self.assertEqual(loaded.entries[0].content, bank.entries[0].content)
+
+    def test_latest_revision_survives_binding_error_and_next_cycle(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            host = construct_upstream(root / "upstream", research_candidate="pma_gap_evidence_v1")
+            bank, agent, calls = host._memory, host._memory_agent, []
+            key = None
+            maintenance_count = 0
+
+            async def fake(**kwargs):
+                nonlocal key, maintenance_count
+                calls.append((agent.transport_phase, kwargs))
+                if agent.transport_phase == "selection":
+                    return LLMResponse(content="<no_intervention/>")
+                maintenance_count += 1
+                if maintenance_count == 1:
+                    args = {"content": "Old gap", "evidence": [{"quote": "Original task"}]}
+                elif maintenance_count == 2:
+                    key = bank.entries[0].id
+                    args = {"content": "Latest gap despite malformed evidence", "memory_id": key,
+                            "evidence": "not an evidence array"}
+                else:
+                    self.assertIn("Latest gap despite malformed evidence", kwargs["prompt"])
+                    self.assertNotIn("PENDING UNBOUND replacement", kwargs["prompt"])
+                    return LLMResponse(content="")
+                return LLMResponse(content="", tool_calls=[NS(function=NS(
+                    name="memory_save_gap", arguments=json.dumps(args)))])
+
+            host._memory_llm.call = fake
+            ep = PMAEpisode(host, run_id="latest-host", task_id="synthetic", archive=root / "archive")
+            def event(kind, n, **kwargs):
+                return dict(kind=kind, sequence=n, event_id=f"latest-{n}",
+                            run_id="latest-host", task_id="synthetic", **kwargs)
+            async def run():
+                await ep.handle(event("task_start", 1, initial_user_content="Original task"))
+                for attempt, sequence in [(1, 2), (2, 4)]:
+                    await ep.handle(event("before_actor_call", sequence, actor_attempt=attempt))
+                    await ep.handle(event("actor_step", sequence + 1, actor_attempt=attempt,
+                        step_status="normal", response="public observation", commands=[],
+                        observation=json.dumps({"content": "public observation", "tool_results": []})))
+                await ep.handle(event("task_end", 6, terminal={"result": "done"}))
+            asyncio.run(run())
+            self.assertEqual([phase for phase, _ in calls], ["maintenance", "selection"] * 3)
+            self.assertEqual(bank.entries[0].id, key)
+            self.assertEqual(bank.entries[0].content, "Latest gap despite malformed evidence")
+            self.assertEqual(bank.binding(key).status, "error")
+            self.assertFalse(bank.pending_proposals)
+            self.assertIn("binding_status=error", calls[3][1]["prompt"])
+            self.assertIn("Latest gap despite malformed evidence", calls[3][1]["prompt"])
+            cycles = [json.loads(line) for line in (root / "archive/gap_cycle.jsonl").read_text().splitlines()]
+            self.assertEqual(cycles[1]["evidence_report"]["binding_errors"], 1)
+            self.assertEqual(cycles[1]["evidence_report"]["content_writes_committed"], 1)
+            saved = json.loads((root / "archive/memory.json").read_text())
+            self.assertEqual(json.loads(json.dumps(AlignedEvidenceGapMemory.from_dict(saved).to_dict())), saved)
+            self.assertEqual(host._llm.calls, 0)
 
     def test_old_bank_readability_and_new_source_hash_coverage(self):
         stage = Path(__file__).resolve().parents[1]

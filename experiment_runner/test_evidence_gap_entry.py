@@ -153,6 +153,8 @@ class EvidenceGapEntryTests(unittest.TestCase):
             'evidence_gap_context.py', 'source_memory.py', 'evidence_requirements.txt',
             'aligned_evidence_gap_agent.py', 'aligned_evidence_gap_store.py',
             'gap_evidence_alignment.py', 'vendor/langextract_3a68580/__init__.py',
+            'latest_evidence_gap_agent.py', 'latest_evidence_gap_store.py',
+            'graded_evidence_alignment.py', 'vendor/langextract_3a68580/fuzzy.py',
             'vendor/langextract_3a68580/alignment.py',
             'vendor/langextract_3a68580/tokenizer.py',
             'vendor/langextract_3a68580/requirements.txt',

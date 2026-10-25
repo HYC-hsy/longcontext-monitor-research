@@ -88,8 +88,8 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
         agent._research_candidate = research_candidate
     elif research_candidate in {"pma_gap_memory_v0", "pma_gap_evidence_v1"}:
         if research_candidate == "pma_gap_evidence_v1":
-            from aligned_evidence_gap_agent import AlignedEvidenceGapMemoryAgent as GapMemoryAgent
-            from aligned_evidence_gap_store import AlignedEvidenceGapMemory as GapMemory
+            from latest_evidence_gap_agent import LatestEvidenceGapMemoryAgent as GapMemoryAgent
+            from latest_evidence_gap_store import LatestEvidenceGapMemory as GapMemory
         else:
             from gap_memory_agent import GapMemoryAgent
             from gap_store import GapMemory
