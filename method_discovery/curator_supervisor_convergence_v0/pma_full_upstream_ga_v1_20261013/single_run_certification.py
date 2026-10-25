@@ -61,7 +61,13 @@ GAP_SOURCE_FILES = SOURCE_FILES + (
 EVIDENCE_GAP_SOURCE_FILES = GAP_SOURCE_FILES + tuple(
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     + name for name in ('gap_evidence.py', 'evidence_gap_store.py', 'evidence_gap_agent.py',
-                         'evidence_gap_context.py', 'source_memory.py', 'evidence_requirements.txt')
+                         'evidence_gap_context.py', 'source_memory.py', 'evidence_requirements.txt',
+                         'aligned_evidence_gap_agent.py', 'aligned_evidence_gap_store.py',
+                         'gap_evidence_alignment.py',
+                         'vendor/langextract_3a68580/__init__.py',
+                         'vendor/langextract_3a68580/alignment.py',
+                         'vendor/langextract_3a68580/tokenizer.py',
+                         'vendor/langextract_3a68580/requirements.txt')
 )
 EVIDENCE_FILES = (
     'execution_identity.json',
@@ -92,15 +98,16 @@ def require_bound_gap_memory(path: Path) -> None:
     original_path = sys.path[:]
     try:
         sys.path[:0] = [str(stage), str(stage / 'vendor/pma_89e5c0d/src')]
-        from evidence_gap_store import EvidenceGapMemory
+        from aligned_evidence_gap_store import AlignedEvidenceGapMemory
         modules = {name: stage / (name + '.py') for name in (
+            'aligned_evidence_gap_store',
             'evidence_gap_store', 'gap_evidence', 'gap_store', 'source_memory')}
         modules['memory_agent.memory.universal_memory'] = (
             stage / 'vendor/pma_89e5c0d/src/memory_agent/memory/universal_memory.py')
         if any(Path(sys.modules[name].__file__).resolve() != expected.resolve()
                for name, expected in modules.items()):
             raise RuntimeError('evidence fixture validator loaded foreign source')
-        memory = EvidenceGapMemory.from_dict(json.loads(path.read_text(encoding='utf-8')))
+        memory = AlignedEvidenceGapMemory.from_dict(json.loads(path.read_text(encoding='utf-8')))
     finally:
         sys.path[:] = original_path
     for gap in memory.entries:

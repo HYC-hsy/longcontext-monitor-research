@@ -88,8 +88,8 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
         agent._research_candidate = research_candidate
     elif research_candidate in {"pma_gap_memory_v0", "pma_gap_evidence_v1"}:
         if research_candidate == "pma_gap_evidence_v1":
-            from evidence_gap_agent import EvidenceGapMemoryAgent as GapMemoryAgent
-            from evidence_gap_store import EvidenceGapMemory as GapMemory
+            from aligned_evidence_gap_agent import AlignedEvidenceGapMemoryAgent as GapMemoryAgent
+            from aligned_evidence_gap_store import AlignedEvidenceGapMemory as GapMemory
         else:
             from gap_memory_agent import GapMemoryAgent
             from gap_store import GapMemory
@@ -212,6 +212,8 @@ class PMAEpisode:
                         'step': 1 if kind == 'task_start' else result.get('step_count'),
                         'report': deepcopy(candidate_agent.last_gap_report),
                         'formal_gaps': [entry.to_dict() for entry in self.agent._memory.entries],
+                        **({'alignment_policy': candidate_agent.expected_alignment_policy}
+                           if hasattr(candidate_agent, 'expected_alignment_policy') else {}),
                         **({'evidence_report': deepcopy(candidate_agent.last_evidence_report)}
                            if hasattr(candidate_agent, 'last_evidence_report') else {}),
                     }, ensure_ascii=False, sort_keys=True) + '\n')

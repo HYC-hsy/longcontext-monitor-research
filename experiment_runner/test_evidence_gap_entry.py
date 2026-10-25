@@ -1,4 +1,5 @@
 """Offline routing and identity checks; no preparation, model or verifier run."""
+import hashlib
 import importlib
 import importlib.util
 import os
@@ -146,13 +147,33 @@ class EvidenceGapEntryTests(unittest.TestCase):
     def test_evidence_source_identity_is_separate_and_complete(self):
         certification = importlib.import_module(DRIVER + '.single_run_certification')
         added = set(certification.EVIDENCE_GAP_SOURCE_FILES) - set(certification.GAP_SOURCE_FILES)
-        self.assertEqual({Path(name).name for name in added}, {
+        prefix = DRIVER.replace('.', '/') + '/'
+        expected = {
             'gap_evidence.py', 'evidence_gap_store.py', 'evidence_gap_agent.py',
-            'evidence_gap_context.py', 'source_memory.py', 'evidence_requirements.txt'})
-        with patch.object(certification, '_committed_source_sha', return_value='fixture'):
-            old = certification.source_identity(Path('.'), gap=True)
-            new = certification.source_identity(Path('.'), evidence_gap=True)
+            'evidence_gap_context.py', 'source_memory.py', 'evidence_requirements.txt',
+            'aligned_evidence_gap_agent.py', 'aligned_evidence_gap_store.py',
+            'gap_evidence_alignment.py', 'vendor/langextract_3a68580/__init__.py',
+            'vendor/langextract_3a68580/alignment.py',
+            'vendor/langextract_3a68580/tokenizer.py',
+            'vendor/langextract_3a68580/requirements.txt',
+        }
+        self.assertEqual(added, {prefix + name for name in expected})
+        checkout = Path(__file__).resolve().parents[1]
+        def hash_working_bytes(root, name):
+            self.assertEqual(root, checkout)
+            return hashlib.sha256((root / name).read_bytes()).hexdigest()
+        # Exercise identity dispatch with actual current bytes, not a constant.
+        # This is source coverage only, not committed-source certification.
+        with patch.object(certification, '_committed_source_sha',
+                          side_effect=hash_working_bytes) as source_hash:
+            old = certification.source_identity(checkout, gap=True)
+            new = certification.source_identity(checkout, evidence_gap=True)
         self.assertEqual(set(new) - set(old), added)
+        self.assertEqual({name for root, name in (call.args for call in source_hash.call_args_list)},
+                         set(certification.EVIDENCE_GAP_SOURCE_FILES))
+        for name in added:
+            self.assertEqual(new[name], hashlib.sha256((checkout / name).read_bytes()).hexdigest())
+
 
 
 if __name__ == '__main__':
