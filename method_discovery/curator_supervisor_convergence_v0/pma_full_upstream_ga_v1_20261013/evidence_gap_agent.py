@@ -26,6 +26,33 @@ memory_id only for a new entry. Do not delete then save to express an update.
 Deletion uses only memory_id. Each operation is atomic and independent: a failed operation does not undo other
 successful operations. An explicit delete is not coupled to a later save.
 """
+# Evidence-only adaptations of the two legacy gap replacement instructions.
+# Exact anchors are checked against the inherited text in regression tests;
+# ordinary pma-gap and the vendor prompt remain untouched.
+GAP_REVISION_REPLACEMENTS = (
+    (
+        "Save and delete update the view immediately. To revise, delete the displayed real gap\n"
+        "ID and save a new entry; never guess a new ID. Unmentioned entries remain.",
+        "Save and delete update the view immediately. To revise a gap, use memory_save_gap\n"
+        "with its displayed memory_id, replacement content, and evidence in one operation;\n"
+        "never delete it first or guess a new ID. Unmentioned entries remain.",
+    ),
+    (
+        "ID. If only part is resolved, revise it using the existing delete-and-save tools\n"
+        "so the unresolved part remains.",
+        "ID. If only part is resolved, use memory_save_gap with that displayed memory_id,\n"
+        "content describing the unresolved part, and evidence to revise it in place.",
+    ),
+)
+
+
+def evidence_phase1_system():
+    maintenance = MAINTENANCE
+    for old, new in GAP_REVISION_REPLACEMENTS:
+        maintenance = maintenance.replace(old, new, 1)
+    return PHASE1_SYSTEM + maintenance + EVIDENCE_RULES
+
+
 WRITERS = {
     "memory_save_knowledge": "knowledge",
     "memory_save_procedural": "procedural",
@@ -174,7 +201,7 @@ class EvidenceGapMemoryAgent(GapMemoryAgent):
     async def _call_llm_phase1(self, user_prompt):
         self.transport_phase = "maintenance"
         kwargs = {"prompt": user_prompt,
-                  "system": PHASE1_SYSTEM + MAINTENANCE + EVIDENCE_RULES}
+                  "system": evidence_phase1_system()}
         if self.use_structured_tools:
             kwargs["tools"] = self.get_tools_schema()
         try:

@@ -6,12 +6,14 @@ from types import SimpleNamespace as NS
 import unittest
 from unittest.mock import patch
 
-from evidence_gap_agent import EvidenceGapMemoryAgent, WRITERS
+from evidence_gap_agent import (EvidenceGapMemoryAgent, WRITERS, EVIDENCE_RULES,
+                                GAP_REVISION_REPLACEMENTS, evidence_phase1_system)
 from evidence_gap_store import EvidenceGapMemory
 from gap_evidence import sha256
 from gap_memory_agent import GapMemoryAgent
 from gap_store import GapMemory
-from memory_agent.memory.memory_agent import BANK_TOOLS, MemoryAgent
+from gap_prompts import MAINTENANCE, phase2_system
+from memory_agent.memory.memory_agent import BANK_TOOLS, MemoryAgent, PHASE1_SYSTEM
 
 
 RAW = "RAW_COMPOUND_CONTEXT (kept only for retrieval and phase 2)"
@@ -61,6 +63,37 @@ class EvidenceAgentTests(unittest.TestCase):
         expected = GapMemoryAgent(task="task", memory=bank)._build_phase2_prompt(raw, 7)
         self.assertEqual(model.inputs[1]["prompt"], expected)
         return agent, result, model
+
+    def test_actual_phase1_revision_contract_and_plain_gap_unchanged(self):
+        original = PHASE1_SYSTEM + MAINTENANCE
+        for structured in (True, False):
+            with self.subTest(structured=structured):
+                _, _, model = self.run_cycle(lambda evidence: reply(), structured=structured)
+                sent = model.inputs[0]["system"]
+                self.assertEqual(sent, evidence_phase1_system())
+                self.assertTrue(sent.startswith(PHASE1_SYSTEM))
+                self.assertTrue(sent.endswith(EVIDENCE_RULES))
+                for old, new in GAP_REVISION_REPLACEMENTS:
+                    # Detect changed/missing/duplicated inherited anchors in CI,
+                    # without adding a new runtime admission gate.
+                    self.assertEqual(MAINTENANCE.count(old), 1)
+                    self.assertEqual(sent.count(new), 1)
+                    self.assertNotIn(old, sent)
+                self.assertNotIn("delete-and-save", sent)
+                self.assertNotIn("To revise, delete", sent)
+                self.assertIn("never delete it first", sent)
+                self.assertIn("content describing the unresolved part, and evidence", sent)
+                self.assertIn("If evidence resolves the stated gap within its scope, delete", sent)
+                self.assertIn("Do not delete then save to express an update.", sent)
+                self.assertIn("Each operation is atomic and independent", sent)
+                self.assertEqual(model.inputs[1]["system"], phase2_system())
+                plain = Model(lambda evidence: reply())
+                agent = GapMemoryAgent(task="task", memory=GapMemory(), llm=plain,
+                                       use_structured_tools=structured)
+                asyncio.run(agent.process(RAW, 7))
+                self.assertEqual(plain.inputs[0]["system"], original)
+                self.assertEqual(plain.inputs[1]["system"], model.inputs[1]["system"])
+        self.assertEqual(PHASE1_SYSTEM + MAINTENANCE, original)
 
     def test_all_five_tools_and_exact_phase2(self):
         bank = EvidenceGapMemory(max_status_length=8)
