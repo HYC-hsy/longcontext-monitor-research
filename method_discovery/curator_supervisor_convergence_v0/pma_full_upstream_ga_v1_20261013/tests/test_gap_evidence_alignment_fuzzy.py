@@ -65,3 +65,26 @@ class FuzzyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ArchivedC8Tests(unittest.TestCase):
+    def test_real_c8_missing_continuations_align_to_original_source(self):
+        import json
+        from pathlib import Path
+        from gap_evidence import sha256
+        fixture = json.loads(Path(__file__).with_name("graded_c8_alignment_fixture.json").read_text())
+        source = fixture["source"]
+        self.assertEqual(sha256(source), fixture["source_sha256"])
+        self.assertIn("\\\n\tshell.c", source)
+        for quote in fixture["quotes"]:
+            position = quote.index(" -o sqlite3 ") + len(" -o sqlite3 ")
+            self.assertEqual([ord(c) for c in quote[position:position + 2]], [10, 9])
+            self.assertFalse(candidate_grade_valid(quote, source, "normalized_unique"))
+            result = align_graded_evidence([{"quote": quote}], catalog_for(source))
+            self.assertEqual(result.status, "normalized_unique")
+            ref = result.bound_refs[0]
+            excerpt = source[ref.start:ref.end]
+            self.assertNotEqual(excerpt, quote)
+            self.assertEqual(ref.snippet_sha256, sha256(excerpt))
+            self.assertTrue(candidate_grade_valid(quote, excerpt, result.status))
+            self.assertIn("line_continuation", result.items[0].metadata["candidate_details"][0]["source_transforms"])
