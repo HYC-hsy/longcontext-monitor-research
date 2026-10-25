@@ -63,9 +63,16 @@ def visible_sources(prompt, manifest):
         require(header is not None, 'missing_source_header')
         handle, role, order, field = header.groups()
         identity = json.loads(sid)
+        require(json.dumps(identity, ensure_ascii=False, separators=(',', ':')) == sid,
+                'noncanonical_source_id')
+        combined = [span for ref, group in zip(refs, spans) if ref == sid for span in group]
+        sealed = json.dumps([manifest['cycle_id'], manifest['request_sha256'], sid, combined],
+                            ensure_ascii=False, separators=(',', ':'))
+        require(visibility == digest(sealed), 'visibility_ref_mismatch')
         require(identity[1] in ('public', 'memory'), 'unknown_source_kind')
         if identity[1] == 'public':
             require(identity[-1] == field, 'source_field_mismatch')
+            require(handle == 's' + digest(sid)[:12], 'source_handle_mismatch')
         cursor = header.end()
         slices = []
         for number, pair in enumerate(ranges):
@@ -115,6 +122,7 @@ def build_from_data(payloads, trajectory, cycles, bank, *, step, cycle_id,
     for old in before:
         require(old['content'] in prompt, 'historical_memory_not_fully_visible')
     allowed_before = {x['revision_id'] for x in before}
+    current = {x['memory_id']: x for x in before}
     operations = []
     evidence_ops = cycle['evidence_report']['operations']
     require(len(evidence_ops) == len(recorded['operations']), 'operation_count_mismatch')
@@ -133,6 +141,9 @@ def build_from_data(payloads, trajectory, cycles, bank, *, step, cycle_id,
                 and x['memory_id'] == raw['memory_id'], 'missing_deletion_tombstone')
             require(tomb['revision_id'] in allowed_before, 'deletion_not_visible_before')
             item['before'] = revision(store, tomb['revision_id'])
+            require(item['before'] == current.get(raw['memory_id']), 'deletion_not_current')
+            item['category'] = item['before']['category']
+            current.pop(raw['memory_id'])
             item['revision_id'] = tomb['revision_id']
             item['content'] = item['before']['content']
             item['review_scope'] = 'justification_for_deleting_this_item_not_asserting_it_true'
@@ -154,7 +165,11 @@ def build_from_data(payloads, trajectory, cycles, bank, *, step, cycle_id,
             if previous:
                 require(previous in allowed_before, 'previous_revision_not_visible')
                 item['before'] = revision(store, previous)
-            item.update(revision_id=rid, review_scope='written_content')
+            require(item['before'] == current.get(raw['memory_id']), 'previous_revision_not_current')
+            item.update(revision_id=rid, category=after['category'], review_scope='written_content')
+            allowed_before.add(rid)
+            current[raw['memory_id']] = after
+        item['content_sha256'] = digest(item['content']) if item['success'] else None
         operations.append(item)
     task_sources = [s for s in sources if s['role'] == 'task_instruction']
     require(task_sources or not exact, 'original_task_missing')
@@ -168,8 +183,47 @@ def build_from_data(payloads, trajectory, cycles, bank, *, step, cycle_id,
         'replay_status': 'exact_public_prompt' if exact else 'degraded_replay',
         'memory_before': before, 'operations': operations, 'sources': sources,
         'limitations': limitations, 'truncation': 'none_added_by_builder'}
+    packet['review_input_sha256'] = review_input_identity(packet)
     validate(packet)
     return packet
+
+
+def model_material(packet):
+    """Explicit top-level whitelist; no developer labels or unknown fields serialized."""
+    def memory(row):
+        return {k: row[k] for k in ('memory_id', 'revision_id', 'category', 'content')}
+    operations = []
+    for op in packet['operations']:
+        row = {k: op[k] for k in ('op_index', 'action', 'memory_id', 'revision_id',
+            'content', 'content_sha256', 'category', 'success', 'binding_status', 'review_scope') if k in op}
+        row['before'] = memory(op['before']) if op.get('before') else None
+        operations.append(row)
+    sources = []
+    for source in packet['sources']:
+        row = {k: source[k] for k in ('source_id', 'handle', 'kind', 'role',
+            'event_order', 'field_path', 'visibility_ref')}
+        row['slices'] = [{k: part[k] for k in ('start', 'end', 'text')}
+                         for part in source['slices']]
+        sources.append(row)
+    return {'original_task': packet['original_task'],
+        'maintenance_prompt': packet['maintenance_prompt'],
+        'memory_before': [memory(x) for x in packet['memory_before']],
+        'operations': operations, 'sources': sources,
+        'limitations': packet['limitations'], 'replay_status': packet['replay_status']}
+
+
+def review_input_identity(packet):
+    """Content identity, not a signature or proof of archive authenticity.
+
+    The maintenance hash binds only the old prompt. This identity additionally
+    binds the exact whitelisted model material and its cycle/operation provenance.
+    Extra developer annotations excluded by model_material cannot enter requests.
+    """
+    identity = {k: packet[k] for k in ('schema', 'cycle_id', 'step', 'call_sequence',
+        'manifest', 'request_sha256', 'original_request_sha256', 'truncation')}
+    identity['model_material'] = model_material(packet)
+    return digest(json.dumps(identity, sort_keys=True, separators=(',', ':'),
+                             ensure_ascii=False, allow_nan=False))
 
 
 def validate(packet):
@@ -182,6 +236,10 @@ def validate(packet):
     require(isinstance(packet.get('sources'), list), 'sources_missing')
     require(isinstance(packet.get('memory_before'), list), 'memory_before_missing')
     require(isinstance(packet.get('original_task'), str), 'original_task_missing')
+    require(isinstance(packet.get('manifest'), dict) and
+            packet['manifest'].get('cycle_id') == packet.get('cycle_id') and
+            packet['manifest'].get('request_sha256') == packet.get('original_request_sha256'),
+            'manifest_identity_mismatch')
     if packet['replay_status'] == 'exact_public_prompt':
         manifest = packet.get('manifest')
         require(isinstance(manifest, dict) and manifest.get('request_sha256') ==
@@ -202,6 +260,8 @@ def validate(packet):
     else:
         require(packet['limitations'] and not packet['sources'], 'degraded_sources_untrusted')
     require(isinstance(packet.get('operations'), list) and packet['operations'], 'operations_empty')
+    before_by_id = {row['memory_id']: row for row in packet['memory_before']}
+    require(len(before_by_id) == len(packet['memory_before']), 'duplicate_before_memory')
     indices = []
     for op in packet['operations']:
         require(type(op.get('op_index')) is int, 'operation_index')
@@ -211,8 +271,39 @@ def validate(packet):
         require(type(op.get('success')) is bool, 'success_missing')
         require(not op['success'] or isinstance(op.get('content'), str) and
                 bool(op['content']) and bool(op.get('revision_id')), 'operation_content_missing')
+        if op['success']:
+            require(op.get('content_sha256') == digest(op['content']), 'operation_content_hash')
+            expected_before = before_by_id.get(op['memory_id'])
+            require((None if op.get('before') is None else
+                     {k: op['before'][k] for k in ('memory_id', 'revision_id', 'category', 'content')}) ==
+                    (None if expected_before is None else
+                     {k: expected_before[k] for k in ('memory_id', 'revision_id', 'category', 'content')}),
+                    'operation_before_mismatch')
+            if op['action'].startswith('delete_'):
+                require(expected_before is not None and
+                        op['revision_id'] == expected_before['revision_id'] and
+                        op['content'] == expected_before['content'], 'deletion_revision_mismatch')
+                before_by_id.pop(op['memory_id'])
+            else:
+                before_by_id[op['memory_id']] = {k: op[k] for k in
+                    ('memory_id', 'revision_id', 'category', 'content')}
+    require(indices == list(range(len(indices))), 'operations_not_ordered')
     require(len(set(indices)) == len(indices), 'duplicate_operation')
+    require(packet.get('review_input_sha256') == review_input_identity(packet),
+            'review_input_hash_mismatch')
     return packet
+
+
+def load_indexed(path, files, lines=False):
+    entry = only(files, lambda x: x['public'] == path.name, 'indexed_file_missing')
+    raw = path.read_bytes()
+    require(len(raw) == entry['public_gzip_bytes'] and
+            hashlib.sha256(raw).hexdigest() == entry['public_gzip_sha256'], 'public_gzip_hash')
+    decoded = gzip.decompress(raw)
+    require(hashlib.sha256(decoded).hexdigest() == entry['public_uncompressed_sha256'],
+            'public_uncompressed_hash')
+    data = [json.loads(line) for line in decoded.splitlines() if line.strip()] if lines else json.loads(decoded)
+    return [row['value'] for row in data] if lines else data['value']
 
 
 def build(repo, sample, *, step=None, cycle_id=None, allow_redacted=False):
@@ -220,9 +311,13 @@ def build(repo, sample, *, step=None, cycle_id=None, allow_redacted=False):
     root = Path(repo) / D / 'source_window_two_real_20261025'
     index = json.loads((root / 'INDEX.json').read_text())
     require(index['executed_code_commit'] == EXECUTED_SHA, 'executed_baseline_mismatch')
-    require(any(x.get('task') == slot[3:-3] for x in index['slots']), 'sample_not_indexed')
+    selected = only(index['slots'], lambda x: x.get('task') == slot[3:-3], 'sample_not_indexed')
     path = root / slot
-    return build_from_data(load(path / 'memory_payload.jsonl.gz', True),
-        load(path / 'trajectory_memory.json.gz'), load(path / 'gap_cycle.jsonl.gz', True),
-        load(path / 'memory.json.gz'), step=default_step if step is None else step,
+    raw_index = (path / 'INDEX.json').read_bytes()
+    require(hashlib.sha256(raw_index).hexdigest() == selected['index_sha256'], 'slot_index_hash')
+    files = json.loads(raw_index)['files']
+    return build_from_data(load_indexed(path / 'memory_payload.jsonl.gz', files, True),
+        load_indexed(path / 'trajectory_memory.json.gz', files),
+        load_indexed(path / 'gap_cycle.jsonl.gz', files, True),
+        load_indexed(path / 'memory.json.gz', files), step=default_step if step is None else step,
         cycle_id=default_cycle if cycle_id is None else cycle_id, allow_redacted=allow_redacted)

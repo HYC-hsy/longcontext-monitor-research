@@ -52,10 +52,18 @@ previous evidence. SQLite selects step 14 / maintenance call 27 / cycle
 
 The input contains `original_task`, the exact public `maintenance_prompt`, pre-cycle
 revision snapshots, current write/delete operations, typed visible source slices,
-manifest identities and offsets, replay status and limitations. It does not contain
+manifest identities and offsets, replay status and limitations.
+`request_sha256` identifies only the maintenance prompt; `review_input_sha256`
+independently binds the canonical complete review material and cycle provenance.
+Validation checks both, including operation content digests, sequential before/revision
+consistency, and deletion target content. Re-sealing changed candidate content produces
+a different input identity; hashes are not authentication or proof of historical origin.
+Old packets lacking the full input identity must be rebuilt, not silently accepted. It does not contain
 reward, selection decisions, hidden tests, later Task behavior, phase2 responses,
 `should_inject`, `context_for_action` or `actual_phase2_prompt`. The old instructions
 inside the maintenance prompt are explicitly treated as quoted audited material.
+
+See [中文交接与接口契约](HANDOFF.md) for the reusable core interface.
 
 The final `memory.json.gz` is opened only as a historical identity archive: the
 builder selects the exact manifest, pre-cycle revisions, current-operation revisions,
@@ -65,7 +73,9 @@ visible source text; final retained sources are not a substitute. SQLite C14 has
 manifest sources and HTML C2 has 12. Operation indices join trajectory operations to
 `gap_cycle.evidence_report.operations`; no tool repr is evaluated.
 
-Prompt SHA must match `manifest.request_sha256`. A different cycle can be selected
+The root index binds the slot index; each read gzip and its decompressed bytes are
+checked against the slot index. Source handles and visibility refs use the existing
+protocol hash formulas. Prompt SHA must match `manifest.request_sha256`. A different cycle can be selected
 with **both** `--step N --cycle-id ID`. Missing identities/content are refused.
 `--allow-redacted` explicitly marks a changed public prompt as degraded and removes
 source-coordinate claims. It does not restore omitted text or waive revision integrity
@@ -135,13 +145,14 @@ factory initialization/provider calls were not tested or claimed validated.
 
 Without `--execute-authorized-real-model`, this command refuses **before opening a
 profile**. Only after a new explicit user authorization naming frozen input(s),
-comparison, existing profile/model, call/output/token/time/cost limits, retry behavior,
-and capture handling may an operator run:
+existing profile/model, execution scope and capture handling may an operator run:
 
 ```text
 python -m pma_evidence_review run-profile --repo . --input INPUT.json --profile EXISTING_PRIVATE_PROFILE.json --profile-key claude_monitor_opus48 --out NEW_PRIVATE_DIRECTORY --execute-authorized-real-model
 ```
 
+Record actual resource use and retry behavior. Apply only limits explicitly requested
+by the user or required by the existing model configuration; do not invent new ceilings.
 This flag is an execution switch, not evidence that authorization was granted. Do not
 run it as a connectivity test in the current phase. No credentials are embedded in
 requests or reports. Keep captures private; never publish real inputs, raw responses,

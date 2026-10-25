@@ -1,6 +1,6 @@
 # Offline acceptance record — 2026-10-25
 
-Result: **27 tests passed** under installed Python **3.11.15**, `regex==2024.11.6`.
+Result: **34 tests passed** under installed Python **3.11.15**, `regex==2024.11.6`.
 Raw nonsensitive unittest output: [test-output.txt](test-output.txt).
 No semantic experiment, real model request, Task, curator revision or official
 assessment was run. No human labels or semantic baseline/candidate results exist.
@@ -82,3 +82,16 @@ could not write the OS cache; subsequent validation used AST and no-bytecode tes
   redacted prompt mode is explicitly degraded, never original-equivalent replay.
 - No automatic memory edits, gap close policy, pending system, NLI/retriever download,
   online timing change, new execution framework, or original-method modification.
+
+## Independent-review repair acceptance
+
+Added complete review-input identity validation distinct from the maintenance prompt
+hash; operation content digests and sequential before/deletion consistency are enforced.
+The source handle and visibility formulas are checked, and the archive adapter verifies
+slot-index, compressed-file and decompressed-file hashes. Existing
+`LatestEvidenceGapMemory.apply_aligned_write` consults active revisions per write, so
+same-cycle update/update/delete chains are now accepted in order, never from future data.
+Seven added tests cover these boundaries and archive-independent core consumption.
+All 34 tests pass with zero socket connection attempts and fake clients only.
+The repair step adds/removes fewer than 600 code lines; original method files are untouched.
+See HANDOFF.md for the stable core contract and Chinese reproduction instructions.

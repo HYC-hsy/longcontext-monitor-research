@@ -72,3 +72,8 @@ They were not copied merely to increase reuse counts.
 No RAG general-purpose highlight locator replaces the host's graded locator.
 Lexical alignment is always distinct from evidence entailment, and a normalized
 or fuzzy association does not validate the claim semantically.
+
+Independent-review repair: canonical model-material projection now lives in
+`inputs.model_material` (imported as `review.material`). Source identity checks reuse
+the exact `gap_evidence._key`/SHA formulas without importing model/runtime packages.
+The archive adapter checks existing INDEX hashes; no new source ledger was introduced.

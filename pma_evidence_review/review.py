@@ -5,7 +5,7 @@ from collections import Counter
 from dataclasses import asdict
 import json
 
-from .inputs import validate, require
+from .inputs import validate, require, model_material as material
 from .vendor.rag_models import Claim, Span, VerificationResult
 from .vendor.rag_prompts import (format_claim_extraction_prompt,
     format_claim_verification_batch_prompt, format_claim_verification_evidence_first_prompt)
@@ -52,30 +52,6 @@ def json_value(raw):
             result[k] = v
         return result
     return json.loads(text, object_pairs_hook=unique)
-
-
-def material(packet):
-    """Explicit top-level whitelist; no developer labels or unknown fields serialized."""
-    def memory(row):
-        return {k: row[k] for k in ('memory_id', 'revision_id', 'category', 'content')}
-    operations = []
-    for op in packet['operations']:
-        row = {k: op[k] for k in ('op_index', 'action', 'memory_id', 'revision_id',
-            'content', 'success', 'binding_status', 'review_scope') if k in op}
-        row['before'] = memory(op['before']) if op.get('before') else None
-        operations.append(row)
-    sources = []
-    for source in packet['sources']:
-        row = {k: source[k] for k in ('source_id', 'handle', 'kind', 'role',
-            'event_order', 'field_path', 'visibility_ref')}
-        row['slices'] = [{k: part[k] for k in ('start', 'end', 'text')}
-                         for part in source['slices']]
-        sources.append(row)
-    return {'original_task': packet['original_task'],
-        'maintenance_prompt': packet['maintenance_prompt'],
-        'memory_before': [memory(x) for x in packet['memory_before']],
-        'operations': operations, 'sources': sources,
-        'limitations': packet['limitations'], 'replay_status': packet['replay_status']}
 
 
 
@@ -137,6 +113,7 @@ def parse_claims(raw, packet):
 
 
 def verification_requests(packet, claims, metadata, mode='evidence-first'):
+    validate(packet)
     require(mode in ('evidence-first', 'batch'), 'unknown_mode')
     claims = [c for c in claims if metadata[c.index]['kind'] in ('fact', 'deletion')]
     # One complete quoted document avoids silently applying RAG's document cap.
@@ -198,7 +175,8 @@ def parse_results(raw, claims, batch=False):
 async def review(packet, transport, *, mode='evidence-first', locator=None):
     validate(packet)
     report = {'schema': 'pma-evidence-review-report-v1', 'cycle_id': packet['cycle_id'],
-        'request_sha256': packet['request_sha256'], 'mode': mode, 'results': [],
+        'request_sha256': packet['request_sha256'],
+        'review_input_sha256': packet['review_input_sha256'], 'mode': mode, 'results': [],
         'claims': [], 'coverage': [], 'errors': [], 'limitations': packet['limitations'],
         'semantic_effectiveness': 'not_evaluated', 'memory_mutated': False}
     try:

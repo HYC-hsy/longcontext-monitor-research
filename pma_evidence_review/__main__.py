@@ -53,7 +53,8 @@ def main():
     packet = validate(read(args.input))
     if args.command == 'validate':
         print(json.dumps({'status': 'valid', 'replay_status': packet['replay_status'],
-                          'limitations': packet['limitations']}))
+                          'limitations': packet['limitations'],
+                          'review_input_sha256': packet['review_input_sha256']}))
         return
     if args.command == 'export':
         requests = [extraction_request(packet)]

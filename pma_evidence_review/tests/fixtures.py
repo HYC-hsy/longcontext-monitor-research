@@ -14,9 +14,12 @@ def bundle():
         identity = ['ns', 'memory', 'old'] if role == 'memory_derived' else ['ns', 'public', 'e%d' % i, field]
         refs.append(json.dumps(identity, separators=(',', ':')))
         spans.append([[0, len(content)]])
-        visibility.append('v%d' % i)
-        parts.append('\n[s%d %s event_order=%d field=%s]\n%s' % (i, role, i, field, content))
+        visibility.append(None)
+        handle = 'm1' if role == 'memory_derived' else 's' + digest(refs[-1])[:12]
+        parts.append('\n[%s %s event_order=%d field=%s]\n%s' % (handle, role, i, field, content))
     prompt = ''.join(parts)
+    visibility = [digest(json.dumps(['c1', digest(prompt), sid, ranges],
+        ensure_ascii=False, separators=(',', ':'))) for sid, ranges in zip(refs, spans)]
     manifest = {'cycle_id': 'c1', 'request_sha256': digest(prompt),
         'ordered_source_refs': refs, 'visible_spans': spans, 'visibility_refs': visibility,
         'pre_cycle_revision_refs': ['old']}
