@@ -138,11 +138,14 @@ def visible_strings(value: object):
             yield from visible_strings(child)
 
 
-def export(run_root: Path, output: Path, secrets: list[str], run_id: str) -> dict:
+def export(run_root: Path, output: Path, secrets: list[str], run_id: str,
+           research_candidate: str = 'pma_gap_memory_v0') -> dict:
+    if research_candidate not in {'pma_gap_memory_v0', 'pma_gap_evidence_v1'}:
+        raise ValueError('unsupported gap candidate for visible export')
     run_root = run_root.resolve(strict=True)
     status = json.loads((run_root / 'archive/live_result.json').read_bytes())
     if (status.get('run_id') != run_id or
-            status.get('research_candidate') != 'pma_gap_memory_v0' or
+            status.get('research_candidate') != research_candidate or
             status.get('zero_model_fixture_only') is not False):
         raise ValueError('run identity or mode mismatch')
     private = run_root / 'host_private/archive'
@@ -221,6 +224,7 @@ def export(run_root: Path, output: Path, secrets: list[str], run_id: str) -> dic
                 'step_index': n, 'step_canonical_sha256': sha(canonical(steps[n]))},
             'maintenance_operations_as_recorded': steps[n]['operations'],
             'review_and_stale_report': value['report'],
+            'evidence_write_report': value.get('evidence_report'),
             'final_formal_gaps': value['formal_gaps'],
             'phase2_should_inject': steps[n]['should_inject'],
             'phase2_context_for_action': steps[n]['context_for_action'],
@@ -399,6 +403,7 @@ def export(run_root: Path, output: Path, secrets: list[str], run_id: str) -> dic
             THINKING_TAG.search(public_text.decode('utf-8'))):
         raise ValueError('sensitive marker remains in public projection')
     index = {'schema': 'pma-gap-visible-readonly-audit-v1', 'run_id': run_id,
+        'research_candidate': research_candidate,
         'source_kind': 'private_original_bytes', 'public_kind': 'allowlisted_redacted_jsonl',
         'sources': sources, 'public_files': public_files,
         'excluded_or_replaced': sanitizer.removals,
@@ -422,9 +427,12 @@ def main() -> None:
     parser.add_argument('--run-id', required=True)
     parser.add_argument('--task-profile', type=Path, required=True)
     parser.add_argument('--pma-profile', type=Path, required=True)
+    parser.add_argument('--research-candidate', choices=(
+        'pma_gap_memory_v0', 'pma_gap_evidence_v1'), default='pma_gap_memory_v0')
     args = parser.parse_args()
     result = export(args.run_root, args.output,
-                    private_values(args.task_profile, args.pma_profile), args.run_id)
+                    private_values(args.task_profile, args.pma_profile), args.run_id,
+                    args.research_candidate)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
 
 

@@ -2,6 +2,8 @@
 
 This is a read-only projection. It never opens a verifier script or hidden test
 body. Gzip members are complete redacted streams, not developer summaries.
+The opt-in evidence-gap identity uses the same projection without changing
+the original PMA-gap export default.
 """
 
 from __future__ import annotations
@@ -89,11 +91,14 @@ def _unique(paths: list[Path], kind: str) -> Path:
 
 
 def export(batch_root: Path, output: Path, secrets: list[str],
-           executed_code_commit: str, expected_slots: int = 20) -> dict:
+           executed_code_commit: str, expected_slots: int = 20,
+           research_candidate: str = 'pma_gap_memory_v0') -> dict:
     if re.fullmatch(r'[0-9a-f]{40}', executed_code_commit) is None:
         raise ValueError('executed code commit must be an exact SHA')
     if expected_slots < 1:
         raise ValueError('expected_slots must be positive')
+    if research_candidate not in {'pma_gap_memory_v0', 'pma_gap_evidence_v1'}:
+        raise ValueError('unsupported gap candidate for visible export')
     batch_root = batch_root.resolve(strict=True)
     selection_path = batch_root / 'selection_result.json'
     selection = json.loads(selection_path.read_bytes())
@@ -101,7 +106,10 @@ def export(batch_root: Path, output: Path, secrets: list[str],
     if len(slots) != expected_slots or selection.get('remaining_not_started') != []:
         raise ValueError('batch has not reached the expected terminal slots')
     output.mkdir(parents=True, exist_ok=False)
-    index = {'schema': f'pma-gap-batch{expected_slots}-visible-projection-v1',
+    label = ('pma-gap-evidence' if research_candidate == 'pma_gap_evidence_v1'
+             else 'pma-gap')
+    index = {'schema': f'{label}-batch{expected_slots}-visible-projection-v1',
+             'research_candidate': research_candidate,
              'executed_code_commit': executed_code_commit,
              'selection_source_sha256': file_sha(selection_path),
              'selection_source_bytes': selection_path.stat().st_size,
@@ -119,10 +127,10 @@ def export(batch_root: Path, output: Path, secrets: list[str],
         run_id = result['run_id']
         manifest = json.loads((slot / 'manifest.json').read_bytes())
         if (manifest['planned_order'][0]['task'] != row['task'] or
-                manifest['planned_order'][0]['research_candidate'] != 'pma_gap_memory_v0' or
+                manifest['planned_order'][0]['research_candidate'] != research_candidate or
                 manifest['config'].get('evaluation_bootstrap_protocol') !=
                     'download_retry_v1' or
-                result.get('research_candidate') != 'pma_gap_memory_v0' or
+                result.get('research_candidate') != research_candidate or
                 result.get('zero_model_fixture_only') is not False or
                 result.get('cleanup_confirmed') is not True or
                 run.name != run_id):
@@ -176,7 +184,7 @@ def export(batch_root: Path, output: Path, secrets: list[str],
                   bootstrap.get('test_starts') != 1))):
             raise ValueError('evaluation outcome and bootstrap receipt differ')
         identity = {'run_id': run_id, 'task': row['task'], 'order': row['order'],
-            'condition': 'B', 'research_candidate': 'pma_gap_memory_v0',
+            'condition': 'B', 'research_candidate': research_candidate,
             'manifest_sha256': file_sha(slot / 'manifest.json'),
             'config_sha256': manifest['config_sha256'],
             'executed_code_commit': executed_code_commit,
@@ -192,7 +200,7 @@ def export(batch_root: Path, output: Path, secrets: list[str],
             'ctrf_source': ctrf_source, 'ctrf_summary': public_summary}
         (directory / 'IDENTITY.json').write_bytes(canonical(identity) + b'\n')
         (directory / 'INDEX.json').write_bytes(canonical({
-            'schema': 'pma-gap-run-visible-projection-v1', 'run_id': run_id,
+            'schema': f'{label}-run-visible-projection-v1', 'run_id': run_id,
             'files': files, 'identity_sha256': file_sha(directory / 'IDENTITY.json'),
             'redaction_policy': 'export_gap_visible_audit.Sanitizer',
             'private_originals_retained': True}) + b'\n')
@@ -216,10 +224,13 @@ def main() -> None:
     parser.add_argument('--pma-profile', type=Path, required=True)
     parser.add_argument('--executed-code-commit', required=True)
     parser.add_argument('--expected-slots', type=int, default=20)
+    parser.add_argument('--research-candidate', choices=(
+        'pma_gap_memory_v0', 'pma_gap_evidence_v1'), default='pma_gap_memory_v0')
     args = parser.parse_args()
     print(json.dumps(export(args.batch_root, args.output,
                             private_values(args.task_profile, args.pma_profile),
-                            args.executed_code_commit, args.expected_slots)))
+                            args.executed_code_commit, args.expected_slots,
+                            args.research_candidate)))
 
 
 if __name__ == '__main__':

@@ -1,18 +1,31 @@
 """The batch projection preserves every source row with explicit redactions."""
 
 import gzip
+import inspect
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
 from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.export_gap_batch20_visible import (
-    _one_json, _stream)
+    _one_json, _stream, export as export_batch)
 from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.export_gap_visible_audit import (
-    Sanitizer, sha)
+    Sanitizer, export as export_single, sha)
 
 
 class BatchVisibleProjectionTests(unittest.TestCase):
+    def test_evidence_candidate_is_opt_in_and_unknown_candidate_fails(self):
+        self.assertEqual(inspect.signature(export_batch).parameters[
+            'research_candidate'].default, 'pma_gap_memory_v0')
+        self.assertEqual(inspect.signature(export_single).parameters[
+            'research_candidate'].default, 'pma_gap_memory_v0')
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with self.assertRaisesRegex(ValueError, 'unsupported gap candidate'):
+                export_batch(root, root / 'out', [], '0' * 40, 1, 'unknown')
+            with self.assertRaisesRegex(ValueError, 'unsupported gap candidate'):
+                export_single(root, root / 'out', [], 'run', 'unknown')
+
     def test_stream_keeps_all_rows_and_private_original_mapping(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
