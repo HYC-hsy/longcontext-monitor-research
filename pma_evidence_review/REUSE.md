@@ -1,0 +1,74 @@
+# Fixed-source reuse and adaptation ledger
+
+This is a standalone offline evidence-support research component, not a PMA
+reproduction and not an online completion gate. No original method was modified.
+
+## Sources actually inspected
+
+- `eea/rag-facts-check` **b78a08213ba7e6d9e587bfa3134ba9047cfaf677**;
+  MIT, European Environment Agency 2026. `vendor/RAG_LICENSE` is preserved verbatim.
+- `aberaio/sourcecheck` **d81493d239ea084c6063695b6e762c2626dd5646**;
+  MIT, Mikias Abera 2026. `vendor/SOURCECHECK_LICENSE` is preserved verbatim.
+- `shmsw25/FActScore` **f28272deffcf33efc1f1117d5479c10bb75221a9**;
+  MIT, Sewon Min 2023. Inspected `factscore/atomic_facts.py`; no code copied.
+- Host archive **72152913f545ca36a75b68e8796e24a6e24f9f81**, with executed
+  source **90a4eb7a77ed6c05101fda7a929cd5cf609bf626** as an ancestor.
+  Remote `main` was **be17a5c913c9dae7a3821c89f52f925af835dd29** when checked;
+  it is not the relevant source-window research lineage. This branch starts at
+  the specified archive rather than pretending main contains these artifacts.
+
+The supplied Library source-study ZIP could not be materialized: this consumer
+runtime exposed Library creation/upload tools but no read/search/materialize tools.
+No parent filesystem path was treated as transferred. Therefore `READ_FIRST.txt`
+and the four study reports were **not read**, and the ZIP SHA was **not verified**.
+The authorized fallback fetched all three official repositories and checked out
+exact SHAs above. Findings here are fresh static inspection plus local fake tests,
+not claims about the unavailable reports or their probes.
+
+## Function-level reuse
+
+| Upstream symbol / file | Local location | Adaptation and reason |
+|---|---|---|
+| RAG `models.Span`, `EvidenceSpan`, `Claim`, `VerificationResult`; `EvidenceSpan.to_dict` | `vendor/rag_models.py` | Original class/function bodies retained; future annotations added for available Python 3.9.6. Unused aggregate score/report classes omitted. |
+| RAG `prompts._load` | `vendor/rag_prompts.py` | Same loader; packaged prompt directory changed to adjacent `prompts/`. |
+| RAG `format_claim_extraction_prompt` | same file, called by `review.extraction_request` | Original formatter and original prompt files; append explicit operation/coverage/kind contract. |
+| RAG `format_claim_verification_evidence_first_prompt` | same file, called by `review.verification_requests` | Original formatter and actual evidence-first instructions; this is the default single-claim path. |
+| RAG `format_claim_verification_batch_prompt` | same file | Actual upstream batch prompt selected only with explicit `--mode batch`; never silently bypass evidence-first via default batch_size=20. |
+| RAG `format_documents` | same file | Body retained except `zip(strict=True)` removed for 3.9 (the two arrays are built from the same input); caller passes full corpus budget so no silent cap is activated. |
+| RAG `ClaimExtractor._extract_chunk` / `extract` invocation skeleton | `review.extraction_request`, `review.review`, `transport.CapturedTransport.send` | Retain format -> call -> parse -> Claim sequence; replace LLM.generate adapter with host llm.call, no automatic retries/refinement, raw capture on each call. Not a verbatim class transplant. |
+| RAG `ClaimExtractor._to_claim_objects` | `review.parse_claims` | Actual enumerate/original fragment/span/Claim construction adapted to operation-local exact spans. No fuzzy claim highlighting and no same-span deduplication; conditions/dependencies retained. |
+| RAG `ClaimVerifier._single_verify` | `review.verification_requests`, `review.review` | Retain actual evidence-first formatter -> call -> result parse flow, with host call envelope and explicit mode. Agent/self-consistency/retrieval branches omitted. |
+| RAG `ClaimVerifier._single_batch_verify` indexed_claims and Claim/VerificationResult alignment | `review.verification_requests`, `review.parse_results` | Retain input-order reconstruction keyed by claim index; reject duplicate/unknown indices before mapping; missing results are engineering errors, not not_enough_info. |
+| RAG permissive `_parse_text_result`, `_parse_batch_response` parsing | deliberately not reused | Exact JSON enums only; UNSUPPORTED/NOT SUPPORTED never match supported. Duplicate JSON keys rejected. |
+| Sourcecheck `types.Verdict`, `ReasonCode` | `vendor/sourcecheck_types.py`, used by `review.py` | Original enums copied. Public report maps NOT_VERIFIABLE concept to insufficient; operational failures remain separate with null verdict. No score-threshold gate imported. |
+| Host `gap_evidence.render_source_blocks` | format consumed by `inputs.visible_sources` | Builder validates request SHA and uses ordered manifest spans to slice the actual submitted prompt; no final retained-sources reconstruction. |
+| Host `graded_evidence_alignment.align_graded_evidence` and dependencies | imported directly by `location.locate` | Original exact/normalized/fuzzy hierarchy, limits and ambiguity handling unchanged. A transient registry contains only visible slices; candidates translate back to original source IDs/offsets. Full-source digest is explicitly unavailable, never fabricated. |
+| Host `candidate_transport_worker._durable`, `TransportEpisode.handle` call/capture skeleton | `transport.durable`, `CapturedTransport.send` | Durable JSONL and request-before-call/response-after-call flow retained; remove event spool, task identity and tool execution; capture only sanitized error type. |
+| Host `episode.construct_upstream` and profiled_call | `transport.load_profile_client` | Direct call to existing factory with explicit existing profile, only in authorized real execution path; reuse `_memory_llm`, do not call memory process, Task, judgment or evaluator. |
+| PoS `provider_capture.inspect_provider_capture` | inspected, not called | Requires PoS-specific run/task/condition/branch identities and native ledgers. Fabricating those for this independent reviewer would be misleading. Report client boundary calls; future HTTP retry accounting must use native capture. |
+
+## Tests actually adapted
+
+`tests/test_review.py` ports the assertions and fixture shape of RAG
+`TestClaimExtractor.test_extract_claims_basic`, `test_extract_claims_multiple`,
+`test_extract_calls_llm`, and `TestClaimVerifier.test_verify_contradicted` to
+stdlib unittest, strict JSON contracts and captured fake clients. These are
+**adapted tests**, not a claim that the full upstream suites ran. The same-span
+case is an additional regression, not an upstream behavior guarantee. Sourcecheck's
+three-state/reason distinction is checked directly; its NLI/policy tests are not
+reported as executed.
+
+## Rejected components and static findings
+
+Sourcecheck's scientific search, NLI downloads and default policy are omitted.
+Its NLI thresholds and policy thresholds are separately configured, so their
+composition must not be assumed calibrated for PMA. No NLI score is generated here.
+FActScore's generator sets biography behavior and loads demos JSON; its old client,
+biography postprocessing and normalization can drop qualifiers or change technical
+identifiers. `is_num`, `text_to_sentences`, `normalize_answer`, and date/entity
+helpers were inspected but add no needed capability to this JSON/span workflow.
+They were not copied merely to increase reuse counts.
+
+No RAG general-purpose highlight locator replaces the host's graded locator.
+Lexical alignment is always distinct from evidence entailment, and a normalized
+or fuzzy association does not validate the claim semantically.

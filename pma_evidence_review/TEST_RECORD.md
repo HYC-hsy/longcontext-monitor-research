@@ -1,0 +1,84 @@
+# Offline acceptance record — 2026-10-25
+
+Result: **27 tests passed** under installed Python **3.11.15**, `regex==2024.11.6`.
+Raw nonsensitive unittest output: [test-output.txt](test-output.txt).
+No semantic experiment, real model request, Task, curator revision or official
+assessment was run. No human labels or semantic baseline/candidate results exist.
+
+Executed from repository root (dependency directory was outside the repository):
+
+```text
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=../offline-deps /opt/homebrew/bin/python3.11 -m unittest discover -s pma_evidence_review/tests -v
+```
+
+Both test classes block socket connection and assert zero attempts. Fake transport records actual client
+payloads, raw responses and invocation counts. The real profile adapter test injects
+a fake `episode.construct_upstream` and a synthetic profile: it verifies argument
+routing and credential exclusion, not live factory/provider compatibility.
+
+Additional CLI checks succeeded: build SQLite and HTML input JSON; export SQLite
+extraction request; synthetic fake run (3 client calls, 0 network calls); export the
+synthetic extraction plus two evidence-first requests. New real input/request files
+were saved only to the workspace's private `offline-results/` sibling directory,
+not staged or published. Synthetic fixtures are generated from `tests/fixtures.py`.
+
+## Public development samples
+
+| Sample | Step / maintenance sequence | Visible sources | Operations | Fake client calls |
+|---|---|---|---|---|
+| SQLite | 14 / 27 | 54 | 3 | 4 |
+| HTML | 2 / 3 | 12 | 4 | 5 |
+
+Both selected public prompts exactly match their recorded manifest SHA. These counts
+are plumbing checks, not support labels. The builder reads no evaluation files.
+Future prompt/reward/selection/active-bank/irrelevant-revision mutation leaves the
+actual exported SQLite request unchanged. Final retained sources are not used to
+reconstruct visibility. Historical content outside the visible prompt is refused.
+
+## Implementation steps (each below 600 added+removed code lines)
+
+Changes were made and locally checked in separate purposes, not as a single edit:
+
+1. Vendor selected RAG types/formatters/prompts and Sourcecheck enums: 402 lines
+   including licenses; Python 3.9 import and actual prompt smoke passed.
+2. Frozen-cycle builder: initially under 220 lines, then receipt-less graded alignment
+   adaptation; SQLite C14 hash/54-source/3-operation smoke passed.
+3. RAG-derived extraction/verification skeleton and strict parsing: <250 lines;
+   AST validation passed without writing to the system Python cache.
+4. Captured transport, existing profile-client route, original graded locator adapter
+   and CLI: <250 lines; CLI help passed.
+5. Synthetic fixture and parser/builder/fake regressions: <250 lines; 17 tests passed.
+6. Small hardening edits (single-index validation, nonfactual routing, nested
+   whitelist and manifest checks): <150 added+removed lines; 17 tests passed.
+7. Source locator and public-index integration tests plus projection-ref correction:
+   <200 added+removed lines; 25 tests passed on installed Python 3.11.
+8. Historical visibility/task identity checks and regressions: <100 added+removed
+   lines; final 27 tests passed. Documentation is separate from code-line accounting.
+
+The first full-locator attempt under system Python 3.9 failed because `regex` was
+absent and the existing locator requires dataclass slots. No algorithm was replaced;
+used the already installed Python 3.11 and installed only regex into a task-local
+folder. No Python runtime was installed or reinstalled. A default py_compile attempt
+could not write the OS cache; subsequent validation used AST and no-bytecode test runs.
+
+## Known limits
+
+- The Library study ZIP and four reports were unavailable to this consumer. Official
+  fixed source checkouts were used; see REUSE.md. ZIP integrity was not verified.
+- This is an engineering acceptance, not model evidence-support effectiveness.
+  Extraction completeness and type assignment remain model judgments; malformed,
+  missing and incomplete output is visible, not proof of semantic coverage.
+- The copied upstream mock assertions were adapted; full upstream test suites were
+  not run. FActScore was inspected, not imported.
+- Live path is implemented but only dependency-injected fakes were tested. A working
+  existing PMA/Harbor dependency environment and separately authorized existing profile
+  are required before real use. No credential file was read in this acceptance.
+- Future native retry/token/cost accounting must use provider instrumentation. Client
+  call counts are not a measurement of HTTP attempts in a real run.
+- Graded lookup runs on visible slices and translates coordinates. It does not claim
+  to reconstruct absent full-source digests or wrapper blobs; fuzzy-only/unbound
+  quotes cannot carry a usable supported/contradicted report verdict.
+- Partial historical memory or missing revision/tombstone identities are refused;
+  redacted prompt mode is explicitly degraded, never original-equivalent replay.
+- No automatic memory edits, gap close policy, pending system, NLI/retriever download,
+  online timing change, new execution framework, or original-method modification.
