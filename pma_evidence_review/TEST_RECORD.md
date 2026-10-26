@@ -233,3 +233,24 @@ Python code syntax parsed only, never executed. Windows logic retained, not newl
 Implementation step 112 additions/4 deletions including tests; test pathspec repair is
 2 changed lines. Documentation/raw generated logs handled separately under the 600-line
 code step rule. No production changes outside operation_review comparison/version.
+
+## Whole A + verbatim focus v5
+
+Base archive 667d05b14e0f309c27a29c5ea3fc65f4f5b613b3; whole payload baseline
+77f0f91dc4f508c9ef8e39c9f01e1d50c59eebd7. Old candidate comparison and its two active
+isolation tests retired (reproducible at prior commit), original 73 regressions retained.
+85 tests passed: 73 original + 4 partition + 8 focus tests. macOS Python3.11.15,
+existing ../offline-deps/regex; no dependency reinstall or new Windows execution.
+Command: PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=../offline-deps /opt/homebrew/bin/python3.11
+-m unittest discover -s pma_evidence_review/tests -v. Logs in test-records-focus retain
+step1/step2/step3/final and initial execute_request refactor syntax failure, corrected
+before commit. No real model/profile/Task/evaluation/trajectory command execution.
+Fixed whole request plans and same-fake reports match A on both development inputs;
+all source registries and focus hashes checked. Invalid/ambiguous/source-offset cases,
+Unicode/emoji/combining characters/CRLF, coverage reconstruction, complete sentence,
+local isolation, reuse/delete/skipped, disagreement versus engineering failure,
+protocol raw text, CLI export/fake/profile substitute and no-overwrite exercised.
+Inherited AB ZIP byte count/hash/CRC verified; no new real private input uploaded.
+Implementation code steps: 172+/112-; 314+/37-; 70+/3-. Documentation and generated
+logs separate. Last whitespace attachment/packaging utility is a separate small step.
+Fake output establishes plumbing, not improved error detection or semantic coverage.

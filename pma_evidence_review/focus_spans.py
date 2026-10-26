@@ -101,6 +101,9 @@ def intervals(text):
             if boundary > previous:
                 result.append((previous, boundary))
                 previous = boundary
+    if len(result) > 1 and not text[result[0][0]:result[0][1]].strip():
+        result[1] = (result[0][0], result[1][1])
+        result.pop(0)
     require(result and result[0][0] == 0 and result[-1][1] == len(text) and
             all(a[1] == b[0] for a,b in zip(result,result[1:])), 'focus_partition_incomplete')
     return result

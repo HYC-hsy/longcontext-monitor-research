@@ -9,6 +9,8 @@ class FocusSpanTests(unittest.TestCase):
         self.assertEqual(''.join(text[a:b] for a,b in spans),text)
         self.assertEqual(spans[0][0],0)
         self.assertEqual(spans[-1][1],len(text))
+        if text.strip():
+            self.assertTrue(all(text[a:b].strip() for a,b in spans))
         return [text[a:b] for a,b in spans]
 
     def test_completion_conditions_and_mixed_clause(self):

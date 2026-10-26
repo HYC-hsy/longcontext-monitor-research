@@ -177,3 +177,24 @@ Explanation uses the existing field to describe the narrowest evidence-backed sc
 conditions and missing necessary premise. No new output type, classifier, few-shot or
 semantic fixture set. Fake isolation tests are not evidence of semantic effectiveness.
 MIT notices remain unchanged.
+
+## Whole A + verbatim focus v5
+
+Whole payload restored to A=77f0f91d, not the former entailment-prompt candidate.
+Re-read RAG b78a082 `ClaimVerifier._single_verify`: fixed target + independent documents
+→ client → parsed result. This actual skeleton/format_documents/EvidenceSpan remain
+active; execute_request extracts the existing parse/bind/capture path for shared calls.
+Result alignment is host-bound per request/op/focus, without invented Claim objects.
+RAG `split_answer_into_chunks` strips chunks and can repeat table headers, so it is NOT
+copied for lossless coordinates. `_aggregate` support ratios/thresholds are not reused.
+Sourcecheck d81493 resolve/fetch→grounding remains adapted in local source binding.
+Its `_sentences` regex strips and drops short strings; it is not used for code/path/Unicode
+spans. FActScore f28272 per-item verification with original-text linkage inspires local
+focus/context, but its free atomic extraction and binary averaging are not restored.
+
+New focus_spans is a small standard-library conservative partitioner, not an upstream
+algorithm presented under a new name: character offsets, protected blocks and literal
+slicing retain all text. No atomization or semantic completeness guarantee. Focus request
+instructions are a new adaptation of the evidence-first flow with one output contract.
+Whole/local isolation is input isolation only. No consensus, voting, third evaluator,
+rewriting, support rate, NLI, retrieval or automatic revision. Existing MIT notices intact.
