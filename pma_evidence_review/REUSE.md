@@ -77,3 +77,19 @@ Independent-review repair: canonical model-material projection now lives in
 `inputs.model_material` (imported as `review.material`). Source identity checks reuse
 the exact `gap_evidence._key`/SHA formulas without importing model/runtime packages.
 The archive adapter checks existing INDEX hashes; no new source ledger was introduced.
+
+## Source-boundary repair (2026-10-26)
+
+Re-read at the pinned upstream revisions above:
+
+| Function / contract | Repair reuse and adaptation |
+| --- | --- |
+| RAG `FactChecker.check(answer, documents)` / `_check`, `ClaimVerifier.verify(claim, documents)` | Restore its actual separation: `extraction_request` formats only operation targets; `verification_requests` passes only independently identified visible source slices as documents. Preserve vendored Claim/VerificationResult and explicit single/batch paths. |
+| RAG `format_claim_verification_evidence_first_prompt`, `format_documents` | Continue executing the copied formatter. Use its supported title/text dictionaries: titles carry source identity, role, visibility and offsets. Its zero-based `document_index` is consumed for a single unique quote; multiple quotes need individual citation indices. Conflicting first indices fail. No document text truncation introduced. |
+| Sourcecheck `verify_claim`, `_resolve_and_fetch` | Adapt the resolve-then-fetch contract in `evidence_policy.bind`: resolve local request document identity before grounding. No remote store, resolver, scholarly search, default NLI or thresholds copied. Existing vendored verdict/reason types remain active. This contract adaptation is not presented as copying its entire verifier. |
+| FActScore `FactScorer._get_score` | Read its actual atom-as-Input versus independently retrieved passage-as-Text construction. Apply this separation to local visible sources. No new FActScore functions copied; no biography extraction, demos, retrieval, old client or permissive binary parsing introduced. |
+| Host `align_graded_evidence` | Still called through `location.locate`, now restricted to the already resolved citation slice. Strict citation offsets/text checks precede it; original locator hierarchy itself is unchanged. |
+| Host profile and capture adapters | Same client path and arguments; capture additionally stores policy version and actual payload SHA256. No profile data read in this repair. |
+
+`inputs.model_material` remains the frozen input identity projection, but is no longer
+passed wholesale to either model template. MIT notices and upstream files are unchanged.

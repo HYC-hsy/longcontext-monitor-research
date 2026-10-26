@@ -184,3 +184,5 @@ experiment or curator repair loop was performed.
    calls, online integration, curator revision loop, Task, or official evaluation
    require separately scoped user authorization. This release claims neither semantic
    superiority nor holdout performance.
+
+Source-boundary repair: see [Chinese contract and offline acceptance](HANDOFF.md#2026-10-26-来源边界修复本轮只做离线验证) and [reuse details](REUSE.md#source-boundary-repair-2026-10-26). The input packet identity is unchanged; actual request identities and citation-use policy are versioned separately.

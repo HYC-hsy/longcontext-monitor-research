@@ -1,8 +1,8 @@
 # PMA 证据审核器 v1：中文交接与接口契约
 
 本组件只审核当轮记忆写入/删除是否受到当时可见证据支持，不判断任务是否完成，
-不改正式记忆、不触发返工或三角色运行。当前只有离线 fake 工程验收，没有真实模型
-效果结果、人工标签或留出集对照。
+不改正式记忆、不触发返工或三角色运行。本轮修复只有离线 fake 工程验收；既有首轮真实输出保留为开发诊断，
+不是本轮修复的真实模型效果结果、人工 gold 或留出集对照。
 
 ## 稳定接入点
 
@@ -18,7 +18,7 @@ report = await review(packet, transport, locator=locate)
 ```
 
 这是未来接线示意，本轮没有执行。必须显式传 `locator=locate`；省略定位器时，含引文
-的结果会报告 `alignment_error`，不会默认为已定位。现有定位算法保持不变。
+的结果会报告 `locator_unavailable`，不会默认为已定位。现有定位算法保持不变。
 
 `review` 的消费契约是 packet、transport 和 locator；它不读归档、不选择 SQLite/HTML、
 不读最终 bank。`inputs.build(repo, sample)` 只是已公开归档的一个适配器。
@@ -89,3 +89,65 @@ SQLite C14（54 来源/3 操作）与 HTML C2（12 来源/4 操作）都是开�
 未来真实调用前确认输入、既有模型和执行范围，记录实际资源消耗与重试行为；只采用
 用户明确指定或现有模型必需的限制，不强制新增调用数、token、时间或费用上限。
 真实模型、在线接入、整理者返工、Task 和官方评价仍分别需要相应授权。
+
+## 2026-10-26 来源边界修复（本轮只做离线验证）
+
+稳定 packet、`review(packet, transport, locator=locate)`、模型客户端和原定位算法不变。
+旧 `review_input_sha256` 继续标识完整冻结输入；新 `audit_request_sha256` 标识实际发送的
+`{system,prompt,tools}` 按 UTF-8、sort_keys、紧凑 JSON 序列化后的 SHA256，报告保存每次
+请求的摘要，capture 同步记录。`evidence_policy=source-use-v2` 区分新协议。不要覆盖旧运行。
+
+请求边界变化：
+
+| 区域 | 修复前 | 修复后 |
+| --- | --- | --- |
+| 抽取正文 | 整包材料 | 仅 operations（含删除 before）；任务/历史快照另列解释上下文 |
+| 核验 Source Documents | 整包材料，包括待审操作 | 仅 packet.sources 中按用途允许的可见切片 |
+| 待审操作 | 同时是证据 | 放在 Claim 的 audit_target_not_evidence 区域 |
+| maintenance_prompt | 完整进入模型材料 | 仅保留在归档/输入身份中，不进入请求 |
+| 引用定位 | 全来源匹配字符串 | 先解析请求文档身份，再限制原定位器的搜索范围 |
+
+抽取新增内部 `evidence_scope`，第一阶段无需增加字段：execution 只用 tool_observation；
+attempt 只用 tool_command；static_behavior 可用 tool_command/tool_observation；
+requirement 只用 task_instruction；historical_record 只用 memory_derived；
+agent_statement 只用 agent_report。缺少 scope 的旧抽取结果默认 execution，并记录
+scope_origin=conservative_default。batch 按 scope 分组，调用次数可能随用途组数变化。
+命令中的代码可以支持狭义静态行为；回执可以支持其实际报告的文件创建等观察。
+“要求是什么”和“曾记录什么”仍可审核，但不能用这两种用途偷换执行或缺口解决断言。
+
+每条 evidence 对应 citations 中一项，含零基 document_index、source_id、role、
+visibility_ref、原来源 start/end。索引绑定到实际请求内的文档，不能任意使用全局序号。
+兼容上游单个 document_index 的情况仅限一条引文且该文档内文字唯一；多引文须逐条索引。
+字段若提供必须一致。缺身份不做自动跨来源猜测，重复文字不随意选角色。
+显式区间必须落在可见切片内且逐字匹配；严格引用拒绝不会改变原定位器的模糊诊断能力。
+新增工程状态包含 citation_missing、citation_count_mismatch、citation_unknown_document、
+citation_wrong_source_id/role/visibility_ref、citation_outside_visible_range、
+citation_text_mismatch、citation_ambiguous_or_unmatched、citation_first_document_conflict、
+citation_use_not_permitted。locator 缺失现在是 locator_unavailable。
+工程失败时正式 verdict=null，保留 model_verdict；解析失败看原始响应捕获，不冒充语义不足。
+
+工程强约束是对象分区、来源身份/角色/范围、一对一引用与无空证据通过。
+主张用途、抽取完整性、条件保留及“证据是否真的支持这项主张”仍依赖模型判断。
+尤其静态代码与执行结果、局部成功与跨会话推广、删除理由是否充分，不能由定位保证。
+本轮不声称已解决这些语义错误，没有新真实调用、gold、准确率或效果提升结论。
+原诊断包仅用于旧输入哈希与新请求构造回归，两份样本仍是开发样本。
+
+从仓库根目录复制执行（使用当前 Python 3.10+；原部署依赖 regex==2024.11.6）：
+
+```bash
+python -m unittest discover -s pma_evidence_review/tests -v
+python -m pma_evidence_review build --repo . --sample sqlite --out /tmp/pma-v2-sqlite-input.json
+python -m pma_evidence_review validate --input /tmp/pma-v2-sqlite-input.json
+python -m pma_evidence_review export --input /tmp/pma-v2-sqlite-input.json --out /tmp/pma-v2-extract.json
+```
+
+导出核验请求时追加 `--extraction-response` 指向保存的抽取 JSON。旧抽取可检查工程路径，
+但默认用途不代表重新抽取过。fake 命令仍接收原始响应字符串数组；SUPPORTED 示例须包含
+`evidence:["原文"]` 与对应 citations，或单引文 document_index。完整合成可运行示例在
+`tests/test_source_boundary.py`，包含捕获的最终请求、文件创建和静态代码正例。
+CLI 使用新输出路径且拒绝覆盖，测试禁止网络连接（保留 Windows asyncio 本地 socketpair 例外）。
+
+未来真实实验必须另获授权，确认输入、模型和执行范围；只应用用户明确要求或模型必需的
+限制，记录实际调用/重试/资源。使用同一冻结输入分别保存旧/新请求与结果，开发诊断标签
+单独存放，不进入模型输入。先分析分区、用途分类与绑定弃权，再由独立逐项诊断评估语义；
+没有盲评 gold 时不报告准确率/增益。不要把这里的 fake 断言当成真实模型标签。

@@ -95,3 +95,19 @@ Seven added tests cover these boundaries and archive-independent core consumptio
 All 34 tests pass with zero socket connection attempts and fake clients only.
 The repair step adds/removes fewer than 600 code lines; original method files are untouched.
 See HANDOFF.md for the stable core contract and Chinese reproduction instructions.
+
+## Source boundary repair 2026-10-26
+
+Baseline: 70889040cfd9024c8832a111540d701c8b8ce9f9 (retains production 58314609
+and Windows compatibility 3531386f). Successor branch:
+research/pma-evidence-source-boundary-v2-20261026.
+
+Python /opt/homebrew/bin/python3.11 (3.11.15), existing ../offline-deps with regex.
+Command: `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=../offline-deps /opt/homebrew/bin/python3.11 -m unittest discover -s pma_evidence_review/tests -v`.
+Raw stdout/stderr: test-output-source-boundary.txt. 46 tests passed; baseline 34.
+No real model/Task/evaluation calls, credential reads or trajectory command execution.
+Network connect guard installed in fake suites, Windows local socketpair exception preserved;
+this run was macOS, not a fresh Windows execution. Profile factory tested only with a mock.
+ZIP hash and two old frozen input identities verified; old responses used only to generate
+new requests, never as gold or transmitted externally. No new raw diagnostic files committed.
+Step 1: 156 additions + 30 deletions; step 2: 212 additions; documentation separately.
