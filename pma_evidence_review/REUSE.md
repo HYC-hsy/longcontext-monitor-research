@@ -100,3 +100,29 @@ visible source records for interpretation across scopes, including original even
 field path, handle and visibility identity. It does not add these records to a scope's
 citation registry. This preserves the command conditions needed to interpret receipts
 without conflating command submission with successful execution. No inferred links added.
+
+## Citation protocol v3 (2026-10-26; supersedes v2/v2.1 citation/scope rules)
+
+Pinned actual code, not just README/types, was reviewed before the change:
+
+- [RAG `ClaimVerifier._single_verify` and batch alignment](https://github.com/eea/rag-facts-check/blob/b78a08213ba7e6d9e587bfa3134ba9047cfaf677/rag_facts_check/checker.py#L522-L554): retain formatter → call → parse and indexed claim alignment; actual local adapter remains `review.py`.
+- [RAG per-quote `EvidenceSpan`](https://github.com/eea/rag-facts-check/blob/b78a08213ba7e6d9e587bfa3134ba9047cfaf677/rag_facts_check/models.py#L46-L69) and [checker per-quote construction](https://github.com/eea/rag-facts-check/blob/b78a08213ba7e6d9e587bfa3134ba9047cfaf677/rag_facts_check/checker.py#L1156-L1191): reuse the per-quote association concept, not more model-supplied provenance fields. Host derives source identity, role, visibility and normally coordinates.
+- [RAG `find_evidence_spans`](https://github.com/eea/rag-facts-check/blob/b78a08213ba7e6d9e587bfa3134ba9047cfaf677/rag_facts_check/spans.py#L240-L277) falls back from preferred document to any document/first match. This is deliberately NOT reused. Local `evidence_policy.bind` resolves the selected visible slice only, rejects mismatches/overlapping repeated matches, and invokes the existing host locator within that exact source/span.
+- [Sourcecheck `verify_claim` resolve/fetch → grounding](https://github.com/aberaio/sourcecheck/blob/d81493d239ea084c6063695b6e762c2626dd5646/src/sourcecheck/verifier.py#L56-L86) and [abstention failures](https://github.com/aberaio/sourcecheck/blob/d81493d239ea084c6063695b6e762c2626dd5646/src/sourcecheck/abstention.py#L32-L61): reuse boundary ordering, separate operational failure from semantic insufficiency. Do not import remote fetch/NLI/threshold policy or claim their lexical grounding proves entailment.
+- [FActScore `FactScorer._get_score`](https://github.com/shmsw25/FActScore/blob/f28272deffcf33efc1f1117d5479c10bb75221a9/factscore/factscorer.py#L209-L261): atom/query and independent passages are separate; no model-classification source gate or reusable citation resolver. Inspected only, not imported.
+
+RAG's actual formatter displays Document 1..N while upstream verification templates
+request a zero-based index for only the FIRST quote. Appending a second `citations`
+contract left both schemas in the request. V3 keeps the formatter, modifies the three
+vendored verification template files explicitly, and emits only evidence objects
+`{document_index: 1, quote: "..."}`. Index is one-based everywhere on this wire and
+in derived report citations. Both original MIT notices remain unchanged. This is a
+necessary contract adaptation, not an unmodified upstream reproduction.
+
+All original visible typed sources are now citable independently of legacy extraction
+`evidence_scope`. Legacy scope is preserved only when supplied in old output, in the diagnostic report;
+no default label is synthesized and no scope label enters new verification prompts.
+It neither filters sources nor splits batches. Role is provenance, NOT an entailment decision.
+Extraction still targets only operations and preserves deletion tombstones. Core packet,
+Phase1 implementation, original history visibility and existing locator are unchanged.
+No additional model, semantic rule engine, dependencies graph or online gate was added.

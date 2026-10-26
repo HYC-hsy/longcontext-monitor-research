@@ -121,3 +121,68 @@ source projection (all identity/order/field/slice fields), SQLite export PATH pl
 which sqlite3 and actual observations; command-only execution citation rejected.
 Every scope retains original visible source context. No new model call or private
 result publication. Original frozen packet hashes remain unchanged.
+
+## Citation protocol v3 engineering acceptance (2026-10-26)
+
+Base: `000aaec23ae64288362dfdfac25a58ccdf2c3c54`, isolated worktree; original checkout
+and unrelated changes preserved. Linux Python **3.12.14**, pinned `regex==2024.11.6`
+installed to `/tmp/auditor-offline-deps`, no credential files read.
+
+Initial baseline attempt lacked regex: 47 ran, 5 failures +4 errors from locator
+imports/alignment. After installing the already-required pinned dependency, an original
+v2.1 archive checkout passed **47/47**. Raw successful baseline:
+`test-output-citation-v21-baseline.txt`; initial failure remains local `/tmp/auditor-baseline.txt`.
+The old test source came from `git archive 000aaec2 pma_evidence_review`; unchanged
+host method sources were symlinked into its temporary root. No old result was changed.
+
+Command on final code:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/tmp/auditor-offline-deps python -m unittest discover -s pma_evidence_review/tests -v
+```
+
+**61/61 passed**. Raw stdout/stderr: `test-output-citation-v3.txt`.
+Existing 47 tests retained and migrated only where their former wire/scope expectations
+were intentionally replaced; 11 protocol tests and 3 portability tests added.
+
+Per implementation step, additions + deletions (not aggregate; each <600):
+
+1. Single per-quote model schema, one-based displayed/returned identity, strict binding,
+   duplicate identity and overlapping-match guards: **172 code/test/template lines**;
+   6 new focused tests passed (`test-output-citation-step1.txt`).
+2. Remove model-scope source eligibility and batch partition; migrate old protocol tests;
+   reject partial/null offsets: **165 code/test lines**; 40 focused migrated tests passed
+   (`test-output-scope-step2.txt`).
+3. Remove even default/advisory scope from new model prompts per user's simplicity
+   direction; retain only supplied legacy metadata in reports. Add historical raw-schema,
+   typed equal-text provenance, command echo, build-directory, no-scope and portability
+   regressions: **218 code/test lines**. Documentation counted separately; raw test logs
+   are generated output, not source code.
+
+Final assertions include:
+- Actual captured fake-client requests in single/batch mode contain only one evidence
+  schema; document headers and per-quote identity agree. Supported/contradicted examples,
+  empty insufficient, absent/malformed quotes and unknown/boolean indices covered.
+- Exact/partial original bounds, duplicate IDs, identical text in mixed roles, overlapping
+  repeated quote ambiguity, explicit-coordinate disambiguation, no self-quote/no fallback.
+- Wrong legacy labels cannot hide original task, command or observation; new extraction
+  and verification prompts contain no evidence_scope classification. One batch stays one
+  batch regardless of legacy labels. Full original visible context remains unchanged.
+- V2.1 ZIP SHA stays `d9cdb4dc0fc2c1c5a62903e42f517f9e8ff73aad4c03222aa171cde06143a436`;
+  SQLite input stays `0aa854b8a7c7eb98ae5e412cdf78180597ca3400e0884046db397e9e4c2cdb90`.
+  All 14 captured old responses explicitly reject as legacy wire, including empty
+  insufficient with legacy top-level index. No automatic semantic reinterpretation.
+- Build-directory cases preserve command+receipt and never synthesize mv/cp. Scripted
+  insufficient stays insufficient; scripted supported stays a model verdict with
+  semantic_proof=false. This intentionally demonstrates the remaining semantic boundary,
+  NOT proof that a real model avoids invented movement.
+- UTF-8 durable capture and profile factory roundtrip; Windows socketpair exception
+  simulated with a local spy (no sockets opened). No real Windows executor was used.
+- Future-information, deletion/tombstone, core input identity, existing profile factory
+  and graded locator regressions continue passing.
+
+No real model/Task/eval, online integration, formal memory mutation, hidden semantic gold,
+resource-cost analytics or new private diagnostic publication. All new fixtures are
+synthetic or read the already committed public ZIP without copying its raw text.
+Direct git push had no credential helper and failed before upload; parent uses the
+connected GitHub publisher and must separately report exact remote commit/tree identity.

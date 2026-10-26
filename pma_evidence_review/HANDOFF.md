@@ -168,3 +168,72 @@ source_id、handle、role、event_order、field_path、visibility_ref、kind 和
 请求策略改为 source-use-v2.1，实际请求摘要随之改变，冻结 packet 摘要不变。
 新增最终请求回归核对整个可见来源投影及事件字段，并在冻结 SQLite 请求中检查
 export PATH 和 which sqlite3 同时可见；命令单独引用仍拒绝。47 项离线测试通过。
+
+## 当前版本 v3：单一逐引文协议（替代以上 v2/v2.1 用途和引用规则）
+
+**只完成工程修复，未运行新的真实模型、Task 或评测，未改正式记忆。**
+模型抽取是否完整、是否把成功断言改写成自述、条件/依赖是否遗漏，以及证据是否蕴含
+主张，仍是语义问题。来源可定位不等于内容足够支持；没有新增宿主语义裁判。
+
+本轮分三步：统一引用协议；撤销模型分类对来源资格的硬门控；补历史诊断与平台回归。
+基线为 `000aaec23ae64288362dfdfac25a58ccdf2c3c54`，保留 `9d174fbe` 的上下文修复。
+上游具体调用链、复用/不复用理由和永久链接见 REUSE.md 的 v3 节。
+
+### 模型 wire contract
+
+单条核验：
+
+```json
+{"verdict":"SUPPORTED","evidence":[{"document_index":1,"quote":"逐字引文"}],"explanation":"理由"}
+```
+
+多引文每条都有自己的文档序号，可来自同一文档或不同文档。batch 返回上述对象数组，
+每个对象再有 `claim_index`。`document_index` **从 1 开始**，与实际展示的 Document N
+完全一致，不再存在首条引文零基规则。模型不再输出 source_id、role、visibility_ref；
+宿主从对应来源派生。只有同一文档内引文重复时，可附带 `start/end` 两个原来源字符
+坐标消歧；必须同时为整数，不接受 null/单边坐标。无证据可合法返回：
+
+```json
+{"verdict":"NOT_ENOUGH_INFO","evidence":[],"explanation":"当前可见材料不足"}
+```
+
+新策略为 `source-use-v3`。旧字符串 evidence、顶层 document_index 或并列 citations
+不自动兼容、不猜 +1/-1、不跨来源找相似文字；旧顶层字段明确报
+`legacy_citation_protocol`。原始响应仍通过 transport 留存。旧诊断包和报告不覆写；
+测试确认 v2.1 的 14 份旧核验响应均不满足新 wire（包括旧 insufficient 的
+空引文加顶层 null 索引），这是协议不兼容而非语义降级，**不是 14 份修复后的裁决**。
+
+### 来源与报告
+
+所有当时可见的 task_instruction/tool_command/tool_observation/agent_report/memory_derived
+均保留来源身份、角色、可见边界与原上下文。模型抽取不再被要求新增 evidence_scope；
+旧标签仅在旧响应提供时保留于诊断报告，不生成默认标签，不进入核验提示，
+不过滤文档也不拆 batch。目标 operations 从不进入独立
+来源注册表；若同样文字确实独立出现在某来源，仍必须显式选择该来源，不能只按文字
+黑名单拒绝。要求或 Agent 自述不是成功执行观察；命令说明尝试/静态代码，不单独证明
+运行成功。上下文保留原 PATH、目录、参数、事件顺序和字段，不补隐藏或未来历史。
+
+报告保留 `evidence:[字符串]` 便于已有消费者阅读；每条 `alignment.citations` 中的
+document_index、source_id、role、visibility_ref、start/end 由宿主确定。document_index
+现在也是 1 基，消费者必须读 evidence_policy；旧报告不迁移。绑定失败 verdict=null，
+保留 model_verdict；没有自动将错误 scope 改成 supported 的后处理。即使模型错误地用
+真实可定位引文声称 supported，工程绑定也不会自行判断语义对错；`semantic_proof=false`。
+
+重复 source_id、重复文档范围、未知文档、越界、文字不匹配、文档内重复/重叠引文且
+未消歧都明确拒绝。单引文无歧义的正确回显可通过；多引文逐条绑定。宿主不运行轨迹
+命令，不重写原任务/维护输入，packet 和 Phase1 接口不变。SQLite 输入身份仍为
+`0aa854b8a7c7eb98ae5e412cdf78180597ca3400e0884046db397e9e4c2cdb90`。
+
+### 复制验收与停止点
+
+```bash
+python -m pip install --target .review-deps -r pma_evidence_review/requirements.txt
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=.review-deps python -m unittest discover -s pma_evidence_review/tests -v
+```
+
+PowerShell 可先设置 `$env:PYTHONPATH='.review-deps'` 和
+`$env:PYTHONDONTWRITEBYTECODE='1'`，再执行相同 unittest 命令。
+本轮 Linux Python 3.12.14；UTF-8 文件往返和 Windows socketpair 分支以 mock 验证，
+未声称在真实 Windows 机器运行。完整原始测试输出见 test-output-citation-v3.txt。
+构建目录案例只证明原命令/回执保留、宿主不虚构 mv/cp 和不覆盖模型 verdict，不能证明
+新模型不会误推断文件移动。下一真实模型验证须单独授权，本轮到工程验收和代码交付停止。

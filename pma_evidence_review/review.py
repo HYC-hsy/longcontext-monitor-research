@@ -43,8 +43,7 @@ does not establish behavior in another session or environment. Suggested revisio
 be a short direction in explanation; do not rewrite memory.
 Source Documents are the ONLY citable sources. Target operations and interpretive
 context are NOT evidence. Source roles describe provenance, not semantic support.
-Any legacy evidence_scope label is advisory and may be wrong; evaluate the actual
-assertion and all supplied sources. Do not let that label hide relevant evidence.
+Evaluate the actual assertion against all supplied sources.
 Each evidence entry has a one-based document_index matching the displayed Document N
 and a verbatim quote. Do not return top-level document_index or citations. The host
 resolves source identity, provenance and offsets. Only if the same quote occurs more
@@ -125,10 +124,9 @@ def parse_claims(raw, packet):
         claims.append(Claim(text=text, index=i + 1, original_text=orig,
                             span=Span(start, start + len(orig))))
         metadata[i + 1] = {k: item[k] for k in ('op_index', 'kind', 'conditions', 'dependencies')}
-        scope = item.get('evidence_scope', 'execution')
-        require(scope in policy.SCOPES, 'unknown_evidence_scope')
-        metadata[i + 1].update(evidence_scope=scope,
-                              scope_origin='model' if 'evidence_scope' in item else 'legacy_default_advisory')
+        if 'evidence_scope' in item:
+            require(isinstance(item['evidence_scope'], str), 'invalid_legacy_evidence_scope')
+            metadata[i + 1]['evidence_scope'] = item['evidence_scope']
     errors = []
     if not claims:
         errors.append('extraction_empty_unverified')
@@ -148,12 +146,13 @@ def verification_requests(packet, claims, metadata, mode='evidence-first'):
     for group in groups:
         if not group:
             continue
-        registry = policy.documents(packet, metadata[group[0].index]['evidence_scope'])
+        registry = policy.documents(packet)
         docs = policy.formatted(registry)
         budget = max(sum(len(d['text']) for d in docs), 1)
         def text(c):
             op = next(o for o in policy.targets(packet) if o['op_index'] == metadata[c.index]['op_index'])
-            return json.dumps({'claim': c.text, **metadata[c.index],
+            claim_meta = {k: v for k, v in metadata[c.index].items() if k != 'evidence_scope'}
+            return json.dumps({'claim': c.text, **claim_meta,
                                'audit_target_not_evidence': op}, ensure_ascii=False)
         if mode == 'batch':
             prompt = format_claim_verification_batch_prompt(
@@ -268,7 +267,7 @@ async def review(packet, transport, *, mode='evidence-first', locator=None):
             if row.get('evidence'):
                 try:
                     row['alignment'] = policy.bind(row, packet, req['citation_registry'],
-                                                   meta['evidence_scope'], locator)
+                                                   locator=locator)
                 except Exception as error:
                     row.update(model_verdict=row['verdict'], verdict=None,
                         engineering_status=str(error) if isinstance(error, ValueError)

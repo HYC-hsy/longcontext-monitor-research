@@ -1,11 +1,19 @@
-# PMA evidence reviewer v1
+# PMA evidence reviewer — citation policy v3
 
 Standalone frozen-cycle evidence audit. **No online memory integration, memory writes,
 curator retry, judge, Task, official evaluation, or completion gate.** Only the offline
 fake paths were tested. The code has an explicit future real-client entry point, but
 real model semantics, client/provider behavior and task outcomes are untested.
 
-## Reproduce the offline acceptance
+## Current contract
+
+Read [HANDOFF.md — current v3 contract](HANDOFF.md#当前版本-v3单一逐引文协议替代以上-v2v21-用途和引用规则)
+and [TEST_RECORD.md](TEST_RECORD.md) first. V3 uses one-based per-quote evidence
+objects; it does not ask the model for use/scope labels. Typed source provenance is
+retained, but does not prove entailment. Old v2/v2.1 responses are intentionally not
+converted. Current repair base: `000aaec23ae64288362dfdfac25a58ccdf2c3c54`.
+
+## Original offline acceptance (historical setup)
 
 Check out the independent branch, then pin its delivered commit SHA from the release
 report. The parent is `72152913f545ca36a75b68e8796e24a6e24f9f81`; do not substitute

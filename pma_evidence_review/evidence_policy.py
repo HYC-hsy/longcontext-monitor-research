@@ -27,8 +27,8 @@ def context(packet, *, include_sources=False):
     return result
 
 
-def documents(packet, scope):
-    require(scope in SCOPES, 'unknown_evidence_scope')
+def documents(packet, scope=None):
+    # scope is accepted only for older callers; never consulted.
     registry = []
     ids = [s['source_id'] for s in packet['sources']]
     require(len(ids) == len(set(ids)), 'citation_duplicate_source_id')
@@ -46,7 +46,7 @@ def formatted(registry):
                                 ensure_ascii=False), 'text': doc['text']} for doc in registry]
 
 
-def bind(row, packet, registry, scope, locator):
+def bind(row, packet, registry, scope=None, locator=None):
     """No fallback search across other identities; never pick a matching role by text."""
     evidence = row['evidence']
     citations = row.get('citations')
