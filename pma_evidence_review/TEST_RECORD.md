@@ -254,3 +254,10 @@ Inherited AB ZIP byte count/hash/CRC verified; no new real private input uploade
 Implementation code steps: 172+/112-; 314+/37-; 70+/3-. Documentation and generated
 logs separate. Last whitespace attachment/packaging utility is a separate small step.
 Fake output establishes plumbing, not improved error detection or semantic coverage.
+
+### v5.1 local system correction
+
+86 tests passed under the same macOS/Python3.11.15 offline command. Raw output:
+test-records-focus/v51-final.txt. Dedicated local system removes the higher-priority
+whole-operation target conflict; final request tests check both system and prompt.
+Existing seven frozen whole payload/report comparisons with A still pass. No real calls.

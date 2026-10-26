@@ -145,3 +145,11 @@ git ls-remote origin refs/heads/research/pma-whole-focus-diagnostic-DATE
 若 git 无凭据，使用已授权 GitHub connector 上传二进制 blob + tree/commit，不能读取秘密找
 凭据。远端回读 commit 和 ZIP 字节/hash，提供固定链接，不把本机路径当交付附件。
 此上传授权不扩大真实实验范围；无 gold/留出集，无模型效果增益结论。
+
+### v5.1：跨消息层目标一致
+
+local 现在使用专用 FOCUS_SYSTEM，最高优先级也仅要求审核当前原文区间；完整 operation/
+before 仅解释引用、条件与限定，不把其它内容变成额外目标。来源安全原则保留。若焦点本身
+是完成断言仍须审核。whole.SYSTEM 及所有 whole payload 不变，继续逐字对照 A。
+策略为 whole-A-verbatim-focus-v5.1，86 项离线测试通过；新增最终请求回归检查 system/user
+两层目标一致。旧 v5 ZIP 保留，新 v5.1 ZIP 是此修正的工程验收，不是新真实诊断。

@@ -198,3 +198,8 @@ slicing retain all text. No atomization or semantic completeness guarantee. Focu
 instructions are a new adaptation of the evidence-first flow with one output contract.
 Whole/local isolation is input isolation only. No consensus, voting, third evaluator,
 rewriting, support rate, NLI, retrieval or automatic revision. Existing MIT notices intact.
+
+v5.1 local FOCUS_SYSTEM is an explicit adaptation for the current verbatim interval.
+It no longer inherits whole.SYSTEM's complete-operation target. Shared source/safety
+principles remain; whole SYSTEM/payload are unchanged. No parser, locator or transport
+change; the test inspects both message layers, not just the appended user prompt.
