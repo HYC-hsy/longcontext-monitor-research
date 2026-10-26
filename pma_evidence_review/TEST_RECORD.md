@@ -111,3 +111,13 @@ this run was macOS, not a fresh Windows execution. Profile factory tested only w
 ZIP hash and two old frozen input identities verified; old responses used only to generate
 new requests, never as gold or transmitted externally. No new raw diagnostic files committed.
 Step 1: 156 additions + 30 deletions; step 2: 212 additions; documentation separately.
+
+
+### v2.1 command-context correction
+
+Same command/runtime/network guard: 47 tests passed. Raw output in
+`test-output-source-context.txt`. Final execution requests checked for original
+source projection (all identity/order/field/slice fields), SQLite export PATH plus
+which sqlite3 and actual observations; command-only execution citation rejected.
+Every scope retains original visible source context. No new model call or private
+result publication. Original frozen packet hashes remain unchanged.

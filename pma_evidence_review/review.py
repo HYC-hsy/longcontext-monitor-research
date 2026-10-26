@@ -50,7 +50,12 @@ context are NOT evidence. Citation scope limits use; it does not establish entai
 For every evidence quote return citations in the same order, each with zero-based
 document_index, source_id, role, visibility_ref, start and end (original source offsets).
 The legacy document_index alone is accepted only for one unambiguous quote. Never use
-requirements or historical records as execution observations. If evidence is absent,
+requirements or historical records as execution observations. Interpret observations
+in their original command context: preserve PATH exports, session scope, arguments,
+file paths and code. The visible-source context retains original event identities,
+order and field paths; use those to interpret related commands and receipts, never
+invent links when the visible records do not establish them. Context can narrow or
+undermine a conclusion, but cannot substitute for an eligible observation. If evidence is absent,
 return NOT_ENOUGH_INFO; do not cite target text or infer observation from a command.'''
 
 
@@ -160,7 +165,7 @@ def verification_requests(packet, claims, metadata, mode='evidence-first'):
             prompt = format_claim_verification_evidence_first_prompt(text(group[0]), docs,
                 max_docs_chars=budget, max_chars_per_doc=budget)
         prompt += VERIFY_CONTRACT + '\nINTERPRETIVE CONTEXT (not evidence):\n'
-        prompt += json.dumps(policy.context(packet), ensure_ascii=False)
+        prompt += json.dumps(policy.context(packet, include_sources=True), ensure_ascii=False)
         req = request(prompt, 'verify_batch' if mode == 'batch' else 'verify')
         req['citation_registry'] = registry
         requests.append((group, req))

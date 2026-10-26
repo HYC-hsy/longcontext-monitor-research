@@ -174,6 +174,22 @@ class SourceBoundaryTests(unittest.TestCase):
             self.assertEqual(report['results'][0]['engineering_status'], 'ok')
             self.assertIn(quote, client.calls[1]['prompt'].split('Source Documents:\n')[1].split('\nClaim')[0])
 
+    def test_execution_retains_original_command_and_receipt_context(self):
+        req = self.request('execution')
+        context = json.loads(req['prompt'].split('INTERPRETIVE CONTEXT (not evidence):\n')[1])
+        sources = context['visible_source_context_not_independent_evidence']
+        self.assertEqual(sources, packet()['sources'])
+        self.assertIn('export PATH=/tool:$PATH; tool', req['prompt'])
+        self.assertEqual([d['text'] for d in req['citation_registry']], ['green'])
+        row = self.run_fake(json.loads(result('SUPPORTED',
+            ['export PATH=/tool:$PATH; tool'], document_index=0)))
+        self.assertIsNone(row['verdict'])
+        self.assertEqual(row['engineering_status'], 'citation_ambiguous_or_unmatched')
+        for scope in policy.SCOPES:
+            context = json.loads(self.request(scope)['prompt'].split(
+                'INTERPRETIVE CONTEXT (not evidence):\n')[1])
+            self.assertEqual(context['visible_source_context_not_independent_evidence'], sources)
+
     def test_conflicting_first_index_and_scope_no_rescue(self):
         output = json.loads(result('SUPPORTED', ['green'], document_index=1,
                                    citations=[{'document_index': 0}]))
@@ -206,3 +222,18 @@ class SourceBoundaryTests(unittest.TestCase):
                     self.assertTrue(all(d['role'] == 'tool_observation' for d in req['citation_registry']))
                     self.assertNotIn('maintenance_prompt', req['prompt'])
                     self.assertNotEqual(req['prompt'], old[1]['request']['prompt'])
+                    context = json.loads(req['prompt'].split(
+                        'INTERPRETIVE CONTEXT (not evidence):\n')[1])
+                    visible = context['visible_source_context_not_independent_evidence']
+                    self.assertEqual(visible, p['sources'])
+                    commands = [piece['text'] for source in visible
+                                if source['role'] == 'tool_command' for piece in source['slices']]
+                    self.assertTrue(commands)
+                    if sample == 'sqlite':
+                        self.assertTrue(any('export PATH' in text and 'which sqlite3' in text
+                                            for text in commands))
+                    for source in visible:
+                        if source['role'] == 'tool_observation':
+                            for piece in source['slices']:
+                                self.assertTrue(any(doc['source_id'] == source['source_id'] and
+                                    doc['text'] == piece['text'] for doc in req['citation_registry']))

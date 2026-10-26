@@ -7,7 +7,7 @@ import json
 
 from .inputs import require, model_material
 
-POLICY_VERSION = 'source-use-v2'
+POLICY_VERSION = 'source-use-v2.1'
 SCOPES = {
     'execution': {'tool_observation'},
     'attempt': {'tool_command'},
@@ -22,9 +22,14 @@ def targets(packet):
     return model_material(packet)['operations']
 
 
-def context(packet):
+def context(packet, *, include_sources=False):
     material = model_material(packet)
-    return {k: material[k] for k in ('original_task', 'memory_before', 'limitations')}
+    result = {k: material[k] for k in ('original_task', 'memory_before', 'limitations')}
+    if include_sources:
+        # Preserve original event identities/order/field paths and visible slices.
+        # No inferred command-result pairing or extra history is introduced.
+        result['visible_source_context_not_independent_evidence'] = material['sources']
+    return result
 
 
 def documents(packet, scope):

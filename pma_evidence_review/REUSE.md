@@ -93,3 +93,10 @@ Re-read at the pinned upstream revisions above:
 
 `inputs.model_material` remains the frozen input identity projection, but is no longer
 passed wholesale to either model template. MIT notices and upstream files are unchanged.
+
+
+v2.1 correction: `evidence_policy.context(include_sources=True)` retains all existing
+visible source records for interpretation across scopes, including original event order,
+field path, handle and visibility identity. It does not add these records to a scope's
+citation registry. This preserves the command conditions needed to interpret receipts
+without conflating command submission with successful execution. No inferred links added.

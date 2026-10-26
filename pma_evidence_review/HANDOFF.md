@@ -95,7 +95,7 @@ SQLite C14（54 来源/3 操作）与 HTML C2（12 来源/4 操作）都是开�
 稳定 packet、`review(packet, transport, locator=locate)`、模型客户端和原定位算法不变。
 旧 `review_input_sha256` 继续标识完整冻结输入；新 `audit_request_sha256` 标识实际发送的
 `{system,prompt,tools}` 按 UTF-8、sort_keys、紧凑 JSON 序列化后的 SHA256，报告保存每次
-请求的摘要，capture 同步记录。`evidence_policy=source-use-v2` 区分新协议。不要覆盖旧运行。
+请求的摘要，capture 同步记录。`evidence_policy=source-use-v2.1` 区分新协议。不要覆盖旧运行。
 
 请求边界变化：
 
@@ -151,3 +151,20 @@ CLI 使用新输出路径且拒绝覆盖，测试禁止网络连接（保留 Win
 限制，记录实际调用/重试/资源。使用同一冻结输入分别保存旧/新请求与结果，开发诊断标签
 单独存放，不进入模型输入。先分析分区、用途分类与绑定弃权，再由独立逐项诊断评估语义；
 没有盲评 gold 时不报告准确率/增益。不要把这里的 fake 断言当成真实模型标签。
+
+
+### v2.1：解释上下文保留原命令与事件身份
+
+v2 的用途过滤遗漏了 execution 判断所需的原命令上下文，已修复。
+核验的独立 `INTERPRETIVE CONTEXT` 现在包含全部原始可见来源投影，逐项保留
+source_id、handle、role、event_order、field_path、visibility_ref、kind 和 slices。
+使用已有身份和顺序解释命令/回执，不另造关联 ID、不补隐藏或未来历史。
+因此 SQLite 的 PATH 导出与 which 命令条件、HTML 写文件的参数/代码仍对核验可见。
+所有 scope 都保留这份上下文；抽取正文及其上下文保持原来的更小范围。
+
+这些上下文可限制或推翻宽泛结论，但只有 Source Documents 中的来源可以作为该用途的
+独立支持引用。execution 引用集合仍仅含观察回执，命令不能替代成功观察。
+需要结合命令解释回执的语义判断仍由模型完成，不能从保留上下文推断已经判断正确。
+请求策略改为 source-use-v2.1，实际请求摘要随之改变，冻结 packet 摘要不变。
+新增最终请求回归核对整个可见来源投影及事件字段，并在冻结 SQLite 请求中检查
+export PATH 和 which sqlite3 同时可见；命令单独引用仍拒绝。47 项离线测试通过。
