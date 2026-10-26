@@ -186,3 +186,20 @@ resource-cost analytics or new private diagnostic publication. All new fixtures 
 synthetic or read the already committed public ZIP without copying its raw text.
 Direct git push had no credential helper and failed before upload; parent uses the
 connected GitHub publisher and must separately report exact remote commit/tree identity.
+
+## Direct-operation v4, 2026-10-26
+
+Base 4e3a52a637322c3b436552390e8c0ccb035d8cef, branch
+research/pma-direct-operation-review-v4-20261026. macOS Python 3.11.15,
+existing ../offline-deps (regex); no dependency reinstall. Command:
+`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=../offline-deps /opt/homebrew/bin/python3.11 -m unittest discover -s pma_evidence_review/tests -v`.
+Raw outputs in test-records-v4: baseline 61, step1 63, step2 initial 68, final 70 tests,
+all passed. Existing 61 tests explicitly retain legacy coverage; 9 direct-path tests added.
+Step1 code 226 additions/6 deletions; step2 code 169 additions/11 deletions, below 600 each.
+Documentation and generated test logs separate. No true model/Task/evaluation/trajectory
+command or real profile read. Profile CLI tested using FakeClient factory replacement.
+Socket connect guard remains active; Windows UTF8/socketpair changes preserved, no fresh
+Windows execution claimed. v3 ZIP size/hash checked; only frozen input JSON read by new
+test, no diagnosis labels transmitted. Input hashes unchanged, SQLite 3/HTML 4 direct
+requests verified with full operation body and fixed deletion question. No new private
+raw package/configuration uploaded. Fake verdicts are plumbing probes, not semantic gold.

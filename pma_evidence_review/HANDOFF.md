@@ -1,3 +1,5 @@
+> 历史说明：以下为旧 claim/extraction 流程。当前 v4 默认接口与 CLI 请使用 [DIRECT_HANDOFF.md](DIRECT_HANDOFF.md)。旧参数不再适用于默认 CLI，旧代码仅由显式 legacy_review 调用。
+
 # PMA 证据审核器 v1：中文交接与接口契约
 
 本组件只审核当轮记忆写入/删除是否受到当时可见证据支持，不判断任务是否完成，

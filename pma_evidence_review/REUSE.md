@@ -126,3 +126,23 @@ It neither filters sources nor splits batches. Role is provenance, NOT an entail
 Extraction still targets only operations and preserves deletion tombstones. Core packet,
 Phase1 implementation, original history visibility and existing locator are unchanged.
 No additional model, semantic rule engine, dependencies graph or online gate was added.
+
+## Direct-operation v4 (2026-10-26)
+
+Re-read actual fixed checkouts: RAG b78a08213ba7e6d9e587bfa3134ba9047cfaf677,
+Sourcecheck d81493d239ea084c6063695b6e762c2626dd5646 and FActScore
+f28272deffcf33efc1f1117d5479c10bb75221a9. Existing MIT files remain unchanged.
+
+| Function / type | Actual direct-path reuse and adaptation |
+| --- | --- |
+| RAG `ClaimVerifier.verify` and `_single_verify` (522–554) | Its direct evidence-first formatter → client → parse skeleton does not require extraction. `operation_requests` calls the existing vendored evidence-first formatter with full operation target and independent documents; operation loop invokes the existing transport. No artificial Claim or claim_index is created. |
+| RAG `format_documents`, evidence-first prompt files | Existing v3 adapted formatter/templates execute unchanged; one-based Document N aligns with per-evidence document_index. Full source text budget retained. |
+| RAG `EvidenceSpan.to_dict` | `operation_review.review` instantiates EvidenceSpan after v3 binding, serializes using upstream method, explicitly translates its zero-based internal document index to the public one-based protocol. Coordinates remain original visible-source offsets. |
+| RAG Claim/VerificationResult/ClaimExtractor | Remain in explicit `legacy_review` and regression tests. Not used to invent operation claims; direct parser adapts strict verdict/evidence validation to op_index and keeps raw output/model verdict. |
+| Sourcecheck `verify_claim`, `_resolve_and_fetch` | Existing `evidence_policy.documents/bind` resolve-before-grounding contract reused unchanged; identity/range resolution precedes original locator. No external source store, NLI, search or threshold stack. |
+| FActScore `FactScorer._get_score` | Rechecked Input atom separated from retrieved Text passages. Keep independent-source construction; no new extraction/retrieval functions copied, no biography machinery or permissive boolean parser. |
+| Host input/locator/profile | Full packet validation, revision chains and identity unchanged; direct review calls the same graded locator and captured profile client. Capture adds strategy/op_index only, not credentials. |
+
+`review.review` now dispatches to direct operation review; `review.legacy_review` is
+explicitly named and old tests target it. This avoids silently interpreting historical
+claim reports as operation reports. No upstream full suite or semantic validation claimed.
