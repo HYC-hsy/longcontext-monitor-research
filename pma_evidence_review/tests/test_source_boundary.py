@@ -1,0 +1,208 @@
+"""Final payload tests with scripted responses; no semantic gold or network calls."""
+import asyncio
+import copy
+import hashlib
+import json
+from pathlib import Path
+import unittest
+import zipfile
+
+from pma_evidence_review import evidence_policy as policy
+from pma_evidence_review.inputs import validate, build_from_data, digest
+from pma_evidence_review.location import locate
+from pma_evidence_review.review import extraction_request, parse_claims, verification_requests, review
+from pma_evidence_review.transport import CapturedTransport, FakeClient
+from pma_evidence_review.tests.fixtures import packet, extraction, result, bundle
+from pma_evidence_review.tests.no_network import install_guard
+
+
+class SourceBoundaryTests(unittest.TestCase):
+    def setUp(self):
+        install_guard(self)
+
+    def extracted(self, scope='execution', two=False):
+        data = json.loads(extraction(two))
+        for claim in data['claims']:
+            claim['evidence_scope'] = scope
+        return json.dumps(data)
+
+    def request(self, scope='execution', mode='evidence-first'):
+        p = packet()
+        claims, meta, _, _ = parse_claims(self.extracted(scope), p)
+        return verification_requests(p, claims, meta, mode)[0][1]
+
+    def run_fake(self, output, scope='execution'):
+        client = FakeClient([self.extracted(scope), json.dumps(output)])
+        transport = CapturedTransport(client, fake=True)
+        report = asyncio.run(review(packet(), transport, locator=locate))
+        self.assertEqual(transport.calls, 2)
+        self.assertEqual(client.calls[1], transport.records[1]['request'])
+        identity = hashlib.sha256(json.dumps(client.calls[1], ensure_ascii=False,
+            sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        self.assertEqual(identity, report['audit_request_sha256s'][1])
+        self.assertEqual(identity, transport.records[1]['audit_request_sha256'])
+        return report['results'][0]
+
+    def test_final_extraction_targets_only_operations(self):
+        p = packet()
+        prompt = extraction_request(p)['prompt']
+        targets, context = prompt.split('INTERPRETIVE CONTEXT (not targets):')
+        self.assertIn(p['operations'][0]['content'], targets)
+        self.assertNotIn('Build the tool.', targets)
+        self.assertNotIn('export PATH=', prompt)
+        self.assertNotIn('maintenance_prompt', prompt)
+        self.assertIn('Build the tool.', context)
+
+    def test_final_verify_partition_both_modes(self):
+        for mode in ('evidence-first', 'batch'):
+            req = self.request(mode=mode)
+            documents = req['prompt'].split('Source Documents:\n')[1].split('\nClaim')[0]
+            self.assertIn('green', documents)
+            self.assertNotIn(packet()['operations'][0]['content'], documents)
+            self.assertNotIn('Build the tool.', documents)
+            self.assertNotIn('Need to check the tool.', documents)
+            self.assertNotIn('export PATH=', documents)
+            self.assertNotIn('maintenance_prompt', req['prompt'])
+            self.assertIn('audit_target_not_evidence', req['prompt'])
+            self.assertEqual([d['role'] for d in req['citation_registry']], ['tool_observation'])
+
+    def test_role_use_projection_retains_commands_and_context(self):
+        for scope, role, text in [('attempt', 'tool_command', 'export PATH='),
+            ('static_behavior', 'tool_command', 'export PATH='),
+            ('requirement', 'task_instruction', 'Build the tool.'),
+            ('historical_record', 'memory_derived', 'Need to check the tool.')]:
+            req = self.request(scope)
+            self.assertIn(role, [d['role'] for d in req['citation_registry']])
+            self.assertIn(text, req['prompt'].split('Source Documents:\n')[1].split('\nClaim')[0])
+
+    def test_receipt_positive_and_self_reference_rejected(self):
+        output = json.loads(result('SUPPORTED', ['green'], document_index=0))
+        self.assertEqual(self.run_fake(output)['verdict'], 'supported')
+        output['evidence'] = [packet()['operations'][0]['content']]
+        row = self.run_fake(output)
+        self.assertIsNone(row['verdict'])
+        self.assertEqual(row['engineering_status'], 'citation_ambiguous_or_unmatched')
+
+    def test_requirements_and_memory_not_execution(self):
+        for quote in ('Build the tool.', 'Need to check the tool.'):
+            row = self.run_fake(json.loads(result('SUPPORTED', [quote], document_index=0)))
+            self.assertIsNone(row['verdict'])
+        row = self.run_fake(json.loads(result('SUPPORTED', ['Build the tool.'], document_index=0)),
+                            'requirement')
+        self.assertEqual(row['engineering_status'], 'ok')
+
+    def test_missing_identity_empty_evidence_and_multiple_quotes(self):
+        for output, status in [
+            (json.loads(result('SUPPORTED', ['green'])), 'citation_missing'),
+            (json.loads(result('SUPPORTED')), 'parse_failure'),
+            (json.loads(result('SUPPORTED', ['green', 'green'], document_index=0)), 'citation_missing')]:
+            row = self.run_fake(output)
+            self.assertEqual(row['engineering_status'], status)
+            self.assertIsNone(row['verdict'])
+
+    def test_identity_role_range_and_text_failures(self):
+        doc = self.request()['citation_registry'][0]
+        citation = {k: doc[k] for k in ('source_id', 'role', 'visibility_ref', 'start', 'end')}
+        citation['document_index'] = 0
+        cases = [('document_index', 99, 'citation_unknown_document'),
+            ('source_id', 'unknown', 'citation_wrong_source_id'),
+            ('role', 'task_instruction', 'citation_wrong_role'),
+            ('visibility_ref', 'future', 'citation_wrong_visibility_ref'),
+            ('start', -1, 'citation_outside_visible_range'),
+            ('end', 4, 'citation_text_mismatch')]
+        for key, value, expected in cases:
+            changed = dict(citation, **{key: value})
+            row = self.run_fake(json.loads(result('SUPPORTED', ['green'], citations=[changed])))
+            self.assertEqual(row['engineering_status'], expected)
+            self.assertIsNone(row['verdict'])
+        output = json.loads(result('SUPPORTED', ['green', 'green'], citations=[citation, citation]))
+        self.assertEqual(self.run_fake(output)['engineering_status'], 'ok')
+
+    def test_same_text_identity_not_string_exclusion(self):
+        # Policy unit projection: identical content is not intrinsically self-reference.
+        p = packet()
+        text = p['operations'][0]['content']
+        for source in p['sources']:
+            source['slices'] = [{'start': 0, 'end': len(text), 'text': text}]
+        registry = policy.documents(p, 'execution')
+        self.assertEqual(len(registry), 1)
+        row = {'evidence': [text], 'document_index': 0}
+        self.assertEqual(policy.bind(row, p, registry, 'execution', locate)['status'], 'exact_unique')
+        with self.assertRaisesRegex(ValueError, 'citation_missing'):
+            policy.bind({'evidence': [text]}, p, registry, 'execution', locate)
+        # No search can rescue an explicitly wrong source identity.
+        row['citations'] = [{'document_index': 0, 'source_id': p['sources'][0]['source_id']}]
+        with self.assertRaisesRegex(ValueError, 'citation_wrong_source_id'):
+            policy.bind(row, p, registry, 'execution', locate)
+
+    def test_static_code_and_file_creation_receipt(self):
+        p = packet()
+        command, observation = p['sources'][1:3]
+        code = 'def add(a, b): return a + b'
+        receipt = 'File created successfully'
+        command['slices'] = [{'start': 10, 'end': 10+len(code), 'text': code}]
+        observation['slices'] = [{'start': 0, 'end': len(receipt), 'text': receipt}]
+        for scope, quote in [('static_behavior', code), ('execution', receipt)]:
+            registry = policy.documents(p, scope)
+            index = next(i for i, doc in enumerate(registry) if doc['text'] == quote)
+            row = {'evidence': [quote], 'document_index': index}
+            self.assertEqual(policy.bind(row, p, registry, scope, locate)['status'], 'exact_unique')
+        # A command isn't an execution document even when its text looks like success.
+        self.assertNotIn(code, [d['text'] for d in policy.documents(p, 'execution')])
+
+    def test_static_and_creation_full_fake_requests(self):
+        args = bundle()
+        prompt = args[0][0]['prompt'].replace('export PATH=/tool:$PATH; tool',
+            'def add(a, b): return a + b').replace('green', 'File created successfully')
+        args[0][0]['prompt'] = prompt
+        manifest = args[3]['gap_evidence']['manifests']['c1']
+        manifest['request_sha256'] = digest(prompt)
+        manifest['visible_spans'][1] = [[0, len('def add(a, b): return a + b')]]
+        manifest['visible_spans'][2] = [[0, len('File created successfully')]]
+        manifest['visibility_refs'] = [digest(json.dumps(['c1', digest(prompt), sid, spans],
+            ensure_ascii=False, separators=(',', ':'))) for sid, spans in zip(
+                manifest['ordered_source_refs'], manifest['visible_spans'])]
+        p = build_from_data(*args, step=1, cycle_id='c1')
+        for scope, quote in [('static_behavior', 'def add(a, b): return a + b'),
+                             ('execution', 'File created successfully')]:
+            ext = json.loads(self.extracted(scope))
+            ext['claims'][0]['claim'] = ('The function returns the sum of its arguments'
+                if scope == 'static_behavior' else 'A file was created')
+            client = FakeClient([json.dumps(ext), result('SUPPORTED', [quote], document_index=0)])
+            transport = CapturedTransport(client, fake=True)
+            report = asyncio.run(review(p, transport, locator=locate))
+            self.assertEqual(report['results'][0]['engineering_status'], 'ok')
+            self.assertIn(quote, client.calls[1]['prompt'].split('Source Documents:\n')[1].split('\nClaim')[0])
+
+    def test_conflicting_first_index_and_scope_no_rescue(self):
+        output = json.loads(result('SUPPORTED', ['green'], document_index=1,
+                                   citations=[{'document_index': 0}]))
+        self.assertEqual(self.run_fake(output)['engineering_status'], 'citation_first_document_conflict')
+        p = packet()
+        registry = policy.documents(p, 'requirement')
+        with self.assertRaisesRegex(ValueError, 'citation_use_not_permitted'):
+            policy.bind({'evidence': ['Build the tool.'], 'document_index': 0},
+                        p, registry, 'execution', locate)
+
+    def test_frozen_inputs_old_identity_new_request(self):
+        root = Path(__file__).resolve().parents[1]
+        path = root/'diagnostic_packages/PMA_AUDITOR_FIRST_REAL_DIAGNOSTIC_PACKAGE_20261025.zip'
+        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),
+            'b29cf429b00e0f9b6fa7db818762201510799253a9f659d875d245eaf574a848')
+        identities = {'sqlite': '0aa854b8a7c7eb98ae5e412cdf78180597ca3400e0884046db397e9e4c2cdb90',
+            'html': '4760d69e0e47f1e0ede15e9fd800270b89768a6307c45b4c8d4223803cc1494b'}
+        with zipfile.ZipFile(path) as archive:
+            for sample, expected in identities.items():
+                p = json.loads(archive.read(sample+'/input.json'))
+                validate(p)
+                self.assertEqual(p['review_input_sha256'], expected)
+                old = [json.loads(line) for line in archive.read(sample+'/requests.jsonl').splitlines()]
+                responses = [json.loads(line) for line in archive.read(sample+'/responses.jsonl').splitlines()]
+                claims, meta, _, _ = parse_claims(responses[0]['response'], p)
+                requests = verification_requests(p, claims, meta)
+                self.assertEqual(len(requests), len(claims))
+                self.assertNotEqual(extraction_request(p)['prompt'], old[0]['request']['prompt'])
+                for _, req in requests:
+                    self.assertTrue(all(d['role'] == 'tool_observation' for d in req['citation_registry']))
+                    self.assertNotIn('maintenance_prompt', req['prompt'])
+                    self.assertNotEqual(req['prompt'], old[1]['request']['prompt'])

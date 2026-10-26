@@ -55,6 +55,10 @@ def bind(row, packet, registry, scope, locator):
         citations = [{'document_index': row['document_index']}]
     require(isinstance(citations, list) and len(citations) == len(evidence),
             'citation_count_mismatch')
+    if row.get('document_index') is not None and citations:
+        require(isinstance(citations[0], dict) and
+                row['document_index'] == citations[0].get('document_index'),
+                'citation_first_document_conflict')
     aligned = []
     for quote, citation in zip(evidence, citations):
         require(isinstance(citation, dict), 'citation_shape')
