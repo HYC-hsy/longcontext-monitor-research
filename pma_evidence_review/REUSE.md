@@ -157,3 +157,23 @@ used only by the explicit legacy path. EvidenceSpan and source/locator reuse are
 CapturedTransport now preserves available response text before rejecting unexpected tool
 calls, using ResponseProtocolError to distinguish received invalid responses from call
 failures; it never executes or serializes tool/client/profile objects.
+
+## Single-factor entailment prompt candidate (2026-10-26)
+
+Rechecked pinned RAG b78a082 prompts/claim-verification-evidence-first-system.txt:
+extract relevant evidence → compare to the judgment → supported/contradicted/insufficient.
+This sequence was already adapted; the candidate refines comparison, not a new mechanism.
+Rechecked Sourcecheck d81493 backends/entailment.py `score_sentences`: pairs are
+(source_sentence, claim), not reversed. `decide_grounding` separates insufficient support
+from actual contradiction; its thresholds, lexical/numeric guards and NLI are NOT copied,
+loaded or run. This is prompt-design inspiration only, not new code reuse or calibration.
+Rechecked FActScore f28272 `FactScorer._get_score`: assess the whole stated fact against
+independent passages. No atomizer, retrieval, binary averaging or new client introduced.
+
+Production diff is only the comparison paragraph of CONTRACT and STRATEGY in
+operation_review.py. Existing RAG format_documents/EvidenceSpan, Sourcecheck-derived
+local resolution contract, host validation/locator and transport execute unchanged.
+Explanation uses the existing field to describe the narrowest evidence-backed scope,
+conditions and missing necessary premise. No new output type, classifier, few-shot or
+semantic fixture set. Fake isolation tests are not evidence of semantic effectiveness.
+MIT notices remain unchanged.

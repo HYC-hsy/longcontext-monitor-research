@@ -214,3 +214,22 @@ claim output template, and existing export/fake payload equality. Invalid tool r
 retains text/model verdict and records protocol_error, never executes opaque tools;
 nontext response objects are not serialized, while true call exceptions remain call_error.
 No real calls or credential reads. Input hashes/source protocol unchanged; strategy v4.1.
+
+## Single-factor prompt candidate
+
+Archive baseline f657bb866d3bbf715b37a30ca289dfb6dbea40f1; production A fixed at
+77f0f91dc4f508c9ef8e39c9f01e1d50c59eebd7. macOS, existing Python 3.11.15 and regex
+via ../offline-deps. Same unittest discover command as v4.1, network guard retained.
+Baseline 73 passed; final 75 passed. Raw logs in test-records-entailment include initial
+runs and a post-commit test-scope failure: Git's default pathspec matched the new test
+as production. Corrected test to explicit glob top-level modules/vendor, no production
+change; final full suite passed. New two tests are isolation/plumbing checks, not a new
+semantic dataset. All seven frozen requests compared after restoring only the comparison
+paragraph: exact target/source/context/example and system/prompt/tools equality. Actual
+request hashes independently recomputed for A/B; strategy metadata is outside payload.
+Fixed v4 ZIP size/hash and old input identities verified. No old responses/diagnoses fed
+to model; no real profile read, model/Task/evaluation call, or private upload. A/B guide
+Python code syntax parsed only, never executed. Windows logic retained, not newly run.
+Implementation step 112 additions/4 deletions including tests; test pathspec repair is
+2 changed lines. Documentation/raw generated logs handled separately under the 600-line
+code step rule. No production changes outside operation_review comparison/version.

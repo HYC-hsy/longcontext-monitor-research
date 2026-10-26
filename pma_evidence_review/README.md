@@ -1,3 +1,5 @@
+> 当前 checkout 是单因素提示候选（未验证语义改进）。请先读 [候选接收及真实 A/B 指导](PROMPT_AB_HANDOFF.md)。策略为 direct-operation-v4.2-entailment-candidate；以下 v4.1 接口说明仍适用，历史运行保持不变。
+
 # PMA direct operation evidence reviewer v4
 
 Default API and CLI audit complete original memory operations directly. No extraction

@@ -52,7 +52,7 @@ class PromptCandidateTests(unittest.TestCase):
             return ast.dump(tree, include_attributes=False)
         self.assertEqual(normalized(old), normalized(new))
         changed = subprocess.check_output(['git','diff',BASELINE,'--name-only','--',
-            'pma_evidence_review/*.py','pma_evidence_review/vendor'],cwd=ROOT).decode().splitlines()
+            ':(glob)pma_evidence_review/*.py',':(glob)pma_evidence_review/vendor/**'],cwd=ROOT).decode().splitlines()
         self.assertEqual(changed,[SOURCE])
 
     def test_frozen_inputs_requests_and_baseline_replay_isolated(self):
