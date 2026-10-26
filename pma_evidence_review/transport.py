@@ -48,6 +48,9 @@ class CapturedTransport:
                'request': copy.deepcopy(payload), 'fake': self.fake,
                'audit_request_sha256': request.get('audit_request_sha256'),
                'evidence_policy': request.get('evidence_policy')}
+        for key in ('review_strategy', 'op_index'):
+            if key in request:
+                row[key] = request[key]
         self.records.append(row)
         if self.directory:
             durable(self.directory / 'requests.jsonl', row)

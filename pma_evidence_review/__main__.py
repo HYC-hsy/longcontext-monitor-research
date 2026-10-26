@@ -7,7 +7,8 @@ from pathlib import Path
 
 from .inputs import build, validate
 from .location import locate
-from .review import extraction_request, parse_claims, verification_requests, review
+from .review import review
+from .operation_review import operation_requests
 from .transport import CapturedTransport, FakeClient, load_profile_client
 
 
@@ -35,9 +36,6 @@ def main():
         p.add_argument('--input', required=True)
         if command != 'validate':
             p.add_argument('--out', required=True)
-            p.add_argument('--mode', choices=['evidence-first', 'batch'], default='evidence-first')
-        if command == 'export':
-            p.add_argument('--extraction-response', help='Optional saved JSON extraction response')
         if command == 'fake':
             p.add_argument('--responses', required=True, help='JSON array of raw response strings')
         if command == 'run-profile':
@@ -57,11 +55,7 @@ def main():
                           'review_input_sha256': packet['review_input_sha256']}))
         return
     if args.command == 'export':
-        requests = [extraction_request(packet)]
-        if args.extraction_response:
-            claims, metadata, _, _ = parse_claims(Path(args.extraction_response).read_text(), packet)
-            requests += [r for _, r in verification_requests(packet, claims, metadata, args.mode)]
-        write(args.out, requests)
+        write(args.out, operation_requests(packet))
         return
     if args.command == 'run-profile' and not args.execute_authorized_real_model:
         parser.error('No request sent. Real execution requires separate user authorization and flag.')
@@ -70,7 +64,7 @@ def main():
     client = FakeClient(read(args.responses)) if args.command == 'fake' else load_profile_client(
         args.repo, args.profile, args.profile_key, out / 'private_client', authorized=True)
     transport = CapturedTransport(client, out, fake=args.command == 'fake')
-    result = asyncio.run(review(packet, transport, mode=args.mode, locator=locate))
+    result = asyncio.run(review(packet, transport, locator=locate))
     result['calls'] = {'client_calls': transport.calls, 'fake': transport.fake,
         'network_calls': 0 if transport.fake else 'not_measured_by_client_boundary',
         'provider_retries': 0 if transport.fake else 'see_native_provider_capture'}
