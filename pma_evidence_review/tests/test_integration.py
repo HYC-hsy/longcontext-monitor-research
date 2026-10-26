@@ -49,7 +49,7 @@ class IntegrationTests(unittest.TestCase):
 
     def test_decisive_result_requires_bound_quote(self):
         for quote,expected in [('green','ok'),('never visible','citation_ambiguous_or_unmatched')]:
-            transport=CapturedTransport(FakeClient([extraction(),result('SUPPORTED',[quote],document_index=0)]),fake=True)
+            transport=CapturedTransport(FakeClient([extraction(),result('SUPPORTED',[quote],document_index=3)]),fake=True)
             report=asyncio.run(review(packet(),transport,locator=locate))
             row=report['results'][0]
             self.assertEqual(row['engineering_status'],expected)

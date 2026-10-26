@@ -8,14 +8,9 @@ import json
 from .inputs import require, model_material
 
 POLICY_VERSION = 'source-use-v3'
-SCOPES = {
-    'execution': {'tool_observation'},
-    'attempt': {'tool_command'},
-    'static_behavior': {'tool_command', 'tool_observation'},
-    'requirement': {'task_instruction'},
-    'historical_record': {'memory_derived'},
-    'agent_statement': {'agent_report'},
-}
+# Legacy extraction labels are descriptive metadata, never source eligibility gates.
+SCOPES = ('execution', 'attempt', 'static_behavior', 'requirement',
+          'historical_record', 'agent_statement')
 
 
 def targets(packet):
@@ -38,8 +33,6 @@ def documents(packet, scope):
     ids = [s['source_id'] for s in packet['sources']]
     require(len(ids) == len(set(ids)), 'citation_duplicate_source_id')
     for source in model_material(packet)['sources']:
-        if source['role'] not in SCOPES[scope]:
-            continue
         for piece in source['slices']:
             registry.append({**{k: source[k] for k in
                 ('source_id', 'role', 'visibility_ref')}, **piece})
@@ -67,9 +60,10 @@ def bind(row, packet, registry, scope, locator):
         doc = registry[index - 1]
         for key in ('source_id', 'role', 'visibility_ref'):
             require(key not in citation or citation[key] == doc[key], 'citation_wrong_' + key)
-        require(doc['role'] in SCOPES[scope], 'citation_use_not_permitted')
         start, end = citation.get('start'), citation.get('end')
-        if start is None and end is None:
+        if 'start' in citation or 'end' in citation:
+            require(type(start) is int and type(end) is int, 'citation_outside_visible_range')
+        else:
             position = doc['text'].find(quote)
             require(position >= 0 and doc['text'].find(quote, position + 1) < 0,
                     'citation_ambiguous_or_unmatched')

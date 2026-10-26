@@ -58,5 +58,8 @@ def extraction(two=False):
 
 def result(verdict='NOT_ENOUGH_INFO', evidence=None, **kwargs):
     import json
-    return json.dumps(dict(verdict=verdict, evidence=evidence or [],
+    index = kwargs.pop('document_index', 3)
+    quotes = [dict(document_index=index, quote=q) if isinstance(q, str) else q
+              for q in (evidence or [])]
+    return json.dumps(dict(verdict=verdict, evidence=quotes,
                            explanation='Synthetic mock; no semantic evaluation.', **kwargs))

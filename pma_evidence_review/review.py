@@ -25,19 +25,15 @@ Use only the supplied material. Return the requested JSON and no other text.'''
 EXTRACT_CONTRACT = '''\nPMA output contract (overrides generic output shape): return
 {"claims":[{"claim":"...","original_text":"exact operation content fragment",
 "op_index":0,"kind":"fact|plan|hypothesis|question|deletion",
-"conditions":[],"dependencies":[],
-"evidence_scope":"execution|attempt|static_behavior|requirement|historical_record|agent_statement"}],
+"conditions":[],"dependencies":[]}],
 "coverage":[{"op_index":0,"status":"complete|nonfactual|incomplete","reason":"..."}]}.
 Account for EVERY operation, even nonfactual material. Split independent assertions
 without losing their conditions or dependencies. Same original_text may yield multiple
 claims. For deletion use kind=deletion and formulate the justification being audited.
 Nonfactual items should still be represented with their kind. Never infer that an empty
 claims array establishes semantic success. Output one coverage entry per operation.
-Extract ONLY operations, never interpretive context. Scope describes the assertion: execution
-means an observed outcome; attempt means a submitted command; static_behavior means what
-visible code does, not successful execution; requirement means what was requested;
-historical_record and agent_statement mean only what was recorded or claimed. A claim
-about success or gap resolution must not be recast as a mere record of a claim.'''
+Extract ONLY operations, never interpretive context. Preserve the original assertion:
+a claim about success or gap resolution must not be recast as a mere record of a claim.'''
 VERIFY_CONTRACT = '''\nPMA contract: verdict must be exactly SUPPORTED, CONTRADICTED or
 NOT_ENOUGH_INFO. Include explanation.
 Use the claim's kind, conditions, dependencies and operation scope. Unsupported plans
@@ -46,7 +42,9 @@ Do not count derived memory as independent raw evidence. A local command/receipt
 does not establish behavior in another session or environment. Suggested revision may
 be a short direction in explanation; do not rewrite memory.
 Source Documents are the ONLY citable sources. Target operations and interpretive
-context are NOT evidence. Citation scope limits use; it does not establish entailment.
+context are NOT evidence. Source roles describe provenance, not semantic support.
+Any legacy evidence_scope label is advisory and may be wrong; evaluate the actual
+assertion and all supplied sources. Do not let that label hide relevant evidence.
 Each evidence entry has a one-based document_index matching the displayed Document N
 and a verbatim quote. Do not return top-level document_index or citations. The host
 resolves source identity, provenance and offsets. Only if the same quote occurs more
@@ -57,7 +55,7 @@ in their original command context: preserve PATH exports, session scope, argumen
 file paths and code. The visible-source context retains original event identities,
 order and field paths; use those to interpret related commands and receipts, never
 invent links when the visible records do not establish them. Context can narrow or
-undermine a conclusion, but cannot substitute for an eligible observation. If evidence is absent,
+undermine a conclusion, but cannot substitute for an observation of the claimed outcome. If evidence is absent,
 return NOT_ENOUGH_INFO; do not cite target text or infer observation from a command.'''
 
 
@@ -130,7 +128,7 @@ def parse_claims(raw, packet):
         scope = item.get('evidence_scope', 'execution')
         require(scope in policy.SCOPES, 'unknown_evidence_scope')
         metadata[i + 1].update(evidence_scope=scope,
-                              scope_origin='model' if 'evidence_scope' in item else 'conservative_default')
+                              scope_origin='model' if 'evidence_scope' in item else 'legacy_default_advisory')
     errors = []
     if not claims:
         errors.append('extraction_empty_unverified')
@@ -145,9 +143,7 @@ def verification_requests(packet, claims, metadata, mode='evidence-first'):
     validate(packet)
     require(mode in ('evidence-first', 'batch'), 'unknown_mode')
     claims = [c for c in claims if metadata[c.index]['kind'] in ('fact', 'deletion')]
-    groups = [[c] for c in claims] if mode != 'batch' else [
-        [c for c in claims if metadata[c.index]['evidence_scope'] == scope]
-        for scope in policy.SCOPES]
+    groups = [[c] for c in claims] if mode != 'batch' else [claims]
     requests = []
     for group in groups:
         if not group:

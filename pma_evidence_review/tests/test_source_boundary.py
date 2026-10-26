@@ -59,12 +59,13 @@ class SourceBoundaryTests(unittest.TestCase):
             documents = req['prompt'].split('Source Documents:\n')[1].split('\nClaim')[0]
             self.assertIn('green', documents)
             self.assertNotIn(packet()['operations'][0]['content'], documents)
-            self.assertNotIn('Build the tool.', documents)
-            self.assertNotIn('Need to check the tool.', documents)
-            self.assertNotIn('export PATH=', documents)
+            self.assertIn('Build the tool.', documents)
+            self.assertIn('Need to check the tool.', documents)
+            self.assertIn('export PATH=', documents)
             self.assertNotIn('maintenance_prompt', req['prompt'])
             self.assertIn('audit_target_not_evidence', req['prompt'])
-            self.assertEqual([d['role'] for d in req['citation_registry']], ['tool_observation'])
+            self.assertEqual([d['role'] for d in req['citation_registry']],
+                             [s['role'] for s in packet()['sources']])
 
     def test_role_use_projection_retains_commands_and_context(self):
         for scope, role, text in [('attempt', 'tool_command', 'export PATH='),
@@ -76,47 +77,48 @@ class SourceBoundaryTests(unittest.TestCase):
             self.assertIn(text, req['prompt'].split('Source Documents:\n')[1].split('\nClaim')[0])
 
     def test_receipt_positive_and_self_reference_rejected(self):
-        output = json.loads(result('SUPPORTED', ['green'], document_index=0))
+        output = json.loads(result('SUPPORTED', ['green'], document_index=3))
         self.assertEqual(self.run_fake(output)['verdict'], 'supported')
-        output['evidence'] = [packet()['operations'][0]['content']]
+        output['evidence'][0]['quote'] = packet()['operations'][0]['content']
         row = self.run_fake(output)
         self.assertIsNone(row['verdict'])
         self.assertEqual(row['engineering_status'], 'citation_ambiguous_or_unmatched')
 
-    def test_requirements_and_memory_not_execution(self):
-        for quote in ('Build the tool.', 'Need to check the tool.'):
-            row = self.run_fake(json.loads(result('SUPPORTED', [quote], document_index=0)))
-            self.assertIsNone(row['verdict'])
-        row = self.run_fake(json.loads(result('SUPPORTED', ['Build the tool.'], document_index=0)),
-                            'requirement')
-        self.assertEqual(row['engineering_status'], 'ok')
+    def test_roles_are_provenance_not_semantic_proof(self):
+        # Scripted support is retained as a MODEL verdict, not host semantic proof.
+        for index, quote, role in [(1, 'Build the tool.', 'task_instruction'),
+                (4, 'Need to check the tool.', 'memory_derived')]:
+            row = self.run_fake(json.loads(result('SUPPORTED', [quote], document_index=index)))
+            self.assertEqual(row['engineering_status'], 'ok')
+            self.assertEqual(row['alignment']['citations'][0]['role'], role)
+            self.assertFalse(row['alignment']['semantic_proof'])
+        self.assertIn('Never use\nrequirements or historical records as execution observations',
+                      self.request()['prompt'])
 
     def test_missing_identity_empty_evidence_and_multiple_quotes(self):
-        for output, status in [
-            (json.loads(result('SUPPORTED', ['green'])), 'citation_missing'),
-            (json.loads(result('SUPPORTED')), 'parse_failure'),
-            (json.loads(result('SUPPORTED', ['green', 'green'], document_index=0)), 'citation_missing')]:
+        invalid = json.loads(result('SUPPORTED', ['green']))
+        del invalid['evidence'][0]['document_index']
+        for output in [invalid, json.loads(result('SUPPORTED'))]:
             row = self.run_fake(output)
-            self.assertEqual(row['engineering_status'], status)
+            self.assertEqual(row['engineering_status'], 'parse_failure')
             self.assertIsNone(row['verdict'])
+        row = self.run_fake(json.loads(result('SUPPORTED', ['green', 'green'])))
+        self.assertEqual(row['engineering_status'], 'ok')
+        self.assertEqual(len(row['alignment']['citations']), 2)
 
     def test_identity_role_range_and_text_failures(self):
-        doc = self.request()['citation_registry'][0]
-        citation = {k: doc[k] for k in ('source_id', 'role', 'visibility_ref', 'start', 'end')}
-        citation['document_index'] = 0
-        cases = [('document_index', 99, 'citation_unknown_document'),
-            ('source_id', 'unknown', 'citation_wrong_source_id'),
-            ('role', 'task_instruction', 'citation_wrong_role'),
-            ('visibility_ref', 'future', 'citation_wrong_visibility_ref'),
-            ('start', -1, 'citation_outside_visible_range'),
-            ('end', 4, 'citation_text_mismatch')]
-        for key, value, expected in cases:
-            changed = dict(citation, **{key: value})
-            row = self.run_fake(json.loads(result('SUPPORTED', ['green'], citations=[changed])))
+        for fields, expected in [({'document_index': 99}, 'citation_unknown_document'),
+                ({'start': -1, 'end': 5}, 'citation_outside_visible_range'),
+                ({'start': 0, 'end': 4}, 'citation_text_mismatch')]:
+            quote = dict(document_index=3, quote='green')
+            quote.update(fields)
+            row = self.run_fake(json.loads(result('SUPPORTED', [quote])))
             self.assertEqual(row['engineering_status'], expected)
             self.assertIsNone(row['verdict'])
-        output = json.loads(result('SUPPORTED', ['green', 'green'], citations=[citation, citation]))
-        self.assertEqual(self.run_fake(output)['engineering_status'], 'ok')
+        # The wire cannot override host-owned provenance.
+        quote = dict(document_index=3, quote='green', role='task_instruction')
+        self.assertEqual(self.run_fake(json.loads(result('SUPPORTED', [quote])))[
+            'engineering_status'], 'parse_failure')
 
     def test_same_text_identity_not_string_exclusion(self):
         # Policy unit projection: identical content is not intrinsically self-reference.
@@ -125,13 +127,13 @@ class SourceBoundaryTests(unittest.TestCase):
         for source in p['sources']:
             source['slices'] = [{'start': 0, 'end': len(text), 'text': text}]
         registry = policy.documents(p, 'execution')
-        self.assertEqual(len(registry), 1)
-        row = {'evidence': [text], 'document_index': 0}
+        self.assertEqual(len(registry), 4)
+        row = {'evidence': [text], 'citations': [{'document_index': 3}]}
         self.assertEqual(policy.bind(row, p, registry, 'execution', locate)['status'], 'exact_unique')
-        with self.assertRaisesRegex(ValueError, 'citation_missing'):
+        with self.assertRaisesRegex(ValueError, 'citation_count_mismatch'):
             policy.bind({'evidence': [text]}, p, registry, 'execution', locate)
         # No search can rescue an explicitly wrong source identity.
-        row['citations'] = [{'document_index': 0, 'source_id': p['sources'][0]['source_id']}]
+        row['citations'] = [{'document_index': 3, 'source_id': p['sources'][0]['source_id']}]
         with self.assertRaisesRegex(ValueError, 'citation_wrong_source_id'):
             policy.bind(row, p, registry, 'execution', locate)
 
@@ -144,11 +146,11 @@ class SourceBoundaryTests(unittest.TestCase):
         observation['slices'] = [{'start': 0, 'end': len(receipt), 'text': receipt}]
         for scope, quote in [('static_behavior', code), ('execution', receipt)]:
             registry = policy.documents(p, scope)
-            index = next(i for i, doc in enumerate(registry) if doc['text'] == quote)
-            row = {'evidence': [quote], 'document_index': index}
+            index = next(i for i, doc in enumerate(registry, 1) if doc['text'] == quote)
+            row = {'evidence': [quote], 'citations': [{'document_index': index}]}
             self.assertEqual(policy.bind(row, p, registry, scope, locate)['status'], 'exact_unique')
-        # A command isn't an execution document even when its text looks like success.
-        self.assertNotIn(code, [d['text'] for d in policy.documents(p, 'execution')])
+        # Available command text does not change its provenance to observation.
+        self.assertEqual(policy.documents(p, 'execution')[1]['role'], 'tool_command')
 
     def test_static_and_creation_full_fake_requests(self):
         args = bundle()
@@ -168,7 +170,8 @@ class SourceBoundaryTests(unittest.TestCase):
             ext = json.loads(self.extracted(scope))
             ext['claims'][0]['claim'] = ('The function returns the sum of its arguments'
                 if scope == 'static_behavior' else 'A file was created')
-            client = FakeClient([json.dumps(ext), result('SUPPORTED', [quote], document_index=0)])
+            client = FakeClient([json.dumps(ext), result('SUPPORTED', [quote],
+                document_index=2 if scope == 'static_behavior' else 3)])
             transport = CapturedTransport(client, fake=True)
             report = asyncio.run(review(p, transport, locator=locate))
             self.assertEqual(report['results'][0]['engineering_status'], 'ok')
@@ -180,9 +183,10 @@ class SourceBoundaryTests(unittest.TestCase):
         sources = context['visible_source_context_not_independent_evidence']
         self.assertEqual(sources, packet()['sources'])
         self.assertIn('export PATH=/tool:$PATH; tool', req['prompt'])
-        self.assertEqual([d['text'] for d in req['citation_registry']], ['green'])
+        self.assertEqual([d['text'] for d in req['citation_registry']],
+                         [part['text'] for source in packet()['sources'] for part in source['slices']])
         row = self.run_fake(json.loads(result('SUPPORTED',
-            ['export PATH=/tool:$PATH; tool'], document_index=0)))
+            ['export PATH=/tool:$PATH; tool'], document_index=3)))
         self.assertIsNone(row['verdict'])
         self.assertEqual(row['engineering_status'], 'citation_ambiguous_or_unmatched')
         for scope in policy.SCOPES:
@@ -190,15 +194,24 @@ class SourceBoundaryTests(unittest.TestCase):
                 'INTERPRETIVE CONTEXT (not evidence):\n')[1])
             self.assertEqual(context['visible_source_context_not_independent_evidence'], sources)
 
-    def test_conflicting_first_index_and_scope_no_rescue(self):
-        output = json.loads(result('SUPPORTED', ['green'], document_index=1,
-                                   citations=[{'document_index': 0}]))
-        self.assertEqual(self.run_fake(output)['engineering_status'], 'citation_first_document_conflict')
+    def test_wrong_legacy_scope_cannot_hide_sources_or_split_batch(self):
+        baseline = self.request()['citation_registry']
+        for scope in policy.SCOPES:
+            self.assertEqual(self.request(scope)['citation_registry'], baseline)
+            for quote, index in [('green', 3), ('Build the tool.', 1)]:
+                row = self.run_fake(json.loads(result('SUPPORTED', [quote],
+                    document_index=index)), scope)
+                self.assertEqual(row['engineering_status'], 'ok')
+                self.assertFalse(row['alignment']['semantic_proof'])
         p = packet()
-        registry = policy.documents(p, 'requirement')
-        with self.assertRaisesRegex(ValueError, 'citation_use_not_permitted'):
-            policy.bind({'evidence': ['Build the tool.'], 'document_index': 0},
-                        p, registry, 'execution', locate)
+        ext = json.loads(self.extracted(two=True))
+        ext['claims'][0]['evidence_scope'] = 'agent_statement'
+        ext['claims'][1]['evidence_scope'] = 'requirement'
+        claims, metadata, _, _ = parse_claims(json.dumps(ext), p)
+        requests = verification_requests(p, claims, metadata, 'batch')
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(len(requests[0][0]), 2)
+        self.assertEqual(requests[0][1]['citation_registry'], baseline)
 
     def test_frozen_inputs_old_identity_new_request(self):
         root = Path(__file__).resolve().parents[1]
@@ -219,7 +232,8 @@ class SourceBoundaryTests(unittest.TestCase):
                 self.assertEqual(len(requests), len(claims))
                 self.assertNotEqual(extraction_request(p)['prompt'], old[0]['request']['prompt'])
                 for _, req in requests:
-                    self.assertTrue(all(d['role'] == 'tool_observation' for d in req['citation_registry']))
+                    self.assertEqual({d['role'] for d in req['citation_registry']},
+                                     {s['role'] for s in p['sources']})
                     self.assertNotIn('maintenance_prompt', req['prompt'])
                     self.assertNotEqual(req['prompt'], old[1]['request']['prompt'])
                     context = json.loads(req['prompt'].split(
