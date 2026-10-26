@@ -39,7 +39,7 @@ visible code does, not successful execution; requirement means what was requeste
 historical_record and agent_statement mean only what was recorded or claimed. A claim
 about success or gap resolution must not be recast as a mere record of a claim.'''
 VERIFY_CONTRACT = '''\nPMA contract: verdict must be exactly SUPPORTED, CONTRADICTED or
-NOT_ENOUGH_INFO. Evidence must be a list of verbatim strings. Include explanation.
+NOT_ENOUGH_INFO. Include explanation.
 Use the claim's kind, conditions, dependencies and operation scope. Unsupported plans
 are not false assertions; assess only any factual premise explicitly stated in them.
 Do not count derived memory as independent raw evidence. A local command/receipt alone
@@ -47,9 +47,11 @@ does not establish behavior in another session or environment. Suggested revisio
 be a short direction in explanation; do not rewrite memory.
 Source Documents are the ONLY citable sources. Target operations and interpretive
 context are NOT evidence. Citation scope limits use; it does not establish entailment.
-For every evidence quote return citations in the same order, each with zero-based
-document_index, source_id, role, visibility_ref, start and end (original source offsets).
-The legacy document_index alone is accepted only for one unambiguous quote. Never use
+Each evidence entry has a one-based document_index matching the displayed Document N
+and a verbatim quote. Do not return top-level document_index or citations. The host
+resolves source identity, provenance and offsets. Only if the same quote occurs more
+than once within the chosen document, include start and end as exact original-source
+offsets (both required). Never guess an index or quote another document. Never use
 requirements or historical records as execution observations. Interpret observations
 in their original command context: preserve PATH exports, session scope, arguments,
 file paths and code. The visible-source context retains original event identities,
@@ -199,16 +201,19 @@ def parse_results(raw, claims, batch=False):
         p = parsed[claim.index]
         verdict = p.get('verdict')
         require(isinstance(verdict, str) and verdict.lower() in VERDICTS, 'invalid_verdict')
+        require('document_index' not in p and 'citations' not in p, 'legacy_citation_protocol')
         evidence = p.get('evidence')
-        require(isinstance(evidence, list) and all(isinstance(q, str) and q.strip()
+        require(isinstance(evidence, list) and all(isinstance(q, dict) and isinstance(q.get('quote'), str)
+                and q['quote'].strip() and type(q.get('document_index')) is int
+                and set(q) <= {'quote', 'document_index', 'start', 'end'}
                 for q in evidence), 'invalid_evidence')
         require(isinstance(p.get('explanation'), str) and p['explanation'].strip(), 'missing_explanation')
         semantic = VERDICTS[verdict.lower()]
         require(semantic == 'insufficient' or evidence, 'decisive_verdict_without_evidence')
         result = VerificationResult(claim=claim.text, claim_index=claim.index,
-            verdict=semantic, confidence=0, evidence=evidence, explanation=p['explanation'])
+            verdict=semantic, confidence=0, evidence=[q['quote'] for q in evidence], explanation=p['explanation'])
         row = asdict(result)
-        row.update(document_index=p.get('document_index'), citations=p.get('citations'))
+        row.update(citations=[{k: v for k, v in q.items() if k != 'quote'} for q in evidence])
         row.update(engineering_status='ok', reason_code=(ReasonCode.LOW_GROUNDING.value
             if semantic == 'insufficient' else semantic), confidence=None)
         results.append(row)
