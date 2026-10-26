@@ -15,7 +15,7 @@ def aligned(parent=None):
         'source_kind':s['kind'],'visibility_ref':s['visibility_ref'],
         'start':piece['start'],'end':piece['end'],'snippet_sha256':digest(piece['text']),
         'source_text_sha256':digest(piece['text'])}
-    data={'status':'exact_unique','items':[{'quote':piece['text'],'source_hint':None,
+    data={'status':'exact_unique','bound_refs':[ref],'items':[{'quote':piece['text'],'source_hint':None,
         'status':'exact_unique','reason':None,'metadata':{},'candidates':[ref]}]}
     row={'cycle_id':p['cycle_id'],'revision_id':op['revision_id'],'status':'exact_unique',
          'alignment_json':json.dumps(data)}
@@ -53,7 +53,7 @@ class CitationInputTests(unittest.TestCase):
         p,rows=aligned();rid=p['operations'][0]['revision_id']
         for raw,status in [(None,'evidence_unavailable'),('invalid','malformed_evidence_unavailable'),
             ({**rows[rid],'alignment_json':'bad'},'malformed_evidence_unavailable'),
-            ({**rows[rid],'alignment_json':json.dumps({'items':[],'reason':'no_evidence','status':'unbound'})},'no_evidence')]:
+            ({**rows[rid],'alignment_json':json.dumps({'items':[],'bound_refs':[],'reason':'no_evidence','status':'unbound'})},'no_evidence')]:
             result=ci.build_from_parent(p,{rid:raw})
             self.assertEqual(result['operations'][0]['preparation']['status'],status)
         for status in ('fuzzy_candidate','exact_multiple','unbound'):
@@ -91,3 +91,32 @@ class CitationInputTests(unittest.TestCase):
         self.assertEqual(ready['status'],'ready')
         self.assertEqual([r['citation_index'] for r in ready['citations']],[0,1])
         self.assertEqual(ready['citations'][0]['submitted_quote'],ready['citations'][1]['submitted_quote'])
+
+    def test_malformed_and_inconsistent_records_never_request(self):
+        from pma_evidence_review.citation_review import requests
+        p,rows=aligned();rid=p['operations'][0]['revision_id']
+        for mutate in ('duplicate','hint','future','bound_refs'):
+            raw=copy.deepcopy(rows[rid]);d=json.loads(raw['alignment_json'])
+            if mutate=='hint': d['items'][0]['source_hint']={}
+            if mutate=='future': d['items'][0]['candidates'][0]['parent_revision_id']='future_revision'
+            if mutate=='bound_refs': d['bound_refs']=[]
+            raw['alignment_json']=json.dumps(d)
+            if mutate=='duplicate': raw['alignment_json']=raw['alignment_json'].replace('"status": "exact_unique"','"status":"unbound","status":"exact_unique"',1)
+            result=ci.build_from_parent(p,{rid:raw})
+            self.assertNotEqual(result['operations'][0]['preparation']['status'],'ready')
+            self.assertIsNone(requests(result)[0]['request'])
+
+    def test_source_digest_known_record_and_partial_visibility(self):
+        p=ci.build('.', 'html');row=p['operations'][0];parent=p['host_provenance']
+        ref=copy.deepcopy(row['preparation']['citations'][0]['candidates'][0]['reference'])
+        ref['source_text_sha256']='0'*64
+        with self.assertRaisesRegex(ValueError,'source_hash_mismatch'):
+            ci.candidate(ref,parent,p['source_records'])
+        # No complete record: partial excerpt cannot validate a full-source digest.
+        partial=copy.deepcopy(parent)
+        source=next(s for s in partial['sources'] if s['source_id']==ref['source_id'])
+        original=source['slices'][0]
+        source['slices']=[{'start':ref['start'],'end':ref['end'],
+            'text':original['text'][ref['start']-original['start']:ref['end']-original['start']]}]
+        self.assertEqual(ci.candidate(ref,partial)['source_text_hash_check'],
+                         'full_source_unavailable_not_asserted')

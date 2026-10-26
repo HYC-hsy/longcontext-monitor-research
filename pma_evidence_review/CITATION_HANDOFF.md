@@ -26,8 +26,8 @@ HTML status 的成功字符串来自 commands/0/args/content、字符区间[4885
 
 schema=`pma-submitted-citation-input-v1`，独立完整身份：
 
-- SQLite citation_input_sha256 = `fbff3622cb07e5ae6c66ec5ad7f6285326b00ceba08dfb0fa2144477d35484d8`
-- HTML citation_input_sha256 = `a9623c027854de358cb40845e2df3684937c89fef7d9f0d866214eef9722310d`
+- SQLite citation_input_sha256 = `1cd6c3af8020102d645dc36216269c6fe25a2d1ef83b6bdc44516ac195545b37`
+- HTML citation_input_sha256 = `ac83412c5a025b97f68657b53fde6f8a492dacb365daa5c00e92075c9f1291c6`
 
 旧 0aa854… / 4760d6… 仅作为 parent_input_sha256 关联，不冒充新输入身份。
 新摘要覆盖所有原操作、恢复 alignment、准备结果、规范上下文及宿主 provenance；另列
@@ -42,10 +42,18 @@ status/reason/candidates/metadata及顺序/重复条目。删除绝不拿旧 rev
 
 每个candidate仅在原manifest-visible切片中验证，保留宿主推定身份和original_excerpt；
 source_hint是第一阶段可选提示，不等于模型选择该来源。snippet必须精确匹配可见原文。
-完整source hash若与从0开始的可见文本digest一致，记录matches_visible_text；如果全原source
-不可恢复，只记录full_source_unavailable_not_asserted，不补隐藏文本、不声称验证整源。
-实际两个样本的13候选完整源hash也都与可见文本一致。角色/顺序/visibility/源身份和snippet
-不能因无法恢复整源而绕过校验。
+若索引已校验归档保留了对应历史source记录及blob，适配器核对blob摘要和可见切片，
+只把source记录元数据存入host-only source_records，绝不传隐藏正文。candidate摘要必须
+匹配该记录，记录matches_verified_source_record；不匹配不能降级成“不可验证”。
+若记录未保留，只有可见片段，则不推断片段等于整源：恰好digest匹配可记matches_visible_text，
+否则记录full_source_unavailable_not_asserted。这是整源摘要验证未完成，不影响对可见
+snippet/身份/role/visibility的强制检查，不把合法部分可见来源一律拒绝。
+source_records属于新输入hash范围、不是模型证据；归档INDEX提供文件身份，packet摘要不是签名。
+
+alignment_json拒绝重复键；hint必须null或非空字符串，reason必须null或字符串，metadata为对象。
+逐item候选按宿主序列去重后必须与bound_refs一致。public禁止parent_revision_id；memory的
+revision必须与source_id一致且存在本轮pre_cycle_revision_refs。wrapper必须属于同一public
+事件的父字段路径；已保留source记录时再精确核对parent字段。malformed记录不生成request。
 
 两份选定raw_response_phase1均为空。恢复的是已记录alignment中的提交quote，不承诺恢复
 完整工具args、缺字段vs空数组、被宿主丢弃的malformed输入。missing alignment、malformed、

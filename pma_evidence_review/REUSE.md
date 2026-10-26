@@ -227,3 +227,10 @@ That chain is deliberately not used in closed submitted-evidence review. No new 
 component copied; independent target/source principle is design reference only.
 Existing upstream MIT notices/licenses remain intact. These references establish no
 measured semantic effectiveness. Old whole/focus production code remains unchanged.
+
+Integrity follow-up: re-read gap_evidence._snapshot_valid_uncached and
+aligned_evidence_gap_store historical alignment validation. Adapted its source-kind/
+parent revision rule, per-item field types and ordered deduplicated bound_refs contract;
+added duplicate-key rejection (upstream json.loads itself is permissive). Historical
+source records are optional host-only digest witnesses, verified against available
+archive blobs and visible slices by the adapter. No hidden blob enters model projection.

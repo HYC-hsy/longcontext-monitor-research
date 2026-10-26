@@ -74,7 +74,7 @@ class CitationReviewTests(unittest.TestCase):
         alignment=modified['operations'][2]['recovered_alignment']
         raw=json.loads(alignment['alignment_json']);raw['items'][0]['quote']='OTHER_OPERATION_SENTINEL'
         alignment['alignment_json']=json.dumps(raw)
-        modified['operations'][2]['preparation']=ci.prepare(modified['operations'][2]['operation'],alignment,modified['host_provenance'])
+        modified['operations'][2]['preparation']=ci.prepare(modified['operations'][2]['operation'],alignment,modified['host_provenance'],modified['source_records'])
         modified['citation_input_sha256']=ci.identity({k:v for k,v in modified.items() if k!='citation_input_sha256'})
         self.assertEqual(cr.requests(p)[0]['request'],cr.requests(modified)[0]['request'])
 

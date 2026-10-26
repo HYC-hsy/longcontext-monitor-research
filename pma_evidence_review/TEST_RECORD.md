@@ -278,3 +278,9 @@ Two public development packets each admit op0 only; five other operations remain
 explicitly unreviewed. Fake labels test flow, not semantic effectiveness.
 CITATION_HANDOFF.md records new independent hashes and commands; tools/build_citation_delivery.py
 packages synthetic raw artifacts, public readiness/hash summary and logs only.
+
+Integrity follow-up: 99 tests passed (0.416s), raw output in
+test-records-citation/integrity-fix.txt. Duplicate JSON keys, dict hint, invented public
+parent revision, inconsistent bound_refs and known source digest tampering are rejected.
+Partial visible-only source remains explicitly full-hash-unverified. Both actual ready
+operation model projections remain unchanged; new packet hashes are in CITATION_HANDOFF.
