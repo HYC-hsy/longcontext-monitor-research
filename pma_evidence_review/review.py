@@ -215,7 +215,7 @@ def parse_results(raw, claims, batch=False):
     return results
 
 
-async def review(packet, transport, *, mode='evidence-first', locator=None):
+async def legacy_review(packet, transport, *, mode='evidence-first', locator=None):
     validate(packet)
     report = {'schema': 'pma-evidence-review-report-v1', 'cycle_id': packet['cycle_id'],
         'request_sha256': packet['request_sha256'],
@@ -275,3 +275,9 @@ async def review(packet, transport, *, mode='evidence-first', locator=None):
             report['results'].append(row)
     # No aggregate support threshold, no implicit semantic pass for an empty report.
     return report
+
+
+async def review(packet, transport, *, locator=None):
+    """Default v4 direct-operation API. Legacy claim reports require legacy_review."""
+    from .operation_review import review as direct_review
+    return await direct_review(packet, transport, locator=locator)

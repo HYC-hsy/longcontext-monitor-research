@@ -8,7 +8,7 @@ import unittest
 
 from pma_evidence_review import evidence_policy as policy
 from pma_evidence_review.location import locate
-from pma_evidence_review.review import parse_claims, parse_results, verification_requests, review
+from pma_evidence_review.review import parse_claims, parse_results, verification_requests, legacy_review as review
 from pma_evidence_review.tests.fixtures import packet, extraction
 from pma_evidence_review.tests.no_network import install_guard
 from pma_evidence_review.transport import CapturedTransport, FakeClient

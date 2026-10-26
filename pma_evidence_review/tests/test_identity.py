@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from pma_evidence_review.inputs import (build, build_from_data, digest, load_indexed,
     review_input_identity, validate, visible_sources, D, SAMPLES)
-from pma_evidence_review.review import extraction_request, review
+from pma_evidence_review.review import extraction_request, legacy_review as review
 from pma_evidence_review.transport import CapturedTransport, FakeClient
 from pma_evidence_review.location import locate
 from pma_evidence_review.tests.fixtures import bundle, packet, extraction, result

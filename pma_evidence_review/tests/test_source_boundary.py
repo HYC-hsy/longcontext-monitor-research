@@ -10,7 +10,7 @@ import zipfile
 from pma_evidence_review import evidence_policy as policy
 from pma_evidence_review.inputs import validate, build_from_data, digest
 from pma_evidence_review.location import locate
-from pma_evidence_review.review import extraction_request, parse_claims, verification_requests, review
+from pma_evidence_review.review import extraction_request, parse_claims, verification_requests, legacy_review as review
 from pma_evidence_review.transport import CapturedTransport, FakeClient
 from pma_evidence_review.tests.fixtures import packet, extraction, result, bundle
 from pma_evidence_review.tests.no_network import install_guard

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from pma_evidence_review.inputs import build_from_data, validate, digest
 from pma_evidence_review.review import (parse_claims, parse_results, extraction_request,
-    verification_requests, review)
+    verification_requests, legacy_review as review)
 from pma_evidence_review.transport import FakeClient, CapturedTransport, load_profile_client
 from pma_evidence_review.vendor.rag_models import Claim, VerificationResult
 from pma_evidence_review.vendor.sourcecheck_types import Verdict, ReasonCode
