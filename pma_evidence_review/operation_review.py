@@ -139,43 +139,48 @@ async def review(packet, transport, *, locator=None):
             continue
         row['audit_request_sha256'] = req['audit_request_sha256']
         report['audit_request_sha256s'].append(req['audit_request_sha256'])
+        await execute_request(packet, transport, req, row, locator)
+    return report
+
+
+async def execute_request(packet, transport, req, row, locator):
+    """Shared parsing/binding/capture for one host-bound target; mutates only row."""
+    try:
+        row['raw_response'] = await transport.send(req)
+    except ResponseProtocolError as error:
+        row.update(engineering_status='protocol_error', reason=error.code,
+                   raw_response=error.raw_response, error_type=type(error).__name__)
         try:
-            row['raw_response'] = await transport.send(req)
-        except ResponseProtocolError as error:
-            row.update(engineering_status='protocol_error', reason=error.code,
-                       raw_response=error.raw_response, error_type=type(error).__name__)
-            try:
-                data = json_value(error.raw_response)
-                if isinstance(data, dict):
-                    row['model_verdict'] = data.get('verdict')
-            except (ValueError, TypeError):
-                pass
-            continue
-        except Exception as error:
-            row.update(engineering_status='call_error', error_type=type(error).__name__)
-            continue
-        try:
-            data = json_value(row['raw_response'])
+            data = json_value(error.raw_response)
             if isinstance(data, dict):
                 row['model_verdict'] = data.get('verdict')
-            row.update(parse_operation(data, op['op_index']))
-        except (ValueError, TypeError, KeyError) as error:
-            row.update(engineering_status='parse_failure', reason=str(error), verdict=None)
-            continue
-        try:
-            if row['evidence']:
-                row['alignment'] = policy.bind(row, packet, req['citation_registry'], locator=locator)
-                # Reuse upstream EvidenceSpan with its zero-based internal index, then
-                # explicitly translate to v3's one-based public protocol.
-                spans = []
-                for citation in row['alignment']['citations']:
-                    span = EvidenceSpan(citation['quote'], citation['start'], citation['end'],
-                                        citation['document_index'] - 1).to_dict()
-                    span['document_index'] += 1
-                    spans.append(span)
-                row['evidence_spans'] = spans
-            row['engineering_status'] = 'ok'
-        except Exception as error:
-            row.update(verdict=None, engineering_status=str(error) if isinstance(error, ValueError)
-                       else 'alignment_error', error_type=type(error).__name__)
-    return report
+        except (ValueError, TypeError):
+            pass
+        return
+    except Exception as error:
+        row.update(engineering_status='call_error', error_type=type(error).__name__)
+        return
+    try:
+        data = json_value(row['raw_response'])
+        if isinstance(data, dict):
+            row['model_verdict'] = data.get('verdict')
+        row.update(parse_operation(data, row['op_index']))
+    except (ValueError, TypeError, KeyError) as error:
+        row.update(engineering_status='parse_failure', reason=str(error), verdict=None)
+        return
+    try:
+        if row['evidence']:
+            row['alignment'] = policy.bind(row, packet, req['citation_registry'], locator=locator)
+            # Reuse upstream EvidenceSpan with its zero-based internal index, then
+            # explicitly translate to v3's one-based public protocol.
+            spans = []
+            for citation in row['alignment']['citations']:
+                span = EvidenceSpan(citation['quote'], citation['start'], citation['end'],
+                                    citation['document_index'] - 1).to_dict()
+                span['document_index'] += 1
+                spans.append(span)
+            row['evidence_spans'] = spans
+        row['engineering_status'] = 'ok'
+    except Exception as error:
+        row.update(verdict=None, engineering_status=str(error) if isinstance(error, ValueError)
+                   else 'alignment_error', error_type=type(error).__name__)
