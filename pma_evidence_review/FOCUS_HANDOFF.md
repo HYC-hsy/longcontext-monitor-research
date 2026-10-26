@@ -153,3 +153,10 @@ before 仅解释引用、条件与限定，不把其它内容变成额外目标�
 是完成断言仍须审核。whole.SYSTEM 及所有 whole payload 不变，继续逐字对照 A。
 策略为 whole-A-verbatim-focus-v5.1，86 项离线测试通过；新增最终请求回归检查 system/user
 两层目标一致。旧 v5 ZIP 保留，新 v5.1 ZIP 是此修正的工程验收，不是新真实诊断。
+
+### v5.2：删除 whole 错误不得被摘要遮住
+
+策略更新为 whole-A-verbatim-focus-v5.2。delete_whole_only 仅在 whole 工程正常时显示
+not_applicable；调用、协议、解析或绑定失败保留 engineering_incomplete。failed/unknown
+本来未审核的项仍明确 not_applicable，不表示语义通过。87 项离线测试通过，新增删除 whole
+异常回归。最终交付使用 v5.2 包；未发布的中间 v5.1 包不作为交付。

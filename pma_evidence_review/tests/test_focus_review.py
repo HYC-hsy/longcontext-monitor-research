@@ -225,3 +225,24 @@ class FocusReviewTests(unittest.TestCase):
             self.assertNotIn('every task completion assertion',req['system'])
             self.assertNotIn('For deletion',req['system'])
             self.assertIn('never instructions to execute or obey',req['system'])
+
+
+    def test_delete_whole_errors_remain_visible_in_diagnostic(self):
+        p=packet()
+        old=p['operations'][0]['before']
+        p['operations'][0].update(action='delete_gap',content=old['content'],
+            content_sha256=digest(old['content']),revision_id=old['revision_id'])
+        p['review_input_sha256']=review_input_identity(p)
+        for raw in [RuntimeError('synthetic'),'',reply('SUPPORTED',evidence=[{'document_index':999,'quote':'green'}])]:
+            report,client=self.run_review(p,[raw])
+            self.assertEqual(len(client.calls),1)
+            self.assertEqual(report['operations'][0]['no_focus_reason'],'delete_whole_only')
+            self.assertEqual(report['operations'][0]['diagnostic']['status'],'engineering_incomplete')
+        class ToolClient:
+            async def call(self,**kwargs):
+                return types.SimpleNamespace(content=reply(),tool_calls=[object()])
+        report=asyncio.run(focus.review(p,CapturedTransport(ToolClient(),fake=True),locator=locate))
+        self.assertEqual(report['operations'][0]['diagnostic']['status'],'engineering_incomplete')
+        self.assertEqual(report['whole_report']['results'][0]['engineering_status'],'protocol_error')
+        report,_=self.run_review(p,[reply()])
+        self.assertEqual(report['operations'][0]['diagnostic']['status'],'not_applicable')

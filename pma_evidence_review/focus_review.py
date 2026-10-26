@@ -9,7 +9,7 @@ from .focus_spans import plan as span_plan
 from .inputs import digest, require
 from .vendor.rag_prompts import format_documents
 
-STRATEGY = 'whole-A-verbatim-focus-v5.1'
+STRATEGY = 'whole-A-verbatim-focus-v5.2'
 FOCUS_SYSTEM = '''You audit evidence support of ONLY the current verbatim focus interval.
 The full original operation and before/context explain that focus's references,
 conditions and qualifiers; do not audit other portions as additional targets.
@@ -133,7 +133,9 @@ async def review(packet,transport,*,locator=None):
             {'focus':entry['focus'],'execution':entry['execution']} for entry in item['focuses']],
             'no_focus_reason':item['no_focus_reason'],'local_results':rows}
         result['diagnostic']=diagnostic(whole_row,item['focuses'],rows)
-        if item['no_focus_reason']:
+        if item['no_focus_reason'] and (whole_row.get('engineering_status') == 'ok' or
+                whole_row.get('engineering_status') in
+                ('not_reviewed_failed_operation', 'not_reviewed_unknown_action')):
             result['diagnostic']['status']='not_applicable'
         report['operations'].append(result)
     return report

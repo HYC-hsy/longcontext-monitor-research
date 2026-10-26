@@ -261,3 +261,9 @@ Fake output establishes plumbing, not improved error detection or semantic cover
 test-records-focus/v51-final.txt. Dedicated local system removes the higher-priority
 whole-operation target conflict; final request tests check both system and prompt.
 Existing seven frozen whole payload/report comparisons with A still pass. No real calls.
+
+v5.2 final: 87 tests passed, raw output test-records-focus/v52-final.txt. Delete whole
+call/protocol/parse/binding errors retain engineering_incomplete in per-operation
+summary; normal delete and failed/unknown skipped cases remain not_applicable. Whole
+payload still matches A. Intermediate v5.1 archive was not published; final package is
+regenerated using final code SHA. No real requests.
