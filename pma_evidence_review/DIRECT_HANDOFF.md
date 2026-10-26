@@ -21,7 +21,7 @@ report = await review(packet, transport, locator=locate)
 开发任务。`inputs.build` 仍只是公开归档适配器；可将当轮既有对象投影为同一 packet。
 显式提供 `locator=locate`；否则有引用的结果以 `locator_unavailable` 拒绝，不假装已定位。
 
-- `review_strategy=direct-operation-v4`，报告 `schema=pma-operation-review-report-v2`。
+- `review_strategy=direct-operation-v4.1`，报告 `schema=pma-operation-review-report-v2`。
 - 来源协议仍 `evidence_policy=source-use-v3`，一基 Document N / document_index。
 - 身份为 `op_index/action/memory_id/revision_id/content_sha256`，没有伪造 claim_index。
 - `operation_requests` 返回按操作顺序的 `{op_index,target,engineering_status,request}` 列表。
@@ -117,7 +117,7 @@ SQLite 3 项、HTML 4 项；每项 request.phase=verify_operation，无 extract�
 
 ## 验收证据与下一步权限
 
-70 项离线测试通过，包括 61 项既有回归（legacy 明确标识）和 9 项操作级测试。
+73 项离线测试通过，包括 61 项既有回归（legacy 明确标识）和 12 项操作级测试。
 `tests/test_operations.py` 核对 v3 ZIP 哈希，只读取两个冻结 input，不执行轨迹命令或导入
 诊断标签；旧输入摘要保持 SQLite 0aa854b8…、HTML 4760d69e…。
 测试覆盖 3/4 一对一请求、完整完成句、固定删除目标、失败项/未知 action、空/错/重复输出、
@@ -130,3 +130,16 @@ SQLite 3 项、HTML 4 项；每项 request.phase=verify_operation，无 extract�
 本轮没有读取真实 profile、真实模型调用、Task 或官方评价。以后真实结果存新私有目录，
 按操作逐项诊断遗漏/范围推广/删除合理性，与旧版本比较时明确粒度变化，不能直接把旧
 claim 支持率与新 operation 支持率当同一指标。两样本均开发样本，不是 gold 或留出集。
+
+
+### v4.1 交付复核修正
+
+直接模板只包含一套操作级输出契约及一个完整示例，示例 op_index 使用当前操作的准确值。
+不再嵌套旧 claim 核验模板，也不靠 overrides 追加覆盖。继续执行上游 format_documents，
+证据优先步骤适配为先读来源、对照整个操作、再决定 verdict。来源协议和报告 schema 不变；
+review_strategy 改为 direct-operation-v4.1，实际请求摘要自然改变。旧结果不覆盖。
+
+已收到文本但附带工具调用时，先捕获文本再报告 protocol_error/unexpected_tool_calls，
+verdict=null；保留可解析的 model_verdict。非文本响应为 protocol_error/response_content_type，
+不序列化任意对象。真正调用异常仍是 call_error；这些情况不混同。工具不执行，工具对象、
+客户端和 profile 不进入日志。本轮以替身验证上述流程，未新增真实调用。

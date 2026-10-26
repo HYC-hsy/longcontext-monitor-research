@@ -167,8 +167,8 @@ class OperationTests(unittest.TestCase):
                 plans = operation_requests(p)
                 self.assertEqual(len(plans),count)
                 for op, plan in zip(p['operations'],plans):
-                    target = json.loads(plan['request']['prompt'].split('\nClaim:\n')[1].split(
-                        '\nReturn JSON:')[0])
+                    target = json.loads(plan['request']['prompt'].split('\nOPERATION TARGET (not evidence):\n')[1].split(
+                        '\nINTERPRETIVE CONTEXT')[0])
                     self.assertEqual(target['original_operation']['content'],op['content'])
                     self.assertEqual(target['original_operation']['before'],op['before'])
                     self.assertNotIn('kind',target)
@@ -176,6 +176,10 @@ class OperationTests(unittest.TestCase):
                     self.assertNotIn('dependencies',target)
                     self.assertNotIn('evidence_scope',plan['request']['prompt'])
                     self.assertEqual(plan['request']['phase'],'verify_operation')
+                    example = json.loads(plan['request']['prompt'].split(
+                        'OUTPUT EXAMPLE (shape only; decide the verdict from evidence):\n')[1])
+                    self.assertEqual(example['op_index'],op['op_index'])
+                    self.assertEqual(set(example),{'op_index','verdict','explanation','evidence'})
                     if op['action'].startswith('delete_'):
                         self.assertEqual(target['question'],DELETE_QUESTION)
                         self.assertIn('old gap once existed is NOT a reason',plan['request']['prompt'])
@@ -212,3 +216,59 @@ class OperationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             asyncio.run(review(p,CapturedTransport(client,fake=True),locator=locate))
         self.assertEqual(client.calls,[])
+
+
+    def test_final_request_has_one_operation_output_contract(self):
+        plans = operation_requests(packet())
+        for plan in plans:
+            prompt = plan['request']['prompt']
+            self.assertEqual(prompt.count('Return one JSON object with exactly'), 1)
+            self.assertEqual(prompt.count('OUTPUT EXAMPLE ('), 1)
+            self.assertNotIn('Return JSON:', prompt)
+            self.assertNotIn('claim_index', prompt)
+            self.assertNotIn('overrides', prompt)
+            self.assertNotIn('Claim:', prompt)
+            self.assertNotIn('coverage', prompt)
+            example = json.loads(prompt.split(
+                'OUTPUT EXAMPLE (shape only; decide the verdict from evidence):\n')[1])
+            self.assertEqual(set(example), {'op_index','verdict','explanation','evidence'})
+            self.assertEqual(example['op_index'],plan['op_index'])
+            from pma_evidence_review.operation_review import parse_operation
+            self.assertEqual(parse_operation(example,plan['op_index'])['verdict'],'insufficient')
+
+
+    def test_tool_response_text_captured_before_protocol_rejection(self):
+        raw = response(verdict='SUPPORTED',evidence=[{'document_index':3,'quote':'green'}])
+        executed = []
+        class UnexpectedToolsClient:
+            async def call(self, **kwargs):
+                # An opaque object that must never be executed or serialized.
+                def tool():
+                    executed.append(True)
+                    raise AssertionError('must not execute')
+                return type('Response',(),{'content':raw,'tool_calls':[tool]})()
+        with tempfile.TemporaryDirectory() as temp:
+            transport = CapturedTransport(UnexpectedToolsClient(),temp,fake=True)
+            row = asyncio.run(review(packet(),transport,locator=locate))['results'][0]
+            self.assertEqual(row['engineering_status'],'protocol_error')
+            self.assertEqual(row['reason'],'unexpected_tool_calls')
+            self.assertEqual(row['raw_response'],raw)
+            self.assertEqual(row['model_verdict'],'SUPPORTED')
+            self.assertIsNone(row['verdict'])
+            capture = json.loads(Path(temp,'responses.jsonl').read_text(encoding='utf-8'))
+            self.assertEqual(capture['response'],raw)
+            self.assertEqual(capture['status'],'protocol_error')
+            self.assertNotIn('tool_calls',capture)
+            self.assertEqual(executed,[])
+        transport = CapturedTransport(FakeClient([RuntimeError('synthetic')]),fake=True)
+        row = asyncio.run(review(packet(),transport,locator=locate))['results'][0]
+        self.assertEqual(row['engineering_status'],'call_error')
+        self.assertIsNone(row['raw_response'])
+
+    def test_nontext_response_is_protocol_error_without_object_serialization(self):
+        transport = CapturedTransport(FakeClient([{'opaque':'not text'}]),fake=True)
+        row = asyncio.run(review(packet(),transport,locator=locate))['results'][0]
+        self.assertEqual(row['engineering_status'],'protocol_error')
+        self.assertEqual(row['reason'],'response_content_type')
+        self.assertIsNone(row['raw_response'])
+        self.assertNotIn('opaque',json.dumps(transport.records))

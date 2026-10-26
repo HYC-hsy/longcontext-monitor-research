@@ -203,3 +203,14 @@ Windows execution claimed. v3 ZIP size/hash checked; only frozen input JSON read
 test, no diagnosis labels transmitted. Input hashes unchanged, SQLite 3/HTML 4 direct
 requests verified with full operation body and fixed deletion question. No new private
 raw package/configuration uploaded. Fake verdicts are plumbing probes, not semantic gold.
+
+### v4.1 delivery-review corrections
+
+Same macOS/Python/command and network guard. Template correction: 71 tests passed;
+combined text-capture correction: 73 tests passed. Raw outputs v41-template.txt and
+v41-final.txt in test-records-v4. Final request checks include exactly one full operation
+output example with actual op_index for all seven frozen development operations, no old
+claim output template, and existing export/fake payload equality. Invalid tool response
+retains text/model verdict and records protocol_error, never executes opaque tools;
+nontext response objects are not serialized, while true call exceptions remain call_error.
+No real calls or credential reads. Input hashes/source protocol unchanged; strategy v4.1.

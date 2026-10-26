@@ -12,7 +12,7 @@ python -m pma_evidence_review export --input sqlite-v4-input.json --out sqlite-v
 ```
 
 `review(packet, transport, locator=locate)` returns operation report schema
-`pma-operation-review-report-v2`, strategy `direct-operation-v4`. It preserves the
+`pma-operation-review-report-v2`, strategy `direct-operation-v4.1`. It preserves the
 frozen packet/Phase1 interface and v3 one-based evidence protocol. `export`, `fake`
 and `run-profile` use the same one-request-per-operation path. Old `--mode` and
 `--extraction-response` flags are rejected. Failed/unknown operations remain visible

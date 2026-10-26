@@ -146,3 +146,14 @@ f28272deffcf33efc1f1117d5479c10bb75221a9. Existing MIT files remain unchanged.
 `review.review` now dispatches to direct operation review; `review.legacy_review` is
 explicitly named and old tests target it. This avoids silently interpreting historical
 claim reports as operation reports. No upstream full suite or semantic validation claimed.
+
+
+v4.1 supersedes the v4 template row above: direct `operation_requests` executes
+vendored `format_documents` only, with its original title/text handling and full budget.
+Evidence-first reasoning steps are adapted into one operation-specific template, not
+concatenated with the legacy claim output example. One complete example carries the
+actual op_index and the same four fields required by the parser. Legacy templates remain
+used only by the explicit legacy path. EvidenceSpan and source/locator reuse are unchanged.
+CapturedTransport now preserves available response text before rejecting unexpected tool
+calls, using ResponseProtocolError to distinguish received invalid responses from call
+failures; it never executes or serializes tool/client/profile objects.

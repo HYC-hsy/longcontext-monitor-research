@@ -32,6 +32,14 @@ class FakeClient:
         return type('Response', (), {'content': value, 'tool_calls': []})()
 
 
+class ResponseProtocolError(ValueError):
+    """Received a response, but it violates the text-only reviewer protocol."""
+    def __init__(self, code, raw_response=None):
+        super().__init__(code)
+        self.code = code
+        self.raw_response = raw_response
+
+
 class CapturedTransport:
     def __init__(self, client, directory=None, *, fake=False):
         self.client, self.fake = client, fake
@@ -56,11 +64,19 @@ class CapturedTransport:
             durable(self.directory / 'requests.jsonl', row)
         try:
             response = await self.client.call(**payload)
-            require(not getattr(response, 'tool_calls', None), 'unexpected_tool_calls')
             content = getattr(response, 'content', None)
-            require(isinstance(content, str), 'response_content_type')
+            raw = content if isinstance(content, str) else None
+            row['response'] = raw
+            if getattr(response, 'tool_calls', None):
+                raise ResponseProtocolError('unexpected_tool_calls', raw)
+            if raw is None:
+                raise ResponseProtocolError('response_content_type')
             row.update(response=content, status='returned')
             return content
+        except ResponseProtocolError as error:
+            row.update(status='protocol_error', protocol_error=error.code,
+                       error_type=type(error).__name__)
+            raise
         except Exception as error:
             row.update(status='call_error', error_type=type(error).__name__)
             raise

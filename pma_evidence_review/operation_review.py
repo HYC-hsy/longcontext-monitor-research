@@ -4,22 +4,25 @@ import json
 from . import evidence_policy as policy
 from .inputs import validate, require, digest
 from .review import SYSTEM as LEGACY_SYSTEM, json_value, VERDICTS
+from .transport import ResponseProtocolError
 from .vendor.rag_models import EvidenceSpan
-from .vendor.rag_prompts import format_claim_verification_evidence_first_prompt
+from .vendor.rag_prompts import format_documents
 
 SYSTEM = LEGACY_SYSTEM.replace(
     'You audit evidence support of proposed memory changes, not task completion.',
     'You audit evidence support of complete memory operations, including every task '
     'completion assertion in their content. You do not replace Task execution or '
     'official evaluation.')
-STRATEGY = 'direct-operation-v4'
+STRATEGY = 'direct-operation-v4.1'
 SCHEMA = 'pma-operation-review-report-v2'
 ACTIONS = {'save_knowledge', 'save_procedural', 'save_gap', 'update_status',
            'delete_knowledge', 'delete_procedural', 'delete_gap', 'delete_status'}
 DELETE_QUESTION = 'Is there sufficient visible evidence to justify deleting this exact entry?'
 WRITE_QUESTION = 'Is the complete content of this memory operation supported by the visible evidence?'
 CONTRACT = '''
-DIRECT OPERATION CONTRACT overrides generic claim wording above.
+OPERATION AUDIT INSTRUCTIONS
+Use evidence-first reasoning: first identify relevant verbatim source passages,
+then compare them against the complete operation, then decide its verdict.
 Audit the complete original operation, not a selected fragment or a rewritten claim.
 SUPPORTED requires support for ALL judgments requiring evidence in that operation.
 If only part is supported, identify the unsupported portion in explanation and return
@@ -41,10 +44,11 @@ session conditions, PATH exports and visible event identities. Do not turn file 
 into complete functionality or a local success into cross-session success.
 Return one JSON object with exactly op_index, verdict, explanation, evidence.
 verdict: SUPPORTED, CONTRADICTED or NOT_ENOUGH_INFO. explanation: specific reasons.
-evidence: [{"document_index":1,"quote":"verbatim passage"}], using the displayed
-one-based Document N. Multiple quotes use multiple entries. Only for repeated text in
+evidence: an array of objects, each containing document_index and quote. Use the
+displayed one-based Document N and one contiguous verbatim passage. Never stitch or
+paraphrase passages. Multiple quotes use multiple entries. Only for repeated text in
 that document, optionally give exact original-source start/end together. No invented
-source IDs, top-level document_index, citations, claim_index or extraction fields.
+source IDs or additional top-level fields.
 No evidence means NOT_ENOUGH_INFO. Do not execute commands or modify memories.
 '''
 
@@ -73,11 +77,17 @@ def operation_requests(packet):
         plan = {'op_index': op['op_index'], 'target': target(op),
                 'engineering_status': disposition(op) or 'ready', 'request': None}
         if disposition(op) is None:
-            prompt = format_claim_verification_evidence_first_prompt(
-                json.dumps(plan['target'], ensure_ascii=False), docs,
-                max_docs_chars=budget, max_chars_per_doc=budget)
-            prompt += CONTRACT + '\nINTERPRETIVE CONTEXT (not independent proof):\n'
+            prompt = CONTRACT + '\nSource Documents:\n'
+            prompt += format_documents(docs, max_total_chars=budget, max_chars_per_doc=budget)
+            prompt += '\nOPERATION TARGET (not evidence):\n'
+            prompt += json.dumps(plan['target'], ensure_ascii=False)
+            prompt += '\nINTERPRETIVE CONTEXT (not independent proof):\n'
             prompt += json.dumps(policy.context(packet, include_sources=True), ensure_ascii=False)
+            example = {'op_index': op['op_index'], 'verdict': 'NOT_ENOUGH_INFO',
+                'explanation': 'Explain the specific unsupported portions or missing evidence.',
+                'evidence': []}
+            prompt += ('\nOUTPUT EXAMPLE (shape only; decide the verdict from evidence):\n' +
+                       json.dumps(example, ensure_ascii=False))
             payload = {'system': SYSTEM, 'prompt': prompt, 'tools': None}
             identity = digest(json.dumps(payload, ensure_ascii=False, sort_keys=True,
                                          separators=(',', ':')))
@@ -131,6 +141,16 @@ async def review(packet, transport, *, locator=None):
         report['audit_request_sha256s'].append(req['audit_request_sha256'])
         try:
             row['raw_response'] = await transport.send(req)
+        except ResponseProtocolError as error:
+            row.update(engineering_status='protocol_error', reason=error.code,
+                       raw_response=error.raw_response, error_type=type(error).__name__)
+            try:
+                data = json_value(error.raw_response)
+                if isinstance(data, dict):
+                    row['model_verdict'] = data.get('verdict')
+            except (ValueError, TypeError):
+                pass
+            continue
         except Exception as error:
             row.update(engineering_status='call_error', error_type=type(error).__name__)
             continue
