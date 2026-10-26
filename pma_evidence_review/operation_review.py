@@ -13,7 +13,7 @@ SYSTEM = LEGACY_SYSTEM.replace(
     'You audit evidence support of complete memory operations, including every task '
     'completion assertion in their content. You do not replace Task execution or '
     'official evaluation.')
-STRATEGY = 'direct-operation-v4.2-entailment-candidate'
+STRATEGY = 'direct-operation-v4.1'
 SCHEMA = 'pma-operation-review-report-v2'
 ACTIONS = {'save_knowledge', 'save_procedural', 'save_gap', 'update_status',
            'delete_knowledge', 'delete_procedural', 'delete_gap', 'delete_status'}
@@ -24,18 +24,10 @@ OPERATION AUDIT INSTRUCTIONS
 Use evidence-first reasoning: first identify relevant verbatim source passages,
 then compare them against the complete operation, then decide its verdict.
 Audit the complete original operation, not a selected fragment or a rewritten claim.
-For each material factual judgment and strengthening qualifier already in the original
-operation, compare the narrowest scope and conditions established by the cited evidence
-with what the full original wording commits to. In explanation, state what the evidence
-actually establishes and identify any missing necessary premise for that commitment.
-Check whether the cited evidence could hold while the stronger conclusion still fails
-because a necessary premise remains unestablished. Ground this check in the visible
-material and original wording; do not invent failures, new requirements or endless doubt.
 SUPPORTED requires support for ALL judgments requiring evidence in that operation.
-If a necessary premise is missing, return NOT_ENOUGH_INFO and identify the affected
-portion. Use CONTRADICTED only for actual incompatible evidence under the same conditions,
-not for silence or an untested possibility. Narrow code behavior that follows from visible
-source can be supported statically; do not require execution tests for every assertion.
+If only part is supported, identify the unsupported portion in explanation and return
+NOT_ENOUGH_INFO; if a material assertion is contradicted, return CONTRADICTED and
+identify it. Do not let a correct subfact establish the entire operation.
 For deletion the fixed question is whether deleting the exact before/target is justified.
 The old entry is the object being deleted, not a factual claim to verify. Evidence that
 an old gap once existed is NOT a reason to delete it. Resolution, valid replacement or
