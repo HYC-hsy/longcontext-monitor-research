@@ -203,3 +203,27 @@ v5.1 local FOCUS_SYSTEM is an explicit adaptation for the current verbatim inter
 It no longer inherits whole.SYSTEM's complete-operation target. Shared source/safety
 principles remain; whole SYSTEM/payload are unchanged. No parser, locator or transport
 change; the test inspects both message layers, not just the appended user prompt.
+
+## Submitted literal citations v1
+
+Re-inspected pinned Sourcecheck d81493d239ea084c6063695b6e762c2626dd5646:
+verify_claim(claim,citation) -> _resolve_and_fetch -> grounding is the closest interface
+contract. Its resolver supplies summary/full content, NOT a quote-only guarantee. Our
+citation_inputs.prepare/candidate adapt that contract to recorded per-write alignment
+and literal visible excerpts. No resolver network fallback, NLI, thresholds or retrieval
+code is newly copied. Aggregate bound is not sufficient: each item must be exact_unique
+and have exactly one candidate. Host inferred binding is not model-selected citation.
+
+RAG b78a08213ba7e6d9e587bfa3134ba9047cfaf677 ClaimVerifier.verify/_single_verify
+accept caller-provided target/documents. This separation inspires the new fixed-operation
+and submitted-only projection; neither check/extractor nor its quote-generating prompt
+is invoked. Existing strict json_value adaptation and CapturedTransport are actually
+reused, as are inputs.validate/build/load_indexed/digest and phase/revision/source checks.
+No fake Claim or VerificationResult is introduced for operation identities. New three-field
+response template/parser are explicit local adaptations, not upstream verbatim code.
+
+FActScore f28272deffcf33efc1f1117d5479c10bb75221a9 _get_score re-retrieves per atom.
+That chain is deliberately not used in closed submitted-evidence review. No new FActScore
+component copied; independent target/source principle is design reference only.
+Existing upstream MIT notices/licenses remain intact. These references establish no
+measured semantic effectiveness. Old whole/focus production code remains unchanged.

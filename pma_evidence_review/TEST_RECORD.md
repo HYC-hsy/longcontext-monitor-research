@@ -267,3 +267,14 @@ call/protocol/parse/binding errors retain engineering_incomplete in per-operatio
 summary; normal delete and failed/unknown skipped cases remain not_applicable. Whole
 payload still matches A. Intermediate v5.1 archive was not published; final package is
 regenerated using final code SHA. No real requests.
+
+## Submitted-citation v1 offline acceptance
+
+macOS, Python 3.11.15 (/opt/homebrew/bin/python3.11), existing ../offline-deps.
+97 tests = 87 prior regressions + 10 submitted-citation tests. No real profile/client,
+Task, evaluation or formal-memory mutation executed. Network guards cover tests.
+Raw stdout/stderr: test-records-citation/{step1,step2,final}.txt.
+Two public development packets each admit op0 only; five other operations remain
+explicitly unreviewed. Fake labels test flow, not semantic effectiveness.
+CITATION_HANDOFF.md records new independent hashes and commands; tools/build_citation_delivery.py
+packages synthetic raw artifacts, public readiness/hash summary and logs only.

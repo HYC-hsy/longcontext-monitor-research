@@ -42,6 +42,7 @@ class CitationReviewTests(unittest.TestCase):
             material=json.loads(payload['prompt'].split('PACKAGE:\n')[1].split('\nOUTPUT EXAMPLE')[0])
             self.assertEqual(set(material),{'original_operation','submitted_evidence','normative_requirements_context'})
             self.assertEqual(material['normative_requirements_context'],'')
+            self.assertIn('missing necessary context as insufficient',payload['system'])
             self.assertEqual(set(material['original_operation']),{'op_index','action','memory_id','revision_id','content','content_sha256'})
             for forbidden in ('maintenance_prompt','memory_before','raw_response_phase','candidate_details','evidence_scope'):
                 self.assertNotIn(forbidden,payload['prompt'])

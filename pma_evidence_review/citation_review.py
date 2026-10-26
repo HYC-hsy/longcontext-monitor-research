@@ -20,6 +20,9 @@ behavior, not execution success. A success string in source code is not an obser
 receipt. Reports/old memory establish what was claimed, not independent execution.
 Missing quoted command conditions or wider-scope evidence cannot be rescued from unseen
 history, neighboring lines or another operation. Do not invent unstated requirements.
+If task completion is asserted but the requirements needed to define completion are
+absent, do not treat listed local accomplishments as the whole task: explain that
+missing necessary context as insufficient. Never fill it from unquoted history.
 SUPPORTED means the submitted quotes suffice for all evidence-requiring judgments and
 scope in the original operation. Partial support is insufficient; contradicted requires
 actual incompatible quoted evidence, not mere absence. Insufficient does not prove the

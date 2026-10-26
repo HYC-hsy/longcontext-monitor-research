@@ -1,3 +1,9 @@
+# Submitted-citation sufficiency reviewer v1
+
+Current independent entry: `python -m pma_evidence_review.citation_cli --help`.
+Read [中文接收与真实实验指导](CITATION_HANDOFF.md). Only submitted, uniquely exact
+quotes enter this mode. Existing whole/focus entry below is unchanged and is not a fallback.
+
 # Whole A + verbatim focus reviewer v5
 
 Start with [中文接收、接口、工程 ZIP 和未来真实诊断上传指导](FOCUS_HANDOFF.md).
