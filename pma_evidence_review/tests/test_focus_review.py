@@ -143,3 +143,66 @@ class FocusReviewTests(unittest.TestCase):
                 self.assertEqual(client.calls,[{k:r[k] for k in ('prompt','system','tools')} for r in expected])
                 self.assertEqual(report['whole_report'],asyncio.run(baseline.review(p,
                     CapturedTransport(FakeClient(replies[:len(plan['whole_plans'])]),fake=True),locator=locate)))
+
+    def test_cli_export_fake_profile_substitute_and_no_overwrite(self):
+        import contextlib, io, tempfile
+        from unittest.mock import patch
+        from pma_evidence_review.__main__ import main
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            inp=root/'input.json'
+            p=changed('It ran. Done.')
+            inp.write_text(json.dumps(p),encoding='utf-8')
+            replies=root/'responses.json'
+            replies.write_text(json.dumps([reply()]*3),encoding='utf-8')
+            def cli(*args):
+                with patch('sys.argv',['pma',*map(str,args)]),contextlib.redirect_stdout(io.StringIO()):
+                    main()
+            cli('export','--review-mode','whole-focus','--input',inp,'--out',root/'plan.json')
+            plan=json.loads((root/'plan.json').read_text(encoding='utf-8'))
+            expected=[p['request'] for p in plan['whole_plans'] if p['request']]
+            expected += [f['request'] for p in plan['operations'] for f in p['focuses'] if f['request']]
+            cli('fake','--review-mode','whole-focus','--input',inp,'--responses',replies,'--out',root/'fake')
+            captures=[json.loads(x) for x in (root/'fake/requests.jsonl').read_text(encoding='utf-8').splitlines()]
+            self.assertEqual([r['request'] for r in captures],[{k:r[k] for k in ('prompt','system','tools')} for r in expected])
+            self.assertEqual([r.get('focus_id') for r in captures],[r.get('focus_id') for r in expected])
+            with self.assertRaises(FileExistsError):
+                cli('fake','--review-mode','whole-focus','--input',inp,'--responses',replies,'--out',root/'fake')
+            fake=FakeClient([reply()]*3)
+            with patch('pma_evidence_review.__main__.load_profile_client',return_value=fake):
+                cli('run-profile','--review-mode','whole-focus','--input',inp,'--profile',root/'nonexistent',
+                    '--out',root/'mock-profile','--execute-authorized-real-model')
+            self.assertEqual(fake.calls,[r['request'] for r in captures])
+
+    def test_nonfactual_focus_is_not_automatically_false_and_protocol_text_retained(self):
+        p=changed('Should we try again? Plan to inspect it.')
+        report,_=self.run_review(p,[reply()]*3)
+        self.assertEqual(report['whole_report']['results'][0]['verdict'],'insufficient')
+        self.assertTrue(all(r['verdict']=='insufficient' for r in report['operations'][0]['local_results']))
+        self.assertIn('Plans/questions are not automatically false',focus.FOCUS_INSTRUCTIONS)
+        class ToolClient:
+            def __init__(self): self.calls=0
+            async def call(self,**kwargs):
+                self.calls+=1
+                return types.SimpleNamespace(content=reply(),tool_calls=[] if self.calls==1 else [object()])
+        transport=CapturedTransport(ToolClient(),fake=True)
+        report=asyncio.run(focus.review(p,transport,locator=locate))
+        for row in report['operations'][0]['local_results']:
+            self.assertEqual(row['engineering_status'],'protocol_error')
+            self.assertEqual(row['raw_response'],reply())
+        self.assertEqual(report['operations'][0]['diagnostic']['status'],'engineering_incomplete')
+
+    def test_repeated_source_text_requires_source_offsets_not_focus_offsets(self):
+        from pma_evidence_review import evidence_policy as policy
+        p=changed('First. Second.')
+        p['sources'][2]['slices']=[{'start':50,'end':61,'text':'green green'}]
+        registry=policy.documents(p)
+        row={'evidence':['green'],'citations':[{'document_index':3}]}
+        with self.assertRaisesRegex(ValueError,'ambiguous'):
+            policy.bind(row,p,registry,locator=locate)
+        row['citations'][0].update(start=56,end=61)
+        bound=policy.bind(row,p,registry,locator=locate)
+        self.assertEqual(bound['citations'][0]['start'],56)
+        row['citations'][0].update(start=0,end=5)
+        with self.assertRaisesRegex(ValueError,'outside_visible_range'):
+            policy.bind(row,p,registry,locator=locate)

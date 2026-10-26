@@ -56,7 +56,7 @@ class CapturedTransport:
                'request': copy.deepcopy(payload), 'fake': self.fake,
                'audit_request_sha256': request.get('audit_request_sha256'),
                'evidence_policy': request.get('evidence_policy')}
-        for key in ('review_strategy', 'op_index'):
+        for key in ('review_strategy', 'op_index', 'focus_id'):
             if key in request:
                 row[key] = request[key]
         self.records.append(row)

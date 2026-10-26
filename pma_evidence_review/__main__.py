@@ -9,6 +9,7 @@ from .inputs import build, validate
 from .location import locate
 from .review import review
 from .operation_review import operation_requests
+from . import focus_review
 from .transport import CapturedTransport, FakeClient, load_profile_client
 
 
@@ -36,6 +37,7 @@ def main():
         p.add_argument('--input', required=True)
         if command != 'validate':
             p.add_argument('--out', required=True)
+            p.add_argument('--review-mode', choices=['whole','whole-focus'], default='whole')
         if command == 'fake':
             p.add_argument('--responses', required=True, help='JSON array of raw response strings')
         if command == 'run-profile':
@@ -55,7 +57,8 @@ def main():
                           'review_input_sha256': packet['review_input_sha256']}))
         return
     if args.command == 'export':
-        write(args.out, operation_requests(packet))
+        write(args.out, focus_review.focus_plan(packet) if args.review_mode == 'whole-focus'
+              else operation_requests(packet))
         return
     if args.command == 'run-profile' and not args.execute_authorized_real_model:
         parser.error('No request sent. Real execution requires separate user authorization and flag.')
@@ -64,7 +67,8 @@ def main():
     client = FakeClient(read(args.responses)) if args.command == 'fake' else load_profile_client(
         args.repo, args.profile, args.profile_key, out / 'private_client', authorized=True)
     transport = CapturedTransport(client, out, fake=args.command == 'fake')
-    result = asyncio.run(review(packet, transport, locator=locate))
+    runner = focus_review.review if args.review_mode == 'whole-focus' else review
+    result = asyncio.run(runner(packet, transport, locator=locate))
     result['calls'] = {'client_calls': transport.calls, 'fake': transport.fake,
         'network_calls': 0 if transport.fake else 'not_measured_by_client_boundary',
         'provider_retries': 0 if transport.fake else 'see_native_provider_capture'}
