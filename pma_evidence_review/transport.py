@@ -45,7 +45,9 @@ class CapturedTransport:
         payload = {k: request[k] for k in ('prompt', 'system', 'tools')}
         self.calls += 1
         row = {'call_index': self.calls, 'phase': request['phase'],
-               'request': copy.deepcopy(payload), 'fake': self.fake}
+               'request': copy.deepcopy(payload), 'fake': self.fake,
+               'audit_request_sha256': request.get('audit_request_sha256'),
+               'evidence_policy': request.get('evidence_policy')}
         self.records.append(row)
         if self.directory:
             durable(self.directory / 'requests.jsonl', row)

@@ -48,8 +48,8 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(locate(['secret hidden content'],p)['status'],'unbound')
 
     def test_decisive_result_requires_bound_quote(self):
-        for quote,expected in [('green','ok'),('never visible','evidence_not_bound')]:
-            transport=CapturedTransport(FakeClient([extraction(),result('SUPPORTED',[quote])]),fake=True)
+        for quote,expected in [('green','ok'),('never visible','citation_ambiguous_or_unmatched')]:
+            transport=CapturedTransport(FakeClient([extraction(),result('SUPPORTED',[quote],document_index=0)]),fake=True)
             report=asyncio.run(review(packet(),transport,locator=locate))
             row=report['results'][0]
             self.assertEqual(row['engineering_status'],expected)

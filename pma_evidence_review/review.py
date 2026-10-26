@@ -5,7 +5,8 @@ from collections import Counter
 from dataclasses import asdict
 import json
 
-from .inputs import validate, require, model_material as material
+from .inputs import validate, require, digest
+from . import evidence_policy as policy
 from .vendor.rag_models import Claim, Span, VerificationResult
 from .vendor.rag_prompts import (format_claim_extraction_prompt,
     format_claim_verification_batch_prompt, format_claim_verification_evidence_first_prompt)
@@ -24,20 +25,33 @@ Use only the supplied material. Return the requested JSON and no other text.'''
 EXTRACT_CONTRACT = '''\nPMA output contract (overrides generic output shape): return
 {"claims":[{"claim":"...","original_text":"exact operation content fragment",
 "op_index":0,"kind":"fact|plan|hypothesis|question|deletion",
-"conditions":[],"dependencies":[]}],
+"conditions":[],"dependencies":[],
+"evidence_scope":"execution|attempt|static_behavior|requirement|historical_record|agent_statement"}],
 "coverage":[{"op_index":0,"status":"complete|nonfactual|incomplete","reason":"..."}]}.
 Account for EVERY operation, even nonfactual material. Split independent assertions
 without losing their conditions or dependencies. Same original_text may yield multiple
 claims. For deletion use kind=deletion and formulate the justification being audited.
 Nonfactual items should still be represented with their kind. Never infer that an empty
-claims array establishes semantic success. Output one coverage entry per operation.'''
+claims array establishes semantic success. Output one coverage entry per operation.
+Extract ONLY operations, never interpretive context. Scope describes the assertion: execution
+means an observed outcome; attempt means a submitted command; static_behavior means what
+visible code does, not successful execution; requirement means what was requested;
+historical_record and agent_statement mean only what was recorded or claimed. A claim
+about success or gap resolution must not be recast as a mere record of a claim.'''
 VERIFY_CONTRACT = '''\nPMA contract: verdict must be exactly SUPPORTED, CONTRADICTED or
 NOT_ENOUGH_INFO. Evidence must be a list of verbatim strings. Include explanation.
 Use the claim's kind, conditions, dependencies and operation scope. Unsupported plans
 are not false assertions; assess only any factual premise explicitly stated in them.
 Do not count derived memory as independent raw evidence. A local command/receipt alone
 does not establish behavior in another session or environment. Suggested revision may
-be a short direction in explanation; do not rewrite memory.'''
+be a short direction in explanation; do not rewrite memory.
+Source Documents are the ONLY citable sources. Target operations and interpretive
+context are NOT evidence. Citation scope limits use; it does not establish entailment.
+For every evidence quote return citations in the same order, each with zero-based
+document_index, source_id, role, visibility_ref, start and end (original source offsets).
+The legacy document_index alone is accepted only for one unambiguous quote. Never use
+requirements or historical records as execution observations. If evidence is absent,
+return NOT_ENOUGH_INFO; do not cite target text or infer observation from a command.'''
 
 
 def json_value(raw):
@@ -56,13 +70,17 @@ def json_value(raw):
 
 
 def request(prompt, phase):
-    return {'phase': phase, 'system': SYSTEM, 'prompt': prompt, 'tools': None}
+    payload = {'system': SYSTEM, 'prompt': prompt, 'tools': None}
+    identity = digest(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',', ':')))
+    return {'phase': phase, **payload, 'audit_request_sha256': identity,
+            'evidence_policy': policy.POLICY_VERSION}
 
 
 def extraction_request(packet):
     validate(packet)
-    return request(format_claim_extraction_prompt(json.dumps(material(packet),
-        ensure_ascii=False)) + EXTRACT_CONTRACT, 'extract')
+    return request(format_claim_extraction_prompt(json.dumps(policy.targets(packet),
+        ensure_ascii=False)) + EXTRACT_CONTRACT + '\nINTERPRETIVE CONTEXT (not targets):\n' +
+        json.dumps(policy.context(packet), ensure_ascii=False), 'extract')
 
 
 def parse_claims(raw, packet):
@@ -102,6 +120,10 @@ def parse_claims(raw, packet):
         claims.append(Claim(text=text, index=i + 1, original_text=orig,
                             span=Span(start, start + len(orig))))
         metadata[i + 1] = {k: item[k] for k in ('op_index', 'kind', 'conditions', 'dependencies')}
+        scope = item.get('evidence_scope', 'execution')
+        require(scope in policy.SCOPES, 'unknown_evidence_scope')
+        metadata[i + 1].update(evidence_scope=scope,
+                              scope_origin='model' if 'evidence_scope' in item else 'conservative_default')
     errors = []
     if not claims:
         errors.append('extraction_empty_unverified')
@@ -116,18 +138,33 @@ def verification_requests(packet, claims, metadata, mode='evidence-first'):
     validate(packet)
     require(mode in ('evidence-first', 'batch'), 'unknown_mode')
     claims = [c for c in claims if metadata[c.index]['kind'] in ('fact', 'deletion')]
-    # One complete quoted document avoids silently applying RAG's document cap.
-    document = json.dumps(material(packet), ensure_ascii=False)
-    budget = max(len(document), 1)
-    def text(c):
-        return json.dumps({'claim': c.text, **metadata[c.index]}, ensure_ascii=False)
-    if mode == 'batch':
-        return [(claims, request(format_claim_verification_batch_prompt(
-            [(c.index, text(c)) for c in claims], [document], max_docs_chars=budget,
-            max_chars_per_doc=budget) + VERIFY_CONTRACT, 'verify_batch'))] if claims else []
-    return [([c], request(format_claim_verification_evidence_first_prompt(text(c),
-        [document], max_docs_chars=budget, max_chars_per_doc=budget) + VERIFY_CONTRACT,
-        'verify')) for c in claims]
+    groups = [[c] for c in claims] if mode != 'batch' else [
+        [c for c in claims if metadata[c.index]['evidence_scope'] == scope]
+        for scope in policy.SCOPES]
+    requests = []
+    for group in groups:
+        if not group:
+            continue
+        registry = policy.documents(packet, metadata[group[0].index]['evidence_scope'])
+        docs = policy.formatted(registry)
+        budget = max(sum(len(d['text']) for d in docs), 1)
+        def text(c):
+            op = next(o for o in policy.targets(packet) if o['op_index'] == metadata[c.index]['op_index'])
+            return json.dumps({'claim': c.text, **metadata[c.index],
+                               'audit_target_not_evidence': op}, ensure_ascii=False)
+        if mode == 'batch':
+            prompt = format_claim_verification_batch_prompt(
+                [(c.index, text(c)) for c in group], docs, max_docs_chars=budget,
+                max_chars_per_doc=budget)
+        else:
+            prompt = format_claim_verification_evidence_first_prompt(text(group[0]), docs,
+                max_docs_chars=budget, max_chars_per_doc=budget)
+        prompt += VERIFY_CONTRACT + '\nINTERPRETIVE CONTEXT (not evidence):\n'
+        prompt += json.dumps(policy.context(packet), ensure_ascii=False)
+        req = request(prompt, 'verify_batch' if mode == 'batch' else 'verify')
+        req['citation_registry'] = registry
+        requests.append((group, req))
+    return requests
 
 
 VERDICTS = {'supported': Verdict.SUPPORTED.value, 'contradicted': Verdict.CONTRADICTED.value,
@@ -166,6 +203,7 @@ def parse_results(raw, claims, batch=False):
         result = VerificationResult(claim=claim.text, claim_index=claim.index,
             verdict=semantic, confidence=0, evidence=evidence, explanation=p['explanation'])
         row = asdict(result)
+        row.update(document_index=p.get('document_index'), citations=p.get('citations'))
         row.update(engineering_status='ok', reason_code=(ReasonCode.LOW_GROUNDING.value
             if semantic == 'insufficient' else semantic), confidence=None)
         results.append(row)
@@ -178,9 +216,12 @@ async def review(packet, transport, *, mode='evidence-first', locator=None):
         'request_sha256': packet['request_sha256'],
         'review_input_sha256': packet['review_input_sha256'], 'mode': mode, 'results': [],
         'claims': [], 'coverage': [], 'errors': [], 'limitations': packet['limitations'],
+        'evidence_policy': policy.POLICY_VERSION, 'audit_request_sha256s': [],
         'semantic_effectiveness': 'not_evaluated', 'memory_mutated': False}
     try:
-        raw = await transport.send(extraction_request(packet))
+        req = extraction_request(packet)
+        report['audit_request_sha256s'].append(req['audit_request_sha256'])
+        raw = await transport.send(req)
     except Exception as error:
         report['errors'].append('extraction_call_error:' + type(error).__name__)
         return report
@@ -201,6 +242,7 @@ async def review(packet, transport, *, mode='evidence-first', locator=None):
                 'action': op['action'], 'verdict': None,
                 'engineering_status': 'not_applicable_nonfactual'})
     for group, req in verification_requests(packet, factual, metadata, mode):
+        report['audit_request_sha256s'].append(req['audit_request_sha256'])
         try:
             raw = await transport.send(req)
         except Exception as error:
@@ -219,15 +261,12 @@ async def review(packet, transport, *, mode='evidence-first', locator=None):
                        action=op['action'], original_binding_status=op['binding_status'])
             if row.get('evidence'):
                 try:
-                    require(locator is not None, 'locator_unavailable')
-                    row['alignment'] = locator(row['evidence'], packet)
-                    if row['alignment']['status'] not in ('exact_unique', 'exact_multiple',
-                                                         'normalized_unique', 'normalized_multiple'):
-                        row.update(model_verdict=row['verdict'], verdict=None,
-                                   engineering_status='evidence_not_bound')
+                    row['alignment'] = policy.bind(row, packet, req['citation_registry'],
+                                                   meta['evidence_scope'], locator)
                 except Exception as error:
                     row.update(model_verdict=row['verdict'], verdict=None,
-                        engineering_status='alignment_error', error_type=type(error).__name__)
+                        engineering_status=str(error) if isinstance(error, ValueError)
+                        else 'alignment_error', error_type=type(error).__name__)
             report['results'].append(row)
     # No aggregate support threshold, no implicit semantic pass for an empty report.
     return report
