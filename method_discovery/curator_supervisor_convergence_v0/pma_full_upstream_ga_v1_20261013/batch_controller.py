@@ -94,6 +94,8 @@ def run_batch(args: argparse.Namespace) -> dict:
             'evaluation_bootstrap_protocol', 'original'),
         evaluation_cache=manifest.get('config', {}).get('evaluation_cache'),
         evaluation_download_retry=manifest.get('config', {}).get('evaluation_download_retry'),
+        citation_review_gate=manifest.get('config', {}).get('citation_review_gate'),
+        zero_model_fixture_only=fixture,
         candidate_profile_fixture_only=profile_fixture,
         **({'agent_time_protocol': manifest['config'].get('agent_time_protocol'),
             'native_context_policy': manifest['config']['native_context_policy'],

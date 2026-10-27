@@ -5,13 +5,14 @@
 runtime policy 被拦截，gate-one-repair 未启动。归档 `df7550644bba1598ff424c8c52b0dcf63737214a`
 是部分诊断包；未收录的原始材料不等于没有产生，不能据此声称 gate 已认证。
 
-本轮修复两个接线缺陷，不改模型提示、审核语义或历史结果：
+本轮修复三处接线缺陷，不改模型提示、审核语义或历史结果：
 
 1. gap 候选缺 policy 现在在 `single_run.prepare` 创建输出、读取 profile、假授权和启动运行之前报错；
    不自动补限额、不绕过 Harbor 最终策略校验。命令补上 B 专用 `--runtime-policy-file`。
 2. gate 原先错误写入 stateful-fake 分支、实际 prepare 的 plan 却未保存，导致显式 gate 丢失。
    现在写到正确 plan，并在生成 manifest 后检查 gate 原值绑定，缺失/错模式不再发布 manifest/run identity。
    同时恢复无关 stateful-fake 准备路径，不增加 gate。
+3. batch 预检 spec 同步传入冻结 gate 和已校验的 fake 标志，避免新 gate 在预检再次丢失或把首次假认证误作真实启动。
 
 下述认证必须使用新固定源码、新目录、新 run_id：A、gate-only、gate-one-repair 各一次。
 旧 A 虽成功，但源码身份已变化，不能直接套入新证书；本次不是在旧冻结运行上补参数重跑。
@@ -67,8 +68,8 @@ PMA 必须来自当前 checkout 的 vendor；native 必须来自指定的干净�
 省略 `--native-harbor-source-root` 时，只接受解释器既有安装所指向的同一固定干净源码；
 不要用随便安装的同名 Harbor 或把 vendor 放进 native 路径来代替。
 Python3.11 仍只有原先一次“整个 native 模块未执行”的明确 skip，不能算 native 验收；
-Python3.12+ 不新增 skip。完整接收预期为 276 PMA + 16 native = 292，零失败/错误/跳过。
-原 282 个测试全部保留且原文件字节不变，新增 10 个 policy/入口链回归；原先报错的 8 个边界测试不得删减或降级。
+Python3.12+ 不新增 skip。完整接收预期为 279 PMA + 16 native = 295，零失败/错误/跳过。
+原 282 个测试全部保留且原文件字节不变，新增 13 个 policy/入口链回归；原先报错的 8 个边界测试不得删减或降级。
 上次 Windows 的既有路径是 `E:\LongContext\bench_runtime\m4\harbor-env\Scripts\python.exe`
 和 `E:\LongContext\bench_runtime\m4\harbor-src`，使用前仍须核对实际存在与固定身份。
 云端通过不是 Windows 实机通过，也不是 Docker 生命周期或两种 gate 模式认证。
@@ -79,7 +80,7 @@ Python3.12+ 不新增 skip。完整接收预期为 276 PMA + 16 native = 292，�
 必须具备既有 Docker/Harbor 环境和本地官方镜像；不下载新依赖来绕过失败。
 先只读执行 `docker info --format '{{.ServerVersion}}'` 与 `docker info --format '{{.OSType}}'`，
 退出非零、空版本或非 linux 立即停止本节。最近本机已读到 Linux Engine 29.6.1，但需重新核对，
-不得只因历史可用或离线通过而跳过检查；本轮不启动/安装 Docker、不生成真实授权。
+不得只因历史可用或离线通过而跳过检查；本节不启动/安装 Docker、不生成真实授权。
 官方源码固定 2fd12b88aafdd04a52c298e3940bcb189f9766d6；Harbor 固定
 459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc。使用现有 secret-free fixture profiles，
 不得把真实 key/profile 拷进交付目录。下面变量是占位符，换成已有本地路径；不是私有路径示例。
@@ -96,7 +97,7 @@ Task/PMA fixture profiles 仍需符合既有 Opus4.8配置形状；fixture只使
 $Repo=(Get-Location).Path
 $RuntimePolicy=Join-Path $Reports 'approved_requested_runtime_policy.json'
 # 若固定对象本机不存在，只抓取该固定归档，不切换/覆盖当前源码。
-git cat-file -e 72152913f545ca36a75b68e8796e24a6e24f9f81^{commit}
+git cat-file -e '72152913f545ca36a75b68e8796e24a6e24f9f81^{commit}'
 if ($LASTEXITCODE -ne 0) {
   git fetch origin 72152913f545ca36a75b68e8796e24a6e24f9f81
   if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch fixed policy provenance; stop' }
