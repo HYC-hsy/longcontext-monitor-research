@@ -82,6 +82,15 @@ def collect(condition: str, source: Path, target: Path, secrets: list[str],
     return output
 
 
+def protect_evidence_bytes(root: Path) -> dict:
+    """Keep raw capture bytes on Git add/checkout, scoped to this evidence root."""
+    raw = b"* -text\n"
+    with (root / '.gitattributes').open('xb') as stream:
+        stream.write(raw)
+    return {'path': '.gitattributes', 'bytes': len(raw),
+            'sha256': hashlib.sha256(raw).hexdigest(), 'redactions': 0}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--citation-review-gate',choices=('gate-only','gate-one-repair'))
@@ -98,8 +107,9 @@ def main() -> None:
     if args.b is None and args.research_candidate != 'U':
         parser.error('A-only certification requires U')
     args.output.mkdir(parents=True, exist_ok=False)
+    files = [protect_evidence_bytes(args.output)]
     secrets = private_values(args.task_profile_file, args.pma_profile_file)
-    files = collect('A', args.a, args.output / 'A', secrets)
+    files += collect('A', args.a, args.output / 'A', secrets)
     if args.b is not None:
         files += collect('B', args.b, args.output / 'B', secrets, args.research_candidate,args.citation_review_gate)
     summary = verify_evidence(args.output, require_committed=False,citation_review_gate=args.citation_review_gate,

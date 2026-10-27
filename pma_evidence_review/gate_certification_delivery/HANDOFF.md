@@ -123,3 +123,13 @@ if ($LASTEXITCODE -ne 0) { throw 'gate-one-repair prepare failed' }
 原single_run run仍要求独立一次授权及manifest/run binding，未在此添加真实执行授权。
 比较漏放、误拒、陈旧记忆、gap积压与Task效果，不以supported率作为质量。
 没有新语义样本、真实模型结果或效果提升结论。
+
+## Windows 字节保护补丁
+
+collector 在每个输出认证根（例如 gate-only/、gate-one-repair/）生成 `.gitattributes`，
+内容为 `* -text`；只作用于该目录及后代，并把属性文件纳入 FILE_HASHES.json。
+上面的 `git add -f -- <两个证据目录>` 必须包含此隐藏文件；不要只挑JSON提交。
+不得通过换行归一化重算原件哈希；不改变全局 core.autocrlf。
+回归使用真实临时Git仓库，core.autocrlf=true下add/commit再新clone检出，
+验证CRLF原日志、UTF-8证书、索引及属性文件字节与Git blob完全一致，目录外属性不变。
+793a及其原日志保留；接收方须从最终含字节保护补丁的SHA重新生成认证材料。
