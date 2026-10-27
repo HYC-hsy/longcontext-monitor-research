@@ -1,5 +1,8 @@
 # Citation-only 开发样本集：本地发布审查稿
 
+**Windows 离线预检修复及新的接收步骤：见 [WINDOWS_PREFLIGHT_HANDOFF.md](WINDOWS_PREFLIGHT_HANDOFF.md)。**
+下文保留最初发布审查时的历史状态与方法边界；不得把旧版的离线通过记录当作 Windows 实机验收。
+
 当前状态：仅本地构建及离线验收。没有 commit、push、上传、真实模型、Task、评价或正式记忆写入。
 用户已确认仅benchmark/、新增测试及白名单ZIP范围；仍待父线程完成审查并明确开始发布。其它私有历史发布拒绝不变。未读额外私有日志/profile/private_client/凭据。
 

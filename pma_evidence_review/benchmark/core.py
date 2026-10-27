@@ -17,17 +17,19 @@ ROOT = old.D / 'source_window_two_real_20261025'
 
 
 def write(path, value):
-    with Path(path).open('x', encoding='utf-8') as f:
+    with Path(path).open('x', encoding='utf-8', newline='\n') as f:
         json.dump(value, f, ensure_ascii=False, indent=2)
         f.write('\n')
 
 
 def checked_file(repo, relative):
     """Only fixed public repository bytes; fail if local files differ."""
-    frozen = subprocess.check_output(['git', 'show', SOURCE_COMMIT+':'+str(relative)], cwd=repo, env={**os.environ, 'GIT_NO_LAZY_FETCH':'1'})
+    # Git object names and persisted provenance are POSIX, even on Windows.
+    object_path = relative.as_posix()
+    frozen = subprocess.check_output(['git', 'show', SOURCE_COMMIT+':'+object_path], cwd=repo, env={**os.environ, 'GIT_NO_LAZY_FETCH':'1'})
     current = (Path(repo)/relative).read_bytes()
     old.require(current == frozen, 'public_commit_file_mismatch')
-    return {'commit': SOURCE_COMMIT, 'path': str(relative),
+    return {'commit': SOURCE_COMMIT, 'path': object_path,
             'sha256': hashlib.sha256(current).hexdigest(), 'bytes': len(current)}
 
 
@@ -163,7 +165,7 @@ def build_case(spec, packet):
     request['audit_request_sha256'] = ci.identity({k: request[k] for k in ('system','prompt','tools')})
     sources = [c['candidates'][0]['reference'] for c in row['preparation']['citations']]
     case = {'sample_id': spec['id'], 'kind': spec['kind'], 'origin': {
-        'commit': SOURCE_COMMIT, 'slot_path': str(ROOT/old.SAMPLES[spec['sample']][0]),
+        'commit': SOURCE_COMMIT, 'slot_path': (ROOT/old.SAMPLES[spec['sample']][0]).as_posix(),
         'step': spec['step'], 'cycle_id': packet['cycle_id'], 'operation': spec['op_index'],
         'revision_id': origin['operation']['revision_id'], 'parent_input_sha256': packet['citation_input_sha256']},
         'material': material, 'citations': sources, 'request': request}
