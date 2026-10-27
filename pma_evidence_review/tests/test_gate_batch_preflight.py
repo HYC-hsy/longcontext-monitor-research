@@ -11,11 +11,29 @@ from unittest.mock import patch
 from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013 import batch_controller as bc
 from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013 import citation_gate_config as cfg
 from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013 import gate_certification as gc
+from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013 import live_launcher as ll
+from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013 import single_run_certification as sc
 from experiment_runner.runtime_policy import resolve_policy
 
 ROOT=Path(__file__).resolve().parents[2]
 
 class GateBatchPreflightTests(unittest.TestCase):
+    def test_live_launcher_rechecks_frozen_gate_certificate_mode(self):
+        files={name:'source-hash' for name in sc.EVIDENCE_GAP_SOURCE_FILES}
+        for mode in cfg.MODES:
+            with self.subTest(mode=mode):
+                manifest={'schema':'pma-ga-live-manifest-v5',
+                    'status':'prepared_not_executed',
+                    'planned_order':[{'research_candidate':'pma_gap_evidence_v1'}],
+                    'config':{'citation_review_gate':mode},
+                    'native_shared_certification':{'harbor_commit':sc.HARBOR_COMMIT,
+                        'source_files':files,'evidence_path':'pma_evidence_review',
+                        'conditions':['A','B'],'evidence':{'checked':True}}}
+                with (patch.object(sc,'source_identity',return_value=files),
+                      patch.object(sc,'verify_evidence',return_value={'checked':True}) as verify):
+                    ll._require_evaluation_state_contract(manifest)
+                self.assertEqual(verify.call_args.kwargs['citation_review_gate'],mode)
+
     def setup_records(self, root, mode, fixture):
         head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
         asset={'native_agent_seconds':900,'native_verifier_seconds':900}

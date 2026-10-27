@@ -219,7 +219,9 @@ def _require_evaluation_state_contract(manifest: dict) -> None:
         evidence = (checkout / cert.get('evidence_path', '')).resolve(strict=True)
         if (not evidence.is_relative_to(checkout) or
                 verify_evidence(evidence, research_candidate=research,
-                    conditions=tuple(cert.get('conditions', ('A', 'B')))) != cert.get('evidence')):
+                    conditions=tuple(cert.get('conditions', ('A', 'B'))),
+                    citation_review_gate=manifest.get('config', {}).get('citation_review_gate'))
+                != cert.get('evidence')):
             raise RuntimeError('single-run native lifecycle evidence differs')
         return
     if manifest.get('schema') == 'pma-ga-live-manifest-v2':
