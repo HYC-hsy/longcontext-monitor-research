@@ -50,6 +50,17 @@ def projection(packet,row):
         'submitted_evidence':evidence,'normative_requirements_context':packet['normative_context']}
 
 
+def request_from_material(material,index):
+    """Shared literal request format; caller must validate its host input first."""
+    prompt='SUBMITTED OPERATION AND CLOSED EVIDENCE PACKAGE:\n'+json.dumps(material,ensure_ascii=False)
+    prompt+='\nOUTPUT EXAMPLE (shape only; decide from submitted quotes):\n'+json.dumps({
+        'op_index':index,'verdict':'insufficient','explanation':'Explain which commitments the submitted evidence establishes or leaves unsupported.'})
+    payload={'system':SYSTEM,'prompt':prompt,'tools':None}
+    return {'phase':'audit_submitted_citations',**payload,'op_index':index,
+        'review_strategy':STRATEGY,'evidence_policy':'submitted-literal-only-v1',
+        'audit_request_sha256':ci.identity(payload)}
+
+
 def requests(packet):
     ci.validate(packet)
     plans=[]
@@ -57,13 +68,7 @@ def requests(packet):
         op=row['operation'];prepared=row['preparation']
         plan={'op_index':op['op_index'],'preparation':copy.deepcopy(prepared),'request':None}
         if prepared['status']=='ready':
-            prompt='SUBMITTED OPERATION AND CLOSED EVIDENCE PACKAGE:\n'+json.dumps(projection(packet,row),ensure_ascii=False)
-            prompt+='\nOUTPUT EXAMPLE (shape only; decide from submitted quotes):\n'+json.dumps({
-                'op_index':op['op_index'],'verdict':'insufficient','explanation':'Explain which commitments the submitted evidence establishes or leaves unsupported.'})
-            payload={'system':SYSTEM,'prompt':prompt,'tools':None}
-            plan['request']={'phase':'audit_submitted_citations',**payload,'op_index':op['op_index'],
-                'review_strategy':STRATEGY,'evidence_policy':'submitted-literal-only-v1',
-                'audit_request_sha256':ci.identity(payload)}
+            plan['request']=request_from_material(projection(packet,row),op['op_index'])
         plans.append(plan)
     return plans
 

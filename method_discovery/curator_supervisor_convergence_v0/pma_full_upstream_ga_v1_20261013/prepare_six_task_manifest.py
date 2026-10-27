@@ -108,6 +108,8 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
     single = plan is not None and plan.get('schema') in {
         'pma-ga-single-plan-v1', 'pma-ga-single-plan-v2'}
     candidate = plan.get('research_candidate', 'U') if single else 'U'
+    from .citation_gate_config import validate_gate
+    gate=validate_gate((plan or {}).get('citation_review_gate'),candidate,(plan or {}).get('condition','B'))
     stateful = candidate == 'pma_stateful_memory_v1'
     if stateful:
         from .stateful_runtime_policy import policies
@@ -126,6 +128,7 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
             required.add('task_complete_response_policy')
             required.add('agent_time_protocol')
             required.update(key for key in runtime_policies if key in plan)
+        if gate is not None:required.add('citation_review_gate')
         if 'runtime_policy' in plan:
             required.add('runtime_policy')
         if 'evaluation_bootstrap_protocol' in plan:
@@ -244,6 +247,11 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
               'pma_profile_name': 'claude_monitor_opus48',
               'network': 'official_task_network_with_host_credential_gateway',
               'evaluation': 'native_Harbor_SHARED_pending_lifecycle_certification'}
+    if gate is not None:
+        from .citation_gate_config import gate_source_paths
+        method['citation_review_gate']=gate
+        method['citation_gate_source_sha256']={name:_committed_source_sha(STAGE.parents[2],name)
+            for name in gate_source_paths()}
     if schema == 'pma-ga-live-manifest-v5':
         method['research_candidate'] = candidate
         if candidate in ('pma_gap_memory_v0', 'pma_gap_evidence_v1'):

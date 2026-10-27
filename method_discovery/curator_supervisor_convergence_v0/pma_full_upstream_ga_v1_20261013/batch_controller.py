@@ -134,6 +134,8 @@ def run_batch(args: argparse.Namespace) -> dict:
         if manifest.get('schema') in {'pma-ga-live-manifest-v5',
                                       'pos-ga-single-manifest-v1'}:
             command += ['--research-candidate', binding['research_candidate']]
+        from .citation_gate_config import worker_flags
+        command += worker_flags(manifest.get('config',{}).get('citation_review_gate'),binding.get('research_candidate','U'))
         if fixture:
             command += ['--zero-model-fixture']
         if stateful_replies:

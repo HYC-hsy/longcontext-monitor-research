@@ -120,7 +120,8 @@ async def serve(args: argparse.Namespace) -> None:
                                memory_api_base=os.environ.get("PMA_MEMORY_API_BASE"),
                                memory_api_key=os.environ.get("PMA_MEMORY_API_KEY"),
                                memory_profile=profile,
-                               research_candidate=getattr(args, "research_candidate", "U"))
+                               research_candidate=getattr(args, "research_candidate", "U"),
+                               citation_review_gate=getattr(args,"citation_review_gate",None))
     if args.fake_memory:
         from harbor.llms.base import LLMResponse
 
@@ -136,6 +137,12 @@ async def serve(args: argparse.Namespace) -> None:
                         calls.append(SimpleNamespace(function=SimpleNamespace(
                             name='memory_save_gap', arguments=arguments)))
                     return LLMResponse(content='', tool_calls=calls)
+                if phase == 'citation_review':
+                    material=json.loads(prompt.split('\n',1)[1].split('\nOUTPUT')[0])
+                    return LLMResponse(content=json.dumps({'op_index':material['original_operation']['op_index'],
+                        'verdict':'supported','explanation':'Synthetic transport fixture only.'}))
+                if phase == 'citation_repair':
+                    return LLMResponse(content='{"decision":"withdraw"}')
                 if phase == 'selection':
                     return LLMResponse(content=(
                         '<context_for_action>Verify the synthetic result.</context_for_action>'
@@ -161,7 +168,8 @@ async def serve(args: argparse.Namespace) -> None:
     (private / "worker_ready.json").write_text(json.dumps({
         "run_id": args.run_id, "task_id": args.task_id,
         "deadline_epoch": args.deadline_epoch, "fake_memory": args.fake_memory,
-        "research_candidate": getattr(args, "research_candidate", "U")},
+        "research_candidate": getattr(args, "research_candidate", "U"),
+        **({"citation_review_gate":args.citation_review_gate} if getattr(args,"citation_review_gate",None) else {})},
         sort_keys=True), encoding="utf-8")
     stopped = asyncio.Event()
     for name in ("SIGTERM", "SIGINT"):
@@ -223,6 +231,7 @@ def main() -> None:
     parser.add_argument("--deadline-epoch", type=lambda value: None if value == 'uncapped' else float(value), required=True)
     parser.add_argument("--fake-memory", action="store_true")
     parser.add_argument("--fake-memory-update", action="store_true")
+    parser.add_argument("--citation-review-gate",choices=('gate-only','gate-one-repair'))
     parser.add_argument("--research-candidate", choices=("U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0", "pma_gap_evidence_v1"), default="U")
     asyncio.run(serve(parser.parse_args()))
 

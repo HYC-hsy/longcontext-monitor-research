@@ -32,6 +32,7 @@ def prepare_stateful_fake(args: argparse.Namespace) -> dict:
             'research_candidate': 'pma_stateful_memory_v1',
             'mode': 'fake-only', 'execution_authorized': False,
             'task': 'synthetic-local-task', 'run_id': 'stateful-' + uuid.uuid4().hex[:16]}
+    if gate is not None:plan['citation_review_gate']=gate
     _write_new(root / 'plan.json', plan)
     return plan
 
@@ -101,6 +102,8 @@ def prepare(args: argparse.Namespace) -> dict:
     reuse = getattr(args, 'runtime_reuse', None)
     if reuse is not None and getattr(args, 'research_candidate', 'U') != 'pma_gap_memory_v0':
         raise ValueError('runtime reuse supports only the gap candidate')
+    from .citation_gate_config import validate_gate
+    gate=validate_gate(getattr(args,'citation_review_gate',None),getattr(args,'research_candidate','U'),args.condition)
     validate_binding(args.condition, getattr(args, 'research_candidate', 'U'))
     if runtime_policy is not None and getattr(args, 'research_candidate', 'U') not in {
             'pma_stateful_memory_v1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1'}:
@@ -257,6 +260,7 @@ def main() -> None:
     prepared = commands.add_parser('prepare', help='fixed-Git asset and image check; no calls')
     prepared.add_argument('--task', required=True)
     prepared.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
+    prepared.add_argument('--citation-review-gate',choices=('gate-only','gate-one-repair'))
     prepared.add_argument('--research-candidate', choices=sorted(candidate_names()), default='U')
     prepared.add_argument('--occurrence', type=int, default=1)
     prepared.add_argument('--output', required=True)

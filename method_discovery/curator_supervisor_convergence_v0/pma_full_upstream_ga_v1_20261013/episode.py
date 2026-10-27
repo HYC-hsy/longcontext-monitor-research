@@ -45,7 +45,10 @@ def stable_initial_text(content: str | list[dict[str, Any]]) -> str:
 def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
                        memory_api_key: str | None = None,
                        memory_profile: dict[str, Any] | None = None,
-                       research_candidate: str = "U") -> MemoryEnabledTerminus2:
+                       research_candidate: str = "U",
+                       citation_review_gate: str | None = None) -> MemoryEnabledTerminus2:
+    from citation_gate_config import validate_gate
+    validate_gate(citation_review_gate,research_candidate)
     if research_candidate not in {"U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0", "pma_gap_evidence_v1"}:
         raise ValueError("unknown research candidate")
     if memory_profile is not None:
@@ -102,6 +105,17 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
             use_bm25_prefilter=original.use_bm25_prefilter,
             keep_thinking=original.keep_thinking,
             use_structured_tools=original.use_structured_tools)
+        if citation_review_gate is not None:
+            from citation_gate_agent import CitationGateMemoryAgent
+            agent._memory_agent = CitationGateMemoryAgent(
+                task="", llm=agent._memory_llm, memory=bank,
+                max_memory_in_prompt=original.max_memory_in_prompt,
+                use_bm25_prefilter=original.use_bm25_prefilter,
+                keep_thinking=original.keep_thinking,
+                use_structured_tools=original.use_structured_tools,
+                review_directory=Path(logs_dir)/"citation_review",
+                repair_limit=int(citation_review_gate=='gate-one-repair'))
+            agent._citation_review_gate=citation_review_gate
         if agent._memory is not agent._memory_agent.memory or agent._memory is not agent._memory_agent.gaps:
             raise RuntimeError("gap bank identity mismatch")
         agent._research_candidate = research_candidate
@@ -144,6 +158,8 @@ class PMAEpisode:
     def __init__(self, agent: MemoryEnabledTerminus2, *, run_id: str,
                  task_id: str, archive: Path):
         self.agent = agent
+        if hasattr(agent._memory_agent,'run_id'):
+            agent._memory_agent.run_id=run_id
         self.run_id = run_id
         self.task_id = task_id
         self.archive = archive
@@ -214,6 +230,8 @@ class PMAEpisode:
                         'formal_gaps': [entry.to_dict() for entry in self.agent._memory.entries],
                         **({'alignment_policy': candidate_agent.expected_alignment_policy}
                            if hasattr(candidate_agent, 'expected_alignment_policy') else {}),
+                        **({'citation_gate_report': deepcopy(candidate_agent.last_citation_gate_report)}
+                           if hasattr(candidate_agent, 'last_citation_gate_report') else {}),
                         **({'evidence_report': deepcopy(candidate_agent.last_evidence_report)}
                            if hasattr(candidate_agent, 'last_evidence_report') else {}),
                     }, ensure_ascii=False, sort_keys=True) + '\n')

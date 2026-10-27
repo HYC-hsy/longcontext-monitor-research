@@ -436,6 +436,9 @@ def run_live(args) -> dict:
                            authorized.get('candidate_profile_fixture_only') is True):
         raise RuntimeError('candidate profile fixture identity differs')
     candidate = getattr(args, 'research_candidate', 'U')
+    from .citation_gate_config import require_gate_binding,worker_flags,verify_gate_sources
+    gate=require_gate_binding(getattr(args,'citation_review_gate',None),manifest['config'],candidate,args.condition)
+    verify_gate_sources(manifest['config'])
     stateful = candidate == 'pma_stateful_memory_v1'
     if stateful:
         from .stateful_runtime_policy import require_same_policies
@@ -551,6 +554,7 @@ def run_live(args) -> dict:
         'authorization_sha256': _sha(authorization_path),
         'audited_code_commit': authorized['audited_code_commit'],
     }
+    if gate is not None:spec['citation_review_gate']=gate
     runtime_policy = manifest.get('config', {}).get('runtime_policy')
     if runtime_policy is not None:
         from experiment_runner.runtime_policy import validate_resolved_policy
@@ -676,7 +680,8 @@ def run_live(args) -> dict:
                 str(root / 'control/ga_stage'))) if stateful else
                 os.pathsep.join((str(STAGE),
                 str(STAGE / 'vendor' / 'pma_89e5c0d' / 'src'),
-                str(STAGE / 'vendor' / 'pma_89e5c0d' / 'external' / 'harbor' / 'src'))))
+                str(STAGE / 'vendor' / 'pma_89e5c0d' / 'external' / 'harbor' / 'src'),
+                *([str(STAGE.parents[2])] if gate is not None else []))))
             if stateful:
                 worker_env.update(GA_STATEFUL_MEMORY_ENABLED='1',
                     GA_STATEFUL_MEMORY_MODE='live', GA_STATEFUL_UNCAPPED_TOTAL='1',
@@ -726,6 +731,7 @@ def run_live(args) -> dict:
                     '--research-candidate', candidate,
                     *(['--fake-memory', '--fake-memory-update'] if fixture and
                       not candidate_profile else [])]
+            worker_args += worker_flags(gate,candidate)
             worker = subprocess.Popen(worker_args,
                 cwd=STAGE, env=worker_env,
                 stdout=worker_logs[0], stderr=worker_logs[1])
@@ -736,6 +742,7 @@ def run_live(args) -> dict:
                     raise RuntimeError('PMA host worker not ready')
                 time.sleep(.05)
             ready_data = json.loads(ready.read_text(encoding='utf-8'))
+            if ready_data.get('citation_review_gate')!=gate:raise RuntimeError('worker gate identity mismatch')
             if stateful:
                 require_same_policies(runtime_policies, ready_data)
                 if (ready_data.get('run_id'), ready_data.get('task_id'),
@@ -1069,6 +1076,7 @@ def main() -> None:
     parser.add_argument('--repeat', type=int)
     parser.add_argument('--task', required=True)
     parser.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
+    parser.add_argument('--citation-review-gate',choices=('gate-only','gate-one-repair'))
     parser.add_argument('--research-candidate', choices=(
         'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
         'pos_pma_complement_v1', 'pos_pma_shared_view_v1',

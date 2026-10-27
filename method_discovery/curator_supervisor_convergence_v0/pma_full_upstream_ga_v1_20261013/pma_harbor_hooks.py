@@ -89,6 +89,10 @@ def verify_live_spec(spec: dict) -> None:
         raise RuntimeError('PMA frozen manifest or authorization changed')
     frozen = json.loads(manifest.read_text(encoding='utf-8'))
     granted = json.loads(authorization.read_text(encoding='utf-8'))
+    from .citation_gate_config import require_gate_binding,verify_gate_sources
+    require_gate_binding(spec.get('citation_review_gate'),frozen.get('config',{}),
+                         spec.get('research_candidate','U'),spec.get('condition','B'))
+    verify_gate_sources(frozen.get('config',{}))
     policy = frozen.get('config', {}).get('runtime_policy')
     if spec.get('runtime_policy') != policy:
         raise RuntimeError('runtime policy differs from the authorized manifest')

@@ -229,6 +229,7 @@ class AlignedEvidenceGapMemoryAgent(EvidenceGapMemoryAgent):
                                     for row in self._previous_failures[:3])
                 suffix += ("Previous maintenance errors (host diagnostics, not evidence): "
                            + summary + f"; total failed={len(self._previous_failures)}.\n")
+            suffix += self._maintenance_control_suffix()
             self._parts = render_source_blocks(memory_blocks + public,
                 cycle_id="cycle_" + uuid.uuid4().hex, prefix=prefix, suffix=suffix)
             self._draft = draft

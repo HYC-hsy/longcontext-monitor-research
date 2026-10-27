@@ -189,6 +189,7 @@ class EvidenceGapMemoryAgent(GapMemoryAgent):
                                     for row in self._previous_failures[:3])
                 suffix += ("Previous maintenance errors (host diagnostics, not evidence): "
                            + summary + f"; total failed={len(self._previous_failures)}.\n")
+            suffix += self._maintenance_control_suffix()
             self._parts = render_source_blocks(memory_blocks + public,
                 cycle_id="cycle_" + uuid.uuid4().hex, prefix=prefix, suffix=suffix)
             self._draft = draft
@@ -197,6 +198,9 @@ class EvidenceGapMemoryAgent(GapMemoryAgent):
             self.last_evidence_report["errors"].append(str(exc))
             # No binding catalog survives failure; unchanged phase 2 still runs.
             return super()._build_phase1_prompt(observation, step_count)
+
+    def _maintenance_control_suffix(self):
+        return ""
 
     async def _call_llm_phase1(self, user_prompt):
         self.transport_phase = "maintenance"
