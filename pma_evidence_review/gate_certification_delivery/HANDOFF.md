@@ -1,15 +1,22 @@
 # Gate 生命周期认证接收指令（认证补丁候选）
 
-父版本 a51350908ed89fe511343770b9755d49e40059a9。以最终审查回复的补丁 exact SHA 为准。
-本轮只修复离线 regression runner 的进程/导入隔离；没有执行 Harbor 容器生命周期。
-历史 3.11 日志曾对 native 模块作一次明确 skip；这不是 Windows 验收结果。
-8c075bb 的 Windows Python 3.13.14 实际运行 273 项，8 errors、0 failures、0 skips：
-同进程错用了 PMA vendor Harbor（没有 `_resolve_tests`），并非 gate 已获认证。
-现在 PMA/vendor 与 native evaluator 分别使用新解释器进程；原断言与真实 Verifier 不改。
-云端 Python 3.12.14 最终 282 项全部通过（原 273 + 新 runner 9；零跳过）；
-Windows 3.13.14 待用下述命令复验。证据见 `runner_isolation_20261028/`。
-接收端 Docker Linux Engine 在上次只读预检中不可连接；本补丁不启动/安装/修复 Docker。
-不得把 worker fake 通过当作完成 Harbor 认证。旧 gate_delivery 日志保持原件。
+父版本 `57b204aefeaf3768b47a698dabde3a7880a93f49`；以最终审查回复的修复 exact SHA 为准。
+上一轮 Windows 隔离回归 282/282 通过，A 零模型夹具完成；gate-only 在 Task 启动前因缺失
+runtime policy 被拦截，gate-one-repair 未启动。归档 `df7550644bba1598ff424c8c52b0dcf63737214a`
+是部分诊断包；未收录的原始材料不等于没有产生，不能据此声称 gate 已认证。
+
+本轮修复两个接线缺陷，不改模型提示、审核语义或历史结果：
+
+1. gap 候选缺 policy 现在在 `single_run.prepare` 创建输出、读取 profile、假授权和启动运行之前报错；
+   不自动补限额、不绕过 Harbor 最终策略校验。命令补上 B 专用 `--runtime-policy-file`。
+2. gate 原先错误写入 stateful-fake 分支、实际 prepare 的 plan 却未保存，导致显式 gate 丢失。
+   现在写到正确 plan，并在生成 manifest 后检查 gate 原值绑定，缺失/错模式不再发布 manifest/run identity。
+   同时恢复无关 stateful-fake 准备路径，不增加 gate。
+
+下述认证必须使用新固定源码、新目录、新 run_id：A、gate-only、gate-one-repair 各一次。
+旧 A 虽成功，但源码身份已变化，不能直接套入新证书；本次不是在旧冻结运行上补参数重跑。
+此前失败 run 的卷身份记录仍为 unknown，不能回填 clean；只读排查与新运行认证分别记录。
+没有运行任何新 Harbor/Docker 生命周期、真实模型或正式 Task。本轮离线证据见 `policy_preflight_20261028/`。
 
 ## 契约与变更
 
@@ -60,8 +67,8 @@ PMA 必须来自当前 checkout 的 vendor；native 必须来自指定的干净�
 省略 `--native-harbor-source-root` 时，只接受解释器既有安装所指向的同一固定干净源码；
 不要用随便安装的同名 Harbor 或把 vendor 放进 native 路径来代替。
 Python3.11 仍只有原先一次“整个 native 模块未执行”的明确 skip，不能算 native 验收；
-Python3.12+ 不新增 skip。完整接收预期为 266 PMA + 16 native = 282，零失败/错误/跳过。
-原 273 个测试全部保留且原文件字节不变；其中原先报错的 8 个边界测试不得删减或降级。
+Python3.12+ 不新增 skip。完整接收预期为 276 PMA + 16 native = 292，零失败/错误/跳过。
+原 282 个测试全部保留且原文件字节不变，新增 10 个 policy/入口链回归；原先报错的 8 个边界测试不得删减或降级。
 上次 Windows 的既有路径是 `E:\LongContext\bench_runtime\m4\harbor-env\Scripts\python.exe`
 和 `E:\LongContext\bench_runtime\m4\harbor-src`，使用前仍须核对实际存在与固定身份。
 云端通过不是 Windows 实机通过，也不是 Docker 生命周期或两种 gate 模式认证。
@@ -70,14 +77,58 @@ Python3.12+ 不新增 skip。完整接收预期为 266 PMA + 16 native = 282，�
 
 本节是后续独立认证步骤，不由 runner 修复通过自动授权执行。
 必须具备既有 Docker/Harbor 环境和本地官方镜像；不下载新依赖来绕过失败。
-先只读执行 `docker info --format '{{.ServerVersion}}'`，退出非零或空版本立即停止本节。
-上次 `dockerDesktopLinuxEngine` pipe 不可用是独立前提阻塞；不得因为离线通过而继续 fixture，
-也不在本次 runner 修复内启动/安装 Docker、创建容器或生成真实授权。
+先只读执行 `docker info --format '{{.ServerVersion}}'` 与 `docker info --format '{{.OSType}}'`，
+退出非零、空版本或非 linux 立即停止本节。最近本机已读到 Linux Engine 29.6.1，但需重新核对，
+不得只因历史可用或离线通过而跳过检查；本轮不启动/安装 Docker、不生成真实授权。
 官方源码固定 2fd12b88aafdd04a52c298e3940bcb189f9766d6；Harbor 固定
 459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc。使用现有 secret-free fixture profiles，
 不得把真实 key/profile 拷进交付目录。下面变量是占位符，换成已有本地路径；不是私有路径示例。
 Task/PMA fixture profiles 仍需符合既有 Opus4.8配置形状；fixture只使用fake传输。
 不要使用 --candidate-profile-fixture（该参数属于其它 PoS 路径）。
+
+先从固定历史 Git 原件导出已采用的 requested policy，不手写新预算、不使用含派生字段的 resolved policy。
+固定归档 `72152913f545ca36a75b68e8796e24a6e24f9f81` 的 SQLite/HTML IDENTITY.json 两者均记录：
+`agent_timeout=uncapped, task_turns=uncapped, verifier_timeout=official`。仅复用该执行策略，不复用旧证书。
+这个 uncapped 是已有显式实验策略，不是代码默认或因为失败而新放宽限制；Harbor verifier 仍取原任务官方时限。
+若现有已批准策略与此不同、固定原件无法读取或无法确认沿用，停止并报告，不自行替换策略。
+
+```powershell
+$Repo=(Get-Location).Path
+$RuntimePolicy=Join-Path $Reports 'approved_requested_runtime_policy.json'
+# 若固定对象本机不存在，只抓取该固定归档，不切换/覆盖当前源码。
+git cat-file -e 72152913f545ca36a75b68e8796e24a6e24f9f81^{commit}
+if ($LASTEXITCODE -ne 0) {
+  git fetch origin 72152913f545ca36a75b68e8796e24a6e24f9f81
+  if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch fixed policy provenance; stop' }
+}
+@'
+import hashlib, json, pathlib, subprocess, sys
+repo, output = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+commit = '72152913f545ca36a75b68e8796e24a6e24f9f81'
+prefix = 'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/source_window_two_real_20261025'
+rows = []
+for task in ('01-sqlite-with-gcov-r1', '02-filter-js-from-html-r1'):
+    path = prefix + '/' + task + '/IDENTITY.json'
+    raw = subprocess.check_output(['git', '-c', 'core.longpaths=true', 'show', commit + ':' + path], cwd=repo)
+    requested = json.loads(raw)['runtime_policy']['requested']
+    rows.append({'path': path, 'sha256': hashlib.sha256(raw).hexdigest(), 'requested': requested})
+expected = {'agent_timeout': 'uncapped', 'task_turns': 'uncapped', 'verifier_timeout': 'official'}
+if any(row['requested'] != expected for row in rows):
+    raise RuntimeError('Fixed historical policies differ; do not invent a replacement')
+raw = (json.dumps(rows[0]['requested'], sort_keys=True, indent=2) + '\n').encode('utf-8')
+with output.open('xb') as f:
+    f.write(raw)
+record = {'source_commit': commit, 'sources': rows, 'requested_policy_sha256': hashlib.sha256(raw).hexdigest()}
+with output.with_suffix('.provenance.json').open('x', encoding='utf-8', newline='\n') as f:
+    json.dump(record, f, ensure_ascii=False, indent=2)
+    f.write('\n')
+print(json.dumps(record, ensure_ascii=False))
+'@ | & $Python -X utf8 -B - $Repo $RuntimePolicy
+if ($LASTEXITCODE -ne 0) { throw 'Approved policy source/export failed; stop before fixtures' }
+```
+
+A/U 不接收 runtime policy 覆盖，因此不得把此参数加到 A/B 共用的 `$Common` 中。
+B 两种模式和其后两份 real prepare 必须显式传相同 `$RuntimePolicy`；不得改 frozen manifest 补字段。
 
 ```powershell
 $Prefix='method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013'
@@ -101,19 +152,24 @@ $Common=@('--task','sqlite-with-gcov','--official-source-git',$Official,
   '--native-context-policy','required','--research-capture-policy','required')
 
 # A也用当前源码重新做native生命周期，不能拿旧源码证书替代。
-python -m "$Prefix.single_run_fixture" @Common --condition A --research-candidate U --output "$FixtureRoot/A"
+& $Python -X utf8 -B -m "$Prefix.single_run_fixture" @Common --condition A --research-candidate U --output "$FixtureRoot/A"
 if ($LASTEXITCODE -ne 0) { throw 'A native fake fixture failed; stop' }
 foreach ($Mode in @('gate-only','gate-one-repair')) {
-  python -m "$Prefix.single_run_fixture" @Common --condition B --research-candidate pma_gap_evidence_v1 --citation-review-gate $Mode --output "$FixtureRoot/$Mode"
+  & $Python -X utf8 -B -m "$Prefix.single_run_fixture" @Common --condition B --research-candidate pma_gap_evidence_v1 --citation-review-gate $Mode --runtime-policy-file $RuntimePolicy --output "$FixtureRoot/$Mode"
   if ($LASTEXITCODE -ne 0) { throw "$Mode native fake fixture failed; stop" }
-  python -m "$Prefix.collect_single_run_fixture" --a "$FixtureRoot/A" --b "$FixtureRoot/$Mode" --output "$CertRoot/$Mode" --task-profile-file $FakeTask --pma-profile-file $FakePma --research-candidate pma_gap_evidence_v1 --citation-review-gate $Mode
+  & $Python -X utf8 -B -m "$Prefix.collect_single_run_fixture" --a "$FixtureRoot/A" --b "$FixtureRoot/$Mode" --output "$CertRoot/$Mode" --task-profile-file $FakeTask --pma-profile-file $FakePma --research-candidate pma_gap_evidence_v1 --citation-review-gate $Mode
   if ($LASTEXITCODE -ne 0) { throw "$Mode collect/validate failed; stop" }
 }
 ```
 
+每个 B 运行后须核对实际冻结 plan 有 citation_review_gate，manifest.config 有同模式及
+citation_gate_source_sha256、runtime_policy.requested；execution_identity.gate_config 与 manifest.config
+完全一致，且 runtime_policy_effective.json 表明 Harbor 实际应用同一策略。最终仍以完整证书验证为准，
+仅看到 CLI 参数、execution_identity 顶层 gate_config 键或阶段名称，不算 gate 已生效。
+
 collect 只复制原脚本白名单、脱敏后再验证，哈希材料若脱敏破坏身份则拒绝。
 新证书不靠人工填phase；由实际capture生成。缺第二维护/回执、没有repair等均失败。
-成功也不自动发布采集材料。先检查两个证书目录、FILE_HASHES、secret-free内容与原件，
+先检查两个证书目录、FILE_HASHES、secret-free内容与原件，
 仅将审核过的这两个目录提交本地 Git（正式验证继承原证据必须committed约束）：
 
 ```powershell
@@ -123,26 +179,27 @@ git diff --cached --stat
 git commit -m 'Record reviewed synthetic native gate lifecycle evidence'
 if ($LASTEXITCODE -ne 0) { throw 'Evidence must be committed before formal verification' }
 foreach ($Mode in @('gate-only','gate-one-repair')) {
-  python -m "$Prefix.gate_certification" --evidence "$CertRoot/$Mode" --mode $Mode
+  & $Python -X utf8 -B -m "$Prefix.gate_certification" --evidence "$CertRoot/$Mode" --mode $Mode
   if ($LASTEXITCODE -ne 0) { throw "$Mode committed verification failed; stop" }
 }
 ```
 
-这里是本地证据提交，不授权上传真实私有包或凭据。若fixture失败，保存原错误报告，不自动重跑、不调低验证条件。
+这里是本地证据提交，不授权上传 profile、private_client 或凭据；后续仅按最终交付指令的诊断白名单上传。若fixture失败，保存原错误报告，不自动重跑、不调低验证条件。
 无Docker、镜像、Harbor、配置不符时停止此阶段；离线unit通过仍然不能启动真实实验。
 
-## 认证通过且另外获得真实实验授权后才准备
+## 认证通过后只准备配置；真实执行仍另行授权
 
-以下prepare不发送模型请求，但读取用户既有配置；本实现线程没有执行。
+以下 prepare 不发送模型请求，只读取用户已批准的既有配置；本实现线程没有执行。
+不得复制/上传私有 profile 或凭据。仅准备并返回两份 manifest、config hash、run_id，不能生成真实授权或启动 run。
 使用各模式对应证书，保持相同任务和其它设置，两个全新输出目录。
 
 ```powershell
 $TaskProfile='<用户批准的既有Task配置.py>'
 $PmaProfile='<用户批准的既有PMA配置.json>'
 $Task='<用户批准的Task标识>'
-python -m "$Prefix.single_run" prepare --task $Task --condition B --research-candidate pma_gap_evidence_v1 --citation-review-gate gate-only --occurrence 1 --output '<全新gate-only准备目录>' --official-source-git $Official --task-profile-file $TaskProfile --pma-profile-file $PmaProfile --certification-dir "$CertRoot/gate-only" --native-context-policy required --research-capture-policy required
+& $Python -X utf8 -B -m "$Prefix.single_run" prepare --task $Task --condition B --research-candidate pma_gap_evidence_v1 --citation-review-gate gate-only --runtime-policy-file $RuntimePolicy --occurrence 1 --output '<全新gate-only准备目录>' --official-source-git $Official --task-profile-file $TaskProfile --pma-profile-file $PmaProfile --certification-dir "$CertRoot/gate-only" --native-context-policy required --research-capture-policy required
 if ($LASTEXITCODE -ne 0) { throw 'gate-only prepare failed' }
-python -m "$Prefix.single_run" prepare --task $Task --condition B --research-candidate pma_gap_evidence_v1 --citation-review-gate gate-one-repair --occurrence 1 --output '<全新gate-one-repair准备目录>' --official-source-git $Official --task-profile-file $TaskProfile --pma-profile-file $PmaProfile --certification-dir "$CertRoot/gate-one-repair" --native-context-policy required --research-capture-policy required
+& $Python -X utf8 -B -m "$Prefix.single_run" prepare --task $Task --condition B --research-candidate pma_gap_evidence_v1 --citation-review-gate gate-one-repair --runtime-policy-file $RuntimePolicy --occurrence 1 --output '<全新gate-one-repair准备目录>' --official-source-git $Official --task-profile-file $TaskProfile --pma-profile-file $PmaProfile --certification-dir "$CertRoot/gate-one-repair" --native-context-policy required --research-capture-policy required
 if ($LASTEXITCODE -ne 0) { throw 'gate-one-repair prepare failed' }
 ```
 
@@ -159,3 +216,28 @@ collector 在每个输出认证根（例如 gate-only/、gate-one-repair/）生�
 回归使用真实临时Git仓库，core.autocrlf=true下add/commit再新clone检出，
 验证CRLF原日志、UTF-8证书、索引及属性文件字节与Git blob完全一致，目录外属性不变。
 793a及其原日志保留；接收方须从最终含字节保护补丁的SHA重新生成认证材料。
+
+
+## 完整诊断包一次性交付
+
+每个运行命令执行后核对退出码；任一阶段失败立即停止后续模式，不现场改源码、改响应或自动重跑。
+保存原输出及未执行清单。旧 df7550644bba1598ff424c8c52b0dcf63737214a 包及旧 unknown 清理记录保持不变。
+成功或提前停止，都按本轮实际发生材料制作一个新 ZIP 与外部索引，建议新名称
+`PMA_CITATION_GATE_POLICY_BINDING_ACCEPTANCE_20261028.zip`（实际日期变动时同步改名，不覆盖旧包）。
+
+白名单包括：固定源码/环境/来源身份；两个隔离子进程原始输出、测试清单和 summary；
+固定历史 policy 导出及来源哈希；Docker 只读结果；实际 A/B 夹具命令、原始日志、计划和 manifest、
+execution_identity、runtime_policy_effective、worker 捕获、memory/gap/receipt 与最终 bank、
+native 合成生命周期和证书核验材料；授权撤除与限定 run_id 的容器/卷清理报告；
+两份 prepare 的可公开计划/身份或未产生说明；诊断说明及逐文件哈希索引。
+原始 fixture 本机目录应保留，不能用 collector 的脱敏副本代替原始请求/回执而声称原件完整。
+仅将白名单真实产生的文件纳入；逐项区分“未产生”“已产生但未收录”“已收录”，不要把缺件统称未执行。
+
+禁止上传 profile、private_client、凭据、授权原件、秘密端点或无关个人材料。
+如必需原件含秘密或白名单无法安全完整发布，停止公开上传并说明缺项，不静默改写/脱敏后宣称原始完整。
+按已授权目的只提交该 ZIP 及外部索引到
+`HYC-hsy/longcontext-monitor-research/pma_evidence_review/diagnostic_packages/`；
+使用新归档提交、非强制推送，不上传整个工作区。
+推送后重新 fetch，读取远端 exact commit 的 ZIP 字节，核对大小、SHA-256、CRC、逐文件哈希及外部索引。
+返回代码 SHA、实际证据提交 HEAD、归档 SHA、下载链接、各阶段真实执行/停止状态和剩余限制。
+工程回归、零模型生命周期与模型/Task 效果分别报告；本轮不运行 29 条审核集，也不调用真实模型或正式 Task。

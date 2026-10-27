@@ -32,7 +32,6 @@ def prepare_stateful_fake(args: argparse.Namespace) -> dict:
             'research_candidate': 'pma_stateful_memory_v1',
             'mode': 'fake-only', 'execution_authorized': False,
             'task': 'synthetic-local-task', 'run_id': 'stateful-' + uuid.uuid4().hex[:16]}
-    if gate is not None:plan['citation_review_gate']=gate
     _write_new(root / 'plan.json', plan)
     return plan
 
@@ -110,6 +109,16 @@ def prepare(args: argparse.Namespace) -> dict:
     if runtime_policy is not None and getattr(args, 'research_candidate', 'U') not in {
             'pma_stateful_memory_v1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1'}:
         raise ValueError('runtime policy overrides require a supported candidate')
+    # Gap Harbor hooks require an explicit resolved policy at agent_start.
+    # Fail before artifacts/profiles, fixture grants or runtime allocation.
+    # Never invent timeout/turn budgets to repair a missing configuration.
+    if getattr(args, 'research_candidate', 'U') in {
+            'pma_gap_memory_v0', 'pma_gap_evidence_v1'}:
+        if runtime_policy is None:
+            raise ValueError('gap candidate requires an explicit runtime policy; '
+                             'pass --runtime-policy-file with the approved requested policy')
+        if not isinstance(runtime_policy, dict):
+            raise ValueError('gap runtime policy must be a requested-policy JSON object')
     root = Path(args.output).resolve(strict=False)
     root.mkdir(parents=True, exist_ok=False)
     pos = args.condition == 'P'
@@ -166,6 +175,8 @@ def prepare(args: argparse.Namespace) -> dict:
     if reuse is not None:
         plan['runtime_reuse'] = reuse
         plan['current_config_sha256'] = args.current_config_sha256
+    if gate is not None:
+        plan['citation_review_gate'] = gate
     _write_new(root / 'plan.json', plan)
     if pos:
         from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import prepare as prepare_pos
@@ -181,6 +192,9 @@ def prepare(args: argparse.Namespace) -> dict:
             Path(args.pma_profile_file).resolve(strict=True),
             evidence=(Path(args.certification_dir).resolve(strict=True)
                       if getattr(args, 'certification_dir', None) else None), plan=plan)
+    if not pos:
+        from .citation_gate_config import require_gate_binding
+        require_gate_binding(gate, manifest['config'], candidate, args.condition)
     if args.fake_only and not pos:
         manifest['zero_model_fixture_only'] = True
         if candidate == 'pma_stateful_memory_v1':
