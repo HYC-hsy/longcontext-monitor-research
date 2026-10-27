@@ -5,10 +5,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 
 from .archive_live_six_task import private_values, redact
-from .export_gap_visible_audit import Sanitizer
+from .export_gap_visible_audit import Sanitizer, URL
 from .single_run_certification import EVIDENCE_FILES, verify_evidence
 
 
@@ -19,6 +20,34 @@ def _verifiable_evidence_snapshot(raw: bytes, secrets: list[str]) -> tuple[bytes
     projected = sanitizer.clean(value)
     if sanitizer.removals or projected != value:
         raise RuntimeError('evidence snapshot needs redaction and cannot retain its binding')
+    return raw, 0
+
+
+def _verifiable_evidence_jsonl(raw: bytes, secrets: list[str]) -> tuple[bytes, int]:
+    """Preserve sealed synthetic rows byte-for-byte, or refuse publication."""
+    if any(secret.encode('utf-8') in raw for secret in secrets if len(secret) >= 6):
+        raise RuntimeError('sealed evidence row needs redaction')
+
+    def scan_view(value):
+        if isinstance(value, dict):
+            return {key: scan_view(item) for key, item in value.items()
+                    if not (key == 'metadata' and item == {})}
+        if isinstance(value, list):
+            return [scan_view(item) for item in value]
+        if isinstance(value, str):
+            return URL.sub(lambda match: '[PUBLIC_LOOPBACK_FIXTURE]'
+                if re.fullmatch(r'http://127\.0\.0\.1:\d+/', match.group())
+                else match.group(), value)
+        return value
+
+    sanitizer = Sanitizer(secrets)
+    for line in raw.splitlines():
+        if not line.strip():
+            raise RuntimeError('blank sealed evidence row')
+        value = json.loads(line)
+        viewed = scan_view(value)
+        if sanitizer.clean(viewed) != viewed or sanitizer.removals:
+            raise RuntimeError('sealed evidence row needs redaction')
     return raw, 0
 
 
@@ -60,10 +89,13 @@ def collect(condition: str, source: Path, target: Path, secrets: list[str],
     output = []
     for name, path in sorted(mapping.items()):
         raw = path.read_bytes()
-        public, removed = (_verifiable_evidence_snapshot(raw, secrets)
-                           if name == 'memory.json' and
-                           research_candidate == 'pma_gap_evidence_v1' else
-                           redact(raw, secrets))
+        if research_candidate == 'pma_gap_evidence_v1' and name == 'memory.json':
+            public, removed = _verifiable_evidence_snapshot(raw, secrets)
+        elif citation_review_gate and name in {
+                'memory_payload.jsonl', 'gap_cycle.jsonl', 'gap_visible_transport.jsonl'}:
+            public, removed = _verifiable_evidence_jsonl(raw, secrets)
+        else:
+            public, removed = redact(raw, secrets)
         destination = target / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         with destination.open('xb') as stream:
