@@ -78,7 +78,8 @@ def inspect_evidence(base, mode):
         maintenance,answer=group[0];selection=group[-1][0]
         require(maintenance['phase']=='maintenance' and selection['phase']=='selection','gate_phase_edges')
         require(digest(maintenance['prompt'])==manifest['request_sha256'],'gate_maintenance_hash')
-        parsed=ci.old.visible_sources(maintenance['prompt'],manifest)
+        parsed=ci.old.visible_sources(maintenance['prompt'],manifest,
+                allow_python_default_source_ids=True)
         def source_projection(source):
             return {k:v for k,v in source.items() if k!='handle' or source['kind']=='public'}
         require([source_projection(x) for x in parsed]==[source_projection(x) for x in visibility['sources']],

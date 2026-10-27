@@ -48,7 +48,7 @@ def revision(store, rid):
             'category': rev['category'], 'content': content}
 
 
-def visible_sources(prompt, manifest):
+def visible_sources(prompt, manifest, *, allow_python_default_source_ids=False):
     """Use manifest lengths, not final retained sources or a global regex split.
 
     Header-like text inside a tool result cannot create an extra evidence source.
@@ -63,16 +63,18 @@ def visible_sources(prompt, manifest):
         require(header is not None, 'missing_source_header')
         handle, role, order, field = header.groups()
         identity = json.loads(sid)
-        require(json.dumps(identity, ensure_ascii=False, separators=(',', ':')) == sid,
+        canonical = json.dumps(identity, ensure_ascii=False, separators=(',', ':'))
+        python_default = json.dumps(identity, ensure_ascii=False)
+        require(sid == canonical or (allow_python_default_source_ids and sid == python_default),
                 'noncanonical_source_id')
         combined = [span for ref, group in zip(refs, spans) if ref == sid for span in group]
-        sealed = json.dumps([manifest['cycle_id'], manifest['request_sha256'], sid, combined],
+        sealed = json.dumps([manifest['cycle_id'], manifest['request_sha256'], canonical, combined],
                             ensure_ascii=False, separators=(',', ':'))
         require(visibility == digest(sealed), 'visibility_ref_mismatch')
         require(identity[1] in ('public', 'memory'), 'unknown_source_kind')
         if identity[1] == 'public':
             require(identity[-1] == field, 'source_field_mismatch')
-            require(handle == 's' + digest(sid)[:12], 'source_handle_mismatch')
+            require(handle == 's' + digest(canonical)[:12], 'source_handle_mismatch')
         cursor = header.end()
         slices = []
         for number, pair in enumerate(ranges):

@@ -24,6 +24,27 @@ class IdentityTests(unittest.TestCase):
     def setUp(self):
         install_guard(self)
 
+    def test_gate_runtime_default_json_source_id_keeps_original_seal(self):
+        identity = ['episode', 'public', 'event', 'content']
+        sid = json.dumps(identity, ensure_ascii=False)
+        canonical = json.dumps(identity, ensure_ascii=False, separators=(',', ':'))
+        handle = 's' + digest(canonical)[:12]
+        prompt = f'\n[{handle} tool_observation event_order=0 field=content]\nabc'
+        manifest = {'cycle_id': 'cycle', 'request_sha256': digest(prompt),
+            'ordered_source_refs': [sid], 'visible_spans': [[[0, 3]]],
+            'visibility_refs': [digest(json.dumps([
+                'cycle', digest(prompt), canonical, [[0, 3]]],
+                ensure_ascii=False, separators=(',', ':')))]}
+        with self.assertRaisesRegex(ValueError, 'noncanonical_source_id'):
+            visible_sources(prompt, manifest)
+        parsed = visible_sources(prompt, manifest, allow_python_default_source_ids=True)
+        self.assertEqual(parsed[0]['source_id'], sid)
+        self.assertEqual(parsed[0]['slices'][0]['text'], 'abc')
+        altered = copy.deepcopy(manifest)
+        altered['ordered_source_refs'][0] = sid.replace(', ', ',  ', 1)
+        with self.assertRaisesRegex(ValueError, 'noncanonical_source_id'):
+            visible_sources(prompt, altered, allow_python_default_source_ids=True)
+
     def test_sqlite_operation_and_deletion_mutations_rejected(self):
         original = build(ROOT, 'sqlite')
         for key in ('content', 'before'):
