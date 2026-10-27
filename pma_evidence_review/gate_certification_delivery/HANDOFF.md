@@ -1,8 +1,14 @@
 # Gate 生命周期认证接收指令（认证补丁候选）
 
 父版本 a51350908ed89fe511343770b9755d49e40059a9。以最终审查回复的补丁 exact SHA 为准。
-本轮只实现和离线测试；本机没有 docker 命令，没有执行 Harbor 容器生命周期。
-原生test_evaluation_bootstrap模块依赖Python3.12语法；本机3.11导入失败原文另存，最终runner明确skip该模块。接收方Python3.12将实际执行，不能忽略失败。
+本轮只修复离线 regression runner 的进程/导入隔离；没有执行 Harbor 容器生命周期。
+历史 3.11 日志曾对 native 模块作一次明确 skip；这不是 Windows 验收结果。
+8c075bb 的 Windows Python 3.13.14 实际运行 273 项，8 errors、0 failures、0 skips：
+同进程错用了 PMA vendor Harbor（没有 `_resolve_tests`），并非 gate 已获认证。
+现在 PMA/vendor 与 native evaluator 分别使用新解释器进程；原断言与真实 Verifier 不改。
+云端 Python 3.12.14 最终 282 项全部通过（原 273 + 新 runner 9；零跳过）；
+Windows 3.13.14 待用下述命令复验。证据见 `runner_isolation_20261028/`。
+接收端 Docker Linux Engine 在上次只读预检中不可连接；本补丁不启动/安装/修复 Docker。
 不得把 worker fake 通过当作完成 Harbor 认证。旧 gate_delivery 日志保持原件。
 
 ## 契约与变更
@@ -37,16 +43,36 @@
 $env:PYTHONUTF8='1'
 $env:PYTHONDONTWRITEBYTECODE='1'
 $env:LITELLM_LOCAL_MODEL_COST_MAP='True'
-python -m pma_evidence_review.tests.run_gate_regressions
-if ($LASTEXITCODE -ne 0) { throw 'Offline regressions failed' }
+# 使用既有解释器与独立 Harbor checkout，不是 PMA vendor Harbor。
+$Python='<既有 Python3.12+ 可执行文件>'
+$NativeHarborSource='<既有独立 Harbor 源码根目录>'
+$Reports='<全新离线回归报告目录>'
+# NativeHarborSource 必须为干净的 459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc。
+& $Python -X utf8 -B -m pma_evidence_review.tests.run_gate_regressions --native-harbor-source-root $NativeHarborSource --report-dir $Reports
+if ($LASTEXITCODE -ne 0) { throw 'Offline regressions failed; keep both child logs and stop' }
 ```
 
 此 runner 禁止网络连接（Windows asyncio socketpair 例外），无 profile 读取，无真实模型。
-Python3.11/源码 Harbor 导入适配只用于测试，不冒称修改生产 vendor 或验证 Windows 实机。
+协调进程不导入 PMA/Harbor；两个子进程都执行，即使前一个失败也保留后一个结果。
+`pma.json`、`native.json` 记录完整测试清单和实际 module origin，`*.stdout.txt` /
+`*.stderr.txt` 保留原始子进程输出，`summary.json` 聚合真实退出码、计数与重复清单检查。
+PMA 必须来自当前 checkout 的 vendor；native 必须来自指定的干净固定源码，拒绝 vendor 回退。
+省略 `--native-harbor-source-root` 时，只接受解释器既有安装所指向的同一固定干净源码；
+不要用随便安装的同名 Harbor 或把 vendor 放进 native 路径来代替。
+Python3.11 仍只有原先一次“整个 native 模块未执行”的明确 skip，不能算 native 验收；
+Python3.12+ 不新增 skip。完整接收预期为 266 PMA + 16 native = 282，零失败/错误/跳过。
+原 273 个测试全部保留且原文件字节不变；其中原先报错的 8 个边界测试不得删减或降级。
+上次 Windows 的既有路径是 `E:\LongContext\bench_runtime\m4\harbor-env\Scripts\python.exe`
+和 `E:\LongContext\bench_runtime\m4\harbor-src`，使用前仍须核对实际存在与固定身份。
+云端通过不是 Windows 实机通过，也不是 Docker 生命周期或两种 gate 模式认证。
 
 ## 接收端零模型 Harbor 认证：完整命令
 
+本节是后续独立认证步骤，不由 runner 修复通过自动授权执行。
 必须具备既有 Docker/Harbor 环境和本地官方镜像；不下载新依赖来绕过失败。
+先只读执行 `docker info --format '{{.ServerVersion}}'`，退出非零或空版本立即停止本节。
+上次 `dockerDesktopLinuxEngine` pipe 不可用是独立前提阻塞；不得因为离线通过而继续 fixture，
+也不在本次 runner 修复内启动/安装 Docker、创建容器或生成真实授权。
 官方源码固定 2fd12b88aafdd04a52c298e3940bcb189f9766d6；Harbor 固定
 459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc。使用现有 secret-free fixture profiles，
 不得把真实 key/profile 拷进交付目录。下面变量是占位符，换成已有本地路径；不是私有路径示例。
