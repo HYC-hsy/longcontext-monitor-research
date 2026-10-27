@@ -43,7 +43,7 @@ class CitationExperimentTests(unittest.TestCase):
             self.assertNotIn(word,ex.CLARIFICATION)
 
     def test_fake_payload_identity_and_wrong_strategy_score(self):
-        for strategy in (ex.BASELINE,ex.CANDIDATE):
+        for strategy in (ex.BASELINE,ex.CANDIDATE,ex.ONE_SENTENCE):
             plan=ex.plan(DATA,PIN,strategy)
             responses=[json.dumps({'op_index':e['request']['op_index'],'verdict':'insufficient','explanation':'fixture'}) for e in plan['entries']]
             client=FakeClient(responses)
@@ -82,3 +82,30 @@ class CitationExperimentTests(unittest.TestCase):
             with patch('sys.argv',args+['--execute-authorized-real-model']),patch.object(ex,'load_profile_client',return_value=FakeClient(['bad'])):
                 with self.assertRaisesRegex(SystemExit,'stopped'):ex.main()
             self.assertTrue((root/'mock/results.json').exists())
+
+    def test_one_sentence_exact_insertion_and_old_plan_identities(self):
+        a=ex.plan(DATA,PIN);old=ex.plan(DATA,PIN,ex.CANDIDATE)
+        self.assertEqual(a['experiment_plan_sha256'],'a1282f49e8538a991419eafcc2e7ca49704c15fbc1363c57cbb496317ec5b3f1')
+        self.assertEqual(old['experiment_plan_sha256'],'eb19addffa4401228fb4cf7aa6b0d24ea9a3b088441cfeffab62b004a3bc719e')
+        new=ex.plan(DATA,PIN,ex.ONE_SENTENCE)
+        sentence='Assess support by meaning rather than wording, without broadening scope, dropping conditions, or strengthening the claims supported by the evidence.'
+        for ea,en in zip(a['entries'],new['entries']):
+            request=copy.deepcopy(en['request'])
+            self.assertEqual(request['system'].count(sentence),1)
+            self.assertIn(sentence+'\nSUPPORTED means',request['system'])
+            self.assertNotIn(ex.CLARIFICATION,request['system'])
+            request['system']=request['system'].replace(sentence+'\n','',1)
+            request['review_strategy']=ea['request']['review_strategy']
+            request['audit_request_sha256']=core.ci.identity({k:request[k] for k in ('system','prompt','tools')})
+            self.assertEqual(request,ea['request'])
+
+    def test_one_sentence_cli_export_matches_fake(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            args=['experiment','--dataset',str(DATA),'--manifest-sha256',PIN,'--strategy',ex.ONE_SENTENCE]
+            with patch('sys.argv',args+['export','--out',str(root/'plan.json')]):ex.main()
+            with patch('sys.argv',args+['fake','--out',str(root/'fake')]):ex.main()
+            plan=json.loads((root/'plan.json').read_text())
+            self.assertEqual(plan,json.loads((root/'fake/experiment-plan.json').read_text()))
+            received=[json.loads(line)['request'] for line in (root/'fake/requests.jsonl').read_text().splitlines()]
+            self.assertEqual(received,[{k:e['request'][k] for k in ('system','prompt','tools')} for e in plan['entries']])

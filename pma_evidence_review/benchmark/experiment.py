@@ -11,6 +11,8 @@ from ..transport import CapturedTransport, FakeClient, load_profile_client
 
 BASELINE = 'baseline-a'
 CANDIDATE = 'semantic-paraphrase-role-clarity-v1'
+ONE_SENTENCE = 'semantic-support-one-sentence-v1'
+SUPPORT_SENTENCE = 'Assess support by meaning rather than wording, without broadening scope, dropping conditions, or strengthening the claims supported by the evidence.'
 BASELINE_CODE = 'ae31a01fb94535d7fb11bbd8b7adfdb639bdb446'
 CLARIFICATION = '''Literal quotation matching and host identity checks apply to the submitted
 quotations and their recorded sources, not to whether the operation's conclusion repeats
@@ -33,7 +35,7 @@ inventing failure or importing unquoted context.
 
 
 def plan(dataset, manifest_sha256, strategy=BASELINE):
-    core.old.require(strategy in (BASELINE,CANDIDATE), 'experiment_strategy')
+    core.old.require(strategy in (BASELINE,CANDIDATE,ONE_SENTENCE), 'experiment_strategy')
     cases=core.load_dataset(dataset,manifest_sha256)['cases.json']
     entries=[]
     for case in cases:
@@ -42,7 +44,12 @@ def plan(dataset, manifest_sha256, strategy=BASELINE):
             anchor='Return only one JSON object with exactly op_index, verdict, explanation.'
             core.old.require(request['system'].count(anchor)==1, 'candidate_system_anchor')
             request['system']=request['system'].replace(anchor,CLARIFICATION+anchor,1)
-            request['review_strategy']=CANDIDATE
+        elif strategy==ONE_SENTENCE:
+            anchor='SUPPORTED means the submitted quotes suffice'
+            core.old.require(request['system'].count(anchor)==1, 'one_sentence_system_anchor')
+            request['system']=request['system'].replace(anchor,SUPPORT_SENTENCE+'\n'+anchor,1)
+        if strategy!=BASELINE:
+            request['review_strategy']=strategy
             request['audit_request_sha256']=core.ci.identity({k:request[k] for k in ('system','prompt','tools')})
         entries.append({'sample_id':case['sample_id'],
             'parent_benchmark_input_sha256':case['benchmark_input_sha256'],
@@ -113,7 +120,7 @@ def main():
     parser.add_argument('command',choices=['export','fake','run-profile','score'])
     parser.add_argument('--dataset',required=True)
     parser.add_argument('--manifest-sha256',required=True)
-    parser.add_argument('--strategy',choices=[BASELINE,CANDIDATE],default=BASELINE)
+    parser.add_argument('--strategy',choices=[BASELINE,CANDIDATE,ONE_SENTENCE],default=BASELINE)
     parser.add_argument('--out',required=True)
     parser.add_argument('--results')
     parser.add_argument('--repo',default='.')
