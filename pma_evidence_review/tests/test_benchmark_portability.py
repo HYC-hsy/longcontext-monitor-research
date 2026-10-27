@@ -29,7 +29,7 @@ class BenchmarkPortabilityTests(unittest.TestCase):
         with patch.object(core.subprocess, 'check_output', wraps=subprocess.check_output) as git:
             record = core.checked_file(REPO, relative)
         self.assertEqual(git.call_args.args[0],
-                         ['git', 'show', core.SOURCE_COMMIT+':'+relative.as_posix()])
+                         ['git', '-c', 'core.longpaths=true', 'show', core.SOURCE_COMMIT+':'+relative.as_posix()])
         self.assertEqual(record['path'], relative.as_posix())
 
     def test_writer_uses_utf8_lf_even_with_windows_text_default(self):

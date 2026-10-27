@@ -26,7 +26,10 @@ def checked_file(repo, relative):
     """Only fixed public repository bytes; fail if local files differ."""
     # Git object names and persisted provenance are POSIX, even on Windows.
     object_path = relative.as_posix()
-    frozen = subprocess.check_output(['git', 'show', SOURCE_COMMIT+':'+object_path], cwd=repo, env={**os.environ, 'GIT_NO_LAZY_FETCH':'1'})
+    # Git for Windows may stat the full object expression relative to cwd before
+    # resolving it.  A temporary checkout can exceed MAX_PATH even though the
+    # repository object exists; this per-call setting avoids global Git changes.
+    frozen = subprocess.check_output(['git', '-c', 'core.longpaths=true', 'show', SOURCE_COMMIT+':'+object_path], cwd=repo, env={**os.environ, 'GIT_NO_LAZY_FETCH':'1'})
     current = (Path(repo)/relative).read_bytes()
     old.require(current == frozen, 'public_commit_file_mismatch')
     return {'commit': SOURCE_COMMIT, 'path': object_path,
