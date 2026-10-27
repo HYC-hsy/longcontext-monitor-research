@@ -23,7 +23,7 @@ def _verifiable_evidence_snapshot(raw: bytes, secrets: list[str]) -> tuple[bytes
 
 
 def collect(condition: str, source: Path, target: Path, secrets: list[str],
-            research_candidate: str = "U") -> list[dict]:
+            research_candidate: str = "U", citation_review_gate=None) -> list[dict]:
     identity = json.loads((source / 'run_identity.json').read_text(encoding='utf-8'))
     run = Path(identity['run_root']).resolve(strict=True)
     if not run.is_relative_to(source.resolve(strict=True)):
@@ -72,11 +72,19 @@ def collect(condition: str, source: Path, target: Path, secrets: list[str],
                        'sha256': hashlib.sha256(public).hexdigest(),
                        'redactions': removed,
                        'private_source_sha256': hashlib.sha256(raw).hexdigest()})
+    if citation_review_gate:
+        from .gate_certification import inspect_evidence
+        certificate=inspect_evidence(target,citation_review_gate)
+        raw=json.dumps(certificate,ensure_ascii=False,sort_keys=True,indent=2).encode('utf-8')
+        (target/'gate_certificate.json').write_bytes(raw)
+        output.append({'path':f'{condition}/gate_certificate.json','bytes':len(raw),
+                       'sha256':hashlib.sha256(raw).hexdigest(),'redactions':0})
     return output
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--citation-review-gate',choices=('gate-only','gate-one-repair'))
     parser.add_argument('--a', type=Path, required=True)
     parser.add_argument('--b', type=Path)
     parser.add_argument('--output', type=Path, required=True)
@@ -85,14 +93,16 @@ def main() -> None:
     parser.add_argument('--research-candidate', choices=('U', 'V1', 'D1',
         'pma_gap_memory_v0', 'pma_gap_evidence_v1'), default='U')
     args = parser.parse_args()
+    from .citation_gate_config import validate_gate
+    validate_gate(args.citation_review_gate,args.research_candidate)
     if args.b is None and args.research_candidate != 'U':
         parser.error('A-only certification requires U')
     args.output.mkdir(parents=True, exist_ok=False)
     secrets = private_values(args.task_profile_file, args.pma_profile_file)
     files = collect('A', args.a, args.output / 'A', secrets)
     if args.b is not None:
-        files += collect('B', args.b, args.output / 'B', secrets, args.research_candidate)
-    summary = verify_evidence(args.output, require_committed=False,
+        files += collect('B', args.b, args.output / 'B', secrets, args.research_candidate,args.citation_review_gate)
+    summary = verify_evidence(args.output, require_committed=False,citation_review_gate=args.citation_review_gate,
                               research_candidate=(args.research_candidate
                                   if args.research_candidate != 'U' else None),
                               conditions=('A', 'B') if args.b is not None else ('A',))

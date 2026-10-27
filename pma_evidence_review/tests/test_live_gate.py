@@ -92,6 +92,28 @@ class LiveGateTests(unittest.TestCase):
             self.assertEqual(baseline.get_tools_schema(),original_tools)
             self.assertEqual(latest_phase1_system(),original_system)
 
+    def test_invalid_second_context_does_not_reuse_previous_commit_report(self):
+        agent,result,_=self.cycle([write()])
+        self.assertTrue(result.operations[0].success)
+        receipt_id=agent.pending_receipt['receipt_id']
+        agent.prepare_visible_context(None,[])
+        asyncio.run(agent.process('second observation',2))
+        report=agent.last_citation_gate_report
+        self.assertEqual(report['operations'],[])
+        self.assertEqual(report['error_code'],'maintenance_context_invalid')
+        self.assertTrue(report['incomplete'])
+        self.assertEqual(report['final_receipt']['receipt_id'],receipt_id)
+        self.assertEqual(report['receipt_delivery'],'pending_delivery')
+        self.assertEqual(agent.receipt_deliveries,[])
+
+    def test_rejected_receipts_identify_original_targets(self):
+        bank=LatestEvidenceGapMemory();a=bank.save_knowledge('same');b=bank.save_knowledge('same')
+        agent,_,_=self.cycle([('memory_delete',{'memory_id':a}),('memory_delete',{'memory_id':b}),
+                              write('same',a)],('insufficient',),bank)
+        items=agent.pending_receipt['operations']
+        self.assertEqual([r['target_memory_id'] for r in items],[a,b,a])
+        self.assertTrue(all('revision_id' not in r for r in items))
+
     def test_rejection_retains_old_and_is_not_selected(self):
         bank=LatestEvidenceGapMemory();key=bank.save_knowledge('old')
         a,r,inputs=self.cycle([write('REJECTED SECRET',key)],('insufficient',),bank)
@@ -350,7 +372,9 @@ class LiveGateTests(unittest.TestCase):
                 ready=json.loads((root/'private/worker_ready.json').read_text())
                 self.assertEqual(ready['citation_review_gate'],mode)
                 payloads=[json.loads(s) for s in (root/'private/archive/memory_payload.jsonl').read_text().splitlines()]
-                self.assertEqual([p['phase'] for p in payloads],['maintenance','citation_review','selection'])
+                self.assertEqual([p['phase'] for p in payloads],(['maintenance']+
+                    ['citation_review']*3+['selection'] if mode=='gate-only' else
+                    ['maintenance','citation_review','citation_review','citation_repair','citation_review','citation_repair','citation_review','selection']))
                 cycles=[json.loads(s) for s in (root/'private/archive/gap_cycle.jsonl').read_text().splitlines()]
                 self.assertEqual(cycles[0]['citation_gate_report']['repair_limit'],int(mode=='gate-one-repair'))
 

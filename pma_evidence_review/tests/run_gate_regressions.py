@@ -34,8 +34,13 @@ def main():
             for name in ('test_gap_latest_revision_store.py','test_gap_latest_revision_agent.py',
                          'test_gap_evidence_agent.py','test_gap_evidence_store.py',
                          'test_gap_evidence_host.py','test_gap_evidence_aligned_host.py',
-                         'test_gap_evidence_alignment_integration.py','test_gap_host_integration.py'):
-                suite.addTests(unittest.TestLoader().discover(str(stage/'tests'),pattern=name))
+                         'test_gap_evidence_alignment_integration.py','test_gap_host_integration.py',
+                         'test_evaluation_bootstrap.py'):
+                if name=='test_evaluation_bootstrap.py' and sys.version_info<(3,12):
+                    skipped=unittest.skip('Pinned native Harbor verifier requires Python 3.12 syntax; not executed')(lambda:None)
+                    suite.addTest(unittest.FunctionTestCase(skipped))
+                else:
+                    suite.addTests(unittest.TestLoader().discover(str(stage/'tests'),pattern=name))
             result=unittest.TextTestRunner(verbosity=2).run(suite)
         return 0 if result.wasSuccessful() else 1
     finally:

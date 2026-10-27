@@ -14,16 +14,7 @@ def build_live(draft, parts, operation, index, *, run_id):
     content=draft._content(operation.memory_id)[1]
     ci.old.require(content==operation.content, 'candidate_content_changed')
     ci.old.require(revision.content_sha256==ci.old.digest(content), 'candidate_revision_content')
-    sources=[];records={}
-    for visible in parts.catalog.values():
-        record=visible.snapshot.record
-        sources.append({'source_id':record.source_id,'handle':record.handle,
-            'kind':record.source_kind,'role':record.role,'event_order':record.order,
-            'field_path':record.field_path,'visibility_ref':visible.visibility_ref,
-            'slices':[{'start':a,'end':b,'text':visible.snapshot.blob.text[a:b]}
-                      for a,b in visible.visible_spans]})
-        records[record.source_id]=asdict(record)
-    parent={'cycle_id':parts.manifest.cycle_id,'manifest':asdict(parts.manifest),'sources':sources}
+    parent,records=visible_snapshot(parts)
     op={'op_index':index,'action':operation.action,'memory_id':operation.memory_id,
         'revision_id':operation.revision_id,'content':content,'content_sha256':ci.old.digest(content),
         'success':True}
@@ -60,3 +51,17 @@ async def assess(request,transport):
             if result['engineering_status']=='received':
                 result.update(engineering_status='parse_failure',reason=str(error))
     return result
+
+
+def visible_snapshot(parts):
+    sources=[];records={}
+    for visible in parts.catalog.values():
+        record=visible.snapshot.record
+        sources.append({'source_id':record.source_id,'handle':record.handle,
+            'kind':record.source_kind,'role':record.role,'event_order':record.order,
+            'field_path':record.field_path,'visibility_ref':visible.visibility_ref,
+            'slices':[{'start':a,'end':b,'text':visible.snapshot.blob.text[a:b]}
+                      for a,b in visible.visible_spans]})
+        records[record.source_id]=asdict(record)
+    parent={'cycle_id':parts.manifest.cycle_id,'manifest':asdict(parts.manifest),'sources':sources}
+    return parent,records

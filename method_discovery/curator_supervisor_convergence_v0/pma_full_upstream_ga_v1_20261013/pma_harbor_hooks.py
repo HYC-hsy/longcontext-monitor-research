@@ -93,6 +93,9 @@ def verify_live_spec(spec: dict) -> None:
     require_gate_binding(spec.get('citation_review_gate'),frozen.get('config',{}),
                          spec.get('research_candidate','U'),spec.get('condition','B'))
     verify_gate_sources(frozen.get('config',{}))
+    from .gate_certification import require_launch_certificate
+    require_launch_certificate(frozen,fixture=(spec.get('zero_model_fixture_only') is True and
+                                              granted.get('zero_model_fixture_only') is True))
     policy = frozen.get('config', {}).get('runtime_policy')
     if spec.get('runtime_policy') != policy:
         raise RuntimeError('runtime policy differs from the authorized manifest')

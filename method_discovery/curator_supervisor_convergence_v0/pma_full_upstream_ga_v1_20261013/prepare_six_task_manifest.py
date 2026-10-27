@@ -369,7 +369,7 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
                          'evidence_path': evidence.relative_to(checkout).as_posix(),
                          'evidence': (verify_evidence(evidence) if stateful else
                              verify_evidence(evidence, research_candidate=research,
-                                             conditions=conditions)),
+                                             conditions=conditions,citation_review_gate=gate)),
                          **({'conditions': list(conditions)} if not stateful else {}),
                          'harbor_commit': HARBOR_COMMIT}
     return {'schema': schema,

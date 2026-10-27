@@ -104,6 +104,8 @@ def prepare(args: argparse.Namespace) -> dict:
         raise ValueError('runtime reuse supports only the gap candidate')
     from .citation_gate_config import validate_gate
     gate=validate_gate(getattr(args,'citation_review_gate',None),getattr(args,'research_candidate','U'),args.condition)
+    if gate and not getattr(args,'fake_only',False) and not getattr(args,'certification_dir',None):
+        raise ValueError('gate certification-dir required before real preparation')
     validate_binding(args.condition, getattr(args, 'research_candidate', 'U'))
     if runtime_policy is not None and getattr(args, 'research_candidate', 'U') not in {
             'pma_stateful_memory_v1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1'}:

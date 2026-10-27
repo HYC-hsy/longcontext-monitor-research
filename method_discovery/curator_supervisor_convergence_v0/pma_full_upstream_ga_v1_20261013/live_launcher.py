@@ -439,6 +439,8 @@ def run_live(args) -> dict:
     from .citation_gate_config import require_gate_binding,worker_flags,verify_gate_sources
     gate=require_gate_binding(getattr(args,'citation_review_gate',None),manifest['config'],candidate,args.condition)
     verify_gate_sources(manifest['config'])
+    from .gate_certification import require_launch_certificate
+    require_launch_certificate(manifest,fixture=fixture)
     stateful = candidate == 'pma_stateful_memory_v1'
     if stateful:
         from .stateful_runtime_policy import require_same_policies

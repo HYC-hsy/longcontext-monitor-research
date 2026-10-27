@@ -6,7 +6,7 @@ from pathlib import Path
 from latest_evidence_gap_agent import LatestEvidenceGapMemoryAgent, latest_phase1_system
 from evidence_gap_agent import WRITERS
 from memory_agent.memory.memory_agent import MemoryOperation
-from pma_evidence_review.live_citations import build_live, assess
+from pma_evidence_review.live_citations import build_live, assess, visible_snapshot
 from pma_evidence_review.prompt_strategy import ONE_SENTENCE
 from pma_evidence_review.gate_control import repair, receipt
 from pma_evidence_review.citation_inputs import identity
@@ -50,11 +50,15 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
             self._included_receipt=None
 
     async def _call_llm_phase1(self, user_prompt):
-        if self._parts is None or self._parts.text!=user_prompt:
-            raise ValueError('gate_requires_valid_frozen_maintenance')
         self.transport_phase='maintenance'
         self.last_citation_gate_report={'schema':'pma-live-citation-gate-v1','strategy':ONE_SENTENCE,
             'repair_limit':self.repair_limit,'operations':[],'incomplete':False}
+        if self._parts is None or self._parts.text!=user_prompt:
+            self.last_citation_gate_report.update(incomplete=True,error_code='maintenance_context_invalid',
+                final_receipt=deepcopy(self.pending_receipt),
+                receipt_delivery='pending_delivery' if self.pending_receipt else 'none',
+                prior_receipt_deliveries=deepcopy(self.receipt_deliveries))
+            raise ValueError('gate_requires_valid_frozen_maintenance')
         system=latest_phase1_system().replace(
             'Every valid save becomes the latest content regardless of binding.',
             'A save becomes latest only after exact submitted citations pass the host review gate.').replace(
@@ -131,7 +135,8 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
             'strategy':ONE_SENTENCE,'repair_limit':self.repair_limit,
             'legacy_policy':'retain_unreviewed_no_freshness_claim',
             'repair_calls':0,'operations':outcomes,'incomplete':False,
-            'raw_response_phase1':getattr(response,'content',None)}
+            'raw_response_phase1':getattr(response,'content',None),
+            'frozen_visibility':visible_snapshot(self._parts)[0]}
         try:
             try:calls=self._tool_items(response)
             except Exception:calls=[('invalid','malformed_tool_response')]
@@ -228,6 +233,7 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
                     'notice':'Host reporting incomplete; these are commit states, not external facts.',
                     'operations':[{'op_index':r['index'],'outcome':'committed' if r['success'] else 'not_committed',
                         'reason':r.get('error_code','reporting_failed_after_commit'),
+                        'target_memory_id':'status' if r.get('tool')=='memory_update_status' else (r.get('submitted_arguments') or {}).get('memory_id'),
                         'memory_id':r.get('candidate',{}).get('memory_id'),
                         'revision_id':r.get('candidate',{}).get('revision_id')} for r in outcomes]}
                 fallback['receipt_id']=identity(fallback)

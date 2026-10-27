@@ -59,6 +59,7 @@ def receipt(cycle_id, rows):
         outcome=('committed_after_repair' if row.get('repair') else 'committed') if row['success'] else (
             'withdrawn' if row.get('withdrawn') else 'not_run' if row.get('error_code') in ('not_run_after_review_error','not_run_after_cancel') else 'not_committed')
         item={'op_index':row['index'],'action':row.get('tool','invalid_memory_operation'),
+            'target_memory_id':'status' if row.get('tool')=='memory_update_status' else args.get('memory_id'),
             'proposed_content_summary':summary(args.get('content')),'outcome':outcome,
             'reason':row.get('error_code') or ('supported_candidate_committed' if row['success'] else 'interrupted_not_committed')}
         if row['success']:

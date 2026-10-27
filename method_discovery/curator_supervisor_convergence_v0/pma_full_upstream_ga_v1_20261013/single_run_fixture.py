@@ -23,6 +23,7 @@ def main() -> None:
         'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
         'pos_pma_complement_v1', 'pos_pma_shared_view_v1',
         'pma_stateful_memory_v1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1'), default='U')
+    parser.add_argument('--citation-review-gate',choices=('gate-only','gate-one-repair'))
     parser.add_argument('--output', type=Path, required=True)
     for name in ('official-source-git', 'task-profile-file',
                  'ga-source', 'runtime-root', 'worker-python', 'harbor-python',
@@ -40,6 +41,8 @@ def main() -> None:
     parser.add_argument('--candidate-profile-fixture', action='store_true',
                         help='isolated synthetic P with real independent PMA host process')
     args = parser.parse_args()
+    from .citation_gate_config import validate_gate
+    validate_gate(args.citation_review_gate,args.research_candidate,args.condition)
     root = args.output.resolve(strict=False)
     if args.condition == 'P' and (args.task != 'pos-synthetic-file-http' or
                                    args.research_candidate not in {'PoS',
@@ -65,7 +68,7 @@ def main() -> None:
         stateful_uncapped_diagnostic=(stateful and not args.runtime_policy_file),
         native_context_policy=args.native_context_policy,
         research_capture_policy=args.research_capture_policy,
-        research_candidate=args.research_candidate,
+        research_candidate=args.research_candidate, citation_review_gate=args.citation_review_gate,
         official_source_git=args.official_source_git,
         task_profile_file=args.task_profile_file,
         pma_profile_file=args.pma_profile_file))
@@ -93,6 +96,10 @@ def main() -> None:
                  'harbor_commit': harbor_head,
                  **({'upstream_commit': manifest['upstream_commit']} if args.condition == 'P'
                     else {'pma_vendor_commit': manifest['pma_vendor_commit']})}
+    if args.citation_review_gate:
+        from .gate_certification import source_identity as gate_identity
+        execution['gate_config']=manifest['config']
+        execution['gate_certificate_source_sha256']=gate_identity()
     if args.condition == 'P':
         from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import (
             SOURCE_FILES, SHARED_SOURCE_FILE)

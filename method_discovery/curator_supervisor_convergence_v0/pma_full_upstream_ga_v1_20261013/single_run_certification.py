@@ -130,10 +130,14 @@ def require_bound_gap_memory(path: Path) -> None:
 
 def verify_evidence(evidence: Path, *, require_committed: bool = True,
                     research_candidate: str | None = None,
-                    conditions: tuple[str, ...] = ('A', 'B')) -> dict:
+                    conditions: tuple[str, ...] = ('A', 'B'), citation_review_gate=None) -> dict:
     if conditions not in (('A',), ('A', 'B')) or (conditions == ('A',) and
             research_candidate is not None):
         raise ValueError('unsupported single-run certification conditions')
+    from .citation_gate_config import validate_gate
+    validate_gate(citation_review_gate,research_candidate)
+    if citation_review_gate and conditions != ('A','B'):raise ValueError('gate requires A/B native evidence')
+    gate_certificate=None
     checkout = Path(__file__).resolve().parents[3]
     outcomes = {}
     hashes = {}
@@ -213,9 +217,8 @@ def verify_evidence(evidence: Path, *, require_committed: bool = True,
                 {'bank_management', 'context_decision'})
             if not required_phases <= set(phases):
                 raise RuntimeError('generic PMA two-stage transport absent')
-            if (research_candidate in ('pma_gap_memory_v0', 'pma_gap_evidence_v1')
-                    and set(phases) != required_phases):
-                raise RuntimeError('gap candidate made a non-two-stage transport call')
+            if research_candidate in ('pma_gap_memory_v0','pma_gap_evidence_v1'):
+                require_gap_phases(phases,citation_review_gate)
             if research_candidate in ('pma_gap_memory_v0', 'pma_gap_evidence_v1') and not (
                     base / 'gap_cycle.jsonl').is_file():
                 raise RuntimeError('gap candidate cycle evidence absent')
@@ -226,6 +229,11 @@ def verify_evidence(evidence: Path, *, require_committed: bool = True,
                            for row in cycles):
                     raise RuntimeError('evidence gap fixture has no accepted evidence batch')
                 require_bound_gap_memory(base / 'memory.json')
+                if citation_review_gate:
+                    from .gate_certification import verify_certificate
+                    gate_certificate=verify_certificate(base,citation_review_gate)
+                elif executed.get('gate_config'):
+                    raise RuntimeError('gate evidence cannot certify baseline')
         else:
             if any(row.get('event_type') == 'pma_reminder_appended' for row in events):
                 raise RuntimeError('generic Task-only fixture used PMA')
@@ -240,7 +248,8 @@ def verify_evidence(evidence: Path, *, require_committed: bool = True,
         if name not in hashes:
             hashes[name] = (_committed_evidence_sha(checkout, path)
                 if require_committed else hashlib.sha256(path.read_bytes()).hexdigest())
-    return {'outcomes': outcomes, 'file_sha256': hashes}
+    return {'outcomes': outcomes, 'file_sha256': hashes,
+            **({'gate_certificate':gate_certificate} if citation_review_gate else {})}
 
 
 def source_identity(checkout: Path, *, candidate: bool = False,
@@ -252,3 +261,15 @@ def source_identity(checkout: Path, *, candidate: bool = False,
 
 def vendor_identity(checkout: Path) -> dict:
     return {name: _committed_source_sha(checkout, name) for name in VENDOR_FILES}
+
+
+def require_gap_phases(phases,mode=None):
+    if mode is None:
+        if set(phases)!={'maintenance','selection'}:
+            raise RuntimeError('gap candidate made a non-two-stage transport call')
+    else:
+        from .citation_gate_config import MODES
+        allowed={'maintenance','selection','citation_review'}|({'citation_repair'} if mode=='gate-one-repair' else set())
+        if mode not in MODES or set(phases)!=allowed:
+            raise RuntimeError('gate fixture phase contract differs')
+        # This is only a preliminary check. verify_certificate below is mandatory.

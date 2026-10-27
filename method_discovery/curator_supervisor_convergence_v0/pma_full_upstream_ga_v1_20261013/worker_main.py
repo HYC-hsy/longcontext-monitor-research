@@ -125,6 +125,7 @@ async def serve(args: argparse.Namespace) -> None:
     if args.fake_memory:
         from harbor.llms.base import LLMResponse
 
+        gate_fixture_reviews={}
         async def offline_memory(*, prompt, system, tools=None):
             if args.research_candidate in ('pma_gap_memory_v0', 'pma_gap_evidence_v1'):
                 phase = agent._memory_agent.transport_phase
@@ -136,13 +137,25 @@ async def serve(args: argparse.Namespace) -> None:
                             {'content': 'Confirm the synthetic task result before completion.'})
                         calls.append(SimpleNamespace(function=SimpleNamespace(
                             name='memory_save_gap', arguments=arguments)))
+                    if getattr(args,'citation_review_gate',None):
+                        if calls:
+                            original=calls[0].function.arguments
+                            calls=[SimpleNamespace(function=SimpleNamespace(name='memory_save_gap',arguments={**original,'content':text}))
+                                   for text in ('GATE_FIXTURE_ACCEPTED','GATE_FIXTURE_REJECTED','GATE_FIXTURE_REPAIRABLE')]
+                        return LLMResponse(content='GATE_FIXTURE_MAINTENANCE_RESPONSE',tool_calls=calls)
                     return LLMResponse(content='', tool_calls=calls)
                 if phase == 'citation_review':
                     material=json.loads(prompt.split('\n',1)[1].split('\nOUTPUT')[0])
-                    return LLMResponse(content=json.dumps({'op_index':material['original_operation']['op_index'],
-                        'verdict':'supported','explanation':'Synthetic transport fixture only.'}))
+                    op=material['original_operation'];index=op['op_index']
+                    gate_fixture_reviews[index]=gate_fixture_reviews.get(index,0)+1
+                    verdict=('supported' if op['content'] in ('GATE_FIXTURE_ACCEPTED','GATE_FIXTURE_REPAIRED') else 'insufficient')
+                    return LLMResponse(content=json.dumps({'op_index':index,
+                        'verdict':verdict,'explanation':'GATE_FIXTURE_REVIEW_CONTROL_ONLY'}))
                 if phase == 'citation_repair':
-                    return LLMResponse(content='{"decision":"withdraw"}')
+                    original=json.loads(prompt)['original_arguments']
+                    value=({'decision':'replace','content':'GATE_FIXTURE_REPAIRED','evidence':original['evidence']}
+                           if original['content']=='GATE_FIXTURE_REPAIRABLE' else {'decision':'withdraw'})
+                    return LLMResponse(content=json.dumps(value))
                 if phase == 'selection':
                     return LLMResponse(content=(
                         '<context_for_action>Verify the synthetic result.</context_for_action>'
