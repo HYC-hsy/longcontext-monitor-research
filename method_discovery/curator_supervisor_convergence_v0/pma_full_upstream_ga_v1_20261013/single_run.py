@@ -101,8 +101,10 @@ def prepare(args: argparse.Namespace) -> dict:
     reuse = getattr(args, 'runtime_reuse', None)
     if reuse is not None and getattr(args, 'research_candidate', 'U') != 'pma_gap_memory_v0':
         raise ValueError('runtime reuse supports only the gap candidate')
-    from .citation_gate_config import validate_gate
+    from .citation_gate_config import validate_gate,validate_strategy
     gate=validate_gate(getattr(args,'citation_review_gate',None),getattr(args,'research_candidate','U'),args.condition)
+    strategy=getattr(args,'citation_review_strategy',None)
+    validate_strategy(gate,strategy)
     if gate and not getattr(args,'fake_only',False) and not getattr(args,'certification_dir',None):
         raise ValueError('gate certification-dir required before real preparation')
     validate_binding(args.condition, getattr(args, 'research_candidate', 'U'))
@@ -177,6 +179,7 @@ def prepare(args: argparse.Namespace) -> dict:
         plan['current_config_sha256'] = args.current_config_sha256
     if gate is not None:
         plan['citation_review_gate'] = gate
+        if strategy is not None:plan['citation_review_strategy']=strategy
     _write_new(root / 'plan.json', plan)
     if pos:
         from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import prepare as prepare_pos
@@ -193,8 +196,9 @@ def prepare(args: argparse.Namespace) -> dict:
             evidence=(Path(args.certification_dir).resolve(strict=True)
                       if getattr(args, 'certification_dir', None) else None), plan=plan)
     if not pos:
-        from .citation_gate_config import require_gate_binding
+        from .citation_gate_config import require_gate_binding,require_strategy_binding
         require_gate_binding(gate, manifest['config'], candidate, args.condition)
+        require_strategy_binding(strategy,manifest['config'],gate)
     if args.fake_only and not pos:
         manifest['zero_model_fixture_only'] = True
         if candidate == 'pma_stateful_memory_v1':
@@ -277,6 +281,8 @@ def main() -> None:
     prepared.add_argument('--task', required=True)
     prepared.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
     prepared.add_argument('--citation-review-gate',choices=('gate-only','gate-one-repair'))
+    from .citation_gate_config import STRATEGIES
+    prepared.add_argument('--citation-review-strategy',choices=STRATEGIES)
     prepared.add_argument('--research-candidate', choices=sorted(candidate_names()), default='U')
     prepared.add_argument('--occurrence', type=int, default=1)
     prepared.add_argument('--output', required=True)

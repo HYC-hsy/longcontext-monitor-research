@@ -6,7 +6,8 @@ import hashlib
 import json
 from pathlib import Path
 
-from .citation_gate_config import MODES, verify_gate_sources, gate_source_paths
+from .citation_gate_config import (MODES, STRATEGIES, CLAIM_SPLIT, verify_gate_sources,
+                                   gate_source_paths, require_strategy_binding, validate_strategy)
 from pma_evidence_review import citation_inputs as ci, citation_review as cr
 from pma_evidence_review.inputs import require, digest
 from pma_evidence_review.prompt_strategy import apply_strategy, ONE_SENTENCE
@@ -40,12 +41,13 @@ def _payload(row):
     return {k:row[k] for k in ('system','prompt','tools')}
 
 
-def inspect_evidence(base, mode):
+def inspect_evidence(base, mode, strategy=None):
     require(mode in MODES,'gate_certificate_mode')
     base=Path(base)
     execution=ci.strict_json((base/'execution_identity.json').read_text(encoding='utf-8'))
     config=execution.get('gate_config',{})
     require(config.get('citation_review_gate')==mode,'gate_execution_mode')
+    effective=require_strategy_binding(strategy,config,mode)
     verify_gate_sources(config)
     require(execution.get('gate_certificate_source_sha256')==source_identity(),'gate_certificate_source_identity')
     requests=_rows(base/'memory_payload.jsonl');responses=_rows(base/'gap_visible_transport.jsonl')
@@ -72,7 +74,7 @@ def inspect_evidence(base, mode):
     for group,cycle in zip(groups,cycles):
         report=cycle['citation_gate_report'];visibility=report['frozen_visibility']
         manifest=visibility['manifest'];cid=manifest['cycle_id']
-        require(report['strategy']==ONE_SENTENCE and report['repair_limit']==int(mode=='gate-one-repair'),
+        require(report['strategy']==effective and report['repair_limit']==int(mode=='gate-one-repair'),
                 'gate_report_strategy')
         require(not report['incomplete'],'gate_report_incomplete')
         maintenance,answer=group[0];selection=group[-1][0]
@@ -130,11 +132,20 @@ def inspect_evidence(base, mode):
                         'gate_operation_identity')
                 prep=ci.prepare(op,env['alignment'],visibility,env['source_records'])
                 require(prep==env['preparation'] and prep['status']=='ready','gate_preparation')
-                request=apply_strategy(cr.request_from_material(cr.projection(env,{'operation':op,'preparation':prep}),row['index']),ONE_SENTENCE)
-                require(request==attempt['request'],'gate_request_projection')
-                verdict=cr.parse(cr.json_value(attempt['raw_response']),row['index'])
-                require(attempt['engineering_status']=='ok' and verdict['verdict']==attempt['verdict'],'gate_verdict')
-                expected.append(('citation_review',request,attempt['raw_response']))
+                material=cr.projection(env,{'operation':op,'preparation':prep})
+                if effective==CLAIM_SPLIT:
+                    from pma_evidence_review import claim_split
+                    require(attempt['request']==claim_split.split_request(material,row['index']),
+                            'gate_request_projection')
+                    calls=claim_split.audit_calls(attempt)
+                    require(attempt['engineering_status']=='ok','gate_verdict')
+                    expected.extend(('citation_review',request,raw) for request,raw in calls)
+                else:
+                    request=apply_strategy(cr.request_from_material(material,row['index']),ONE_SENTENCE)
+                    require(request==attempt['request'],'gate_request_projection')
+                    verdict=cr.parse(cr.json_value(attempt['raw_response']),row['index'])
+                    require(attempt['engineering_status']=='ok' and verdict['verdict']==attempt['verdict'],'gate_verdict')
+                    expected.append(('citation_review',request,attempt['raw_response']))
                 if number==0 and row.get('repair'):
                     repair=row['repair'];req=repair['request'];repairs+=1
                     require(mode=='gate-one-repair' and attempt['verdict']!='supported','gate_repair_eligibility')
@@ -145,7 +156,7 @@ def inspect_evidence(base, mode):
                             mat['original_arguments']==row['submitted_arguments'] and mat['fixed_tool']==row['tool'],
                             'gate_repair_fixed_target')
                     require(req['audit_request_sha256']==ci.identity(_payload(req)),'gate_repair_request_hash')
-                    require(ci.strict_json(repair['raw_response'])==repair['replacement'],'gate_repair_response')
+                    require(cr.json_value(repair['raw_response'])==repair['replacement'],'gate_repair_response')
                     value=repair['replacement']
                     if value.get('decision')=='withdraw':
                         require(set(value)=={'decision'} and len(attempts)==1 and row.get('withdrawn') is True,
@@ -182,12 +193,13 @@ def inspect_evidence(base, mode):
     require(accepted and rejected and delivered and pending is None,'gate_fixture_coverage')
     require((repairs>0)==(mode=='gate-one-repair'),'gate_repair_coverage')
     return {'schema':SCHEMA,'mode':mode,'source_sha256':source_identity(),
+            **({'review_strategy':effective} if effective!=ONE_SENTENCE else {}),
             'evidence_sha256':{n:hashlib.sha256((base/n).read_bytes()).hexdigest() for n in FILES},
             'accepted_revisions':accepted,'rejected_revisions':rejected,'receipts_delivered':delivered,'repair_calls':repairs}
 
 
-def verify_certificate(base,mode):
-    expected=inspect_evidence(base,mode)
+def verify_certificate(base,mode,strategy=None):
+    expected=inspect_evidence(base,mode,strategy)
     supplied=ci.strict_json((Path(base)/'gate_certificate.json').read_text(encoding='utf-8'))
     require(supplied==expected,'gate_certificate_mismatch')
     return expected
@@ -195,6 +207,7 @@ def verify_certificate(base,mode):
 
 def require_launch_certificate(manifest, *, fixture=False):
     mode=manifest.get('config',{}).get('citation_review_gate')
+    validate_strategy(mode,manifest.get('config',{}).get('citation_review_strategy'))
     if mode is None:return
     require(mode in MODES,'gate_launch_mode')
     if fixture:
@@ -209,7 +222,7 @@ def require_launch_certificate(manifest, *, fixture=False):
     from .single_run_certification import _committed_evidence_sha
     for name in (*FILES,'gate_certificate.json'):
         _committed_evidence_sha(root,base/'B'/name)
-    actual=verify_certificate(base/'B',mode)
+    actual=verify_certificate(base/'B',mode,manifest['config'].get('citation_review_strategy'))
     require(certification.get('evidence',{}).get('gate_certificate')==actual,'gate_manifest_certificate')
 
 
@@ -218,9 +231,10 @@ def main():
     parser=argparse.ArgumentParser(description='Verify committed native Harbor plus gate lifecycle evidence; no execution.')
     parser.add_argument('--evidence',type=Path,required=True)
     parser.add_argument('--mode',choices=MODES,required=True)
+    parser.add_argument('--citation-review-strategy',choices=STRATEGIES)
     args=parser.parse_args()
     from .single_run_certification import verify_evidence
-    result=verify_evidence(args.evidence,research_candidate='pma_gap_evidence_v1',citation_review_gate=args.mode)
+    result=verify_evidence(args.evidence,research_candidate='pma_gap_evidence_v1',citation_review_gate=args.mode,citation_review_strategy=args.citation_review_strategy)
     print(json.dumps(result,ensure_ascii=False,sort_keys=True,indent=2))
 
 

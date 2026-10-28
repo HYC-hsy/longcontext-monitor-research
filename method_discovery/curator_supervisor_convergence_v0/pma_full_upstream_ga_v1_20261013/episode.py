@@ -46,9 +46,10 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
                        memory_api_key: str | None = None,
                        memory_profile: dict[str, Any] | None = None,
                        research_candidate: str = "U",
-                       citation_review_gate: str | None = None) -> MemoryEnabledTerminus2:
-    from citation_gate_config import validate_gate
+                       citation_review_gate: str | None = None, citation_review_strategy: str | None = None) -> MemoryEnabledTerminus2:
+    from citation_gate_config import validate_gate,validate_strategy
     validate_gate(citation_review_gate,research_candidate)
+    review_strategy=validate_strategy(citation_review_gate,citation_review_strategy)
     if research_candidate not in {"U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0", "pma_gap_evidence_v1"}:
         raise ValueError("unknown research candidate")
     if memory_profile is not None:
@@ -114,8 +115,9 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
                 keep_thinking=original.keep_thinking,
                 use_structured_tools=original.use_structured_tools,
                 review_directory=Path(logs_dir)/"citation_review",
-                repair_limit=int(citation_review_gate=='gate-one-repair'))
+                repair_limit=int(citation_review_gate=='gate-one-repair'),review_strategy=review_strategy)
             agent._citation_review_gate=citation_review_gate
+            agent._citation_review_strategy=review_strategy
         if agent._memory is not agent._memory_agent.memory or agent._memory is not agent._memory_agent.gaps:
             raise RuntimeError("gap bank identity mismatch")
         agent._research_candidate = research_candidate

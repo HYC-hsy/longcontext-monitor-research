@@ -56,7 +56,7 @@ class CapturedTransport:
                'request': copy.deepcopy(payload), 'fake': self.fake,
                'audit_request_sha256': request.get('audit_request_sha256'),
                'evidence_policy': request.get('evidence_policy')}
-        for key in ('review_strategy', 'op_index', 'focus_id'):
+        for key in ('review_strategy', 'op_index', 'focus_id', 'claim_index', 'submitted_evidence_sha256'):
             if key in request:
                 row[key] = request[key]
         self.records.append(row)
@@ -67,6 +67,12 @@ class CapturedTransport:
             content = getattr(response, 'content', None)
             raw = content if isinstance(content, str) else None
             row['response'] = raw
+            if request.get('review_strategy') == 'claim-split-same-evidence-v1':
+                finish = getattr(response, 'finish_reason', None)
+                if finish is not None:
+                    row['finish_reason'] = finish
+                if finish in ('length', 'max_tokens', 'max_output_tokens'):
+                    raise ResponseProtocolError('truncated_response', raw)
             if getattr(response, 'tool_calls', None):
                 raise ResponseProtocolError('unexpected_tool_calls', raw)
             if raw is None:

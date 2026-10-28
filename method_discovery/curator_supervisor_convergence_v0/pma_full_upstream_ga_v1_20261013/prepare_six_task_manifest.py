@@ -108,8 +108,10 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
     single = plan is not None and plan.get('schema') in {
         'pma-ga-single-plan-v1', 'pma-ga-single-plan-v2'}
     candidate = plan.get('research_candidate', 'U') if single else 'U'
-    from .citation_gate_config import validate_gate
+    from .citation_gate_config import validate_gate,validate_strategy
     gate=validate_gate((plan or {}).get('citation_review_gate'),candidate,(plan or {}).get('condition','B'))
+    strategy=(plan or {}).get('citation_review_strategy')
+    validate_strategy(gate,strategy)
     stateful = candidate == 'pma_stateful_memory_v1'
     if stateful:
         from .stateful_runtime_policy import policies
@@ -129,6 +131,7 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
             required.add('agent_time_protocol')
             required.update(key for key in runtime_policies if key in plan)
         if gate is not None:required.add('citation_review_gate')
+        if strategy is not None:required.add('citation_review_strategy')
         if 'runtime_policy' in plan:
             required.add('runtime_policy')
         if 'evaluation_bootstrap_protocol' in plan:
@@ -250,6 +253,7 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
     if gate is not None:
         from .citation_gate_config import gate_source_paths
         method['citation_review_gate']=gate
+        if strategy is not None:method['citation_review_strategy']=strategy
         method['citation_gate_source_sha256']={name:_committed_source_sha(STAGE.parents[2],name)
             for name in gate_source_paths()}
     if schema == 'pma-ga-live-manifest-v5':
@@ -369,7 +373,7 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
                          'evidence_path': evidence.relative_to(checkout).as_posix(),
                          'evidence': (verify_evidence(evidence) if stateful else
                              verify_evidence(evidence, research_candidate=research,
-                                             conditions=conditions,citation_review_gate=gate)),
+                                             conditions=conditions,citation_review_gate=gate,citation_review_strategy=strategy)),
                          **({'conditions': list(conditions)} if not stateful else {}),
                          'harbor_commit': HARBOR_COMMIT}
     return {'schema': schema,

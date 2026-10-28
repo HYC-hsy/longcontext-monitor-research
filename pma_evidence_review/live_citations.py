@@ -2,12 +2,13 @@
 from dataclasses import asdict
 import copy
 
-from . import citation_inputs as ci, citation_review as cr
+from . import citation_inputs as ci, citation_review as cr, claim_split
 from .prompt_strategy import ONE_SENTENCE, apply_strategy
 from .transport import ResponseProtocolError
 
 
-def build_live(draft, parts, operation, index, *, run_id):
+def build_live(draft, parts, operation, index, *, run_id, review_strategy=ONE_SENTENCE):
+    ci.old.require(review_strategy in (ONE_SENTENCE, claim_split.STRATEGY), 'invalid_review_strategy')
     # Host snapshots and validation stay outside the model projection.
     draft.validate_bank()
     revision=draft.revisions[operation.revision_id]
@@ -29,11 +30,15 @@ def build_live(draft, parts, operation, index, *, run_id):
     row={'operation':op,'preparation':preparation}
     request=None
     if preparation['status']=='ready':
-        request=apply_strategy(cr.request_from_material(cr.projection(envelope,row),index),ONE_SENTENCE)
+        material=cr.projection(envelope,row)
+        request=(claim_split.split_request(material,index) if review_strategy==claim_split.STRATEGY else
+                 apply_strategy(cr.request_from_material(material,index),ONE_SENTENCE))
     return envelope,request
 
 
 async def assess(request,transport):
+    if request.get('review_strategy')==claim_split.STRATEGY:
+        return await claim_split.assess(request,transport)
     result={'verdict':None,'model_verdict':None,'raw_response':None,'engineering_status':'received'}
     try:
         result['raw_response']=await transport.send(copy.deepcopy(request))

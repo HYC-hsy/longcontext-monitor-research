@@ -1,0 +1,123 @@
+{
+  "schema": "same-submitted-evidence-trace-fixtures-v1",
+  "usage": "Only fixture.material may enter a model request. Everything else is development-side provenance, historical output or explicit reference expectations; never append it to model evidence.",
+  "new_model_calls": 0,
+  "fixtures": [
+    {
+      "fixture_id": "sqlite_call_19",
+      "material": {
+        "original_operation": {
+          "op_index": 0,
+          "action": "save_procedural",
+          "memory_id": "D2mKHasy",
+          "revision_id": "rev_5f593d8f4a88415dacefeb8a1ae942ee",
+          "content": "Configure script execution failed: \"./configure --help\" in /app/sqlite/sqlite reports \"No working C compiler found. Tried cc and gcc.\" This blocks the configure step needed for gcov instrumentation. The environment lacks a C compiler installation despite SQLite source being ready.",
+          "content_sha256": "728b3afdc8c8668a94d1256d27b4dfcbad28fc9ad8f1147e11ac1b1d31a11430"
+        },
+        "submitted_evidence": [
+          {
+            "evidence_id": "E1",
+            "submitted_quote": "No working C compiler found. Tried cc and gcc.",
+            "role": "tool_observation",
+            "field_path": "observation/tool_results/0/content/stdout",
+            "source_id": "[\"gap_evidence_84b385f941b7466e802f9994aa947c87\",\"public\",\"3b4c360f4e9841aa8d27c56939628de5\",\"observation/tool_results/0/content/stdout\"]",
+            "event_order": 9,
+            "source_identity_origin": "host_inferred_not_model_selected"
+          }
+        ],
+        "normative_requirements_context": ""
+      },
+      "reference_expectations_not_model_output": {
+        "expected_operation_verdict": "insufficient",
+        "expected_host_commit_allowed": false,
+        "assertions_to_preserve": [
+          "The specified ./configure --help command ran in /app/sqlite/sqlite and failed.",
+          "The output reports that no working C compiler was found after trying cc and gcc.",
+          "This blocks the configure step needed for gcov instrumentation.",
+          "The environment lacks a C compiler installation.",
+          "SQLite source is ready."
+        ],
+        "reference_rationale": [
+          "E1 supports the narrow diagnostic report, not categorical absence of installed compilers; a compiler can be installed but unavailable or not working in the attempted environment.",
+          "The exact command, directory, gcov/configuration linkage and SQLite source readiness are additional commitments not established by this one submitted quote.",
+          "Do not discard source readiness as mere framing, or use inferred neighboring command context as evidence."
+        ]
+      },
+      "historical_baseline_response_not_reference_label": {
+        "review_strategy": "semantic-support-one-sentence-v1",
+        "call_index": 19,
+        "status": "returned",
+        "raw_response": "```json\n{\n  \"op_index\": 0,\n  \"verdict\": \"supported\",\n  \"explanation\": \"The operation claims that (1) configure script execution failed with a specific error message about no working C compiler, (2) this occurred when running './configure --help' in /app/sqlite/sqlite, (3) this blocks the configure step for gcov instrumentation, and (4) the environment lacks a C compiler despite SQLite source being ready. E1 directly quotes the error message 'No working C compiler found. Tried cc and gcc.' from the command output, establishing that the configure script failed with this specific compiler-related error. The quoted error message semantically supports the claim that no C compiler is available (gcc and cc were tried and not found). While E1 does not explicitly show the command './configure --help' or the directory path, the error message itself is diagnostic output from a configure script's compiler detection routine, which is consistent with running configure. The claim about blocking gcov instrumentation is a logical consequence statement rather than a separate factual claim requiring direct evidence—if configure fails due to missing compiler, instrumentation cannot proceed. The characterization that 'SQLite source being ready' is contextual framing that does not require separate evidence. All core factual claims about the failure and its cause are supported by the submitted quote.\"\n}\n```",
+        "parsed_verdict": "supported",
+        "warning": "Historical whole-operation baseline response only; no claim-split model run was performed."
+      }
+    },
+    {
+      "fixture_id": "sqlite_call_61",
+      "material": {
+        "original_operation": {
+          "op_index": 2,
+          "action": "save_procedural",
+          "memory_id": "D2mKHasy",
+          "revision_id": "rev_37f9914a0aa847b6bd924ac87adcf85d",
+          "content": "apt-get install of large package sets (build-essential + tcl: 103 MB download, 343 MB installed) times out. Command started downloading packages but was force-terminated before completion. Solution: increase timeout parameter for large package installations.",
+          "content_sha256": "2b4b4bb7cbdbb8ab184fb75004063a5d61cbc5ebc672c053194038070d9877a3"
+        },
+        "submitted_evidence": [
+          {
+            "evidence_id": "E1",
+            "submitted_quote": "Need to get 103 MB of archives.\nAfter this operation, 343 MB of additional disk space will be used.",
+            "role": "tool_observation",
+            "field_path": "observation/tool_results/0/content/stdout",
+            "source_id": "[\"gap_evidence_84b385f941b7466e802f9994aa947c87\",\"public\",\"9b5b725701354d31b52a9d67f0e88ed1\",\"observation/tool_results/0/content/stdout\"]",
+            "event_order": 13,
+            "source_identity_origin": "host_inferred_not_model_selected"
+          },
+          {
+            "evidence_id": "E2",
+            "submitted_quote": "[Timeout Error] 超时强制终止",
+            "role": "tool_observation",
+            "field_path": "observation/tool_results/0/content/stdout",
+            "source_id": "[\"gap_evidence_84b385f941b7466e802f9994aa947c87\",\"public\",\"9b5b725701354d31b52a9d67f0e88ed1\",\"observation/tool_results/0/content/stdout\"]",
+            "event_order": 13,
+            "source_identity_origin": "host_inferred_not_model_selected"
+          },
+          {
+            "evidence_id": "E3",
+            "submitted_quote": "Setting up build-essential (12.10ubuntu1) ...",
+            "role": "tool_observation",
+            "field_path": "observation/tool_results/0/content/stdout",
+            "source_id": "[\"gap_evidence_84b385f941b7466e802f9994aa947c87\",\"public\",\"7ff7f0e266a7480aa0ead5e5d0a63c94\",\"observation/tool_results/0/content/stdout\"]",
+            "event_order": 19,
+            "source_identity_origin": "host_inferred_not_model_selected"
+          }
+        ],
+        "normative_requirements_context": ""
+      },
+      "reference_expectations_not_model_output": {
+        "expected_operation_verdict": "insufficient",
+        "expected_host_commit_allowed": false,
+        "assertions_to_preserve": [
+          "An apt-get install of the described large package set times out.",
+          "The quoted package operation reports 103 MB to download and 343 MB additional disk use.",
+          "The command started downloading packages and was force-terminated before completion.",
+          "Increasing the timeout parameter is presented as a solution for large package installations."
+        ],
+        "reference_rationale": [
+          "E2 reports a historical timeout/forced termination at event 13. E3 reports build-essential setup at later event 19. Later setup does not itself contradict that earlier timeout or prove they are the same attempt.",
+          "E1 establishes the quoted size estimates. Its future-tense need-to-get line alone does not establish downloading actually began.",
+          "The general claim about large-package timeouts, command/package-set identity and the asserted solution require care; B does not show that increasing a timeout solved the issue.",
+          "The reference insufficient label is a closed-B design-review expectation, not a native verifier result or newly measured model outcome. A contradicted label must identify actual incompatible evidence, not event order alone."
+        ]
+      },
+      "historical_baseline_response_not_reference_label": {
+        "review_strategy": "semantic-support-one-sentence-v1",
+        "call_index": 61,
+        "status": "returned",
+        "raw_response": "```json\n{\n  \"op_index\": 2,\n  \"verdict\": \"contradicted\",\n  \"explanation\": \"The operation claims the apt-get installation 'was force-terminated before completion,' but E3 shows 'Setting up build-essential' which indicates package setup was occurring, demonstrating progress beyond mere downloading. The operation also claims the command 'times out' and proposes a solution to 'increase timeout parameter,' but E2 shows '[Timeout Error] 超时强制终止' which confirms a timeout occurred and forced termination. However, the temporal sequence contradicts the operation's narrative: E3 (event_order 19) occurs after E2 (event_order 13), meaning the setup activity happened after the timeout error. This suggests either the installation continued past the timeout in a later attempt, or the operation conflated multiple attempts. The operation presents a single linear narrative (download started → force-terminated before completion → solution needed) that is incompatible with evidence showing package setup occurring after the documented timeout termination.\"\n}\n```",
+        "parsed_verdict": "contradicted",
+        "warning": "Historical whole-operation baseline response only; no claim-split model run was performed."
+      }
+    }
+  ]
+}

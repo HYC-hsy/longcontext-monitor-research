@@ -8,13 +8,17 @@ from evidence_gap_agent import WRITERS
 from memory_agent.memory.memory_agent import MemoryOperation
 from pma_evidence_review.live_citations import build_live, assess, visible_snapshot
 from pma_evidence_review.prompt_strategy import ONE_SENTENCE
+from pma_evidence_review.claim_split import STRATEGY as CLAIM_SPLIT
 from pma_evidence_review.gate_control import repair, receipt
 from pma_evidence_review.citation_inputs import identity
 from pma_evidence_review.transport import CapturedTransport, durable
 
 
 class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
-    def __init__(self, *, review_directory=None, run_id='live', repair_limit=0, **kwargs):
+    def __init__(self, *, review_directory=None, run_id='live', repair_limit=0,
+                 review_strategy=ONE_SENTENCE, **kwargs):
+        if review_strategy not in (ONE_SENTENCE, CLAIM_SPLIT):raise ValueError('review_strategy')
+        self.review_strategy=review_strategy
         if type(repair_limit) is not int or repair_limit not in (0,1):raise ValueError('repair_limit')
         super().__init__(**kwargs)
         self._tools=deepcopy(self._tools)
@@ -51,7 +55,7 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
 
     async def _call_llm_phase1(self, user_prompt):
         self.transport_phase='maintenance'
-        self.last_citation_gate_report={'schema':'pma-live-citation-gate-v1','strategy':ONE_SENTENCE,
+        self.last_citation_gate_report={'schema':'pma-live-citation-gate-v1','strategy':self.review_strategy,
             'repair_limit':self.repair_limit,'operations':[],'incomplete':False}
         if self._parts is None or self._parts.text!=user_prompt:
             self.last_citation_gate_report.update(incomplete=True,error_code='maintenance_context_invalid',
@@ -117,7 +121,7 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
         operation=self._apply_operation(draft,name,args,index)
         operation.content_status='candidate_not_published'
         row['candidate']=deepcopy(vars(operation))
-        envelope,request=build_live(draft,self._parts,operation,index,run_id=self.run_id)
+        envelope,request=build_live(draft,self._parts,operation,index,run_id=self.run_id,review_strategy=self.review_strategy)
         row.update(candidate=deepcopy(vars(operation)),input=envelope,request=request,
                    preparation=envelope['preparation']['status'])
         if request is None:row['error_code']='citation_preparation_'+row['preparation']
@@ -132,7 +136,7 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
         operations=[];outcomes=[];stopped=False
         cycle=self._parts.manifest.cycle_id
         self.last_citation_gate_report={'schema':'pma-live-citation-gate-v1',
-            'strategy':ONE_SENTENCE,'repair_limit':self.repair_limit,
+            'strategy':self.review_strategy,'repair_limit':self.repair_limit,
             'legacy_policy':'retain_unreviewed_no_freshness_claim',
             'repair_calls':0,'operations':outcomes,'incomplete':False,
             'raw_response_phase1':getattr(response,'content',None),

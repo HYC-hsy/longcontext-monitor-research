@@ -121,7 +121,8 @@ async def serve(args: argparse.Namespace) -> None:
                                memory_api_key=os.environ.get("PMA_MEMORY_API_KEY"),
                                memory_profile=profile,
                                research_candidate=getattr(args, "research_candidate", "U"),
-                               citation_review_gate=getattr(args,"citation_review_gate",None))
+                               citation_review_gate=getattr(args,"citation_review_gate",None),
+                               citation_review_strategy=getattr(args,"citation_review_strategy",None))
     if args.fake_memory:
         from harbor.llms.base import LLMResponse
 
@@ -145,6 +146,27 @@ async def serve(args: argparse.Namespace) -> None:
                         return LLMResponse(content='GATE_FIXTURE_MAINTENANCE_RESPONSE',tool_calls=calls)
                     return LLMResponse(content='', tool_calls=calls)
                 if phase == 'citation_review':
+                    # Finite engineering fixture only: fixed labels, no semantic inference.
+                    from citation_gate_config import CLAIM_SPLIT
+                    if getattr(args,'citation_review_strategy',None)==CLAIM_SPLIT:
+                        if prompt.startswith('CLOSED MATERIAL (A is not evidence):\n'):
+                            material=json.loads(prompt.split('\n',1)[1])
+                            op=material['original_operation'];text=op['content']
+                            return LLMResponse(content=json.dumps({'op_index':op['op_index'],
+                                'claims':[{'claim':text+' synthetic clause '+str(i),
+                                    'original_text':text,'start':0,'end':len(text)} for i in (1,2)]}))
+                        material=json.loads(prompt.split('\n',1)[1].split(
+                            '\nSUBMITTED EVIDENCE ONLY (unchanged B):\n',1)[0])
+                        op=material['original_operation']
+                        verdict=('supported' if op['content'] in (
+                            'GATE_FIXTURE_ACCEPTED','GATE_FIXTURE_REPAIRED') else 'insufficient')
+                        return LLMResponse(content=json.dumps({'results':[
+                            {'claim_index':claim['index'],'verdict':verdict,'evidence_ids':['E1'],
+                             'original_fragment':claim['original_text'],
+                             'explanation':'GATE_FIXTURE_REVIEW_CONTROL_ONLY'}
+                            for claim in material['all_claims']],
+                            'decomposition_complete':True,'coverage_original_fragment':'',
+                            'coverage_explanation':'GATE_FIXTURE_REVIEW_CONTROL_ONLY'}))
                     material=json.loads(prompt.split('\n',1)[1].split('\nOUTPUT')[0])
                     op=material['original_operation'];index=op['op_index']
                     gate_fixture_reviews[index]=gate_fixture_reviews.get(index,0)+1
@@ -182,7 +204,8 @@ async def serve(args: argparse.Namespace) -> None:
         "run_id": args.run_id, "task_id": args.task_id,
         "deadline_epoch": args.deadline_epoch, "fake_memory": args.fake_memory,
         "research_candidate": getattr(args, "research_candidate", "U"),
-        **({"citation_review_gate":args.citation_review_gate} if getattr(args,"citation_review_gate",None) else {})},
+        **({"citation_review_gate":args.citation_review_gate} if getattr(args,"citation_review_gate",None) else {}),
+        **({"citation_review_strategy":args.citation_review_strategy} if getattr(args,"citation_review_strategy",None) else {})},
         sort_keys=True), encoding="utf-8")
     stopped = asyncio.Event()
     for name in ("SIGTERM", "SIGINT"):
@@ -245,6 +268,8 @@ def main() -> None:
     parser.add_argument("--fake-memory", action="store_true")
     parser.add_argument("--fake-memory-update", action="store_true")
     parser.add_argument("--citation-review-gate",choices=('gate-only','gate-one-repair'))
+    from citation_gate_config import STRATEGIES
+    parser.add_argument('--citation-review-strategy',choices=STRATEGIES)
     parser.add_argument("--research-candidate", choices=("U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0", "pma_gap_evidence_v1"), default="U")
     asyncio.run(serve(parser.parse_args()))
 

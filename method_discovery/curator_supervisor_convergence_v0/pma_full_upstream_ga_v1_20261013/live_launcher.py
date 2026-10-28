@@ -220,7 +220,8 @@ def _require_evaluation_state_contract(manifest: dict) -> None:
         if (not evidence.is_relative_to(checkout) or
                 verify_evidence(evidence, research_candidate=research,
                     conditions=tuple(cert.get('conditions', ('A', 'B'))),
-                    citation_review_gate=manifest.get('config', {}).get('citation_review_gate'))
+                    citation_review_gate=manifest.get('config', {}).get('citation_review_gate'),
+                    citation_review_strategy=manifest.get('config', {}).get('citation_review_strategy'))
                 != cert.get('evidence')):
             raise RuntimeError('single-run native lifecycle evidence differs')
         return
@@ -438,8 +439,10 @@ def run_live(args) -> dict:
                            authorized.get('candidate_profile_fixture_only') is True):
         raise RuntimeError('candidate profile fixture identity differs')
     candidate = getattr(args, 'research_candidate', 'U')
-    from .citation_gate_config import require_gate_binding,worker_flags,verify_gate_sources
+    from .citation_gate_config import require_gate_binding,require_strategy_binding,worker_flags,verify_gate_sources
     gate=require_gate_binding(getattr(args,'citation_review_gate',None),manifest['config'],candidate,args.condition)
+    strategy=getattr(args,'citation_review_strategy',None)
+    require_strategy_binding(strategy,manifest['config'],gate)
     verify_gate_sources(manifest['config'])
     from .gate_certification import require_launch_certificate
     require_launch_certificate(manifest,fixture=fixture)
@@ -559,6 +562,7 @@ def run_live(args) -> dict:
         'audited_code_commit': authorized['audited_code_commit'],
     }
     if gate is not None:spec['citation_review_gate']=gate
+    if strategy is not None:spec['citation_review_strategy']=strategy
     runtime_policy = manifest.get('config', {}).get('runtime_policy')
     if runtime_policy is not None:
         from experiment_runner.runtime_policy import validate_resolved_policy
@@ -735,7 +739,7 @@ def run_live(args) -> dict:
                     '--research-candidate', candidate,
                     *(['--fake-memory', '--fake-memory-update'] if fixture and
                       not candidate_profile else [])]
-            worker_args += worker_flags(gate,candidate)
+            worker_args += worker_flags(gate,candidate,strategy)
             worker = subprocess.Popen(worker_args,
                 cwd=STAGE, env=worker_env,
                 stdout=worker_logs[0], stderr=worker_logs[1])
@@ -747,6 +751,7 @@ def run_live(args) -> dict:
                 time.sleep(.05)
             ready_data = json.loads(ready.read_text(encoding='utf-8'))
             if ready_data.get('citation_review_gate')!=gate:raise RuntimeError('worker gate identity mismatch')
+            require_strategy_binding(ready_data.get('citation_review_strategy'),manifest['config'],gate)
             if stateful:
                 require_same_policies(runtime_policies, ready_data)
                 if (ready_data.get('run_id'), ready_data.get('task_id'),
@@ -1081,6 +1086,8 @@ def main() -> None:
     parser.add_argument('--task', required=True)
     parser.add_argument('--condition', choices=('A', 'B', 'P'), required=True)
     parser.add_argument('--citation-review-gate',choices=('gate-only','gate-one-repair'))
+    from .citation_gate_config import STRATEGIES
+    parser.add_argument('--citation-review-strategy',choices=STRATEGIES)
     parser.add_argument('--research-candidate', choices=(
         'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
         'pos_pma_complement_v1', 'pos_pma_shared_view_v1',

@@ -68,7 +68,7 @@ def receipt(cycle_id, rows):
                 committed_content_summary=summary(op['content']))
         elif row.get('attempts'):
             last=row['attempts'][-1]
-            item['review_reason']=last.get('explanation',last.get('preparation','not_reviewed'))
+            item['review_reason']=last.get('explanation',last.get('reason',last.get('preparation','not_reviewed')))
             if last.get('input'):
                 item['preparation_issues']=copy.deepcopy(last['input']['preparation']['issues'])
             if row.get('repair',{}).get('engineering_status') not in (None,'ok'):

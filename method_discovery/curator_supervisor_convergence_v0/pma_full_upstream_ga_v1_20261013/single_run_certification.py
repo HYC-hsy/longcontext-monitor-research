@@ -130,12 +130,14 @@ def require_bound_gap_memory(path: Path) -> None:
 
 def verify_evidence(evidence: Path, *, require_committed: bool = True,
                     research_candidate: str | None = None,
-                    conditions: tuple[str, ...] = ('A', 'B'), citation_review_gate=None) -> dict:
+                    conditions: tuple[str, ...] = ('A', 'B'), citation_review_gate=None,
+                    citation_review_strategy=None) -> dict:
     if conditions not in (('A',), ('A', 'B')) or (conditions == ('A',) and
             research_candidate is not None):
         raise ValueError('unsupported single-run certification conditions')
-    from .citation_gate_config import validate_gate
+    from .citation_gate_config import validate_gate,validate_strategy
     validate_gate(citation_review_gate,research_candidate)
+    validate_strategy(citation_review_gate,citation_review_strategy)
     if citation_review_gate and conditions != ('A','B'):raise ValueError('gate requires A/B native evidence')
     gate_certificate=None
     checkout = Path(__file__).resolve().parents[3]
@@ -231,7 +233,7 @@ def verify_evidence(evidence: Path, *, require_committed: bool = True,
                 require_bound_gap_memory(base / 'memory.json')
                 if citation_review_gate:
                     from .gate_certification import verify_certificate
-                    gate_certificate=verify_certificate(base,citation_review_gate)
+                    gate_certificate=verify_certificate(base,citation_review_gate,citation_review_strategy)
                 elif executed.get('gate_config'):
                     raise RuntimeError('gate evidence cannot certify baseline')
         else:
