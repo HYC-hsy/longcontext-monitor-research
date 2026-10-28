@@ -32,7 +32,7 @@ def write(content='candidate',target=None):
 class LiveGateTests(unittest.TestCase):
     def setUp(self):install_guard(self)
 
-    def cycle(self,calls,answers=('supported',),bank=None,side_effect=None,repair_limit=0,repairs=()):
+    def cycle(self,calls,answers=('supported',),bank=None,side_effect=None,repair_limit=0,repairs=(),raw_repairs=False):
         bank=bank if bank is not None else LatestEvidenceGapMemory()
         inputs=[];answers=iter(answers);repairs=iter(repairs)
         async def fake(**kw):
@@ -42,7 +42,7 @@ class LiveGateTests(unittest.TestCase):
             if agent.transport_phase=='citation_repair':
                 value=next(repairs)
                 if isinstance(value,BaseException):raise value
-                return reply(content=json.dumps(value))
+                return reply(content=value if raw_repairs else json.dumps(value))
             self.assertEqual(agent.transport_phase,'citation_review')
             if side_effect:side_effect(bank)
             answer=next(answers)

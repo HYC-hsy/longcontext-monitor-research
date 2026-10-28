@@ -1,7 +1,8 @@
 """Control-only repair and final receipts, never registered as evidence."""
 import copy
 import json
-from .citation_inputs import identity, strict_json
+from .citation_inputs import identity
+from .review import json_value
 from .inputs import require, digest
 from .transport import ResponseProtocolError
 
@@ -28,7 +29,7 @@ async def repair(transport, maintenance_prompt, name, args, issue, index):
         result.update(engineering_status='call_error',error_type=type(error).__name__)
     if result['engineering_status']=='received':
         try:
-            value=strict_json(result['raw_response'])
+            value=json_value(result['raw_response'])
             require(isinstance(value,dict),'repair_schema')
             if value.get('decision')=='withdraw':require(set(value)=={'decision'},'repair_withdraw_schema')
             else:
