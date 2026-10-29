@@ -134,6 +134,7 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
 
     async def _execute_reviewed(self,response):
         operations=[];outcomes=[];stopped=False
+        blocked_targets=set()
         cycle=self._parts.manifest.cycle_id
         self.last_citation_gate_report={'schema':'pma-live-citation-gate-v1',
             'strategy':self.review_strategy,'repair_limit':self.repair_limit,
@@ -152,7 +153,10 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
                 try:
                     name,args=self._parse_item(item)
                     row.update(tool=name,submitted_arguments=deepcopy(args))
+                    target='status' if name=='memory_update_status' else (args.get('memory_id') if isinstance(args,dict) else None)
                     if stopped:row['error_code']='not_run_after_review_error'
+                    elif self.review_strategy==CLAIM_SPLIT and target in blocked_targets:
+                        row.update(error_code='not_run_failed_target_dependency', blocked_target=target)
                     elif name=='memory_delete':
                         row.update(error_code='not_applicable_delete_protocol',preparation='not_reviewed_not_deleted')
                     elif not self._valid_target(name,args):row['error_code']='invalid_operation_or_target'
@@ -163,8 +167,13 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
                             if self.memory._generation!=base_generation:raise ValueError('stale_operation_base')
                             result,draft,operation=await self._attempt(name,current,index,attempt,row['attempts'])
                             row.update(result)
-                            if result['engineering_status'] not in ('ok','not_reviewed'):
+                            local_parse = self.review_strategy==CLAIM_SPLIT and result['engineering_status']=='parse_failure'
+                            if result['engineering_status'] not in ('ok','not_reviewed') and not local_parse:
                                 stopped=True;break
+                            if local_parse:
+                                row['failure_scope']='operation_local'
+                                result['explanation']='Technical parsing failure; no semantic verdict. Original text “'+current['content']+'”: '+result.get('reason','invalid model schema')
+                                row['explanation']=result['explanation']
                             if result['verdict']=='supported':
                                 prepared=self.memory.prepare_publication(draft)
                                 self.memory.publish(prepared)
@@ -180,7 +189,9 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
                             if row['repair']['engineering_status']!='ok':
                                 row.update(error_code='repair_'+row['repair']['engineering_status'],
                                            engineering_status=row['repair']['engineering_status'])
-                                stopped=True;break
+                                if not (self.review_strategy==CLAIM_SPLIT and row['repair']['engineering_status']=='parse_failure'):
+                                    stopped=True
+                                break
                             replacement=row['repair']['replacement']
                             if replacement['decision']=='withdraw':
                                 row.update(withdrawn=True,error_code='author_withdrawn');break
@@ -194,6 +205,9 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
                         row.update(error_code=type(error).__name__,engineering_status='host_error')
                         stopped=True
                 if not row['success']:
+                    if self.review_strategy==CLAIM_SPLIT and isinstance(args,dict):
+                        target='status' if name=='memory_update_status' else args.get('memory_id')
+                        if target is not None:blocked_targets.add(target)
                     operation=MemoryOperation(name,success=False,error=row['error_code'])
                     operation.content_status='not_committed'
                     row['retained_old_value_may_be_stale']=bool(self.memory.status if name=='memory_update_status'
@@ -218,7 +232,8 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
         finally:
             try:
                 failed=sum(not r['success'] for r in outcomes)
-                self.last_citation_gate_report['incomplete'] |= stopped
+                self.last_citation_gate_report['incomplete'] |= stopped or any(
+                    r.get('engineering_status')=='parse_failure' for r in outcomes)
                 self.last_evidence_report.update(accepted=not failed,partial_success=bool(failed and failed<len(outcomes)),
                     succeeded=len(outcomes)-failed,failed=failed,operations=deepcopy(outcomes))
                 self._previous_failures=[]  # Explicit final receipts replace the old three-error suffix.

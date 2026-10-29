@@ -14,10 +14,11 @@ from .prompt_strategy import SUPPORT_SENTENCE
 from .review import json_value
 from .transport import ResponseProtocolError
 from .vendor.rag_models import Claim, Span, VerificationResult
+from .vendor.rag_span_union import merge_overlapping_spans
 from .vendor.rag_prompts import (format_claim_verification_batch_prompt,
     CLAIM_VERIFICATION_BATCH_SYSTEM)
 
-STRATEGY = 'claim-split-same-evidence-v1'
+STRATEGY = 'claim-split-same-evidence-v2'
 # Reuse closed-source discipline, replacing only the direct output contract.
 BOUNDARY = DIRECT_SYSTEM.split('Return only one JSON object with exactly')[0]
 SPLIT_SYSTEM = BOUNDARY + '''\nSplit the ORIGINAL OPERATION, not the evidence, into separately verifiable
@@ -32,8 +33,9 @@ accomplishments. Full original A is target context, never a source. B is fixed b
 For each claim copy an exact original_text substring. The host locates it if unique.
 Only if repeated, supply BOTH start (inclusive) / end (exclusive) Python Unicode character
 offsets to disambiguate; otherwise omit both. Overlapping spans and distinct
-claims from the SAME span are allowed. Cover all non-whitespace original characters,
-including headings/punctuation attached to the relevant claim; do not skip text.
+claims from the SAME span are allowed. Cover the complete original meaning, including
+headings, conditions and completion. Uncovered original characters are recorded verbatim
+by the host for the batch preservation check; never assume they are meaningless.
 Return exactly {"op_index":0,"claims":[{"claim":"...","original_text":"..."}]}. Optional start/end must be paired. No source IDs, evidence edits, operation edits, or extra fields.
 Do not truncate or silently cap claims. An empty/incomplete split blocks publication.'''
 VERIFY_SYSTEM = BOUNDARY.replace('support its complete original content',
@@ -51,20 +53,23 @@ Set decomposition_complete=false if anything is dropped, strengthened, weakened,
 transformed from a requirement/question into an accomplished fact. This global judgment
 is required even if every listed claim alone is supported. Never trust the splitter's
 apparent completeness or a previous review. No extra model phase or per-claim requests.
-Return one JSON object with exactly results, decomposition_complete, coverage_explanation,
-coverage_original_fragment.
+Return one JSON object with exactly results, decomposition_complete, coverage_explanation.
 results must contain exactly one object for EVERY supplied claim_index (no missing,
 duplicate, unknown or extra IDs), each with exactly claim_index, verdict, evidence_ids,
-explanation, original_fragment. original_fragment must be an exact nonempty substring
-of that claim's original_text, pinpointing the portion being judged. Explain unsupported
+explanation. The host attaches the verified original_text for author feedback; do not
+re-copy it or count coordinates. Explain unsupported
 commitments in the original operation's language and their specific evidence limits;
 never require the author to resolve internal claim IDs. Do not call a broad original span
 wholly supported just because a narrow proposition is supported. Verdict is supported, contradicted or insufficient; supported/contradicted
 require at least one existing E ID. No new quotes, sources or fields. Unsupported is NOT
-supported. decomposition_complete is a Boolean and coverage_explanation is nonempty.
-When false, coverage_original_fragment must quote the exact affected portion of A and
-coverage_explanation must explain the omission/transformation in original language.
-When true, coverage_original_fragment must be empty. No rewritten replacement text.
+supported. decomposition_complete is a Boolean. When true, coverage_explanation may
+be empty. When false, coverage_explanation must give a specific omission/transformation
+in A in original language; the host anchors global feedback to the complete immutable A.
+Do not return coverage_original_fragment. No rewritten replacement text.
+Inspect uncovered_original_spans without ignoring punctuation, operators, negation,
+conditions, chronology or completion. They are diagnostics, not automatically new claims
+or proof of incompleteness. Preservation concerns A: B need not be exhaustively copied
+into A. Information present only in B is not a missing commitment of A.
 Missing or later evidence does not contradict an earlier scoped observation. Preserve
 open questions and plans; lack of an answer is not proof the premise is false.
 The host requires ALL claims supported AND valid coverage; never average or majority vote.'''
@@ -92,6 +97,7 @@ def parse_split(raw, index, content):
     require(type(data['op_index']) is int and data['op_index'] == index, 'unknown_operation_index')
     require(isinstance(data['claims'], list) and data['claims'], 'split_empty')
     claims, identities, covered = [], set(), set()
+    offset_corrections = []
     for i, item in enumerate(data['claims']):
         require(isinstance(item, dict) and {'claim', 'original_text'} <= set(item)
                 and set(item) <= {'claim', 'original_text', 'start', 'end'}, 'split_claim_schema')
@@ -99,30 +105,54 @@ def parse_split(raw, index, content):
         require(isinstance(text, str) and text.strip() and isinstance(original, str)
                 and original.strip(), 'split_empty_claim')
         require(('start' in item) == ('end' in item), 'split_offset_pair')
+        first = content.find(original)
+        require(first >= 0, 'split_invalid_span')
+        unique = content.find(original, first + 1) < 0
         if 'start' in item:
-            start, end = item['start'], item['end']
+            require(type(item['start']) is int and type(item['end']) is int, 'split_invalid_span')
+        if unique:
+            start, end = first, first + len(original)
+            if 'start' in item and (item['start'], item['end']) != (start, end):
+                offset_corrections.append({'claim_index': i + 1,
+                    'supplied': [item['start'], item['end']], 'resolved': [start, end],
+                    'method': 'unique_exact_original_text'})
         else:
-            start = content.find(original)
-            require(start >= 0, 'split_invalid_span')
-            require(content.find(original, start + 1) < 0, 'split_ambiguous_span')
-            end = start + len(original)
-        require(type(start) is int and type(end) is int and 0 <= start < end <= len(content)
-                and content[start:end] == original, 'split_invalid_span')
+            require('start' in item, 'split_ambiguous_span')
+            start, end = item['start'], item['end']
+        require(0 <= start < end <= len(content) and content[start:end] == original,
+                'split_invalid_span')
         key = (text.strip(), start, end)
         require(key not in identities, 'split_duplicate_claim')
         identities.add(key)
         claims.append(Claim(text=text, index=i + 1, original_text=original, span=Span(start, end)))
         covered.update(range(start, end))
     required = {i for i, char in enumerate(content) if not char.isspace()}
-    require(required and required <= covered, 'split_uncovered_original_text')
-    return claims, {'status': 'structural_full', 'required_characters': len(required),
-                    'covered_required_characters': len(required & covered),
-                    'limitation': 'Exact span coverage is not a proof of semantic completeness.'}
+    require(required, 'split_empty')
+    diagnostic = coverage_diagnostic(claims, content)
+    diagnostic['offset_corrections'] = offset_corrections
+    return claims, diagnostic
+
+
+def coverage_diagnostic(claims, content):
+    union = merge_overlapping_spans([(c.span.start, c.span.end) for c in claims], max_gap=0)
+    gaps = []
+    cursor = 0
+    for start, end in union + [(len(content), len(content))]:
+        if cursor < start:
+            gaps.append({'start': cursor, 'end': start, 'text': content[cursor:start]})
+        cursor = end
+    required = sum(not c.isspace() for c in content)
+    missing = sum(not c.isspace() for g in gaps for c in g['text'])
+    return {'status': 'structural_full' if missing == 0 else 'structural_gaps',
+            'required_characters': required, 'covered_required_characters': required - missing,
+            'uncovered_original_spans': gaps,
+            'limitation': 'Exact anchors and character diagnostics do not prove semantic completeness.'}
 
 
 def verification_request(material, claims):
     context = {key: deepcopy(value) for key, value in material.items() if key != 'submitted_evidence'}
-    context.update(all_claims=[asdict(c) for c in claims])
+    context.update(all_claims=[asdict(c) for c in claims],
+        uncovered_original_spans=coverage_diagnostic(claims, material['original_operation']['content'])['uncovered_original_spans'])
     documents = [{'title': item['evidence_id'], 'text': json.dumps(item, ensure_ascii=False)}
                  for item in material['submitted_evidence']]
     budget = max(1, sum(len(doc['text']) for doc in documents))
@@ -141,10 +171,9 @@ def verification_request(material, claims):
     prompt = 'TARGET CONTEXT ONLY (not evidence):\n' + json.dumps(context, ensure_ascii=False)
     prompt += '\nSUBMITTED EVIDENCE ONLY (unchanged B):\n' + body
     example = {'results': [{'claim_index': c.index, 'verdict': 'insufficient',
-               'evidence_ids': [], 'original_fragment': c.original_text,
+               'evidence_ids': [],
                'explanation': 'Explain this original portion and its specific evidence limits.'} for c in claims],
-               'decomposition_complete': False, 'coverage_explanation': 'Identify what was omitted or changed in A.',
-               'coverage_original_fragment': material['original_operation']['content']}
+               'decomposition_complete': False, 'coverage_explanation': 'Identify what was omitted or changed in A.'}
     prompt += '\nOUTPUT EXAMPLE (shape and IDs only):\n' + json.dumps(example)
     request = _request(VERIFY_SYSTEM, prompt, 'citation_claim_verify_batch', material['original_operation']['op_index'])
     request.update(submitted_evidence_sha256=identity(material['submitted_evidence']))
@@ -154,14 +183,18 @@ def verification_request(material, claims):
 def parse_batch(raw, claims, evidence, original_content):
     """RAG _single_batch_verify indexed reconstruction, strict before dict mapping."""
     data = json_value(raw)
-    require(isinstance(data, dict) and set(data) == {'results', 'decomposition_complete',
-            'coverage_explanation', 'coverage_original_fragment'}, 'batch_result_schema')
+    require(isinstance(data, dict) and {'results', 'decomposition_complete', 'coverage_explanation'} <= set(data)
+            and set(data) <= {'results', 'decomposition_complete', 'coverage_explanation', 'coverage_original_fragment'}, 'batch_result_schema')
     require(type(data['decomposition_complete']) is bool, 'decomposition_complete_type')
-    require(isinstance(data['coverage_explanation'], str) and data['coverage_explanation'].strip(),
+    require(isinstance(data['coverage_explanation'], str) and
+            (data['decomposition_complete'] or data['coverage_explanation'].strip()),
             'missing_coverage_explanation')
-    fragment = data['coverage_original_fragment']
-    require(isinstance(fragment, str) and (fragment == '' if data['decomposition_complete'] else
-            bool(fragment.strip()) and fragment in original_content), 'invalid_coverage_fragment')
+    # Legacy redundant echoes are never authoritative identity or semantic evidence.
+    supplied = data.get('coverage_original_fragment', '')
+    require(isinstance(supplied, str), 'invalid_coverage_fragment')
+    fragment = '' if data['decomposition_complete'] else original_content
+    if not data['decomposition_complete'] and supplied.strip() and supplied in original_content:
+        fragment = supplied
     rows = data['results']
     require(isinstance(rows, list), 'batch_results_shape')
     expected = {c.index for c in claims}
@@ -174,7 +207,8 @@ def parse_batch(raw, claims, evidence, original_content):
     results = []
     for claim in claims:
         row = parsed[claim.index]
-        require(set(row) == {'claim_index', 'verdict', 'evidence_ids', 'explanation', 'original_fragment'}, 'claim_result_schema')
+        require({'claim_index', 'verdict', 'evidence_ids', 'explanation'} <= set(row) and
+                set(row) <= {'claim_index', 'verdict', 'evidence_ids', 'explanation', 'original_fragment'}, 'claim_result_schema')
         require(row['verdict'] in ('supported', 'contradicted', 'insufficient'), 'invalid_verdict')
         refs = row['evidence_ids']
         require(isinstance(refs, list) and all(isinstance(i, str) and i in available for i in refs),
@@ -182,12 +216,13 @@ def parse_batch(raw, claims, evidence, original_content):
         require(len(refs) == len(set(refs)), 'duplicate_evidence_id')
         require(row['verdict'] == 'insufficient' or refs, 'decisive_verdict_without_evidence')
         require(isinstance(row['explanation'], str) and row['explanation'].strip(), 'missing_explanation')
-        require(isinstance(row['original_fragment'], str) and row['original_fragment'].strip()
-                and row['original_fragment'] in claim.original_text, 'invalid_feedback_fragment')
+        supplied = row.get('original_fragment', '')
+        require(isinstance(supplied, str), 'invalid_feedback_fragment')
+        fragment_for_claim = supplied if supplied.strip() and supplied in claim.original_text else claim.original_text
         result = VerificationResult(claim=claim.text, claim_index=claim.index,
             verdict=row['verdict'], confidence=0, explanation=row['explanation'])
         results.append({'claim_index': result.claim_index, 'verdict': result.verdict,
-                        'explanation': result.explanation, 'original_fragment': row['original_fragment'],
+                        'explanation': result.explanation, 'original_fragment': fragment_for_claim,
                         'evidence_ids': refs, 'engineering_status': 'ok'})
     return results, {'decomposition_complete': data['decomposition_complete'],
                      'coverage_explanation': data['coverage_explanation'], 'coverage_original_fragment': fragment}
@@ -195,7 +230,7 @@ def parse_batch(raw, claims, evidence, original_content):
 
 def aggregate(claims, coverage, reviews, preservation):
     """Exact cardinality and unanimous support, never a score or majority."""
-    require(claims and coverage.get('status') == 'structural_full', 'aggregate_coverage')
+    require(claims and coverage.get('status') in ('structural_full', 'structural_gaps'), 'aggregate_coverage')
     require([r.get('claim_index') for r in reviews] == [c.index for c in claims], 'aggregate_claim_alignment')
     require(all(r.get('engineering_status') == 'ok' for r in reviews), 'aggregate_review_failure')
     complete = preservation['decomposition_complete'] is True
@@ -207,7 +242,7 @@ def aggregate(claims, coverage, reviews, preservation):
         issues.append('Original text “' + preservation['coverage_original_fragment'] + '”: ' +
                       preservation['coverage_explanation'])
     return {'engineering_status': 'ok', 'verdict': verdict,
-            'explanation': '; '.join(issues) if issues else 'Every claim supported; structural coverage and semantic preservation checks passed.'}
+            'explanation': '; '.join(issues) if issues else 'Every claim supported; exact anchors valid and batch semantic preservation confirmed (fallible model judgment).'}
 
 
 async def _call(request, transport):

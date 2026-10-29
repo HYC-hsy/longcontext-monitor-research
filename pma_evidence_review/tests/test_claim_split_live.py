@@ -102,11 +102,11 @@ class ClaimSplitLiveTests(unittest.TestCase):
             self.assertEqual(a.pending_receipt['operations'][0]['outcome'],
                              'committed_after_repair' if last == 'supported' else 'not_committed')
 
-    def test_bad_split_and_unbound_quote_never_publish_or_repair(self):
+    def test_bad_split_has_one_author_opportunity_unbound_quote_never_publishes(self):
         repair = {'decision': 'withdraw'}
         a, r, calls, _ = self.cycle(repairs=[repair], bad_split=True)
         self.assertFalse(r.operations[0].success)
-        self.assertNotIn('citation_repair', [p for p, _ in calls])
+        self.assertEqual([p for p, _ in calls].count('citation_repair'), 1)
         self.assertIn('split_schema', a.pending_receipt['operations'][0]['review_reason'])
         a, r, calls, _ = self.cycle(quote='First assertion and second assertion.')
         self.assertFalse(r.operations[0].success)

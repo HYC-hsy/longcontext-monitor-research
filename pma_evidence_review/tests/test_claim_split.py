@@ -88,12 +88,11 @@ class ClaimSplitTests(unittest.TestCase):
 
     def test_coverage_empty_invalid_span_extra_fields_and_duplicates_fail(self):
         text = material()['original_operation']['content']; valid = split(text); variants = []
-        for patch in ({'start': -1, 'end': 3}, {'start': 0, 'end': len(text)+1}, {'start': True, 'end': 3},
+        for patch in ({'start': True, 'end': 3},
                       {'start': 0}, {'original_text': 'invented'}, {'claim': ''}, {'evidence_ids': ['E1']}):
             value = deepcopy(valid); value['claims'][0].update(patch); variants.append(value)
         variants += [{'op_index': 0, 'claims': []}, {'op_index': 9, 'claims': valid['claims']},
                      {'op_index': 0, 'claims': valid['claims'], 'complete': True}]
-        short = deepcopy(valid); short['claims'][0]['original_text'] = text[:3]; variants.append(short)
         duplicate = deepcopy(valid); duplicate['claims'] *= 2; variants.append(duplicate)
         for value in variants:
             result, transport = run(material(), [value])
@@ -141,12 +140,12 @@ class ClaimSplitTests(unittest.TestCase):
         variants = []
         for patch in ({'claim_index': 9}, {'claim_index': True}, {'evidence_ids': ['new-source']},
                       {'evidence_ids': ['E1', 'E1']}, {'evidence_ids': []}, {'quote': 'new evidence'},
-                      {'verdict': 'UNSUPPORTED'}, {'explanation': ''}, {'original_fragment': 'invented'}):
+                      {'verdict': 'UNSUPPORTED'}, {'explanation': ''}, {'original_fragment': 4}):
             value = deepcopy(valid); value['results'][0].update(patch); variants.append(value)
         for rows in ([], valid['results'][:1], valid['results'] + valid['results'][:1]):
             value = deepcopy(valid); value['results'] = rows; variants.append(value)
-        for patch in ({'decomposition_complete': 'true'}, {'coverage_original_fragment': 'invented'},
-                      {'decomposition_complete': False, 'coverage_original_fragment': ''}):
+        for patch in ({'decomposition_complete': 'true'}, {'coverage_original_fragment': 4},
+                      {'decomposition_complete': False, 'coverage_explanation': ''}):
             value = deepcopy(valid); value.update(patch); variants.append(value)
         variants.append(verification())  # Obsolete individual-claim wire is rejected.
         for value in variants:

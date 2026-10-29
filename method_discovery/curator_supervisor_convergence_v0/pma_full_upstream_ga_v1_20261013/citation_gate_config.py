@@ -1,7 +1,7 @@
 """Small shared opt-in contract; no imports of clients, profiles or benchmark data."""
 MODES=('gate-only','gate-one-repair')
 STRATEGY='semantic-support-one-sentence-v1'
-CLAIM_SPLIT='claim-split-same-evidence-v1'
+CLAIM_SPLIT='claim-split-same-evidence-v2'
 STRATEGIES=(STRATEGY,CLAIM_SPLIT)
 
 
@@ -43,7 +43,7 @@ def gate_source_paths():
     stage=Path(__file__).resolve().parent
     root=stage.parents[2]
     review=root/'pma_evidence_review'
-    vendor=[review/'vendor'/name for name in ('rag_models.py','rag_prompts.py','sourcecheck_types.py')]
+    vendor=[review/'vendor'/name for name in ('rag_models.py','rag_prompts.py','sourcecheck_types.py','rag_span_union.py')]
     vendor+=sorted((review/'vendor/prompts').glob('*.txt'))
     return [p.relative_to(root).as_posix() for p in sorted(review.glob('*.py'))+vendor]+[
         (stage/name).relative_to(root).as_posix() for name in ('citation_gate_agent.py','citation_gate_config.py')]
