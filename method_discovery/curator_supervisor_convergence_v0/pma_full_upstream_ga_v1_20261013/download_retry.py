@@ -132,7 +132,8 @@ def plan(original: bytes, max_attempts: int) -> DownloadPlan:
     return fallback
 
 
-async def prepare(exec_command, record, stages: tuple[tuple[str, str], ...]):
+async def prepare(exec_command, record, stages: tuple[tuple[str, str], ...],
+                  record_output=None):
     """Run each preparation stage once; tools own their bounded HTTP retries."""
     for name, command in stages:
         record({'stage': name, 'status': 'started', 'command_class': name})
@@ -141,6 +142,8 @@ async def prepare(exec_command, record, stages: tuple[tuple[str, str], ...]):
         except Exception as exc:
             record({'stage': name, 'status': 'failed', 'error_type': type(exc).__name__})
             raise BootstrapFailed(name, None, type(exc).__name__) from exc
+        if record_output is not None:
+            record_output(name, result.stdout or '', result.stderr or '')
         record({'stage': name, 'status': 'complete' if result.return_code == 0 else 'failed',
                 'return_code': result.return_code,
                 'stdout_sha256': hashlib.sha256((result.stdout or '').encode()).hexdigest(),

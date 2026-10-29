@@ -96,21 +96,25 @@ class NativeDownloadBoundaryTests(unittest.TestCase):
                 else:
                     asyncio.run(verifier.verify())
             receipt = json.loads((archive / 'download_retry_v1.json').read_text())
-            return started, receipt, env.commands
+            raw = archive / 'download_retry_v1_raw_stage_output'
+            output = (raw / 'uv_download.stderr.txt').read_text(encoding='utf-8')
+            return started, receipt, env.commands, output
 
     def test_download_failure_never_starts_test_entry(self):
-        started, receipt, commands = self._run('uv_download')
+        started, receipt, commands, output = self._run('uv_download')
         self.assertEqual(started, [])
         self.assertEqual(receipt['status'], 'bootstrap_failed')
         self.assertEqual(receipt['test_starts'], 0)
         self.assertFalse(any('bash /tests/test.sh' in command for command in commands))
+        self.assertEqual(output, 'HTTP 502')
 
     def test_success_starts_exactly_one_test_entry(self):
-        started, receipt, commands = self._run()
+        started, receipt, commands, output = self._run()
         self.assertEqual(started, [True])
         self.assertEqual(receipt['status'], 'evaluation_completed')
         self.assertEqual(receipt['test_starts'], 1)
         self.assertEqual(receipt['coverage'], 'apt_curl_uvx')
+        self.assertEqual(output, '')
         self.assertEqual(sum('bash /tests/test.sh' in command for command in commands), 0)
         self.assertEqual(sum('bash /logs/verifier/download_retry_v1/test.sh' in command
                              for command in commands), 1)

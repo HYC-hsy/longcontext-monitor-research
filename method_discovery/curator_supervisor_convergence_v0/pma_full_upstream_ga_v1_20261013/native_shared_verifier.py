@@ -140,7 +140,17 @@ class NativeSharedVerifier(Verifier):
                     await self.environment.exec(
                         command=f'mkdir -p /logs/verifier/{protocol}', user='root',
                         timeout_sec=30)
-                    await prepare_downloads(self.environment.exec, record, download.stages)
+                    # Keep dependency failure text in the private archive; the
+                    # public stage receipts contain only hashes. This is
+                    # diagnostic capture, not verifier input or test output.
+                    raw_dir = archive / f'{protocol}_raw_stage_output'
+                    raw_dir.mkdir(exist_ok=False)
+                    def record_output(name, stdout, stderr):
+                        for suffix, body in (('stdout', stdout), ('stderr', stderr)):
+                            (raw_dir / f'{name}.{suffix}.txt').write_text(
+                                body, encoding='utf-8')
+                    await prepare_downloads(self.environment.exec, record,
+                                            download.stages, record_output)
                 else:
                     cache = spec['evaluation_cache']
                     frozen = json.loads(Path(spec['manifest_path']).read_text(encoding='utf-8'))
