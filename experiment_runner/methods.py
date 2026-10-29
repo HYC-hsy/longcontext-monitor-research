@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 METHOD_PREFIXES = ('GA_STATEFUL_', 'GA_POS_', 'GA_PMA_UPSTREAM_',
                    'GA_MONITOR_', 'GA_M0_')
 METHOD_EXTRA_KEYS = {'GA_PMA_ENABLED', 'GA_EXPERIMENT_TASK_TURNS',
-                     'GA_TASK_DEADLINE_EPOCH'}
+                     'GA_EXPERIMENT_GA_ONLY_POLICY', 'GA_TASK_DEADLINE_EPOCH'}
 
 
 def clean_candidate_environment(inherited):
@@ -43,7 +43,7 @@ class Method:
 
 
 _BUILTINS = (
-    Method('ga-only', 'A', 'U'), Method('pma', 'B', 'U'),
+    Method('ga-only', 'A', 'U', False, 300, True), Method('pma', 'B', 'U'),
     Method('pma-stateful', 'B', 'pma_stateful_memory_v1', True, None, True),
     Method('pma-gap', 'B', 'pma_gap_memory_v0', False, None, True),
     Method('pma-gap-evidence', 'B', 'pma_gap_evidence_v1', False, None, True),

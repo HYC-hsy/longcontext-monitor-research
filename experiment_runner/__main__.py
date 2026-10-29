@@ -143,7 +143,8 @@ def build_plan(config):
     public = catalog(config['dataset'], [row['task'] for row in normalized])
     by_task = {row['task']: row for row in public['tasks']}
     for row in normalized:
-        if row['adapter']['supports_runtime_policy']:
+        if row['adapter']['supports_runtime_policy'] and (
+                row['method'] != 'ga-only' or 'runtime_policy' in config):
             from .runtime_policy import resolve_policy
             asset = by_task[row['task']]
             row['requested_runtime_policy'] = config.get('runtime_policy', {})

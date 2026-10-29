@@ -62,7 +62,7 @@ class RuntimeIntegrationTests(unittest.TestCase):
             spec.loader.exec_module(result)
         return result
 
-    def prepare(self, requested):
+    def prepare(self, requested, condition='B'):
         builder = self.load_manifest_builder()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -81,13 +81,15 @@ class RuntimeIntegrationTests(unittest.TestCase):
                      'native_verifier_seconds': 900}
             image = {'repo_digests': ['synthetic/image@sha256:abc'],
                      'image_id': 'synthetic', 'platform': 'synthetic'}
-            plan = {'schema': 'pma-ga-single-plan-v2', 'execution_authorized': False,
+            plan = {'schema': 'pma-ga-single-plan-v2' if condition == 'B' else 'pma-ga-single-plan-v1',
+                    'execution_authorized': False,
                     'official_source_git_commit': '2fd12b88aafdd04a52c298e3940bcb189f9766d6',
-                    'task': 'synthetic-task', 'condition': 'B', 'occurrence': 1,
-                    'research_candidate': 'pma_stateful_memory_v1',
-                    'task_complete_response_policy': 'complete-response-v1',
-                    'agent_time_protocol': ('diagnostic-uncapped-v1' if requested is None
-                                            else 'runtime-policy-v1')}
+                    'task': 'synthetic-task', 'condition': condition, 'occurrence': 1}
+            if condition == 'B':
+                plan.update(research_candidate='pma_stateful_memory_v1',
+                    task_complete_response_policy='complete-response-v1',
+                    agent_time_protocol=('diagnostic-uncapped-v1' if requested is None
+                                         else 'runtime-policy-v1'))
             if requested is not None:
                 plan['runtime_policy'] = requested
             with patch.object(builder, 'descriptor', return_value=asset), \
@@ -109,6 +111,19 @@ class RuntimeIntegrationTests(unittest.TestCase):
                 separators=(',', ':')).encode()).hexdigest()
             self.assertEqual(value['config_sha256'], expected)
         self.assertNotEqual(official['config_sha256'], relaxed['config_sha256'])
+
+    def test_ga_only_explicit_policy_freezes_uncapped_without_changing_default(self):
+        legacy = self.prepare(None, condition='A')
+        relaxed = self.prepare({'agent_timeout': 'uncapped',
+            'task_turns': 'uncapped', 'verifier_timeout': 'official'}, condition='A')
+        self.assertNotIn('runtime_policy', legacy['config'])
+        self.assertEqual(legacy['config']['task_turns_max'], 300)
+        self.assertEqual(legacy['config']['agent_wall_seconds'], 14400)
+        self.assertEqual(relaxed['config']['runtime_policy']['method_default_task_turns'], 300)
+        self.assertIsNone(relaxed['config']['task_turns_max'])
+        self.assertIsNone(relaxed['config']['agent_wall_seconds'])
+        self.assertEqual(relaxed['config']['runtime_policy']['official_verifier_seconds'], 900)
+        self.assertNotEqual(legacy['config_sha256'], relaxed['config_sha256'])
 
     def test_changed_policy_does_not_accept_old_authorization(self):
         from importlib import import_module

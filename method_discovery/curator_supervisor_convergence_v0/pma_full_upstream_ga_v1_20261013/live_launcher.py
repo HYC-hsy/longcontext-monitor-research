@@ -566,7 +566,8 @@ def run_live(args) -> dict:
     runtime_policy = manifest.get('config', {}).get('runtime_policy')
     if runtime_policy is not None:
         from experiment_runner.runtime_policy import validate_resolved_policy
-        if not stateful and candidate not in ('pma_gap_memory_v0', 'pma_gap_evidence_v1'):
+        if not stateful and candidate not in ('pma_gap_memory_v0', 'pma_gap_evidence_v1') and not (
+                args.condition == 'A' and candidate == 'U'):
             raise RuntimeError('runtime policy is not supported by this legacy candidate')
         validate_resolved_policy(runtime_policy, manifest['assets'][args.task])
         spec['runtime_policy'] = runtime_policy
@@ -814,6 +815,8 @@ def run_live(args) -> dict:
         if runtime_policy is not None:
             turns = runtime_policy['effective_task_turns']
             env['GA_EXPERIMENT_TASK_TURNS'] = 'uncapped' if turns is None else str(turns)
+        if runtime_policy is not None and args.condition == 'A' and candidate == 'U':
+            env['GA_EXPERIMENT_GA_ONLY_POLICY'] = 'A/U'
         for name in ('PMA_MEMORY_API_KEY', 'OPENROUTER_API_KEY', 'ANTHROPIC_API_KEY'):
             env.pop(name, None)
         python_roots = [str(repo), str(repo / 'GenericAgent-main'),

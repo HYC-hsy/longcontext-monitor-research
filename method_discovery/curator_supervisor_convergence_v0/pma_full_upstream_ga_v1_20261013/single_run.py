@@ -108,8 +108,10 @@ def prepare(args: argparse.Namespace) -> dict:
     if gate and not getattr(args,'fake_only',False) and not getattr(args,'certification_dir',None):
         raise ValueError('gate certification-dir required before real preparation')
     validate_binding(args.condition, getattr(args, 'research_candidate', 'U'))
-    if runtime_policy is not None and getattr(args, 'research_candidate', 'U') not in {
-            'pma_stateful_memory_v1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1'}:
+    if runtime_policy is not None and not (
+            (args.condition == 'A' and getattr(args, 'research_candidate', 'U') == 'U') or
+            getattr(args, 'research_candidate', 'U') in {
+                'pma_stateful_memory_v1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1'}):
         raise ValueError('runtime policy overrides require a supported candidate')
     # Gap Harbor hooks require an explicit resolved policy at agent_start.
     # Fail before artifacts/profiles, fixture grants or runtime allocation.

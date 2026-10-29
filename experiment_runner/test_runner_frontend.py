@@ -51,7 +51,7 @@ class FakeBackend:
             (root / 'plan.json').write_text(json.dumps(single))
             manifest.setdefault('config', {})['runtime_policy'] = resolve_policy(args.runtime_policy,
                 {'native_agent_seconds': 900, 'native_verifier_seconds': 900},
-                {'task_turns_max': None})
+                {'task_turns_max': 300 if args.condition == 'A' else None})
             for key in ('native_context_policy', 'research_capture_policy'):
                 value = getattr(args, key, 'required')
                 single[key] = value
@@ -255,6 +255,35 @@ class FrontendTests(unittest.TestCase):
         self.authorize()
         self.assertTrue(succeeded(execute(plan, self.output, 'run', backend), 2, 'run'))
         self.assertIsNone(backend.runs[0].stateful_fake_replies)
+
+    def test_ga_only_default_policy_is_unchanged(self):
+        self.config['method'] = 'ga-only'
+        plan = build_plan(self.config)
+        self.assertNotIn('requested_runtime_policy', plan['slots'][0])
+        backend = FakeBackend()
+        self.assertTrue(succeeded(execute(plan, self.output, 'prepare', backend), 2, 'prepare'))
+        self.assertFalse(hasattr(backend.prepared[0], 'runtime_policy'))
+
+    def test_ga_only_explicit_uncapped_policy_is_frozen(self):
+        self.config['method'] = 'ga-only'
+        self.config['runtime_policy'] = {'agent_timeout': 'uncapped',
+            'task_turns': 'uncapped', 'verifier_timeout': 'official'}
+        plan = build_plan(self.config)
+        for slot in plan['slots']:
+            self.assertEqual(slot['adapter']['condition'], 'A')
+            self.assertEqual(slot['adapter']['research_candidate'], 'U')
+            self.assertEqual(slot['effective_runtime_policy']['method_default_task_turns'], 300)
+            self.assertIsNone(slot['effective_runtime_policy']['effective_agent_seconds'])
+            self.assertIsNone(slot['effective_runtime_policy']['effective_task_turns'])
+            self.assertEqual(slot['effective_runtime_policy']['official_verifier_seconds'], 900)
+        backend = FakeBackend()
+        self.assertTrue(succeeded(execute(plan, self.output, 'prepare', backend), 2, 'prepare'))
+        for directory in self.output.glob('0?-*'):
+            single = json.loads((directory / 'plan.json').read_text())
+            manifest = json.loads((directory / 'manifest.json').read_text())
+            self.assertEqual(single['runtime_policy'], self.config['runtime_policy'])
+            self.assertEqual(manifest['config']['runtime_policy'],
+                plan['slots'][0]['effective_runtime_policy'])
 
     def test_default_stateful_policy_is_explicit_official(self):
         self.assertNotIn('runtime_policy', self.config)
