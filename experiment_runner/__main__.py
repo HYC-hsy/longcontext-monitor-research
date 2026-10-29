@@ -43,7 +43,7 @@ def load_config(path):
         raise ValueError('only serial execution is supported')
     protocol = config.get('evaluation_bootstrap_protocol', 'original')
     if protocol not in {'original', 'bootstrap_retry_v1', 'persistent_bundle_v1',
-                        'download_retry_v1'}:
+                        'download_retry_v1', 'prepared_dependency_bundle_v1'}:
         raise ValueError('unsupported evaluation bootstrap protocol')
     retry = config.get('evaluation_download_retry')
     if protocol == 'download_retry_v1':
@@ -60,15 +60,20 @@ def load_config(path):
     if 'preserve_pre_eval_snapshot' in config and type(config['preserve_pre_eval_snapshot']) is not bool:
         raise ValueError('preserve_pre_eval_snapshot must be boolean')
     cache = config.get('evaluation_cache')
-    if (config.get('evaluation_bootstrap_protocol') == 'persistent_bundle_v1') != (cache is not None):
-        raise ValueError('persistent bundle protocol requires exactly one evaluation_cache')
+    if (protocol in {'persistent_bundle_v1', 'prepared_dependency_bundle_v1'}) != (cache is not None):
+        raise ValueError('bundle protocol requires exactly one evaluation_cache')
     if cache is not None:
-        if not isinstance(cache, dict) or set(cache) != {'bundle_path', 'manifest_sha256', 'identity'}:
-            raise ValueError('invalid evaluation cache binding')
-        from .evaluation_cache import verify_bundle, require_offline_ready
-        cache['bundle_path'] = str((path.parent / cache['bundle_path']).resolve(strict=True))
-        verify_bundle(cache['bundle_path'], cache['identity'])
-        require_offline_ready(cache['bundle_path'], cache['manifest_sha256'])
+        if protocol == 'persistent_bundle_v1':
+            if not isinstance(cache, dict) or set(cache) != {'bundle_path', 'manifest_sha256', 'identity'}:
+                raise ValueError('invalid evaluation cache binding')
+            from .evaluation_cache import verify_bundle, require_offline_ready
+            cache['bundle_path'] = str((path.parent / cache['bundle_path']).resolve(strict=True))
+            verify_bundle(cache['bundle_path'], cache['identity'])
+            require_offline_ready(cache['bundle_path'], cache['manifest_sha256'])
+        else:
+            if not isinstance(cache, dict) or set(cache) != {'bundle_path', 'manifest_sha256'}:
+                raise ValueError('invalid prepared dependency cache binding')
+            cache['bundle_path'] = str((path.parent / cache['bundle_path']).resolve(strict=True))
     reuse = config.get('runtime_reuse')
     if reuse is not None:
         if not isinstance(reuse, dict) or set(reuse) != {
@@ -125,6 +130,9 @@ def build_plan(config):
                 and task != 'sqlite-with-gcov'):
             raise ValueError('non-original bootstrap supports only sqlite-with-gcov')
         method = resolve(row.get('method', config.get('method')))
+        if config.get('evaluation_bootstrap_protocol') == 'prepared_dependency_bundle_v1' and (
+                method.name != 'ga-only' or config.get('environment', {}).get('fake_only') is True):
+            raise ValueError('prepared dependency bundles require a real ga-only slot')
         if config.get('preserve_pre_eval_snapshot') is True and (
                 method.name != 'ga-only' or config.get('environment', {}).get('fake_only') is True):
             raise ValueError('pre-evaluation snapshot requires a real ga-only slot')

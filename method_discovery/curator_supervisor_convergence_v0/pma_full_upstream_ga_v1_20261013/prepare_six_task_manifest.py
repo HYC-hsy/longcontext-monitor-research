@@ -29,6 +29,7 @@ SOURCE_FILES = (
     'experiment_runner/methods.py',
     'experiment_runner/__main__.py',
     'experiment_runner/runtime_policy.py',
+    'experiment_runner/prepared_dependency_cache.py',
     'long_context_bench/adapters/harbor_ga_agent.py',
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'archive_six_task_native_base.py',
@@ -161,8 +162,9 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
                 (plan['condition'] == 'A' and candidate != 'U') or
                 (plan.get('evaluation_bootstrap_protocol', 'original') not in
                  {'original', 'bootstrap_retry_v1', 'persistent_bundle_v1',
-                  'download_retry_v1'}) or
-                ((plan.get('evaluation_bootstrap_protocol') == 'persistent_bundle_v1') !=
+                  'download_retry_v1', 'prepared_dependency_bundle_v1'}) or
+                ((plan.get('evaluation_bootstrap_protocol') in
+                  {'persistent_bundle_v1', 'prepared_dependency_bundle_v1'}) !=
                  ('evaluation_cache' in plan)) or
                 ((plan.get('evaluation_bootstrap_protocol') == 'download_retry_v1') !=
                  ('evaluation_download_retry' in plan)) or
@@ -182,6 +184,8 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
                 (plan.get('evaluation_bootstrap_protocol', 'original') in
                  {'bootstrap_retry_v1', 'persistent_bundle_v1'} and
                  plan['task'] != 'sqlite-with-gcov') or
+                (plan.get('evaluation_bootstrap_protocol') == 'prepared_dependency_bundle_v1' and
+                 (plan['condition'] != 'A' or candidate != 'U')) or
                 type(plan['occurrence']) is not int or plan['occurrence'] < 1):
             raise RuntimeError('single-run plan schema mismatch')
         slot = dict(order=1, task=plan['task'],
@@ -221,6 +225,7 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
         raise RuntimeError('frozen Task/PMA models are not Opus 4.8')
     tasks = tuple(dict.fromkeys(row['task'] for row in slots))
     assets = {}
+    test_coverage = {}
     for task in tasks:
         desc = descriptor(source, task, registered=single)
         with TemporaryDirectory(prefix='pma-public-check-') as temporary:
@@ -235,6 +240,9 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
             export_task(source, task, tests, registered=single)
             tests_hash = digest_tree(tests)
             test_sh_hash = _sha(tests / 'test.sh')
+            if single and plan.get('evaluation_bootstrap_protocol') == 'prepared_dependency_bundle_v1':
+                from .download_retry import plan as download_plan
+                test_coverage[task] = download_plan((tests / 'test.sh').read_bytes(), 3).coverage
         image = image_identity(desc['image_tag'])
         repo = desc['image_tag'].rsplit(':', 1)[0]
         matching_digests = [value for value in image['repo_digests']
@@ -306,19 +314,28 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
     if single and 'preserve_pre_eval_snapshot' in plan:
         method['preserve_pre_eval_snapshot'] = plan['preserve_pre_eval_snapshot']
     if single and 'evaluation_cache' in plan:
-        from experiment_runner.evaluation_cache import verify_bundle, require_offline_ready
         cache = plan['evaluation_cache']
-        if not isinstance(cache, dict) or set(cache) != {
-                'bundle_path', 'manifest_sha256', 'identity'}:
-            raise RuntimeError('invalid evaluation cache binding')
-        verify_bundle(cache['bundle_path'], cache['identity'])
-        require_offline_ready(cache['bundle_path'], cache['manifest_sha256'])
         asset = assets[plan['task']]
-        if (cache['identity']['base_image'] != asset['repo_digest'] or
-                asset['platform'] != 'linux/amd64' or
-                cache['identity']['architecture'] != 'x86_64' or
-                cache['identity']['original_sha256'] != asset['native_test_sh_sha256']):
-            raise RuntimeError('cache differs from frozen Task image or evaluator')
+        if plan.get('evaluation_bootstrap_protocol') == 'prepared_dependency_bundle_v1':
+            from experiment_runner.prepared_dependency_cache import verify_bundle
+            verify_bundle(cache, task=plan['task'], image_digest=asset['repo_digest'],
+                          image_id=asset['image_id'],
+                          original_sha256=asset['native_test_sh_sha256'],
+                          coverage=test_coverage[plan['task']])
+            if asset['platform'] != 'linux/amd64':
+                raise RuntimeError('prepared dependency cache requires linux/amd64')
+        else:
+            from experiment_runner.evaluation_cache import verify_bundle, require_offline_ready
+            if not isinstance(cache, dict) or set(cache) != {
+                    'bundle_path', 'manifest_sha256', 'identity'}:
+                raise RuntimeError('invalid evaluation cache binding')
+            verify_bundle(cache['bundle_path'], cache['identity'])
+            require_offline_ready(cache['bundle_path'], cache['manifest_sha256'])
+            if (cache['identity']['base_image'] != asset['repo_digest'] or
+                    asset['platform'] != 'linux/amd64' or
+                    cache['identity']['architecture'] != 'x86_64' or
+                    cache['identity']['original_sha256'] != asset['native_test_sh_sha256']):
+                raise RuntimeError('cache differs from frozen Task image or evaluator')
         method['evaluation_cache'] = cache
     if single and 'runtime_reuse' in plan:
         method['runtime_reuse'] = plan['runtime_reuse']

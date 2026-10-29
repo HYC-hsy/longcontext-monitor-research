@@ -360,7 +360,8 @@ def _advance_worker_stop(root: Path, worker: subprocess.Popen | None,
 def _native_trial_result(root: Path) -> dict:
     """Read this fresh Harbor job's result, without interpreting task answers."""
     def bootstrap_failure():
-        for name in ('persistent_bundle_v1', 'bootstrap_retry_v1', 'download_retry_v1'):
+        for name in ('persistent_bundle_v1', 'bootstrap_retry_v1', 'download_retry_v1',
+                     'prepared_dependency_bundle_v1'):
             receipt = root / 'archive' / f'{name}.json'
             if receipt.is_file():
                 row = json.loads(receipt.read_text(encoding='utf-8'))

@@ -277,6 +277,27 @@ class FrontendTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'configuration/adapter/catalog changed'):
             execute(build_plan(self.config), self.output, 'run', backend)
 
+    def test_prepared_dependency_bundle_is_real_ga_only_and_frozen(self):
+        cache = {'bundle_path': str((self.root / 'bundle').resolve()),
+                 'manifest_sha256': 'a' * 64}
+        self.config.update(method='ga-only',
+            evaluation_bootstrap_protocol='prepared_dependency_bundle_v1',
+            evaluation_cache=cache)
+        self.config['environment']['fake_only'] = False
+        plan = build_plan(self.config)
+        backend = FakeBackend()
+        self.assertTrue(succeeded(execute(plan, self.output, 'prepare', backend), 2, 'prepare'))
+        self.assertEqual(backend.prepared[0].evaluation_cache, cache)
+        manifest = json.loads(next(self.output.glob('01-*/manifest.json')).read_text())
+        self.assertEqual(manifest['config']['evaluation_cache'], cache)
+        self.config['method'] = 'pma'
+        with self.assertRaisesRegex(ValueError, 'real ga-only'):
+            build_plan(self.config)
+        self.config['method'] = 'ga-only'
+        self.config['evaluation_cache'] = {**cache, 'manifest_sha256': 'b' * 64}
+        with self.assertRaisesRegex(ValueError, 'configuration/adapter/catalog changed'):
+            execute(build_plan(self.config), self.output, 'run', backend)
+
     def test_download_retry_is_frozen_and_reaches_driver_without_cache(self):
         self.config.update(method='pma-gap', slots=[{'task': 'db-wal-recovery'}],
                            evaluation_bootstrap_protocol='download_retry_v1',

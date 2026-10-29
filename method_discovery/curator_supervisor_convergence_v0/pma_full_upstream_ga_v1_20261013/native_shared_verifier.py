@@ -9,6 +9,9 @@ from pathlib import Path
 import subprocess
 from tempfile import TemporaryDirectory
 from experiment_runner.evaluation_cache import prepare_cached
+from experiment_runner.prepared_dependency_cache import (
+    PROTOCOL as PREPARED_PROTOCOL, verify_bundle as verify_prepared_bundle,
+    restore as restore_prepared_bundle, SCHEMAS as PREPARED_SCHEMAS)
 
 from harbor.models.trial.paths import EnvironmentPaths
 from harbor.verifier.verifier import Verifier
@@ -89,20 +92,25 @@ class NativeSharedVerifier(Verifier):
             'test_sh_sha256': required['tests/test.sh']})
         protocol = spec.get('evaluation_bootstrap_protocol', 'original')
         if protocol not in {'original', BOOTSTRAP_PROTOCOL, 'persistent_bundle_v1',
-                            DOWNLOAD_PROTOCOL}:
+                            DOWNLOAD_PROTOCOL, PREPARED_PROTOCOL}:
             raise RuntimeError('unknown evaluation bootstrap protocol')
         bootstrap = None
         effective_path = None
-        if protocol in {BOOTSTRAP_PROTOCOL, 'persistent_bundle_v1', DOWNLOAD_PROTOCOL}:
+        if protocol in {BOOTSTRAP_PROTOCOL, 'persistent_bundle_v1', DOWNLOAD_PROTOCOL,
+                        PREPARED_PROTOCOL}:
             if (spec.get('evaluation_protocol') != 'official_shared_v2' or
-                    (protocol != DOWNLOAD_PROTOCOL and
+                    (protocol not in {DOWNLOAD_PROTOCOL, PREPARED_PROTOCOL} and
                      spec.get('task_id') != 'sqlite-with-gcov')):
-                raise RuntimeError('bootstrap protocol outside pinned official SQLite task')
+                raise RuntimeError('bootstrap protocol outside supported official task')
             original = self.task.paths.test_path_for(self.environment.os).read_bytes()
-            download = (download_plan(original, spec['evaluation_download_retry']['max_attempts'])
+            download = (download_plan(original, 3)
+                        if protocol == PREPARED_PROTOCOL else
+                        download_plan(original, spec['evaluation_download_retry']['max_attempts'])
                         if protocol == DOWNLOAD_PROTOCOL else None)
             effective = (download.effective if download is not None else
                          effective_script(original, task=spec['task_id']))
+            if protocol == PREPARED_PROTOCOL and download.coverage not in PREPARED_SCHEMAS:
+                raise RuntimeError('official evaluator has no prepared dependency coverage')
             if hashlib.sha256(original).hexdigest() != required['tests/test.sh']:
                 raise RuntimeError('bootstrap original does not match uploaded verifier')
             # No artifact from a previous attempt may satisfy this invocation.
@@ -118,7 +126,7 @@ class NativeSharedVerifier(Verifier):
                          'original_sha256': hashlib.sha256(original).hexdigest(),
                          'effective_sha256': hashlib.sha256(effective).hexdigest(),
                          'status': 'preparing', 'stages': [], 'test_starts': 0}
-            if download is not None:
+            if protocol == DOWNLOAD_PROTOCOL:
                 bootstrap.update(coverage=download.coverage,
                                  max_attempts=spec['evaluation_download_retry']['max_attempts'],
                                  preparation_commands_sha256=hashlib.sha256(json.dumps(
@@ -151,6 +159,33 @@ class NativeSharedVerifier(Verifier):
                                 body, encoding='utf-8')
                     await prepare_downloads(self.environment.exec, record,
                                             download.stages, record_output)
+                elif protocol == PREPARED_PROTOCOL:
+                    cache = spec['evaluation_cache']
+                    frozen = json.loads(Path(spec['manifest_path']).read_text(encoding='utf-8'))
+                    asset = frozen['assets'][spec['task_id']]
+                    try:
+                        container = subprocess.run(['docker', 'inspect', ended['container_id']],
+                            check=True, capture_output=True, text=True, timeout=30)
+                        containers = json.loads(container.stdout)
+                        inspected = subprocess.run(['docker', 'image', 'inspect', spec['image_id']],
+                            check=True, capture_output=True, text=True, timeout=30)
+                        images = json.loads(inspected.stdout)
+                    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                        raise BootstrapFailed('image_identity', None, type(exc).__name__) from exc
+                    if (len(containers) != 1 or containers[0]['Image'] != spec['image_id'] or
+                            len(images) != 1 or images[0]['Id'] != spec['image_id'] or
+                            asset['repo_digest'] not in images[0]['RepoDigests'] or
+                            images[0]['Os'] + '/' + images[0]['Architecture'] != asset['platform'] or
+                            asset['platform'] != 'linux/amd64'):
+                        raise BootstrapFailed('image_identity', None, 'container image differs from bundle')
+                    try:
+                        prepared = verify_prepared_bundle(cache, task=spec['task_id'],
+                            image_digest=asset['repo_digest'], image_id=asset['image_id'],
+                            original_sha256=required['tests/test.sh'], coverage=download.coverage)
+                        await restore_prepared_bundle(self.environment.exec,
+                            self.environment.upload_file, cache, prepared, record)
+                    except Exception as exc:
+                        raise BootstrapFailed('cache_prepare', None, type(exc).__name__) from exc
                 else:
                     cache = spec['evaluation_cache']
                     frozen = json.loads(Path(spec['manifest_path']).read_text(encoding='utf-8'))

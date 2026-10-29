@@ -89,21 +89,28 @@ def prepare(args: argparse.Namespace) -> dict:
              getattr(args, 'fake_only', False)))):
         raise ValueError('pre-evaluation snapshot requires a real GA-only A/U run')
     if bootstrap not in {'original', 'bootstrap_retry_v1', 'persistent_bundle_v1',
-                          'download_retry_v1'} or (bootstrap in {'bootstrap_retry_v1', 'persistent_bundle_v1'} and
+                          'download_retry_v1', 'prepared_dependency_bundle_v1'} or (bootstrap in {'bootstrap_retry_v1', 'persistent_bundle_v1'} and
             (args.task != 'sqlite-with-gcov' or getattr(args, 'fake_only', False))):
         raise ValueError('evaluation bootstrap protocol requires real sqlite-with-gcov')
+    if bootstrap == 'prepared_dependency_bundle_v1' and (
+            args.condition != 'A' or getattr(args, 'research_candidate', 'U') != 'U' or
+            getattr(args, 'fake_only', False)):
+        raise ValueError('prepared dependency bundle requires real GA A/U')
     if bootstrap == 'download_retry_v1':
         if (not isinstance(retry, dict) or set(retry) != {'max_attempts'} or
                 type(retry['max_attempts']) is not int or not 1 <= retry['max_attempts'] <= 10):
             raise ValueError('invalid evaluation download retry policy')
     elif retry is not None:
         raise ValueError('download retry policy requires download_retry_v1')
-    if (bootstrap == 'persistent_bundle_v1') != (cache is not None):
-        raise ValueError('persistent bundle requires an explicit cache binding')
+    if (bootstrap in {'persistent_bundle_v1', 'prepared_dependency_bundle_v1'}) != (cache is not None):
+        raise ValueError('bundle protocol requires an explicit cache binding')
     if cache is not None:
-        from experiment_runner.evaluation_cache import verify_bundle, require_offline_ready
-        verify_bundle(cache['bundle_path'], cache['identity'])
-        require_offline_ready(cache['bundle_path'], cache['manifest_sha256'])
+        if bootstrap == 'persistent_bundle_v1':
+            from experiment_runner.evaluation_cache import verify_bundle, require_offline_ready
+            verify_bundle(cache['bundle_path'], cache['identity'])
+            require_offline_ready(cache['bundle_path'], cache['manifest_sha256'])
+        elif not isinstance(cache, dict) or set(cache) != {'bundle_path', 'manifest_sha256'}:
+            raise ValueError('invalid prepared dependency cache binding')
     reuse = getattr(args, 'runtime_reuse', None)
     if reuse is not None and getattr(args, 'research_candidate', 'U') != 'pma_gap_memory_v0':
         raise ValueError('runtime reuse supports only the gap candidate')

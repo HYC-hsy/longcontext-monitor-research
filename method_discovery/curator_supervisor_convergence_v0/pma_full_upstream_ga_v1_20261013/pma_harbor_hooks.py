@@ -103,12 +103,17 @@ def verify_live_spec(spec: dict) -> None:
         raise RuntimeError('runtime policy differs from the authorized manifest')
     bootstrap = frozen.get('config', {}).get('evaluation_bootstrap_protocol', 'original')
     if (bootstrap not in {'original', 'bootstrap_retry_v1', 'persistent_bundle_v1',
-                          'download_retry_v1'} or
+                          'download_retry_v1', 'prepared_dependency_bundle_v1'} or
             spec.get('evaluation_bootstrap_protocol', 'original') != bootstrap or
             (bootstrap in {'bootstrap_retry_v1', 'persistent_bundle_v1'} and
              (spec.get('task_id') != 'sqlite-with-gcov' or
              spec.get('evaluation_protocol') != 'official_shared_v2'))):
         raise RuntimeError('evaluation bootstrap differs from authorized manifest')
+    if bootstrap == 'prepared_dependency_bundle_v1' and (
+            spec.get('condition') != 'A' or spec.get('research_candidate', 'U') != 'U' or
+            spec.get('zero_model_fixture_only') is True or
+            spec.get('evaluation_protocol') != 'official_shared_v2'):
+        raise RuntimeError('prepared dependency bundle requires real GA A/U')
     retry = frozen.get('config', {}).get('evaluation_download_retry')
     snapshot = frozen.get('config', {}).get('preserve_pre_eval_snapshot')
     if (spec.get('preserve_pre_eval_snapshot') != snapshot or
@@ -125,19 +130,31 @@ def verify_live_spec(spec: dict) -> None:
              not 1 <= retry['max_attempts'] <= 10))):
         raise RuntimeError('evaluation download retry differs from authorized manifest')
     cache = frozen.get('config', {}).get('evaluation_cache')
-    if (bootstrap == 'persistent_bundle_v1') != (cache is not None) or spec.get('evaluation_cache') != cache:
+    if (bootstrap in {'persistent_bundle_v1', 'prepared_dependency_bundle_v1'}) != (cache is not None) or spec.get('evaluation_cache') != cache:
         raise RuntimeError('evaluation cache differs from authorized manifest')
     if cache is not None:
-        from experiment_runner.evaluation_cache import verify_bundle, require_offline_ready
-        if not isinstance(cache, dict) or set(cache) != {'bundle_path', 'manifest_sha256', 'identity'}:
-            raise RuntimeError('invalid evaluation cache binding')
-        verify_bundle(cache['bundle_path'], cache['identity'])
-        require_offline_ready(cache['bundle_path'], cache['manifest_sha256'])
         asset = frozen['assets'][spec['task_id']]
-        if (cache['identity']['base_image'] != asset['repo_digest'] or
-                asset['image_id'] != spec.get('image_id', asset['image_id']) or
-                cache['identity']['original_sha256'] != asset['native_test_sh_sha256']):
-            raise RuntimeError('evaluation cache image or evaluator identity differs')
+        if bootstrap == 'prepared_dependency_bundle_v1':
+            from experiment_runner.prepared_dependency_cache import verify_bundle, SCHEMAS
+            import json as _json
+            from pathlib import Path as _Path
+            bundle_manifest = _json.loads((_Path(cache['bundle_path']) / 'manifest.json').read_text(encoding='utf-8'))
+            coverage = next((name for name, schema in SCHEMAS.items()
+                             if schema == bundle_manifest.get('schema')), None)
+            verify_bundle(cache, task=spec['task_id'], image_digest=asset['repo_digest'],
+                          image_id=asset['image_id'],
+                          original_sha256=asset['native_test_sh_sha256'],
+                          coverage=coverage)
+        else:
+            from experiment_runner.evaluation_cache import verify_bundle, require_offline_ready
+            if not isinstance(cache, dict) or set(cache) != {'bundle_path', 'manifest_sha256', 'identity'}:
+                raise RuntimeError('invalid evaluation cache binding')
+            verify_bundle(cache['bundle_path'], cache['identity'])
+            require_offline_ready(cache['bundle_path'], cache['manifest_sha256'])
+            if (cache['identity']['base_image'] != asset['repo_digest'] or
+                    asset['image_id'] != spec.get('image_id', asset['image_id']) or
+                    cache['identity']['original_sha256'] != asset['native_test_sh_sha256']):
+                raise RuntimeError('evaluation cache image or evaluator identity differs')
     if policy is not None:
         from experiment_runner.runtime_policy import validate_resolved_policy
         validate_resolved_policy(policy, frozen['assets'][spec['task_id']])
