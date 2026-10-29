@@ -192,7 +192,9 @@ def print_plan_summary(plan):
         req = policy['requested']
         def label(value):
             return 'uncapped' if value is None else str(value)
-        print(prefix + f"agent={label(policy['effective_agent_seconds'])}s "
+        agent_seconds = policy['effective_agent_seconds']
+        agent_label = 'uncapped' if agent_seconds is None else f'{agent_seconds}s'
+        print(prefix + f"agent={agent_label} "
               f"(source: {req['agent_timeout']}), "
               f"turns={label(policy['effective_task_turns'])} "
               f"(source: {req['task_turns']}), "

@@ -218,6 +218,12 @@ class FrontendTests(unittest.TestCase):
         self.assertIn('turns=7', text)
         self.assertIn('source: official', text)
         self.assertIn('runtime checks pending', text)
+        output = StringIO()
+        with redirect_stdout(output):
+            print_plan_summary(build_plan(dict(self.config, runtime_policy={
+                'agent_timeout': 'uncapped', 'task_turns': 'uncapped'})))
+        self.assertIn('agent=uncapped (source: uncapped)', output.getvalue())
+        self.assertNotIn('uncappeds', output.getvalue())
 
     def test_versioned_evaluator_bootstrap_is_frozen_and_real_only(self):
         self.config['evaluation_bootstrap_protocol'] = 'bootstrap_retry_v1'
