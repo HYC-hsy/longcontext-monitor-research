@@ -20,6 +20,18 @@ def write_json(path: Path, value: dict) -> str:
 
 
 class LiveWiringTests(unittest.TestCase):
+    def test_dead_worker_publishes_isolated_spool_marker(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'host_private').mkdir()
+            responses = root / 'control' / 'spool' / 'responses'
+            responses.mkdir(parents=True)
+            worker = SimpleNamespace(poll=lambda: 1, pid=42, returncode=1)
+            clearance = live_launcher._worker_clearance(root, worker, 'run-1')
+            self.assertTrue(clearance['stopped'])
+            marker = json.loads((responses / 'worker_exit.json').read_text(encoding='utf-8'))
+            self.assertEqual(marker, {'run_id': 'run-1', 'worker_return_code': 1})
+
     def test_missing_pma_profile_rejects_b_before_preparation(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

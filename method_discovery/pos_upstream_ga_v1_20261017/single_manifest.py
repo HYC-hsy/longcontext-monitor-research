@@ -50,6 +50,8 @@ SOURCE_FILES = (
     'method_discovery/curator_supervisor_convergence_v0/'
     'pma_full_upstream_ga_v1_20261013/batch_controller.py',
     'method_discovery/curator_supervisor_convergence_v0/'
+    'pma_full_upstream_ga_v1_20261013/run_selection.py',
+    'method_discovery/curator_supervisor_convergence_v0/'
     'pma_full_upstream_ga_v1_20261013/live_launcher.py',
     'method_discovery/curator_supervisor_convergence_v0/'
     'pma_full_upstream_ga_v1_20261013/offline_launcher.py',

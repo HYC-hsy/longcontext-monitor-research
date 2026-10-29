@@ -311,6 +311,13 @@ def _worker_clearance(root: Path, worker: subprocess.Popen | None, run_id: str) 
             exit_value = json.loads(receipt.read_text(encoding='utf-8'))
         except (OSError, ValueError):
             exit_value = None
+        # The response spool is the only worker-liveness surface visible to
+        # the isolated Task container. Publish after poll() proves exit.
+        marker = root / 'control' / 'spool' / 'responses' / 'worker_exit.json'
+        if marker.parent.is_dir() and not marker.exists():
+            marker.write_text(json.dumps({'run_id': run_id,
+                                          'worker_return_code': worker.returncode},
+                                         sort_keys=True), encoding='utf-8')
         identity_valid = (not isinstance(exit_value, dict) or
                           exit_value.get('run_id', run_id) == run_id)
         stopped_receipt = root / 'host_private/worker_stopped_without_task_end.json'

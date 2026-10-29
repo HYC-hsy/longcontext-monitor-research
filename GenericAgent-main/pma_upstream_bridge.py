@@ -84,6 +84,17 @@ class UpstreamPMAClient:
                 os.unlink(pending)
         response = self.responses / request.name
         while not response.is_file():
+            # The host publishes this marker only after its worker has exited.
+            # A pending event is then unknown, never safe to send again.
+            stopped = self.responses / 'worker_exit.json'
+            if stopped.is_file():
+                try:
+                    exit_row = json.loads(stopped.read_text(encoding='utf-8'))
+                except (OSError, ValueError) as exc:
+                    raise PMABridgeError('PMA worker exit marker unreadable') from exc
+                if exit_row.get('run_id') != self.run_id:
+                    raise PMABridgeError('PMA worker exit marker identity mismatch')
+                raise PMABridgeError('PMA worker exited without receipt; never replay accepted event')
             if self.deadline is not None and time.time() >= self.deadline:
                 raise PMABridgeError('PMA result unknown; do not replay accepted event')
             time.sleep(.02)

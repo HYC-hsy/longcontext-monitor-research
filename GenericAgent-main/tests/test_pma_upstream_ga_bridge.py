@@ -7,6 +7,23 @@ from agent_loop import BaseHandler, StepOutcome, agent_runner_loop, exhaust
 from pma_upstream_bridge import UpstreamPMAClient
 
 
+def test_uncapped_pending_event_fails_when_host_worker_exits(tmp_path):
+    requests, responses = tmp_path / 'requests', tmp_path / 'responses'
+    requests.mkdir()
+    responses.mkdir()
+    (responses / 'worker_exit.json').write_text(json.dumps(
+        {'run_id': 'r', 'worker_return_code': 1}), encoding='utf-8')
+    client = UpstreamPMAClient(run_id='r', task_id='t', requests=requests,
+                               responses=responses, deadline='uncapped')
+    try:
+        client.exchange('task_start', initial_user_content='public task')
+    except RuntimeError as error:
+        assert 'worker exited without receipt' in str(error)
+    else:
+        raise AssertionError('dead worker left an uncapped client waiting')
+    assert len(list(requests.glob('*.json'))) == 1
+
+
 class FakeBridge:
     def __init__(self):
         self.calls = []
