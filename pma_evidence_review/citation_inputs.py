@@ -76,7 +76,7 @@ def candidate(ref, parent, source_records=None):
         'coordinate_unit':'python_unicode_code_points','binding_origin':'host_inferred_not_model_selected'}
 
 
-def prepare(op, alignment, parent, source_records=None):
+def prepare(op, alignment, parent, source_records=None, *, allow_multiple=False):
     records,issues=[],[]
     if not op['success']:
         return {'status':'not_reviewed_failed_operation','issues':[],'citations':[]}
@@ -115,10 +115,15 @@ def prepare(op, alignment, parent, source_records=None):
             row['issues'].append('malformed_submitted_record')
             continue
         row.update(submitted_quote=item['quote'],source_hint=item.get('source_hint'),binding_status=item.get('status'))
-        if item.get('status')!='exact_unique':
+        allowed = {'exact_unique', 'exact_multiple'} if allow_multiple else {'exact_unique'}
+        if item.get('status') not in allowed:
             row['issues'].append('binding_'+str(item.get('status','missing')))
-        if len(item['candidates'])!=1:
-            row['issues'].append('candidate_count_'+str(len(item['candidates'])))
+        count = len(item['candidates'])
+        expected_multiple = allow_multiple and item.get('status') == 'exact_multiple'
+        if (expected_multiple and count < 2) or (not expected_multiple and count != 1):
+            row['issues'].append('candidate_count_'+str(count))
+        if allow_multiple and len({identity(ref) for ref in item['candidates']}) != count:
+            row['issues'].append('duplicate_candidate')
         for ref in item['candidates']:
             try:
                 bound=candidate(ref,parent,source_records)
@@ -134,7 +139,12 @@ def prepare(op, alignment, parent, source_records=None):
             if ref not in flattened: flattened.append(ref)
     if flattened != data['bound_refs']:
         issues.append('aggregate_bound_refs_mismatch')
-    if data.get('status')!='exact_unique' or alignment.get('status')!='exact_unique':
+    if allow_multiple:
+        expected = ('exact_multiple' if any(item['status'] == 'exact_multiple'
+                    for item in data['items']) else 'exact_unique')
+        if data.get('status') != expected or alignment.get('status') != expected:
+            issues.append('operation_binding_grade_mismatch')
+    elif data.get('status')!='exact_unique' or alignment.get('status')!='exact_unique':
         issues.append('operation_binding_not_exact_unique')
     issues += ['citation_%s:%s'%(row['citation_index'],code) for row in records for code in row['issues']]
     return {'status':'ready' if not issues else 'citation_set_not_eligible','issues':issues,'citations':records}

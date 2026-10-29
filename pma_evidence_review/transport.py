@@ -67,7 +67,7 @@ class CapturedTransport:
             content = getattr(response, 'content', None)
             raw = content if isinstance(content, str) else None
             row['response'] = raw
-            if request.get('review_strategy') in ('claim-split-same-evidence-v1', 'claim-split-same-evidence-v2'):
+            if request.get('review_strategy') in ('claim-split-same-evidence-v1', 'claim-split-same-evidence-v2', 'claim-split-same-evidence-v3'):
                 finish = getattr(response, 'finish_reason', None)
                 if finish is not None:
                     row['finish_reason'] = finish

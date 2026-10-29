@@ -2,13 +2,13 @@
 from dataclasses import asdict
 import copy
 
-from . import citation_inputs as ci, citation_review as cr, claim_split
+from . import citation_inputs as ci, citation_review as cr, claim_split, claim_split_simple
 from .prompt_strategy import ONE_SENTENCE, apply_strategy
 from .transport import ResponseProtocolError
 
 
 def build_live(draft, parts, operation, index, *, run_id, review_strategy=ONE_SENTENCE):
-    ci.old.require(review_strategy in (ONE_SENTENCE, claim_split.STRATEGY), 'invalid_review_strategy')
+    ci.old.require(review_strategy in (ONE_SENTENCE, claim_split.STRATEGY, claim_split_simple.STRATEGY), 'invalid_review_strategy')
     # Host snapshots and validation stay outside the model projection.
     draft.validate_bank()
     revision=draft.revisions[operation.revision_id]
@@ -20,7 +20,8 @@ def build_live(draft, parts, operation, index, *, run_id, review_strategy=ONE_SE
         'revision_id':operation.revision_id,'content':content,'content_sha256':ci.old.digest(content),
         'success':True}
     alignment=asdict(draft.alignments[operation.revision_id])
-    preparation=ci.prepare(op,alignment,parent,records)
+    preparation=ci.prepare(op,alignment,parent,records,
+        allow_multiple=review_strategy==claim_split_simple.STRATEGY)
     envelope={'schema':'pma-live-citation-candidate-v1','run_id':run_id,
         'cycle_id':parts.manifest.cycle_id,'maintenance_request_sha256':parts.manifest.request_sha256,
         'operation':op,'previous_revision_id':revision.previous_revision_id,
@@ -30,13 +31,19 @@ def build_live(draft, parts, operation, index, *, run_id, review_strategy=ONE_SE
     row={'operation':op,'preparation':preparation}
     request=None
     if preparation['status']=='ready':
-        material=cr.projection(envelope,row)
-        request=(claim_split.split_request(material,index) if review_strategy==claim_split.STRATEGY else
-                 apply_strategy(cr.request_from_material(material,index),ONE_SENTENCE))
+        if review_strategy == claim_split_simple.STRATEGY:
+            material = claim_split_simple.projection(envelope,row)
+            request = claim_split_simple.split_request(material,index)
+        else:
+            material=cr.projection(envelope,row)
+            request=(claim_split.split_request(material,index) if review_strategy==claim_split.STRATEGY else
+                     apply_strategy(cr.request_from_material(material,index),ONE_SENTENCE))
     return envelope,request
 
 
 async def assess(request,transport):
+    if request.get('review_strategy')==claim_split_simple.STRATEGY:
+        return await claim_split_simple.assess(request,transport)
     if request.get('review_strategy')==claim_split.STRATEGY:
         return await claim_split.assess(request,transport)
     result={'verdict':None,'model_verdict':None,'raw_response':None,'engineering_status':'received'}

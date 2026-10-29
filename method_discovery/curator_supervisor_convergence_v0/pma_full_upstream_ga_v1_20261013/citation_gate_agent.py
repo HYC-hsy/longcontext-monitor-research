@@ -1,6 +1,8 @@
 """Opt-in prepublication gate, with zero/one author repair and final control receipts."""
 from copy import deepcopy
 import json
+import asyncio
+from contextvars import ContextVar
 from pathlib import Path
 
 from latest_evidence_gap_agent import LatestEvidenceGapMemoryAgent, latest_phase1_system
@@ -9,15 +11,28 @@ from memory_agent.memory.memory_agent import MemoryOperation
 from pma_evidence_review.live_citations import build_live, assess, visible_snapshot
 from pma_evidence_review.prompt_strategy import ONE_SENTENCE
 from pma_evidence_review.claim_split import STRATEGY as CLAIM_SPLIT
+from pma_evidence_review import claim_split_simple as simple_split
+
+SPLIT_STRATEGIES = (CLAIM_SPLIT, simple_split.STRATEGY)
 from pma_evidence_review.gate_control import repair, receipt
 from pma_evidence_review.citation_inputs import identity
 from pma_evidence_review.transport import CapturedTransport, durable
 
 
 class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
+    @property
+    def transport_phase(self):
+        return self._transport_phase.get()
+
+    @transport_phase.setter
+    def transport_phase(self, value):
+        if not hasattr(self, '_transport_phase'):
+            self._transport_phase = ContextVar('citation_transport_phase', default='maintenance')
+        self._transport_phase.set(value)
+
     def __init__(self, *, review_directory=None, run_id='live', repair_limit=0,
                  review_strategy=ONE_SENTENCE, **kwargs):
-        if review_strategy not in (ONE_SENTENCE, CLAIM_SPLIT):raise ValueError('review_strategy')
+        if review_strategy not in (ONE_SENTENCE, *SPLIT_STRATEGIES):raise ValueError('review_strategy')
         self.review_strategy=review_strategy
         if type(repair_limit) is not int or repair_limit not in (0,1):raise ValueError('repair_limit')
         super().__init__(**kwargs)
@@ -130,6 +145,9 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
             row.update(error_code='status_would_truncate',preparation='status_would_truncate')
             return row,None,None
         draft=self._operation_draft()
+        base=self.memory.fork_write_draft()
+        # Frozen pre-cycle legacy revisions may be materialized by an earlier commit.
+        base.active_revisions = draft.active_revisions.copy()
         operation=self._apply_operation(draft,name,args,index)
         operation.content_status='candidate_not_published'
         row['candidate']=deepcopy(vars(operation))
@@ -139,13 +157,82 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
         if request is None:row['error_code']='citation_preparation_'+row['preparation']
         else:
             self.transport_phase='citation_review'
-            row.update(await assess(request,self.review_transport))
+            if self.review_strategy == simple_split.STRATEGY:
+                async with self._split_slot:
+                    split = await simple_split.split_stage(request, self.review_transport)
+                async with self._review_slot:
+                    result = await simple_split.review_stage(request, self.review_transport, split)
+                row.update(result)
+            else:
+                row.update(await assess(request,self.review_transport))
             if row['engineering_status']!='ok':row['error_code']='citation_'+row['engineering_status']
             elif row['verdict']!='supported':row['error_code']='citation_'+row['verdict']
+        if self.review_strategy == simple_split.STRATEGY:
+            self._staged_bases[id(draft)] = base
         return row,draft,operation
+
+    def _rebase_candidate(self, draft, operation):
+        """Merge one independently reviewed write, retaining its immutable identity.
+
+        Never publish the speculative whole bank or regenerate an audited operation.
+        History.add checks collisions; normal publication validates the merged delta.
+        """
+        base = self._staged_bases.pop(id(draft))
+        if draft._draft_generation == self.memory._generation:
+            return draft
+        key = operation.memory_id
+        if self.memory.active_revisions.get(key) != base.active_revisions.get(key):
+            raise ValueError('stale_candidate_target')
+        fresh = self.memory.fork_write_draft()
+        for name in (*draft._HISTORIES, 'alignments', '_reserved_ids', '_retired_ids'):
+            history = getattr(fresh, name)
+            for identity, value in getattr(draft, name).delta(getattr(base, name)):
+                history = history.add(identity, value)
+            setattr(fresh, name, history)
+        fresh.active_revisions[key] = draft.active_revisions[key]
+        if key == 'status':
+            fresh._status = draft._status
+        else:
+            kind = draft._content(key)[0]
+            field = '_gap_entries' if kind == 'gap' else '_' + kind
+            entry = next(e for e in getattr(draft, field) if e.id == key)
+            entries = getattr(fresh, field)
+            position = next((i for i, e in enumerate(entries) if e.id == key), None)
+            if position is None:
+                entries.append(entry)
+            else:
+                entries[position] = entry
+            fresh._invalidate_indices(kind)
+        return fresh
+
+    def _prefetch(self, calls, index, current_target, blocked_targets):
+        """At most one successor; same-target operations wait for actual commit."""
+        if index >= len(calls):
+            return None
+        try:
+            name, args = self._parse_item(calls[index])
+            target = self._dependency_target(name, args)
+            if not self._valid_target(name, args) or (target is not None and
+                    (target == current_target or target in blocked_targets)):
+                return None
+        except (ValueError, TypeError, KeyError):
+            return None
+        attempts = []
+        task = asyncio.create_task(self._attempt(name, deepcopy(args), index, 0, attempts))
+        self._pipeline_tasks.add(task)
+        self._pipeline_attempts[task] = attempts
+        return task, attempts
 
     async def _execute_reviewed(self,response):
         operations=[];outcomes=[];stopped=False
+        pipeline = self.review_strategy == simple_split.STRATEGY
+        self._split_slot = asyncio.Semaphore(1)
+        self._review_slot = asyncio.Semaphore(1)
+        self._pipeline_tasks = set()
+        self._pipeline_attempts = {}
+        self._staged_bases = {}
+        prefetched = {}
+        expected_generation = self.memory._generation
         blocked_targets=set()
         cycle=self._parts.manifest.cycle_id
         self.last_citation_gate_report={'schema':'pma-live-citation-gate-v1',
@@ -161,26 +248,46 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
                 name='invalid_memory_operation';args=None;operation=None;prepared=None;target=None
                 row={'index':index,'cycle_id':cycle,'success':False,'verdict':None,
                      'engineering_status':'not_reviewed','content_status':'not_committed','attempts':[]}
+                if index in prefetched:
+                    row['attempts'] = prefetched[index][1]
                 outcomes.append(row)
                 try:
                     name,args=self._parse_item(item)
                     row.update(tool=name,submitted_arguments=deepcopy(args))
-                    if self.review_strategy==CLAIM_SPLIT:
+                    if self.review_strategy in SPLIT_STRATEGIES:
                         target=self._dependency_target(name,args)
                     if stopped:row['error_code']='not_run_after_review_error'
-                    elif self.review_strategy==CLAIM_SPLIT and target is not None and target in blocked_targets:
+                    elif self.review_strategy in SPLIT_STRATEGIES and target is not None and target in blocked_targets:
                         row.update(error_code='not_run_failed_target_dependency', blocked_target=target)
                     elif name=='memory_delete':
                         row.update(error_code='not_applicable_delete_protocol',preparation='not_reviewed_not_deleted')
                     elif not self._valid_target(name,args):row['error_code']='invalid_operation_or_target'
                     else:
                         base_generation=self.memory._generation
+                        if pipeline and base_generation != expected_generation:
+                            raise ValueError('stale_operation_base')
                         current=deepcopy(args)
                         for attempt in range(self.repair_limit+1):
                             if self.memory._generation!=base_generation:raise ValueError('stale_operation_base')
-                            result,draft,operation=await self._attempt(name,current,index,attempt,row['attempts'])
+                            if pipeline and attempt == 0:
+                                pending = prefetched.pop(index, None)
+                                if pending is None:
+                                    pending = self._prefetch(calls, index, None, blocked_targets)
+                                if pending is not None:
+                                    task, attempt_rows = pending
+                                    row['attempts'] = attempt_rows
+                                    # Let the first split acquire its slot before the successor.
+                                    await asyncio.sleep(0)
+                                    next_pending = self._prefetch(calls, index + 1, target, blocked_targets)
+                                    if next_pending is not None:
+                                        prefetched[index + 1] = next_pending
+                                    result,draft,operation = await task
+                                else:
+                                    result,draft,operation=await self._attempt(name,current,index,attempt,row['attempts'])
+                            else:
+                                result,draft,operation=await self._attempt(name,current,index,attempt,row['attempts'])
                             row.update(result)
-                            local_parse = self.review_strategy==CLAIM_SPLIT and result['engineering_status']=='parse_failure'
+                            local_parse = self.review_strategy in SPLIT_STRATEGIES and result['engineering_status']=='parse_failure'
                             if result['engineering_status'] not in ('ok','not_reviewed') and not local_parse:
                                 stopped=True;break
                             if local_parse:
@@ -188,21 +295,26 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
                                 result['explanation']='Technical parsing failure; no semantic verdict. Original text “'+current['content']+'”: '+result.get('reason','invalid model schema')
                                 row['explanation']=result['explanation']
                             if result['verdict']=='supported':
+                                if pipeline:
+                                    if self.memory._generation != expected_generation:
+                                        raise ValueError('stale_operation_base')
+                                    draft = self._rebase_candidate(draft, operation)
                                 prepared=self.memory.prepare_publication(draft)
                                 self.memory.publish(prepared)
+                                expected_generation = self.memory._generation
                                 operation.content_status='committed'
                                 row.pop('error_code',None)
                                 row.update(success=True,content_status='committed');break
                             if attempt==self.repair_limit:break
                             self.transport_phase='citation_repair'
-                            issue={k:result[k] for k in ('error_code','explanation','preparation') if k in result}
+                            issue={k:result[k] for k in ('error_code','explanation','preparation','repair_feedback') if k in result}
                             if result.get('input'):issue['preparation_issues']=result['input']['preparation']['issues']
                             row['repair']=await repair(self.review_transport,self._maintenance_prompt,name,args,issue,index)
                             self.last_citation_gate_report['repair_calls']+=1
                             if row['repair']['engineering_status']!='ok':
                                 row.update(error_code='repair_'+row['repair']['engineering_status'],
                                            engineering_status=row['repair']['engineering_status'])
-                                if not (self.review_strategy==CLAIM_SPLIT and row['repair']['engineering_status']=='parse_failure'):
+                                if not (self.review_strategy in SPLIT_STRATEGIES and row['repair']['engineering_status']=='parse_failure'):
                                     stopped=True
                                 break
                             replacement=row['repair']['replacement']
@@ -215,10 +327,11 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
                         row.update(success=True,content_status='committed',post_commit_error=type(error).__name__)
                         stopped=True
                     else:
-                        row.update(error_code=type(error).__name__,engineering_status='host_error')
-                        stopped=True
+                        local_invalid = pipeline and args is None and isinstance(error, (ValueError, TypeError, KeyError))
+                        row.update(error_code=type(error).__name__,engineering_status='invalid_operation' if local_invalid else 'host_error')
+                        stopped = not local_invalid
                 if not row['success']:
-                    if self.review_strategy==CLAIM_SPLIT and target is not None:
+                    if self.review_strategy in SPLIT_STRATEGIES and target is not None:
                         blocked_targets.add(target)
                     operation=MemoryOperation(name,success=False,error=row['error_code'])
                     operation.content_status='not_committed'
@@ -239,9 +352,22 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
                 try:
                     name,args=self._parse_item(calls[pending]);row.update(tool=name,submitted_arguments=deepcopy(args))
                 except Exception:row['tool']='invalid_memory_operation'
+                if pending in prefetched:
+                    row['attempts'] = prefetched[pending][1]
                 outcomes.append(row)
             raise
         finally:
+            # No task survives cancellation, transport failure, or the selection barrier.
+            for task in self._pipeline_tasks:
+                if not task.done():
+                    task.cancel()
+            if self._pipeline_tasks:
+                await asyncio.gather(*self._pipeline_tasks, return_exceptions=True)
+            for task, attempts in self._pipeline_attempts.items():
+                if task.cancelled():
+                    for attempt in attempts:
+                        attempt.update(engineering_status='cancelled', error_code='cancelled_not_committed')
+            self._staged_bases.clear()
             try:
                 failed=sum(not r['success'] for r in outcomes)
                 self.last_citation_gate_report['incomplete'] |= stopped or any(

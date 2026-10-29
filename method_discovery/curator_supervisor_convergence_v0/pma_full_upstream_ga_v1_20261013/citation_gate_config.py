@@ -2,7 +2,8 @@
 MODES=('gate-only','gate-one-repair')
 STRATEGY='semantic-support-one-sentence-v1'
 CLAIM_SPLIT='claim-split-same-evidence-v2'
-STRATEGIES=(STRATEGY,CLAIM_SPLIT)
+CLAIM_SPLIT_SIMPLE='claim-split-same-evidence-v3'
+STRATEGIES=(STRATEGY,CLAIM_SPLIT,CLAIM_SPLIT_SIMPLE)
 
 
 def validate_strategy(mode,strategy=None):
