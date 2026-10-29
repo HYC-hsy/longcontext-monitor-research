@@ -35,7 +35,8 @@ def load_config(path):
                'native_context_policy', 'research_capture_policy', 'execution',
                'evaluation_bootstrap_protocol', 'evaluation_cache',
                'evaluation_download_retry', 'on_slot_failure', 'runtime_reuse',
-               'citation_review_gate', 'citation_review_strategy'}
+               'citation_review_gate', 'citation_review_strategy',
+               'preserve_pre_eval_snapshot'}
     if set(config) - allowed or config.get('schema') != 'ga-experiment-plan-v1':
         raise ValueError('unknown configuration schema or keys')
     if config.get('execution', 'serial') != 'serial':
@@ -56,6 +57,8 @@ def load_config(path):
         raise ValueError('evaluation_download_retry requires download_retry_v1')
     if config.get('on_slot_failure', 'stop') not in {'stop', 'continue'}:
         raise ValueError('invalid on_slot_failure policy')
+    if 'preserve_pre_eval_snapshot' in config and type(config['preserve_pre_eval_snapshot']) is not bool:
+        raise ValueError('preserve_pre_eval_snapshot must be boolean')
     cache = config.get('evaluation_cache')
     if (config.get('evaluation_bootstrap_protocol') == 'persistent_bundle_v1') != (cache is not None):
         raise ValueError('persistent bundle protocol requires exactly one evaluation_cache')
@@ -122,6 +125,9 @@ def build_plan(config):
                 and task != 'sqlite-with-gcov'):
             raise ValueError('non-original bootstrap supports only sqlite-with-gcov')
         method = resolve(row.get('method', config.get('method')))
+        if config.get('preserve_pre_eval_snapshot') is True and (
+                method.name != 'ga-only' or config.get('environment', {}).get('fake_only') is True):
+            raise ValueError('pre-evaluation snapshot requires a real ga-only slot')
         from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.citation_gate_config import validate_gate,validate_strategy
         validate_gate(config.get('citation_review_gate'),method.research_candidate,method.condition)
         validate_strategy(config.get('citation_review_gate'),config.get('citation_review_strategy'))
@@ -241,6 +247,8 @@ def execute(plan, output, mode, backend=None):
             args['evaluation_cache'] = config['evaluation_cache']
         if 'evaluation_download_retry' in config:
             args['evaluation_download_retry'] = config['evaluation_download_retry']
+        if 'preserve_pre_eval_snapshot' in config:
+            args['preserve_pre_eval_snapshot'] = config['preserve_pre_eval_snapshot']
         if 'runtime_reuse' in config:
             args['runtime_reuse'] = config['runtime_reuse']
             args['current_config_sha256'] = digest({k: v for k, v in config.items()
@@ -272,6 +280,10 @@ def execute(plan, output, mode, backend=None):
                 manifest.get('config', {}).get('evaluation_download_retry') !=
                 config.get('evaluation_download_retry')):
             raise ValueError('driver ignored evaluation download retry identity')
+        if (single.get('preserve_pre_eval_snapshot') != config.get('preserve_pre_eval_snapshot') or
+                manifest.get('config', {}).get('preserve_pre_eval_snapshot') !=
+                config.get('preserve_pre_eval_snapshot')):
+            raise ValueError('driver ignored pre-evaluation snapshot policy')
         if 'runtime_reuse' in config:
             if (single.get('runtime_reuse') != config['runtime_reuse'] or
                     manifest.get('config', {}).get('runtime_reuse') != config['runtime_reuse']):

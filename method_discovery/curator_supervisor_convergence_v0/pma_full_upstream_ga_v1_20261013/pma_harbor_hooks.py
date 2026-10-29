@@ -110,6 +110,13 @@ def verify_live_spec(spec: dict) -> None:
              spec.get('evaluation_protocol') != 'official_shared_v2'))):
         raise RuntimeError('evaluation bootstrap differs from authorized manifest')
     retry = frozen.get('config', {}).get('evaluation_download_retry')
+    snapshot = frozen.get('config', {}).get('preserve_pre_eval_snapshot')
+    if (spec.get('preserve_pre_eval_snapshot') != snapshot or
+            (snapshot is not None and type(snapshot) is not bool) or
+            (snapshot is True and (spec.get('condition') != 'A' or
+             spec.get('research_candidate', 'U') != 'U' or
+             spec.get('zero_model_fixture_only') is True))):
+        raise RuntimeError('pre-evaluation snapshot differs from authorized GA-only manifest')
     if (spec.get('evaluation_download_retry') != retry or
             (bootstrap == 'download_retry_v1') != (retry is not None) or
             (retry is not None and (not isinstance(retry, dict) or
@@ -612,6 +619,23 @@ class NativeSharedTrialHooks(PMATrialHooks):
             'baseline_pids': sorted(self.baseline_pids),
             'agent_result_metadata': str(getattr(self.trial.result, 'agent_result', None)),
             'legal_agent_end_required': False})
+        if self.spec.get('preserve_pre_eval_snapshot') is True:
+            from .pre_eval_snapshot import capture, UnsafeSnapshot
+            try:
+                checkpoint = await asyncio.to_thread(capture,
+                    run_id=self.spec['run_id'], task_id=self.spec['task_id'],
+                    container_id=self.container_id,
+                    source_image_id=self.spec['image_id'])
+            except UnsafeSnapshot:
+                raise  # Never enter native evaluation with an unconfirmed pause.
+            except Exception as exc:
+                _atomic(self.archive / 'pre_eval_snapshot_status.json', {
+                    'run_id': self.spec['run_id'], 'status': 'failed',
+                    'error_type': type(exc).__name__})
+            else:
+                _atomic(self.archive / 'pre_eval_snapshot_status.json', {
+                    'run_id': self.spec['run_id'], 'status': 'saved',
+                    'checkpoint': checkpoint})
         if self.spec['condition'] == 'P':
             result_path = self.control / 'pos_archive' / 'events.result.json'
             close_path = self.control / 'pos_archive' / 'events.close.json'

@@ -82,6 +82,12 @@ def prepare(args: argparse.Namespace) -> dict:
     bootstrap = getattr(args, 'evaluation_bootstrap_protocol', 'original')
     cache = getattr(args, 'evaluation_cache', None)
     retry = getattr(args, 'evaluation_download_retry', None)
+    snapshot = getattr(args, 'preserve_pre_eval_snapshot', None)
+    if snapshot is not None and (type(snapshot) is not bool or
+            (snapshot and (args.condition != 'A' or
+             getattr(args, 'research_candidate', 'U') != 'U' or
+             getattr(args, 'fake_only', False)))):
+        raise ValueError('pre-evaluation snapshot requires a real GA-only A/U run')
     if bootstrap not in {'original', 'bootstrap_retry_v1', 'persistent_bundle_v1',
                           'download_retry_v1'} or (bootstrap in {'bootstrap_retry_v1', 'persistent_bundle_v1'} and
             (args.task != 'sqlite-with-gcov' or getattr(args, 'fake_only', False))):
@@ -171,6 +177,8 @@ def prepare(args: argparse.Namespace) -> dict:
         plan['evaluation_cache'] = cache
     if retry is not None:
         plan['evaluation_download_retry'] = retry
+    if snapshot is not None:
+        plan['preserve_pre_eval_snapshot'] = snapshot
     if reuse is not None:
         plan['runtime_reuse'] = reuse
         plan['current_config_sha256'] = args.current_config_sha256

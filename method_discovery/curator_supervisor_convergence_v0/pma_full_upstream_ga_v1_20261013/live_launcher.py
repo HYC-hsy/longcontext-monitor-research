@@ -601,6 +601,7 @@ def run_live(args) -> dict:
             'evaluation_bootstrap_protocol', 'original')
         spec['evaluation_cache'] = manifest['config'].get('evaluation_cache')
         spec['evaluation_download_retry'] = manifest['config'].get('evaluation_download_retry')
+        spec['preserve_pre_eval_snapshot'] = manifest['config'].get('preserve_pre_eval_snapshot')
     verify_live_spec(spec)
     if _sha(Path(args.task_profile_file)) != manifest['task_profile_sha256']:
         raise RuntimeError('PMA Task profile differs from frozen identity')
@@ -979,6 +980,12 @@ def run_live(args) -> dict:
                 reports = None
         clearance = (_worker_clearance(root, worker, args.run_id)
                      if worker is None or worker.poll() is not None else None)
+        snapshot_required = manifest.get('config', {}).get('preserve_pre_eval_snapshot') is True
+        try:
+            snapshot_receipt = json.loads((root / 'archive/pre_eval_snapshot_status.json').read_text(
+                encoding='utf-8')) if snapshot_required else None
+        except (OSError, ValueError):
+            snapshot_receipt = {'status': 'missing_or_invalid'}
         fake_requests = root / 'archive/fake_provider_requests'
         fake_captures = sorted(fake_requests.glob('*.json')) if fixture else []
         try:
@@ -1016,6 +1023,14 @@ def run_live(args) -> dict:
                   (harbor is None or harbor.poll() is not None),
                   'frozen_product': frozen.is_file(), 'evaluation_released': release.is_file(),
                   'native_result': native,
+                  'snapshot_required': snapshot_required,
+                  'pre_eval_snapshot_status': snapshot_receipt,
+                  'snapshot_saved': (isinstance(snapshot_receipt, dict) and
+                      snapshot_receipt.get('run_id') == args.run_id and
+                      snapshot_receipt.get('status') == 'saved' and
+                      isinstance(snapshot_receipt.get('checkpoint'), dict) and
+                      snapshot_receipt['checkpoint'].get('run_id') == args.run_id)
+                      if snapshot_required else None,
                   'native_upload_checked': (root / 'archive/native_evaluator_uploaded.json').is_file()
                       if native_shared else None,
                   'native_script_observed': (isinstance(execution, dict) and
@@ -1078,6 +1093,8 @@ def live_status_success(status: dict) -> bool:
     return (status.get('primary_failure') is None and
             status.get('harbor_return_code') == 0 and
             status.get('cleanup_confirmed') is True and
+            (status.get('snapshot_required') is not True or
+             status.get('snapshot_saved') is True) and
             status.get('frozen_product') is True and
             status.get('evaluation_released') is True and
             (not native_required or (isinstance(native, dict) and

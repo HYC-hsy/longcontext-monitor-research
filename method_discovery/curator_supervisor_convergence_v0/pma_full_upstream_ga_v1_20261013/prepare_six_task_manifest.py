@@ -54,6 +54,8 @@ SOURCE_FILES = (
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'pma_harbor_hooks.py',
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'pre_eval_snapshot.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'worker_main.py',
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'six_task_assets.py',
@@ -140,6 +142,8 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
             required.add('evaluation_cache')
         if 'evaluation_download_retry' in plan:
             required.add('evaluation_download_retry')
+        if 'preserve_pre_eval_snapshot' in plan:
+            required.add('preserve_pre_eval_snapshot')
         if 'runtime_reuse' in plan:
             required.update({'runtime_reuse', 'current_config_sha256'})
         if (set(plan) != required or
@@ -167,6 +171,10 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
                   set(plan['evaluation_download_retry']) != {'max_attempts'} or
                   type(plan['evaluation_download_retry']['max_attempts']) is not int or
                   not 1 <= plan['evaluation_download_retry']['max_attempts'] <= 10)) or
+                ('preserve_pre_eval_snapshot' in plan and
+                 (type(plan['preserve_pre_eval_snapshot']) is not bool or
+                  (plan['preserve_pre_eval_snapshot'] is True and
+                   (plan['condition'] != 'A' or candidate != 'U')))) or
                 ('runtime_reuse' in plan and
                  (candidate != 'pma_gap_memory_v0' or
                   not isinstance(plan.get('current_config_sha256'), str) or
@@ -295,6 +303,8 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
         method['evaluation_bootstrap_protocol'] = plan['evaluation_bootstrap_protocol']
     if single and 'evaluation_download_retry' in plan:
         method['evaluation_download_retry'] = plan['evaluation_download_retry']
+    if single and 'preserve_pre_eval_snapshot' in plan:
+        method['preserve_pre_eval_snapshot'] = plan['preserve_pre_eval_snapshot']
     if single and 'evaluation_cache' in plan:
         from experiment_runner.evaluation_cache import verify_bundle, require_offline_ready
         cache = plan['evaluation_cache']

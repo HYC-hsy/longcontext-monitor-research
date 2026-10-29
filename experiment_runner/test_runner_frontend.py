@@ -40,6 +40,11 @@ class FakeBackend:
             single['evaluation_download_retry'] = args.evaluation_download_retry
             (root / 'plan.json').write_text(json.dumps(single))
             manifest.setdefault('config', {})['evaluation_download_retry'] = args.evaluation_download_retry
+        if hasattr(args, 'preserve_pre_eval_snapshot'):
+            single = json.loads((root / 'plan.json').read_text())
+            single['preserve_pre_eval_snapshot'] = args.preserve_pre_eval_snapshot
+            (root / 'plan.json').write_text(json.dumps(single))
+            manifest.setdefault('config', {})['preserve_pre_eval_snapshot'] = args.preserve_pre_eval_snapshot
         if args.fake_only and args.research_candidate == 'pma_stateful_memory_v1':
             driver = importlib.import_module(DRIVER + '.single_run')
             replies = Path(driver.__file__).with_name('stateful_fixture_replies.json')
@@ -241,6 +246,21 @@ class FrontendTests(unittest.TestCase):
             prepare(argparse.Namespace(condition='B', research_candidate='pma_stateful_memory_v1',
                 runtime_policy=None, evaluation_bootstrap_protocol='bootstrap_retry_v1',
                 task='sqlite-with-gcov', fake_only=True, output=str(self.root / 'no-start')))
+
+    def test_ga_only_pre_evaluation_snapshot_is_explicit_and_bound(self):
+        self.config['method'] = 'ga-only'
+        self.config['slots'] = [{'task': 'sqlite-with-gcov'}]
+        self.config['preserve_pre_eval_snapshot'] = True
+        self.config['environment']['fake_only'] = False
+        plan = build_plan(self.config)
+        backend = FakeBackend()
+        self.assertTrue(succeeded(execute(plan, self.output, 'prepare', backend), 1, 'prepare'))
+        self.assertTrue(backend.prepared[0].preserve_pre_eval_snapshot)
+        manifest = json.loads(next(self.output.glob('01-*/manifest.json')).read_text())
+        self.assertIs(manifest['config']['preserve_pre_eval_snapshot'], True)
+        self.config['method'] = 'pma'
+        with self.assertRaisesRegex(ValueError, 'requires a real ga-only'):
+            build_plan(self.config)
 
     def test_persistent_cache_binding_reaches_backend_and_is_frozen(self):
         cache = {'bundle_path': str((self.root / 'bundle').resolve()), 'manifest_sha256': 'a' * 64,

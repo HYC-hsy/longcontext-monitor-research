@@ -20,6 +20,28 @@ from .single_run_certification import verify_evidence
 
 
 class SingleRunOfflineTests(unittest.TestCase):
+    def test_real_ga_snapshot_policy_reaches_manifest_plan(self):
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from .single_run import prepare
+        with TemporaryDirectory() as directory:
+            base = Path(directory)
+            for name in ('task.py', 'pma.json'):
+                (base / name).write_text('fixture')
+            args = SimpleNamespace(output=str(base / 'prepared'), condition='A',
+                research_candidate='U', task='db-wal-recovery', occurrence=1,
+                fake_only=False, runtime_policy=None, task_complete_response=False,
+                official_source_git=str(base), task_profile_file=str(base / 'task.py'),
+                pma_profile_file=str(base / 'pma.json'), certification_dir=None,
+                preserve_pre_eval_snapshot=True)
+            with patch('method_discovery.curator_supervisor_convergence_v0.'
+                       'pma_full_upstream_ga_v1_20261013.prepare_six_task_manifest.prepare',
+                       return_value={'config': {'preserve_pre_eval_snapshot': True}}) as backend:
+                prepare(args)
+            self.assertIs(backend.call_args.kwargs['plan']['preserve_pre_eval_snapshot'], True)
+            self.assertIs(json.loads((base / 'prepared/plan.json').read_text())[
+                'preserve_pre_eval_snapshot'], True)
+
     def test_download_retry_reaches_real_manifest_api_for_non_sqlite(self):
         from tempfile import TemporaryDirectory
         from unittest.mock import patch
