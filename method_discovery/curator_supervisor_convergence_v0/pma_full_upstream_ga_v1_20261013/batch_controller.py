@@ -94,6 +94,7 @@ def run_batch(args: argparse.Namespace) -> dict:
             'evaluation_bootstrap_protocol', 'original'),
         evaluation_cache=manifest.get('config', {}).get('evaluation_cache'),
         evaluation_download_retry=manifest.get('config', {}).get('evaluation_download_retry'),
+        preserve_pre_eval_snapshot=manifest.get('config', {}).get('preserve_pre_eval_snapshot'),
         citation_review_gate=manifest.get('config', {}).get('citation_review_gate'),
         citation_review_strategy=manifest.get('config', {}).get('citation_review_strategy'),
         zero_model_fixture_only=fixture,
