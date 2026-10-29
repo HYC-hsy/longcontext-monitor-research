@@ -510,6 +510,31 @@ class NativeSharedTrialHooks(PMATrialHooks):
         gateway_ids = gateway.stdout.strip().splitlines()
         if len(gateway_ids) != 1:
             raise RuntimeError('native model gateway identity unavailable after stop')
+        # Keep only gateway-generated, allowlisted transport metadata. Docker
+        # log streams may contain other text and must never enter public audit.
+        try:
+            gateway_logs = await asyncio.to_thread(subprocess.run,
+                ['docker', 'logs', gateway_ids[0]], text=True,
+                capture_output=True, timeout=30)
+            if gateway_logs.returncode == 0:
+                events = []
+                for line in (gateway_logs.stdout + '\n' + gateway_logs.stderr).splitlines():
+                    start = line.find('{')
+                    if start < 0:
+                        continue
+                    try:
+                        value = json.loads(line[start:])
+                    except ValueError:
+                        continue
+                    if isinstance(value, dict) and value.get('event') == 'gateway_transport':
+                        events.append({key: value[key] for key in (
+                            'event', 'timestamp', 'thread', 'stage', 'status',
+                            'exception_type', 'http_status') if key in value})
+                (self.archive / 'gateway_transport_events.jsonl').write_text(
+                    ''.join(json.dumps(item, sort_keys=True) + '\n' for item in events),
+                    encoding='utf-8')
+        except (OSError, subprocess.SubprocessError):
+            pass  # Diagnostics cannot change Task or native evaluation outcome.
         gateway_state = await asyncio.to_thread(subprocess.run,
             ['docker', 'inspect', '-f', '{{.State.Running}}', gateway_ids[0]],
             text=True, capture_output=True, timeout=30)
