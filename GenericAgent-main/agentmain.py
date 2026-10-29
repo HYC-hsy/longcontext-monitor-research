@@ -381,10 +381,10 @@ class GenericAgent:
                     'pma_gap_memory_v0', 'pma_gap_evidence_v1') and
                 os.environ.get('GA_EXPERIMENT_TASK_TURNS') is not None)
             ga_only_policy = (os.environ.get('GA_EXPERIMENT_GA_ONLY_POLICY') == 'A/U' and
-                os.environ.get('GA_PMA_UPSTREAM_ENABLED') == '0' and
-                os.environ.get('GA_POS_ENABLED') == '0' and
-                os.environ.get('GA_STATEFUL_MEMORY_ENABLED') == '0' and
-                os.environ.get('GA_MONITOR_ENABLED') == '0' and
+                os.environ.get('GA_PMA_UPSTREAM_ENABLED') != '1' and
+                os.environ.get('GA_POS_ENABLED') != '1' and
+                os.environ.get('GA_STATEFUL_MEMORY_ENABLED') != '1' and
+                os.environ.get('GA_MONITOR_ENABLED') != '1' and
                 os.environ.get('GA_EXPERIMENT_TASK_TURNS') is not None)
             max_turns = None if stateful_uncapped else int(
                 os.environ.get('GA_MAX_TURNS', '180'))

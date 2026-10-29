@@ -34,10 +34,9 @@ def test_explicit_ga_only_uncapped_turns_ignore_plan_mode_limit():
     parent = Parent()
     handler = Handler(parent)
     client = Client(handler)
+    # The native A/U adapter leaves disabled feature flags absent.
     env = {'GA_EXPERIMENT_GA_ONLY_POLICY': 'A/U',
-           'GA_EXPERIMENT_TASK_TURNS': 'uncapped',
-           'GA_PMA_UPSTREAM_ENABLED': '0', 'GA_POS_ENABLED': '0',
-           'GA_STATEFUL_MEMORY_ENABLED': '0', 'GA_MONITOR_ENABLED': '0'}
+           'GA_EXPERIMENT_TASK_TURNS': 'uncapped'}
     with patch.dict(os.environ, env, clear=True):
         result = exhaust(agent_runner_loop(client, 'system', 'task', handler, [],
             max_turns=None, verbose=False))
