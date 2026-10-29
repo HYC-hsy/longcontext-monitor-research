@@ -51,14 +51,39 @@ class FakeBackend:
             (root / 'plan.json').write_text(json.dumps(single))
             manifest.setdefault('config', {})['runtime_policy'] = resolve_policy(args.runtime_policy,
                 {'native_agent_seconds': 900, 'native_verifier_seconds': 900},
-                {'task_turns_max': None})
+                {'task_turns_max': (None if args.research_candidate in {
+                    'pma_stateful_memory_v1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1'} else 300)})
             for key in ('native_context_policy', 'research_capture_policy'):
                 value = getattr(args, key, 'required')
                 single[key] = value
                 manifest['config'][key] = value
             (root / 'plan.json').write_text(json.dumps(single))
+        config = manifest.setdefault('config', {})
+        config.update(research_candidate=args.research_candidate,
+                      task_complete_response_policy='complete-response-v1' if args.task_complete_response else 'disabled')
+        if args.research_candidate == 'pma_stateful_memory_v1':
+            config.update(agent_time_protocol='runtime-policy-v1',
+                          native_context_policy=getattr(args, 'native_context_policy', 'required'),
+                          research_capture_policy=getattr(args, 'research_capture_policy', 'required'))
+        manifest.update(schema='pos-ga-single-manifest-v1' if args.condition == 'P' else
+                        'pma-ga-live-manifest-v5', execution_authorized=False,
+                        config_sha256='synthetic-config',
+                        upstream_commit='6818cfa6434dbc91fcf67f0b3eb12a91db47433f',
+                        assets={args.task: {'native_agent_seconds': 900, 'native_verifier_seconds': 900}},
+                        planned_order=[{'order': 1, 'task': args.task, 'repeat': args.occurrence,
+                                        'condition': args.condition, 'research_candidate': args.research_candidate}])
+        if args.condition == 'P':
+            config['name'] = args.research_candidate
+            config['citation_mode'] = 'visible_tool_fields_v2'
         (root / 'manifest.json').write_text(json.dumps(manifest))
-        return {'run_id': str(len(self.prepared)), 'execution_authorized': False}
+        run_id = 'fixture-' + str(len(self.prepared))
+        identity = {'run_id': run_id, 'run_root': str(root / 'runs' / run_id),
+                    'output_root': str(root / 'runs'), 'execution_authorized': False,
+                    'plan_sha256': hashlib.sha256((root / 'plan.json').read_bytes()).hexdigest(),
+                    'manifest_sha256': hashlib.sha256((root / 'manifest.json').read_bytes()).hexdigest()}
+        (root / 'run_identity.json').write_text(json.dumps(identity))
+        return identity
+
 
     def run(self, args):
         self.runs.append(args)
@@ -69,6 +94,10 @@ class FakeBackend:
 
 class FrontendTests(unittest.TestCase):
     def setUp(self):
+        identity = patch('experiment_runner.startup.code_identity', return_value={
+            'kind': 'synthetic_test_identity', 'code_commit': 'fixture'})
+        identity.start()
+        self.addCleanup(identity.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -93,6 +122,103 @@ class FrontendTests(unittest.TestCase):
             if directory.is_dir():
                 (directory / 'authorization.json').write_text('{}')
 
+    def test_all_method_policy_prepare_matrix(self):
+        from experiment_runner.methods import builtin_specs
+        cases = ({}, {'agent_timeout': 1.5, 'task_turns': 2},
+                 {'agent_timeout': 'uncapped', 'task_turns': 'uncapped'})
+        for method in builtin_specs():
+            for index, policy in enumerate(cases):
+                with self.subTest(method=method.name, policy=policy):
+                    config = dict(self.config, method=method.name, runtime_policy=policy,
+                                  slots=[{'task': 'sqlite-with-gcov'}])
+                    plan = build_plan(config)
+                    backend = FakeBackend()
+                    output = self.root / (method.name + str(index))
+                    self.assertTrue(succeeded(execute(plan, output, 'prepare', backend), 1, 'prepare'))
+                    self.assertEqual(backend.runs, [])
+                    self.assertEqual(backend.prepared[0].runtime_policy, policy)
+                    self.assertEqual(plan['slots'][0]['effective_runtime_policy']['method_default_task_turns'],
+                                     method.task_turns_max)
+
+    def test_defaults_and_explicit_empty_for_every_method_and_alias(self):
+        from dataclasses import replace
+        from experiment_runner.methods import builtin_specs, register
+        for method in builtin_specs():
+            config = dict(self.config, method=method.name)
+            absent = build_plan(config)['slots'][0]
+            expected = method.research_candidate in {
+                'pma_stateful_memory_v1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1'}
+            self.assertEqual('effective_runtime_policy' in absent, expected)
+            explicit = build_plan(dict(config, runtime_policy={}))['slots'][0]
+            self.assertEqual(explicit['effective_runtime_policy']['effective_agent_seconds'], 900)
+        register(replace(builtin_specs()[0], name='test-ga-runtime-alias'))
+        config = dict(self.config, method='test-ga-runtime-alias')
+        self.assertNotIn('effective_runtime_policy', build_plan(config)['slots'][0])
+        self.assertIn('effective_runtime_policy', build_plan(dict(config, runtime_policy={}))['slots'][0])
+
+    def test_fresh_run_automatic_prepare_isolated_and_once(self):
+        for name in ('first', 'second'):
+            backend = FakeBackend()
+            output = self.root / name
+            self.assertTrue(succeeded(execute(self.plan, output, 'run', backend), 2, 'run'))
+            self.assertEqual(len(backend.prepared), 2)
+            self.assertEqual(len(backend.runs), 2)
+            self.assertTrue((output / 'run_claim.json').exists())
+            self.assertFalse(list(output.rglob('.run_binding.json')))
+            with self.assertRaises(FileExistsError):
+                execute(self.plan, output, 'run', backend)
+
+    def test_run_claim_blocks_concurrent_entry(self):
+        backend = FakeBackend()
+        execute(self.plan, self.output, 'prepare', backend)
+        (self.output / 'run_claim.json').write_text('{}')
+        with self.assertRaises(FileExistsError):
+            execute(self.plan, self.output, 'run', backend)
+        self.assertEqual(backend.runs, [])
+
+    def test_identity_tampering_and_prior_allocation_rejected(self):
+        from experiment_runner.startup import internal_binding
+        backend = FakeBackend()
+        execute(self.plan, self.output, 'prepare', backend)
+        directory = next(self.output.glob('01-*'))
+        path = directory / 'run_identity.json'
+        original = json.loads(path.read_text())
+        for key, value in (('run_id', '../escape'), ('run_root', '/tmp/escape'),
+                           ('output_root', '/tmp'), ('plan_sha256', 'changed'),
+                           ('manifest_sha256', 'changed'), ('execution_authorized', True)):
+            path.write_text(json.dumps(dict(original, **{key: value})))
+            with self.assertRaises(ValueError):
+                internal_binding(directory)
+        path.write_text(json.dumps(original))
+        (directory / 'runs' / 'old-attempt').mkdir(parents=True)
+        with self.assertRaises(FileExistsError):
+            internal_binding(directory)
+
+    def test_transient_record_cleanup_on_failure_and_existing_file_preserved(self):
+        backend = FakeBackend(fail_run=True)
+        execute(self.plan, self.output, 'prepare', backend)
+        directory = next(self.output.glob('01-*'))
+        old = directory / 'authorization.json'
+        old.write_text('user-owned')
+        rows = execute(self.plan, self.output, 'run', backend)
+        self.assertEqual(len(backend.runs), 1)
+        self.assertFalse(succeeded(rows, 2, 'run'))
+        self.assertEqual(old.read_text(), 'user-owned')
+        self.assertFalse(list(self.output.rglob('.run_binding.json')))
+
+    def test_summary_is_planned_and_source_is_visible(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from experiment_runner.runtime_policy import print_plan_summary
+        output = StringIO()
+        with redirect_stdout(output):
+            print_plan_summary(build_plan(dict(self.config, runtime_policy={'task_turns': 7})))
+        text = output.getvalue()
+        self.assertIn('planned limits', text)
+        self.assertIn('turns=7', text)
+        self.assertIn('source: official', text)
+        self.assertIn('runtime checks pending', text)
+
     def test_versioned_evaluator_bootstrap_is_frozen_and_real_only(self):
         self.config['evaluation_bootstrap_protocol'] = 'bootstrap_retry_v1'
         plan = build_plan(self.config)
@@ -111,7 +237,7 @@ class FrontendTests(unittest.TestCase):
                 task='sqlite-with-gcov', fake_only=True, output=str(self.root / 'no-start')))
 
     def test_persistent_cache_binding_reaches_backend_and_is_frozen(self):
-        cache = {'bundle_path': str(self.root / 'bundle'), 'manifest_sha256': 'a' * 64,
+        cache = {'bundle_path': str((self.root / 'bundle').resolve()), 'manifest_sha256': 'a' * 64,
                  'identity': {'protocol': 'persistent_bundle_v1'}}
         self.config['evaluation_bootstrap_protocol'] = 'persistent_bundle_v1'
         self.config['evaluation_cache'] = cache
@@ -172,8 +298,8 @@ class FrontendTests(unittest.TestCase):
         with patch('experiment_runner.evaluation_cache.verify_bundle'), patch(
                 'experiment_runner.evaluation_cache.require_offline_ready') as ready:
             loaded = load_config(path)
-        self.assertEqual(loaded['evaluation_cache']['bundle_path'], str(self.root / 'bundle'))
-        ready.assert_called_once_with(str(self.root / 'bundle'), 'a' * 64)
+        self.assertEqual(loaded['evaluation_cache']['bundle_path'], str((self.root / 'bundle').resolve()))
+        ready.assert_called_once_with(str((self.root / 'bundle').resolve()), 'a' * 64)
         with patch('experiment_runner.evaluation_cache.verify_bundle'), patch(
                 'experiment_runner.evaluation_cache.require_offline_ready',
                 side_effect=RuntimeError('offline acceptance missing')):
@@ -341,10 +467,9 @@ class FrontendTests(unittest.TestCase):
         self.assertEqual(rows[0]['status'], 'preparation_failed')
         self.assertIn('ignored', rows[0]['error'])
 
-    def test_unsupported_policy_rejected(self):
+    def test_policy_supported_by_all_adapters(self):
         self.config.update(method='pma', runtime_policy={})
-        with self.assertRaisesRegex(ValueError, 'unsupported'):
-            build_plan(self.config)
+        self.assertIn('effective_runtime_policy', build_plan(self.config)['slots'][0])
 
     def test_response_environment_scoped(self):
         backend = FakeBackend()
@@ -400,12 +525,13 @@ class FrontendTests(unittest.TestCase):
         result = json.loads((self.output / 'selection_result.json').read_text())
         self.assertEqual(len(result['remaining_not_started']), 1)
 
-    def test_no_approval_means_zero_runs(self):
+    def test_explicit_run_needs_no_approval_file(self):
         backend = FakeBackend()
         execute(self.plan, self.output, 'prepare', backend)
         rows = execute(self.plan, self.output, 'run', backend)
-        self.assertEqual(rows[0]['status'], 'not_started_missing_approval')
-        self.assertEqual(backend.runs, [])
+        self.assertTrue(succeeded(rows, 2, 'run'))
+        self.assertEqual(len(backend.runs), 2)
+        self.assertFalse(list(self.output.rglob('.run_binding.json')))
 
     def test_changed_config_rejected(self):
         backend = FakeBackend()

@@ -625,6 +625,10 @@ class ProviderResponseCancelled(Exception):
 
 
 def _task_deadline(sess):
+    if (os.environ.get('GA_EXPERIMENT_RUNTIME_POLICY') == 'v1' and
+            os.environ.get('GA_TASK_DEADLINE_EPOCH') == 'uncapped'):
+        # Harbor enforces the phase-local Agent budget, including finite policies.
+        return None
     if (os.environ.get('GA_STATEFUL_MEMORY_ENABLED') == '1' and
             os.environ.get('GA_STATEFUL_MEMORY_MODE') == 'live' and
             os.environ.get('GA_STATEFUL_UNCAPPED_TOTAL') == '1'):

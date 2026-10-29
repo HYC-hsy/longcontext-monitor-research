@@ -1,0 +1,290 @@
+..FF..FF.....                                                    [100%]
+=================================== FAILURES ===================================
+___________ test_explicit_turns_ignore_plan_mode[uncapped-3-flags2] ____________
+
+flags = {'GA_POS_ENABLED': '1'}, turns = 'uncapped', expected = 3
+
+    @pytest.mark.parametrize('flags', [
+        {}, {'GA_PMA_UPSTREAM_ENABLED': '1'}, {'GA_POS_ENABLED': '1'},
+        {'GA_STATEFUL_MEMORY_ENABLED': '1', 'GA_STATEFUL_MEMORY_MODE': 'live'}])
+    @pytest.mark.parametrize('turns,expected', [('uncapped', 3), ('2', 2)])
+    def test_explicit_turns_ignore_plan_mode(flags, turns, expected):
+        handler = Handler(Parent())
+        class Client:
+            last_tools = ''
+            calls = 0
+            def chat(self, messages, tools):
+                self.calls += 1
+                handler.max_turns = 1
+                pending = self.calls < 3
+                response = SimpleNamespace(content='continue' if pending else 'done',
+                    thinking='', stop_reason='end_turn', tool_calls=(
+                        [SimpleNamespace(id=str(self.calls), function=SimpleNamespace(
+                            name='bad_json', arguments='{"msg":"retry"}'))] if pending else []))
+                if False:
+                    yield None
+                return response
+        client = Client()
+        env = dict(flags, GA_EXPERIMENT_RUNTIME_POLICY='v1', GA_EXPERIMENT_TASK_TURNS=turns)
+        # Bridge behavior has its own tests; this checks the real task loop limit.
+        with patch.dict(os.environ, env, clear=True), patch(
+                'pma_upstream_bridge.UpstreamPMAClient.from_environment', return_value=None):
+>           exhaust(agent_runner_loop(client, 'system', 'task', handler, [],
+                max_turns=None if turns == 'uncapped' else int(turns), verbose=False))
+
+GenericAgent-main/tests/test_explicit_runtime_turns.py:36: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+GenericAgent-main/agent_loop.py:56: in exhaust
+    while True: next(g)
+                ^^^^^^^
+GenericAgent-main/agent_loop.py:667: in agent_runner_loop
+    return (yield from _agent_runner_loop_impl(
+GenericAgent-main/agent_loop.py:160: in _agent_runner_loop_impl
+    pos = PoSBridge.from_environment()
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <class 'pos_bridge.PoSBridge'>
+
+    @classmethod
+    def from_environment(cls):
+        required = ('GA_POS_WORKER_SCRIPT', 'GA_POS_VENDOR_ROOT',
+                    'GA_POS_EPISODE_MODULE', 'GA_POS_ARCHIVE', 'GA_POS_TRANSPORT')
+        if any(not os.environ.get(name) for name in required):
+>           raise PoSBridgeError('PoS worker identity or archive missing')
+E           pos_bridge.PoSBridgeError: PoS worker identity or archive missing
+
+GenericAgent-main/pos_bridge.py:110: PoSBridgeError
+___________ test_explicit_turns_ignore_plan_mode[uncapped-3-flags3] ____________
+
+flags = {'GA_STATEFUL_MEMORY_ENABLED': '1', 'GA_STATEFUL_MEMORY_MODE': 'live'}
+turns = 'uncapped', expected = 3
+
+    @pytest.mark.parametrize('flags', [
+        {}, {'GA_PMA_UPSTREAM_ENABLED': '1'}, {'GA_POS_ENABLED': '1'},
+        {'GA_STATEFUL_MEMORY_ENABLED': '1', 'GA_STATEFUL_MEMORY_MODE': 'live'}])
+    @pytest.mark.parametrize('turns,expected', [('uncapped', 3), ('2', 2)])
+    def test_explicit_turns_ignore_plan_mode(flags, turns, expected):
+        handler = Handler(Parent())
+        class Client:
+            last_tools = ''
+            calls = 0
+            def chat(self, messages, tools):
+                self.calls += 1
+                handler.max_turns = 1
+                pending = self.calls < 3
+                response = SimpleNamespace(content='continue' if pending else 'done',
+                    thinking='', stop_reason='end_turn', tool_calls=(
+                        [SimpleNamespace(id=str(self.calls), function=SimpleNamespace(
+                            name='bad_json', arguments='{"msg":"retry"}'))] if pending else []))
+                if False:
+                    yield None
+                return response
+        client = Client()
+        env = dict(flags, GA_EXPERIMENT_RUNTIME_POLICY='v1', GA_EXPERIMENT_TASK_TURNS=turns)
+        # Bridge behavior has its own tests; this checks the real task loop limit.
+        with patch.dict(os.environ, env, clear=True), patch(
+                'pma_upstream_bridge.UpstreamPMAClient.from_environment', return_value=None):
+>           exhaust(agent_runner_loop(client, 'system', 'task', handler, [],
+                max_turns=None if turns == 'uncapped' else int(turns), verbose=False))
+
+GenericAgent-main/tests/test_explicit_runtime_turns.py:36: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+GenericAgent-main/agent_loop.py:56: in exhaust
+    while True: next(g)
+                ^^^^^^^
+GenericAgent-main/agent_loop.py:667: in agent_runner_loop
+    return (yield from _agent_runner_loop_impl(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+client = <test_explicit_runtime_turns.test_explicit_turns_ignore_plan_mode.<locals>.Client object at 0x10909ecf0>
+system_prompt = 'system', user_input = 'task'
+handler = <test_task_interruption.Handler object at 0x10909dcd0>
+tools_schema = [], max_turns = None, verbose = False
+initial_user_content = None, yield_info = False, turn_offset = 0
+
+    def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_schema,
+                          max_turns=40, verbose=True, initial_user_content=None, yield_info=False,
+                          turn_offset=0):
+        initial_content = initial_user_content if initial_user_content is not None else user_input
+        initial_content = condition_initial_task(
+            initial_content, getattr(handler.parent, 'research_condition', None)
+        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": initial_content}
+        ]
+        local_turn = 0; turn = int(turn_offset); handler.max_turns = max_turns
+        exit_reason = {}; response = None
+        _hook('agent_before', locals())
+        pma = None
+        pma_upstream = None
+        pos = None
+        stateful = None
+        stateful_setting = os.environ.get('GA_STATEFUL_MEMORY_ENABLED', '0')
+        if stateful_setting not in {'0', '1'}:
+            raise ValueError('invalid stateful-memory enable value')
+        stateful_enabled = stateful_setting == '1'
+        if stateful_enabled:
+            if any(os.environ.get(name) == '1' for name in (
+                    'GA_POS_ENABLED', 'GA_PMA_UPSTREAM_ENABLED', 'GA_PMA_ENABLED',
+                    'GA_MONITOR_ENABLED', 'GA_M0_MONITOR_ENABLED',
+                    'GA_POS_PMA_COMPLEMENT', 'GA_POS_PMA_SHARED_VIEW')):
+                raise ValueError('stateful memory is exclusive of prior auxiliary modes')
+            stateful_mode = os.environ.get('GA_STATEFUL_MEMORY_MODE')
+            if stateful_mode not in {'fake-only', 'live'}:
+                raise ValueError('stateful memory requires fake-only or bound live mode')
+            if (os.environ.get('GA_TASK_COMPLETE_RESPONSE') != '1' or
+                    not getattr(getattr(client, 'backend', None),
+                                'task_complete_response', False)):
+>               raise ValueError('stateful memory requires bound complete-response Task')
+E               ValueError: stateful memory requires bound complete-response Task
+
+GenericAgent-main/agent_loop.py:98: ValueError
+_______________ test_explicit_turns_ignore_plan_mode[2-2-flags2] _______________
+
+flags = {'GA_POS_ENABLED': '1'}, turns = '2', expected = 2
+
+    @pytest.mark.parametrize('flags', [
+        {}, {'GA_PMA_UPSTREAM_ENABLED': '1'}, {'GA_POS_ENABLED': '1'},
+        {'GA_STATEFUL_MEMORY_ENABLED': '1', 'GA_STATEFUL_MEMORY_MODE': 'live'}])
+    @pytest.mark.parametrize('turns,expected', [('uncapped', 3), ('2', 2)])
+    def test_explicit_turns_ignore_plan_mode(flags, turns, expected):
+        handler = Handler(Parent())
+        class Client:
+            last_tools = ''
+            calls = 0
+            def chat(self, messages, tools):
+                self.calls += 1
+                handler.max_turns = 1
+                pending = self.calls < 3
+                response = SimpleNamespace(content='continue' if pending else 'done',
+                    thinking='', stop_reason='end_turn', tool_calls=(
+                        [SimpleNamespace(id=str(self.calls), function=SimpleNamespace(
+                            name='bad_json', arguments='{"msg":"retry"}'))] if pending else []))
+                if False:
+                    yield None
+                return response
+        client = Client()
+        env = dict(flags, GA_EXPERIMENT_RUNTIME_POLICY='v1', GA_EXPERIMENT_TASK_TURNS=turns)
+        # Bridge behavior has its own tests; this checks the real task loop limit.
+        with patch.dict(os.environ, env, clear=True), patch(
+                'pma_upstream_bridge.UpstreamPMAClient.from_environment', return_value=None):
+>           exhaust(agent_runner_loop(client, 'system', 'task', handler, [],
+                max_turns=None if turns == 'uncapped' else int(turns), verbose=False))
+
+GenericAgent-main/tests/test_explicit_runtime_turns.py:36: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+GenericAgent-main/agent_loop.py:56: in exhaust
+    while True: next(g)
+                ^^^^^^^
+GenericAgent-main/agent_loop.py:667: in agent_runner_loop
+    return (yield from _agent_runner_loop_impl(
+GenericAgent-main/agent_loop.py:160: in _agent_runner_loop_impl
+    pos = PoSBridge.from_environment()
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <class 'pos_bridge.PoSBridge'>
+
+    @classmethod
+    def from_environment(cls):
+        required = ('GA_POS_WORKER_SCRIPT', 'GA_POS_VENDOR_ROOT',
+                    'GA_POS_EPISODE_MODULE', 'GA_POS_ARCHIVE', 'GA_POS_TRANSPORT')
+        if any(not os.environ.get(name) for name in required):
+>           raise PoSBridgeError('PoS worker identity or archive missing')
+E           pos_bridge.PoSBridgeError: PoS worker identity or archive missing
+
+GenericAgent-main/pos_bridge.py:110: PoSBridgeError
+_______________ test_explicit_turns_ignore_plan_mode[2-2-flags3] _______________
+
+flags = {'GA_STATEFUL_MEMORY_ENABLED': '1', 'GA_STATEFUL_MEMORY_MODE': 'live'}
+turns = '2', expected = 2
+
+    @pytest.mark.parametrize('flags', [
+        {}, {'GA_PMA_UPSTREAM_ENABLED': '1'}, {'GA_POS_ENABLED': '1'},
+        {'GA_STATEFUL_MEMORY_ENABLED': '1', 'GA_STATEFUL_MEMORY_MODE': 'live'}])
+    @pytest.mark.parametrize('turns,expected', [('uncapped', 3), ('2', 2)])
+    def test_explicit_turns_ignore_plan_mode(flags, turns, expected):
+        handler = Handler(Parent())
+        class Client:
+            last_tools = ''
+            calls = 0
+            def chat(self, messages, tools):
+                self.calls += 1
+                handler.max_turns = 1
+                pending = self.calls < 3
+                response = SimpleNamespace(content='continue' if pending else 'done',
+                    thinking='', stop_reason='end_turn', tool_calls=(
+                        [SimpleNamespace(id=str(self.calls), function=SimpleNamespace(
+                            name='bad_json', arguments='{"msg":"retry"}'))] if pending else []))
+                if False:
+                    yield None
+                return response
+        client = Client()
+        env = dict(flags, GA_EXPERIMENT_RUNTIME_POLICY='v1', GA_EXPERIMENT_TASK_TURNS=turns)
+        # Bridge behavior has its own tests; this checks the real task loop limit.
+        with patch.dict(os.environ, env, clear=True), patch(
+                'pma_upstream_bridge.UpstreamPMAClient.from_environment', return_value=None):
+>           exhaust(agent_runner_loop(client, 'system', 'task', handler, [],
+                max_turns=None if turns == 'uncapped' else int(turns), verbose=False))
+
+GenericAgent-main/tests/test_explicit_runtime_turns.py:36: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+GenericAgent-main/agent_loop.py:56: in exhaust
+    while True: next(g)
+                ^^^^^^^
+GenericAgent-main/agent_loop.py:667: in agent_runner_loop
+    return (yield from _agent_runner_loop_impl(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+client = <test_explicit_runtime_turns.test_explicit_turns_ignore_plan_mode.<locals>.Client object at 0x108b3c350>
+system_prompt = 'system', user_input = 'task'
+handler = <test_task_interruption.Handler object at 0x108b3e990>
+tools_schema = [], max_turns = 2, verbose = False, initial_user_content = None
+yield_info = False, turn_offset = 0
+
+    def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_schema,
+                          max_turns=40, verbose=True, initial_user_content=None, yield_info=False,
+                          turn_offset=0):
+        initial_content = initial_user_content if initial_user_content is not None else user_input
+        initial_content = condition_initial_task(
+            initial_content, getattr(handler.parent, 'research_condition', None)
+        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": initial_content}
+        ]
+        local_turn = 0; turn = int(turn_offset); handler.max_turns = max_turns
+        exit_reason = {}; response = None
+        _hook('agent_before', locals())
+        pma = None
+        pma_upstream = None
+        pos = None
+        stateful = None
+        stateful_setting = os.environ.get('GA_STATEFUL_MEMORY_ENABLED', '0')
+        if stateful_setting not in {'0', '1'}:
+            raise ValueError('invalid stateful-memory enable value')
+        stateful_enabled = stateful_setting == '1'
+        if stateful_enabled:
+            if any(os.environ.get(name) == '1' for name in (
+                    'GA_POS_ENABLED', 'GA_PMA_UPSTREAM_ENABLED', 'GA_PMA_ENABLED',
+                    'GA_MONITOR_ENABLED', 'GA_M0_MONITOR_ENABLED',
+                    'GA_POS_PMA_COMPLEMENT', 'GA_POS_PMA_SHARED_VIEW')):
+                raise ValueError('stateful memory is exclusive of prior auxiliary modes')
+            stateful_mode = os.environ.get('GA_STATEFUL_MEMORY_MODE')
+            if stateful_mode not in {'fake-only', 'live'}:
+                raise ValueError('stateful memory requires fake-only or bound live mode')
+            if (os.environ.get('GA_TASK_COMPLETE_RESPONSE') != '1' or
+                    not getattr(getattr(client, 'backend', None),
+                                'task_complete_response', False)):
+>               raise ValueError('stateful memory requires bound complete-response Task')
+E               ValueError: stateful memory requires bound complete-response Task
+
+GenericAgent-main/agent_loop.py:98: ValueError
+=========================== short test summary info ============================
+FAILED GenericAgent-main/tests/test_explicit_runtime_turns.py::test_explicit_turns_ignore_plan_mode[uncapped-3-flags2]
+FAILED GenericAgent-main/tests/test_explicit_runtime_turns.py::test_explicit_turns_ignore_plan_mode[uncapped-3-flags3]
+FAILED GenericAgent-main/tests/test_explicit_runtime_turns.py::test_explicit_turns_ignore_plan_mode[2-2-flags2]
+FAILED GenericAgent-main/tests/test_explicit_runtime_turns.py::test_explicit_turns_ignore_plan_mode[2-2-flags3]
+4 failed, 9 passed, 8 subtests passed in 0.30s

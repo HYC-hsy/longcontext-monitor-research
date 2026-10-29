@@ -1,0 +1,50 @@
+[1] pma-stateful / sqlite-with-gcov — planned limits: agent=900s (source: official), turns=uncapped (source: method_default), verifier=900s (official); runtime checks pending: archive/runtime_policy_effective.json
+[2] pma-stateful / sqlite-with-gcov — planned limits: agent=900s (source: official), turns=uncapped (source: method_default), verifier=900s (official); runtime checks pending: archive/runtime_policy_effective.json
+======================================================================
+ERROR: test_stateful_transport_policy_rejects_invalid_or_legacy (experiment_runner.test_runner_frontend.FrontendTests.test_stateful_transport_policy_rejects_invalid_or_legacy)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<checkout>/experiment_runner/test_runner_frontend.py", line 357, in test_stateful_transport_policy_rejects_invalid_or_legacy
+    self.assertIn('effective_runtime_policy', build_plan(self.config)['slots'][0])
+                                              ^^^^^^^^^^^^^^^^^^^^^^^
+  File "<checkout>/experiment_runner/__main__.py", line 140, in build_plan
+    raise ValueError(f'stateful transport policy unsupported by adapter {method.name}')
+ValueError: stateful transport policy unsupported by adapter pma
+
+======================================================================
+ERROR: test_versioned_evaluator_bootstrap_is_frozen_and_real_only (experiment_runner.test_runner_frontend.FrontendTests.test_versioned_evaluator_bootstrap_is_frozen_and_real_only)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<checkout>/experiment_runner/test_runner_frontend.py", line 137, in test_versioned_evaluator_bootstrap_is_frozen_and_real_only
+    prepare(argparse.Namespace(condition='B', research_candidate='pma_stateful_memory_v1',
+  File "<checkout>/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/single_run.py", line 80, in prepare
+    from .prepare_six_task_manifest import prepare as prepare_manifest
+  File "<checkout>/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/prepare_six_task_manifest.py", line 18, in <module>
+    from long_context_bench.scripts.isolated_run_bundle import digest_tree
+  File "<checkout>/long_context_bench/scripts/isolated_run_bundle.py", line 9, in <module>
+    from requests.certs import where as requests_ca_where
+ModuleNotFoundError: No module named 'requests'
+
+======================================================================
+FAIL: test_no_approval_means_zero_runs (experiment_runner.test_runner_frontend.FrontendTests.test_no_approval_means_zero_runs)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<checkout>/experiment_runner/test_runner_frontend.py", line 433, in test_no_approval_means_zero_runs
+    self.assertEqual(rows[0]['status'], 'not_started_missing_approval')
+AssertionError: 'attempted' != 'not_started_missing_approval'
+- attempted
++ not_started_missing_approval
+
+
+======================================================================
+FAIL: test_stateful_transport_policies_freeze_and_reach_prepare (experiment_runner.test_runner_frontend.FrontendTests.test_stateful_transport_policies_freeze_and_reach_prepare)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<checkout>/experiment_runner/test_runner_frontend.py", line 336, in test_stateful_transport_policies_freeze_and_reach_prepare
+    self.assertTrue(succeeded(rows, 2, 'prepare'))
+AssertionError: False is not true
+
+----------------------------------------------------------------------
+Ran 50 tests in 0.278s
+
+FAILED (failures=2, errors=2)

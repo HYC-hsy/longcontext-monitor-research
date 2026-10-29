@@ -89,7 +89,7 @@ def fake_evidence_gap_arguments(candidate_agent, prompt):
 
 
 async def serve(args: argparse.Namespace) -> None:
-    if args.deadline_epoch is None and args.research_candidate not in ('pma_gap_memory_v0', 'pma_gap_evidence_v1'):
+    if args.deadline_epoch is None and args.research_candidate not in ('U', 'V1', 'D1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1'):
         raise RuntimeError('uncapped PMA worker requires gap candidate identity')
     vendor = Path(__file__).resolve().parent / "vendor" / "pma_89e5c0d"
     sources = (Path(inspect.getfile(MemoryEnabledTerminus2)).resolve(),

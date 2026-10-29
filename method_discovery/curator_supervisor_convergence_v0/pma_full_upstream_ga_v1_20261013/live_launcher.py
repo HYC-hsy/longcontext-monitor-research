@@ -121,6 +121,10 @@ def _stage_verifier(root: Path, task: str, manifest: dict,
 
 def _require_evaluation_state_contract(manifest: dict) -> None:
     """Bind the native SHARED protocol to code and zero-model raw evidence."""
+    if manifest.get('runtime_startup_identity') is not None:
+        from experiment_runner.startup import verify_startup_identity
+        verify_startup_identity(manifest)
+        return
     if manifest.get('schema') == 'pos-ga-single-manifest-v1':
         from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import (
             source_hashes, vendor_hashes, pma_vendor_hashes, synthetic_members)
@@ -566,8 +570,8 @@ def run_live(args) -> dict:
     runtime_policy = manifest.get('config', {}).get('runtime_policy')
     if runtime_policy is not None:
         from experiment_runner.runtime_policy import validate_resolved_policy
-        if not stateful and candidate not in ('pma_gap_memory_v0', 'pma_gap_evidence_v1'):
-            raise RuntimeError('runtime policy is not supported by this legacy candidate')
+        from experiment_runner.methods import validate_binding
+        validate_binding(args.condition, candidate)
         validate_resolved_policy(runtime_policy, manifest['assets'][args.task])
         spec['runtime_policy'] = runtime_policy
     if stateful:
@@ -670,7 +674,8 @@ def run_live(args) -> dict:
                      if args.condition == 'P' else 14400)
     # Harbor owns the phase clock. Do not start a second stateful deadline
     # before worker readiness/environment setup and shorten the Agent phase.
-    deadline = None if stateful or agent_seconds is None else time.time() + agent_seconds
+    deadline = (None if runtime_policy is not None or stateful or agent_seconds is None
+                else time.time() + agent_seconds)
     worker = harbor = None
     worker_logs = []
     first_error = None
@@ -812,6 +817,8 @@ def run_live(args) -> dict:
         # This field is frozen in the manifest, never inherited from a shell.
         env.pop('GA_EXPERIMENT_TASK_TURNS', None)
         if runtime_policy is not None:
+            env['GA_EXPERIMENT_RUNTIME_POLICY'] = 'v1'
+            env['GA_TASK_DEADLINE_EPOCH'] = 'uncapped'
             turns = runtime_policy['effective_task_turns']
             env['GA_EXPERIMENT_TASK_TURNS'] = 'uncapped' if turns is None else str(turns)
         for name in ('PMA_MEMORY_API_KEY', 'OPENROUTER_API_KEY', 'ANTHROPIC_API_KEY'):
@@ -843,7 +850,7 @@ def run_live(args) -> dict:
             if stateful:
                 env.pop('GA_TASK_DEADLINE_EPOCH', None)
             else:
-                env['GA_TASK_DEADLINE_EPOCH'] = str(deadline)
+                env['GA_TASK_DEADLINE_EPOCH'] = 'uncapped' if deadline is None else str(deadline)
         elif manifest.get('schema') == 'pos-ga-single-manifest-v1':
             env.pop('GA_TASK_COMPLETE_RESPONSE', None)
             env.pop('GA_TASK_DEADLINE_EPOCH', None)
@@ -860,8 +867,8 @@ def run_live(args) -> dict:
                        GA_POS_VENDOR_ROOT='/opt/genericagent/pos_runtime/vendor',
                        GA_POS_EPISODE_MODULE='/opt/genericagent/pos_runtime/episode.py',
                        GA_POS_ARCHIVE='/run/pos-archive/events.jsonl',
-                       GA_POS_TIMEOUT=str(min(180, agent_seconds)),
-                       GA_POS_DEADLINE_EPOCH=str(deadline))
+                       GA_POS_TIMEOUT=str(180 if agent_seconds is None else min(180, agent_seconds)),
+                       GA_POS_DEADLINE_EPOCH='uncapped' if deadline is None else str(deadline))
             if fixture and not profile_fixture:
                 env['GA_POS_FAKE_REPLIES'] = '/run/pos-fake-replies.json'
             else:

@@ -379,6 +379,10 @@ class NativeSharedTrialHooks(PMATrialHooks):
                 ('pma-gap-evidence-v1' if self.spec['research_candidate'] ==
                  'pma_gap_evidence_v1' else 'pma-gap-memory-v0')):
             raise RuntimeError('gap diagnostic Harbor runtime policy not effective')
+        if policy is not None and (
+                self.trial._agent_timeout_sec != expected_agent or
+                self.trial._verifier_timeout_sec != expected_verifier):
+            raise RuntimeError('runtime policy differs from Harbor agent/verifier caches')
         container, raw = await self._inspect()
         mounts = {m['Destination']: m for m in raw.get('Mounts', [])}
         if raw['Image'] != self.spec['image_id'] or raw['HostConfig']['NetworkMode'] == 'none':

@@ -67,6 +67,17 @@ class DeadlineTests(unittest.TestCase):
         bridge.close = lambda: setattr(bridge, 'closed', True)
         return bridge
 
+    def test_uncapped_overall_keeps_provider_limit_and_worker_exit(self):
+        with tempfile.TemporaryDirectory() as root:
+            clock = Clock()
+            bridge = self.bridge(root, clock, deadline=None, ready=3,
+                raw=json.dumps({'status': 'ok', 'result': {'done': True}}))
+            with patch.object(pos_bridge.time, 'monotonic', clock.monotonic):
+                self.assertTrue(bridge.exchange('update')['done'])
+            self.assertEqual(bridge.timeout, 1)
+            self.assertEqual(bridge.sent, 1)
+            self.assertEqual(clock.value, 3)
+
     def test_cumulative_wait_exceeds_provider_limit_without_resend(self):
         with tempfile.TemporaryDirectory() as root:
             clock = Clock()

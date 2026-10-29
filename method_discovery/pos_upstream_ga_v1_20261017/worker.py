@@ -222,7 +222,8 @@ class RoleTransport:
             session.candidate_request_byte_limit = (
                 None if getattr(self, 'shared_view_mode', False) else 90000)
             session.candidate_auxiliary_integrity = True
-        overall = float(os.environ.get('GA_POS_DEADLINE_EPOCH', '0') or 0)
+        raw = os.environ.get('GA_POS_DEADLINE_EPOCH', '0')
+        overall = 0 if raw == 'uncapped' else float(raw or 0)
         remaining = overall - time.time() if overall else float(
             os.environ.get('GA_POS_TIMEOUT', '180'))
         if remaining <= 0:
@@ -432,15 +433,16 @@ def main():
                                     args.episode_module.with_name('shared_view.py')):
                                 raise RuntimeError('shared-view source binding differs')
                             from event_spool import EventClient
-                            deadline_epoch = float(os.environ['GA_POS_DEADLINE_EPOCH'])
-                            remaining = deadline_epoch - time.time()
-                            if remaining <= 0:
+                            raw = os.environ['GA_POS_DEADLINE_EPOCH']
+                            deadline_epoch = None if raw == 'uncapped' else float(raw)
+                            remaining = None if deadline_epoch is None else deadline_epoch - time.time()
+                            if remaining is not None and remaining <= 0:
                                 raise RuntimeError('candidate PMA fixed deadline expired')
                             profile_client = EventClient(
                                 Path('/run/pma-bridge/requests'),
                                 Path('/run/pma-bridge/responses'),
                                 args.run_id, args.task_id,
-                                deadline_monotonic=time.monotonic() + remaining)
+                                deadline_monotonic=None if remaining is None else time.monotonic() + remaining)
                         pma_root = args.episode_module.parent / 'pma_vendor' / 'src'
                         sys.path.insert(0, str(pma_root.resolve(strict=True)))
                         import asyncio

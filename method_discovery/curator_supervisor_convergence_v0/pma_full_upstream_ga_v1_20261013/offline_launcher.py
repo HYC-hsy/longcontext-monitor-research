@@ -182,7 +182,10 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
     normalized_stateful_sources = {}
     if stateful:
         certification = manifest.get('native_shared_certification')
-        if certification is None and manifest.get('zero_model_fixture_only') is True:
+        if manifest.get('runtime_startup_identity') is not None:
+            from experiment_runner.startup import verify_startup_identity
+            frozen = verify_startup_identity(manifest)['source_files']
+        elif certification is None and manifest.get('zero_model_fixture_only') is True:
             from .stateful_certification import source_identity
             frozen = source_identity(STAGE.parents[2])
         else:

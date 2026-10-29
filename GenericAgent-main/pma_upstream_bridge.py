@@ -51,6 +51,7 @@ class UpstreamPMAClient:
         if any(not os.environ.get(name) for name in required):
             raise PMABridgeError('PMA run identity or spool configuration absent')
         if (os.environ['GA_PMA_UPSTREAM_DEADLINE_EPOCH'] == 'uncapped' and
+                os.environ.get('GA_EXPERIMENT_RUNTIME_POLICY') != 'v1' and
                 os.environ.get('GA_PMA_UPSTREAM_CANDIDATE') not in (
                     'pma_gap_memory_v0', 'pma_gap_evidence_v1')):
             raise PMABridgeError('uncapped PMA deadline requires gap candidate identity')

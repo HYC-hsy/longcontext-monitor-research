@@ -30,13 +30,14 @@ class PoSBridge:
             raise PoSBridgeError('invalid PoS per-provider timeout')
         if mode == 'profile' and deadline_epoch is None:
             raise PoSBridgeError('PoS profile requires a fixed overall deadline')
-        deadline_epoch = (float(deadline_epoch) if deadline_epoch is not None
+        uncapped = deadline_epoch == 'uncapped'
+        deadline_epoch = (None if uncapped else float(deadline_epoch) if deadline_epoch is not None
                           else time.time() + timeout)  # bounded fake-only fixture
-        remaining = deadline_epoch - time.time()
-        if not math.isfinite(deadline_epoch) or remaining <= 0:
+        remaining = None if uncapped else deadline_epoch - time.time()
+        if not uncapped and (not math.isfinite(deadline_epoch) or remaining <= 0):
             raise PoSBridgeError('PoS overall deadline invalid or expired before worker start')
         # Convert the frozen wall deadline once; polling never refreshes the budget.
-        deadline_monotonic = time.monotonic() + remaining
+        deadline_monotonic = None if uncapped else time.monotonic() + remaining
         argv = [sys.executable, '-B', '-u', str(Path(worker_script).resolve(strict=True)),
                 '--vendor', str(Path(vendor).resolve(strict=True)),
                 '--episode-module', str(Path(episode_module).resolve(strict=True)),
@@ -140,7 +141,7 @@ class PoSBridge:
         try:
             if self.closed or self.process.poll() is not None:
                 raise PoSBridgeError('PoS worker is unavailable')
-            if self.deadline_monotonic - time.monotonic() <= 0:
+            if self.deadline_monotonic is not None and self.deadline_monotonic - time.monotonic() <= 0:
                 raise PoSBridgeError('PoS overall deadline expired before command send')
             command = {'kind': kind, **fields}
             self.sent += 1
@@ -156,11 +157,12 @@ class PoSBridge:
             while True:
                 if self.closed:
                     raise PoSBridgeError('PoS command cancelled or bridge closed; never resend')
-                remaining = self.deadline_monotonic - time.monotonic()
-                if remaining <= 0:
+                remaining = (None if self.deadline_monotonic is None else
+                             self.deadline_monotonic - time.monotonic())
+                if remaining is not None and remaining <= 0:
                     raise PoSBridgeError('PoS overall deadline expired while awaiting command; never resend')
                 try:
-                    raw = self.replies.get(timeout=min(0.5, remaining))
+                    raw = self.replies.get(timeout=0.5 if remaining is None else min(0.5, remaining))
                     break
                 except queue.Empty:
                     if self.process.poll() is not None and not self._reader.is_alive():

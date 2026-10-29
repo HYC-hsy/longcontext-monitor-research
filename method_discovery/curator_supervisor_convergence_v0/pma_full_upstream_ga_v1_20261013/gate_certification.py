@@ -213,6 +213,10 @@ def require_launch_certificate(manifest, *, fixture=False):
     if fixture:
         require(manifest.get('zero_model_fixture_only') is True,'gate_fixture_identity')
         return
+    if manifest.get('runtime_startup_identity') is not None:
+        from experiment_runner.startup import verify_startup_identity
+        verify_startup_identity(manifest)
+        return
     certification=manifest.get('native_shared_certification') or {}
     root=Path(__file__).resolve().parent.parents[2]
     relative=certification.get('evidence_path')
