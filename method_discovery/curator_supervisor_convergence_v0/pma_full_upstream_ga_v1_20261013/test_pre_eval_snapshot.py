@@ -73,6 +73,7 @@ class SnapshotTests(unittest.TestCase):
             self.assertFalse(receipt['native_evaluator_started'])
             self.assertFalse(receipt['process_state_captured'])
         self.assertEqual([call[0] for call in calls], ['commit', 'image'])
+        self.assertEqual(calls[0], ('commit', CONTAINER, 'ga-pre-eval:' + RUN))
 
 
 if __name__ == '__main__':

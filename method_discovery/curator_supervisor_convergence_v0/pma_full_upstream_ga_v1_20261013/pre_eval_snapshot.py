@@ -55,7 +55,10 @@ def capture(*, run_id: str, task_id: str, container_id: str,
     if existing.returncode == 0:
         raise RuntimeError('checkpoint tag already exists')
     try:
-        committed = _run('commit', '--pause=true', container_id, tag,
+        # Docker pauses during commit by default. The deprecated explicit
+        # --pause flag is printed to stdout by newer CLIs and corrupts the
+        # image-ID receipt below.
+        committed = _run('commit', container_id, tag,
                          timeout=1800).stdout.strip()
     except BaseException:
         # Docker normally unpauses after commit, including errors. Verify that
