@@ -111,6 +111,18 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
             except ValueError:return False
         return True
 
+    def _dependency_target(self,name,args):
+        """Only known host targets participate; malformed IDs identify nothing."""
+        if not isinstance(args,dict):return None
+        if name=='memory_update_status':return 'status'
+        if name not in WRITERS and name!='memory_delete':return None
+        key=args.get('memory_id')
+        if not isinstance(key,str) or not key:return None
+        try:category=self.memory._content(key)[0]
+        except ValueError:return None
+        if name=='memory_delete' or category==WRITERS[name]:return key
+        return None
+
     async def _attempt(self,name,args,index,attempt,attempts):
         row={'attempt':attempt,'verdict':None,'engineering_status':'not_reviewed','success':False}
         attempts.append(row)
@@ -146,16 +158,17 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
             try:calls=self._tool_items(response)
             except Exception:calls=[('invalid','malformed_tool_response')]
             for index,item in enumerate(calls):
-                name='invalid_memory_operation';args=None;operation=None;prepared=None
+                name='invalid_memory_operation';args=None;operation=None;prepared=None;target=None
                 row={'index':index,'cycle_id':cycle,'success':False,'verdict':None,
                      'engineering_status':'not_reviewed','content_status':'not_committed','attempts':[]}
                 outcomes.append(row)
                 try:
                     name,args=self._parse_item(item)
                     row.update(tool=name,submitted_arguments=deepcopy(args))
-                    target='status' if name=='memory_update_status' else (args.get('memory_id') if isinstance(args,dict) else None)
+                    if self.review_strategy==CLAIM_SPLIT:
+                        target=self._dependency_target(name,args)
                     if stopped:row['error_code']='not_run_after_review_error'
-                    elif self.review_strategy==CLAIM_SPLIT and target in blocked_targets:
+                    elif self.review_strategy==CLAIM_SPLIT and target is not None and target in blocked_targets:
                         row.update(error_code='not_run_failed_target_dependency', blocked_target=target)
                     elif name=='memory_delete':
                         row.update(error_code='not_applicable_delete_protocol',preparation='not_reviewed_not_deleted')
@@ -205,9 +218,8 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
                         row.update(error_code=type(error).__name__,engineering_status='host_error')
                         stopped=True
                 if not row['success']:
-                    if self.review_strategy==CLAIM_SPLIT and isinstance(args,dict):
-                        target='status' if name=='memory_update_status' else args.get('memory_id')
-                        if target is not None:blocked_targets.add(target)
+                    if self.review_strategy==CLAIM_SPLIT and target is not None:
+                        blocked_targets.add(target)
                     operation=MemoryOperation(name,success=False,error=row['error_code'])
                     operation.content_status='not_committed'
                     row['retained_old_value_may_be_stale']=bool(self.memory.status if name=='memory_update_status'

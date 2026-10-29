@@ -52,12 +52,15 @@ class ProtocolV2Tests(unittest.TestCase):
         raw['coverage_explanation']='A condition was lost.';raw['coverage_original_fragment']='noncontiguous composite'
         self.assertEqual(cs.parse_batch(json.dumps(raw),claims,[],content)[1]['coverage_original_fragment'],content)
 
-    def isolation_cycle(self, failure="parse"):
+    def isolation_cycle(self, failure="parse", malformed_target=None, invalid_tool=False):
         bank=host.LatestEvidenceGapMemory();key=bank.save_knowledge('old');calls=[]
         async def fake(**kw):
             calls.append(agent.transport_phase)
             if agent.transport_phase=='maintenance':
-                return host.reply([host.write('bad candidate',key),host.write('dependent candidate',key),host.write('independent candidate')])
+                first=host.write('bad candidate',key if malformed_target is None else malformed_target)
+                if malformed_target is not None:first[1]['memory_id']=malformed_target
+                if invalid_tool:first=('unknown_memory_tool',first[1])
+                return host.reply([first,host.write('dependent candidate',key),host.write('independent candidate')])
             if agent.transport_phase=='selection':return host.reply(content='<no_intervention/>')
             if kw['prompt'].startswith('CLOSED MATERIAL'):
                 m=json.loads(kw['prompt'].split('\n',1)[1]);op=m['original_operation']
@@ -100,3 +103,22 @@ class ProtocolV2Tests(unittest.TestCase):
         self.assertEqual([p for p,_ in calls].count('citation_review'),2)
         self.assertEqual(len(agent.last_citation_gate_report['operations'][0]['attempts']),2)
         self.assertEqual(agent.pending_receipt['operations'][0]['outcome'],'not_committed')
+
+    def test_malformed_targets_do_not_block_valid_operations(self):
+        for target in ([], {}, ['k1'], {'id':'k1'}, True, 17):
+            with self.subTest(target=target):
+                agent,result,calls,bank,key=self.isolation_cycle(malformed_target=target)
+                self.assertEqual([o.success for o in result.operations],[False,True,True])
+                rows=agent.last_citation_gate_report['operations']
+                self.assertEqual(rows[0]['error_code'],'invalid_operation_or_target')
+                self.assertFalse(agent.last_citation_gate_report['incomplete'])
+                self.assertEqual(calls.count('citation_review'),4)
+                self.assertEqual([r['outcome'] for r in agent.pending_receipt['operations']],
+                                 ['not_committed','committed','committed'])
+
+    def test_unknown_tool_cannot_block_a_real_target(self):
+        agent,result,calls,bank,key=self.isolation_cycle(invalid_tool=True)
+        self.assertEqual([o.success for o in result.operations],[False,True,True])
+        self.assertEqual(agent.last_citation_gate_report['operations'][0]['error_code'],
+                         'invalid_operation_or_target')
+        self.assertEqual(calls.count('citation_review'),4)
