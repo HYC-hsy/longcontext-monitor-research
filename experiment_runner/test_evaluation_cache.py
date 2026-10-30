@@ -44,6 +44,22 @@ class BundleTests(unittest.TestCase):
         self.assertEqual((self.bundle / 'manifest.json').read_bytes(), original)
         cache.verify_bundle(self.bundle, self.identity)
 
+    def test_ocaml_bundle_is_task_and_source_bound(self):
+        source = self.source / cache.OCAML_ROOT
+        (source / 'testsuite').mkdir(parents=True)
+        (source / 'SOURCE_COMMIT').write_text(cache.OCAML_REPO_COMMIT + '\n')
+        (source / 'testsuite' / 'Makefile').write_text('fixture')
+        identity = copy.deepcopy(self.identity)
+        identity.update(task='fix-ocaml-gc', original_sha256=cache.OCAML_ORIGINAL_SHA256,
+                        repo_commit=cache.OCAML_REPO_COMMIT)
+        bundle = cache.publish_bundle(self.source, self.store, identity)
+        self.assertNotEqual(bundle, self.bundle)
+        cache.verify_bundle(bundle, identity)
+        wrong = copy.deepcopy(identity)
+        wrong['repo_commit'] = '0' * 40
+        with self.assertRaises(cache.CacheMiss):
+            cache.verify_bundle(bundle, wrong)
+
     def test_corrupted_payload(self):
         with open(self.bundle / 'payload.tar', 'ab') as stream:
             stream.write(b'corruption')

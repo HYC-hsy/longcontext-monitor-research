@@ -105,9 +105,12 @@ def verify_live_spec(spec: dict) -> None:
     if (bootstrap not in {'original', 'bootstrap_retry_v1', 'persistent_bundle_v1',
                           'download_retry_v1'} or
             spec.get('evaluation_bootstrap_protocol', 'original') != bootstrap or
+            (bootstrap == 'bootstrap_retry_v1' and
+             spec.get('task_id') != 'sqlite-with-gcov') or
+            (bootstrap == 'persistent_bundle_v1' and
+             spec.get('task_id') not in {'sqlite-with-gcov', 'fix-ocaml-gc'}) or
             (bootstrap in {'bootstrap_retry_v1', 'persistent_bundle_v1'} and
-             (spec.get('task_id') != 'sqlite-with-gcov' or
-             spec.get('evaluation_protocol') != 'official_shared_v2'))):
+             spec.get('evaluation_protocol') != 'official_shared_v2')):
         raise RuntimeError('evaluation bootstrap differs from authorized manifest')
     retry = frozen.get('config', {}).get('evaluation_download_retry')
     if (spec.get('evaluation_download_retry') != retry or

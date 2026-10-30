@@ -6,7 +6,9 @@
 # in patch-authoring environment; host orchestrator marks readiness after success.
 set -euo pipefail
 : "${BASE_IMAGE:?must supply a trusted digest-pinned Task base image}"
+: "${BASE_TASK:=sqlite-with-gcov}"
 [[ $BASE_IMAGE =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] || exit 2
+[[ $BASE_TASK == sqlite-with-gcov || $BASE_TASK == fix-ocaml-gc ]] || exit 2
 export HOME=/root
 export UV_CACHE_DIR=/root/.cache/uv UV_PYTHON_INSTALL_DIR=/root/.local/share/uv/python
 export UV_LINK_MODE=copy UV_NO_PROGRESS=1 UV_PYTHON_PREFERENCE=only-managed
@@ -32,17 +34,30 @@ cd /dependency-check
 # Warm BOTH uvx tool keys used by the original bootstrap. Neither loads tests.
 uvx -p 3.13 -w pytest==8.4.1 -w pytest-json-ctrf==0.3.5 python -c "import importlib.metadata as m; print(m.version(\"pytest\")); print(m.version(\"pytest-json-ctrf\"))"
 UV_OFFLINE=1 uvx -p 3.13 -w pytest==8.4.1 -w pytest-json-ctrf==0.3.5 pytest --help | grep -F -- --ctrf
+if [[ $BASE_TASK == fix-ocaml-gc ]]; then
+  git clone https://github.com/sadiqj/ocaml/ /var/cache/evaluation-ocaml-original
+  cd /var/cache/evaluation-ocaml-original
+  git checkout tag_purposefully_broken_sweeping_changes
+  test "$(git rev-parse HEAD)" = 356d558bf89552ed9229253ec4135c691234f060
+  printf '%s\n' 356d558bf89552ed9229253ec4135c691234f060 > SOURCE_COMMIT
+  rm -rf .git
+  test -d testsuite
+fi
 python_path=$(uv python find --offline 3.13)
 export PYTHON_PATH="$python_path"
 "$python_path" - <<'PY'
 import json, os, platform, sys
 sys.path.insert(0, "/builder")
-from evaluation_cache import PROTOCOL, ORIGINAL_SHA256, VERSIONS, offline_check, publish_bundle
+from evaluation_cache import PROTOCOL, ORIGINAL_SHA256, OCAML_ORIGINAL_SHA256, OCAML_REPO_COMMIT, VERSIONS, offline_check, publish_bundle
 release = platform.freedesktop_os_release()
-identity = dict(protocol=PROTOCOL, task="sqlite-with-gcov", original_sha256=ORIGINAL_SHA256,
+task = os.environ["BASE_TASK"]
+identity = dict(protocol=PROTOCOL, task=task,
+    original_sha256=ORIGINAL_SHA256 if task == "sqlite-with-gcov" else OCAML_ORIGINAL_SHA256,
     base_image=os.environ["BASE_IMAGE"], os_id=release["ID"], os_version=release["VERSION_ID"],
     architecture=platform.machine(), python=platform.python_version(),
     python_executable=os.path.realpath(os.environ["PYTHON_PATH"]), versions=VERSIONS)
+if task == "fix-ocaml-gc":
+    identity["repo_commit"] = OCAML_REPO_COMMIT
 offline_check(identity)
 path = publish_bundle("/", "/output", identity)
 print("BUNDLE=" + str(path))

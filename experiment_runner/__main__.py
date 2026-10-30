@@ -117,10 +117,14 @@ def build_plan(config):
         if not isinstance(row, dict) or set(row) - {'task', 'method', 'occurrence'}:
             raise ValueError('invalid slot fields')
         task = safe_task(row.get('task'))
-        if (config.get('evaluation_bootstrap_protocol', 'original') in {
-                'bootstrap_retry_v1', 'persistent_bundle_v1'}
-                and task != 'sqlite-with-gcov'):
+        if (config.get('evaluation_bootstrap_protocol', 'original') == 'bootstrap_retry_v1'
+                and task != 'sqlite-with-gcov') or (
+                config.get('evaluation_bootstrap_protocol', 'original') == 'persistent_bundle_v1'
+                and task not in {'sqlite-with-gcov', 'fix-ocaml-gc'}):
             raise ValueError('non-original bootstrap supports only sqlite-with-gcov')
+        if (config.get('evaluation_bootstrap_protocol') == 'persistent_bundle_v1' and
+                config['evaluation_cache']['identity'].get('task', task) != task):
+            raise ValueError('evaluation cache task differs from selected task')
         method = resolve(row.get('method', config.get('method')))
         from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.citation_gate_config import validate_gate,validate_strategy
         validate_gate(config.get('citation_review_gate'),method.research_candidate,method.condition)

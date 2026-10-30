@@ -1,4 +1,4 @@
-"""Host-persistent SQLite dependency bundles. No network fallback or test execution.
+"""Host-persistent verifier dependency bundles. No network fallback or test execution.
 
 Integrate only after the agent is stopped and original verifier bytes are checked.
 Use evaluation_bootstrap.effective_script unchanged; select persistent_bundle_v1
@@ -25,6 +25,9 @@ from pathlib import Path, PurePosixPath
 
 PROTOCOL = 'persistent_bundle_v1'
 ORIGINAL_SHA256 = '4770437ea96c3cc84684b4f99d55fb148fcac09f9ea1e8ef49de487716e6c334'
+OCAML_ORIGINAL_SHA256 = 'b0c6a8f1e404c28c5d20e0f95bf00bdd871306b0c9d112243ed9cb57d05304af'
+OCAML_REPO_COMMIT = '356d558bf89552ed9229253ec4135c691234f060'
+OCAML_ROOT = 'var/cache/evaluation-ocaml-original'
 ROOTS = ('root/.local/share/uv/python', 'root/.cache/uv', 'var/cache/evaluation-debs')
 BIN_FILES = ('root/.local/bin/uv', 'root/.local/bin/uvx', 'root/.local/bin/env')
 VERSIONS = {'uv': '0.9.5', 'pytest': '8.4.1', 'pytest-json-ctrf': '0.3.5'}
@@ -46,7 +49,8 @@ def _sha(path):
 def _allowed(name):
     p = PurePosixPath(name)
     return (not p.is_absolute() and str(p) == name and '..' not in p.parts
-            and (name in BIN_FILES or any(name == r or name.startswith(r + '/') for r in ROOTS)))
+            and (name in BIN_FILES or any(name == r or name.startswith(r + '/')
+                 for r in (*ROOTS, OCAML_ROOT))))
 
 
 def _link_target(name, target):
@@ -70,10 +74,14 @@ def _link_target(name, target):
 def validate_identity(identity):
     keys = {'protocol', 'task', 'original_sha256', 'base_image', 'os_id',
             'os_version', 'architecture', 'python', 'python_executable', 'versions'}
+    task = identity.get('task') if isinstance(identity, dict) else None
+    if task == 'fix-ocaml-gc':
+        keys.add('repo_commit')
     if not isinstance(identity, dict) or set(identity) != keys:
         raise CacheMiss('invalid identity fields')
-    if (identity['protocol'] != PROTOCOL or identity['task'] != 'sqlite-with-gcov'
-            or identity['original_sha256'] != ORIGINAL_SHA256
+    if (identity['protocol'] != PROTOCOL or task not in {'sqlite-with-gcov', 'fix-ocaml-gc'}
+            or identity['original_sha256'] != (ORIGINAL_SHA256 if task == 'sqlite-with-gcov' else OCAML_ORIGINAL_SHA256)
+            or (task == 'fix-ocaml-gc' and identity['repo_commit'] != OCAML_REPO_COMMIT)
             or identity['versions'] != VERSIONS
             or not re.fullmatch(r'[^\s@]+@sha256:[0-9a-f]{64}', identity['base_image'])
             or identity['os_id'] != 'ubuntu'
@@ -150,6 +158,15 @@ def verify_bundle(bundle, expected_identity, *, _allow_staging=False):
             raise CacheMiss('curl deb closure missing')
         if not any(n.startswith(ROOTS[1] + '/') and r['type'] == 'file' for n, r in rows.items()):
             raise CacheMiss('uv cache missing')
+        if expected_identity['task'] == 'fix-ocaml-gc':
+            marker = OCAML_ROOT + '/SOURCE_COMMIT'
+            if rows.get(marker, {}).get('type') != 'file' or not any(
+                    n.startswith(OCAML_ROOT + '/testsuite/') and r['type'] == 'file'
+                    for n, r in rows.items()):
+                raise CacheMiss('OCaml source snapshot missing')
+            with tarfile.open(bundle / 'payload.tar', 'r:') as tar:
+                if tar.extractfile(marker).read().decode().strip() != OCAML_REPO_COMMIT:
+                    raise CacheMiss('OCaml source commit mismatch')
         return manifest
     except (OSError, ValueError, KeyError, TypeError, tarfile.TarError) as exc:
         raise CacheMiss('invalid bundle: ' + str(exc)) from exc
@@ -172,7 +189,8 @@ def publish_bundle(source_root, cache_root, identity):
     staging = Path(tempfile.mkdtemp(prefix='.building-', dir=cache_root))
     try:
         with tarfile.open(staging / 'payload.tar', 'w', dereference=False) as tar:
-            for name in (*BIN_FILES, *ROOTS):
+            roots = (*ROOTS, OCAML_ROOT) if identity['task'] == 'fix-ocaml-gc' else ROOTS
+            for name in (*BIN_FILES, *roots):
                 source = source_root / name
                 if source.is_symlink():
                     raise CacheMiss('top-level dependency path is a symlink')
@@ -248,7 +266,8 @@ def restore_bundle(bundle, identity, destination='/'):
         _safe_destination(destination, name)
     # Fail closed on old/Task-created dependency residue; never delete Task data.
     # Especially important for debs: no unmanifested package may be installed.
-    for name in ROOTS:
+    roots = (*ROOTS, OCAML_ROOT) if identity['task'] == 'fix-ocaml-gc' else ROOTS
+    for name in roots:
         existing = _safe_destination(destination, name)
         if existing.exists():
             for path in existing.rglob('*'):
@@ -313,6 +332,11 @@ def offline_check(identity):
             raise CacheMiss('resolved Python/package version mismatch')
         if '--ctrf' not in run(args + ['pytest', '--help']):
             raise CacheMiss('CTRf plugin missing')
+        if identity['task'] == 'fix-ocaml-gc':
+            source = Path('/') / OCAML_ROOT
+            if ((source / 'SOURCE_COMMIT').read_text().strip() != OCAML_REPO_COMMIT
+                    or not (source / 'testsuite').is_dir()):
+                raise CacheMiss('OCaml source snapshot invalid')
 
 
 def require_offline_ready(bundle, expected_manifest_sha256):
@@ -384,7 +408,7 @@ async def prepare_cached(exec_command, upload_file, bundle, expected_identity, r
     return manifest
 
 
-def build_bundle(cache_root, base_image):
+def build_bundle(cache_root, base_image, task='sqlite-with-gcov'):
     """Explicit one-time ONLINE build plus clean Docker --network none acceptance.
 
     Cross-platform host orchestration: uses the running Python (sys.executable),
@@ -393,6 +417,8 @@ def build_bundle(cache_root, base_image):
     """
     if not re.fullmatch(r'[^\s@]+@sha256:[0-9a-f]{64}', base_image):
         raise CacheMiss('build requires trusted digest-pinned base image')
+    if task not in {'sqlite-with-gcov', 'fix-ocaml-gc'}:
+        raise CacheMiss('unsupported cache task')
     root = Path(cache_root).resolve()
     root.mkdir(parents=True, exist_ok=True)
     module = Path(__file__).resolve()
@@ -409,6 +435,7 @@ def build_bundle(cache_root, base_image):
         mounted_script.write_bytes(script_bytes)
         online = ['docker', 'run', '--rm', '--user', 'root', '--entrypoint', '/bin/bash',
                   '-e', 'BASE_IMAGE=' + base_image,
+                  '-e', 'BASE_TASK=' + task,
                   '-v', str(module) + ':/builder/evaluation_cache.py:ro',
                   '-v', str(mounted_script) + ':/builder/build.sh:ro',
                   '-v', str(root) + ':/output', base_image, '/builder/build.sh']
@@ -419,7 +446,7 @@ def build_bundle(cache_root, base_image):
         raise CacheMiss('builder did not return exactly one valid bundle key')
     path = root / lines[0]
     identity = json.loads((path / 'manifest.json').read_text())['identity']
-    if identity['base_image'] != base_image:
+    if identity['base_image'] != base_image or identity['task'] != task:
         raise CacheMiss('builder base image differs')
     manifest = verify_bundle(path, identity)
     manifest_sha = _sha(path / 'manifest.json')
@@ -462,6 +489,7 @@ def main():
     parser.add_argument('path')
     parser.add_argument('--identity', help='exact identity JSON, or @file')
     parser.add_argument('--base-image', help='trusted Task image@sha256:digest; build only')
+    parser.add_argument('--task', choices=('sqlite-with-gcov', 'fix-ocaml-gc'), default='sqlite-with-gcov')
     parser.add_argument('--source-root', default='/')
     parser.add_argument('--install-debs', action='store_true')
     args = parser.parse_args()
@@ -471,7 +499,7 @@ def main():
         parser.error('this command requires --identity')
     try:
         if args.command == 'build':
-            build_bundle(args.path, args.base_image)
+            build_bundle(args.path, args.base_image, args.task)
             return 0
         identity = json.loads(Path(args.identity[1:]).read_text() if args.identity.startswith('@') else args.identity)
         if args.command == 'publish':

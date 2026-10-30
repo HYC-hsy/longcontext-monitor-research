@@ -95,8 +95,10 @@ class NativeSharedVerifier(Verifier):
         effective_path = None
         if protocol in {BOOTSTRAP_PROTOCOL, 'persistent_bundle_v1', DOWNLOAD_PROTOCOL}:
             if (spec.get('evaluation_protocol') != 'official_shared_v2' or
-                    (protocol != DOWNLOAD_PROTOCOL and
-                     spec.get('task_id') != 'sqlite-with-gcov')):
+                    (protocol == BOOTSTRAP_PROTOCOL and
+                     spec.get('task_id') != 'sqlite-with-gcov') or
+                    (protocol == 'persistent_bundle_v1' and
+                     spec.get('task_id') not in {'sqlite-with-gcov', 'fix-ocaml-gc'})):
                 raise RuntimeError('bootstrap protocol outside pinned official SQLite task')
             original = self.task.paths.test_path_for(self.environment.os).read_bytes()
             download = (download_plan(original, spec['evaluation_download_retry']['max_attempts'])
@@ -158,6 +160,8 @@ class NativeSharedVerifier(Verifier):
                             len(images) != 1 or images[0]['Id'] != spec['image_id'] or
                             asset['repo_digest'] not in images[0]['RepoDigests'] or
                             images[0]['Os'] + '/' + images[0]['Architecture'] != asset['platform'] or
+                            cache['identity']['task'] != spec['task_id'] or
+                            cache['identity']['original_sha256'] != required['tests/test.sh'] or
                             cache['identity']['base_image'] != asset['repo_digest'] or
                             cache['identity']['architecture'] != 'x86_64' or
                             asset['platform'] != 'linux/amd64'):

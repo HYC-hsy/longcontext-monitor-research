@@ -171,9 +171,10 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
                  (candidate != 'pma_gap_memory_v0' or
                   not isinstance(plan.get('current_config_sha256'), str) or
                   len(plan['current_config_sha256']) != 64)) or
-                (plan.get('evaluation_bootstrap_protocol', 'original') in
-                 {'bootstrap_retry_v1', 'persistent_bundle_v1'} and
+                (plan.get('evaluation_bootstrap_protocol', 'original') == 'bootstrap_retry_v1' and
                  plan['task'] != 'sqlite-with-gcov') or
+                (plan.get('evaluation_bootstrap_protocol', 'original') == 'persistent_bundle_v1' and
+                 plan['task'] not in {'sqlite-with-gcov', 'fix-ocaml-gc'}) or
                 type(plan['occurrence']) is not int or plan['occurrence'] < 1):
             raise RuntimeError('single-run plan schema mismatch')
         slot = dict(order=1, task=plan['task'],

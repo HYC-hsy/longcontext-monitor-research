@@ -12,6 +12,8 @@ import hashlib
 PROTOCOL = 'bootstrap_retry_v1'
 TASK = 'sqlite-with-gcov'
 ORIGINAL_SHA256 = '4770437ea96c3cc84684b4f99d55fb148fcac09f9ea1e8ef49de487716e6c334'
+OCAML_TASK = 'fix-ocaml-gc'
+OCAML_SHA256 = 'b0c6a8f1e404c28c5d20e0f95bf00bdd871306b0c9d112243ed9cb57d05304af'
 PREPARATION_PREFIX = (
     b'#!/bin/bash\n\n'
     b'# Install curl\napt-get update\napt-get install -y curl\n\n'
@@ -30,13 +32,26 @@ class BootstrapFailed(RuntimeError):
 
 
 def effective_script(original: bytes, *, task: str) -> bytes:
-    if task != TASK or hashlib.sha256(original).hexdigest() != ORIGINAL_SHA256:
+    expected = {TASK: ORIGINAL_SHA256, OCAML_TASK: OCAML_SHA256}.get(task)
+    if expected is None or hashlib.sha256(original).hexdigest() != expected:
         raise BootstrapFailed('identity', None, 'unsupported original verifier bytes')
+    if task == OCAML_TASK:
+        original = original.replace(b'\r\n', b'\n')
+        if b'\r' in original:
+            raise BootstrapFailed('boundary', None, 'unsupported OCaml line ending')
     if not original.startswith(PREPARATION_PREFIX):
         raise BootstrapFailed('boundary', None, 'pinned preparation prefix changed')
     suffix = original[len(PREPARATION_PREFIX):]
     if not suffix.startswith(TEST_BOUNDARY) or suffix.count(TEST_BOUNDARY) != 1:
         raise BootstrapFailed('boundary', None, 'pinned test boundary changed')
+    if task == OCAML_TASK:
+        clone = (b'git clone https://github.com/sadiqj/ocaml/ ocaml-original && cd ocaml-original && '
+                 b'git checkout tag_purposefully_broken_sweeping_changes && cd ..')
+        if suffix.count(clone) != 1:
+            raise BootstrapFailed('boundary', None, 'pinned OCaml clone boundary changed')
+        suffix = suffix.replace(clone,
+            b'cp -a /var/cache/evaluation-ocaml-original ocaml-original')
+        return EFFECTIVE_HEADER + b'export UV_PYTHON_DOWNLOADS=never\n' + suffix
     return EFFECTIVE_HEADER + suffix
 
 

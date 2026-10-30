@@ -83,8 +83,11 @@ def prepare(args: argparse.Namespace) -> dict:
     cache = getattr(args, 'evaluation_cache', None)
     retry = getattr(args, 'evaluation_download_retry', None)
     if bootstrap not in {'original', 'bootstrap_retry_v1', 'persistent_bundle_v1',
-                          'download_retry_v1'} or (bootstrap in {'bootstrap_retry_v1', 'persistent_bundle_v1'} and
-            (args.task != 'sqlite-with-gcov' or getattr(args, 'fake_only', False))):
+                          'download_retry_v1'} or (bootstrap == 'bootstrap_retry_v1' and
+            args.task != 'sqlite-with-gcov') or (bootstrap == 'persistent_bundle_v1' and
+            args.task not in {'sqlite-with-gcov', 'fix-ocaml-gc'}) or (
+            bootstrap in {'bootstrap_retry_v1', 'persistent_bundle_v1'} and
+            getattr(args, 'fake_only', False)):
         raise ValueError('evaluation bootstrap protocol requires real sqlite-with-gcov')
     if bootstrap == 'download_retry_v1':
         if (not isinstance(retry, dict) or set(retry) != {'max_attempts'} or
