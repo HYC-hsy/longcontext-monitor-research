@@ -1,57 +1,40 @@
-# Configuration-driven experiment entry
+# Dataset runner
 
-This entry reuses the existing GA/Harbor single-run driver and serial controller.
-It separates task selection, method names, machine paths, and runtime policy.
-It does **not** replace the method algorithms, model transport, or evaluator.
+Configure the pinned dataset, local runtime/profile paths, default method, and
+limits once in a local JSON file. The file contains **paths**, not credentials.
+[`examples/sqlite.ga-only.json`](examples/sqlite.ga-only.json) shows the shape.
+Keep your filled-in file private.
 
-## Everyday use
-
-From the repository root (Python 3.11+):
+From the repository root, using the already installed runtime Python:
 
 ```sh
-python -m experiment_runner catalog --config experiment.local.json --output catalog.json
-python -m experiment_runner plan --config experiment.local.json --output resolved.json
-python -m experiment_runner prepare --config experiment.local.json --output runs/selection-01
-python -m experiment_runner run --config experiment.local.json --output runs/selection-01
+# One task
+python -m experiment_runner run --config experiment.local.json --method ga-only --task sqlite-with-gcov --output runs/ga-sqlite-01
+
+# Several tasks, in the order written
+python -m experiment_runner run --config experiment.local.json --method pma-gap-evidence --task sqlite-with-gcov --task fix-ocaml-gc --output runs/pma-two-01
+
+# Every compatible task in the pinned dataset
+python -m experiment_runner run --config experiment.local.json --method ga-only --all-tasks --output runs/ga-all-01
 ```
 
-`catalog` and `plan` only read pinned public Git metadata. They do not load
-private profiles as code, start Docker, call a provider, or execute an evaluator.
-Their `--output` is a **new JSON file**. `prepare` and `run` use a **selection
-directory**. Preparation requires the existing local assets/runtime dependencies.
+`run` creates a new result directory, prepares each slot, binds its method and
+source identity, and starts the existing GA/Harbor driver. There is no separate
+user-facing certificate or authorization-file step. Internal one-use binding
+still prevents an already allocated slot from being silently run twice. Choose
+a **new** output directory for every new experiment. `plan` and `prepare` remain
+optional read-only/zero-model inspection commands; their output is not needed
+for an ordinary `run`.
 
-Copy `examples/sqlite.stateful.relaxed.json` to your own local configuration and
-replace the machine paths once. Relative paths are relative to the configuration
-file, not the current shell directory. Never put API keys or endpoint contents
-in this JSON. The local resolved plan contains machine/profile paths; do not
-publish it blindly.
+`--method` overrides the config method for every selected slot. Repeated
+`--task` or `--all-tasks` replaces the config's `slots`; with no overrides, the
+config's slots and method are used unchanged. `--all-tasks` means the entire
+pinned task pool, **not** a previously published 20-task subset. Put a frozen
+subset and desired repeat/occurrence values in `slots` when needed. The current
+driver runs slots serially and refuses `execution: parallel` rather than
+silently changing the schedule.
 
-To select tasks, edit `slots`. List order is execution order. For an explicit
-repeat, add another slot with a different positive `occurrence`. Slots may
-override the top-level `method`. Only serial execution is implemented;
-`execution: parallel` is rejected rather than silently run serially.
-
-Supported compatibility driver names are:
-
-- `ga-only`: A / U
-- `pma`: B / U
-- `pma-v1`, `pma-d1`: existing V1/D1 candidates
-- `pma-stateful`: B / pma_stateful_memory_v1
-- `pos`, `pos-citation-fixed`, `pos-pma-complement`, `pos-pma-shared-view`
-
-Changing names selects an already implemented driver. The registry refuses an
-invented candidate that would otherwise silently dispatch to old PMA. Runtime
-method flags and stale method-specific environment values are cleared before
-the bound launcher enables the chosen method. The caller's environment is
-restored, including on failure.
-
-## Runtime policy: one resolved value, not multiple hidden defaults
-
-Explicit `runtime_policy` is supported by `pma-stateful` and `pma-gap` only.
-Other compatibility drivers reject it. For these candidates, omitting the field
-resolves and passes the explicit official-Agent/method-default-turns policy.
-Other legacy drivers retain their existing behavior; no claim is made that
-their old defaults are official benchmark defaults.
+The same `runtime_policy` object applies to all selected slots:
 
 ```json
 {
@@ -61,126 +44,29 @@ their old defaults are official benchmark defaults.
 }
 ```
 
-- `agent_timeout`: `official`, `uncapped`, or positive finite seconds.
-- `task_turns`: `method_default`, `uncapped`, or a positive integer.
-- `verifier_timeout`: only `official` in this version.
-- Missing fields get the explicit defaults above. JSON `null`, zero, booleans,
-  negative numbers, NaN, Infinity and unknown fields are rejected.
+`agent_timeout` accepts `official`, a positive number of seconds, or
+`uncapped`; `task_turns` accepts `method_default`, a positive integer, or
+`uncapped`. The verifier remains on its official limit. An uncapped Agent run
+is a diagnostic run, not an official-time-limit result. The selected plan
+prints planned limits; the run archive records the limits actually applied.
 
-The resolved policy is placed in `manifest.config.runtime_policy` **before** its
-configuration hash is computed. Run uses that frozen policy, not a new CLI or
-shell override. A changed task/method/configuration/manifest requires a fresh
-preparation and matching existing authorization; it cannot reuse the old run.
+Method names include `ga-only` (pure GA condition A/U), `pma`, `pma-v1`,
+`pma-d1`, `pma-stateful`, `pma-gap`, `pma-gap-evidence`, and the registered PoS
+variants. A new mechanism must have a real adapter; inventing a name does not
+make it runnable. Method-specific options such as `citation_review_gate` and
+`citation_review_strategy` belong in the same config and remain opt-in. Do not
+put them in a pure-GA config. The GA adapter's native prompts, tool loop,
+history, and task completion behavior are not replaced by the runner.
 
-Only `pma-stateful` accepts the separate transport policies at the top level:
-`"native_context_policy": "off"` and
-`"research_capture_policy": "best_effort"`. Both default to `required` when
-omitted; other methods reject explicit overrides. The frontend passes these to
-the existing `single_run prepare` arguments and verifies the resulting
-single-run plan and hashed manifest configuration. `off` disables the additional
-external native-token count, not the model's own context limit; `best_effort`
-allows research-capture gaps, not loss of the state journal or spool receipts.
-The example config opts into both for the time-relaxed diagnostic. It is still
-unarmed: `prepare` does not create a real execution authorization.
+`catalog --config ... --output catalog.json` lists public task identities at
+the pinned dataset commit; `plan --config ... --output plan.json` resolves a
+proposed run without starting it. Relative paths in the config are resolved
+relative to the config file. Local profiles and output archives may contain
+private data; inspect before publishing. No model call is made by `catalog`,
+`plan`, or `prepare`.
 
-An explicit policy controls all relevant boundaries:
-
-1. Harbor's Agent phase, including its cached timeout after Trial construction.
-2. The GA adapter's shell wait loop and environment exec timeout.
-3. GA's effective turn limit, without plan-mode resetting it to 100.
-4. The outer supervisor: explicit policies use phase-local supervision, not
-   `Agent + verifier + 600` counted from before environment setup.
-
-The Harbor overlay uses its pinned private timeout API at commit
-`459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc`. It clones the runtime configurations,
-recomputes the Agent cache, and leaves task files, verifier, build and setup
-limits unchanged. `runtime_policy_effective.json` records original/effective
-values and the authorized config hash. Uncapped operation still responds to
-cancellation, process failure, per-request timeouts and normal termination.
-
-`diagnostic_agent_override` is **not** an original-time-limit benchmark score.
-It uses the same task contents and evaluator with a disclosed Agent policy
-override. No monetary, cumulative call or cumulative token cap is added here.
-
-## Authorization and failure
-
-Preparation never creates a real authorization. Each prepared slot still needs
-its matching `authorization.json` under its slot directory, using the existing
-one-use authorization process. This frontend neither grants more runs nor
-retries an accepted/unknown run. An existing run directory is not reused.
-
-The serial controller stops at a failed/incomplete slot and lists remaining
-slots as not started. A completed run with reward zero remains a completed
-experiment, not permission to rerun until success. Frontend bindings include
-the prepared plan and manifest hashes; `GA_TASK_COMPLETE_RESPONSE` is scoped
-from the method adapter, not a hidden manual shell prerequisite.
-
-## Certification and tests
-
-### Explicit SQLite dependency cache and prompt-only reuse
-
-The optional `persistent_bundle_v1` preparation is selected by adding
-`"evaluation_bootstrap_protocol": "persistent_bundle_v1"` and an
-`evaluation_cache` object containing exactly `bundle_path`, `manifest_sha256`
-and `identity` (the latter copied from the locally verified bundle manifest).
-The bundle is host-persistent, outside run cleanup. Plan, single-run plan,
-manifest/config hash, batch preflight, live spec and verifier all bind these
-values. A missing/corrupt bundle fails preparation; it never falls back to a
-network download or a test run. The verifier checks the actual stopped
-container's image ID and the frozen image RepoDigest/platform before restore.
-Only the original SQLite test suffix is executed once after offline preparation.
-This is a disclosed preparation protocol change, not the original test.sh bytes.
-
-For a later literal-only gap prompt edit, `runtime_reuse` may name a clean
-baseline checkout, its committed A/B evidence, a baseline configuration file,
-and exact reviewed Markdown documentation paths. The gate re-verifies that
-baseline in its own checkout, compares all tracked source and config identities,
-and runs the pinned gap prompt/agent/host tests in a fresh subprocess using the
-vendor import paths. The manifest keeps the **current** source identity and
-stores baseline proof separately. Any executable/configuration change, dirty
-checkout, missing proof or failed short check requires the full Harbor fixture.
-This cache integration itself is executable change and cannot use that shortcut.
-Neither shortcut authorizes an episode or supersedes the one-use run binding.
-
-New runtime code changes invalidate certificates bound to old code. Do not edit
-old evidence. The existing `single_run_fixture` now accepts
-`--runtime-policy-file policy.json`, so the same formal Harbor fixture can
-exercise this policy without writing another launcher. The existing collector
-includes its effective-policy receipt; the verifier checks identity and effect.
-
-Ordinary configuration-only changes do not alter source identity. Each real run
-still gets its own configuration/authorization binding and effective-policy
-receipt. A certificate records the policy actually exercised; it does not claim
-that every conceivable configuration or future method was tested.
-
-Offline test command:
-
-```sh
-python -B -m unittest discover -s experiment_runner -t . -p 'test_*.py' -v
-```
-
-These tests use temporary Git repositories, synthetic profiles/assets, fake
-Harbor objects and a fake environment around the actual GA adapter. They make
-no provider/Docker/evaluator calls. They do not replace a source-bound actual
-Harbor fixture on the development machine.
-
-## Honest boundaries of this slice
-
-- Catalog reads compatible task packages at arbitrary pinned local Git commits;
-  the legacy **execution** driver remains pinned to its existing official
-  Terminal-Bench commit. Other dataset formats need another adapter.
-- Existing driver-specific worker, packaging and termination branches remain
-  behind this entry. This is not a completed universal GA plugin system.
-- A new algorithm still needs an implemented host adapter and its tests. Adding
-  a registry name alone is intentionally insufficient. Existing aliases can be
-  registered programmatically without changing the dispatcher.
-- Existing model/profile names remain fixed by the legacy driver. This patch
-  does not pretend arbitrary model switching is supported.
-- Both Task and auxiliary profile paths are currently required by the legacy
-  preparation API, including GA-only. No profile contents enter public plans.
-- This patch does not fix or certify a provider's native count endpoint. Those
-  startup issues remain separate from the configuration interface.
-
-The delivered objective is that task choice, ordering, explicit repeats,
-supported method selection and supported runtime overrides no longer require
-editing the launcher for each experiment.
+The catalog can read compatible task packages from a pinned local Git commit.
+The current execution adapter is still bound to its pinned Terminal-Bench task
+pool and Harbor source. A different dataset format needs another adapter, not
+a change to GA or to every monitor method. Reward zero is a result, not a
+reason to retry; an interrupted or uncertain run retains its claim and logs.
