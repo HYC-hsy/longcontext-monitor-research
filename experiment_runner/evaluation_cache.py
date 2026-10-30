@@ -49,7 +49,7 @@ def _allowed(name):
             and (name in BIN_FILES or any(name == r or name.startswith(r + '/') for r in ROOTS)))
 
 
-def _link_target(name, target):
+def _link_target(name, target, *, extra_roots=()):
     if target.startswith('/'):
         result = target[1:]
     else:
@@ -62,7 +62,8 @@ def _link_target(name, target):
             elif part not in ('', '.'):
                 parts.append(part)
         result = '/'.join(parts)
-    if not _allowed(result):
+    if not (_allowed(result) or any(
+            result == root or result.startswith(root + '/') for root in extra_roots)):
         raise CacheMiss('link target outside dependency allowlist')
     return result
 
@@ -87,11 +88,14 @@ def validate_identity(identity):
     return hashlib.sha256(_json(identity)).hexdigest()
 
 
-def _archive_index(archive):
+def _archive_index(archive, *, extra_roots=()):
     rows = {}
     with tarfile.open(archive, 'r:') as tar:
         for item in tar:
-            if item.name in rows or not _allowed(item.name) or item.mode & 0o7000:
+            allowed = _allowed(item.name) or any(
+                item.name == root or item.name.startswith(root + '/')
+                for root in extra_roots)
+            if item.name in rows or not allowed or item.mode & 0o7000:
                 raise CacheMiss('unsafe or duplicate archive member: ' + item.name)
             if item.isfile():
                 stream = tar.extractfile(item)
@@ -99,7 +103,7 @@ def _archive_index(archive):
             elif item.isdir():
                 row = {'type': 'directory', 'mode': item.mode}
             elif item.issym():
-                _link_target(item.name, item.linkname)
+                _link_target(item.name, item.linkname, extra_roots=extra_roots)
                 row = {'type': 'symlink', 'target': item.linkname, 'mode': item.mode}
             else:
                 raise CacheMiss('hardlinks/devices/FIFOs are forbidden')
@@ -109,12 +113,12 @@ def _archive_index(archive):
             raise CacheMiss('member under symlink')
         if row['type'] == 'symlink':
             seen = {name}
-            target = _link_target(name, row['target'])
+            target = _link_target(name, row['target'], extra_roots=extra_roots)
             while rows.get(target, {}).get('type') == 'symlink':
                 if target in seen:
                     raise CacheMiss('cyclic symlink')
                 seen.add(target)
-                target = _link_target(target, rows[target]['target'])
+                target = _link_target(target, rows[target]['target'], extra_roots=extra_roots)
             if target not in rows:
                 raise CacheMiss('dangling dependency symlink')
     return rows

@@ -11,7 +11,8 @@ from tempfile import TemporaryDirectory
 from experiment_runner.evaluation_cache import prepare_cached
 from experiment_runner.prepared_dependency_cache import (
     PROTOCOL as PREPARED_PROTOCOL, verify_bundle as verify_prepared_bundle,
-    restore as restore_prepared_bundle, SCHEMAS as PREPARED_SCHEMAS)
+    restore as restore_prepared_bundle, SCHEMAS as PREPARED_SCHEMAS,
+    verifier_test_command)
 
 from harbor.models.trial.paths import EnvironmentPaths
 from harbor.verifier.verifier import Verifier
@@ -43,6 +44,7 @@ class NativeSharedVerifier(Verifier):
                 sum(counts) == total and counts[0] + counts[1] > 0)
 
     async def verify(self):
+        test_environment = ''
         spec_path = os.environ.get('PMA_HARBOR_SPEC')
         if not spec_path:
             raise RuntimeError('native shared verifier has no run identity')
@@ -184,6 +186,8 @@ class NativeSharedVerifier(Verifier):
                             original_sha256=required['tests/test.sh'], coverage=download.coverage)
                         await restore_prepared_bundle(self.environment.exec,
                             self.environment.upload_file, cache, prepared, record)
+                        if prepared.get('cache_layout') == 'isolated_evaluation_uvx_v1':
+                            test_environment = prepared
                     except Exception as exc:
                         raise BootstrapFailed('cache_prepare', None, type(exc).__name__) from exc
                 else:
@@ -262,6 +266,9 @@ class NativeSharedVerifier(Verifier):
                         'effective_sha256': bootstrap['effective_sha256']})
                     if effective_path is not None:
                         kwargs['command'] = str(command).replace('/tests/test.sh', effective_path, 1)
+                    if test_environment:
+                        kwargs['command'] = verifier_test_command(
+                            str(kwargs.get('command', command)), test_environment)
                 execution = {'command': str(command), 'status': 'started'}
                 executions.append(execution)
                 try:

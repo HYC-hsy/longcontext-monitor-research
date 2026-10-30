@@ -25,6 +25,26 @@ SCHEMAS = {
     'uvx': 'ga20-uvx-dependency-prototype-v1',
 }
 SAFE = re.compile(r'[A-Za-z0-9_.+\-=]+\Z')
+ISOLATED_UVX_LAYOUT = 'isolated_evaluation_uvx_v1'
+ISOLATED_UVX_ROOT = 'var/cache/evaluation-uvx'
+
+
+def uvx_environment(manifest, *, offline):
+    """Keep an evaluation-only uv cache separate from the Task's uv sync."""
+    if manifest.get('cache_layout') != ISOLATED_UVX_LAYOUT:
+        return 'HOME=/root ' + ('UV_OFFLINE=1 ' if offline else '') + \
+            'UV_PYTHON_DOWNLOADS=never UV_PYTHON_PREFERENCE=only-managed '
+    return ('HOME=/root UV_CACHE_DIR=/' + ISOLATED_UVX_ROOT + '/cache '
+            'UV_PYTHON_INSTALL_DIR=/' + ISOLATED_UVX_ROOT + '/python '
+            'UV_OFFLINE=1 UV_PYTHON_DOWNLOADS=never '
+            'UV_PYTHON_PREFERENCE=only-managed ')
+
+
+def verifier_test_command(command, manifest):
+    """Apply evaluation-only env without changing the official test script."""
+    if manifest.get('cache_layout') != ISOLATED_UVX_LAYOUT:
+        return command
+    return 'env ' + uvx_environment(manifest, offline=True) + 'sh -c ' + shlex.quote(command)
 
 
 def sha(path):
@@ -56,7 +76,9 @@ def verify_bundle(cache, *, task, image_digest, image_id, original_sha256,
             manifest.get('original_test_sha256') != original_sha256 or
             not re.fullmatch(r'[0-9a-f]{64}', str(manifest.get('payload_sha256'))) or
             sha(payload) != manifest['payload_sha256'] or
-            _archive_index(payload) != manifest.get('files')):
+            _archive_index(payload, extra_roots=(ISOLATED_UVX_ROOT,)
+                if manifest.get('cache_layout') == ISOLATED_UVX_LAYOUT else ()) !=
+                manifest.get('files')):
         raise ValueError('prepared dependency bundle identity or bytes differ')
     package_field = 'pip_packages' if coverage == 'pip' else 'uv_wheels'
     packages = manifest.get(package_field)
@@ -70,6 +92,13 @@ def verify_bundle(cache, *, task, image_digest, image_id, original_sha256,
     if coverage == 'apt_curl_uvx' and (not isinstance(manifest.get('apt'), list) or
             not manifest['apt'] or any(not SAFE.fullmatch(item) for item in manifest['apt'])):
         raise ValueError('prepared apt package identity invalid')
+    layout = manifest.get('cache_layout')
+    if layout is not None:
+        if coverage != 'uvx' or layout != ISOLATED_UVX_LAYOUT or any(
+                name != ISOLATED_UVX_ROOT and
+                not name.startswith(ISOLATED_UVX_ROOT + '/')
+                for name in manifest['files']):
+            raise ValueError('prepared evaluation cache layout invalid')
     for name in ('builder.exit.json', 'offline.exit.json'):
         if json.loads((root / name).read_text(encoding='utf-8')) != {'exit_code': 0}:
             raise ValueError('prepared dependency builder or offline check failed')
@@ -154,8 +183,7 @@ async def restore(exec_command, upload_file, cache, manifest, record):
             uvx = ('/root/.local/bin/uvx' if schema == SCHEMAS['apt_curl_uvx']
                    else 'uvx')
             await execute('cache_uv_offline_check',
-                          'HOME=/root UV_OFFLINE=1 UV_PYTHON_DOWNLOADS=never '
-                          'UV_PYTHON_PREFERENCE=only-managed ' + uvx +
+                          'cd /tmp && ' + uvx_environment(manifest, offline=True) + uvx +
                           ' --offline -p 3.13 ' + wheels +
                           " python -c 'import sys; print(sys.version.split()[0])'")
     finally:
