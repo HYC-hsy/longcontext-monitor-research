@@ -1,6 +1,9 @@
 # v4 split review: offline implementation handoff
 
 Baseline: `3f607a37335433126bf8cfbf40613c169902bfb0`.
+Use repaired v4 code commit `be44ce85fd2ec1ce116e34a8683cbcb7a113f35e`
+for the small-sample commands below; the earlier `29b54922978f9c080834933c83d46fcb586ff049`
+does not include the delete-error isolation or legacy-prompt correction.
 Opt-in strategy: `claim-split-same-evidence-v4`, with `gate-only` or
 `gate-one-repair`; unspecified strategy and v3 retain their old behavior.
 This delivery has **zero real model, Task and native-evaluator calls**.
@@ -47,6 +50,8 @@ From the fixed v4 checkout root, use the already authorized local Python and
 existing PMA profile. Replace the two placeholders with actual absolute paths;
 each output path must not exist. The two exports are offline and may be compared
 before any model request. Only a later explicit authorization permits run-profile.
+Keep v3 and v4 requests and results in separate new directories; this repair
+does not authorize a real run or change the frozen sample labels.
 
 ```powershell
 $Py = '<existing-python-3.12+-absolute-path>'
