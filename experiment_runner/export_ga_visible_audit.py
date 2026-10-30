@@ -86,13 +86,17 @@ def export(run_root: Path, output: Path, run_id: str, secrets: list[str]) -> dic
     visible = by_kind.get('provider_response_content', [])
     response = by_kind.get('provider_response', [])
     actions = by_kind.get('action_selected', [])
-    if not ready or len({len(ready), len(response), len(actions)}) != 1:
-        raise ValueError('Task request/response/action cardinality differs')
+    if not ready or len(ready) != len(actions):
+        raise ValueError('Task request/action cardinality differs')
     keyed = lambda rows: {row['value']['llm_call_id']: row for row in rows}
-    if any(len(keyed(rows)) != len(rows) for rows in (ready, visible, response, actions)):
+    if any(len(keyed(rows)) != len(rows) for rows in (ready, visible, actions)):
         raise ValueError('duplicate Task call identity')
-    if not all(set(keyed(rows)) == set(keyed(ready))
-               for rows in (response, actions)) or not set(keyed(visible)) <= set(keyed(ready)):
+    responses_by_call = {}
+    for row in response:
+        responses_by_call.setdefault(row['value']['llm_call_id'], []).append(row)
+    if not set(responses_by_call) == set(keyed(ready)) or \
+            set(keyed(actions)) != set(keyed(ready)) or \
+            not set(keyed(visible)) <= set(keyed(ready)):
         raise ValueError('Task call identity mismatch')
     if any(row['value']['payload'].get('content_availability') != 'complete'
            for row in ready):
@@ -118,7 +122,8 @@ def export(run_root: Path, output: Path, run_id: str, secrets: list[str]) -> dic
     for turn, row in enumerate(ready, 1):
         call_id = row['value']['llm_call_id']
         shown = keyed(visible).get(call_id)
-        response_row = keyed(response)[call_id]
+        response_attempts = responses_by_call[call_id]
+        response_row = response_attempts[-1]
         blocks = shown['value']['payload']['parsed_visible_blocks'] if shown else []
         if not shown and response_row['value']['payload'].get('outcome') not in {
                 'http_error', 'transport_error', 'incomplete', 'error'}:
@@ -142,6 +147,11 @@ def export(run_root: Path, output: Path, run_id: str, secrets: list[str]) -> dic
                       'visible_response_blocks': blocks,
                       'response_event_id': response_row['value']['event_id'],
                       'response_outcome': response_row['value']['payload'].get('outcome'),
+                      'response_attempts': [{
+                          'source_line': attempt['source_line'],
+                          'event_id': attempt['value']['event_id'],
+                          'outcome': attempt['value']['payload'].get('outcome')}
+                          for attempt in response_attempts],
                       'action_event_id': keyed(actions)[call_id]['value']['event_id'],
                       'tools_and_later_visible_receipts': tools})
 
@@ -175,6 +185,7 @@ def export(run_root: Path, output: Path, run_id: str, secrets: list[str]) -> dic
              'public_kind': 'redacted_reencoded_jsonl_not_original_http_bytes',
              'public_files': public, 'excluded_or_replaced': omitted + sanitizer.removals,
              'counts': {'events': len(original), 'task_turns': len(turns),
+                        'provider_response_attempts': len(response),
                         'complete_visible_responses': len(visible),
                         'tool_calls_with_later_visible_receipts': sum(
                             len(turn['tools_and_later_visible_receipts']) for turn in turns)}}
