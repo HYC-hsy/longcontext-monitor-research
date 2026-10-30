@@ -87,7 +87,8 @@ def deletion_candidate(memory, parts, args, index, *, run_id):
     Existing gap text is target context, never evidence. Non-exact or malformed
     submissions are not silently upgraded to model insufficiency.
     """
-    from gap_evidence_alignment import align_evidence
+    from gap_evidence import SourceScopeError
+    from gap_evidence_alignment import _validate_catalog, align_evidence
     from .live_citations import visible_snapshot
 
     key = args['memory_id']
@@ -96,15 +97,25 @@ def deletion_candidate(memory, parts, args, index, *, run_id):
     revision = memory.active_revisions.get(key)
     require(isinstance(revision, str) and revision, 'delete_target_revision_missing')
     reason = args['reason']
-    alignment = align_evidence(args['evidence'], parts.catalog)
+    try:
+        alignment = align_evidence(args['evidence'], parts.catalog)
+        input_issues = []
+    except SourceScopeError as exc:
+        if str(exc) not in ('invalid_evidence', 'invalid_evidence_item'):
+            raise
+        # align_evidence checks the input before the catalog; malformed input
+        # must not conceal a separate source-integrity failure.
+        _validate_catalog(parts.catalog)
+        alignment = None
+        input_issues = [str(exc)]
     parent, records = visible_snapshot(parts)
     op = {'op_index': index, 'action': 'delete_gap', 'memory_id': key,
           'revision_id': revision, 'content': reason,
           'content_sha256': ci.old.digest(reason), 'existing_gap': old_content,
           'target_revision_id': revision}
     rows = []
-    issues = []
-    for item in alignment.items:
+    issues = input_issues
+    for item in alignment.items if alignment is not None else ():
         origins = []
         if item.status not in ('exact_unique', 'exact_multiple') or not item.candidates:
             issues.append('binding_' + item.status)

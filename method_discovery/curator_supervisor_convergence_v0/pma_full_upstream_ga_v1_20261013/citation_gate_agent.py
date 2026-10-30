@@ -96,11 +96,11 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
             'Malformed evidence prevents publication;').replace('Use no extra review phase.',
             'Host review is separate from your maintenance proposal.')
         # Identical initial author prompt in both modes: repair is a host opportunity.
-        system+='\nHost gate: missing/non-exact citations are not publishable. A later host commit receipt states what actually changed.\n'
         if self.review_strategy == semantic_split.STRATEGY:
+            system+='\nHost gate: missing/non-exact citations are not publishable. A later host commit receipt states what actually changed.\n'
             system+='For every quote, copy one continuous literal span from visible material. Use separate evidence elements for separate spans; never concatenate snippets or insert ellipses. Keep relevant conditions and execution receipts, not just a success string in code. To delete an existing gap, provide its memory_id, a nonempty reason explaining why that specific gap is resolved, and evidence. Old gap text is the target, not proof of resolution. Other deletions remain deferred.\n'
         else:
-            system+='Deletes are not executed because this tool has no citation protocol.\n'
+            system+='\nHost gate: missing/non-exact citations are not publishable. Deletes are not executed because this tool has no citation protocol. A later host commit receipt states what actually changed.\n'
         kwargs={'prompt':user_prompt,'system':system}
         if self.use_structured_tools:kwargs['tools']=self.get_tools_schema()
         delivery=None
@@ -325,7 +325,8 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
                                 stopped=True;break
                             if local_parse:
                                 row['failure_scope']='operation_local'
-                                result['explanation']='Technical parsing failure; no semantic verdict. Original text “'+current['content']+'”: '+result.get('reason','invalid model schema')
+                                original_text = current['reason'] if name == 'memory_delete' else current['content']
+                                result['explanation']='Technical parsing failure; no semantic verdict. Original text “'+original_text+'”: '+result.get('reason','invalid model schema')
                                 row['explanation']=result['explanation']
                             if result['verdict']=='supported':
                                 if pipeline and name!='memory_delete':
