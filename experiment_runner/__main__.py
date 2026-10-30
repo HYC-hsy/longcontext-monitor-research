@@ -121,7 +121,7 @@ def build_plan(config):
                 and task != 'sqlite-with-gcov') or (
                 config.get('evaluation_bootstrap_protocol', 'original') == 'persistent_bundle_v1'
                 and task not in {'sqlite-with-gcov', 'fix-ocaml-gc'}):
-            raise ValueError('non-original bootstrap supports only sqlite-with-gcov')
+            raise ValueError('bootstrap protocol unsupported for this task')
         if (config.get('evaluation_bootstrap_protocol') == 'persistent_bundle_v1' and
                 config['evaluation_cache']['identity'].get('task', task) != task):
             raise ValueError('evaluation cache task differs from selected task')

@@ -88,7 +88,7 @@ def prepare(args: argparse.Namespace) -> dict:
             args.task not in {'sqlite-with-gcov', 'fix-ocaml-gc'}) or (
             bootstrap in {'bootstrap_retry_v1', 'persistent_bundle_v1'} and
             getattr(args, 'fake_only', False)):
-        raise ValueError('evaluation bootstrap protocol requires real sqlite-with-gcov')
+        raise ValueError('evaluation bootstrap protocol unsupported for this task or fake run')
     if bootstrap == 'download_retry_v1':
         if (not isinstance(retry, dict) or set(retry) != {'max_attempts'} or
                 type(retry['max_attempts']) is not int or not 1 <= retry['max_attempts'] <= 10):

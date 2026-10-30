@@ -25,7 +25,7 @@ from pathlib import Path, PurePosixPath
 
 PROTOCOL = 'persistent_bundle_v1'
 ORIGINAL_SHA256 = '4770437ea96c3cc84684b4f99d55fb148fcac09f9ea1e8ef49de487716e6c334'
-OCAML_ORIGINAL_SHA256 = 'b0c6a8f1e404c28c5d20e0f95bf00bdd871306b0c9d112243ed9cb57d05304af'
+OCAML_ORIGINAL_SHA256 = '9a2114729f090f351fb8e8bf055f013f299946108d032e845f5d01e725fa2719'
 OCAML_REPO_COMMIT = '356d558bf89552ed9229253ec4135c691234f060'
 OCAML_ROOT = 'var/cache/evaluation-ocaml-original'
 ROOTS = ('root/.local/share/uv/python', 'root/.cache/uv', 'var/cache/evaluation-debs')

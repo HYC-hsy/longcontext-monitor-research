@@ -13,7 +13,7 @@ PROTOCOL = 'bootstrap_retry_v1'
 TASK = 'sqlite-with-gcov'
 ORIGINAL_SHA256 = '4770437ea96c3cc84684b4f99d55fb148fcac09f9ea1e8ef49de487716e6c334'
 OCAML_TASK = 'fix-ocaml-gc'
-OCAML_SHA256 = 'b0c6a8f1e404c28c5d20e0f95bf00bdd871306b0c9d112243ed9cb57d05304af'
+OCAML_SHA256 = '9a2114729f090f351fb8e8bf055f013f299946108d032e845f5d01e725fa2719'
 PREPARATION_PREFIX = (
     b'#!/bin/bash\n\n'
     b'# Install curl\napt-get update\napt-get install -y curl\n\n'
@@ -35,10 +35,6 @@ def effective_script(original: bytes, *, task: str) -> bytes:
     expected = {TASK: ORIGINAL_SHA256, OCAML_TASK: OCAML_SHA256}.get(task)
     if expected is None or hashlib.sha256(original).hexdigest() != expected:
         raise BootstrapFailed('identity', None, 'unsupported original verifier bytes')
-    if task == OCAML_TASK:
-        original = original.replace(b'\r\n', b'\n')
-        if b'\r' in original:
-            raise BootstrapFailed('boundary', None, 'unsupported OCaml line ending')
     if not original.startswith(PREPARATION_PREFIX):
         raise BootstrapFailed('boundary', None, 'pinned preparation prefix changed')
     suffix = original[len(PREPARATION_PREFIX):]
