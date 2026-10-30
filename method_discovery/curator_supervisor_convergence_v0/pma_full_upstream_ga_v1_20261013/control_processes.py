@@ -42,7 +42,7 @@ print(json.dumps({'pid_namespace': os.readlink('/proc/1/ns/pid'),
 
 def scan(container: str, python_bin: str, run_id: str) -> dict:
     result = subprocess.run(['docker', 'exec', container, python_bin, '-c', _SCAN, run_id],
-                            capture_output=True, text=True, timeout=30)
+                            capture_output=True, text=True, timeout=120)
     if result.returncode:
         raise RuntimeError('GA control process scan unavailable')
     data = json.loads(result.stdout)

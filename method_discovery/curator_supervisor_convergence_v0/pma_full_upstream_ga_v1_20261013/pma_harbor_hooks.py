@@ -379,7 +379,7 @@ class NativeSharedTrialHooks(PMATrialHooks):
     async def _finish_control_watch(self):
         self._control_watch_stop.set()
         try:
-            await asyncio.wait_for(self._control_watch_task, timeout=35)
+            await asyncio.wait_for(self._control_watch_task, timeout=130)
         except BaseException as exc:
             raise RuntimeError('trusted GA control registration incomplete') from exc
 
