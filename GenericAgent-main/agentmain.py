@@ -383,7 +383,8 @@ class GenericAgent:
             max_turns = None if stateful_uncapped else int(
                 os.environ.get('GA_MAX_TURNS', '180'))
             configured_turns = os.environ.get('GA_EXPERIMENT_TASK_TURNS')
-            if configured_turns is not None and (stateful_uncapped or gap_policy):
+            if configured_turns is not None and (stateful_uncapped or gap_policy or
+                    os.environ.get('GA_EXPERIMENT_RUNTIME_POLICY') == 'v1'):
                 max_turns = None if configured_turns == 'uncapped' else int(configured_turns)
                 if max_turns is not None and max_turns <= 0:
                     raise ValueError('configured Task turns must be positive or uncapped')

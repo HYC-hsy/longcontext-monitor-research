@@ -112,14 +112,14 @@ async def serve(args):
     active = None
     try:
         while not (private / 'stop.request').exists():
-            if time.time() >= args.deadline_epoch:
+            if args.deadline_epoch is not None and time.time() >= args.deadline_epoch:
                 reason = 'deadline'
                 break
             active = asyncio.create_task(dispatcher.serve_once())
             while not active.done():
                 await asyncio.wait({active}, timeout=.05)
                 if ((private / 'stop.request').exists() or
-                        time.time() >= args.deadline_epoch):
+                        (args.deadline_epoch is not None and time.time() >= args.deadline_epoch)):
                     reason = 'stopped_or_deadline_in_flight_unknown'
                     active.cancel()
                     break
@@ -141,7 +141,7 @@ if __name__ == '__main__':
     parser.add_argument('--private-root', required=True)
     parser.add_argument('--requests', required=True)
     parser.add_argument('--responses', required=True)
-    parser.add_argument('--deadline-epoch', type=float, required=True)
+    parser.add_argument('--deadline-epoch', type=lambda value: None if value == 'uncapped' else float(value), required=True)
     parser.add_argument('--research-candidate', choices=(
         'pos_pma_complement_v1', 'pos_pma_shared_view_v1'),
         default='pos_pma_complement_v1')

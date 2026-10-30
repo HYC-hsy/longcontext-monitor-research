@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 METHOD_PREFIXES = ('GA_STATEFUL_', 'GA_POS_', 'GA_PMA_UPSTREAM_',
                    'GA_MONITOR_', 'GA_M0_')
 METHOD_EXTRA_KEYS = {'GA_PMA_ENABLED', 'GA_EXPERIMENT_TASK_TURNS',
-                     'GA_TASK_DEADLINE_EPOCH'}
+                     'GA_TASK_DEADLINE_EPOCH', 'GA_EXPERIMENT_RUNTIME_POLICY'}
 
 
 def clean_candidate_environment(inherited):
@@ -20,7 +20,7 @@ class Method:
     research_candidate: str
     task_complete_response: bool = False
     task_turns_max: int | None = 300
-    supports_runtime_policy: bool = False
+    supports_runtime_policy: bool = True
 
     def runtime_environment(self, inherited=None):
         # The selected launcher enables exactly its bound method later. Do not

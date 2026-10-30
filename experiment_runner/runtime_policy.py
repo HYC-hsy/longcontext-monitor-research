@@ -38,7 +38,8 @@ def resolve_policy(requested, asset, method_defaults):
     if not isinstance(requested, dict):
         raise ValueError("requested must be a dictionary")
     if set(requested) - {"agent_timeout", "task_turns", "verifier_timeout"}:
-        raise ValueError("unknown runtime policy fields")
+        raise ValueError("unknown runtime policy fields: " + ", ".join(sorted(
+            set(requested) - {"agent_timeout", "task_turns", "verifier_timeout"})))
     if not isinstance(asset, dict) or not isinstance(method_defaults, dict):
         raise ValueError("asset and method_defaults must be dictionaries")
     official_agent = _positive(asset.get("native_agent_seconds"), "official agent timeout")
@@ -178,3 +179,22 @@ def apply_harbor_policy(trial, policy):
         for key, value in caches.items():
             setattr(trial, key, value)
         raise
+
+
+def print_plan_summary(plan):
+    """Resolved plans are not runtime receipts; keep the distinction visible."""
+    for index, row in enumerate(plan['slots'], 1):
+        policy = row.get('effective_runtime_policy')
+        prefix = f"[{index}] {row['method']} / {row['task']} — planned limits: "
+        if policy is None:
+            print(prefix + 'legacy method defaults (runtime checks pending)', flush=True)
+            continue
+        req = policy['requested']
+        def label(value):
+            return 'uncapped' if value is None else str(value)
+        print(prefix + f"agent={label(policy['effective_agent_seconds'])}s "
+              f"(source: {req['agent_timeout']}), "
+              f"turns={label(policy['effective_task_turns'])} "
+              f"(source: {req['task_turns']}), "
+              f"verifier={policy['official_verifier_seconds']}s (official); "
+              'runtime checks pending: archive/runtime_policy_effective.json', flush=True)

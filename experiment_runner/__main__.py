@@ -143,14 +143,19 @@ def build_plan(config):
     public = catalog(config['dataset'], [row['task'] for row in normalized])
     by_task = {row['task']: row for row in public['tasks']}
     for row in normalized:
-        if row['adapter']['supports_runtime_policy']:
+        if row['adapter']['supports_runtime_policy'] and (
+                'runtime_policy' in config or row['adapter']['research_candidate'] in {
+                    'pma_stateful_memory_v1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1'}):
             from .runtime_policy import resolve_policy
             asset = by_task[row['task']]
             row['requested_runtime_policy'] = config.get('runtime_policy', {})
-            row['effective_runtime_policy'] = resolve_policy(row['requested_runtime_policy'], {
-                'native_agent_seconds': asset['agent_timeout_sec'],
-                'native_verifier_seconds': asset['verifier_timeout_sec']},
-                {'task_turns_max': row['adapter']['task_turns_max']})
+            try:
+                row['effective_runtime_policy'] = resolve_policy(row['requested_runtime_policy'], {
+                    'native_agent_seconds': asset['agent_timeout_sec'],
+                    'native_verifier_seconds': asset['verifier_timeout_sec']},
+                    {'task_turns_max': row['adapter']['task_turns_max']})
+            except ValueError as exc:
+                raise ValueError(f"{row['method']} runtime_policy: {exc}; fix the config before run") from exc
     body = {'schema': 'ga-experiment-resolved-v1', 'config': config,
             'catalog': public, 'slots': normalized, 'execution_authorized': False}
     return {**body, 'plan_sha256': digest(body)}
@@ -200,6 +205,10 @@ def execute(plan, output, mode, backend=None):
     if config['dataset']['commit'] != commit:
         raise ValueError('legacy execution adapter only supports its pinned dataset commit')
     root = Path(output).resolve()
+    if mode == 'run' and not root.exists():
+        prepared = execute(plan, root, 'prepare', backend)
+        if not succeeded(prepared, len(plan['slots']), 'prepare'):
+            return prepared
     if mode == 'run':
         saved = json.loads((root / 'experiment_plan.json').read_text(encoding='utf-8'))
         if saved != plan:
@@ -218,7 +227,8 @@ def execute(plan, output, mode, backend=None):
                     official_source_git=config['dataset']['source_git'], **profiles,
                     **method.prepare_fields(), fake_only=env.get('fake_only', False),
                     certification_dir=env.get('certifications', {}).get(method.name),
-                    candidate_profile_fixture=False, synthetic_pos_fixture=False)
+                    candidate_profile_fixture=False, synthetic_pos_fixture=False,
+                    frontend_run_identity=True)
         if 'requested_runtime_policy' in row:
             args['runtime_policy'] = row['requested_runtime_policy']
         for key in ('native_context_policy', 'research_capture_policy',
@@ -236,6 +246,9 @@ def execute(plan, output, mode, backend=None):
             args['current_config_sha256'] = digest({k: v for k, v in config.items()
                                                    if k != 'runtime_reuse'})
         outcome = backend.prepare(argparse.Namespace(**args))
+        from .startup import bind_prepared_identity
+        bind_prepared_identity(directory)
+        outcome = json.loads((directory / 'run_identity.json').read_text())
         single = json.loads((directory / 'plan.json').read_text())
         actual_candidate = single.get('research_candidate', single.get('method', 'U'))
         if single.get('condition') != method.condition or actual_candidate != method.research_candidate:
@@ -275,7 +288,8 @@ def execute(plan, output, mode, backend=None):
                 raise ValueError('driver ignored or changed stateful transport policies')
         binding = {'plan_sha256': plan['plan_sha256'], 'slot': row,
                    'manifest_sha256': hashlib.sha256((directory / 'manifest.json').read_bytes()).hexdigest(),
-                   'single_plan_sha256': hashlib.sha256((directory / 'plan.json').read_bytes()).hexdigest()}
+                   'single_plan_sha256': hashlib.sha256((directory / 'plan.json').read_bytes()).hexdigest(),
+                   'run_identity_sha256': hashlib.sha256((directory / 'run_identity.json').read_bytes()).hexdigest()}
         write_new(directory / 'frontend_binding.json', binding)
         return outcome
 
@@ -283,7 +297,10 @@ def execute(plan, output, mode, backend=None):
         binding = json.loads((directory / 'frontend_binding.json').read_text())
         expected = {'plan_sha256': plan['plan_sha256'], 'slot': row,
                     'manifest_sha256': hashlib.sha256((directory / 'manifest.json').read_bytes()).hexdigest(),
-                    'single_plan_sha256': hashlib.sha256((directory / 'plan.json').read_bytes()).hexdigest()}
+                    'single_plan_sha256': hashlib.sha256((directory / 'plan.json').read_bytes()).hexdigest(),
+                   'run_identity_sha256': hashlib.sha256((directory / 'run_identity.json').read_bytes()).hexdigest()}
+        if 'run_identity_sha256' not in binding:
+            expected.pop('run_identity_sha256')
         if binding != expected:
             raise ValueError('prepared slot method/protocol/manifest binding changed')
         stateful_replies = None
@@ -300,11 +317,26 @@ def execute(plan, output, mode, backend=None):
                     zero_model_fixture=env.get('fake_only', False), candidate_profile_fixture=False,
                     stateful_fake_replies=stateful_replies)
         args.setdefault('python_home', 'cpython-3.12.12-linux-x86_64-gnu')
-        with method_environment(resolve(row['method'])):
-            return backend.run(argparse.Namespace(**args))
+        # Explicit run is the execution intent. The legacy file is a transient
+        # internal record, not another approval step; never replace a user file.
+        from .startup import internal_binding
+        record = internal_binding(directory)
+        write_new(authorization, record)
+        try:
+            with method_environment(resolve(row['method'])):
+                return backend.run(argparse.Namespace(**args))
+        finally:
+            authorization.unlink()
 
+
+    if mode == 'run':
+        # Persist the claim even after failure/crash: uncertainty never means retry.
+        write_new(root / 'run_claim.json', {'plan_sha256': plan['plan_sha256'],
+                  'pid': os.getpid(), 'execution_intent': 'explicit_run'})
     return controller(plan['slots'], root, mode, prepare_call, run_call, _directory,
-                      on_slot_failure=config.get('on_slot_failure', 'stop'))
+                      on_slot_failure=config.get('on_slot_failure', 'stop'),
+                      internal_run=True)
+
 
 
 def succeeded(results, expected, mode):
@@ -320,18 +352,46 @@ def succeeded(results, expected, mode):
     return True
 
 
+def select_experiment(config, *, tasks=None, all_tasks=False, method=None):
+    """Apply explicit CLI choices to one shared environment/limits config."""
+    if tasks and all_tasks:
+        raise ValueError('choose --task or --all-tasks, not both')
+    if all_tasks:
+        tasks = [row['task'] for row in catalog(config['dataset'])['tasks']]
+        if not tasks:
+            raise ValueError('dataset contains no runnable tasks')
+    if tasks:
+        config['slots'] = [{'task': safe_task(task)} for task in tasks]
+    if method is not None:
+        resolve(method)
+        config['method'] = method
+        # An explicit method choice applies to every selected slot.
+        for slot in config.get('slots', []):
+            slot.pop('method', None)
+    return config
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=('catalog', 'plan', 'prepare', 'run'))
     parser.add_argument('--config', required=True)
     parser.add_argument('--output', required=True)
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument('--task', action='append', dest='tasks', metavar='TASK_ID',
+                           help='run one task; repeat for an ordered subset')
+    selection.add_argument('--all-tasks', action='store_true',
+                           help='run every task in the pinned dataset')
+    parser.add_argument('--method', help='override the config method for every selected task')
     args = parser.parse_args(argv)
     try:
-        config = load_config(args.config)
+        config = select_experiment(load_config(args.config), tasks=args.tasks,
+                                   all_tasks=args.all_tasks, method=args.method)
         if args.command == 'catalog':
             write_new(args.output, catalog(config['dataset']))
         else:
             plan = build_plan(config)
+            from .runtime_policy import print_plan_summary
+            print_plan_summary(plan)
             if args.command == 'plan':
                 write_new(args.output, plan)
             else:

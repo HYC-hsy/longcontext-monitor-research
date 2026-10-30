@@ -27,6 +27,8 @@ SOURCE_FILES = (
     'GenericAgent-main/ga.py', 'GenericAgent-main/llmcore.py',
     'GenericAgent-main/research_runtime.py',
     'GenericAgent-main/pos_bridge.py',
+    'experiment_runner/runtime_policy.py',
+    'experiment_runner/methods.py',
     'method_discovery/pos_upstream_ga_v1_20261017/episode.py',
     'method_discovery/pos_upstream_ga_v1_20261017/citation_fix.py',
     'method_discovery/pos_pma_complement_v1_20261019/candidate.py',
@@ -199,15 +201,21 @@ def prepare(plan: dict, source: Path, task_profile: Path,
             'related_records': 8, 'complete_request_bytes': 90000,
             'byte_budget_basis': 'conservative_engineering_cap_not_token_context',
             'output_reserve': 'existing_frozen_max_tokens_per_role'}
-        method['candidate_profile_status'] = 'host_pinned_pma_transport_v1_requires_separate_authorization'
+        method['candidate_profile_status'] = 'host_pinned_pma_transport_v1_bound_to_run'
     elif plan['method'] == 'pos_pma_shared_view_v1':
         method['pma_trigger'] = {'interval': 1, 'first_step': True,
                                  'sliding_window_size': 8,
                                  'actor_step_mapping': 'actor_attempt_plus_one'}
         method['shared_view_contract'] = 'pma-history-before-pos-single-ga-view-v1'
-        method['candidate_profile_status'] = 'host_pinned_pma_transport_v1_requires_separate_authorization'
+        method['candidate_profile_status'] = 'host_pinned_pma_transport_v1_bound_to_run'
     if 'task_complete_response_policy' in plan:
         method['task_complete_response_policy'] = policy
+    if 'runtime_policy' in plan:
+        from experiment_runner.runtime_policy import resolve_policy
+        resolved = resolve_policy(plan['runtime_policy'], asset, method)
+        method.update(runtime_policy=resolved,
+                      task_turns_max=resolved['effective_task_turns'],
+                      agent_wall_seconds=resolved['effective_agent_seconds'])
     config_sha = hashlib.sha256(json.dumps(method, sort_keys=True,
         separators=(',', ':')).encode('utf-8')).hexdigest()
     certification = None

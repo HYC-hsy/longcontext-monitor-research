@@ -218,3 +218,62 @@ class RuntimeIntegrationTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class PoSManifestPolicyTests(unittest.TestCase):
+    def test_real_pos_manifest_freezes_policy_before_config_hash(self):
+        from method_discovery.pos_upstream_ga_v1_20261017 import single_manifest as builder
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            profile = root / 'task.py'
+            profile.write_text("native_claude_cc_vibe_opus48 = {'model': 'claude-opus-4-8'}")
+            auxiliary = root / 'auxiliary.json'
+            auxiliary.write_text(json.dumps({'claude_monitor_opus48': {
+                'provider': 'anthropic', 'api_mode': 'messages', 'model': 'claude-opus-4-8',
+                'thinking_type': 'adaptive', 'max_tokens': 100, 'read_timeout': 180,
+                'temperature': 0}}))
+            def materialize(source, name, target, expected, **kwargs):
+                target.mkdir()
+            def export(source, name, target, **kwargs):
+                (target / 'test.sh').write_text('# fake\n')
+            asset = {'image_tag': 'synthetic/image:test', 'public_members': [],
+                     'evaluator_members': [], 'native_agent_seconds': 900,
+                     'native_verifier_seconds': 900}
+            image = {'repo_digests': ['synthetic/image@sha256:abc'],
+                     'image_id': 'synthetic', 'platform': 'synthetic'}
+            with patch.object(builder, 'descriptor', return_value=asset), \
+                    patch.object(builder, 'materialize_public', side_effect=materialize), \
+                    patch.object(builder, 'export_task', side_effect=export), \
+                    patch.object(builder, 'image_identity', return_value=image), \
+                    patch.object(builder, 'source_hashes', return_value={}), \
+                    patch.object(builder, 'vendor_hashes', return_value={}), \
+                    patch.object(builder, 'pma_vendor_hashes', return_value={}):
+                for candidate in ('PoS', 'PoS-citation-fixed', 'pos_pma_complement_v1',
+                                  'pos_pma_shared_view_v1'):
+                    for policy in (None, {}, {'agent_timeout': 1.5, 'task_turns': 2},
+                                   {'agent_timeout': 'uncapped', 'task_turns': 'uncapped'}):
+                        with self.subTest(candidate=candidate, policy=policy):
+                            plan = {'schema': 'pos-ga-single-plan-v1',
+                                    'execution_authorized': False, 'condition': 'P',
+                                    'official_source_git_commit': builder.COMMIT,
+                                    'task': 'sqlite-with-gcov', 'occurrence': 1,
+                                    'method': candidate,
+                                    'task_complete_response_policy': 'complete-response-v1'}
+                            if policy is not None:
+                                plan['runtime_policy'] = policy
+                            result = builder.prepare(plan, root, profile, pma_profile=auxiliary)
+                            config = result['config']
+                            if policy is None:
+                                self.assertNotIn('runtime_policy', config)
+                                self.assertEqual(config['agent_wall_seconds'], 14400)
+                            else:
+                                self.assertEqual(config['agent_wall_seconds'],
+                                    None if policy.get('agent_timeout') == 'uncapped' else
+                                    policy.get('agent_timeout', 900))
+                                self.assertEqual(config['task_turns_max'],
+                                    None if policy.get('task_turns') == 'uncapped' else
+                                    policy.get('task_turns', 300))
+                                self.assertEqual(config['runtime_policy']['official_verifier_seconds'], 900)
+                            actual = hashlib.sha256(json.dumps(config, sort_keys=True,
+                                separators=(',', ':')).encode()).hexdigest()
+                            self.assertEqual(result['config_sha256'], actual)

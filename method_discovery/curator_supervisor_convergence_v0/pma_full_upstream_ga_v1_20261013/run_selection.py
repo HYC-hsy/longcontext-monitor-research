@@ -68,7 +68,7 @@ def _isolated_slot_failure(outcome, directory):
 
 
 def execute_serial(slots, output, mode, prepare_call, run_call, directory_name,
-                   *, on_slot_failure='stop'):
+                   *, on_slot_failure='stop', internal_run=False):
     """One attempt per slot; callers supply existing drivers and identity checks."""
     if mode not in {'prepare', 'run'}:
         raise ValueError('mode must be prepare or run')
@@ -96,8 +96,8 @@ def execute_serial(slots, output, mode, prepare_call, run_call, directory_name,
                                 'error_type': type(exc).__name__, 'error': str(exc)})
                 break
         else:
-            authorization = directory / 'authorization.json'
-            if not authorization.is_file():
+            authorization = directory / ('.run_binding.json' if internal_run else 'authorization.json')
+            if not internal_run and not authorization.is_file():
                 results.append({'order': order, **row, 'status': 'not_started_missing_approval'})
                 break
             try:
