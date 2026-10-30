@@ -64,11 +64,11 @@ def projection(packet, row):
             'normative_requirements_context': packet['normative_context']}
 
 
-def _request(system, prompt, phase, material):
+def _request(system, prompt, phase, material, strategy=STRATEGY):
     payload = {'system': system, 'prompt': prompt, 'tools': None}
     return {**payload, 'phase': phase,
             'op_index': material['original_operation']['op_index'],
-            'review_strategy': STRATEGY, 'evidence_policy': 'submitted-literal-only-v1',
+            'review_strategy': strategy, 'evidence_policy': 'submitted-literal-only-v1',
             'audit_request_sha256': identity(payload)}
 
 
@@ -87,16 +87,16 @@ def parse_split(raw):
     return claims
 
 
-def verification_request(material, claims):
+def verification_request(material, claims, *, system=VERIFY_SYSTEM, strategy=STRATEGY):
     documents = [json.dumps(e, ensure_ascii=False) for e in material['submitted_evidence']]
     # Execute the retained upstream formatter with a complete-corpus budget: no cuts.
     budget = sum(map(len, documents)) + 1
     body = format_documents(documents, max_chars_per_doc=budget, max_total_chars=budget)
     context = {'original_operation': material['original_operation'], 'claims': claims,
                'normative_requirements_context': material['normative_requirements_context']}
-    request = _request(VERIFY_SYSTEM, 'TARGET CONTEXT ONLY (not evidence):\n' +
+    request = _request(system, 'TARGET CONTEXT ONLY (not evidence):\n' +
         json.dumps(context, ensure_ascii=False) + '\nSUBMITTED EVIDENCE ONLY (unchanged B):\n' +
-        body, 'citation_claim_verify_batch', material)
+        body, 'citation_claim_verify_batch', material, strategy)
     request['submitted_evidence_sha256'] = identity(material['submitted_evidence'])
     return request
 
@@ -150,7 +150,9 @@ async def review_stage(request, transport, result):
     if result['engineering_status'] != 'split_ready':
         return result
     material = deepcopy(request['closed_material'])
-    batch = await _call(verification_request(material, result['claims']), transport)
+    batch = await _call(verification_request(material, result['claims'],
+        system=request.get('batch_system', VERIFY_SYSTEM),
+        strategy=request.get('review_strategy', STRATEGY)), transport)
     result['batch'] = batch
     if batch['engineering_status'] != 'received':
         result.update(engineering_status=batch['engineering_status'],

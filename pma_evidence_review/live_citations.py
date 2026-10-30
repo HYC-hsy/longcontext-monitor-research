@@ -2,13 +2,14 @@
 from dataclasses import asdict
 import copy
 
-from . import citation_inputs as ci, citation_review as cr, claim_split, claim_split_simple
+from . import citation_inputs as ci, citation_review as cr, claim_split, claim_split_simple, claim_split_semantic
 from .prompt_strategy import ONE_SENTENCE, apply_strategy
 from .transport import ResponseProtocolError
 
 
 def build_live(draft, parts, operation, index, *, run_id, review_strategy=ONE_SENTENCE):
-    ci.old.require(review_strategy in (ONE_SENTENCE, claim_split.STRATEGY, claim_split_simple.STRATEGY), 'invalid_review_strategy')
+    ci.old.require(review_strategy in (ONE_SENTENCE, claim_split.STRATEGY, claim_split_simple.STRATEGY,
+                                      claim_split_semantic.STRATEGY), 'invalid_review_strategy')
     # Host snapshots and validation stay outside the model projection.
     draft.validate_bank()
     revision=draft.revisions[operation.revision_id]
@@ -21,7 +22,7 @@ def build_live(draft, parts, operation, index, *, run_id, review_strategy=ONE_SE
         'success':True}
     alignment=asdict(draft.alignments[operation.revision_id])
     preparation=ci.prepare(op,alignment,parent,records,
-        allow_multiple=review_strategy==claim_split_simple.STRATEGY)
+        allow_multiple=review_strategy in (claim_split_simple.STRATEGY, claim_split_semantic.STRATEGY))
     envelope={'schema':'pma-live-citation-candidate-v1','run_id':run_id,
         'cycle_id':parts.manifest.cycle_id,'maintenance_request_sha256':parts.manifest.request_sha256,
         'operation':op,'previous_revision_id':revision.previous_revision_id,
@@ -31,7 +32,10 @@ def build_live(draft, parts, operation, index, *, run_id, review_strategy=ONE_SE
     row={'operation':op,'preparation':preparation}
     request=None
     if preparation['status']=='ready':
-        if review_strategy == claim_split_simple.STRATEGY:
+        if review_strategy == claim_split_semantic.STRATEGY:
+            material = claim_split_simple.projection(envelope,row)
+            request = claim_split_semantic.split_request(material,index)
+        elif review_strategy == claim_split_simple.STRATEGY:
             material = claim_split_simple.projection(envelope,row)
             request = claim_split_simple.split_request(material,index)
         else:
@@ -42,6 +46,8 @@ def build_live(draft, parts, operation, index, *, run_id, review_strategy=ONE_SE
 
 
 async def assess(request,transport):
+    if request.get('review_strategy')==claim_split_semantic.STRATEGY:
+        return await claim_split_semantic.assess(request,transport)
     if request.get('review_strategy')==claim_split_simple.STRATEGY:
         return await claim_split_simple.assess(request,transport)
     if request.get('review_strategy')==claim_split.STRATEGY:

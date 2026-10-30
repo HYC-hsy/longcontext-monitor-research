@@ -12,8 +12,9 @@ from pma_evidence_review.live_citations import build_live, assess, visible_snaps
 from pma_evidence_review.prompt_strategy import ONE_SENTENCE
 from pma_evidence_review.claim_split import STRATEGY as CLAIM_SPLIT
 from pma_evidence_review import claim_split_simple as simple_split
+from pma_evidence_review import claim_split_semantic as semantic_split
 
-SPLIT_STRATEGIES = (CLAIM_SPLIT, simple_split.STRATEGY)
+SPLIT_STRATEGIES = (CLAIM_SPLIT, simple_split.STRATEGY, semantic_split.STRATEGY)
 from pma_evidence_review.gate_control import repair, receipt
 from pma_evidence_review.citation_inputs import identity
 from pma_evidence_review.transport import CapturedTransport, durable
@@ -42,7 +43,17 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
             if function['name'] in WRITERS:
                 function['description']='Propose a memory write; only the host commit receipt confirms publication. '+function['description']
             elif function['name']=='memory_delete':
-                function['description']='Deletion is deferred in this mode: this tool has no citation protocol and will not delete an entry.'
+                if review_strategy == semantic_split.STRATEGY:
+                    function['description']='Propose deletion of an existing gap only. Give a reason and literal visible citations; only the host receipt confirms deletion.'
+                    properties=function['parameters']['properties']
+                    properties['reason']={'type':'string','minLength':1}
+                    properties['evidence']={'type':'array','minItems':1,'items':{'type':'object',
+                        'properties':{'quote':{'type':'string','minLength':1},
+                                      'source':{'type':'string','minLength':1}},
+                        'required':['quote'],'additionalProperties':False}}
+                    function['parameters']['required']=['memory_id','reason','evidence']
+                else:
+                    function['description']='Deletion is deferred in this mode: this tool has no citation protocol and will not delete an entry.'
         self.run_id,self.repair_limit=run_id,repair_limit
         self.review_directory=Path(review_directory) if review_directory is not None else None
         if self.review_directory is not None:self.review_directory.mkdir(parents=True,exist_ok=False)
@@ -85,7 +96,11 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
             'Malformed evidence prevents publication;').replace('Use no extra review phase.',
             'Host review is separate from your maintenance proposal.')
         # Identical initial author prompt in both modes: repair is a host opportunity.
-        system+='\nHost gate: missing/non-exact citations are not publishable. Deletes are not executed because this tool has no citation protocol. A later host commit receipt states what actually changed.\n'
+        system+='\nHost gate: missing/non-exact citations are not publishable. A later host commit receipt states what actually changed.\n'
+        if self.review_strategy == semantic_split.STRATEGY:
+            system+='For every quote, copy one continuous literal span from visible material. Use separate evidence elements for separate spans; never concatenate snippets or insert ellipses. Keep relevant conditions and execution receipts, not just a success string in code. To delete an existing gap, provide its memory_id, a nonempty reason explaining why that specific gap is resolved, and evidence. Old gap text is the target, not proof of resolution. Other deletions remain deferred.\n'
+        else:
+            system+='Deletes are not executed because this tool has no citation protocol.\n'
         kwargs={'prompt':user_prompt,'system':system}
         if self.use_structured_tools:kwargs['tools']=self.get_tools_schema()
         delivery=None
@@ -116,6 +131,13 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
         return cached[1]
 
     def _valid_target(self,name,args):
+        if name=='memory_delete' and self.review_strategy==semantic_split.STRATEGY:
+            if not isinstance(args,dict) or set(args)!={'memory_id','reason','evidence'}:
+                return False
+            if not isinstance(args['reason'],str) or not args['reason'].strip() or not isinstance(args['evidence'],list) or not args['evidence']:
+                return False
+            try:return self.memory._content(args['memory_id'])[0]=='gap'
+            except (ValueError,TypeError,KeyError):return False
         if name not in WRITERS or not isinstance(args,dict):return False
         allowed={'content','evidence'} | ({'memory_id'} if WRITERS[name]!='status' else set())
         if not set(args)<=allowed or not isinstance(args.get('content'),str) or not args['content'].strip():return False
@@ -148,26 +170,36 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
         base=self.memory.fork_write_draft()
         # Frozen pre-cycle legacy revisions may be materialized by an earlier commit.
         base.active_revisions = draft.active_revisions.copy()
-        operation=self._apply_operation(draft,name,args,index)
+        if name=='memory_delete' and self.review_strategy==semantic_split.STRATEGY:
+            envelope,request=semantic_split.deletion_candidate(draft,self._parts,args,index,run_id=self.run_id)
+            expected=envelope['operation']['target_revision_id']
+            if draft.active_revisions.get(args['memory_id'])!=expected:
+                raise ValueError('stale_delete_target')
+            operation=self._apply_operation(draft,name,{'memory_id':args['memory_id']},index)
+            operation.revision_id=expected
+            operation.content=envelope['operation']['content']
+        else:
+            operation=self._apply_operation(draft,name,args,index)
+            envelope,request=build_live(draft,self._parts,operation,index,run_id=self.run_id,review_strategy=self.review_strategy)
         operation.content_status='candidate_not_published'
         row['candidate']=deepcopy(vars(operation))
-        envelope,request=build_live(draft,self._parts,operation,index,run_id=self.run_id,review_strategy=self.review_strategy)
         row.update(candidate=deepcopy(vars(operation)),input=envelope,request=request,
                    preparation=envelope['preparation']['status'])
         if request is None:row['error_code']='citation_preparation_'+row['preparation']
         else:
             self.transport_phase='citation_review'
-            if self.review_strategy == simple_split.STRATEGY:
+            if self.review_strategy in (simple_split.STRATEGY,semantic_split.STRATEGY):
+                split_module=(semantic_split if self.review_strategy==semantic_split.STRATEGY else simple_split)
                 async with self._split_slot:
-                    split = await simple_split.split_stage(request, self.review_transport)
+                    split = await split_module.split_stage(request, self.review_transport)
                 async with self._review_slot:
-                    result = await simple_split.review_stage(request, self.review_transport, split)
+                    result = await split_module.review_stage(request, self.review_transport, split)
                 row.update(result)
             else:
                 row.update(await assess(request,self.review_transport))
             if row['engineering_status']!='ok':row['error_code']='citation_'+row['engineering_status']
             elif row['verdict']!='supported':row['error_code']='citation_'+row['verdict']
-        if self.review_strategy == simple_split.STRATEGY:
+        if self.review_strategy in (simple_split.STRATEGY,semantic_split.STRATEGY) and name!='memory_delete':
             self._staged_bases[id(draft)] = base
         return row,draft,operation
 
@@ -211,6 +243,7 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
             return None
         try:
             name, args = self._parse_item(calls[index])
+            if name=='memory_delete':return None
             target = self._dependency_target(name, args)
             if not self._valid_target(name, args) or (target is not None and
                     (target == current_target or target in blocked_targets)):
@@ -225,7 +258,7 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
 
     async def _execute_reviewed(self,response):
         operations=[];outcomes=[];stopped=False
-        pipeline = self.review_strategy == simple_split.STRATEGY
+        pipeline = self.review_strategy in (simple_split.STRATEGY,semantic_split.STRATEGY)
         self._split_slot = asyncio.Semaphore(1)
         self._review_slot = asyncio.Semaphore(1)
         self._pipeline_tasks = set()
@@ -259,7 +292,7 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
                     if stopped:row['error_code']='not_run_after_review_error'
                     elif self.review_strategy in SPLIT_STRATEGIES and target is not None and target in blocked_targets:
                         row.update(error_code='not_run_failed_target_dependency', blocked_target=target)
-                    elif name=='memory_delete':
+                    elif name=='memory_delete' and self.review_strategy!=semantic_split.STRATEGY:
                         row.update(error_code='not_applicable_delete_protocol',preparation='not_reviewed_not_deleted')
                     elif not self._valid_target(name,args):row['error_code']='invalid_operation_or_target'
                     else:
@@ -295,7 +328,7 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
                                 result['explanation']='Technical parsing failure; no semantic verdict. Original text “'+current['content']+'”: '+result.get('reason','invalid model schema')
                                 row['explanation']=result['explanation']
                             if result['verdict']=='supported':
-                                if pipeline:
+                                if pipeline and name!='memory_delete':
                                     if self.memory._generation != expected_generation:
                                         raise ValueError('stale_operation_base')
                                     draft = self._rebase_candidate(draft, operation)
@@ -309,7 +342,8 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
                             self.transport_phase='citation_repair'
                             issue={k:result[k] for k in ('error_code','explanation','preparation','repair_feedback') if k in result}
                             if result.get('input'):issue['preparation_issues']=result['input']['preparation']['issues']
-                            row['repair']=await repair(self.review_transport,self._maintenance_prompt,name,args,issue,index)
+                            row['repair']=await repair(self.review_transport,self._maintenance_prompt,name,args,issue,index,
+                                                       semantic_v4=self.review_strategy==semantic_split.STRATEGY)
                             self.last_citation_gate_report['repair_calls']+=1
                             if row['repair']['engineering_status']!='ok':
                                 row.update(error_code='repair_'+row['repair']['engineering_status'],
@@ -320,7 +354,9 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
                             replacement=row['repair']['replacement']
                             if replacement['decision']=='withdraw':
                                 row.update(withdrawn=True,error_code='author_withdrawn');break
-                            current={**args,'content':replacement['content'],'evidence':replacement['evidence']}
+                            current=({**args,'reason':replacement['content'],'evidence':replacement['evidence']}
+                                     if name=='memory_delete' else
+                                     {**args,'content':replacement['content'],'evidence':replacement['evidence']})
                 except Exception as error:
                     if prepared is not None and self.memory.__dict__ is prepared:
                         operation.content_status='committed'

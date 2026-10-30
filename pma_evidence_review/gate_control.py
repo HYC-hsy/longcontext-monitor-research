@@ -13,10 +13,13 @@ original frozen maintenance sources. Host feedback is a fallible review judgment
 Return exactly {"decision":"withdraw"} or {"decision":"replace","content":"complete replacement","evidence":[{"quote":"literal source text"}]}.
 No tools, other operations or extra fields. Do not claim a candidate is committed.'''
 
-async def repair(transport, maintenance_prompt, name, args, issue, index):
+async def repair(transport, maintenance_prompt, name, args, issue, index, *, semantic_v4=False):
     material={'original_maintenance_material':maintenance_prompt,'fixed_tool':name,
         'original_arguments':args,'review_issue':issue}
-    payload={'system':REPAIR_SYSTEM,'prompt':json.dumps(material,ensure_ascii=False),'tools':None}
+    system=REPAIR_SYSTEM
+    if semantic_v4:
+        system+='\nEach quote must be one continuous literal visible span; use multiple evidence elements for separate spans. Do not concatenate or insert ellipses. Preserve conditions and actual receipts. For memory_delete, replacement content is the new deletion reason; the fixed gap target cannot change.\n'
+    payload={'system':system,'prompt':json.dumps(material,ensure_ascii=False),'tools':None}
     request={**payload,'phase':'citation_repair','op_index':index,
         'audit_request_sha256':identity(payload),'review_strategy':'same-author-one-repair-v1',
         'evidence_policy':'original-manifest-only'}
@@ -61,11 +64,14 @@ def receipt(cycle_id, rows):
             'withdrawn' if row.get('withdrawn') else 'not_run' if row.get('error_code') in ('not_run_after_review_error','not_run_after_cancel') else 'not_committed')
         item={'op_index':row['index'],'action':row.get('tool','invalid_memory_operation'),
             'target_memory_id':'status' if row.get('tool')=='memory_update_status' else args.get('memory_id'),
-            'proposed_content_summary':summary(args.get('content')),'outcome':outcome,
+            'proposed_content_summary':summary(args.get('reason') if row.get('tool')=='memory_delete'
+                                                else args.get('content')),'outcome':outcome,
             'reason':row.get('error_code') or ('supported_candidate_committed' if row['success'] else 'interrupted_not_committed')}
         if row['success']:
             op=row['candidate'];item.update(memory_id=op['memory_id'],revision_id=op['revision_id'],
                 committed_content_summary=summary(op['content']))
+            if row.get('tool')=='memory_delete':
+                item['deleted_target_revision_id']=op['revision_id']
         elif row.get('attempts'):
             last=row['attempts'][-1]
             item['review_reason']=last.get('explanation',last.get('reason',last.get('preparation','not_reviewed')))
