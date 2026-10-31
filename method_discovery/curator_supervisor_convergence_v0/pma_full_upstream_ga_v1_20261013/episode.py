@@ -108,7 +108,11 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
             use_structured_tools=original.use_structured_tools)
         if citation_review_gate is not None:
             from citation_gate_agent import CitationGateMemoryAgent
-            agent._memory_agent = CitationGateMemoryAgent(
+            from verbatim_selection_agent import VerbatimSelectionCitationGateAgent
+            candidate_gate_class = (VerbatimSelectionCitationGateAgent
+                                    if review_strategy == 'claim-split-same-evidence-v4'
+                                    else CitationGateMemoryAgent)
+            agent._memory_agent = candidate_gate_class(
                 task="", llm=agent._memory_llm, memory=bank,
                 max_memory_in_prompt=original.max_memory_in_prompt,
                 use_bm25_prefilter=original.use_bm25_prefilter,

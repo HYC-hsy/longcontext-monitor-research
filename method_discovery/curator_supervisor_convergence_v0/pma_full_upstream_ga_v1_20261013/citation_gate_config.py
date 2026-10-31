@@ -48,7 +48,9 @@ def gate_source_paths():
     vendor=[review/'vendor'/name for name in ('rag_models.py','rag_prompts.py','sourcecheck_types.py','rag_span_union.py')]
     vendor+=sorted((review/'vendor/prompts').glob('*.txt'))
     return [p.relative_to(root).as_posix() for p in sorted(review.glob('*.py'))+vendor]+[
-        (stage/name).relative_to(root).as_posix() for name in ('citation_gate_agent.py','citation_gate_config.py')]
+        (stage/name).relative_to(root).as_posix() for name in
+        ('citation_gate_agent.py','citation_gate_config.py','verbatim_selection_agent.py')]+[
+        (review/'verbatim_selection_prototype_20261031/contract.py').relative_to(root).as_posix()]
 
 
 def verify_gate_sources(config):
