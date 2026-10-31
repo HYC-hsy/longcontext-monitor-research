@@ -1,0 +1,364 @@
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/citation_gate_agent.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/citation_gate_agent.py
+index 95275bd..4ee5bb9 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/citation_gate_agent.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/citation_gate_agent.py
+@@ -20,6 +20,7 @@ SPLIT_STRATEGIES = (CLAIM_SPLIT, simple_split.STRATEGY, semantic_split.STRATEGY)
+ from pma_evidence_review.gate_control import repair, receipt
+ from pma_evidence_review.citation_inputs import identity
+ from pma_evidence_review.transport import CapturedTransport, durable
++from pma_evidence_review.private_faults import record_failure
+ 
+ 
+ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
+@@ -207,7 +208,7 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
+                                                else None)
+         operation.content_status='candidate_not_published'
+         row['candidate']=deepcopy(vars(operation))
+-        report_request=({k:v for k,v in request.items() if k!='audit_execution_context'}
++        report_request=(semantic_split.split_request_dto(request)
+                         if request is not None else None)
+         row.update(candidate=deepcopy(vars(operation)),input=envelope,request=report_request,
+                    preparation=envelope['preparation']['status'])
+@@ -445,10 +446,12 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
+                 if self.review_directory is not None:
+                     try:durable(self.review_directory/'gate_cycles.jsonl',self.last_citation_gate_report)
+                     except Exception as error:
+-                        self.last_citation_gate_report.update(incomplete=True,diagnostic_write_error=type(error).__name__)
++                        self.last_citation_gate_report.update(incomplete=True,diagnostic_write_error=type(error).__name__,
++                            diagnostic_failure=record_failure(self.review_directory, error))
+             except Exception as error:
+                 # Reporting must never erase already-published operation results.
+-                self.last_citation_gate_report.update(incomplete=True,finalization_error=type(error).__name__)
++                self.last_citation_gate_report.update(incomplete=True,finalization_error=type(error).__name__,
++                    diagnostic_failure=record_failure(self.review_directory, error) if self.review_directory else None)
+                 fallback={'schema':'pma-host-commit-receipt-v1','cycle_id':cycle,
+                     'notice':'Host reporting incomplete; these are commit states, not external facts.',
+                     'operations':[{'op_index':r['index'],'outcome':'committed' if r['success'] else 'not_committed',
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/episode.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/episode.py
+index 753fc16..2bf4b3f 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/episode.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/episode.py
+@@ -8,12 +8,15 @@ from __future__ import annotations
+ 
+ import asyncio
+ from copy import deepcopy
++from contextlib import asynccontextmanager
+ import hashlib
+ import json
+ import os
+ from pathlib import Path
+ from typing import Any
+ 
++from pma_evidence_review.private_faults import EpisodeFault, record_failure
++
+ from harbor.llms.base import BaseLLM, LLMResponse
+ from memory_agent.memory_enabled_agent import MemoryEnabledTerminus2
+ 
+@@ -178,6 +181,8 @@ class PMAEpisode:
+         self.last_sequence = 0
+         self._responses: dict[str, tuple[str, dict[str, Any]]] = {}
+         self._lock = asyncio.Lock()
++        self._failure = None
++        self._active_event_id = None
+ 
+     def _record(self, event: dict[str, Any], result: dict[str, Any]) -> None:
+         line = json.dumps({"event": event, "result": result},
+@@ -187,8 +192,24 @@ class PMAEpisode:
+             stream.flush()
+             os.fsync(stream.fileno())
+ 
+-    async def handle(self, event: dict[str, Any]) -> dict[str, Any]:
++    @asynccontextmanager
++    async def _event_boundary(self):
+         async with self._lock:
++            if self._failure is not None:
++                # Same-worker fail-stop: never replay a partially executed event.
++                raise EpisodeFault(self._failure)
++            try:
++                yield
++            except Exception as error:
++                failure = record_failure(self.archive, error, event_id=self._active_event_id)
++                if self._active_event_id is not None:
++                    self._failure = failure
++                raise EpisodeFault(failure) from error
++            finally:
++                self._active_event_id = None
++
++    async def handle(self, event: dict[str, Any]) -> dict[str, Any]:
++        async with self._event_boundary():
+             if not isinstance(event, dict):
+                 raise ValueError("event must be an object")
+             if (event.get("run_id"), event.get("task_id")) != (self.run_id, self.task_id):
+@@ -206,6 +227,7 @@ class PMAEpisode:
+                 return old_result
+             if sequence != self.last_sequence + 1:
+                 raise ValueError("event sequence gap or replay with unknown receipt")
++            self._active_event_id = event_id
+             accepted_path = self.archive / "accepted.jsonl"
+             with accepted_path.open("a", encoding="utf-8") as stream:
+                 stream.write(json.dumps({"event_id": event_id, "sequence": sequence,
+@@ -223,8 +245,15 @@ class PMAEpisode:
+                 result = self._task_end(event)
+             else:
+                 raise ValueError("unknown PMA event kind")
+-            self._record(event, result)
+             candidate_agent = self.agent._memory_agent
++            report = getattr(candidate_agent, 'last_citation_gate_report', {})
++            transport = getattr(candidate_agent, 'review_transport', None)
++            if (report.get('diagnostic_write_error') or report.get('finalization_error')
++                    or getattr(transport, 'audit_failure', None)):
++                failure = report.get('diagnostic_failure') or getattr(transport, 'audit_failure', None) or {}
++                raise RuntimeError('PMA audit persistence failed; prior_failure_id=' +
++                                   failure.get('failure_id', 'unavailable'))
++            self._record(event, result)
+             if (getattr(self.agent, '_research_candidate', None) in {'pma_gap_memory_v0', 'pma_gap_evidence_v1'}
+                     and result.get('triggered')):
+                 with (self.archive / 'gap_cycle.jsonl').open('a', encoding='utf-8') as stream:
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/event_spool.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/event_spool.py
+index c59e86f..e74f537 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/event_spool.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/event_spool.py
+@@ -13,6 +13,8 @@ import tempfile
+ import time
+ import uuid
+ 
++from pma_evidence_review.private_faults import EpisodeFault, record_failure
++
+ from typing import TYPE_CHECKING
+ 
+ if TYPE_CHECKING:
+@@ -96,6 +98,7 @@ class EventDispatcher:
+         self.requests = Path(request_dir).resolve(strict=True)
+         self.responses = Path(response_dir).resolve(strict=True)
+         self._processed = set()
++        self._outcomes = {}
+         self.deadline_epoch = deadline_epoch
+         if self.requests == self.responses or not self.requests.is_dir() or not self.responses.is_dir():
+             raise SpoolError("invalid host event spool")
+@@ -124,12 +127,23 @@ class EventDispatcher:
+                     or (request.get("run_id"), request.get("task_id")) != (
+                         self.episode.run_id, self.episode.task_id)):
+                 raise SpoolError("event identity mismatch")
+-            try:
+-                result = await self.episode.handle(request)
+-                response = {"status": "ok", "result": result}
+-            except Exception as exc:
+-                # Do not expose the bank, prompts, raw errors or credentials to GA.
+-                response = {"status": "error", "error_type": type(exc).__name__}
++            cached = self._outcomes.get(path.name)
++            if cached is not None:
++                if cached[0] != request:
++                    raise SpoolError("event changed after processing")
++                response = dict(cached[1])
++            else:
++                try:
++                    result = await self.episode.handle(request)
++                    response = {"status": "ok", "result": result}
++                except Exception as exc:
++                    failure = (exc.failure if isinstance(exc, EpisodeFault) else
++                               record_failure(self.episode.archive, exc, event_id=request["event_id"]))
++                    # Private messages/stack/witnesses never cross the bridge.
++                    response = {"status": "error", "error_type": failure['error_type'],
++                                "failure_id": failure['failure_id']}
++                # Cache before receipt I/O: a failed receipt write must not re-execute.
++                self._outcomes[path.name] = (request, dict(response))
+             if self.deadline_epoch is not None and time.time() >= self.deadline_epoch:
+                 with (self.episode.archive / "late_results.jsonl").open(
+                         "a", encoding="utf-8") as stream:
+@@ -140,7 +154,12 @@ class EventDispatcher:
+                 break
+             response.update(run_id=self.episode.run_id, task_id=self.episode.task_id,
+                             event_id=request["event_id"])
+-            _atomic_json(self.responses / path.name, response)
++            try:
++                _atomic_json(self.responses / path.name, response)
++            except Exception as exc:
++                failure = record_failure(self.episode.archive, exc, event_id=request["event_id"])
++                raise EpisodeFault(failure) from exc
+             self._processed.add(path.name)
++            self._outcomes.pop(path.name, None)
+             count += 1
+         return count
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/worker_main.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/worker_main.py
+index eba46a1..b93532c 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/worker_main.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/worker_main.py
+@@ -15,6 +15,7 @@ from types import SimpleNamespace
+ 
+ from episode import PMAEpisode, construct_upstream
+ from event_spool import EventDispatcher
++from pma_evidence_review.private_faults import record_failure
+ from memory_agent.memory_enabled_agent import MemoryEnabledTerminus2
+ from harbor.agents.terminus_2.terminus_2 import Terminus2
+ 
+@@ -216,6 +217,7 @@ async def serve(args: argparse.Namespace) -> None:
+             except (NotImplementedError, RuntimeError):
+                 pass
+     reason = "task_end"
++    worker_failure = None
+     active = None
+     try:
+         while not episode.ended:
+@@ -239,6 +241,7 @@ async def serve(args: argparse.Namespace) -> None:
+             active = None
+             await asyncio.sleep(0.05)
+     except BaseException as exc:
++        worker_failure = record_failure(private, exc)
+         reason = f"worker_error:{type(exc).__name__}"
+         raise
+     finally:
+@@ -248,13 +251,16 @@ async def serve(args: argparse.Namespace) -> None:
+             try:
+                 outcome["local_save"] = episode.finalize_without_event(reason)
+             except Exception as exc:
+-                outcome["local_save"] = {"status": "failed", "error_type": type(exc).__name__}
++                failure = record_failure(private, exc)
++                outcome["local_save"] = {"status": "failed", "error_type": type(exc).__name__,
++                                         "failure_id": failure["failure_id"]}
+             (private / "worker_stopped_without_task_end.json").write_text(
+                 json.dumps(outcome, sort_keys=True), encoding="utf-8")
+         (private / "worker_exit.json").write_text(json.dumps({
+             "run_id": args.run_id, "task_id": args.task_id,
+             "task_end_saved": episode.ended and reason == "task_end",
+-            "reason": reason, "ended_epoch": time.time()}, sort_keys=True), encoding="utf-8")
++            "reason": reason, "ended_epoch": time.time(),
++            "failure_id": worker_failure["failure_id"] if worker_failure else None}, sort_keys=True), encoding="utf-8")
+ 
+ 
+ def main() -> None:
+diff --git a/pma_evidence_review/claim_split_semantic.py b/pma_evidence_review/claim_split_semantic.py
+index bef941c..60e9eec 100644
+--- a/pma_evidence_review/claim_split_semantic.py
++++ b/pma_evidence_review/claim_split_semantic.py
+@@ -123,8 +123,17 @@ def split_request(material, index):
+     return request
+ 
+ 
++def split_request_dto(request):
++    """v4 split/audit DTO: retain all request fields except this named runtime object.
++
++    The original request stays host-local for review_stage. Neither the v3 splitter
++    nor its nested request log needs execution witnesses. Generic _call is unchanged.
++    """
++    return deepcopy({k: v for k, v in request.items() if k != 'audit_execution_context'})
++
++
+ async def split_stage(request, transport):
+-    return await v3.split_stage(request, transport)
++    return await v3.split_stage(split_request_dto(request), transport)
+ 
+ 
+ def audit_request(request, claims):
+@@ -163,6 +172,7 @@ def audit_request(request, claims):
+         'citation_claim_verify_batch', material, STRATEGY)
+     model_request['submitted_evidence_sha256'] = identity(material['submitted_evidence'])
+     model_request['operation_audit_request_id'] = audit_batch.request_id  # host-only
++    model_request['operation_kind'] = audit_batch.model_input()['target_context_not_evidence']['complete_operation']['action']
+     if execution_view is not None:
+         model_request['execution_context_sha256'] = context_sha
+         model_request['execution_evidence_view'] = execution_view  # selected B only
+diff --git a/pma_evidence_review/transport.py b/pma_evidence_review/transport.py
+index afb590b..6c45636 100644
+--- a/pma_evidence_review/transport.py
++++ b/pma_evidence_review/transport.py
+@@ -2,12 +2,15 @@
+ from __future__ import annotations
+ 
+ import copy
++import hashlib
+ import json
+ import os
+ from pathlib import Path
+ import sys
+ 
+ from .inputs import D, require
++from .citation_inputs import identity
++from .private_faults import record_failure
+ 
+ 
+ def durable(path, row):
+@@ -46,6 +49,14 @@ class CapturedTransport:
+         self.directory = Path(directory) if directory else None
+         self.records = []
+         self.calls = 0
++        self.audit_failure = None
++
++    def _durable(self, path, row):
++        try:
++            durable(path, row)
++        except Exception as error:
++            self.audit_failure = record_failure(self.directory, error)
++            raise
+ 
+     async def send(self, request):
+         # This exact payload is used by fake and real clients alike.
+@@ -55,13 +66,17 @@ class CapturedTransport:
+         row = {'call_index': self.calls, 'phase': request['phase'],
+                'request': copy.deepcopy(payload), 'fake': self.fake,
+                'audit_request_sha256': request.get('audit_request_sha256'),
+-               'evidence_policy': request.get('evidence_policy')}
+-        for key in ('review_strategy', 'op_index', 'focus_id', 'claim_index', 'submitted_evidence_sha256'):
++               'evidence_policy': request.get('evidence_policy'),
++               'effective_system_sha256': hashlib.sha256(payload['system'].encode('utf-8')).hexdigest(),
++               'effective_prompt_sha256': hashlib.sha256(payload['prompt'].encode('utf-8')).hexdigest(),
++               'effective_payload_sha256': identity(payload),
++               'operation_kind': request.get('operation_kind', request.get('audit_operation_kind'))}
++        for key in ('review_strategy', 'op_index', 'focus_id', 'claim_index', 'submitted_evidence_sha256', 'operation_kind'):
+             if key in request:
+                 row[key] = request[key]
+         self.records.append(row)
+         if self.directory:
+-            durable(self.directory / 'requests.jsonl', row)
++            self._durable(self.directory / 'requests.jsonl', row)
+         try:
+             response = await self.client.call(**payload)
+             content = getattr(response, 'content', None)
+@@ -88,7 +103,7 @@ class CapturedTransport:
+             raise
+         finally:
+             if self.directory:
+-                durable(self.directory / 'responses.jsonl', {k: v for k, v in row.items()
++                self._durable(self.directory / 'responses.jsonl', {k: v for k, v in row.items()
+                     if k != 'request'})
+ 
+ 
+diff --git a/pma_evidence_review/private_faults.py b/pma_evidence_review/private_faults.py
+new file mode 100644
+index 0000000..0cc4184
+--- /dev/null
++++ b/pma_evidence_review/private_faults.py
+@@ -0,0 +1,34 @@
++"""Private traceback records and safe correlation; never capture frame locals."""
++import json
++import os
++from pathlib import Path
++import traceback
++import uuid
++
++
++class EpisodeFault(RuntimeError):
++    def __init__(self, failure):
++        self.failure = failure
++        super().__init__('PMA event failed; inspect the private failure record')
++
++
++def record_failure(directory, error, *, event_id=None):
++    failure = {'failure_id': uuid.uuid4().hex, 'error_type': type(error).__name__}
++    try:
++        record = {**failure, 'event_id': event_id,
++                  'traceback': ''.join(traceback.TracebackException.from_exception(
++                      error, capture_locals=False).format())}
++        private = Path(directory) / 'private_failures'
++        private.mkdir(mode=0o700, parents=True, exist_ok=True)
++        path = private / ('failure-' + failure['failure_id'] + '.json')
++        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
++        with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
++            json.dump(record, stream, ensure_ascii=True, sort_keys=True)
++            stream.flush()
++            os.fsync(stream.fileno())
++    except Exception:
++        # The safe ID still identifies the failed attempt; no public exception message.
++        failure['diagnostic_saved'] = False
++    else:
++        failure['diagnostic_saved'] = True
++    return failure

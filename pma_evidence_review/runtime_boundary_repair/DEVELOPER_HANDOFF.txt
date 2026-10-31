@@ -1,0 +1,46 @@
+开发交接：只验收工程闭环，不启动真实模型、Task、容器评价或旧对照。
+
+1. 从固定生产基线 7718a6a912a139494326715fc99dea1a0b98bbc8 创建独立工作区。
+   原活动 checkout E:/pma-execution-task-20261101 不改；本 Mac 环境无法读取该路径。
+   本地源码快照来自已授权 GitHub connector。按 production.patch 接入七个生产文件，
+   加入两份测试和离线 runner；不可 cherry-pick 本地合成快照根提交。
+   GitHub 独立分支为 fix/pma-runtime-audit-boundary-7718；生产补丁提交
+   5488f3e2cfa78efc68c65f773bb2416e5415fe98，父提交就是固定生产基线。
+   首次 create_tree 被自动审批拒绝；父线程补充用户关于此确切仓库及上传的原话后，
+   对已知未执行的同一上传操作重试一次通过。未换渠道、未强推、未合并默认分支。
+   测试和交接文件在后续提交；最终交付回复提供分支最终 SHA 和逐文件回读结果。
+
+2. 保持审核/拆分/维护/P2 的语义提示、银行结构、审核三态、原返工预算不动。
+   只在 v4 split 边界取不含 audit_execution_context 的明确 DTO；review_stage 使用原
+   宿主 request。通用 _call、v3 及非 v4 请求兼容。完整报告的每层都必须严格 JSON，
+   不准 default=str/repr 或把完整 Context/witness 转 dict 填回报告。
+   旧必要 closed_material/host_provenance 审计输入仍保留，不能泛化删字段。
+
+3. 用真实 pinned Python 环境运行 README 两条离线命令；检查 test support 输出的
+   IMPORT_DOUBLES。此环境本次有四种可选依赖替身，不能视为真实依赖验收。
+   必须复核完整 handle 和 dispatcher：task_start、返工、P2 no_intervention/干预、
+   before_actor_call、通用工具 E/X actor_step、task_end/cleanup、所有 JSONL 和安全回执。
+   磁盘错误不得回 started/ok；同 worker 禁止重放已接受维护。失败前的已提交记忆和
+   events 中间记录可存在，以 error 回执/私有 failure ID 为最终故障信号。
+   失败后普通 Task 事件不继续，使用既有 finalize_without_event 只清理保存；
+   task_end_saved 仍为 false。进程重启/跨进程恢复不在本补丁内，禁止自动重启续跑。
+
+4. 源码中 worker_main/live_launcher 可检查，但本次实验写 preflight-run-config.json
+   的本机专用启动器未获得、未修改。开发线程须在首次模型调用前写配置，将旧
+   prompt_sha256.review 从“实际 review hash”改为明确的 review_template_legacy
+   （或 null+dynamic 说明），不要伪造单一实际 hash；记录动态 review 来源为
+   review requests.jsonl 的 effective_system_sha256/effective_prompt_sha256/
+   effective_payload_sha256、phase、operation_kind。发送边界已补，保留原请求 hash。
+   save/update/delete 的真实 system 按动作和 execution scope 生成，实际值以发送记录为准。
+
+5. 原失败保留：run pma-4e9d4cff85244e57；归档提交
+   6a4d76b242720b355d5ea16f80b13d493b71cf83；ZIP
+   pma_evidence_review/diagnostic_packages/PMA_EXECUTION_LINK_SQLITE_FIRST_TASK_20261101.zip；
+   父线程给定 SHA256 aa5308ce3a445186ec271fd48d26e830df67018601a7dd52274c7e83934f751e。
+   此处未再次下载验证该 ZIP，也没有历史完整私有 traceback。不得声称按历史 traceback 定责。
+   新 private_failures 目录不得进入公开 ZIP；核对本机导出脚本只取明确安全白名单。
+   独立审计观察仍保留：Need to…计划被要求已完成、C2 引用了当次 B 外来源却判支持；
+   此补丁不修这些语义问题。旧 committed receipt 的空 run_id 归属限制也不扩修。
+
+6. 完成工程验收后先回报测试、请求身份和私有日志/公开回执边界，不自动跑真实 Task。
+   后续真实 Task 需用户另外授权。新方法同数据集旧结果直接复用，绝不重跑旧对照。
