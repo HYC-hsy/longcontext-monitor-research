@@ -32,20 +32,17 @@ class VerbatimSelectionIntegrationTests(unittest.TestCase):
 
     @staticmethod
     def _raw(agent, refs, decision='intervene'):
-        snapshot = agent._selection_snapshot
-        return json.dumps({'cycle': snapshot.cycle,
-            'task_version': snapshot.task_version, 'decision': decision,
-            'references': refs})
+        return '<no_intervention/>' if decision == 'no_intervention' else (
+            '<intervene>' + ','.join(refs) + '</intervene>')
 
     def test_task_only_through_process_and_pending_delivery(self):
         bank = LatestEvidenceGapMemory()
         bank.update_status('Private progress status')
-        agent, requests = self._agent(lambda a: self._raw(a, [
-            {'kind': 'task', 'version': a._selection_snapshot.task_version}]), bank=bank)
+        agent, requests = self._agent(lambda a: self._raw(a, ['TASK']), bank=bank)
         agent.prepare_visible_context('visible', [])
         result = asyncio.run(agent.process('visible', 1))
         self.assertTrue(result.should_inject)
-        self.assertEqual(json.loads(result.context_for_action)['blocks'][0]['text'], agent.task)
+        self.assertEqual(json.loads(result.context_for_action)['blocks'][0]['content'], agent.task)
         self.assertTrue(agent.pending_refs_valid())
         self.assertEqual(agent.last_gap_report['selection']['status'], 'intervention')
         self.assertEqual([phase for phase, _ in requests], ['maintenance', 'selection'])
@@ -54,36 +51,33 @@ class VerbatimSelectionIntegrationTests(unittest.TestCase):
         self.assertNotIn('Private progress status', result.context_for_action)
 
     def test_invalid_output_is_error_not_deliberate_silence(self):
-        agent, _ = self._agent(lambda a: self._raw(a, [
-            {'kind': 'status'}]))
+        agent, _ = self._agent(lambda a: self._raw(a, ['STATUS']))
         agent.prepare_visible_context('visible', [])
         result = asyncio.run(agent.process('visible', 1))
         self.assertFalse(result.should_inject)
         self.assertEqual(agent.last_gap_report['selection_error']['error'],
-                         'unselectable_reference_kind')
+                         'invalid_alias')
         self.assertNotIn('selection', agent.last_gap_report)
 
     def test_legacy_entry_is_visible_but_not_given_false_revision(self):
         bank = LatestEvidenceGapMemory()
         legacy = bank.save_gap('  Pending issue\n')
-        agent, requests = self._agent(lambda a: self._raw(a, [
-            {'kind': 'task', 'version': a._selection_snapshot.task_version}]), bank=bank)
+        agent, requests = self._agent(lambda a: self._raw(a, ['TASK']), bank=bank)
         agent.prepare_visible_context('visible', [])
         asyncio.run(agent.process('visible', 1))
         self.assertIn(legacy, agent.last_selection_report['excluded_legacy_ids'])
         self.assertNotIn('"id": "' + legacy + '"', requests[-1][1]['prompt'].split(
-            '## Selectable frozen candidates\n', 1)[1])
+            '## Selectable catalogue\n', 1)[1])
 
     def test_frozen_committed_entry_exact_revision_and_revocation(self):
         bank = LatestEvidenceGapMemory()
         key = bank.save_gap('Old gap')
         bank._revision(key, receipt_id='test-commit')
         revision = bank.active_revisions[key]
-        agent, _ = self._agent(lambda a: self._raw(a, [
-            {'kind': 'memory', 'id': key, 'revision': revision}]), bank=bank)
+        agent, _ = self._agent(lambda a: self._raw(a, ['M1']), bank=bank)
         agent.prepare_visible_context('visible', [])
         result = asyncio.run(agent.process('visible', 1))
-        self.assertEqual(json.loads(result.context_for_action)['blocks'][0]['text'], 'Old gap')
+        self.assertEqual(json.loads(result.context_for_action)['blocks'][0]['content'], 'Old gap')
         self.assertTrue(agent.pending_refs_valid())
         bank.active_revisions[key] = 'rev_replaced'
         self.assertFalse(agent.pending_refs_valid())
@@ -106,8 +100,7 @@ class VerbatimSelectionIntegrationTests(unittest.TestCase):
                     return LLMResponse(content='', tool_calls=[])
                 if agent.transport_phase == 'selection':
                     snapshot = agent._selection_snapshot
-                    raw = self._raw(agent, [{'kind': 'task',
-                        'version': snapshot.task_version}])
+                    raw = self._raw(agent, ['TASK'])
                     return LLMResponse(content=raw)
                 raise AssertionError('unexpected model phase')
 
@@ -126,7 +119,7 @@ class VerbatimSelectionIntegrationTests(unittest.TestCase):
             self.assertEqual(delivery['status'], 'reminder')
             start_json = delivery['reminder'].index('{"blocks":')
             decoded, _ = json.JSONDecoder().raw_decode(delivery['reminder'][start_json:])
-            self.assertEqual(decoded['blocks'][0]['text'], start['initial_user_content'])
+            self.assertEqual(decoded['blocks'][0]['content'], start['initial_user_content'])
             self.assertNotIn('source_sha_fixture', delivery['reminder'])
 
     def test_phase1_gate_commits_only_approved_candidate_before_selection(self):
@@ -152,10 +145,8 @@ class VerbatimSelectionIntegrationTests(unittest.TestCase):
                     {'verdict': 'supported', 'reason': 'visible receipt'}]}))
             if agent.transport_phase == 'selection':
                 snapshot = agent._selection_snapshot
-                self.assertEqual([row.text for row in snapshot.items], ['First accepted.'])
-                ref = snapshot.items[0]
-                return reply(content=self._raw(agent, [{'kind': 'memory',
-                    'id': ref.id, 'revision': ref.revision}]))
+                self.assertEqual([row.content for row in snapshot.items], ['First accepted.'])
+                return reply(content=self._raw(agent, ['M1']))
             raise AssertionError('unexpected model phase')
 
         agent = VerbatimSelectionCitationGateAgent(task='Task', memory=bank,
@@ -168,7 +159,7 @@ class VerbatimSelectionIntegrationTests(unittest.TestCase):
         result = asyncio.run(agent.process('visible', 1))
         self.assertEqual(review_count, 2)
         self.assertEqual([op.success for op in result.operations], [True, False])
-        self.assertEqual(json.loads(result.context_for_action)['blocks'][0]['text'],
+        self.assertEqual(json.loads(result.context_for_action)['blocks'][0]['content'],
                          'First accepted.')
         self.assertEqual(len(bank.knowledge), 1)
         self.assertEqual(bank.knowledge[0].content, 'First accepted.')

@@ -1,26 +1,13 @@
-"""Opt-in branch adapter: phase-2 selects pinned, committed verbatim text."""
+"""Phase-2 tag/alias selection over pinned committed text; phase 1 is unchanged."""
 
 import hashlib
 import json
 import uuid
 
 from citation_gate_agent import CitationGateMemoryAgent
-from pma_evidence_review.verbatim_selection_prototype_20261031.contract import (
-    MemoryRef, freeze_snapshot, parse_and_render, delivery_json,
-)
+from tag_selection_contract import (Item, Snapshot, PROTOCOL_VERSION,
+    SELECTION_SYSTEM, dispatch, delivery_json, diagnostic)
 
-
-SELECTION_SYSTEM = """You are choosing whether to remind the task agent using only
-the visible task and committed memory candidates in the current prompt. Internal
-status helps your judgment but is not selectable. Recently visible information
-may still be worth selecting when the task agent's behavior contradicts it.
-Do not write a reminder, summary, new fact, conclusion, or revised memory.
-Return exactly one JSON object with cycle, task_version, decision, references.
-decision is intervene or no_intervention. intervene requires one or more ordered
-references; no_intervention requires an empty list. A task reference has only
-kind=task and version. A memory reference has only kind=memory, id, revision.
-Select only identities shown in the current candidate list. No extra fields.
-"""
 
 _OLD_TASK = """## Your Task
 Review the memory bank and the agent's recent trajectory. Decide:
@@ -37,13 +24,14 @@ def _hash(text):
 
 
 class VerbatimSelectionCitationGateAgent(CitationGateMemoryAgent):
-    """Keep phase-1 gate untouched; change only phase-2 output and presentation."""
+    """Existing gated reviewer and bank, with a strict phase-2 tag protocol."""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._selection_snapshot = None
         self._active_selection_cycle = None
         self._phase2_visible = None
+        self._completion_call_id = None
         self.last_selection_report = {}
 
     def _format_memory_list(self, entries):
@@ -52,52 +40,60 @@ class VerbatimSelectionCitationGateAgent(CitationGateMemoryAgent):
                 self._phase2_visible.setdefault(entry.id, entry)
         return super()._format_memory_list(entries)
 
-    def _build_phase2_prompt(self, observation, step_count):
-        self._phase2_visible = {}
-        self._selection_snapshot = None
-        cycle = 'selection_' + uuid.uuid4().hex
-        self._active_selection_cycle = cycle
-        self.last_selection_report = {'cycle': cycle, 'status': 'building',
-                                      'excluded_legacy_ids': []}
-        try:
-            prompt = super()._build_phase2_prompt(observation, step_count)
-            original_instruction = prompt.rfind(_OLD_TASK)
-            if original_instruction < 0:
-                raise RuntimeError('phase2_prompt_shape_changed')
-            prompt = (prompt[:original_instruction] +
-                      prompt[original_instruction + len(_OLD_TASK):])
-            records = []
-            for entry in self._phase2_visible.values():
+    def _active_records(self):
+        records = {}
+        for category in ('knowledge', 'procedural', 'gap'):
+            entries = self.gaps.entries if category == 'gap' else getattr(self.memory, category)
+            for entry in entries:
                 revision_id = self.memory.active_revisions.get(entry.id)
                 revision = self.memory.revisions.get(revision_id) if revision_id else None
                 if revision is None:
-                    self.last_selection_report['excluded_legacy_ids'].append(entry.id)
                     continue
-                if (revision.memory_id != entry.id or
-                        revision.category not in {'knowledge', 'procedural', 'gap'} or
+                if (revision.memory_id != entry.id or revision.category != category or
                         revision.content_sha256 != _hash(entry.content) or
                         self.memory.blobs.get(revision.content_sha256) != entry.content):
                     raise ValueError('committed_revision_content_mismatch')
-                records.append({'id': entry.id, 'revision': revision_id,
-                                'category': revision.category, 'text': entry.content})
+                records[entry.id] = Item(entry.id, revision_id, category, entry.content)
+        return records
+
+    def _build_phase2_prompt(self, observation, step_count):
+        self._phase2_visible = {}
+        self._selection_snapshot = None
+        self._completion_call_id = None
+        cycle = 'selection_' + uuid.uuid4().hex
+        self._active_selection_cycle = cycle
+        self.last_selection_report = {'cycle': cycle, 'protocol': PROTOCOL_VERSION,
+                                      'status': 'building', 'excluded_legacy_ids': []}
+        try:
+            prompt = super()._build_phase2_prompt(observation, step_count)
+            index = prompt.rfind(_OLD_TASK)
+            if index < 0:
+                raise RuntimeError('phase2_prompt_shape_changed')
+            prompt = prompt[:index] + prompt[index + len(_OLD_TASK):]
+            live = self._active_records()
+            items = []
+            for entry in self._phase2_visible.values():
+                row = live.get(entry.id)
+                if row is None:
+                    self.last_selection_report['excluded_legacy_ids'].append(entry.id)
+                    continue
+                items.append(row)
             version = 'task_sha256_' + _hash(self.task)
-            snapshot = freeze_snapshot(cycle, version, self.task,
-                                       self.memory.status or '', records)
+            snapshot = Snapshot(uuid.uuid4().hex, cycle, version, self.task, tuple(items))
             self._selection_snapshot = snapshot
-            candidates = [{'kind': 'task', 'version': version, 'text': self.task}]
-            candidates += [{'kind': 'memory', 'id': row.id, 'revision': row.revision,
-                            'category': row.category, 'text': row.text} for row in snapshot.items]
-            self.last_selection_report.update(status='request_built', task_version=version,
-                task_sha256=_hash(self.task),
-                candidates=[{'id': row.id, 'revision': row.revision,
-                             'category': row.category, 'content_sha256': _hash(row.text)}
-                            for row in snapshot.items])
-            return prompt + '\n## Selectable frozen candidates\n' + json.dumps(
-                {'cycle': cycle, 'task_version': version, 'candidates': candidates},
-                ensure_ascii=True, sort_keys=True) + '\n\n## Required output\n' + json.dumps(
-                {'cycle': cycle, 'task_version': version, 'decision': 'intervene',
-                 'references': [{'kind': 'task', 'version': version}]},
-                ensure_ascii=True, sort_keys=True) + '\n'
+            self.last_selection_report.update(status='request_built',
+                call_id=snapshot.call_id, task_version=version, task_sha256=_hash(self.task),
+                candidates=[{'alias': f'M{i}', 'id': row.id, 'revision': row.revision,
+                             'category': row.category, 'content_sha256': _hash(row.content)}
+                            for i, row in enumerate(items, 1)])
+            catalogue = [{'alias': 'TASK', 'content': self.task}]
+            catalogue += [{'alias': f'M{i}', 'category': row.category, 'content': row.content}
+                          for i, row in enumerate(items, 1)]
+            return prompt + '\n## Selectable catalogue\n' + json.dumps(
+                catalogue, ensure_ascii=True, sort_keys=True) + (
+                '\n\nOnly TASK and the listed M aliases may be selected. The status and\n'
+                'recent eight visible steps above are judgment context only.\n'
+                'Return one bare <intervene>TASK,M1</intervene> or <no_intervention/>.\n')
         except Exception as exc:
             self.last_selection_report.update(status='selection_error', error=type(exc).__name__)
             self.last_gap_report['selection_error'] = self.last_selection_report.copy()
@@ -109,6 +105,8 @@ class VerbatimSelectionCitationGateAgent(CitationGateMemoryAgent):
         self._sent_phase2 = user_prompt
         self.last_gap_report['actual_phase2_prompt'] = user_prompt
         self.transport_phase = 'selection'
+        snapshot = self._selection_snapshot
+        self._completion_call_id = snapshot.call_id if snapshot else None
         try:
             return await self.llm.call(prompt=user_prompt, system=SELECTION_SYSTEM)
         except Exception as exc:
@@ -124,35 +122,44 @@ class VerbatimSelectionCitationGateAgent(CitationGateMemoryAgent):
             self.last_selection_report.update(status='selection_error', error='missing_snapshot')
             self.last_gap_report['selection_error'] = self.last_selection_report.copy()
             return None
-        outcome = parse_and_render(raw, snapshot,
-            active_cycle=self._active_selection_cycle,
-            active_task_version='task_sha256_' + _hash(self.task))
-        if outcome.kind == 'error':
-            self.last_selection_report.update(status='selection_error', error=outcome.error)
+        try:
+            active = self._active_records()
+            outcome = dispatch(raw, snapshot, completion_call_id=self._completion_call_id,
+                active_cycle=self._active_selection_cycle,
+                active_task_version='task_sha256_' + _hash(self.task), active_records=active)
+        except Exception as exc:
+            self.last_selection_report.update(status='selection_error', error=type(exc).__name__)
             self.last_gap_report['selection_error'] = self.last_selection_report.copy()
             return None
-        self.last_selection_report.update(status=outcome.kind,
-            selected=[({'kind': 'task', 'version': block.reference.version}
-                       if not isinstance(block.reference, MemoryRef) else
-                       {'kind': 'memory', 'id': block.reference.id,
-                        'revision': block.reference.revision}) for block in outcome.blocks])
-        self.last_gap_report['selection'] = self.last_selection_report.copy()
-        if outcome.kind == 'no_intervention':
+        self.last_selection_report.update(diagnostic(outcome))
+        self.last_selection_report['status'] = ('selection_error' if outcome.kind == 'error'
+                                                else outcome.kind)
+        if outcome.kind == 'error':
+            self.last_gap_report['selection_error'] = self.last_selection_report.copy()
             return None
+        self.last_selection_report['selected'] = [
+            {k: block[k] for k in ('alias', 'id', 'revision', 'category')}
+            for block in outcome.blocks]
+        self.last_gap_report['selection'] = self.last_selection_report.copy()
         return delivery_json(outcome)
 
     def pending_refs_valid(self):
-        """Do not substitute a later revision before the pending Task delivery."""
         snapshot = self._selection_snapshot
         if (snapshot is None or self.last_selection_report.get('status') != 'intervention'
                 or snapshot.cycle != self._active_selection_cycle
                 or snapshot.task_version != 'task_sha256_' + _hash(self.task)):
             self.last_gap_report['delivery_error'] = 'stale_selection_snapshot'
             return False
+        try:
+            active = self._active_records()
+        except ValueError:
+            self.last_gap_report['delivery_error'] = 'committed_revision_content_mismatch'
+            return False
         for selected in self.last_selection_report.get('selected', ()):
-            if selected['kind'] != 'memory':
+            if selected['id'] is None:
                 continue
-            if self.memory.active_revisions.get(selected['id']) != selected['revision']:
+            frozen = next((row for row in snapshot.items if row.id == selected['id']), None)
+            if frozen is None or active.get(frozen.id) != frozen:
                 self._active_selection_cycle = None
                 self.last_gap_report['delivery_error'] = 'selection_revision_revoked'
                 return False
