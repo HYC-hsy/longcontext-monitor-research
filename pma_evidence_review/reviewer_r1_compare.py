@@ -6,8 +6,11 @@ Reference labels are read only by score, never by export or run-profile.
 import argparse
 import asyncio
 import hashlib
+import inspect
 import json
 from pathlib import Path
+import re
+import subprocess
 
 from . import claim_split_semantic as v4, claim_split_simple as v3
 from .citation_inputs import identity
@@ -51,6 +54,37 @@ def plan(arm):
               'review_system_sha256': sha(prompt), 'entries': rows}
     result['plan_sha256'] = identity(result)
     return result
+
+
+def _public_value(value, *, numeric=False):
+    if numeric:
+        return value if type(value) in (int, float) and value >= 0 else 'default/unknown'
+    return value if isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9._/-]+', value) else 'default/unknown'
+
+
+def runtime_config(repo, frozen, client):
+    """Whitelist actual initialized client/call-wrapper values, never a profile dump."""
+    checkout = subprocess.run(['git', '-C', str(repo), 'rev-parse', 'HEAD'],
+                              capture_output=True, text=True, check=True).stdout.strip()
+    if not re.fullmatch(r'[0-9a-f]{40}', checkout):
+        raise ValueError('checkout_identity_unavailable')
+    call = getattr(client, 'call', None)
+    closure = inspect.getclosurevars(call).nonlocals if inspect.isfunction(call) else {}
+    bound = closure.get('memory_profile')
+    bound = bound if isinstance(bound, dict) else {}
+    return {'schema': 'pma-v4-reviewer-r1-runtime-config-v1', 'arm': frozen['arm'],
+            'checkout_sha': checkout, 'model_id': _public_value(getattr(client, '_model_name', None)),
+            'generation_parameters': {
+                'temperature': _public_value(getattr(client, '_temperature', None), numeric=True),
+                'reasoning_effort': _public_value(getattr(client, '_reasoning_effort', None)),
+                'max_tokens': _public_value(bound.get('max_tokens'), numeric=True),
+                'thinking_type': _public_value(bound.get('thinking_type')),
+                'read_timeout': _public_value(bound.get('read_timeout'), numeric=True),
+                'top_p': 'default/unknown', 'seed': 'default/unknown'},
+            'parameter_scope': 'initialized client and bound call arguments; provider-side defaults or dropped parameters unknown',
+            'review_system_sha256': frozen['review_system_sha256'],
+            'plan_sha256': frozen['plan_sha256'],
+            'audit_request_sha256': [row['request']['audit_request_sha256'] for row in frozen['entries']]}
 
 
 async def run(frozen, transport):
@@ -139,6 +173,7 @@ def main():
         write(out / 'plan.json', frozen)
         client = load_profile_client(args.repo, args.profile, args.profile_key,
                                      out / 'private_client', authorized=True)
+        write(out / 'run-config.json', runtime_config(args.repo, frozen, client))
         transport = CapturedTransport(client, out, fake=False)
         results = asyncio.run(run(frozen, transport))
         write(out / 'results.json', {'schema': 'pma-v4-reviewer-only-results-v1',
