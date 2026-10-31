@@ -4,6 +4,7 @@ from copy import deepcopy
 import json
 import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -29,6 +30,27 @@ def assert_json(test, value):
     test.assertNotIn('frozen_sources', encoded)
     test.assertNotIn('frozen_inventory', encoded)
     return encoded
+
+
+def assert_private_file_permissions(test, path):
+    if os.name != 'nt':
+        test.assertEqual(path.stat().st_mode & 0o077, 0)
+        return
+    # Windows st_mode does not represent the DACL. Check that broad built-in
+    # principals have no read grant; names are resolved to stable SIDs.
+    script = (
+        '$acl=Get-Acl -LiteralPath $env:PMA_TEST_ACL_PATH; '
+        '$broad=@("S-1-1-0","S-1-5-11","S-1-5-32-545"); '
+        'foreach($rule in $acl.Access){ '
+        'try { $sid=$rule.IdentityReference.Translate('
+        '[System.Security.Principal.SecurityIdentifier]).Value } '
+        'catch { exit 2 }; '
+        'if($sid -in $broad -and $rule.AccessControlType -eq "Allow"){ exit 1 } }; exit 0'
+    )
+    env = dict(os.environ, PMA_TEST_ACL_PATH=str(path))
+    result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive',
+                             '-Command', script], env=env, capture_output=True, text=True)
+    test.assertEqual(result.returncode, 0, 'private file ACL is broad or unreadable')
 
 
 class RuntimeBoundaryTests(unittest.TestCase):
@@ -114,7 +136,9 @@ class RuntimeBoundaryTests(unittest.TestCase):
     def dispatcher(self, root, **options):
         actor, calls = wrapper(root, **options)
         episode = PMAEpisode(actor, run_id='offline-run', task_id='offline-task', archive=root/'private')
-        requests, responses = root/'requests', root/'responses'
+        spool = root/'spool'
+        spool.mkdir()
+        requests, responses = spool/'requests', spool/'responses'
         requests.mkdir(); responses.mkdir()
         start = event('task_start', 1, initial_user_content='Synthetic task')
         (requests/'e1.json').write_text(json.dumps(start))
@@ -131,13 +155,13 @@ class RuntimeBoundaryTests(unittest.TestCase):
                     with patch.object(event_spool, '_atomic_json', side_effect=OSError('private endpoint/key')):
                         with self.assertRaises(EpisodeFault):
                             asyncio.run(dispatcher.serve_once())
-                    self.assertFalse((root/'responses/e1.json').exists())
+                    self.assertFalse((root/'spool/responses/e1.json').exists())
                     self.assertEqual(episode.last_sequence, 1)  # completed, receipt unavailable
                     count = len(calls)
                 else:
                     count = None
                 self.assertEqual(asyncio.run(dispatcher.serve_once()), 1)
-                receipt = json.loads((root/'responses/e1.json').read_text())
+                receipt = json.loads((root/'spool/responses/e1.json').read_text())
                 self.assertEqual(receipt['status'], 'ok')
                 self.assertEqual(receipt['result']['status'], 'started')
                 self.assertEqual(asyncio.run(dispatcher.serve_once()), 0)
@@ -160,7 +184,7 @@ class RuntimeBoundaryTests(unittest.TestCase):
                     return real_durable(path, row)
                 with patch.object(transport, 'durable', side_effect=broken), patch.object(citation_gate_agent, 'durable', side_effect=broken):
                     self.assertEqual(asyncio.run(dispatcher.serve_once()), 1)
-                response = json.loads((root/'responses/e1.json').read_text())
+                response = json.loads((root/'spool/responses/e1.json').read_text())
                 self.assertEqual(response['status'], 'error')
                 self.assertEqual(set(response), {'status', 'error_type', 'failure_id', 'run_id', 'task_id', 'event_id'})
                 self.assertNotIn('SECRET', json.dumps(response))
@@ -175,7 +199,8 @@ class RuntimeBoundaryTests(unittest.TestCase):
                 self.assertEqual(len(calls), count)
                 failures = list((root/'review/private_failures').glob('failure-*.json')) + list((episode.archive/'private_failures').glob('failure-*.json'))
                 self.assertTrue(any('SECRET' in p.read_text() and 'Traceback' in p.read_text() for p in failures))
-                self.assertTrue(all(p.stat().st_mode & 0o077 == 0 for p in failures))
+                for path in failures:
+                    assert_private_file_permissions(self, path)
                 # Cleanup remains explicitly non-inference and does not claim task success.
                 self.assertEqual(episode.finalize_without_event('audit_failed')['status'], 'saved_without_task_end')
                 self.assertEqual(len(calls), count)
@@ -192,7 +217,7 @@ class RuntimeBoundaryTests(unittest.TestCase):
                 return original_open(path, *args, **kwargs)
             with patch.object(Path, 'open', new=fail_gap):
                 asyncio.run(dispatcher.serve_once())
-            response = json.loads((root/'responses/e1.json').read_text())
+            response = json.loads((root/'spool/responses/e1.json').read_text())
             self.assertEqual(response['status'], 'error')
             self.assertEqual(response['error_type'], 'OSError')
             self.assertEqual(episode.last_sequence, 0)
@@ -222,7 +247,7 @@ class RuntimeBoundaryTests(unittest.TestCase):
                             asyncio.run(dispatcher.serve_once())
                     else:
                         asyncio.run(dispatcher.serve_once())
-                response = json.loads((root/'responses/e1.json').read_text())
+                response = json.loads((root/'spool/responses/e1.json').read_text())
                 self.assertEqual(response['status'], 'error')
                 self.assertEqual(response['error_type'], 'TypeError')
                 self.assertNotIn('SECRET', json.dumps(response))

@@ -87,3 +87,13 @@ set $env:PMA_TEST_STRICT_IMPORTS='1' before either command. Here strict mode is
 blocked by missing regex/rpds/shortuuid/harbor; strict-mode-blocked.log records that
 expected blocker, not a passing production run. The 10/45 passing logs are from
 the explicitly disclosed stand-in environment with strict mode disabled.
+
+Windows acceptance addendum (2026-11-01): the preceding paragraph describes
+the original delivery environment, not the later production-environment result.
+The test fixture now places requests/responses under a dedicated spool sibling
+of the private archive, matching the runtime isolation rule. On Windows the
+private-file assertion checks ACL grants to broad well-known SIDs rather than
+POSIX mode bits. No production method code or security guard changed. With the
+existing production Python and strict imports, 45/45 targeted checks passed,
+`Optional dependency doubles: []`; this remains offline engineering evidence,
+not a real Task or semantic-effect result.
