@@ -20,6 +20,7 @@ SPLIT_STRATEGIES = (CLAIM_SPLIT, simple_split.STRATEGY, semantic_split.STRATEGY)
 from pma_evidence_review.gate_control import repair, receipt
 from pma_evidence_review.citation_inputs import identity
 from pma_evidence_review.transport import CapturedTransport, durable
+from pma_evidence_review.private_faults import record_failure
 
 
 class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
@@ -207,7 +208,7 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
                                                else None)
         operation.content_status='candidate_not_published'
         row['candidate']=deepcopy(vars(operation))
-        report_request=({k:v for k,v in request.items() if k!='audit_execution_context'}
+        report_request=(semantic_split.split_request_dto(request)
                         if request is not None else None)
         row.update(candidate=deepcopy(vars(operation)),input=envelope,request=report_request,
                    preparation=envelope['preparation']['status'])
@@ -445,10 +446,12 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
                 if self.review_directory is not None:
                     try:durable(self.review_directory/'gate_cycles.jsonl',self.last_citation_gate_report)
                     except Exception as error:
-                        self.last_citation_gate_report.update(incomplete=True,diagnostic_write_error=type(error).__name__)
+                        self.last_citation_gate_report.update(incomplete=True,diagnostic_write_error=type(error).__name__,
+                            diagnostic_failure=record_failure(self.review_directory, error))
             except Exception as error:
                 # Reporting must never erase already-published operation results.
-                self.last_citation_gate_report.update(incomplete=True,finalization_error=type(error).__name__)
+                self.last_citation_gate_report.update(incomplete=True,finalization_error=type(error).__name__,
+                    diagnostic_failure=record_failure(self.review_directory, error) if self.review_directory else None)
                 fallback={'schema':'pma-host-commit-receipt-v1','cycle_id':cycle,
                     'notice':'Host reporting incomplete; these are commit states, not external facts.',
                     'operations':[{'op_index':r['index'],'outcome':'committed' if r['success'] else 'not_committed',

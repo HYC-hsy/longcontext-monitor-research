@@ -123,8 +123,17 @@ def split_request(material, index):
     return request
 
 
+def split_request_dto(request):
+    """v4 split/audit DTO: retain all request fields except this named runtime object.
+
+    The original request stays host-local for review_stage. Neither the v3 splitter
+    nor its nested request log needs execution witnesses. Generic _call is unchanged.
+    """
+    return deepcopy({k: v for k, v in request.items() if k != 'audit_execution_context'})
+
+
 async def split_stage(request, transport):
-    return await v3.split_stage(request, transport)
+    return await v3.split_stage(split_request_dto(request), transport)
 
 
 def audit_request(request, claims):
@@ -163,6 +172,7 @@ def audit_request(request, claims):
         'citation_claim_verify_batch', material, STRATEGY)
     model_request['submitted_evidence_sha256'] = identity(material['submitted_evidence'])
     model_request['operation_audit_request_id'] = audit_batch.request_id  # host-only
+    model_request['operation_kind'] = audit_batch.model_input()['target_context_not_evidence']['complete_operation']['action']
     if execution_view is not None:
         model_request['execution_context_sha256'] = context_sha
         model_request['execution_evidence_view'] = execution_view  # selected B only

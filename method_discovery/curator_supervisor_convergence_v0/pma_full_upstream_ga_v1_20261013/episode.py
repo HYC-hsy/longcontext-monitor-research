@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
+from contextlib import asynccontextmanager
 import hashlib
 import json
 import os
 from pathlib import Path
 from typing import Any
+
+from pma_evidence_review.private_faults import EpisodeFault, record_failure
 
 from harbor.llms.base import BaseLLM, LLMResponse
 from memory_agent.memory_enabled_agent import MemoryEnabledTerminus2
@@ -178,6 +181,8 @@ class PMAEpisode:
         self.last_sequence = 0
         self._responses: dict[str, tuple[str, dict[str, Any]]] = {}
         self._lock = asyncio.Lock()
+        self._failure = None
+        self._active_event_id = None
 
     def _record(self, event: dict[str, Any], result: dict[str, Any]) -> None:
         line = json.dumps({"event": event, "result": result},
@@ -187,8 +192,24 @@ class PMAEpisode:
             stream.flush()
             os.fsync(stream.fileno())
 
-    async def handle(self, event: dict[str, Any]) -> dict[str, Any]:
+    @asynccontextmanager
+    async def _event_boundary(self):
         async with self._lock:
+            if self._failure is not None:
+                # Same-worker fail-stop: never replay a partially executed event.
+                raise EpisodeFault(self._failure)
+            try:
+                yield
+            except Exception as error:
+                failure = record_failure(self.archive, error, event_id=self._active_event_id)
+                if self._active_event_id is not None:
+                    self._failure = failure
+                raise EpisodeFault(failure) from error
+            finally:
+                self._active_event_id = None
+
+    async def handle(self, event: dict[str, Any]) -> dict[str, Any]:
+        async with self._event_boundary():
             if not isinstance(event, dict):
                 raise ValueError("event must be an object")
             if (event.get("run_id"), event.get("task_id")) != (self.run_id, self.task_id):
@@ -206,6 +227,7 @@ class PMAEpisode:
                 return old_result
             if sequence != self.last_sequence + 1:
                 raise ValueError("event sequence gap or replay with unknown receipt")
+            self._active_event_id = event_id
             accepted_path = self.archive / "accepted.jsonl"
             with accepted_path.open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps({"event_id": event_id, "sequence": sequence,
@@ -223,8 +245,15 @@ class PMAEpisode:
                 result = self._task_end(event)
             else:
                 raise ValueError("unknown PMA event kind")
-            self._record(event, result)
             candidate_agent = self.agent._memory_agent
+            report = getattr(candidate_agent, 'last_citation_gate_report', {})
+            transport = getattr(candidate_agent, 'review_transport', None)
+            if (report.get('diagnostic_write_error') or report.get('finalization_error')
+                    or getattr(transport, 'audit_failure', None)):
+                failure = report.get('diagnostic_failure') or getattr(transport, 'audit_failure', None) or {}
+                raise RuntimeError('PMA audit persistence failed; prior_failure_id=' +
+                                   failure.get('failure_id', 'unavailable'))
+            self._record(event, result)
             if (getattr(self.agent, '_research_candidate', None) in {'pma_gap_memory_v0', 'pma_gap_evidence_v1'}
                     and result.get('triggered')):
                 with (self.archive / 'gap_cycle.jsonl').open('a', encoding='utf-8') as stream:

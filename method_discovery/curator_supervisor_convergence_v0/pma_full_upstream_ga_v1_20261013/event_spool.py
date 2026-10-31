@@ -13,6 +13,8 @@ import tempfile
 import time
 import uuid
 
+from pma_evidence_review.private_faults import EpisodeFault, record_failure
+
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -96,6 +98,7 @@ class EventDispatcher:
         self.requests = Path(request_dir).resolve(strict=True)
         self.responses = Path(response_dir).resolve(strict=True)
         self._processed = set()
+        self._outcomes = {}
         self.deadline_epoch = deadline_epoch
         if self.requests == self.responses or not self.requests.is_dir() or not self.responses.is_dir():
             raise SpoolError("invalid host event spool")
@@ -124,12 +127,23 @@ class EventDispatcher:
                     or (request.get("run_id"), request.get("task_id")) != (
                         self.episode.run_id, self.episode.task_id)):
                 raise SpoolError("event identity mismatch")
-            try:
-                result = await self.episode.handle(request)
-                response = {"status": "ok", "result": result}
-            except Exception as exc:
-                # Do not expose the bank, prompts, raw errors or credentials to GA.
-                response = {"status": "error", "error_type": type(exc).__name__}
+            cached = self._outcomes.get(path.name)
+            if cached is not None:
+                if cached[0] != request:
+                    raise SpoolError("event changed after processing")
+                response = dict(cached[1])
+            else:
+                try:
+                    result = await self.episode.handle(request)
+                    response = {"status": "ok", "result": result}
+                except Exception as exc:
+                    failure = (exc.failure if isinstance(exc, EpisodeFault) else
+                               record_failure(self.episode.archive, exc, event_id=request["event_id"]))
+                    # Private messages/stack/witnesses never cross the bridge.
+                    response = {"status": "error", "error_type": failure['error_type'],
+                                "failure_id": failure['failure_id']}
+                # Cache before receipt I/O: a failed receipt write must not re-execute.
+                self._outcomes[path.name] = (request, dict(response))
             if self.deadline_epoch is not None and time.time() >= self.deadline_epoch:
                 with (self.episode.archive / "late_results.jsonl").open(
                         "a", encoding="utf-8") as stream:
@@ -140,7 +154,12 @@ class EventDispatcher:
                 break
             response.update(run_id=self.episode.run_id, task_id=self.episode.task_id,
                             event_id=request["event_id"])
-            _atomic_json(self.responses / path.name, response)
+            try:
+                _atomic_json(self.responses / path.name, response)
+            except Exception as exc:
+                failure = record_failure(self.episode.archive, exc, event_id=request["event_id"])
+                raise EpisodeFault(failure) from exc
             self._processed.add(path.name)
+            self._outcomes.pop(path.name, None)
             count += 1
         return count

@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
 import sys
 
 from .inputs import D, require
+from .citation_inputs import identity
+from .private_faults import record_failure
 
 
 def durable(path, row):
@@ -46,6 +49,14 @@ class CapturedTransport:
         self.directory = Path(directory) if directory else None
         self.records = []
         self.calls = 0
+        self.audit_failure = None
+
+    def _durable(self, path, row):
+        try:
+            durable(path, row)
+        except Exception as error:
+            self.audit_failure = record_failure(self.directory, error)
+            raise
 
     async def send(self, request):
         # This exact payload is used by fake and real clients alike.
@@ -55,13 +66,17 @@ class CapturedTransport:
         row = {'call_index': self.calls, 'phase': request['phase'],
                'request': copy.deepcopy(payload), 'fake': self.fake,
                'audit_request_sha256': request.get('audit_request_sha256'),
-               'evidence_policy': request.get('evidence_policy')}
-        for key in ('review_strategy', 'op_index', 'focus_id', 'claim_index', 'submitted_evidence_sha256'):
+               'evidence_policy': request.get('evidence_policy'),
+               'effective_system_sha256': hashlib.sha256(payload['system'].encode('utf-8')).hexdigest(),
+               'effective_prompt_sha256': hashlib.sha256(payload['prompt'].encode('utf-8')).hexdigest(),
+               'effective_payload_sha256': identity(payload),
+               'operation_kind': request.get('operation_kind', request.get('audit_operation_kind'))}
+        for key in ('review_strategy', 'op_index', 'focus_id', 'claim_index', 'submitted_evidence_sha256', 'operation_kind'):
             if key in request:
                 row[key] = request[key]
         self.records.append(row)
         if self.directory:
-            durable(self.directory / 'requests.jsonl', row)
+            self._durable(self.directory / 'requests.jsonl', row)
         try:
             response = await self.client.call(**payload)
             content = getattr(response, 'content', None)
@@ -88,7 +103,7 @@ class CapturedTransport:
             raise
         finally:
             if self.directory:
-                durable(self.directory / 'responses.jsonl', {k: v for k, v in row.items()
+                self._durable(self.directory / 'responses.jsonl', {k: v for k, v in row.items()
                     if k != 'request'})
 
 

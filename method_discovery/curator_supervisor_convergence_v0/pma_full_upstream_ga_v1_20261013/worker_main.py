@@ -15,6 +15,7 @@ from types import SimpleNamespace
 
 from episode import PMAEpisode, construct_upstream
 from event_spool import EventDispatcher
+from pma_evidence_review.private_faults import record_failure
 from memory_agent.memory_enabled_agent import MemoryEnabledTerminus2
 from harbor.agents.terminus_2.terminus_2 import Terminus2
 
@@ -216,6 +217,7 @@ async def serve(args: argparse.Namespace) -> None:
             except (NotImplementedError, RuntimeError):
                 pass
     reason = "task_end"
+    worker_failure = None
     active = None
     try:
         while not episode.ended:
@@ -239,6 +241,7 @@ async def serve(args: argparse.Namespace) -> None:
             active = None
             await asyncio.sleep(0.05)
     except BaseException as exc:
+        worker_failure = record_failure(private, exc)
         reason = f"worker_error:{type(exc).__name__}"
         raise
     finally:
@@ -248,13 +251,16 @@ async def serve(args: argparse.Namespace) -> None:
             try:
                 outcome["local_save"] = episode.finalize_without_event(reason)
             except Exception as exc:
-                outcome["local_save"] = {"status": "failed", "error_type": type(exc).__name__}
+                failure = record_failure(private, exc)
+                outcome["local_save"] = {"status": "failed", "error_type": type(exc).__name__,
+                                         "failure_id": failure["failure_id"]}
             (private / "worker_stopped_without_task_end.json").write_text(
                 json.dumps(outcome, sort_keys=True), encoding="utf-8")
         (private / "worker_exit.json").write_text(json.dumps({
             "run_id": args.run_id, "task_id": args.task_id,
             "task_end_saved": episode.ended and reason == "task_end",
-            "reason": reason, "ended_epoch": time.time()}, sort_keys=True), encoding="utf-8")
+            "reason": reason, "ended_epoch": time.time(),
+            "failure_id": worker_failure["failure_id"] if worker_failure else None}, sort_keys=True), encoding="utf-8")
 
 
 def main() -> None:
