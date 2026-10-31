@@ -3,7 +3,7 @@ import sys
 import unittest
 from pma_evidence_review.tests.runtime_boundary_support import IMPORT_DOUBLES
 
-MODULES = ('test_runtime_boundary', 'test_execution_link_integration',
+MODULES = ('test_runtime_boundary', 'test_ga_spool_import_boundary', 'test_execution_link_integration',
            'test_claim_split', 'test_claim_split_simple', 'test_claim_split_semantic')
 OMITTED = 'test_frozen_small_comparison_materials_and_delete_na'
 

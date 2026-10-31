@@ -3,7 +3,7 @@
 1. 从固定生产基线 7718a6a912a139494326715fc99dea1a0b98bbc8 创建独立工作区。
    原活动 checkout E:/pma-execution-task-20261101 不改；本 Mac 环境无法读取该路径。
    本地源码快照来自已授权 GitHub connector。按 production.patch 接入七个生产文件，
-   加入两份测试和离线 runner；不可 cherry-pick 本地合成快照根提交。
+   加入三份测试/support 文件和离线 runner；不可 cherry-pick 本地合成快照根提交。
    GitHub 独立分支为 fix/pma-runtime-audit-boundary-7718；生产补丁提交
    5488f3e2cfa78efc68c65f773bb2416e5415fe98，父提交就是固定生产基线。
    首次 create_tree 被自动审批拒绝；父线程补充用户关于此确切仓库及上传的原话后，
@@ -44,3 +44,10 @@
 
 6. 完成工程验收后先回报测试、请求身份和私有日志/公开回执边界，不自动跑真实 Task。
    后续真实 Task 需用户另外授权。新方法同数据集旧结果直接复用，绝不重跑旧对照。
+
+部署窄修补充：event_spool 同时供 GA 导入 EventClient 使用，不能顶层依赖宿主
+pma_evidence_review。private_faults 导入已移到 EventDispatcher.serve_once 内。
+新增 test_ga_spool_import_boundary 用仅两份 GA 文件、python -I -S 的新进程验证
+无宿主包也能导入/构造客户端；测试只导入，不交换事件、不发网络、不运行容器。
+当前最终离线结果为 10 项定向/45 项相关回归。公开导出器未取得，因此排除
+private_failures 是开发验收硬门槛；该项未通过前不能公开包含运行日志的诊断归档。

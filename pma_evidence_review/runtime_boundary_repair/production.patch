@@ -115,19 +115,10 @@ index 753fc16..2bf4b3f 100644
                      and result.get('triggered')):
                  with (self.archive / 'gap_cycle.jsonl').open('a', encoding='utf-8') as stream:
 diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/event_spool.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/event_spool.py
-index c59e86f..e74f537 100644
+index c59e86f..4049e2b 100644
 --- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/event_spool.py
 +++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/event_spool.py
-@@ -13,6 +13,8 @@ import tempfile
- import time
- import uuid
- 
-+from pma_evidence_review.private_faults import EpisodeFault, record_failure
-+
- from typing import TYPE_CHECKING
- 
- if TYPE_CHECKING:
-@@ -96,6 +98,7 @@ class EventDispatcher:
+@@ -96,6 +96,7 @@ class EventDispatcher:
          self.requests = Path(request_dir).resolve(strict=True)
          self.responses = Path(response_dir).resolve(strict=True)
          self._processed = set()
@@ -135,7 +126,15 @@ index c59e86f..e74f537 100644
          self.deadline_epoch = deadline_epoch
          if self.requests == self.responses or not self.requests.is_dir() or not self.responses.is_dir():
              raise SpoolError("invalid host event spool")
-@@ -124,12 +127,23 @@ class EventDispatcher:
+@@ -107,6 +108,7 @@ class EventDispatcher:
+             raise SpoolError("private PMA archive must not be inside shared spool")
+ 
+     async def serve_once(self) -> int:
++        from pma_evidence_review.private_faults import EpisodeFault, record_failure
+         count = 0
+         for path in sorted(self.requests.glob("*.json")):
+             if self.deadline_epoch is not None and time.time() >= self.deadline_epoch:
+@@ -124,12 +126,23 @@ class EventDispatcher:
                      or (request.get("run_id"), request.get("task_id")) != (
                          self.episode.run_id, self.episode.task_id)):
                  raise SpoolError("event identity mismatch")
@@ -165,7 +164,7 @@ index c59e86f..e74f537 100644
              if self.deadline_epoch is not None and time.time() >= self.deadline_epoch:
                  with (self.episode.archive / "late_results.jsonl").open(
                          "a", encoding="utf-8") as stream:
-@@ -140,7 +154,12 @@ class EventDispatcher:
+@@ -140,7 +153,12 @@ class EventDispatcher:
                  break
              response.update(run_id=self.episode.run_id, task_id=self.episode.task_id,
                              event_id=request["event_id"])

@@ -13,8 +13,6 @@ import tempfile
 import time
 import uuid
 
-from pma_evidence_review.private_faults import EpisodeFault, record_failure
-
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -110,6 +108,7 @@ class EventDispatcher:
             raise SpoolError("private PMA archive must not be inside shared spool")
 
     async def serve_once(self) -> int:
+        from pma_evidence_review.private_faults import EpisodeFault, record_failure
         count = 0
         for path in sorted(self.requests.glob("*.json")):
             if self.deadline_epoch is not None and time.time() >= self.deadline_epoch:

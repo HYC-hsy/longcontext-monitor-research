@@ -49,10 +49,10 @@ exactly-once transactions. Never restart/replay accepted maintenance automatical
 
 Run from repository root with the production Python environment:
 
-    python -m unittest pma_evidence_review.tests.test_runtime_boundary -v
+    python -m unittest pma_evidence_review.tests.test_runtime_boundary pma_evidence_review.tests.test_ga_spool_import_boundary -v
     python -m pma_evidence_review.runtime_boundary_repair.run_offline_checks
 
-Executed locally with Python 3.12: 9 focused tests and 44 targeted checks passed.
+Executed locally with Python 3.12: 10 focused tests and 45 targeted checks passed.
 One frozen-dataset comparison-plan test is excluded because that dataset is not
 part of this scoped source snapshot. No old model runs or evaluations were rerun.
 Here optional shortuuid, rpds, regex and Harbor imports needed documented test
@@ -68,3 +68,14 @@ the production baseline. The first source-tree upload was denied; one retry was
 approved only after additional trusted user evidence clarified the exact target
 repository and upload request. No alternate channel, force push or default merge.
 Tests and handoff are a subsequent commit; consult the final delivery for its SHA.
+
+Deployment boundary: offline_launcher copies event_spool.py into a standalone GA
+staging directory (including stateful/other adapter paths); only host PYTHONPATH
+includes the research audit package. Fault imports therefore live inside the
+EventDispatcher.serve_once host method, never at EventClient module import. A
+fresh Python -I -S subprocess imports only event_spool.py and pma_upstream_bridge.py,
+asserts the host package is unavailable, and constructs both GA clients. This is
+an offline import check, not a container/Task run. Public archive exclusion of
+private_failures is a developer acceptance hard gate, still unverified because
+the experiment-specific exporter was not supplied; do not publish runtime log
+archives until that gate is satisfied.
