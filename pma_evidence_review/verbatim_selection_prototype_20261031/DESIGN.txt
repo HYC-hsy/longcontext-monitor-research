@@ -1,0 +1,119 @@
+PMA selection/presentation contract prototype
+===========================================
+Scope: isolated engineering proof, Python 3.9+ standard library only. This does
+not implement or change semantic review, its prompt, selected-evidence protocol,
+repair policy or admission rules. It does not run models or benchmark tasks.
+
+Trust and storage
+-----------------
+The host owns task_text and opaque nonempty string task_version. Whole task only; no automatic
+splitting or interpretation of later instructions. Existing gate supplies only
+already committed records, each with globally unique nonempty string id,
+nonempty string revision, category knowledge/procedural/gap and exact string text.
+Native IDs, revisions and task version hashes are preserved without remapping,
+trimming, coercion or parsing. The adapter text is the raw entry content, not a
+decorated display string containing source excerpts or binding metadata.
+The adapter cannot infer approval from record contents. In production it must
+read the committed store, not organizer proposals or selector-provided records.
+The test MockCommittedGate has separate explicit committed/rejected fixtures.
+It is not a reviewer; the fixture supplies no selector approval shortcut.
+
+freeze_snapshot copies values into frozen dataclasses and tuples. Its caller
+must obtain an atomic store read under the existing lock/transaction, and mint
+a unique cycle token per attempt (including retries). Internal status is a
+separate judgment field, never a candidate. The selector may see it for judgment;
+do not serialize the entire snapshot to the task agent. The task agent receives
+only validated Outcome blocks. TaskRef and MemoryRef are distinct types.
+
+Exact selector protocol
+-----------------------
+{
+  "cycle": "host-cycle-token",
+  "task_version": "task_sha_318ac9",
+  "decision": "intervene",
+  "references": [
+    {"kind": "task", "version": "task_sha_318ac9"},
+    {"kind": "memory", "id": "G2ng7ij2", "revision": "rev_0985b131ecd044d2b8a443142c37b5a2"}
+  ]
+}
+Only these fields are accepted. no_intervention requires []; intervene requires
+at least one reference. Unknown fields, duplicate JSON keys, nonfinite numbers,
+wrong JSON types (including numeric/boolean IDs), unknown kinds/IDs, wrong revisions,
+duplicate references, prose/fences and selector-written text/approval are errors.
+The prototype adds no byte, reference-count or host-text policy caps. Preserve
+existing upstream transport limits during integration; report actual transport
+limit errors explicitly before dispatch, without dropping references, truncating
+selected text or falling back to model-written text.
+
+Delivery policy
+---------------
+Host verifies active cycle and task_version and dispatches under the same lock
+or equivalent compare-and-swap transaction. Output must match that identity.
+Within an active cycle, pinned snapshot text remains deliverable even if live
+items are edited/deleted. There is no live lookup and no substitution of a later
+revision or reused ID. To revoke pending snapshot contents, advance the cycle;
+task changes must replace task_version and advance cycle. Never reuse cycle tokens.
+Reject an old snapshot even when its decision says no_intervention.
+This deliberately permits pinned old text within a valid cycle; if instantaneous
+deletion revocation is required, integration must invalidate the cycle atomically.
+
+All references validate before any blocks are returned. Requested order and text
+are preserved exactly, including Unicode, CRLF, leading/trailing spaces and tabs.
+delivery_json supplies a deterministic JSON data envelope. Decode JSON to obtain
+the exact text strings; ASCII JSON escaping makes UTF-8 encoding safe even for
+lone surrogate code points in text or opaque identities. Do not interpolate
+source text into executable templates or unescaped structural delimiters.
+
+Outcomes are intervention, no_intervention, error. Every error has no blocks and
+an error code. Invalid outputs must not be relabeled no_intervention or repaired
+with a model-written note. The surrounding system retains its existing error/
+repair policy; this prototype invents no retry or feedback loop. Selection is
+read-only: hiding an unresolved gap does not resolve or remove it.
+
+Integration steps for the development thread
+--------------------------------------------
+1. Leave phase-1 proposal and all reviewer/admission behavior unchanged.
+2. After existing commits finish, atomically capture task, internal status and
+   committed entries. Preserve native opaque IDs and revision IDs exactly; use
+   raw content rather than decorated display text. No numeric remapping layer.
+   Copy the host-owned task version/hash without interpreting its contents.
+3. Give phase 2 the judgment context plus selectable task/entry identities and
+   their exact text. Its output schema is only the protocol above. No prose note.
+4. Parse/validate and dispatch pinned blocks under the active-cycle check. Route
+   errors to existing explicit failure handling, never to semantic no_intervention.
+5. Replace only presentation assembly; preserve scheduling and gap lifecycle.
+   Log cycle, task version, selected IDs/revisions and outcome for diagnosis.
+6. Run these tests against the real adapter, then the authorized development
+   thread can run its existing end-to-end tests/evaluation separately.
+
+Run
+---
+cd pma_contract_prototype
+python3 -m unittest -v
+python3 contract.py
+
+Observed locally: Python 3.9.6; 14 unittest tests passed, 0 failures/errors;
+demo rendered a task-only intervention with original trailing newline intact.
+First run exposed Python 3.9 union-annotation compatibility; postponed annotation
+evaluation fixed it before the successful run. No dependency installation.
+
+Covered invariants: task-only; every entry category; mixed ordering; genuine no
+intervention; hidden gap retained; forbidden status; unknown/rejected entry;
+wrong revision; extra text/approval injection; decision conflicts; duplicates;
+Unicode/whitespace; malformed JSON/types; mutated/deleted/reused live records;
+frozen snapshot; stale cycle/task identity; native opaque identity preservation;
+empty/non-string identity rejection; UTF-8-safe delivery of lone-surrogate text
+and identities with exact decoded strings; selector output exceeding the removed
+65,536-byte/128-reference caps with exact host text; malformed store records.
+
+Limits
+------
+These tests establish these deterministic contract behaviors, not semantic
+usefulness or absence of all engineering bugs. Bad committed facts, organizer
+omissions, misleading status, selection quality, malicious instructions already
+inside approved source text, real transport limits, locking and actual model
+schema compliance remain integration/semantic concerns. No semantic fix,
+automatic task splitting, Ambient variant, planner, gap redesign or feedback
+loop was added. Frozen dataclasses enforce API discipline, not a sandbox against
+host Python code deliberately bypassing the API. No research repository,
+credentials, profiles, shared cache, tasks or installed software were changed.
