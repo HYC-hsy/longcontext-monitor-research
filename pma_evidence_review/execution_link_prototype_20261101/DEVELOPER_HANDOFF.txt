@@ -1,0 +1,29 @@
+请基于 HYC-hsy/longcontext-monitor-research 固定生产代码 a0f35e1ab4586472ebc0768b87e3cc228f36aa14，在独立分支接入本目录“已选证据的工具调用关系”候选。先核对 MANIFEST.json，再读 README.md、HANDOFF.md、REUSE.md、VERIFICATION.md。
+
+一、只修输入关系，不加题目特判
+复用现有 SourceRecord/SourceSnapshot/parent-wrapper，宿主按真实调用 ID 和已接受事件身份生成短 X。不能按数组下标、同event_order或文字相似度配对。已知不同调用保留不同X；只选一侧时另一侧为空。缺ID、重复、缺wrapper、来源歧义保持未绑定，不等于自动拒绝；同调用也不等于成功。完整field_path和已选原文保留，长ID/hash留宿主。
+不要写SQLite/PATH特判、必须持久生效或必须跨环境验证的通用规则。不同调用的证据仍可联合支持结论。不新增模型角色、关联调用、检索系统或Skill/Plugin加载器。
+
+二、必须完成真实接线，不能仅复制原型
+当前_parts不直接提供accepted_events。优先在原事件接受时计算完整命令/结果ID inventory及事件摘要，绑定原event身份，随现有窗口保留/淘汰；包含重复及缺失标记，不另存无限历史。不能拿截断source目录代替完整inventory。记录digest_kind=accepted_public_envelope，先走现有catalog校验，同周期可复用Context。
+沿HANDOFF接入_attempt、audit_request、模型视图和返工；模型不能提供或覆盖绑定。保留既有引文资格、完整操作审核、子项合取、删除目标/版本控制及返工预算。不要修改Phase2、状态、GAP schema或默认策略。
+使用system_for的原四步流程，在HANDOFF指定位置加入SCOPE_NOTE一次，不叠加重复规则。输出协议不变。E/X关系必须随已选材料进入原返工反馈，但严禁把完整host witness/未选正文送审或送返工。ProjectionError走独立工程失败，不冒充insufficient；原parse_failure映射保留。
+
+三、证据与历史结果
+旧B0、旧三例和返回保持不变，绝不追认。默认只组织既有已选引文。
+optional_extended_evidence_B1.json是显式新版本准备材料，不在本轮调用计划中。若以后使用，必须沿原引用资格重新核对，并保存新旧hash及来源差异。
+真实事件21/23是公开数据重建，仅局部来源目录，不是历史完整visibility。生产必须用实际窗口和身份链，不能把fixture合成的可见性自授为生产资格。
+
+四、最少必要验证
+只做原型8项及受影响的生产定向检查，尤其实际事件采集→SourceSnapshot→短X→请求→理由/返工映射。检查乱序同索引不同ID、未选重复ID、多leaf去重、缺失/歧义、调用上下文随窗口失效，以及无未选正文泄漏。不重跑无关全量测试。
+原型8项与公开重建检查不是生产接入通过；完整本地模块导入曾因缺regex受限，VERIFICATION已说明。请在已有正常生产环境验收，不把该限制当已验证。
+
+随后只做3次新候选reviewer-only重放，不运行拆分、Task或原生评价：
+- fixtures/frozen_candidate_cases.json的fact_only。
+- 同文件fact_plus_plan：事实句、类别、B、顺序、system与前者相同，只追加原未来计划。
+- different_call_build：人工非SQLite例，命令与成功回执属于不同调用；未选失败内容不得进入模型。
+人工参考supported/supported/insufficient已单独冻结于reference_labels_development_only.json，不送给模型。candidate_model_requests.json只是离线参考，实际请求由接入后的生产构造器生成并核对。不要把已见开发案例称为盲测或泛化证明。
+
+记录真实模型/可取得参数、最终代码SHA、实际system/prompt/host context身份、请求与原始可见返回、E/X对应、准入结果、工程错误及实际调用数。三次后停止，不为通过而自动重试或改标签；不启动完整Task。只跑新候选，旧组复用；任何旧组重跑须先说明理由和成本并取得用户同意。
+
+提交独立GitHub分支并回读核对，给出生产SHA及逐项诊断。公开材料按原脱敏规则，不上传凭据、私有端点、隐藏思考或隐藏测试正文。结论分别说明工程是否接通、证据关联是否被模型采用、有没有误放/误拒；不能以协议通过或无专用分支宣称无过拟合。
