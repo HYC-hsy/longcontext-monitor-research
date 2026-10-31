@@ -13,6 +13,8 @@ from pma_evidence_review.prompt_strategy import ONE_SENTENCE
 from pma_evidence_review.claim_split import STRATEGY as CLAIM_SPLIT
 from pma_evidence_review import claim_split_simple as simple_split
 from pma_evidence_review import claim_split_semantic as semantic_split
+from pma_evidence_review import execution_link
+from gap_evidence_alignment import _validate_catalog
 
 SPLIT_STRATEGIES = (CLAIM_SPLIT, simple_split.STRATEGY, semantic_split.STRATEGY)
 from pma_evidence_review.gate_control import repair, receipt
@@ -63,6 +65,7 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
         self.pending_receipt=None
         self.receipt_deliveries=[]
         self._included_receipt=None
+        self._execution_context=None
 
     def _maintenance_control_suffix(self):
         self._included_receipt=deepcopy(self.pending_receipt)
@@ -78,6 +81,7 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
             self._draft=None
             self._parts=None
             self._included_receipt=None
+            self._execution_context=None
 
     async def _call_llm_phase1(self, user_prompt):
         self.transport_phase='maintenance'
@@ -182,6 +186,11 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
             operation=self._apply_operation(draft,name,args,index)
             envelope,request=build_live(draft,self._parts,operation,index,run_id=self.run_id,review_strategy=self.review_strategy)
         if request is not None and self.review_strategy==semantic_split.STRATEGY:
+            if self._execution_context is None:
+                self._execution_context=execution_link.context_from_inventory(
+                    self._parts.catalog, _validate_catalog,
+                    getattr(self, '_accepted_execution_inventory', {}))
+            request['audit_execution_context']=self._execution_context
             # Host-only action identity. A save_* tool may create OR revise;
             # the reviewer must not guess from the availability of old text.
             if name=='memory_delete':
@@ -198,7 +207,9 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
                                                else None)
         operation.content_status='candidate_not_published'
         row['candidate']=deepcopy(vars(operation))
-        row.update(candidate=deepcopy(vars(operation)),input=envelope,request=request,
+        report_request=({k:v for k,v in request.items() if k!='audit_execution_context'}
+                        if request is not None else None)
+        row.update(candidate=deepcopy(vars(operation)),input=envelope,request=report_request,
                    preparation=envelope['preparation']['status'])
         if request is None:row['error_code']='citation_preparation_'+row['preparation']
         else:

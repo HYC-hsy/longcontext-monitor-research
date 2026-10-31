@@ -117,6 +117,9 @@ def prepare_context(wrapper):
     raw = wrapper._get_memory_agent_context()
     agent = wrapper._memory_agent
     blocks = []
+    if getattr(agent, 'review_strategy', None) == 'claim-split-same-evidence-v4':
+        # Same bounded task window as the source catalog; no event bodies retained.
+        agent._accepted_execution_inventory = {}
     try:
         def add(identity, role, text, path, **metadata):
             if text:
@@ -131,6 +134,10 @@ def prepare_context(wrapper):
         if type(size) is not int or size < 1:
             raise ValueError("invalid evidence window")
         for entry in wrapper._accumulated_observations[1:][-size:]:
+            if getattr(agent, 'review_strategy', None) == 'claim-split-same-evidence-v4':
+                item = entry.get('_execution_inventory')
+                if item is not None:
+                    agent._accepted_execution_inventory[item['event_id']] = item
             identity = entry["_evidence_identity"]
             add(identity, "agent_report", entry.get("analysis"), "response")
             for index, command in enumerate((entry.get("commands") or [])[:5]):

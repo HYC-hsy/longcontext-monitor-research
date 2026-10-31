@@ -4,7 +4,7 @@ The host retains B across the split call. No retrieval, semantic acceptance rule
 or extra model role is introduced here.
 """
 from copy import deepcopy
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import json
 
 from . import claim_split_simple as v3
@@ -12,6 +12,7 @@ from .citation_inputs import identity
 from . import citation_inputs as ci
 from .inputs import require
 from . import operation_audit
+from . import execution_link
 
 STRATEGY = 'claim-split-same-evidence-v4'
 
@@ -138,12 +139,33 @@ def audit_request(request, claims):
         material, claims, before=request.get('audit_before_entry'),
         operation_kind=request.get('audit_operation_kind'))
     audit_batch = adapted.batch
-    model_request = v3._request(operation_audit.system_for(audit_batch),
+    system = operation_audit.system_for(audit_batch)
+    execution_view = None
+    context = request.get('audit_execution_context')
+    if context is not None:
+        projection = execution_link.project(material['submitted_evidence'], context)
+        execution_view = projection.model_input()
+        view = execution_link.replace_evidence_view(audit_batch.model_input(), projection)
+        context_sha = identity({'sources': context.frozen_sources,
+                                'inventory': context.frozen_inventory})
+        audit_batch = replace(audit_batch,
+            request_id=identity({'original_request': audit_batch.request_id,
+                                 'context_sha256': context_sha,
+                                 'execution_view': execution_view}),
+            frozen_material=operation_audit.canonical(view))
+        anchor = 'operation A, before-entry, task excerpt and claims help interpretation, not proof.'
+        if system.count(anchor) != 1:
+            raise execution_link.ProjectionError('scope_note_anchor')
+        system = system.replace(anchor, anchor + '\n' + execution_link.SCOPE_NOTE, 1)
+    model_request = v3._request(system,
         'TARGET AND SHARED SUBMITTED EVIDENCE (A is not evidence):\n' +
         json.dumps(audit_batch.model_input(), ensure_ascii=True, sort_keys=True),
         'citation_claim_verify_batch', material, STRATEGY)
     model_request['submitted_evidence_sha256'] = identity(material['submitted_evidence'])
     model_request['operation_audit_request_id'] = audit_batch.request_id  # host-only
+    if execution_view is not None:
+        model_request['execution_context_sha256'] = context_sha
+        model_request['execution_evidence_view'] = execution_view  # selected B only
     return audit_batch, model_request
 
 
@@ -151,7 +173,12 @@ async def review_stage(request, transport, result):
     if result['engineering_status'] != 'split_ready':
         return result
     material = deepcopy(request['closed_material'])
-    audit_batch, model_request = audit_request(request, result['claims'])
+    try:
+        audit_batch, model_request = audit_request(request, result['claims'])
+    except execution_link.ProjectionError as error:
+        result.update(engineering_status='projection_failure', verdict=None,
+                      model_verdict=None, reason=str(error), explanation=str(error))
+        return result
     batch = await v3._call(model_request, transport)
     result['batch'] = batch
     if batch['engineering_status'] != 'received':
@@ -170,12 +197,18 @@ async def review_stage(request, transport, result):
     batch['engineering_status'] = 'ok'
     feedback = {'original_operation': material['original_operation'],
                 'claims': mapped['claim_reviews'], 'overall': mapped['overall'],
-                'submitted_evidence': material['submitted_evidence'],
+                'submitted_evidence': model_request.get('execution_evidence_view',
+                    material['submitted_evidence']),
                 'audit_guidance': mapped['repair_feedback']}
+    if 'execution_evidence_view' in model_request:
+        feedback['execution_links'] = model_request['execution_evidence_view']
     result.update(claim_reviews=mapped['claim_reviews'], overall=mapped['overall'],
                   verdict=mapped['verdict'], model_verdict=mapped['model_verdict'],
                   engineering_status='ok', explanation=mapped['explanation'],
                   repair_feedback=feedback)
+    if 'execution_evidence_view' in model_request:
+        result['execution_link'] = {'context_sha256': model_request['execution_context_sha256'],
+                                    'selected_view': model_request['execution_evidence_view']}
     return result
 
 

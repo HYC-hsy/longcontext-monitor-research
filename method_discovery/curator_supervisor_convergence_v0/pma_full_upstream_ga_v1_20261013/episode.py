@@ -420,6 +420,9 @@ class PMAEpisode:
         if getattr(self.agent, "_research_candidate", None) == "pma_gap_evidence_v1":
             from evidence_gap_context import event_identity
             self.agent._accumulated_observations[-1]["_evidence_identity"] = event_identity(event)
+            if getattr(self.agent._memory_agent, 'review_strategy', None) == 'claim-split-same-evidence-v4':
+                from pma_evidence_review.execution_link import inventory_from_accepted_event
+                self.agent._accumulated_observations[-1]["_execution_inventory"] = inventory_from_accepted_event(event)
         triggered, reason = self.agent._trigger.should_trigger(step_count=step)
         if triggered:
             if getattr(self.agent, "_research_candidate", None) == "pma_gap_evidence_v1":
