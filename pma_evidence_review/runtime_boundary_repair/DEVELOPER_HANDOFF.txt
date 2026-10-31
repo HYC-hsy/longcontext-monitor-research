@@ -51,3 +51,9 @@ pma_evidence_review。private_faults 导入已移到 EventDispatcher.serve_once 
 无宿主包也能导入/构造客户端；测试只导入，不交换事件、不发网络、不运行容器。
 当前最终离线结果为 10 项定向/45 项相关回归。公开导出器未取得，因此排除
 private_failures 是开发验收硬门槛；该项未通过前不能公开包含运行日志的诊断归档。
+
+生产离线严格模式（必要验收）：先设置 PMA_TEST_STRICT_IMPORTS=1，再运行 README
+两条命令；Windows PowerShell 可用 $env:PMA_TEST_STRICT_IMPORTS='1'。此模式在
+任何依赖替身注入前检查缺失库并立即报阻塞，不允许以替身通过生产验收。LLM 仍用
+测试假客户端，绝不调用真实模型。当前本机 strict-mode-blocked.log 是缺依赖的
+真实失败记录；10/45 通过只是明确启用替身的本机工程检查，不能称生产全部通过。

@@ -49,8 +49,8 @@ exactly-once transactions. Never restart/replay accepted maintenance automatical
 
 Run from repository root with the production Python environment:
 
-    python -m unittest pma_evidence_review.tests.test_runtime_boundary pma_evidence_review.tests.test_ga_spool_import_boundary -v
-    python -m pma_evidence_review.runtime_boundary_repair.run_offline_checks
+    PMA_TEST_STRICT_IMPORTS=1 python -m unittest pma_evidence_review.tests.test_runtime_boundary pma_evidence_review.tests.test_ga_spool_import_boundary -v
+    PMA_TEST_STRICT_IMPORTS=1 python -m pma_evidence_review.runtime_boundary_repair.run_offline_checks
 
 Executed locally with Python 3.12: 10 focused tests and 45 targeted checks passed.
 One frozen-dataset comparison-plan test is excluded because that dataset is not
@@ -79,3 +79,11 @@ an offline import check, not a container/Task run. Public archive exclusion of
 private_failures is a developer acceptance hard gate, still unverified because
 the experiment-specific exporter was not supplied; do not publish runtime log
 archives until that gate is satisfied.
+
+Strict production offline acceptance: PMA_TEST_STRICT_IMPORTS=1 prohibits dependency
+stand-ins before any are installed in sys.modules; missing dependencies fail import
+and block acceptance. Scripted LLM replies remain required. On Windows PowerShell,
+set $env:PMA_TEST_STRICT_IMPORTS='1' before either command. Here strict mode is
+blocked by missing regex/rpds/shortuuid/harbor; strict-mode-blocked.log records that
+expected blocker, not a passing production run. The 10/45 passing logs are from
+the explicitly disclosed stand-in environment with strict mode disabled.

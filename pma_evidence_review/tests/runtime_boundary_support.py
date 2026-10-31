@@ -1,5 +1,6 @@
 """Offline optional-import doubles; production gate/episode/wrapper methods stay real."""
 import importlib.util
+import os
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace as NS
@@ -12,6 +13,14 @@ STAGE = ROOT / 'method_discovery/curator_supervisor_convergence_v0/pma_full_upst
 for path in (STAGE, STAGE / 'vendor/pma_89e5c0d/src',
              STAGE / 'vendor/pma_89e5c0d/external/harbor/src'):
     sys.path.insert(0, str(path))
+
+
+STRICT_IMPORTS = os.environ.get('PMA_TEST_STRICT_IMPORTS') == '1'
+if STRICT_IMPORTS:
+    missing = [name for name in ('regex', 'rpds', 'shortuuid', 'harbor')
+               if importlib.util.find_spec(name) is None]
+    if missing:
+        raise ModuleNotFoundError('PMA strict offline imports blocked; missing: ' + ', '.join(missing))
 
 
 def module(name, **attrs):
