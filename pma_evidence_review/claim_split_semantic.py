@@ -11,6 +11,7 @@ from . import claim_split_simple as v3
 from .citation_inputs import identity
 from . import citation_inputs as ci
 from .inputs import require
+from . import operation_audit
 
 STRATEGY = 'claim-split-same-evidence-v4'
 
@@ -118,7 +119,6 @@ def split_request(material, index):
                           json.dumps(target, ensure_ascii=False),
                           'citation_claim_split', material, STRATEGY)
     request['closed_material'] = deepcopy(material)  # host-only, never sent by transport
-    request['batch_system'] = VERIFY_SYSTEM         # host-only, used for second request
     return request
 
 
@@ -126,8 +126,57 @@ async def split_stage(request, transport):
     return await v3.split_stage(request, transport)
 
 
+def audit_request(request, claims):
+    """Build the one production batch request from frozen split output; no call."""
+    material = deepcopy(request['closed_material'])
+    # The action and prior body are frozen by the host, not inferred by the
+    # reviewer from whether a before-entry happened to be available.
+    adapted = operation_audit.from_closed_material(
+        identity({'material': material, 'claims': claims,
+                  'operation_kind': request.get('audit_operation_kind'),
+                  'before': request.get('audit_before_entry')}),
+        material, claims, before=request.get('audit_before_entry'),
+        operation_kind=request.get('audit_operation_kind'))
+    audit_batch = adapted.batch
+    model_request = v3._request(operation_audit.system_for(audit_batch),
+        'TARGET AND SHARED SUBMITTED EVIDENCE (A is not evidence):\n' +
+        json.dumps(audit_batch.model_input(), ensure_ascii=True, sort_keys=True),
+        'citation_claim_verify_batch', material, STRATEGY)
+    model_request['submitted_evidence_sha256'] = identity(material['submitted_evidence'])
+    model_request['operation_audit_request_id'] = audit_batch.request_id  # host-only
+    return audit_batch, model_request
+
+
 async def review_stage(request, transport, result):
-    return await v3.review_stage(request, transport, result)
+    if result['engineering_status'] != 'split_ready':
+        return result
+    material = deepcopy(request['closed_material'])
+    audit_batch, model_request = audit_request(request, result['claims'])
+    batch = await v3._call(model_request, transport)
+    result['batch'] = batch
+    if batch['engineering_status'] != 'received':
+        result.update(engineering_status=batch['engineering_status'],
+                      reason=batch.get('reason', batch.get('error_type')))
+        return result
+    parsed = operation_audit.parse_batch(audit_batch, batch['raw_response'],
+                                         completion_request_id=audit_batch.request_id)
+    batch['normalized'] = parsed.normalized
+    if parsed.engineering_status != 'ok':
+        batch.update(engineering_status='parse_failure', reason=parsed.error)
+        result.update(engineering_status='parse_failure', verdict=None,
+                      model_verdict=None, reason=parsed.error, explanation=parsed.error)
+        return result
+    mapped = operation_audit.production_result_example(audit_batch, parsed)
+    batch['engineering_status'] = 'ok'
+    feedback = {'original_operation': material['original_operation'],
+                'claims': mapped['claim_reviews'], 'overall': mapped['overall'],
+                'submitted_evidence': material['submitted_evidence'],
+                'audit_guidance': mapped['repair_feedback']}
+    result.update(claim_reviews=mapped['claim_reviews'], overall=mapped['overall'],
+                  verdict=mapped['verdict'], model_verdict=mapped['model_verdict'],
+                  engineering_status='ok', explanation=mapped['explanation'],
+                  repair_feedback=feedback)
+    return result
 
 
 async def assess(request, transport):

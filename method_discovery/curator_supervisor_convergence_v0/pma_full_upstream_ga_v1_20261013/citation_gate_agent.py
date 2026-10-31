@@ -181,6 +181,21 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
         else:
             operation=self._apply_operation(draft,name,args,index)
             envelope,request=build_live(draft,self._parts,operation,index,run_id=self.run_id,review_strategy=self.review_strategy)
+        if request is not None and self.review_strategy==semantic_split.STRATEGY:
+            # Host-only action identity. A save_* tool may create OR revise;
+            # the reviewer must not guess from the availability of old text.
+            if name=='memory_delete':
+                request['audit_operation_kind']='delete'
+                request['audit_before_entry']={'content':envelope['operation']['existing_gap']}
+            else:
+                revision=draft.revisions[operation.revision_id]
+                previous=revision.previous_revision_id
+                request['audit_operation_kind']=('update' if name=='memory_update_status' or previous
+                                                 else 'save')
+                old=draft.revisions.get(previous) if previous else None
+                old_text=draft.blobs.get(old.content_sha256) if old is not None else None
+                request['audit_before_entry']=({'content':old_text} if isinstance(old_text,str)
+                                               else None)
         operation.content_status='candidate_not_published'
         row['candidate']=deepcopy(vars(operation))
         row.update(candidate=deepcopy(vars(operation)),input=envelope,request=request,

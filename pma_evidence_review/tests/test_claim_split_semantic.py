@@ -9,7 +9,7 @@ from unittest.mock import patch
 from pma_evidence_review import claim_split_semantic as v4
 from pma_evidence_review import claim_split_simple as v3
 from pma_evidence_review.prompt_strategy import ONE_SENTENCE
-from pma_evidence_review.tests.test_claim_split import material
+from pma_evidence_review.tests.test_claim_split import material as v2_material
 from pma_evidence_review.tests.no_network import install_guard
 from pma_evidence_review.transport import CapturedTransport, FakeClient
 from pma_evidence_review.tests.test_live_gate import (
@@ -22,7 +22,18 @@ def judgment(verdict='supported'):
 
 
 def batch(verdict='supported'):
-    return {'overall': judgment(verdict), 'results': [judgment(verdict)]}
+    return [['O', verdict, 'Scripted complete-operation evidence judgment.'],
+            ['C1', verdict] if verdict == 'supported' else
+            ['C1', verdict, 'Scripted subclaim evidence limit.']]
+
+
+def material(content='A succeeded and B is required.'):
+    """Use the actual v4 alternate-origin closed-material shape."""
+    value = v2_material(content)
+    for record in value['submitted_evidence']:
+        record['alternative_origins'] = [{key: record.pop(key) for key in
+            ('role', 'field_path', 'source_id', 'event_order')}]
+    return value
 
 
 class SemanticSplitTests(unittest.TestCase):
@@ -31,6 +42,8 @@ class SemanticSplitTests(unittest.TestCase):
     def test_split_payload_has_no_evidence_and_batch_reuses_frozen_b(self):
         source = material('If enabled, the command ran and caused installation to succeed.')
         request = v4.split_request(source, 0)
+        request['audit_operation_kind'] = 'save'
+        request['audit_before_entry'] = None
         self.assertNotIn('submitted_evidence', request['prompt'])
         self.assertNotIn('A succeeded.', request['prompt'])
         self.assertIn('If enabled', request['prompt'])
@@ -46,6 +59,8 @@ class SemanticSplitTests(unittest.TestCase):
 
     def test_partial_and_bad_cardinality_do_not_publish_semantic_success(self):
         request = v4.split_request(material(), 0)
+        request['audit_operation_kind'] = 'save'
+        request['audit_before_entry'] = None
         for answer, expected in [(batch('insufficient'), 'insufficient'),
                                  ({'overall': judgment(), 'results': []}, None)]:
             transport = CapturedTransport(FakeClient([json.dumps(['Whole original claim.']), json.dumps(answer)]), fake=True)

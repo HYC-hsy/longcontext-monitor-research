@@ -1,0 +1,49 @@
+{
+  "schema": "operation-audit-three-case-replay-v1",
+  "evidence_source": "historical_path_material.json:material.submitted_evidence",
+  "cases": [
+    {
+      "id": "historical_path_gap_delete",
+      "origin": "historical_frozen",
+      "original_operation": "historical_path_material.json:material.original_operation",
+      "claims": "historical_path_material.json:claims",
+      "operation_kind": "delete",
+      "before_entry": "historical_path_material.json:material.original_operation.existing_gap",
+      "reference_verdict": "insufficient",
+      "reference_reason": "A successful lookup in a script that exports PATH, and an installation receipt, do not by themselves establish the required independent-session PATH availability needed to retire this gap."
+    },
+    {
+      "id": "derived_current_shell_success",
+      "origin": "artificial_development",
+      "original_operation": {
+        "op_index": 0,
+        "action": "save_knowledge",
+        "content": "In the shown shell script, after exporting /app/sqlite/bin into PATH, lookup found /app/sqlite/bin/sqlite3; the captured stdout also contained a SQLite version line."
+      },
+      "claims": [
+        "In the shown shell script, after exporting /app/sqlite/bin into PATH, lookup found /app/sqlite/bin/sqlite3; the captured stdout also contained a SQLite version line."
+      ],
+      "operation_kind": "save",
+      "before_entry": null,
+      "reference_verdict": "supported",
+      "reference_reason": "The submitted command shows the session-local export and lookup; the submitted stdout shows the found path and version output. This says nothing about another process."
+    },
+    {
+      "id": "derived_observation_and_plan",
+      "origin": "artificial_development",
+      "original_operation": {
+        "op_index": 0,
+        "action": "save_procedural",
+        "content": "The shown script exported /app/sqlite/bin into PATH, found sqlite3 there, and received a version response. Next, verify availability from an independent process without relying on that export."
+      },
+      "claims": [
+        "The shown script exported /app/sqlite/bin into PATH, found sqlite3 there, and received a version response.",
+        "Next, verify availability from an independent process without relying on that export."
+      ],
+      "operation_kind": "save",
+      "before_entry": null,
+      "reference_verdict": "supported",
+      "reference_reason": "The first sentence records the submitted command and receipt; the second is an uncompleted plan, not a claim that the independent-process check already succeeded."
+    }
+  ]
+}
