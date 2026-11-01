@@ -20,7 +20,7 @@ from verbatim_selection_agent import VerbatimSelectionCitationGateAgent
 BASELINE = '5e7dc05ae95e40b1042ac489d82fcfdfb126a19a'
 ROOT = Path(__file__).resolve().parents[2]
 REL = STAGE.relative_to(ROOT)
-P1_SHA256 = '0b75c3ddd13cb372ee3707c614337844c50ae7493cfd362b62cf797f38a10e17'
+P1_SHA256 = 'c737495707808aaff4beb0d93229c57d599b95d4bc65b04ebc4fe2468f0d0055'
 P2_SHA256 = 'f8ab207073db662a3af7e712584fdf2bb0433b1c4d42ba9a9e4dae872269d522'
 
 
@@ -129,7 +129,7 @@ class SelectionJudgmentPromptTests(unittest.TestCase):
         original_p1 = originals['PHASE1_SYSTEM']
         angles = original_p1[original_p1.index('## What to save at Step 1'):].strip()
         self.assertIn(angles, maintenance_system())  # Text preservation, not semantic behavior.
-        self.assertEqual(len(maintenance_system()), 2662)
+        self.assertEqual(len(maintenance_system()), 2823)
         self.assertEqual(hashlib.sha256(maintenance_system().encode()).hexdigest(), P1_SHA256)
         namespace = {'__name__': 'baseline_maintenance_snapshot'}
         exec(compile(baseline_bytes((REL / 'maintenance_no_review_agent.py').as_posix()),
