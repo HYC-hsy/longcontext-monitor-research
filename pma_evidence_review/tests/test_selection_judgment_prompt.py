@@ -17,10 +17,10 @@ from episode import construct_upstream, PMAEpisode
 from tag_selection_contract import SELECTION_SYSTEM
 from verbatim_selection_agent import VerbatimSelectionCitationGateAgent
 
-BASELINE = 'd28d0ed75741f3a627721766a29745ab3ae2da9d'
+BASELINE = '5e7dc05ae95e40b1042ac489d82fcfdfb126a19a'
 ROOT = Path(__file__).resolve().parents[2]
 REL = STAGE.relative_to(ROOT)
-P1_SHA256 = '5ad9ae10f9bdd3573a58c10edc68de153ab5d062562f28e6f79a0862bf987b8e'
+P1_SHA256 = '0b75c3ddd13cb372ee3707c614337844c50ae7493cfd362b62cf797f38a10e17'
 P2_SHA256 = 'f8ab207073db662a3af7e712584fdf2bb0433b1c4d42ba9a9e4dae872269d522'
 
 
@@ -89,18 +89,9 @@ class SelectionJudgmentPromptTests(unittest.TestCase):
             self.assertEqual([phase for phase, _ in requests], ['maintenance', 'selection'])
             self.assertEqual(requests[1][1]['system'], SELECTION_SYSTEM)
 
-    def test_p2_delta_is_only_system_and_input_protocol_files_are_unchanged(self):
+    def test_p2_and_input_protocol_files_are_unchanged(self):
         name = (REL / 'tag_selection_contract.py').as_posix()
-        before, after = ast.parse(baseline_bytes(name)), ast.parse((ROOT / name).read_bytes())
-        for tree in (before, after):
-            found = 0
-            for node in tree.body:
-                if isinstance(node, ast.Assign) and any(
-                        isinstance(t, ast.Name) and t.id == 'SELECTION_SYSTEM' for t in node.targets):
-                    node.value = ast.Constant(value='SYSTEM_ONLY')
-                    found += 1
-            self.assertEqual(found, 1)
-        self.assertEqual(ast.dump(before), ast.dump(after))
+        self.assertEqual((ROOT / name).read_bytes(), baseline_bytes(name))
         for filename in ('latest_evidence_gap_agent.py',
                          'gap_prompts.py', 'verbatim_selection_mixin.py', 'selection_context.py',
                          'evidence_gap_context.py', 'live_launcher.py', 'worker_main.py'):
@@ -138,7 +129,7 @@ class SelectionJudgmentPromptTests(unittest.TestCase):
         original_p1 = originals['PHASE1_SYSTEM']
         angles = original_p1[original_p1.index('## What to save at Step 1'):].strip()
         self.assertIn(angles, maintenance_system())  # Text preservation, not semantic behavior.
-        self.assertEqual(len(maintenance_system()), 4387)
+        self.assertEqual(len(maintenance_system()), 2662)
         self.assertEqual(hashlib.sha256(maintenance_system().encode()).hexdigest(), P1_SHA256)
         namespace = {'__name__': 'baseline_maintenance_snapshot'}
         exec(compile(baseline_bytes((REL / 'maintenance_no_review_agent.py').as_posix()),
