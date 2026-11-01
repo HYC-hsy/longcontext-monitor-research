@@ -34,6 +34,11 @@ class P1SourceClientTests(unittest.TestCase):
             root=Path(tmp);captured=[]
             async def provider(**kw):
                 captured.append(deepcopy(kw))
+                config=json.loads((root/'run_config.json').read_text())
+                self.assertEqual(config['model_parameters']['max_tokens'],2048)
+                self.assertEqual(len(config['requests']),len(captured))
+                self.assertNotIn('example.invalid',json.dumps(config))
+                self.assertNotIn('synthetic-not-a-secret',json.dumps(config))
                 if len(captured)==1:
                     calls=[{'id':'provider-read-1','type':'function','function':{
                         'name':'memory_read_source','arguments':json.dumps({'memory_id':'legacy'})}}]
@@ -91,3 +96,35 @@ class P1SourceClientTests(unittest.TestCase):
             self.assertIn('not per-claim evidential support',requests[1]['prompt'])
             receipt=result['turns'][0]['tool_results'][0]['result']
             self.assertTrue(receipt['truncated']);self.assertTrue(receipt['omitted']['full_generation_input'])
+
+    def test_build_case_failure_has_terminal_without_calling_model(self):
+        from types import SimpleNamespace as NS
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);case=simple_case();called=[]
+            case['entry_sources']=[{'memory_id':'not-live','window_id':'missing'}]
+            async def forbidden(**kw):
+                called.append(kw)
+                raise AssertionError('no model before valid input')
+            result=asyncio.run(run_case(case,root,NS(call=forbidden)))
+            terminal=json.loads((root/'terminal.json').read_text())
+            self.assertEqual(terminal['status'],'engineering_error')
+            self.assertEqual(terminal['stage'],'build_case')
+            self.assertEqual(terminal['error_type'],'KeyError')
+            self.assertEqual(terminal['model_calls_attempted'],0);self.assertEqual(called,[])
+
+    def test_cli_profile_initialization_failure_has_terminal_not_a_hanging_identity(self):
+        import sys
+        from pma_evidence_review.tools import run_p1_source_case as runner
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);path=root/'input.json';path.write_text(json.dumps(simple_case()))
+            profile=root/'synthetic-profile.json';profile.write_text('{}')
+            output=root/'allocated'
+            identity=runner.source_identity(strict=False)
+            argv=['p1-runner','--case',str(path),'--output',str(output),'--mode','real',
+                  '--profile-file',str(profile),'--authorize-real-p1']
+            with patch.object(sys,'argv',argv),patch.object(runner,'source_identity',return_value=identity):
+                self.assertEqual(runner.main(),1)
+            terminal=json.loads((output/'terminal.json').read_text())
+            self.assertEqual(terminal,{'status':'engineering_error','stage':'client_initialization',
+                'error_type':'KeyError','model_calls_attempted':0})
+            self.assertTrue((output/'identity.json').exists())

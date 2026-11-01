@@ -47,11 +47,39 @@ def source_view(result, window, full_text):
         reports.append({'window_event': index + 1, **report})
     view = {**result, 'status': 'available_truncated', 'truncated': True,
             'source_characters': len(full_text), 'source_text': '',
-            'actions_and_receipts': [], 'actor_reports': [],
+            'actions_and_receipts': [], 'actor_reports': [], 'presented_source_receipts': [],
             'omitted': {'whole_event_units': list(range(1, len(units) + 1)),
                         'actor_report_units': list(range(1, len(reports) + 1)),
-                        'full_generation_input': True},
+                        'full_generation_input': True,
+                        'read_receipt_units': list(range(1, len(window.get('presented_source_receipts', [])) + 1))},
             'view_policy': 'Latest whole action/receipt units first, then Actor reports; retained units are chronological. Oversize units are omitted, never sliced. Full input remains archived.'}
+    # Copy already-presented receipts literally; never resolve their old IDs again.
+    for index, receipt in enumerate(window.get('presented_source_receipts', []), 1):
+        item = {'role': 'previously_presented_source_result_not_new_observation',
+                'returned_receipt': receipt, 'view_omitted_parts': False}
+        trial = deepcopy(view)
+        trial['presented_source_receipts'].append(item)
+        trial['omitted']['read_receipt_units'].remove(index)
+        if len(encode(trial)) <= MAX_SOURCE_RETURN_CHARS:
+            view = trial
+            continue
+        returned = receipt['receipt']
+        compact = {'role': item['role'], 'read_call': receipt['call'],
+                   'returned_metadata': {k: returned[k] for k in
+                       ('memory_id','task_id','cycle_id','status','source_scope','integrity','truncated')
+                       if k in returned},
+                   'actions_and_receipts': [], 'view_omitted_parts': True}
+        trial = deepcopy(view)
+        trial['presented_source_receipts'].append(compact)
+        trial['omitted']['read_receipt_units'].remove(index)
+        if len(encode(trial)) > MAX_SOURCE_RETURN_CHARS:
+            continue
+        view = trial
+        for unit in reversed(returned.get('actions_and_receipts', [])):
+            trial = deepcopy(view)
+            trial['presented_source_receipts'][-1]['actions_and_receipts'].insert(0, unit)
+            if len(encode(trial)) <= MAX_SOURCE_RETURN_CHARS:
+                view = trial
     for field, candidates, omitted_key in (
             ('actions_and_receipts', units, 'whole_event_units'),
             ('actor_reports', reports, 'actor_report_units')):
@@ -127,12 +155,13 @@ class SourceArchive:
             rows.append(row)
         return rows
 
-    def capture(self, cycle_id, model_input, events):
+    def capture(self, cycle_id, model_input, events, *, presented_source_receipts=()):
         path = self.window_path(cycle_id)
         path.parent.mkdir(exist_ok=True)
         value = {'task_id': self.task_id, 'cycle_id': cycle_id,
                  'scope': 'Generation-time visible input; not per-claim evidential support.',
                  'model_input': model_input, 'visible_events': deepcopy(events),
+                 'presented_source_receipts': deepcopy(list(presented_source_receipts)),
                  'event_index': [{'event_id': row.get('event_id'),
                                   'presentation': row['presentation']} for row in events]}
         with path.open('x', encoding='utf-8') as stream:

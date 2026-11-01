@@ -1,0 +1,71 @@
+{
+  "schema": "p1-maintenance-case-v1",
+  "case_id": "06-optional-read-preserve-correct-memory",
+  "material_kind": "manual_control",
+  "task_id": "t_9b50990d4f1a9f860e1e",
+  "task": "Collect configuration for workspaces A and B; preserve workspace-specific values.",
+  "initial_bank": {
+    "status": "Workspace B check pending.",
+    "knowledge": [
+      {
+        "id": "knownA",
+        "content": "Workspace A reports a maximum batch size of 50.",
+        "created_at": "manual-control",
+        "access_count": 0,
+        "last_accessed": null
+      }
+    ],
+    "procedural": [],
+    "gaps": [
+      {
+        "id": "gap_b",
+        "content": "Workspace B batch size has not yet been observed.",
+        "created_at": "manual-control",
+        "access_count": 0,
+        "last_accessed": null
+      }
+    ]
+  },
+  "entries": [
+    {
+      "event_id": "new-b",
+      "commands": [
+        "query --workspace B --field max_batch"
+      ],
+      "analysis": "Actor says this might replace the old global limit",
+      "observation": "{\"content\": \"Actor interpretation\", \"tool_results\": [{\"tool_use_id\": \"query-b\", \"content\": \"workspace=B max_batch=200\"}]}"
+    }
+  ],
+  "prior_presentations": [],
+  "source_windows": [
+    {
+      "window_id": "manual_origin",
+      "model_input": "Task: collect workspace settings. Raw command query --workspace A --field max_batch; receipt workspace=A max_batch=50. Actor guess: one global limit.",
+      "visible_events": [
+        {
+          "event_id": "older-a",
+          "presentation": "historical_visible_event",
+          "commands": [
+            "query --workspace A --field max_batch"
+          ],
+          "analysis": "Actor guesses the service may have one global limit",
+          "observation": "{\"content\": \"Actor guess\", \"tool_results\": [{\"tool_use_id\": \"query-a\", \"content\": \"workspace=A max_batch=50\"}]}"
+        }
+      ]
+    }
+  ],
+  "entry_sources": [
+    {
+      "memory_id": "knownA",
+      "window_id": "manual_origin"
+    }
+  ],
+  "step_count": 2,
+  "observation_dimensions": [
+    "Keep a correct older scoped record when a different workspace produces another value.",
+    "Read source only if useful; if read, distinguish observations from the older Actor guess."
+  ],
+  "source_manifest": {
+    "origin": "Manually authored development control; no production-manifest claim."
+  }
+}

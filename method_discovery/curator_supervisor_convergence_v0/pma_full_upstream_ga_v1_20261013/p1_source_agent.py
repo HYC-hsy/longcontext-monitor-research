@@ -31,12 +31,17 @@ A source window records what was visible when an entry was generated, not proof 
 '''
 
 
+class SourceAssociationError(RuntimeError):
+    pass
+
+
 class SourceReadP1Agent(BankDisplayAgent):
     """No P2 entry point: this candidate is maintained and tested independently."""
     def __init__(self, *, source_root, task_id, **kwargs):
         super().__init__(**kwargs)
         self.source_archive = SourceArchive(source_root, task_id=task_id, task=self.task)
         self.last_p1_report = {}
+        self.before_request = None
 
     async def process(self, *args, **kwargs):
         raise RuntimeError('P1-only candidate: call maintain(); Task/P2 are not enabled')
@@ -78,7 +83,8 @@ class SourceReadP1Agent(BankDisplayAgent):
     def _calls(self, response, round_index):
         calls = getattr(response, 'tool_calls', None) or []
         extracted = [self._extract_tool_call(call) for call in calls]
-        if not calls or any(not args.get('content') for _, args in extracted):
+        if not any(isinstance(name, str) and name and isinstance(args, dict)
+                   for name, args in extracted):
             raw = self._strip_thinking(getattr(response, 'content', None) or '')
             parsed = self._parse_tool_calls_from_text(raw) if '<tool_call>' in raw else []
             if parsed:
@@ -104,12 +110,25 @@ class SourceReadP1Agent(BankDisplayAgent):
         if name not in {t['function']['name'] for t in super().get_tools_schema()}:
             return {'status': 'unknown_tool'}
         normalized = NS(content='', tool_calls=[NS(function=NS(name=name, arguments=args))])
+        snapshot = deepcopy(self.memory.to_dict())
+        status_limit = self.memory._max_status_length
         operations = GapMemoryAgent._execute_tool_calls(self, normalized)
+        try:
+            for op in operations:
+                if op.success and op.action in {'save_knowledge', 'save_procedural', 'save_gap'}:
+                    record = self._active_records()[op.memory_id]
+                    self.source_archive.bind(record.id, record.category, record.content, window_id)
+        except Exception as exc:
+            # Restore this one save's ordinary bank; keep its diagnostic records.
+            restored = type(self.memory).from_dict(snapshot)
+            restored._max_status_length = status_limit
+            restored._status = snapshot['status']
+            self.memory.__dict__.clear()
+            self.memory.__dict__.update(restored.__dict__)
+            report['operations'].extend({**vars(op), 'success': False,
+                'error': 'source_association_failed_save_rolled_back'} for op in operations)
+            raise SourceAssociationError(type(exc).__name__) from exc
         report['operations'].extend(vars(op).copy() for op in operations)
-        for op in operations:
-            if op.success and op.action in {'save_knowledge', 'save_procedural', 'save_gap'}:
-                record = self._active_records()[op.memory_id]
-                self.source_archive.bind(record.id, record.category, record.content, window_id)
         return {'status': 'applied' if all(op.success for op in operations) else 'tool_error',
                 'operations': [vars(op).copy() for op in operations]}
 
@@ -124,6 +143,7 @@ class SourceReadP1Agent(BankDisplayAgent):
         report = {'cycle_id': cycle_id or 'p1_' + uuid.uuid4().hex,
                   'status': 'completed', 'reads_used': 0, 'read_requests': 0,
                   'continuations_used': 0, 'operations': [], 'turns': [],
+                  'model_calls_attempted': 0, 'model_calls_completed': 0,
                   'limits': {'reads': READ_LIMIT, 'continuations': CONTINUATION_LIMIT}}
         self.last_p1_report = report
         try:
@@ -132,14 +152,20 @@ class SourceReadP1Agent(BankDisplayAgent):
             initial, marked, projection, visible = self._input(observation, step_count, raw_events)
             report['input_projection'] = projection
             prompt = initial
+            presented_receipts = []
             for round_index in range(CONTINUATION_LIMIT + 1):
                 tools = self.get_tools_schema() if round_index == 0 else super().get_tools_schema()
                 window_id = report['cycle_id'] + f'_r{round_index}'
-                self.source_archive.capture(window_id, prompt, visible)
+                self.source_archive.capture(window_id, prompt, visible,
+                    presented_source_receipts=presented_receipts)
                 request = {'kind': 'request', 'cycle_id': report['cycle_id'], 'window_id': window_id,
                            'prompt': prompt, 'system': SYSTEM, 'tools': tools}
                 self._journal(request)
+                if self.before_request is not None:
+                    self.before_request(request)
+                report['model_calls_attempted'] += 1
                 response = await self.llm.call(prompt=prompt, system=SYSTEM, tools=tools)
+                report['model_calls_completed'] += 1
                 self.source_archive.mark_presented(marked)
                 calls = self._calls(response, round_index)
                 turn = {'window_id': window_id, 'assistant_text': self._strip_thinking(getattr(response, 'content', None) or ''),
@@ -149,9 +175,18 @@ class SourceReadP1Agent(BankDisplayAgent):
                     ('prompt_tokens','completion_tokens','cache_tokens','cost_usd')
                     if usage is not None and getattr(usage, k, None) is not None}
                 report['turns'].append(turn)
+                association_failed = False
                 for call in calls:
+                    if association_failed:
+                        turn['tool_results'].append({'tool_call_id': call['tool_call_id'],
+                            'result': {'status': 'not_executed_after_engineering_failure'}})
+                        continue
                     try:
                         result = self._apply(call, window_id, round_index, report)
+                    except SourceAssociationError as exc:
+                        association_failed = True
+                        result = {'status': 'engineering_error', 'error_type': type(exc).__name__,
+                                  'save_rolled_back': True}
                     except Exception as exc:
                         result = {'status': 'engineering_error', 'error_type': type(exc).__name__}
                     status = result['status']
@@ -163,7 +198,12 @@ class SourceReadP1Agent(BankDisplayAgent):
                         report['status'] = 'tool_error'
                     turn['tool_results'].append({'tool_call_id': call['tool_call_id'], 'result': result})
                 self._journal({'kind': 'response_and_receipts', 'cycle_id': report['cycle_id'], **turn})
+                if association_failed:
+                    break
                 if round_index == 0 and any(call['name'] == 'memory_read_source' for call in calls):
+                    presented_receipts = [{'call': deepcopy(call), 'receipt': deepcopy(receipt['result'])}
+                        for call, receipt in zip(calls, turn['tool_results'])
+                        if call['name'] == 'memory_read_source']
                     report['continuations_used'] += 1
                     prompt = initial + '\n## Previous maintenance turn and tool receipts (data)\n' + encode({k: turn[k] for k in ('assistant_text','tool_calls','tool_results')})
                     prompt += '\nContinue from these exact receipts. Source reads are now closed; use the five memory-write tools or leave the bank unchanged.\n'

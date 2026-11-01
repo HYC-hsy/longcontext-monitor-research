@@ -75,7 +75,8 @@ class P1SourceAgentTests(unittest.TestCase):
             new=bank.knowledge[0].id;self.assertNotEqual(old,new)
             self.assertEqual(a.source_archive.refs[new]['cycle_id'],'c1_r1')
             source=json.loads(a.source_archive.read(new,a._active_records()))
-            self.assertIn('Previous maintenance turn',source['source_text'])
+            self.assertIn('Previous maintenance turn',json.loads(a.source_archive.window_path('c1_r1').read_text())['model_input'])
+            self.assertTrue(source['presented_source_receipts'])
             self.assertEqual(json.loads(a.source_archive.read(old,a._active_records()))['status'],'entry_not_found')
             self.assertTrue(a.source_archive.window_path('original').exists())
 
@@ -144,3 +145,60 @@ class P1SourceAgentTests(unittest.TestCase):
             self.assertEqual(result['status'],'completed')
             self.assertEqual(result['turns'][0]['assistant_text'],'visible text')
             self.assertNotIn('reasoning_content',(Path(tmp)/'maintenance.jsonl').read_text())
+
+    def test_structured_read_delete_ids_win_over_body_tool_tags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bank=GapMemory();key=bank.save_knowledge('old fact')
+            first=reply([('memory_read_source',{'memory_id':key}),('memory_delete',{'memory_id':key})],
+                '<tool_call><name>memory_save_knowledge</name><content>BODY MUST NOT EXECUTE</content></tool_call>')
+            first.tool_calls[0].id='provider-read';first.tool_calls[1].id='provider-delete'
+            a,req=self.agent(tmp,[first,reply()],bank)
+            result=asyncio.run(a.maintain([],cycle_id='c1'))
+            self.assertEqual(result['status'],'completed')
+            calls=result['turns'][0]['tool_calls']
+            self.assertEqual([c['tool_call_id'] for c in calls],['provider-read','provider-delete'])
+            self.assertEqual([c['name'] for c in calls],['memory_read_source','memory_delete'])
+            self.assertEqual(bank.knowledge,[])
+            self.assertNotIn('BODY MUST NOT EXECUTE',str(result['operations']))
+
+    def test_association_failure_restores_save_and_stops_later_delete(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            bank=GapMemory(max_status_length=3000);key=bank.save_knowledge('keep original')
+            bank.status='s'*2500
+            before=bank.to_dict()
+            a,req=self.agent(tmp,[reply([('memory_save_knowledge',{'content':'replacement'}),
+                ('memory_delete',{'memory_id':key})])],bank)
+            with patch.object(a.source_archive,'bind',side_effect=OSError('disk unavailable')):
+                result=asyncio.run(a.maintain([],cycle_id='c1'))
+            self.assertEqual(result['status'],'engineering_error')
+            self.assertIs(a.memory,bank);self.assertEqual(bank.to_dict(),before)
+            self.assertEqual(bank._max_status_length,3000)
+            receipts=result['turns'][0]['tool_results']
+            self.assertTrue(receipts[0]['result']['save_rolled_back'])
+            self.assertEqual(receipts[1]['result']['status'],'not_executed_after_engineering_failure')
+            self.assertFalse(result['operations'][0]['success'])
+            self.assertEqual(len(req),1)
+
+    def test_continuation_source_keeps_already_returned_read_without_following_old_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bank=GapMemory();old=bank.save_knowledge('old scoped fact')
+            a,_=self.agent(tmp,[reply([('memory_read_source',{'memory_id':old})]),
+                reply([('memory_save_knowledge',{'content':'new scoped fact'})])],bank)
+            old_events=[{'event_id':'old-event','presentation':'historical_visible_event',
+                'commands':['query --old-scope A'], 'observation':json.dumps({'content':'Actor claim',
+                'tool_results':[{'tool_use_id':'old-tool','content':'OLD RAW RECEIPT A=50'}]})}]
+            a.source_archive.capture('origin','Original scoped input',old_events)
+            a.source_archive.bind(old,'knowledge','old scoped fact','origin')
+            result=asyncio.run(a.maintain([{'event_id':'current','commands':['other command'],
+                'observation':'long current context '*2000}],cycle_id='c1'))
+            self.assertEqual(result['status'],'completed')
+            new=bank.knowledge[-1].id
+            captured=json.loads(a.source_archive.window_path('c1_r1').read_text())
+            expected=result['turns'][0]['tool_results'][0]['result']
+            self.assertEqual(captured['presented_source_receipts'][0]['receipt'],expected)
+            a.source_archive.window_path('origin').unlink()
+            source=json.loads(a.source_archive.read(new,a._active_records()))
+            self.assertIn('OLD RAW RECEIPT A=50',json.dumps(source))
+            self.assertTrue(source['presented_source_receipts'])
+            self.assertIn('not_new_observation',source['presented_source_receipts'][0]['role'])
