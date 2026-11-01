@@ -117,6 +117,9 @@ def prepare_context(wrapper):
     raw = wrapper._get_memory_agent_context()
     agent = wrapper._memory_agent
     blocks = []
+    if hasattr(agent, "prepare_selection_context"):
+        agent.prepare_selection_context(raw,
+            wrapper._accumulated_observations[1:][-wrapper._sliding_window_size:])
     if getattr(agent, 'review_strategy', None) == 'claim-split-same-evidence-v4':
         # Same bounded task window as the source catalog; no event bodies retained.
         agent._accepted_execution_inventory = {}

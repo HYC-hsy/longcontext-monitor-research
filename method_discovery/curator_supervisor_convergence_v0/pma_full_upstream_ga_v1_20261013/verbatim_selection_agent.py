@@ -4,6 +4,8 @@ import hashlib
 import json
 import uuid
 
+from selection_context import project_steps, render_selection
+
 from citation_gate_agent import CitationGateMemoryAgent
 from tag_selection_contract import (Item, Snapshot, PROTOCOL_VERSION,
     SELECTION_SYSTEM, dispatch, delivery_json, diagnostic)
@@ -33,6 +35,9 @@ class VerbatimSelectionCitationGateAgent(CitationGateMemoryAgent):
         self._phase2_visible = None
         self._completion_call_id = None
         self.last_selection_report = {}
+
+    def prepare_selection_context(self, raw, entries):
+        self._selection_context = (raw, *project_steps(entries))
 
     def _format_memory_list(self, entries):
         if self._phase2_visible is not None:
@@ -87,13 +92,18 @@ class VerbatimSelectionCitationGateAgent(CitationGateMemoryAgent):
                              'category': row.category, 'content_sha256': _hash(row.content)}
                             for i, row in enumerate(items, 1)])
             catalogue = [{'alias': 'TASK', 'content': self.task}]
-            catalogue += [{'alias': f'M{i}', 'category': row.category, 'content': row.content}
+            catalogue += [{'alias': f'M{i}', 'category': row.category, 'content': row.content,
+                           'binding': self._binding_text(row.id, include_quotes=False).split('\n', 1)[0]}
                           for i, row in enumerate(items, 1)]
-            return prompt + '\n## Selectable catalogue\n' + json.dumps(
-                catalogue, ensure_ascii=True, sort_keys=True) + (
-                '\n\nOnly TASK and the listed M aliases may be selected. The status and\n'
-                'recent eight visible steps above are judgment context only.\n'
-                'Return one bare <intervene>TASK,M1</intervene> or <no_intervention/>.\n')
+            prepared = getattr(self, '_selection_context', None)
+            if prepared is None or prepared[0] != observation:
+                # No provenance: preserve the entire original observation, never guess.
+                steps, audit = observation, {'retained_unknown': ['unprepared_context']}
+            else:
+                _, steps, audit = prepared
+            self.last_selection_report['input_projection'] = audit
+            return render_selection(catalogue, self.memory.status, steps, step_count,
+                self._binding_text('status', include_quotes=False).split('\n', 1)[0])
         except Exception as exc:
             self.last_selection_report.update(status='selection_error', error=type(exc).__name__)
             self.last_gap_report['selection_error'] = self.last_selection_report.copy()
