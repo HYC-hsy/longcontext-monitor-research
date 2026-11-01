@@ -1,0 +1,151 @@
+"""Generation-window records, separate from the plain PMA bank; no truth review."""
+from copy import deepcopy
+import hashlib
+import json
+from pathlib import Path
+import re
+
+
+MAX_SOURCE_RETURN_CHARS = 8000
+
+
+def encode(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+
+
+def digest(text):
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+def bounded_reply(result, text=None):
+    """Cap the entire serialized receipt; a truncated prefix is explicitly literal."""
+    if text is None:
+        return encode(result)
+    result = {**result, 'source_characters': len(text), 'truncated': False, 'source_text': text}
+    if len(encode(result)) <= MAX_SOURCE_RETURN_CHARS:
+        return encode(result)
+    result.update(status='available_truncated', truncated=True)
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        result['source_text'] = text[:mid]
+        if len(encode(result)) <= MAX_SOURCE_RETURN_CHARS:
+            lo = mid
+        else:
+            hi = mid - 1
+    result['source_text'] = text[:lo]
+    return encode(result)
+
+
+class SourceArchive:
+    """Only active IDs can resolve to source. Deleted records stay diagnostic-only."""
+    def __init__(self, root, *, task_id, task):
+        if not isinstance(task_id, str) or not task_id or not isinstance(task, str):
+            raise ValueError('explicit task identity and text required')
+        self.root = Path(root)
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.task_id, self.task = task_id, task
+        meta = {'task_id': task_id, 'task': task}
+        path = self.root / 'task.json'
+        if path.exists():
+            if json.loads(path.read_text(encoding='utf-8')) != meta:
+                raise ValueError('source archive belongs to another task')
+        else:
+            path.write_text(encode(meta), encoding='utf-8')
+        self.seen = self._load('seen_events.json', {})
+        self.refs = {}
+        path = self.root / 'entry_sources.jsonl'
+        if path.exists():
+            for line in path.read_text(encoding='utf-8').splitlines():
+                ref = json.loads(line)
+                key = ref['memory_id']
+                if ref['task_id'] != task_id or key in self.refs:
+                    raise ValueError('invalid source association archive')
+                self.refs[key] = ref
+
+    def _load(self, name, default):
+        path = self.root / name
+        return json.loads(path.read_text(encoding='utf-8')) if path.exists() else default
+
+    def window_path(self, cycle_id):
+        if not isinstance(cycle_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', cycle_id):
+            raise ValueError('invalid source cycle identity')
+        return self.root / 'windows' / (cycle_id + '.json')
+
+    def classify(self, events):
+        """Keep every presentation. Only explicit IDs identify repeated executions."""
+        rows, within = [], {}
+        for event in events:
+            row = deepcopy(event)
+            key = row.get('event_id')
+            fingerprint = digest(encode(row))
+            if key is None:
+                kind = 'identity_unknown'
+            elif not isinstance(key, str) or not key:
+                raise ValueError('invalid accepted event ID')
+            else:
+                previous = within.get(key, self.seen.get(key))
+                if previous is not None and previous != fingerprint:
+                    raise ValueError('accepted event ID reused with changed visible content')
+                kind = ('repeated_in_window' if key in within else
+                        'previously_presented' if key in self.seen else 'new_event')
+                within[key] = fingerprint
+            row['presentation'] = kind
+            rows.append(row)
+        return rows
+
+    def capture(self, cycle_id, model_input, events):
+        path = self.window_path(cycle_id)
+        path.parent.mkdir(exist_ok=True)
+        value = {'task_id': self.task_id, 'cycle_id': cycle_id,
+                 'scope': 'Generation-time visible input; not per-claim evidential support.',
+                 'model_input': model_input,
+                 'event_index': [{'event_id': row.get('event_id'),
+                                  'presentation': row['presentation']} for row in events]}
+        with path.open('x', encoding='utf-8') as stream:
+            stream.write(encode(value))
+        return value
+
+    def mark_presented(self, events):
+        for event in events:
+            row = {k: v for k, v in event.items() if k != 'presentation'}
+            if row.get('event_id') is not None:
+                self.seen[row['event_id']] = digest(encode(row))
+        (self.root / 'seen_events.json').write_text(encode(self.seen), encoding='utf-8')
+
+    def bind(self, memory_id, category, content, cycle_id):
+        if memory_id in self.refs:
+            raise ValueError('source association cannot overwrite an existing ID')
+        path = self.window_path(cycle_id)
+        text = path.read_text(encoding='utf-8')
+        window = json.loads(text)
+        if window['task_id'] != self.task_id or window['cycle_id'] != cycle_id:
+            raise ValueError('source association scope mismatch')
+        ref = {'task_id': self.task_id, 'cycle_id': cycle_id, 'memory_id': memory_id,
+               'category': category, 'content_sha256': digest(content),
+               'window_sha256': digest(text)}
+        with (self.root / 'entry_sources.jsonl').open('a', encoding='utf-8') as stream:
+            stream.write(encode(ref) + '\n')
+        self.refs[memory_id] = ref
+
+    def read(self, memory_id, active_records):
+        result = {'memory_id': memory_id}
+        row = active_records.get(memory_id)
+        if row is None:
+            return bounded_reply({**result, 'status': 'entry_not_found'})
+        ref = self.refs.get(memory_id)
+        if ref is None:
+            return bounded_reply({**result, 'status': 'source_unrecorded'})
+        if (ref['task_id'] != self.task_id or ref['memory_id'] != memory_id or
+                ref['category'] != row.category or ref['content_sha256'] != digest(row.content)):
+            return bounded_reply({**result, 'status': 'source_binding_error'})
+        try:
+            text = self.window_path(ref['cycle_id']).read_text(encoding='utf-8')
+        except FileNotFoundError:
+            return bounded_reply({**result, 'status': 'source_missing'})
+        if digest(text) != ref['window_sha256']:
+            return bounded_reply({**result, 'status': 'source_integrity_error'})
+        window = json.loads(text)
+        if window['task_id'] != self.task_id or window['cycle_id'] != ref['cycle_id']:
+            return bounded_reply({**result, 'status': 'source_binding_error'})
+        return bounded_reply({**result, 'status': 'available'}, text)
