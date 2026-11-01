@@ -29,6 +29,18 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _worker_pythonpath(root: Path, *, stateful: bool) -> str:
+    if stateful:
+        return os.pathsep.join((str(root / 'control/stateful_host_stage'),
+                                str(root / 'control/ga_stage')))
+    # worker_main/episode import pma_evidence_review.private_faults even when
+    # the citation gate is disabled. Keep the host package importable in both modes.
+    return os.pathsep.join((str(STAGE),
+        str(STAGE / 'vendor' / 'pma_89e5c0d' / 'src'),
+        str(STAGE / 'vendor' / 'pma_89e5c0d' / 'external' / 'harbor' / 'src'),
+        str(STAGE.parents[2])))
+
+
 def _derive_uncapped_task(root: Path) -> dict:
     """Modify only the new run's materialized task copy, never the fixed asset."""
     path = root / 'public_task/task.toml'
@@ -692,13 +704,7 @@ def run_live(args) -> dict:
             for name in ('worker.stdout.log', 'worker.stderr.log'):
                 worker_logs.append((root / 'archive' / name).open('wb'))
             worker_env = clean_candidate_environment(os.environ)
-            host_stage = root / 'control/stateful_host_stage'
-            worker_env['PYTHONPATH'] = (os.pathsep.join((str(host_stage),
-                str(root / 'control/ga_stage'))) if stateful else
-                os.pathsep.join((str(STAGE),
-                str(STAGE / 'vendor' / 'pma_89e5c0d' / 'src'),
-                str(STAGE / 'vendor' / 'pma_89e5c0d' / 'external' / 'harbor' / 'src'),
-                *([str(STAGE.parents[2])] if gate is not None else []))))
+            worker_env['PYTHONPATH'] = _worker_pythonpath(root, stateful=stateful)
             if stateful:
                 worker_env.update(GA_STATEFUL_MEMORY_ENABLED='1',
                     GA_STATEFUL_MEMORY_MODE='live', GA_STATEFUL_UNCAPPED_TOTAL='1',

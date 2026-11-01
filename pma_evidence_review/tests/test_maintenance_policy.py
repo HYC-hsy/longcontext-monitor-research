@@ -3,7 +3,10 @@ import ast
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -16,6 +19,17 @@ spec.loader.exec_module(config)
 
 
 class MaintenancePolicyTests(unittest.TestCase):
+    def test_no_review_worker_imports_host_fault_module_from_launcher_path(self):
+        from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013 import live_launcher
+        with tempfile.TemporaryDirectory() as tmp:
+            env = os.environ.copy()
+            env.pop('PYTHONHOME', None)
+            env['PYTHONPATH'] = live_launcher._worker_pythonpath(Path(tmp), stateful=False)
+            result = subprocess.run([sys.executable, '-X', 'utf8', '-B', '-c',
+                'import worker_main; import pma_evidence_review.private_faults'],
+                cwd=tmp, env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_explicit_policy_cannot_fall_back_or_combine_with_gate(self):
         policy = config.MAINTENANCE_POLICY
         self.assertEqual(config.worker_flags(None, 'pma_gap_evidence_v1', None, policy),
