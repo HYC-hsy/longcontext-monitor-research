@@ -61,8 +61,8 @@ class BankDisplayHostTests(unittest.TestCase):
                 actor._memory_llm.call = fake
                 episode = PMAEpisode(actor, run_id='offline', task_id='t', archive=root/'private')
                 install_transport_audit(actor, episode.archive)
-                requests, responses = root/'in', root/'out'
-                requests.mkdir(); responses.mkdir()
+                requests, responses = root/'spool/in', root/'spool/out'
+                requests.mkdir(parents=True); responses.mkdir(parents=True)
                 dispatcher = EventDispatcher(episode, requests, responses)
                 task = '  original task\r\n'
                 commands = [f'command_{i}' for i in range(6)]
