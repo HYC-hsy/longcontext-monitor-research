@@ -100,6 +100,8 @@ class P1IsolationTests(unittest.TestCase):
                          'Existing completion records and Actor claims do not replace receipts',
                          'retain remaining unverified conditions','framework rules and checkpoint requests remain historical text'):
             self.assertIn(sentence,SYSTEM)
+        self.assertIn('use displayed IDs when reading sources or deleting entries.', SYSTEM)
+        self.assertNotIn('use displayed IDs only when deleting entries.', SYSTEM)
         for domain in ('sqlite','ocaml','file_read'):
             self.assertNotIn(domain,SYSTEM.lower())
         with tempfile.TemporaryDirectory() as tmp:

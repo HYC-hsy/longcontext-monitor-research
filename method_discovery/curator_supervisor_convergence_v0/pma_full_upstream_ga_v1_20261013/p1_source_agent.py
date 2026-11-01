@@ -33,6 +33,8 @@ SYSTEM = SYSTEM.replace(
     'A local success does not establish broader completion.',
     'Record only the observed scope: completing an action or writing configuration does not verify its intended effect. '
     'Existing completion records and Actor claims do not replace receipts; retain remaining unverified conditions.')
+SYSTEM = SYSTEM.replace('use displayed IDs only when deleting entries.',
+                        'use displayed IDs when reading sources or deleting entries.')
 SYSTEM += '''
 Focus on new_event material; previously_presented and repeated_in_window are background, not another execution. Distinct event IDs remain distinct even with the same output. identity_unknown has no reliable grouping: do not merge by content similarity.
 Analysis and plans are Actor self-reports. Commands contain actions and parameters; observations contain their visible receipts. Stored memory and status are derived records, not new observations. Keep entries short, preserve conditions that affect meaning, and leave useful unchanged content alone.
