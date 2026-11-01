@@ -51,7 +51,7 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
                        research_candidate: str = "U",
                        citation_review_gate: str | None = None, citation_review_strategy: str | None = None,
                        memory_maintenance_policy: str | None = None) -> MemoryEnabledTerminus2:
-    from citation_gate_config import validate_gate,validate_strategy,validate_maintenance
+    from citation_gate_config import validate_gate,validate_strategy,validate_maintenance,BANK_DISPLAY_POLICY
     validate_maintenance(memory_maintenance_policy,research_candidate,citation_review_gate,citation_review_strategy)
     validate_gate(citation_review_gate,research_candidate)
     review_strategy=validate_strategy(citation_review_gate,citation_review_strategy)
@@ -103,7 +103,11 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
             from gap_memory_agent import GapMemoryAgent
             from gap_store import GapMemory
         original = agent._memory_agent
-        bank = GapMemory.from_dict(agent._memory.to_dict())
+        if memory_maintenance_policy == BANK_DISPLAY_POLICY:
+            from bank_display_agent import BankDisplayAgent
+            bank = BankDisplayAgent.load_bank(agent._memory.to_dict())
+        else:
+            bank = GapMemory.from_dict(agent._memory.to_dict())
         agent._memory = bank
         agent._memory_agent = GapMemoryAgent(
             task="", llm=agent._memory_llm, memory=bank,
@@ -112,8 +116,12 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
             keep_thinking=original.keep_thinking,
             use_structured_tools=original.use_structured_tools)
         if memory_maintenance_policy is not None:
-            from maintenance_no_review_agent import MaintenanceNoReviewAgent
-            agent._memory_agent = MaintenanceNoReviewAgent(
+            if memory_maintenance_policy == BANK_DISPLAY_POLICY:
+                policy_class = BankDisplayAgent
+            else:
+                from maintenance_no_review_agent import MaintenanceNoReviewAgent
+                policy_class = MaintenanceNoReviewAgent
+            agent._memory_agent = policy_class(
                 task="", llm=agent._memory_llm, memory=bank,
                 max_memory_in_prompt=original.max_memory_in_prompt,
                 use_bm25_prefilter=original.use_bm25_prefilter,
@@ -285,7 +293,8 @@ class PMAEpisode:
                     }, ensure_ascii=False, sort_keys=True) + '\n')
                     stream.flush()
                     os.fsync(stream.fileno())
-            if hasattr(candidate_agent, "last_delivery_status"):
+            if (hasattr(candidate_agent, "last_delivery_status")
+                    and hasattr(candidate_agent, "variant")):
                 with (self.archive / "candidate_audit.jsonl").open("a", encoding="utf-8") as stream:
                     stream.write(json.dumps({
                         "event_id": event_id, "kind": kind,
@@ -349,6 +358,10 @@ class PMAEpisode:
             if getattr(self.agent, "_research_candidate", None) == "pma_gap_evidence_v1":
                 from evidence_gap_context import prepare_context
                 prepare_context(self.agent)
+            elif getattr(self.agent, '_memory_maintenance_policy', None) == 'pma-bank-display-v1':
+                self.agent._memory_agent.prepare_selection_context(
+                    self.agent._get_memory_agent_context(),
+                    self.agent._accumulated_observations[1:][-self.agent._sliding_window_size:])
             await self.agent._trigger_memory_agent(step_count=1)
         return {"status": "started", "triggered": triggered, "trigger_reason": reason,
                 "initial_envelope_sha256": hashlib.sha256(
@@ -470,6 +483,10 @@ class PMAEpisode:
             if getattr(self.agent, "_research_candidate", None) == "pma_gap_evidence_v1":
                 from evidence_gap_context import prepare_context
                 prepare_context(self.agent)
+            elif getattr(self.agent, '_memory_maintenance_policy', None) == 'pma-bank-display-v1':
+                self.agent._memory_agent.prepare_selection_context(
+                    self.agent._get_memory_agent_context(),
+                    self.agent._accumulated_observations[1:][-self.agent._sliding_window_size:])
             await self.agent._trigger_memory_agent(step_count=step)
         self.last_completed_attempt = attempt
         return {"status": "observed", "triggered": triggered,

@@ -1106,7 +1106,7 @@ def main() -> None:
     parser.add_argument('--citation-review-gate',choices=('gate-only','gate-one-repair'))
     from .citation_gate_config import STRATEGIES
     parser.add_argument('--citation-review-strategy',choices=STRATEGIES)
-    parser.add_argument('--memory-maintenance-policy',choices=('maintain-scoped-latest-no-review-v1',))
+    parser.add_argument('--memory-maintenance-policy',choices=('maintain-scoped-latest-no-review-v1','pma-bank-display-v1'))
     parser.add_argument('--research-candidate', choices=(
         'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
         'pos_pma_complement_v1', 'pos_pma_shared_view_v1',

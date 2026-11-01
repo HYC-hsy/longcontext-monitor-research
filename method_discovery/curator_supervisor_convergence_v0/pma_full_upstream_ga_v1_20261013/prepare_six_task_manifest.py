@@ -264,7 +264,7 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
     if maintenance_policy is not None:
         method['memory_maintenance_policy']=maintenance_policy
         method['maintenance_source_sha256']={name:_committed_source_sha(STAGE.parents[2],name)
-            for name in maintenance_source_paths()}
+            for name in maintenance_source_paths(maintenance_policy)}
     if schema == 'pma-ga-live-manifest-v5':
         method['research_candidate'] = candidate
         if candidate in ('pma_gap_memory_v0', 'pma_gap_evidence_v1'):

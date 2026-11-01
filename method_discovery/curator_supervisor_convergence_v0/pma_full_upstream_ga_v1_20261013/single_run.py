@@ -289,7 +289,7 @@ def main() -> None:
     prepared.add_argument('--citation-review-gate',choices=('gate-only','gate-one-repair'))
     from .citation_gate_config import STRATEGIES
     prepared.add_argument('--citation-review-strategy',choices=STRATEGIES)
-    prepared.add_argument('--memory-maintenance-policy',choices=('maintain-scoped-latest-no-review-v1',))
+    prepared.add_argument('--memory-maintenance-policy',choices=('maintain-scoped-latest-no-review-v1','pma-bank-display-v1'))
     prepared.add_argument('--research-candidate', choices=sorted(candidate_names()), default='U')
     prepared.add_argument('--occurrence', type=int, default=1)
     prepared.add_argument('--output', required=True)

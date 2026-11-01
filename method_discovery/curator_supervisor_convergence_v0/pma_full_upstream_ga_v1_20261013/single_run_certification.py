@@ -57,8 +57,13 @@ GAP_SOURCE_FILES = SOURCE_FILES + (
     'gap_store.py',
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'gap_prompts.py',
+) + tuple('method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+          + name for name in ('bank_display_agent.py', 'verbatim_selection_mixin.py',
+                              'selection_context.py', 'tag_selection_contract.py',
+                              'citation_gate_config.py')) + (
+    'pma_evidence_review/__init__.py', 'pma_evidence_review/private_faults.py',
 )
-EVIDENCE_GAP_SOURCE_FILES = GAP_SOURCE_FILES + tuple(
+EVIDENCE_GAP_SOURCE_FILES = tuple(dict.fromkeys(GAP_SOURCE_FILES + tuple(
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     + name for name in ('gap_evidence.py', 'evidence_gap_store.py', 'evidence_gap_agent.py',
                          'evidence_gap_context.py', 'source_memory.py', 'evidence_requirements.txt',
@@ -76,7 +81,7 @@ EVIDENCE_GAP_SOURCE_FILES = GAP_SOURCE_FILES + tuple(
                          'vendor/langextract_3a68580/tokenizer.py',
                          'vendor/langextract_3a68580/requirements.txt')
 ) + ('pma_evidence_review/verbatim_selection_prototype_20261031/contract.py',
-     'pma_evidence_review/__init__.py', 'pma_evidence_review/private_faults.py')
+     'pma_evidence_review/__init__.py', 'pma_evidence_review/private_faults.py')))
 EVIDENCE_FILES = (
     'execution_identity.json',
     'live_result.json', 'agent_start_identity.json', 'agent_end_native.json',

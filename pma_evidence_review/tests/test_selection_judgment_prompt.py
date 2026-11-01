@@ -92,11 +92,31 @@ class SelectionJudgmentPromptTests(unittest.TestCase):
     def test_p2_and_input_protocol_files_are_unchanged(self):
         name = (REL / 'tag_selection_contract.py').as_posix()
         self.assertEqual((ROOT / name).read_bytes(), baseline_bytes(name))
-        for filename in ('latest_evidence_gap_agent.py',
-                         'gap_prompts.py', 'verbatim_selection_mixin.py', 'selection_context.py',
-                         'evidence_gap_context.py', 'live_launcher.py', 'worker_main.py'):
+        for filename in ('latest_evidence_gap_agent.py', 'gap_prompts.py', 'evidence_gap_context.py'):
             name = (REL / filename).as_posix()
             self.assertEqual((ROOT / name).read_bytes(), baseline_bytes(name), filename)
+        # The new opt-in has two display hooks and one additional CLI choice.
+        # Preserve the existing algorithms/default rendered text, not a byte
+        # freeze that would forbid the explicitly authorized adapter.
+        for filename, methods in (
+            ('verbatim_selection_mixin.py', {'_active_records', '_parse_phase2_response', 'pending_refs_valid'}),
+            ('selection_context.py', {'project_steps'})):
+            name = (REL / filename).as_posix()
+            def bodies(raw):
+                return {n.name: ast.dump(n, include_attributes=False) for n in ast.walk(ast.parse(raw))
+                        if isinstance(n, ast.FunctionDef) and n.name in methods}
+            self.assertEqual(bodies((ROOT/name).read_bytes()), bodies(baseline_bytes(name)))
+        import selection_context
+        old = {}
+        exec(compile(baseline_bytes((REL/'selection_context.py').as_posix()), 'old_context', 'exec'), old)
+        args = ([{'alias':'TASK','content':'original'}], 'status', [{'commands':['c'], 'observation':'result'}], 3, 'binding')
+        self.assertEqual(selection_context.render_selection(*args), old['render_selection'](*args))
+        for filename in ('live_launcher.py', 'worker_main.py'):
+            name = (REL/filename).as_posix()
+            current = (ROOT/name).read_bytes().replace(
+                b"choices=('maintain-scoped-latest-no-review-v1','pma-bank-display-v1')",
+                b"choices=('maintain-scoped-latest-no-review-v1',)")
+            self.assertEqual(current, baseline_bytes(name), filename)
 
     def test_actual_launch_source_identity_hashes_the_changed_contract(self):
         from experiment_runner.startup import code_identity

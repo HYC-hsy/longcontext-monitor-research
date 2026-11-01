@@ -1,5 +1,6 @@
 """Small shared opt-in contract; no imports of clients, profiles or benchmark data."""
 MAINTENANCE_POLICY='maintain-scoped-latest-no-review-v1'
+BANK_DISPLAY_POLICY='pma-bank-display-v1'
 MODES=('gate-only','gate-one-repair')
 STRATEGY='semantic-support-one-sentence-v1'
 CLAIM_SPLIT='claim-split-same-evidence-v2'
@@ -58,10 +59,12 @@ def gate_source_paths():
 
 
 def validate_maintenance(policy,candidate,mode=None,strategy=None,condition='B'):
-    if policy is not None and (policy != MAINTENANCE_POLICY or
-            candidate != 'pma_gap_evidence_v1' or condition != 'B' or
+    carriers = {MAINTENANCE_POLICY: 'pma_gap_evidence_v1',
+                BANK_DISPLAY_POLICY: 'pma_gap_memory_v0'}
+    if policy is not None and (policy not in carriers or
+            candidate != carriers[policy] or condition != 'B' or
             mode is not None or strategy is not None):
-        raise ValueError('maintenance policy requires evidence PMA B without any review gate or strategy')
+        raise ValueError('maintenance policy requires its explicit PMA B carrier without review gate or strategy')
     return policy
 
 
@@ -73,9 +76,9 @@ def require_maintenance_binding(policy,config,candidate,condition='B'):
     return policy
 
 
-def maintenance_source_paths():
-    from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.single_run_certification import EVIDENCE_GAP_SOURCE_FILES
-    return list(EVIDENCE_GAP_SOURCE_FILES)
+def maintenance_source_paths(policy=MAINTENANCE_POLICY):
+    from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.single_run_certification import EVIDENCE_GAP_SOURCE_FILES, GAP_SOURCE_FILES
+    return list(GAP_SOURCE_FILES if policy == BANK_DISPLAY_POLICY else EVIDENCE_GAP_SOURCE_FILES)
 
 
 def verify_gate_sources(config):
@@ -86,7 +89,7 @@ def verify_gate_sources(config):
         from pathlib import Path
         import hashlib
         root=Path(__file__).resolve().parent.parents[2]
-        actual={p:hashlib.sha256((root/p).read_bytes()).hexdigest() for p in maintenance_source_paths()}
+        actual={p:hashlib.sha256((root/p).read_bytes()).hexdigest() for p in maintenance_source_paths(policy)}
         if config.get('maintenance_source_sha256')!=actual:
             raise ValueError('maintenance source identity differs from manifest')
     elif config.get('maintenance_source_sha256') is not None:
