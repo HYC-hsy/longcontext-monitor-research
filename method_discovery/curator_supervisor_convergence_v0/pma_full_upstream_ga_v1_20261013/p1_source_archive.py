@@ -17,24 +17,57 @@ def digest(text):
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
 
-def bounded_reply(result, text=None):
-    """Cap the entire serialized receipt; a truncated prefix is explicitly literal."""
-    if text is None:
-        return encode(result)
-    result = {**result, 'source_characters': len(text), 'truncated': False, 'source_text': text}
-    if len(encode(result)) <= MAX_SOURCE_RETURN_CHARS:
-        return encode(result)
-    result.update(status='available_truncated', truncated=True)
-    lo, hi = 0, len(text)
-    while lo < hi:
-        mid = (lo + hi + 1) // 2
-        result['source_text'] = text[:mid]
-        if len(encode(result)) <= MAX_SOURCE_RETURN_CHARS:
-            lo = mid
+def bounded_reply(result):
+    raw = encode(result)
+    if len(raw) > MAX_SOURCE_RETURN_CHARS:
+        return encode({'status': 'engineering_error', 'error_type': 'receipt_metadata_too_large'})
+    return raw
+
+
+def source_view(result, window, full_text):
+    """Latest whole event units first, displayed chronologically; no snippet guessing."""
+    events = window.get('visible_events', [])
+    units, reports = [], []
+    for index, event in enumerate(events):
+        unit = {'window_event': index + 1, 'event_id': event.get('event_id'),
+                'commands': event.get('commands', [])}
+        report = {k: event[k] for k in ('analysis', 'plan') if k in event}
+        observation = event.get('observation', '')
+        try:
+            envelope = json.loads(observation) if isinstance(observation, str) else observation
+        except (ValueError, TypeError):
+            envelope = None
+        if (isinstance(envelope, dict) and set(envelope) == {'content', 'tool_results'}
+                and isinstance(envelope['content'], str) and isinstance(envelope['tool_results'], list)):
+            unit['tool_results'] = envelope['tool_results']
+            report['observation_content'] = envelope['content']
         else:
-            hi = mid - 1
-    result['source_text'] = text[:lo]
-    return encode(result)
+            unit['unclassified_observation'] = observation
+        units.append(unit)
+        reports.append({'window_event': index + 1, **report})
+    view = {**result, 'status': 'available_truncated', 'truncated': True,
+            'source_characters': len(full_text), 'source_text': '',
+            'actions_and_receipts': [], 'actor_reports': [],
+            'omitted': {'whole_event_units': list(range(1, len(units) + 1)),
+                        'actor_report_units': list(range(1, len(reports) + 1)),
+                        'full_generation_input': True},
+            'view_policy': 'Latest whole action/receipt units first, then Actor reports; retained units are chronological. Oversize units are omitted, never sliced. Full input remains archived.'}
+    for field, candidates, omitted_key in (
+            ('actions_and_receipts', units, 'whole_event_units'),
+            ('actor_reports', reports, 'actor_report_units')):
+        for candidate in reversed(candidates):
+            trial = deepcopy(view)
+            trial[field].append(candidate)
+            trial[field].sort(key=lambda row: row['window_event'])
+            trial['omitted'][omitted_key].remove(candidate['window_event'])
+            if len(encode(trial)) <= MAX_SOURCE_RETURN_CHARS:
+                view = trial
+    trial = deepcopy(view)
+    trial.update(source_text=full_text, status='available', truncated=False)
+    trial['omitted']['full_generation_input'] = False
+    if len(encode(trial)) <= MAX_SOURCE_RETURN_CHARS:
+        view = trial
+    return bounded_reply(view)
 
 
 class SourceArchive:
@@ -99,7 +132,7 @@ class SourceArchive:
         path.parent.mkdir(exist_ok=True)
         value = {'task_id': self.task_id, 'cycle_id': cycle_id,
                  'scope': 'Generation-time visible input; not per-claim evidential support.',
-                 'model_input': model_input,
+                 'model_input': model_input, 'visible_events': deepcopy(events),
                  'event_index': [{'event_id': row.get('event_id'),
                                   'presentation': row['presentation']} for row in events]}
         with path.open('x', encoding='utf-8') as stream:
@@ -129,7 +162,9 @@ class SourceArchive:
         self.refs[memory_id] = ref
 
     def read(self, memory_id, active_records):
-        result = {'memory_id': memory_id}
+        result = {'memory_id': memory_id, 'task_id': self.task_id,
+                  'source_scope': 'Generation-time visible window; not per-claim evidential support.',
+                  'integrity': 'not_checked'}
         row = active_records.get(memory_id)
         if row is None:
             return bounded_reply({**result, 'status': 'entry_not_found'})
@@ -139,13 +174,14 @@ class SourceArchive:
         if (ref['task_id'] != self.task_id or ref['memory_id'] != memory_id or
                 ref['category'] != row.category or ref['content_sha256'] != digest(row.content)):
             return bounded_reply({**result, 'status': 'source_binding_error'})
+        result['cycle_id'] = ref['cycle_id']
         try:
             text = self.window_path(ref['cycle_id']).read_text(encoding='utf-8')
         except FileNotFoundError:
             return bounded_reply({**result, 'status': 'source_missing'})
         if digest(text) != ref['window_sha256']:
-            return bounded_reply({**result, 'status': 'source_integrity_error'})
+            return bounded_reply({**result, 'status': 'source_integrity_error', 'integrity': 'failed'})
         window = json.loads(text)
         if window['task_id'] != self.task_id or window['cycle_id'] != ref['cycle_id']:
             return bounded_reply({**result, 'status': 'source_binding_error'})
-        return bounded_reply({**result, 'status': 'available'}, text)
+        return source_view({**result, 'integrity': 'verified_saved_bytes'}, window, text)

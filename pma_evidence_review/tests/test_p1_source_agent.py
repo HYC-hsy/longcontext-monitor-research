@@ -127,3 +127,20 @@ class P1SourceAgentTests(unittest.TestCase):
             a.task='other'
             with self.assertRaises(ValueError):
                 asyncio.run(a.maintain([],cycle_id='c2'))
+
+    def test_private_reasoning_and_signature_fields_are_never_read_or_logged(self):
+        class VisibleReply:
+            content='visible text'
+            tool_calls=[]
+            @property
+            def reasoning_content(self):
+                raise AssertionError('hidden reasoning was accessed')
+            @property
+            def signature(self):
+                raise AssertionError('signature was accessed')
+        with tempfile.TemporaryDirectory() as tmp:
+            a,_=self.agent(tmp,[VisibleReply()])
+            result=asyncio.run(a.maintain([],cycle_id='c1'))
+            self.assertEqual(result['status'],'completed')
+            self.assertEqual(result['turns'][0]['assistant_text'],'visible text')
+            self.assertNotIn('reasoning_content',(Path(tmp)/'maintenance.jsonl').read_text())

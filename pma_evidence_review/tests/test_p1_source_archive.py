@@ -95,3 +95,35 @@ class SourceArchiveTests(unittest.TestCase):
             self.assertEqual(reply['status'],'available_truncated')
             self.assertTrue(reply['truncated'])
             self.assertGreater(reply['source_characters'],len(reply['source_text']))
+
+    def test_long_bank_task_cannot_hide_short_tail_action_receipt_or_outer_scope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a=self.archive(tmp)
+            events=a.classify([{'event_id':'tail', 'analysis':'Actor says success',
+                'commands':['{"id":"tool-tail","tool_name":"query","args":{"region":"west"}}'],
+                'observation':json.dumps({'content':'Actor report, not a receipt', 'tool_results':[
+                    {'tool_use_id':'tool-tail','content':'RAW TAIL RECEIPT: seven rows'}]})}])
+            a.capture('c1', 'TASK '+('long task '*3000)+'BANK '+('old summary '*3000),events)
+            a.bind('m1','knowledge','saved','c1')
+            raw=a.read('m1',{'m1':NS(category='knowledge',content='saved')})
+            self.assertLessEqual(len(raw),MAX_SOURCE_RETURN_CHARS)
+            view=json.loads(raw)
+            self.assertEqual(view['task_id'],'task-1');self.assertEqual(view['cycle_id'],'c1')
+            self.assertEqual(view['integrity'],'verified_saved_bytes')
+            self.assertIn('not per-claim',view['source_scope'])
+            self.assertEqual(view['status'],'available_truncated')
+            self.assertTrue(view['omitted']['full_generation_input'])
+            unit=view['actions_and_receipts'][0]
+            self.assertIn('"region":"west"',unit['commands'][0])
+            self.assertEqual(unit['tool_results'][0]['tool_use_id'],'tool-tail')
+            self.assertEqual(unit['tool_results'][0]['content'],'RAW TAIL RECEIPT: seven rows')
+            self.assertEqual(view['actor_reports'][0]['analysis'],'Actor says success')
+
+    def test_oversize_event_is_wholly_omitted_shorter_event_keeps_pairing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a=self.archive(tmp)
+            events=a.classify([self.event('small'),self.event('large',result='huge '*9000)])
+            a.capture('c1','long model input '*4000,events);a.bind('m1','knowledge','saved','c1')
+            view=json.loads(a.read('m1',{'m1':NS(category='knowledge',content='saved')}))
+            self.assertEqual([u['event_id'] for u in view['actions_and_receipts']],['small'])
+            self.assertEqual(view['omitted']['whole_event_units'],[2])

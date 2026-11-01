@@ -73,7 +73,7 @@ class SourceReadP1Agent(BankDisplayAgent):
             + self._format_memory_bank(observation) + self._gap_view()
             + '\n## Recent visible events\n' + encode(visible)
             + '\n\nMaintain the bank with the available tools; unchanged entries need no write.\n')
-        return prompt, marked, projection
+        return prompt, marked, projection, visible
 
     def _calls(self, response, round_index):
         calls = getattr(response, 'tool_calls', None) or []
@@ -129,13 +129,13 @@ class SourceReadP1Agent(BankDisplayAgent):
         try:
             raw_events = self._public_events(entries)
             observation = observation if observation is not None else encode({'task': self.task, 'events': raw_events})
-            initial, marked, projection = self._input(observation, step_count, raw_events)
+            initial, marked, projection, visible = self._input(observation, step_count, raw_events)
             report['input_projection'] = projection
             prompt = initial
             for round_index in range(CONTINUATION_LIMIT + 1):
                 tools = self.get_tools_schema() if round_index == 0 else super().get_tools_schema()
                 window_id = report['cycle_id'] + f'_r{round_index}'
-                self.source_archive.capture(window_id, prompt, marked)
+                self.source_archive.capture(window_id, prompt, visible)
                 request = {'kind': 'request', 'cycle_id': report['cycle_id'], 'window_id': window_id,
                            'prompt': prompt, 'system': SYSTEM, 'tools': tools}
                 self._journal(request)
@@ -144,6 +144,10 @@ class SourceReadP1Agent(BankDisplayAgent):
                 calls = self._calls(response, round_index)
                 turn = {'window_id': window_id, 'assistant_text': self._strip_thinking(getattr(response, 'content', None) or ''),
                         'tool_calls': calls, 'tool_results': []}
+                usage = getattr(response, 'usage', None)
+                turn['usage'] = {k: getattr(usage, k) for k in
+                    ('prompt_tokens','completion_tokens','cache_tokens','cost_usd')
+                    if usage is not None and getattr(usage, k, None) is not None}
                 report['turns'].append(turn)
                 for call in calls:
                     try:
@@ -161,7 +165,7 @@ class SourceReadP1Agent(BankDisplayAgent):
                 self._journal({'kind': 'response_and_receipts', 'cycle_id': report['cycle_id'], **turn})
                 if round_index == 0 and any(call['name'] == 'memory_read_source' for call in calls):
                     report['continuations_used'] += 1
-                    prompt = initial + '\n## Previous maintenance turn and tool receipts (data)\n' + encode(turn)
+                    prompt = initial + '\n## Previous maintenance turn and tool receipts (data)\n' + encode({k: turn[k] for k in ('assistant_text','tool_calls','tool_results')})
                     prompt += '\nContinue from these exact receipts. Source reads are now closed; use the five memory-write tools or leave the bank unchanged.\n'
                 else:
                     break
