@@ -64,10 +64,11 @@ def project_steps(entries):
     return rows, audit
 
 
-def render_selection(catalogue, status, steps, step_count, status_binding=''):
+def render_selection(catalogue, status, steps, step_count, status_binding='',
+                     memory_note='Memory is derived; source alignment is NOT semantic proof.'):
     return (f'## Step {step_count}\n\n## Selectable catalogue\n'
             + json.dumps(catalogue, ensure_ascii=False, sort_keys=True)
-            + '\nMemory is derived; source alignment is NOT semantic proof.\n'
+            + '\n' + memory_note + '\n'
             + '\n## Current internal status (not selectable)\n' + (status or '(no status)')
             + '\n' + status_binding
             + '\n\n## Recent visible steps (not selectable)\n'

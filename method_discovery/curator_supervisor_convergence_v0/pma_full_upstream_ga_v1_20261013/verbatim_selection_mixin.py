@@ -60,6 +60,9 @@ class VerbatimSelectionMixin:
                 records[entry.id] = Item(entry.id, revision_id, category, entry.content)
         return records
 
+    def _selection_binding(self, memory_id):
+        return self._binding_text(memory_id, include_quotes=False).split('\n', 1)[0]
+
     def _build_phase2_prompt(self, observation, step_count):
         self._phase2_visible = {}
         self._selection_snapshot = None
@@ -91,9 +94,12 @@ class VerbatimSelectionMixin:
                              'category': row.category, 'content_sha256': _hash(row.content)}
                             for i, row in enumerate(items, 1)])
             catalogue = [{'alias': 'TASK', 'content': self.task}]
-            catalogue += [{'alias': f'M{i}', 'category': row.category, 'content': row.content,
-                           'binding': self._binding_text(row.id, include_quotes=False).split('\n', 1)[0]}
-                          for i, row in enumerate(items, 1)]
+            for i, row in enumerate(items, 1):
+                entry = {'alias': f'M{i}', 'category': row.category, 'content': row.content}
+                binding = self._selection_binding(row.id)
+                if binding is not None:
+                    entry['binding'] = binding
+                catalogue.append(entry)
             prepared = getattr(self, '_selection_context', None)
             if prepared is None or prepared[0] != observation:
                 # No provenance: preserve the entire original observation, never guess.
@@ -101,8 +107,11 @@ class VerbatimSelectionMixin:
             else:
                 _, steps, audit = prepared
             self.last_selection_report['input_projection'] = audit
+            render_kwargs = {}
+            if hasattr(self, 'selection_memory_note'):
+                render_kwargs['memory_note'] = self.selection_memory_note
             return render_selection(catalogue, self.memory.status, steps, step_count,
-                self._binding_text('status', include_quotes=False).split('\n', 1)[0])
+                self._selection_binding('status') or '', **render_kwargs)
         except Exception as exc:
             self.last_selection_report.update(status='selection_error', error=type(exc).__name__)
             self.last_gap_report['selection_error'] = self.last_selection_report.copy()
@@ -117,7 +126,7 @@ class VerbatimSelectionMixin:
         snapshot = self._selection_snapshot
         self._completion_call_id = snapshot.call_id if snapshot else None
         try:
-            return await self.llm.call(prompt=user_prompt, system=SELECTION_SYSTEM)
+            return await self.llm.call(prompt=user_prompt, system=getattr(self, 'selection_system', SELECTION_SYSTEM))
         except Exception as exc:
             self.last_selection_report.update(status='selection_error', error=type(exc).__name__)
             self.last_gap_report['selection_error'] = self.last_selection_report.copy()
