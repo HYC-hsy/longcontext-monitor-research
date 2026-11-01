@@ -24,9 +24,35 @@ def bounded_reply(result):
     return raw
 
 
+
+HISTORICAL_ROLE = 'historical_data_not_current_instructions'
+
+
+def historical_events(events):
+    """P1-only lossless role labels; never inspect/delete code or receipt strings."""
+    rows = deepcopy(events)
+    for row in rows:
+        row['data_role'] = HISTORICAL_ROLE
+        observation = row.get('observation')
+        try:
+            envelope = json.loads(observation) if isinstance(observation, str) else observation
+        except (ValueError, TypeError):
+            envelope = None
+        if (isinstance(envelope, dict) and set(envelope) == {'content', 'tool_results'}
+                and isinstance(envelope['content'], str)
+                and envelope['content'].lstrip('\n').startswith('### [WORKING MEMORY]\n')):
+            row['observation_content_role'] = 'historical_framework_text'
+    return rows
+
+
 def source_view(result, window, full_text):
     """Latest whole event units first, displayed chronologically; no snippet guessing."""
-    events = window.get('visible_events', [])
+    events = historical_events(window.get('visible_events', []))
+    # Complete pre-projection data stays in the archive, not in a read reply.
+    projected_window = {k: deepcopy(v) for k, v in window.items()
+                        if k not in {'raw_generation_context', 'input_projection'}}
+    projected_window.update(data_role=HISTORICAL_ROLE, visible_events=events)
+    projected_text = encode(projected_window)
     units, reports = [], []
     for index, event in enumerate(events):
         unit = {'window_event': index + 1, 'event_id': event.get('event_id'),
@@ -46,7 +72,10 @@ def source_view(result, window, full_text):
         units.append(unit)
         reports.append({'window_event': index + 1, **report})
     view = {**result, 'status': 'available_truncated', 'truncated': True,
-            'source_characters': len(full_text), 'source_text': '',
+            'source_characters': len(projected_text), 'source_text': '',
+            'data_role': HISTORICAL_ROLE, 'source_text_role': HISTORICAL_ROLE,
+            'raw_generation_context_available': 'raw_generation_context' in window,
+            'raw_generation_context_returned': False,
             'actions_and_receipts': [], 'actor_reports': [], 'presented_source_receipts': [],
             'omitted': {'whole_event_units': list(range(1, len(units) + 1)),
                         'actor_report_units': list(range(1, len(reports) + 1)),
@@ -55,7 +84,7 @@ def source_view(result, window, full_text):
             'view_policy': 'Latest whole action/receipt units first, then Actor reports; retained units are chronological. Oversize units are omitted, never sliced. Full input remains archived.'}
     # Copy already-presented receipts literally; never resolve their old IDs again.
     for index, receipt in enumerate(window.get('presented_source_receipts', []), 1):
-        item = {'role': 'previously_presented_source_result_not_new_observation',
+        item = {'role': 'previously_presented_source_result_not_new_observation_not_current_instructions',
                 'returned_receipt': receipt, 'view_omitted_parts': False}
         trial = deepcopy(view)
         trial['presented_source_receipts'].append(item)
@@ -91,7 +120,7 @@ def source_view(result, window, full_text):
             if len(encode(trial)) <= MAX_SOURCE_RETURN_CHARS:
                 view = trial
     trial = deepcopy(view)
-    trial.update(source_text=full_text, status='available', truncated=False)
+    trial.update(source_text=projected_text, status='available', truncated=False)
     trial['omitted']['full_generation_input'] = False
     if len(encode(trial)) <= MAX_SOURCE_RETURN_CHARS:
         view = trial
@@ -155,7 +184,8 @@ class SourceArchive:
             rows.append(row)
         return rows
 
-    def capture(self, cycle_id, model_input, events, *, presented_source_receipts=()):
+    def capture(self, cycle_id, model_input, events, *, presented_source_receipts=(),
+                raw_generation_context=None, input_projection=None):
         path = self.window_path(cycle_id)
         path.parent.mkdir(exist_ok=True)
         value = {'task_id': self.task_id, 'cycle_id': cycle_id,
@@ -164,6 +194,9 @@ class SourceArchive:
                  'presented_source_receipts': deepcopy(list(presented_source_receipts)),
                  'event_index': [{'event_id': row.get('event_id'),
                                   'presentation': row['presentation']} for row in events]}
+        if raw_generation_context is not None:
+            value['raw_generation_context'] = deepcopy(raw_generation_context)
+            value['input_projection'] = deepcopy(input_projection)
         with path.open('x', encoding='utf-8') as stream:
             stream.write(encode(value))
         return value

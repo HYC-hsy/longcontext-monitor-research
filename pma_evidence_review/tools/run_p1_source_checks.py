@@ -20,7 +20,7 @@ def main():
     args.report.parent.mkdir(parents=True,exist_ok=True)
     files=['pma_evidence_review/tests/'+name for name in (
         'test_p1_source_archive.py','test_p1_source_agent.py',
-        'test_p1_source_client.py','test_p1_source_cases.py')]
+        'test_p1_source_client.py','test_p1_source_cases.py','test_p1_source_isolation.py')]
     with patch.object(runner,'suite_manifest',return_value=files):
         return runner.run_phase('pma',args.report)
 
