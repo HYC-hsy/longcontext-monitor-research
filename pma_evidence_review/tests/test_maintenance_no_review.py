@@ -85,11 +85,11 @@ class MaintenanceNoReviewTests(unittest.TestCase):
         self.assertNotIn('why it failed', text)
         self.assertNotIn('exact_unique,', text)
         self.assertLess(len(text.split()), len(baseline.split()))
-        self.assertEqual(text.count('Test-quality checks:'), 1)
-        self.assertEqual(text.count('Maintain existing memory from the new material first.'), 1)
-        for rule in ('Maintain existing memory', 'specific unresolved condition',
-                     'Unknown or unverified is not observed failure', 'including echo',
-                     'Test-quality checks:', 'Every valid save becomes the latest'):
+        self.assertEqual(text.count('## Gaps'), 1)
+        self.assertEqual(text.count('## Updating entries'), 1)
+        for rule in ('Maintain corresponding records', 'still-unmet parts',
+                     'Unknown is not', 'self-printed success message',
+                     'what behavior and scope were tested', 'Valid writes become latest directly'):
             self.assertIn(rule, text)
         agent, _ = self.agent([])
         for tool in agent.get_tools_schema():
@@ -118,4 +118,4 @@ class MaintenanceNoReviewTests(unittest.TestCase):
                 result = asyncio.run(agent.process(observation, 1))
                 self.assertEqual(json.loads(result.context_for_action)['blocks'][0]['content'], content)
                 self.assertEqual([p for p, _ in requests], ['maintenance', 'selection'])
-                self.assertIn('a local result is not whole-task completion', requests[0][1]['system'])
+                self.assertIn('local results are not whole-task', requests[0][1]['system'])

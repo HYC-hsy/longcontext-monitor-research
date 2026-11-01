@@ -1,87 +1,85 @@
-"""Explicit maintenance candidate: latest writes plus the existing tag selector."""
-from latest_evidence_gap_agent import LatestEvidenceGapMemoryAgent, latest_phase1_system
+"""Approved PMA-aligned maintenance with latest writes and the tag selector."""
+from latest_evidence_gap_agent import LatestEvidenceGapMemoryAgent
 from verbatim_selection_mixin import VerbatimSelectionMixin
-
-
 from citation_gate_config import MAINTENANCE_POLICY as POLICY
 
 
-MAINTENANCE_RULES = """
-Maintain existing memory from the new material first. For the same object, scope,
-and future use, decide whether an existing record should be revised before adding
-another. Add only when no corresponding record exists and the information helps
-continued work; leave unchanged records alone. Do not force one fact per entry or
-merge different environments or different problems merely because they look alike.
+MAINTENANCE_SYSTEM = '''You are a Memory Bank Manager. Your job is to maintain a lean, accurate knowledge bank.
 
-Knowledge should retain specific reusable results, constraints and partial results.
-Experiences should retain what was tried and the observed outcome; include a cause
-only when the available material supports it. A later success need not erase a
-useful earlier failure. Preserve object, time, version, conditions and scope.
-Keep status short but sufficient for current progress and relevant next steps,
-without recopying the entire build or debugging history. Keep gaps focused on the
-specific unresolved condition, without repeating its full completion history.
+## Your Tools
+- memory_save_knowledge: Save important FACTS (task requirements, env details, API constraints, file paths)
+- memory_save_procedural: Record EXPERIENCES (failed approaches, error patterns, successful fixes)
+- memory_update_status: Track progress internally (not shown to action agent)
+- memory_delete: Remove outdated/incorrect entries
+- memory_save_gap: Maintain concrete task-relevant unresolved conditions
 
-Unknown or unverified is not observed failure. A plan or promise is not execution;
-a local result is not whole-task completion. Interpret output with the action that
-produced it and the actual results. An agent's self-report, a comment or a success
-string printed by its own script (including echo) is a claim, not proof that the
-check succeeded. Keep confirmed observations distinct from tentative conclusions.
-Record only concrete task-relevant unresolved conditions; do not enumerate
-hypothetical risks or invent requirements. No additional diagnosis is required.
-"""
+## Guidelines
+1. **Be selective**: Only save information that would be LOST if the action agent's context window scrolls past it
+2. **Prioritize task requirements**: API signatures, output formats, specific constraints from the task description
+3. **Record experiences**: What was tried and what happened; include why only when supported
+4. **Keep it lean**: Revise affected entries, leave unchanged entries alone, and delete only to retire an entry
+5. **Preserve useful observations**: Keep important tool results, failures and partial conclusions; omit incidental output and general tool knowledge
 
+Maintain corresponding records for the same object, scope and future use before
+adding new ones. Do not merge different problems or environments merely because
+they belong to one task, or force one fact per entry. Experiences retain reusable
+attempts and results, including useful earlier failures after success, not a
+growing history of the whole task. Status holds current progress and relevant
+next steps, not a repeated debugging history.
 
-SCOPED_GAP_MAINTENANCE = """
-Maintain a separate gap view with memory_save_gap. At initialization, retain only
-acceptance expectations supported by the original task.
+Count attempts by distinct actual actions, not repeated logs, checkpoints or
+earlier observations. A new execution without a returned result has an unknown
+outcome. Preserve conditions, time, version and scope where they affect meaning.
+Distinguish confirmed observations from tentative conclusions. Unknown is not
+observed failure; plans are not execution, and local results are not whole-task
+completion. Read results with the actions that produced them: an agent claim,
+comment or self-printed success message is not proof of a successful check.
+Derived memory and status are not fresh observations.
 
-Test-quality checks:
-When visible work creates, changes or runs tests, or claims completion, inspect
-what behavior and scope were checked, what would make the check fail, and whether
-actual outputs support the claim. Record a specific supported discrepancy:
-relevant missing coverage, weak assertions, wrong expectations, input contracts,
-or checks of the wrong behavior. A defective check does not prove a defective
-implementation. Do not invent requirements, unseen test behavior, thresholds or
-checklists of hypothetical edge cases.
+## What to save at Step 1 (task description):
+- Specific API requirements (function signatures, argument orders, input types)
+- Required output files and formats
+- Constraints that are easy to forget mid-task
+- Key domain-specific details
 
-Compare new observations with affected gaps. Retire a displayed ID only when its
-condition is resolved within scope, obsolete, redundant or unsupported. A plan,
-acknowledgment or success claim alone is not resolution. If partly resolved,
-revise the same ID to retain the remaining condition. Status updates do not close
-gaps. Preserve useful corrective action and observed verification as a concise,
-scoped experience; retiring duplicate or unsupported gaps is not a successful
-repair. Do not save entries to narrate memory edits or relist unchanged gaps.
-"""
+## What to save at later steps:
+- Environment discoveries (package versions, tool availability)
+- Error patterns and fixes
+- Approach changes and why
+- Performance or score tracking
+
+## Gaps
+At initialization, retain only acceptance expectations supported by the task.
+Keep each gap focused on its unresolved condition. New progress or a temporary
+blocker must not erase still-unmet parts of the original condition. For partial
+resolution, revise the same ID and retain those parts; solving a prerequisite
+does not resolve the remaining goal. Retire a gap only when resolved within its
+scope, obsolete, redundant or unsupported. Status changes and success claims
+alone do not close gaps. Removing a duplicate or unsupported gap is not a
+successful repair. Do not narrate memory edits or relist unchanged gaps.
+
+When visible work creates, changes or runs tests, or claims completion, check
+what behavior and scope were tested, what would make the check fail, and what
+the outputs establish. Retain concrete discrepancies such as missing relevant
+coverage, weak assertions, wrong expectations or input contracts. A defective
+check does not prove a defective implementation. Do not invent requirements,
+unseen test behavior or hypothetical risks. No extra diagnosis is required.
+
+## Updating entries
+Use a displayed memory_id with the same-category save tool to revise an entry;
+omit it only for a new entry. Status replaces the current status. Do not delete
+then save to revise. Unmentioned entries remain; each operation stands alone.
+Valid writes become latest directly, with no pending proposals or review.
+Evidence is optional: [{"quote":"visible text"}]. A source hint does not restrict
+the host's search; for XML tools encode evidence as a JSON array. Supply content
+and optional quotes, not hashes or revision metadata. Source matches locate
+text; they do not prove claims; approximate matches are not verified quotations and
+multiple matches are alternatives, not corroboration.
+'''
 
 
 def maintenance_system():
-    # Replace conflicting inherited guidance at its source in the assembled
-    # candidate prompt; historical modes and pinned vendor bytes stay unchanged.
-    text = latest_phase1_system()
-    replacements = (
-        ("3. **Record failures**: What was tried, why it failed, what the error was — so it's not repeated",
-         "3. **Record experiences**: What was tried and what happened; include why only when supported"),
-        ("4. **Keep it lean**: Revise superseded entries using their stable memory_id; delete only to retire an entry",
-         "4. **Maintain first**: Revise corresponding entries with their stable memory_id; delete only to retire an entry"),
-        ("5. **Don't save obvious things**: Terminal output the agent just saw, general knowledge about tools",
-         "5. **Preserve useful observations**: Keep important tool results, failures and partial conclusions that will matter after the recent window; omit incidental output and general tool knowledge"),
-        ("## What to save at Step 1 (task description):", MAINTENANCE_RULES + "\n## What to save at Step 1 (task description):"),
-        ("Bindings are exact_unique, exact_multiple, normalized_unique, normalized_multiple,\nfuzzy_candidate, unbound, or error. None proves truth or entailment. Normalized\nmatches are not verbatim quotes; fuzzy candidates are approximate locations, not\nverified support. Multiple locations are alternatives, not corroboration.\nAlignment scores describe text matching, not probabilities that content is true.",
-         "Source bindings locate text; they do not prove truth or entailment. Approximate matches are not verified quotations; multiple locations are alternatives, not corroboration."),
-    )
-    for old, new in replacements:
-        if text.count(old) != 1:
-            raise RuntimeError('maintenance_prompt_anchor_changed')
-        text = text.replace(old, new, 1)
-    # Consolidate the inherited GAP maintenance block, rather than accumulating
-    # another overlapping history/lifecycle checklist beside the new rules.
-    start_anchor = '\nMaintain a separate gap view'
-    end_anchor = '\nWrite content normally; evidence is optional:'
-    if text.count(start_anchor) != 1 or text.count(end_anchor) != 1:
-        raise RuntimeError('maintenance_prompt_anchor_changed')
-    start = text.index(start_anchor)
-    end = text.index(end_anchor, start)
-    return text[:start] + SCOPED_GAP_MAINTENANCE + text[end:]
+    return MAINTENANCE_SYSTEM
 
 
 class MaintenanceNoReviewAgent(VerbatimSelectionMixin, LatestEvidenceGapMemoryAgent):
@@ -92,9 +90,9 @@ class MaintenanceNoReviewAgent(VerbatimSelectionMixin, LatestEvidenceGapMemoryAg
         super().__init__(**kwargs)
         descriptions = {
             'memory_save_knowledge': 'Save or revise specific useful facts, constraints or partial results; preserve their scope and conditions.',
-            'memory_save_procedural': 'Save or revise an experience: what was tried and the observed outcome. Include causes only when supported by available material.',
+            'memory_save_procedural': 'Save or revise reusable attempts and observed results, with causes only when supported; do not append a whole-task history.',
             'memory_update_status': 'Replace internal progress with a short sufficient current summary and relevant next steps; keep plans distinct from executed results.',
-            'memory_save_gap': 'Save or revise a concrete unresolved task condition, not its full history. Unknown or unverified does not mean failed.',
+            'memory_save_gap': 'Save or revise a concrete unresolved condition; preserve its still-unmet parts as temporary blockers change or are resolved.',
             'memory_delete': 'Retire an existing entry by its displayed memory_id. For a revision use the same-category save tool with that ID instead.',
         }
         for tool in self._tools:
