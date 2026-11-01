@@ -108,6 +108,9 @@ def prepare(args: argparse.Namespace) -> dict:
     gate=validate_gate(getattr(args,'citation_review_gate',None),getattr(args,'research_candidate','U'),args.condition)
     strategy=getattr(args,'citation_review_strategy',None)
     validate_strategy(gate,strategy)
+    from .citation_gate_config import validate_maintenance
+    maintenance_policy=validate_maintenance(getattr(args,'memory_maintenance_policy',None),
+        getattr(args,'research_candidate','U'),gate,strategy,args.condition)
     if gate and not getattr(args,'frontend_run_identity',False) and not getattr(args,'fake_only',False) and not getattr(args,'certification_dir',None):
         raise ValueError('gate certification-dir required before real preparation')
     validate_binding(args.condition, getattr(args, 'research_candidate', 'U'))
@@ -180,6 +183,7 @@ def prepare(args: argparse.Namespace) -> dict:
     if gate is not None:
         plan['citation_review_gate'] = gate
         if strategy is not None:plan['citation_review_strategy']=strategy
+    if maintenance_policy is not None:plan['memory_maintenance_policy']=maintenance_policy
     _write_new(root / 'plan.json', plan)
     if pos:
         from method_discovery.pos_upstream_ga_v1_20261017.single_manifest import prepare as prepare_pos
@@ -199,6 +203,8 @@ def prepare(args: argparse.Namespace) -> dict:
         from .citation_gate_config import require_gate_binding,require_strategy_binding
         require_gate_binding(gate, manifest['config'], candidate, args.condition)
         require_strategy_binding(strategy,manifest['config'],gate)
+        from .citation_gate_config import require_maintenance_binding
+        require_maintenance_binding(maintenance_policy,manifest['config'],candidate,args.condition)
     if args.fake_only and not pos:
         manifest['zero_model_fixture_only'] = True
         if candidate == 'pma_stateful_memory_v1':
@@ -283,6 +289,7 @@ def main() -> None:
     prepared.add_argument('--citation-review-gate',choices=('gate-only','gate-one-repair'))
     from .citation_gate_config import STRATEGIES
     prepared.add_argument('--citation-review-strategy',choices=STRATEGIES)
+    prepared.add_argument('--memory-maintenance-policy',choices=('maintain-scoped-latest-no-review-v1',))
     prepared.add_argument('--research-candidate', choices=sorted(candidate_names()), default='U')
     prepared.add_argument('--occurrence', type=int, default=1)
     prepared.add_argument('--output', required=True)

@@ -94,6 +94,9 @@ def verify_live_spec(spec: dict) -> None:
                          spec.get('research_candidate','U'),spec.get('condition','B'))
     require_strategy_binding(spec.get('citation_review_strategy'),frozen.get('config',{}),
                              spec.get('citation_review_gate'))
+    from .citation_gate_config import require_maintenance_binding
+    require_maintenance_binding(spec.get('memory_maintenance_policy'),frozen.get('config',{}),
+        spec.get('research_candidate','U'),spec.get('condition','B'))
     verify_gate_sources(frozen.get('config',{}))
     from .gate_certification import require_launch_certificate
     require_launch_certificate(frozen,fixture=(spec.get('zero_model_fixture_only') is True and

@@ -1,4 +1,5 @@
 """Small shared opt-in contract; no imports of clients, profiles or benchmark data."""
+MAINTENANCE_POLICY='maintain-scoped-latest-no-review-v1'
 MODES=('gate-only','gate-one-repair')
 STRATEGY='semantic-support-one-sentence-v1'
 CLAIM_SPLIT='claim-split-same-evidence-v2'
@@ -26,10 +27,12 @@ def validate_gate(mode,candidate,condition='B'):
     return mode
 
 
-def worker_flags(mode,candidate,strategy=None):
+def worker_flags(mode,candidate,strategy=None,maintenance_policy=None):
+    validate_maintenance(maintenance_policy,candidate,mode,strategy)
     validate_gate(mode,candidate)
     validate_strategy(mode,strategy)
     flags=['--citation-review-gate',mode] if mode is not None else []
+    flags += ['--memory-maintenance-policy',maintenance_policy] if maintenance_policy is not None else []
     return flags+(['--citation-review-strategy',strategy] if strategy is not None else [])
 
 
@@ -50,11 +53,44 @@ def gate_source_paths():
     return [p.relative_to(root).as_posix() for p in sorted(review.glob('*.py'))+vendor]+[
         (stage/name).relative_to(root).as_posix() for name in
         ('citation_gate_agent.py','citation_gate_config.py','verbatim_selection_agent.py',
-         'tag_selection_contract.py','selection_context.py')]+[
+         'tag_selection_contract.py','selection_context.py','verbatim_selection_mixin.py')]+[
         (review/'verbatim_selection_prototype_20261031/contract.py').relative_to(root).as_posix()]
 
 
+def validate_maintenance(policy,candidate,mode=None,strategy=None,condition='B'):
+    if policy is not None and (policy != MAINTENANCE_POLICY or
+            candidate != 'pma_gap_evidence_v1' or condition != 'B' or
+            mode is not None or strategy is not None):
+        raise ValueError('maintenance policy requires evidence PMA B without any review gate or strategy')
+    return policy
+
+
+def require_maintenance_binding(policy,config,candidate,condition='B'):
+    validate_maintenance(policy,candidate,config.get('citation_review_gate'),
+                         config.get('citation_review_strategy'),condition)
+    if policy != config.get('memory_maintenance_policy'):
+        raise ValueError('maintenance policy differs from frozen manifest')
+    return policy
+
+
+def maintenance_source_paths():
+    from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.single_run_certification import EVIDENCE_GAP_SOURCE_FILES
+    return list(EVIDENCE_GAP_SOURCE_FILES)
+
+
 def verify_gate_sources(config):
+    policy=config.get('memory_maintenance_policy')
+    validate_maintenance(policy,config.get('research_candidate'),
+                         config.get('citation_review_gate'),config.get('citation_review_strategy'))
+    if policy is not None:
+        from pathlib import Path
+        import hashlib
+        root=Path(__file__).resolve().parent.parents[2]
+        actual={p:hashlib.sha256((root/p).read_bytes()).hexdigest() for p in maintenance_source_paths()}
+        if config.get('maintenance_source_sha256')!=actual:
+            raise ValueError('maintenance source identity differs from manifest')
+    elif config.get('maintenance_source_sha256') is not None:
+        raise ValueError('maintenance source binding without policy')
     validate_strategy(config.get('citation_review_gate'),config.get('citation_review_strategy'))
     if config.get('citation_review_gate') is None:
         if config.get('citation_gate_source_sha256') is not None:raise ValueError('gate source binding without gate')

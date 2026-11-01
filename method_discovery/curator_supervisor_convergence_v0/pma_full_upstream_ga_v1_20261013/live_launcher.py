@@ -447,6 +447,9 @@ def run_live(args) -> dict:
     gate=require_gate_binding(getattr(args,'citation_review_gate',None),manifest['config'],candidate,args.condition)
     strategy=getattr(args,'citation_review_strategy',None)
     require_strategy_binding(strategy,manifest['config'],gate)
+    from .citation_gate_config import require_maintenance_binding
+    maintenance_policy=require_maintenance_binding(getattr(args,'memory_maintenance_policy',None),
+        manifest['config'],candidate,args.condition)
     verify_gate_sources(manifest['config'])
     from .gate_certification import require_launch_certificate
     require_launch_certificate(manifest,fixture=fixture)
@@ -567,6 +570,7 @@ def run_live(args) -> dict:
     }
     if gate is not None:spec['citation_review_gate']=gate
     if strategy is not None:spec['citation_review_strategy']=strategy
+    if maintenance_policy is not None:spec['memory_maintenance_policy']=maintenance_policy
     runtime_policy = manifest.get('config', {}).get('runtime_policy')
     if runtime_policy is not None:
         from experiment_runner.runtime_policy import validate_resolved_policy
@@ -744,7 +748,7 @@ def run_live(args) -> dict:
                     '--research-candidate', candidate,
                     *(['--fake-memory', '--fake-memory-update'] if fixture and
                       not candidate_profile else [])]
-            worker_args += worker_flags(gate,candidate,strategy)
+            worker_args += worker_flags(gate,candidate,strategy,maintenance_policy)
             worker = subprocess.Popen(worker_args,
                 cwd=STAGE, env=worker_env,
                 stdout=worker_logs[0], stderr=worker_logs[1])
@@ -757,6 +761,7 @@ def run_live(args) -> dict:
             ready_data = json.loads(ready.read_text(encoding='utf-8'))
             if ready_data.get('citation_review_gate')!=gate:raise RuntimeError('worker gate identity mismatch')
             require_strategy_binding(ready_data.get('citation_review_strategy'),manifest['config'],gate)
+            require_maintenance_binding(ready_data.get('memory_maintenance_policy'),manifest['config'],candidate,args.condition)
             if stateful:
                 require_same_policies(runtime_policies, ready_data)
                 if (ready_data.get('run_id'), ready_data.get('task_id'),
@@ -1095,6 +1100,7 @@ def main() -> None:
     parser.add_argument('--citation-review-gate',choices=('gate-only','gate-one-repair'))
     from .citation_gate_config import STRATEGIES
     parser.add_argument('--citation-review-strategy',choices=STRATEGIES)
+    parser.add_argument('--memory-maintenance-policy',choices=('maintain-scoped-latest-no-review-v1',))
     parser.add_argument('--research-candidate', choices=(
         'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
         'pos_pma_complement_v1', 'pos_pma_shared_view_v1',

@@ -66,6 +66,8 @@ EVIDENCE_GAP_SOURCE_FILES = GAP_SOURCE_FILES + tuple(
                          'gap_evidence_alignment.py',
                          'latest_evidence_gap_agent.py', 'latest_evidence_gap_store.py',
                          'verbatim_selection_agent.py', 'selection_context.py',
+                         'verbatim_selection_mixin.py', 'maintenance_no_review_agent.py',
+                         'citation_gate_config.py',
                          'tag_selection_contract.py',
                          'graded_evidence_alignment.py', 'vendor/langextract_3a68580/fuzzy.py',
                          'fuzzy_candidate_windows.py', 'vendor/langextract_3a68580/chunking.py',
@@ -73,7 +75,8 @@ EVIDENCE_GAP_SOURCE_FILES = GAP_SOURCE_FILES + tuple(
                          'vendor/langextract_3a68580/alignment.py',
                          'vendor/langextract_3a68580/tokenizer.py',
                          'vendor/langextract_3a68580/requirements.txt')
-) + ('pma_evidence_review/verbatim_selection_prototype_20261031/contract.py',)
+) + ('pma_evidence_review/verbatim_selection_prototype_20261031/contract.py',
+     'pma_evidence_review/__init__.py', 'pma_evidence_review/private_faults.py')
 EVIDENCE_FILES = (
     'execution_identity.json',
     'live_result.json', 'agent_start_identity.json', 'agent_end_native.json',

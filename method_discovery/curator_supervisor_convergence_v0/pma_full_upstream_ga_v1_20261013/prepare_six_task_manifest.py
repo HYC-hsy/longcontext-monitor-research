@@ -112,6 +112,9 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
     gate=validate_gate((plan or {}).get('citation_review_gate'),candidate,(plan or {}).get('condition','B'))
     strategy=(plan or {}).get('citation_review_strategy')
     validate_strategy(gate,strategy)
+    from .citation_gate_config import validate_maintenance,maintenance_source_paths
+    maintenance_policy=validate_maintenance((plan or {}).get('memory_maintenance_policy'),
+        candidate,gate,strategy,(plan or {}).get('condition','B'))
     stateful = candidate == 'pma_stateful_memory_v1'
     if stateful:
         from .stateful_runtime_policy import policies
@@ -132,6 +135,7 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
             required.update(key for key in runtime_policies if key in plan)
         if gate is not None:required.add('citation_review_gate')
         if strategy is not None:required.add('citation_review_strategy')
+        if maintenance_policy is not None:required.add('memory_maintenance_policy')
         if 'runtime_policy' in plan:
             required.add('runtime_policy')
         if 'evaluation_bootstrap_protocol' in plan:
@@ -257,6 +261,10 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
         if strategy is not None:method['citation_review_strategy']=strategy
         method['citation_gate_source_sha256']={name:_committed_source_sha(STAGE.parents[2],name)
             for name in gate_source_paths()}
+    if maintenance_policy is not None:
+        method['memory_maintenance_policy']=maintenance_policy
+        method['maintenance_source_sha256']={name:_committed_source_sha(STAGE.parents[2],name)
+            for name in maintenance_source_paths()}
     if schema == 'pma-ga-live-manifest-v5':
         method['research_candidate'] = candidate
         if candidate in ('pma_gap_memory_v0', 'pma_gap_evidence_v1'):

@@ -49,8 +49,10 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
                        memory_api_key: str | None = None,
                        memory_profile: dict[str, Any] | None = None,
                        research_candidate: str = "U",
-                       citation_review_gate: str | None = None, citation_review_strategy: str | None = None) -> MemoryEnabledTerminus2:
-    from citation_gate_config import validate_gate,validate_strategy
+                       citation_review_gate: str | None = None, citation_review_strategy: str | None = None,
+                       memory_maintenance_policy: str | None = None) -> MemoryEnabledTerminus2:
+    from citation_gate_config import validate_gate,validate_strategy,validate_maintenance
+    validate_maintenance(memory_maintenance_policy,research_candidate,citation_review_gate,citation_review_strategy)
     validate_gate(citation_review_gate,research_candidate)
     review_strategy=validate_strategy(citation_review_gate,citation_review_strategy)
     if research_candidate not in {"U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0", "pma_gap_evidence_v1"}:
@@ -109,6 +111,15 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
             use_bm25_prefilter=original.use_bm25_prefilter,
             keep_thinking=original.keep_thinking,
             use_structured_tools=original.use_structured_tools)
+        if memory_maintenance_policy is not None:
+            from maintenance_no_review_agent import MaintenanceNoReviewAgent
+            agent._memory_agent = MaintenanceNoReviewAgent(
+                task="", llm=agent._memory_llm, memory=bank,
+                max_memory_in_prompt=original.max_memory_in_prompt,
+                use_bm25_prefilter=original.use_bm25_prefilter,
+                keep_thinking=original.keep_thinking,
+                use_structured_tools=original.use_structured_tools)
+            agent._memory_maintenance_policy=memory_maintenance_policy
         if citation_review_gate is not None:
             from citation_gate_agent import CitationGateMemoryAgent
             from verbatim_selection_agent import VerbatimSelectionCitationGateAgent
@@ -262,6 +273,8 @@ class PMAEpisode:
                         'event_id': event_id, 'sequence': sequence,
                         'step': 1 if kind == 'task_start' else result.get('step_count'),
                         'report': deepcopy(candidate_agent.last_gap_report),
+                        **({'memory_maintenance_policy': candidate_agent.maintenance_policy}
+                           if hasattr(candidate_agent, 'maintenance_policy') else {}),
                         'formal_gaps': [entry.to_dict() for entry in self.agent._memory.entries],
                         **({'alignment_policy': candidate_agent.expected_alignment_policy}
                            if hasattr(candidate_agent, 'expected_alignment_policy') else {}),

@@ -123,7 +123,8 @@ async def serve(args: argparse.Namespace) -> None:
                                memory_profile=profile,
                                research_candidate=getattr(args, "research_candidate", "U"),
                                citation_review_gate=getattr(args,"citation_review_gate",None),
-                               citation_review_strategy=getattr(args,"citation_review_strategy",None))
+                               citation_review_strategy=getattr(args,"citation_review_strategy",None),
+                               memory_maintenance_policy=getattr(args,"memory_maintenance_policy",None))
     if args.fake_memory:
         from harbor.llms.base import LLMResponse
 
@@ -146,6 +147,8 @@ async def serve(args: argparse.Namespace) -> None:
                                    for text in ('GATE_FIXTURE_ACCEPTED','GATE_FIXTURE_REJECTED','GATE_FIXTURE_REPAIRABLE')]
                         return LLMResponse(content='GATE_FIXTURE_MAINTENANCE_RESPONSE',tool_calls=calls)
                     return LLMResponse(content='', tool_calls=calls)
+                if phase == 'selection' and getattr(args,'memory_maintenance_policy',None):
+                    return LLMResponse(content='<intervene>TASK</intervene>' if agent._memory_agent._step == 1 else '<no_intervention/>')
                 if phase == 'citation_review':
                     # Finite engineering fixture only: fixed labels, no semantic inference.
                     from citation_gate_config import CLAIM_SPLIT
@@ -205,6 +208,7 @@ async def serve(args: argparse.Namespace) -> None:
         "run_id": args.run_id, "task_id": args.task_id,
         "deadline_epoch": args.deadline_epoch, "fake_memory": args.fake_memory,
         "research_candidate": getattr(args, "research_candidate", "U"),
+        **({"memory_maintenance_policy":args.memory_maintenance_policy} if getattr(args,"memory_maintenance_policy",None) else {}),
         **({"citation_review_gate":args.citation_review_gate} if getattr(args,"citation_review_gate",None) else {}),
         **({"citation_review_strategy":args.citation_review_strategy} if getattr(args,"citation_review_strategy",None) else {})},
         sort_keys=True), encoding="utf-8")
@@ -276,6 +280,7 @@ def main() -> None:
     parser.add_argument("--citation-review-gate",choices=('gate-only','gate-one-repair'))
     from citation_gate_config import STRATEGIES
     parser.add_argument('--citation-review-strategy',choices=STRATEGIES)
+    parser.add_argument('--memory-maintenance-policy',choices=('maintain-scoped-latest-no-review-v1',))
     parser.add_argument("--research-candidate", choices=("U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0", "pma_gap_evidence_v1"), default="U")
     asyncio.run(serve(parser.parse_args()))
 

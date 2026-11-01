@@ -140,9 +140,8 @@ class VerbatimSelectionIntegrationTests(unittest.TestCase):
                 review_count += 1
                 if review_count == 1:
                     return reply(content=json.dumps(['First accepted.']))
-                return reply(content=json.dumps({'overall': {'verdict': 'supported',
-                    'reason': 'visible receipt'}, 'results': [
-                    {'verdict': 'supported', 'reason': 'visible receipt'}]}))
+                return reply(content=json.dumps([['O', 'supported', 'visible receipt'],
+                                                 ['C1', 'supported', 'visible receipt']]))
             if agent.transport_phase == 'selection':
                 snapshot = agent._selection_snapshot
                 self.assertEqual([row.content for row in snapshot.items], ['First accepted.'])

@@ -96,6 +96,7 @@ def run_batch(args: argparse.Namespace) -> dict:
         evaluation_download_retry=manifest.get('config', {}).get('evaluation_download_retry'),
         citation_review_gate=manifest.get('config', {}).get('citation_review_gate'),
         citation_review_strategy=manifest.get('config', {}).get('citation_review_strategy'),
+        memory_maintenance_policy=manifest.get('config', {}).get('memory_maintenance_policy'),
         zero_model_fixture_only=fixture,
         candidate_profile_fixture_only=profile_fixture,
         **({'agent_time_protocol': manifest['config'].get('agent_time_protocol'),
@@ -139,7 +140,8 @@ def run_batch(args: argparse.Namespace) -> dict:
             command += ['--research-candidate', binding['research_candidate']]
         from .citation_gate_config import worker_flags
         command += worker_flags(manifest.get('config',{}).get('citation_review_gate'),binding.get('research_candidate','U'),
-                                manifest.get('config',{}).get('citation_review_strategy'))
+                                manifest.get('config',{}).get('citation_review_strategy'),
+                                manifest.get('config',{}).get('memory_maintenance_policy'))
         if fixture:
             command += ['--zero-model-fixture']
         if stateful_replies:

@@ -35,7 +35,7 @@ def load_config(path):
                'native_context_policy', 'research_capture_policy', 'execution',
                'evaluation_bootstrap_protocol', 'evaluation_cache',
                'evaluation_download_retry', 'on_slot_failure', 'runtime_reuse',
-               'citation_review_gate', 'citation_review_strategy'}
+               'citation_review_gate', 'citation_review_strategy', 'memory_maintenance_policy'}
     if set(config) - allowed or config.get('schema') != 'ga-experiment-plan-v1':
         raise ValueError('unknown configuration schema or keys')
     if config.get('execution', 'serial') != 'serial':
@@ -129,6 +129,9 @@ def build_plan(config):
         from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.citation_gate_config import validate_gate,validate_strategy
         validate_gate(config.get('citation_review_gate'),method.research_candidate,method.condition)
         validate_strategy(config.get('citation_review_gate'),config.get('citation_review_strategy'))
+        from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.citation_gate_config import validate_maintenance
+        validate_maintenance(config.get('memory_maintenance_policy'),method.research_candidate,
+            config.get('citation_review_gate'),config.get('citation_review_strategy'),method.condition)
         if 'runtime_reuse' in config and method.research_candidate != 'pma_gap_memory_v0':
             raise ValueError('runtime reuse supports only the gap candidate')
         occurrence = row.get('occurrence', 1)
@@ -236,7 +239,7 @@ def execute(plan, output, mode, backend=None):
         if 'requested_runtime_policy' in row:
             args['runtime_policy'] = row['requested_runtime_policy']
         for key in ('native_context_policy', 'research_capture_policy',
-                    'citation_review_gate', 'citation_review_strategy'):
+                    'citation_review_gate', 'citation_review_strategy', 'memory_maintenance_policy'):
             if key in config:
                 args[key] = config[key]
         if 'evaluation_bootstrap_protocol' in config:
@@ -265,6 +268,8 @@ def execute(plan, output, mode, backend=None):
         for actual in (single,manifest.get('config',{})):
             require_gate_binding(config.get('citation_review_gate'),actual,method.research_candidate,method.condition)
             require_strategy_binding(config.get('citation_review_strategy'),actual,config.get('citation_review_gate'))
+            from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.citation_gate_config import require_maintenance_binding
+            require_maintenance_binding(config.get('memory_maintenance_policy'),actual,method.research_candidate,method.condition)
         expected_bootstrap = config.get('evaluation_bootstrap_protocol', 'original')
         if (single.get('evaluation_bootstrap_protocol', 'original') != expected_bootstrap or
                 manifest.get('config', {}).get('evaluation_bootstrap_protocol', 'original') != expected_bootstrap):
