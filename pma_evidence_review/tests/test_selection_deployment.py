@@ -1,0 +1,80 @@
+"""Host source collection/identity only: no launcher, Docker or model execution."""
+import ast
+import hashlib
+import importlib.util
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+import unittest
+
+ROOT = Path(__file__).resolve().parents[2]
+REL = Path('method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013')
+STAGE = ROOT / REL
+TARGET = (REL / 'selection_context.py').as_posix()
+
+
+def source_contract():
+    # Execute the real source-list assignments and hashing functions, without
+    # importing launcher dependencies or their optional runtime integrations.
+    namespace = {'Path': Path, 'hashlib': hashlib, 'subprocess': subprocess}
+    for filename, names in (
+        ('prepare_six_task_manifest.py', {'SOURCE_FILES', 'V3_SOURCE_FILES', '_committed_source_sha'}),
+        ('single_run_certification.py', {'SOURCE_FILES', 'CANDIDATE_SOURCE_FILES',
+         'GAP_SOURCE_FILES', 'EVIDENCE_GAP_SOURCE_FILES', 'source_identity'})):
+        tree = ast.parse((STAGE / filename).read_text(encoding='utf-8'))
+        nodes = [node for node in tree.body if
+                 (isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id in names for t in node.targets))
+                 or (isinstance(node, ast.FunctionDef) and node.name in names)]
+        exec(compile(ast.Module(body=nodes, type_ignores=[]), filename, 'exec'), namespace)
+    return namespace
+
+
+class SelectionDeploymentTests(unittest.TestCase):
+    def test_host_source_collection_and_byte_preserving_copy(self):
+        contract = source_contract()
+        self.assertEqual(contract['EVIDENCE_GAP_SOURCE_FILES'].count(TARGET), 1)
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / 'checkout'
+            checkout.mkdir()
+            for name in contract['EVIDENCE_GAP_SOURCE_FILES']:
+                path = checkout / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes((STAGE / 'selection_context.py').read_bytes() if name == TARGET else b'# synthetic dependency\n')
+            for args in (['init', '-q'], ['add', '.'], ['-c', 'user.name=Offline', '-c', 'user.email=offline@example.invalid', 'commit', '-qm', 'synthetic fixture']):
+                subprocess.run(['git', *args], cwd=checkout, check=True, capture_output=True)
+            manifest = contract['source_identity'](checkout, evidence_gap=True)
+            destination = Path(directory) / 'host_stage'
+            for name in manifest:
+                target = destination / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(checkout / name, target)
+            self.assertEqual(manifest[TARGET], hashlib.sha256((destination / TARGET).read_bytes()).hexdigest())
+            self.assertEqual((destination / TARGET).read_bytes(), (STAGE / 'selection_context.py').read_bytes())
+            (checkout / TARGET).write_bytes(b'# altered\n')
+            with self.assertRaisesRegex(RuntimeError, 'differs from HEAD'):
+                contract['source_identity'](checkout, evidence_gap=True)
+
+    def test_gate_manifest_rejects_missing_entry_missing_file_and_changed_bytes(self):
+        spec = importlib.util.spec_from_file_location('deployment_gate', STAGE / 'citation_gate_config.py')
+        gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gate)
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory)
+            gate.__file__ = str(checkout / REL / 'citation_gate_config.py')
+            self.assertEqual(gate.gate_source_paths().count(TARGET), 1)
+            for name in gate.gate_source_paths():
+                path = checkout / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes((STAGE / 'selection_context.py').read_bytes() if name == TARGET else b'# synthetic gate dependency\n')
+            hashes = {name: hashlib.sha256((checkout / name).read_bytes()).hexdigest() for name in gate.gate_source_paths()}
+            config = {'citation_review_gate': 'gate-only', 'citation_gate_source_sha256': hashes}
+            gate.verify_gate_sources(config)
+            with self.assertRaisesRegex(ValueError, 'identity differs'):
+                gate.verify_gate_sources({**config, 'citation_gate_source_sha256': {k: v for k, v in hashes.items() if k != TARGET}})
+            (checkout / TARGET).write_bytes((checkout / TARGET).read_bytes() + b'\r\n')
+            with self.assertRaisesRegex(ValueError, 'identity differs'):
+                gate.verify_gate_sources(config)
+            (checkout / TARGET).unlink()
+            with self.assertRaises(FileNotFoundError):
+                gate.verify_gate_sources(config)

@@ -50,7 +50,7 @@ def gate_source_paths():
     return [p.relative_to(root).as_posix() for p in sorted(review.glob('*.py'))+vendor]+[
         (stage/name).relative_to(root).as_posix() for name in
         ('citation_gate_agent.py','citation_gate_config.py','verbatim_selection_agent.py',
-         'tag_selection_contract.py')]+[
+         'tag_selection_contract.py','selection_context.py')]+[
         (review/'verbatim_selection_prototype_20261031/contract.py').relative_to(root).as_posix()]
 
 
