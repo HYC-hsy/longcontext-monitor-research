@@ -84,6 +84,9 @@ class MaintenanceNoReviewTests(unittest.TestCase):
         self.assertNotIn('Terminal output the agent just saw', text)
         self.assertNotIn('why it failed', text)
         self.assertNotIn('exact_unique,', text)
+        self.assertLess(len(text.split()), len(baseline.split()))
+        self.assertEqual(text.count('Test-quality checks:'), 1)
+        self.assertEqual(text.count('Maintain existing memory from the new material first.'), 1)
         for rule in ('Maintain existing memory', 'specific unresolved condition',
                      'Unknown or unverified is not observed failure', 'including echo',
                      'Test-quality checks:', 'Every valid save becomes the latest'):
@@ -98,3 +101,21 @@ class MaintenanceNoReviewTests(unittest.TestCase):
         # Cross-domain synthetic observations are ordinary input, not expected verdicts.
         self.assertNotIn('sqlite', text.lower())
         self.assertEqual(latest_phase1_system(), baseline)
+
+    def test_cross_domain_partial_records_keep_scope_without_semantic_certification(self):
+        cases = [
+            ('West-region query returned seven rows; export pending.', 'query returned 7 rows'),
+            ('Health endpoint returned 200 in the staging session; production unverified.', 'staging status=200'),
+            ('Workbook formula recalculated in the opened sheet; other sheets unverified.', 'sheet A recalculated'),
+        ]
+        for content, observation in cases:
+            with self.subTest(content=content):
+                # The fake author's wording is input, not a prediction of model quality.
+                agent, requests = self.agent([('memory_save_knowledge', {'content': content})], '<intervene>M1</intervene>')
+                agent.prepare_visible_context(observation, [{'source_id': 'e', 'role': 'tool_observation',
+                    'order': 1, 'field_path': 'result', 'text': observation,
+                    'record_digest': sha256(observation), 'record_digest_kind': 'event'}])
+                result = asyncio.run(agent.process(observation, 1))
+                self.assertEqual(json.loads(result.context_for_action)['blocks'][0]['content'], content)
+                self.assertEqual([p for p, _ in requests], ['maintenance', 'selection'])
+                self.assertIn('a local result is not whole-task completion', requests[0][1]['system'])

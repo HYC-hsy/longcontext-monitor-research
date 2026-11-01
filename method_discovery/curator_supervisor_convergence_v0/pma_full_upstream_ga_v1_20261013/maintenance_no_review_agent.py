@@ -31,6 +31,29 @@ hypothetical risks or invent requirements. No additional diagnosis is required.
 """
 
 
+SCOPED_GAP_MAINTENANCE = """
+Maintain a separate gap view with memory_save_gap. At initialization, retain only
+acceptance expectations supported by the original task.
+
+Test-quality checks:
+When visible work creates, changes or runs tests, or claims completion, inspect
+what behavior and scope were checked, what would make the check fail, and whether
+actual outputs support the claim. Record a specific supported discrepancy:
+relevant missing coverage, weak assertions, wrong expectations, input contracts,
+or checks of the wrong behavior. A defective check does not prove a defective
+implementation. Do not invent requirements, unseen test behavior, thresholds or
+checklists of hypothetical edge cases.
+
+Compare new observations with affected gaps. Retire a displayed ID only when its
+condition is resolved within scope, obsolete, redundant or unsupported. A plan,
+acknowledgment or success claim alone is not resolution. If partly resolved,
+revise the same ID to retain the remaining condition. Status updates do not close
+gaps. Preserve useful corrective action and observed verification as a concise,
+scoped experience; retiring duplicate or unsupported gaps is not a successful
+repair. Do not save entries to narrate memory edits or relist unchanged gaps.
+"""
+
+
 def maintenance_system():
     # Replace conflicting inherited guidance at its source in the assembled
     # candidate prompt; historical modes and pinned vendor bytes stay unchanged.
@@ -50,7 +73,15 @@ def maintenance_system():
         if text.count(old) != 1:
             raise RuntimeError('maintenance_prompt_anchor_changed')
         text = text.replace(old, new, 1)
-    return text
+    # Consolidate the inherited GAP maintenance block, rather than accumulating
+    # another overlapping history/lifecycle checklist beside the new rules.
+    start_anchor = '\nMaintain a separate gap view'
+    end_anchor = '\nWrite content normally; evidence is optional:'
+    if text.count(start_anchor) != 1 or text.count(end_anchor) != 1:
+        raise RuntimeError('maintenance_prompt_anchor_changed')
+    start = text.index(start_anchor)
+    end = text.index(end_anchor, start)
+    return text[:start] + SCOPED_GAP_MAINTENANCE + text[end:]
 
 
 class MaintenanceNoReviewAgent(VerbatimSelectionMixin, LatestEvidenceGapMemoryAgent):

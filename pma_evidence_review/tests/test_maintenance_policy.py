@@ -112,3 +112,38 @@ class MaintenancePolicyTests(unittest.TestCase):
                     self.assertIn('maintenance policy differs', rows[0]['error'])
                 else:
                     self.assertTrue(succeeded(rows, 1, 'prepare'), rows)
+
+    def test_actual_prepare_binds_no_gate_sources_and_policy(self):
+        from contextlib import ExitStack
+        from types import SimpleNamespace as NS
+        from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013 import prepare_six_task_manifest as pm, single_run as sr
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            root = Path(tmp)
+            task, memory = root / 'task.py', root / 'memory.json'
+            task.write_text("native_claude_cc_vibe_opus48={'model':'claude-opus-4-8'}\n")
+            memory.write_text(json.dumps({'claude_monitor_opus48': {'model': 'claude-opus-4-8'}}))
+            desc = {'image_tag': 'synthetic:v1', 'public_members': [], 'evaluator_members': [],
+                    'native_agent_seconds': 900, 'native_verifier_seconds': 900}
+            stack.enter_context(patch.object(pm, 'descriptor', return_value=desc))
+            def materialize(source, name, public, members, **kw):
+                public.mkdir()
+            def export(source, name, tests, **kw):
+                (tests / 'test.sh').write_text('true\n')
+            stack.enter_context(patch.object(pm, 'materialize_public', side_effect=materialize))
+            stack.enter_context(patch.object(pm, 'export_task', side_effect=export))
+            stack.enter_context(patch.object(pm, 'image_identity', return_value={
+                'repo_digests': ['synthetic@sha256:'+'0'*64], 'image_id': 'synthetic', 'platform': 'linux/amd64'}))
+            args = NS(task='sqlite-with-gcov', condition='B', occurrence=1, fake_only=True,
+                research_candidate='pma_gap_evidence_v1', memory_maintenance_policy=config.MAINTENANCE_POLICY,
+                runtime_policy={}, official_source_git=str(root), task_profile_file=str(task),
+                pma_profile_file=str(memory), output=str(root / 'new'))
+            result = sr.prepare(args)
+            frozen = json.loads((root / 'new/manifest.json').read_text())['config']
+            plan = json.loads((root / 'new/plan.json').read_text())
+            self.assertEqual(plan['memory_maintenance_policy'], config.MAINTENANCE_POLICY)
+            self.assertEqual(frozen['memory_maintenance_policy'], config.MAINTENANCE_POLICY)
+            self.assertNotIn('citation_review_gate', frozen)
+            self.assertNotIn('citation_review_strategy', frozen)
+            self.assertEqual(set(frozen['maintenance_source_sha256']), set(config.maintenance_source_paths()))
+            config.verify_gate_sources(frozen)
+            self.assertFalse(result['execution_authorized'])

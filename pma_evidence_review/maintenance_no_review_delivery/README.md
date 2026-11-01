@@ -30,7 +30,9 @@ maintaining corresponding records, continued-work value, concise current status
 and unresolved conditions, and preservation of scope, partial results and useful
 failure history. Causes require support; plans, claims, self-printed success text,
 observations and whole-task completion are distinguished. Existing test-quality
-GAP guidance is retained. It adds no domain-specific SQLite rule or prescribed
+GAP duties are retained in a consolidated shorter block. Actual P1 system size is
+5612 characters (814 whitespace words), versus old latest 6088 (885) and old v4
+gate 6752 (981); shorter text is not evidence of better model behavior. It adds no domain-specific SQLite rule or prescribed
 cross-shell check. These are instructions, not deterministic semantic guarantees.
 
 ## Execution boundaries
@@ -51,11 +53,12 @@ called to reject runtime unbound writes.
 
 ## Acceptance status
 
-Implementation has dedicated fake-client and dispatcher tests. Full regression
-acceptance is in progress at this intermediate commit because existing source
-identity tests require a committed clean checkout. See ACCEPTANCE.md in the final
-delivery for actual results, limitations and local evidence hashes. No real LLM,
-Task, native episode, evaluator or Docker run is part of this development task.
+The final candidate-specific suite passes 13/13 under strict imports. The broad
+regression executes 448 tests: 447 pass and one pre-existing A-carrier preflight
+test errors; no skips. That error was independently reproduced with the fixed
+baseline function. See ACCEPTANCE.md and TEST_RESULTS.json for exact scope and
+limitations. There were no real model, Task, native episode or Docker runs.
+Development handoff: HANDOFF.md. Source bytes: SOURCE_SHA256.json.
 
 ## External source rules adapted
 
