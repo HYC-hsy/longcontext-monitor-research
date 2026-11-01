@@ -93,7 +93,7 @@ def wrapper(directory, *, repair=False, intervene=False):
         verdict = 'insufficient' if repair and reviews == 1 else 'supported'
         return reply(content=json.dumps([['O', verdict, 'Scripted contract judgment.'],
                                        ['C1', verdict, 'Scripted limit.']] if verdict != 'supported'
-                                      else [['O', verdict, 'Scripted support.'], ['C1', verdict]]))
+                                      else [['O', verdict, 'Scripted support.'], ['C1', verdict, 'Scripted support.']]))
     client = NS(call=fake, _model_name='offline-double')
     bank = LatestEvidenceGapMemory()
     gate = VerbatimSelectionCitationGateAgent(task='', memory=bank, llm=client,

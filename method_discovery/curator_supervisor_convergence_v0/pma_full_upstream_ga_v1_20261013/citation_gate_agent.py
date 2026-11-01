@@ -103,7 +103,7 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
         # Identical initial author prompt in both modes: repair is a host opportunity.
         if self.review_strategy == semantic_split.STRATEGY:
             system+='\nHost gate: missing/non-exact citations are not publishable. A later host commit receipt states what actually changed.\n'
-            system+='For every quote, copy one continuous literal span from visible material. Use separate evidence elements for separate spans; never concatenate snippets or insert ellipses. Keep relevant conditions and execution receipts, not just a success string in code. To delete an existing gap, provide its memory_id, a nonempty reason explaining why that specific gap is resolved, and evidence. Old gap text is the target, not proof of resolution. Other deletions remain deferred.\n'
+            system+='For every quote, copy one continuous literal span from visible material. Use separate evidence elements for separate spans; never concatenate snippets or insert ellipses. Keep relevant conditions and execution receipts, not just a success string in code. To delete an existing gap, provide its memory_id, a nonempty reason explaining why that specific gap can be retired (resolved, obsolete, redundant or withdrawn), and evidence. Old gap text identifies the target, not proof that it should be retired. Other deletions remain deferred.\n'
         else:
             system+='\nHost gate: missing/non-exact citations are not publishable. Deletes are not executed because this tool has no citation protocol. A later host commit receipt states what actually changed.\n'
         kwargs={'prompt':user_prompt,'system':system}
@@ -167,6 +167,7 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
 
     async def _attempt(self,name,args,index,attempt,attempts):
         row={'attempt':attempt,'verdict':None,'engineering_status':'not_reviewed','success':False}
+        row['original_target']={'action': name, 'content': args.get('reason', args.get('content'))}
         attempts.append(row)
         if name=='memory_update_status' and len(args['content'])>self.memory._max_status_length:
             row.update(error_code='status_would_truncate',preparation='status_would_truncate')
@@ -192,6 +193,9 @@ class CitationGateMemoryAgent(LatestEvidenceGapMemoryAgent):
                     self._parts.catalog, _validate_catalog,
                     getattr(self, '_accepted_execution_inventory', {}))
             request['audit_execution_context']=self._execution_context
+            if attempt:
+                # First candidate is host-frozen; neither repair author nor reviewer replaces it.
+                request['audit_repair_origin']=deepcopy(attempts[0]['original_target'])
             # Host-only action identity. A save_* tool may create OR revise;
             # the reviewer must not guess from the availability of old text.
             if name=='memory_delete':

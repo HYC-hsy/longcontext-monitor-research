@@ -77,7 +77,7 @@ class ExecutionLinkIntegrationTests(unittest.TestCase):
             if len([x for x in seen if x[0] == 'citation_review']) == 1:
                 return reply(content=json.dumps(['Observed alpha.']))
             return reply(content=json.dumps([['O', 'supported', 'Command and output are linked.'],
-                                             ['C1', 'supported']]))
+                                             ['C1', 'supported', 'Scripted linked receipt.']]))
         agent = CitationGateMemoryAgent(task='Synthetic task', memory=LatestEvidenceGapMemory(),
             llm=NS(call=fake), review_strategy=v4.STRATEGY, repair_limit=0)
         step = {'analysis': event['response'], 'commands': event['commands'],

@@ -23,7 +23,7 @@ def judgment(verdict='supported'):
 
 def batch(verdict='supported'):
     return [['O', verdict, 'Scripted complete-operation evidence judgment.'],
-            ['C1', verdict] if verdict == 'supported' else
+            ['C1', verdict, 'Scripted subclaim support.'] if verdict == 'supported' else
             ['C1', verdict, 'Scripted subclaim evidence limit.']]
 
 

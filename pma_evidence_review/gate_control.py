@@ -18,6 +18,11 @@ async def repair(transport, maintenance_prompt, name, args, issue, index, *, sem
         'original_arguments':args,'review_issue':issue}
     system=REPAIR_SYSTEM
     if semantic_v4:
+        system+=('\nRepair the same underlying issue: add evidence, narrow scope, or correct '
+                 'mistaken assertions; otherwise withdraw. Do not substitute an unrelated issue '
+                 'or stale version of the issue just because it is easier to support. You may '
+                 'remove unsupported assertions; preserving the issue does not require keeping '
+                 'false wording.\n')
         system+='\nEach quote must be one continuous literal visible span; use multiple evidence elements for separate spans. Do not concatenate or insert ellipses. Preserve conditions and actual receipts. For memory_delete, replacement content is the new deletion reason; the fixed gap target cannot change.\n'
     payload={'system':system,'prompt':json.dumps(material,ensure_ascii=False),'tools':None}
     request={**payload,'phase':'citation_repair','op_index':index,

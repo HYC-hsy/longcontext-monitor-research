@@ -114,7 +114,11 @@ No extra fields.'''
 def split_request(material, index):
     require(index == material['original_operation']['op_index'], 'operation_identity')
     # This is the entire model-visible splitter payload: B is not serialized.
-    target = {'original_operation': material['original_operation'],
+    op = material['original_operation']
+    semantic_fields = ('action', 'content', 'existing_gap')
+    host_fields = {'op_index', 'memory_id', 'revision_id', 'content_sha256', 'target_revision_id'}
+    require(set(op) <= set(semantic_fields) | host_fields, 'split_operation_fields')
+    target = {'original_operation': {key: op[key] for key in semantic_fields if key in op},
               'normative_requirements_context': material['normative_requirements_context']}
     request = v3._request(SPLIT_SYSTEM, 'TARGET TO DECOMPOSE (not evidence):\n' +
                           json.dumps(target, ensure_ascii=False),
@@ -144,10 +148,16 @@ def audit_request(request, claims):
     adapted = operation_audit.from_closed_material(
         identity({'material': material, 'claims': claims,
                   'operation_kind': request.get('audit_operation_kind'),
-                  'before': request.get('audit_before_entry')}),
+                  'before': request.get('audit_before_entry'),
+                  'repair_origin': request.get('audit_repair_origin'),
+                  'audit_protocol': operation_audit.PROTOCOL}),
         material, claims, before=request.get('audit_before_entry'),
         operation_kind=request.get('audit_operation_kind'))
     audit_batch = adapted.batch
+    if 'audit_repair_origin' in request:
+        view = audit_batch.model_input()
+        view['target_context_not_evidence']['repair_origin_not_evidence'] = deepcopy(request['audit_repair_origin'])
+        audit_batch = replace(audit_batch, frozen_material=operation_audit.canonical(view))
     system = operation_audit.system_for(audit_batch)
     execution_view = None
     context = request.get('audit_execution_context')
@@ -170,6 +180,7 @@ def audit_request(request, claims):
         'TARGET AND SHARED SUBMITTED EVIDENCE (A is not evidence):\n' +
         json.dumps(audit_batch.model_input(), ensure_ascii=True, sort_keys=True),
         'citation_claim_verify_batch', material, STRATEGY)
+    model_request['audit_protocol'] = operation_audit.PROTOCOL  # host log, not evidence
     model_request['submitted_evidence_sha256'] = identity(material['submitted_evidence'])
     model_request['operation_audit_request_id'] = audit_batch.request_id  # host-only
     model_request['operation_kind'] = audit_batch.model_input()['target_context_not_evidence']['complete_operation']['action']
@@ -190,6 +201,7 @@ async def review_stage(request, transport, result):
                       model_verdict=None, reason=str(error), explanation=str(error))
         return result
     batch = await v3._call(model_request, transport)
+    result['audit_protocol'] = operation_audit.PROTOCOL
     result['batch'] = batch
     if batch['engineering_status'] != 'received':
         result.update(engineering_status=batch['engineering_status'],

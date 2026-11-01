@@ -71,7 +71,7 @@ class CapturedTransport:
                'effective_prompt_sha256': hashlib.sha256(payload['prompt'].encode('utf-8')).hexdigest(),
                'effective_payload_sha256': identity(payload),
                'operation_kind': request.get('operation_kind', request.get('audit_operation_kind'))}
-        for key in ('review_strategy', 'op_index', 'focus_id', 'claim_index', 'submitted_evidence_sha256', 'operation_kind'):
+        for key in ('review_strategy', 'op_index', 'focus_id', 'claim_index', 'submitted_evidence_sha256', 'operation_kind', 'audit_protocol'):
             if key in request:
                 row[key] = request[key]
         self.records.append(row)
