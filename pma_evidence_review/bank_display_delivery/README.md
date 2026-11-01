@@ -2,7 +2,7 @@
 
 Explicit new candidate: `method=pma-gap`, `memory_maintenance_policy=pma-bank-display-v1`.
 Baseline: `e79f57b359124fe061bd603310ba1c45973cf97b`. Old methods and runs remain frozen.
-Publication status: only step 1 (`5c8c60740426668ae3b23a5b316e9d7812891213`) is on the remote branch; the complete candidate is local pending publication approval. Do not run step 1 as the completed candidate.
+Publication approved and complete: remote source commit `58bc9be3484c55f26b7f31a399a6f1246f1c6560` has exactly the full tree of local `8b73e610a6b942177b25818f6a4b437f5d960ee8`. Its production bytes match tested local `ac4bc56411c443b61300672d5addc7abf6c19b94`. A following delivery-only commit updates these publication records; use the final fixed remote SHA reported with this delivery. Local SHAs describe provenance, not uploaded refs.
 
 The factory creates exactly `GapMemory`; Agent MRO is `BankDisplayAgent -> VerbatimSelectionMixin -> GapMemoryAgent -> MemoryAgent`.
 Knowledge/experience saves create IDs from content. Status overwrites. Delete uses ID. Existing save_gap adds the separate GAP view. Public tools equal the pinned four BANK_TOOLS plus existing GAP_TOOL, including descriptions and parameter schemas.

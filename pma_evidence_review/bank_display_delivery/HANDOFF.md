@@ -1,9 +1,9 @@
 # Developer handoff — one fresh candidate only
 
-Do not start from the currently published step-1 SHA. The complete candidate is local until the publication blocker is cleared and a final fixed remote SHA is confirmed.
+The complete source is remotely readable at `58bc9be3484c55f26b7f31a399a6f1246f1c6560`, byte-identical to tested local source. Use the final fixed remote delivery SHA reported by the parent, including this publication metadata. Do not use step 1 or an unpublished local SHA.
 Do not interrupt SQLite/fix-ocaml-gc runs pinned to earlier commits, change their worktrees, or automatically append an episode.
 
-Once the complete remote SHA is provided, use a new clean detached checkout with repository-local `core.autocrlf=false`; verify MANIFEST file hashes, SYSTEMS texts/schema, and the exact bank/Agent types. Run offline checks:
+Using that complete remote SHA, use a new clean detached checkout with repository-local `core.autocrlf=false`; verify MANIFEST file hashes, SYSTEMS texts/schema, and the exact bank/Agent types. Run offline checks:
 
 ```bash
 python -B pma_evidence_review/tools/run_bank_display_checks.py --report /new/local/directed.json
