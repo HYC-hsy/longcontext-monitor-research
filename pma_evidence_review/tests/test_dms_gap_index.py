@@ -108,7 +108,7 @@ class GapIndexTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             DMSP1Agent(task=a.task,task_id='task',source_root=self.tmp.name,memory=GapMemory(),llm=None)
         self.assertIs(candidate_config(CANDIDATE)[0],GapIndexP1Agent)
-        self.assertEqual(len(source_identity(candidate=CANDIDATE,strict=False)['source_files']),64)
+        self.assertEqual(len(source_identity(candidate=CANDIDATE,strict=False)['source_files']),65)
 
     def test_original_six_inputs_noop_actual_new_requests_and_p2_bytes_unchanged(self):
         folder=ROOT/'pma_evidence_review/p1_source_read_delivery/cases'

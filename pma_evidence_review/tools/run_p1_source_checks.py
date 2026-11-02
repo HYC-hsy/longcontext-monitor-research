@@ -32,7 +32,8 @@ def main():
         files += ['pma_evidence_review/tests/test_p1_dms.py',
                   'pma_evidence_review/tests/test_dms_receipt_view.py']
     if args.dms_gap_index:
-        files += ['pma_evidence_review/tests/test_dms_gap_index.py']
+        files += ['pma_evidence_review/tests/test_dms_gap_index.py',
+                  'pma_evidence_review/tests/test_dms_input_history.py']
     with patch.object(runner,'suite_manifest',return_value=files):
         return runner.run_phase('pma',args.report)
 

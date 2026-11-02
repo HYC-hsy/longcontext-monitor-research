@@ -176,6 +176,12 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
         return {'status':'applied' if all(op.success for op in operations) else 'tool_error',
                 'operations':[vars(op).copy() for op in operations]}
 
+    def _capture_window(self, *args, **kwargs):
+        return self.source_archive.capture(*args, **kwargs)
+
+    def _stop_batch_after(self, call, result):
+        return False
+
     async def maintain(self, entries, *, observation=None, step_count=0, cycle_id=None):
         if self._active:
             raise RuntimeError('serial maintenance required')
@@ -201,7 +207,7 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                 window_id = report['cycle_id']+f'_r{round_index}'
                 window_events = [{'event_id':r['source_id'],'presentation':r['presentation']}
                                  for r in self.shown_events]
-                self.source_archive.capture(window_id,prompt,window_events,presented_source_receipts=receipts,
+                self._capture_window(window_id,prompt,window_events,presented_source_receipts=receipts,
                     raw_generation_context=self._raw_generation_context,input_projection=projection)
                 request = {'kind':'request','cycle_id':report['cycle_id'],'window_id':window_id,
                     'prompt':prompt,'system':self.maintenance_system,'tools':tools,'source_aliases':deepcopy(self.request_aliases)}
@@ -250,6 +256,9 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                         report['status']='budget_limited'
                     elif status in {'unknown_tool','invalid_tool_arguments','invalid_source_ids','invalid_cursor','source_not_displayed','tool_error'} and report['status']=='completed':
                         report['status']='tool_error'
+                    if self._stop_batch_after(call,result):
+                        if report['status']=='completed':report['status']='tool_error'
+                        failed=failed or 'tool_error'
                     turn['tool_results'].append({'tool_call_id':call['tool_call_id'],'result':result})
                 self._journal({'kind':'response_and_receipts','cycle_id':report['cycle_id'],**turn})
                 if failed:

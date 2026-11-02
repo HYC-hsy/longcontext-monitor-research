@@ -54,7 +54,7 @@ def source_identity(root=ROOT, *, strict=True, candidate='source-read'):
     if candidate in ('dms-inspired-v1','dms-gap-index-v1'):
         paths += [REL+'/p1_dms_agent.py', REL+'/p1_dms_view.py']
     if candidate == 'dms-gap-index-v1':
-        paths += [REL+'/p1_dms_gap_agent.py']
+        paths += [REL+'/p1_dms_gap_agent.py', REL+'/p1_context_history.py']
     paths += ['pma_evidence_review/tools/run_p1_source_case.py']
     return {'kind':'committed_sources' if strict else 'working_tree_sources',
             'code_commit': subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip(),
