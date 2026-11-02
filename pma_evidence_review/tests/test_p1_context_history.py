@@ -365,3 +365,78 @@ class HistoryAgentTests(unittest.TestCase):
         self.assertEqual(result['turns'][0]['tool_results'][0]['result']['error_type'],'OSError')
         self.assertEqual(self.a.gaps.entries,[])
         self.assertFalse(self.a.links.state.get('history_grants'))
+
+    def test_cited_handle_identity_survives_without_original_read_or_input_rewrite(self):
+        import json
+        parent=self.make_summary();token=None;frozen_windows={}
+        self.a.before_request=lambda request: frozen_windows.setdefault(request['window_id'],
+            self.a.source_archive.window_path(request['window_id']).read_bytes())
+        def cite_without_reading():
+            nonlocal token
+            page=self.a.last_p1_report['turns'][0]['tool_results'][0]['result']
+            token=self.handle(page,self.old)
+            return self.reply([('memory_save_knowledge',{'content':'C cites old A','source_ids':[token]}),
+                               ('memory_delete',{'memory_id':'M1'})])
+        self.responses.extend([self.reply([('memory_read_source',{'memory_id':parent})]),cite_without_reading])
+        produced=self.maintain('cite_only')
+        self.assertEqual((produced['status'],produced['reads_used'],produced['model_calls_attempted']),('completed',1,2))
+        self.assertNotIn(parent,self.a._active_records());self.assertNotIn(self.old,self.a._active_records())
+        child=produced['operations'][0]['memory_id'];ref=self.a.links.state['refs'][child]
+        self.assertEqual(ref['cited_history_handles'],[token])
+        self.assertEqual(ref['sources'],[])
+        self.assertIn(self.old,ref['inherited_unassociated'])
+        persisted=json.loads(self.a.links.path.read_bytes())['data']['refs'][child]
+        self.assertEqual(persisted,ref)
+        raw=self.a.source_archive.window_path('cite_only_r1').read_bytes()
+        self.assertEqual(raw,frozen_windows['cite_only_r1'])
+        generation=json.loads(raw)
+        self.assertEqual(generation['input_memory_coverage']['read_handles'],[])
+        self.assertNotIn('cited_history_handles',generation['input_memory_coverage'])
+        self.assertEqual(generation['model_input'],self.requests[-1]['prompt'])
+        self.assertEqual(produced['turns'][1]['tool_calls'][0]['arguments']['source_ids'],[token])
+        def read_direct_citation():
+            page=self.a.last_p1_report['turns'][0]['tool_results'][0]['result']
+            directory=[json.loads(p['text']) for p in page['parts'] if p['field']=='input_memory']
+            self.assertEqual(directory[0]['history_handle'],token)
+            self.assertEqual(directory[0]['visibility'],'explicitly_cited_history')
+            self.assertTrue(directory[0]['original_read_not_implied'])
+            self.assertEqual(page['explicitly_cited_history_count'],1)
+            return self.reply([('memory_read_source',{'memory_id':token})])
+        self.responses.extend([self.reply([('memory_read_source',{'memory_id':child})]),read_direct_citation,self.reply()])
+        consumed=self.maintain('consume_citation')
+        self.assertEqual((consumed['status'],consumed['reads_used'],consumed['continuations_used']),('completed',2,2))
+        page=consumed['turns'][1]['tool_results'][0]['result']
+        self.assertEqual(''.join(p['text'] for p in page['parts'] if p['field']=='model_input'),
+                         'A original query receipt\r\n🙂')
+        self.assertFalse(page['complete'])
+        # Valid output citations remain available independently of C's input window.
+        path=self.a.source_archive.window_path(ref['context_window']);path.unlink();self.prime()
+        independent=self.read(child,view='sources')
+        cited=[json.loads(p['text']) for p in independent['parts'] if p['field']=='input_memory']
+        self.assertEqual(cited[0]['history_handle'],token)
+        self.assertEqual(cited[0]['visibility'],'explicitly_cited_history')
+        self.assertEqual(independent['input_memory_coverage'],'unavailable')
+        self.assertEqual(independent['explicitly_cited_history_count'],1)
+        self.assertEqual(independent['source_count'],0)
+        self.assertEqual(self.read(child,view='context')['status'],'context_missing')
+
+    def test_cited_handles_and_sources_share_failed_atomic_binding(self):
+        import asyncio,json
+        from unittest.mock import patch
+        parent=self.make_summary();self.prime();token=self.handle(self.read(parent),self.old)
+        before=deepcopy(self.a.links.state);commit=self.a.links.commit
+        def fail_citation_commit(state):
+            if any(ref.get('cited_history_handles') for ref in state['refs'].values()):
+                raise OSError('injected atomic citation failure')
+            return commit(state)
+        self.responses.append(self.reply([('memory_save_knowledge',{'content':'must not commit C','source_ids':[token]}),
+                                         ('memory_delete',{'memory_id':parent})]))
+        with patch.object(self.a.links,'commit',side_effect=fail_citation_commit):
+            result=asyncio.run(self.a.maintain([],cycle_id='atomic_citation'))
+        self.assertEqual(result['status'],'engineering_error')
+        self.assertIn(parent,self.a._active_records())
+        self.assertFalse(any(r.content=='must not commit C' for r in self.a._active_records().values()))
+        saved=json.loads(self.a.links.path.read_bytes())['data']
+        self.assertFalse(any(ref.get('cited_history_handles') for ref in saved['refs'].values()))
+        self.assertEqual(saved['bank'],before['bank'])
+        self.assertEqual(saved['history_grants'],before['history_grants'])

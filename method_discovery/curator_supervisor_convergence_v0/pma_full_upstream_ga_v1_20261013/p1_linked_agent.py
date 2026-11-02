@@ -136,7 +136,7 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
             if not isinstance(args.get('content'),str):
                 return {'status':'invalid_tool_arguments'}
             try:
-                resolved = self.links.resolve(args.get('source_ids',[]), self.request_aliases)
+                resolved = self._resolve_sources(args.get('source_ids',[]))
             except ValueError:
                 return {'status':'invalid_source_ids'}
         normalized = NS(content='',tool_calls=[NS(function=NS(name=name,arguments={k:v for k,v in args.items() if k!='source_ids'}))])
@@ -176,6 +176,9 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
         report['operations'].extend(vars(op).copy() for op in operations)
         return {'status':'applied' if all(op.success for op in operations) else 'tool_error',
                 'operations':[vars(op).copy() for op in operations]}
+
+    def _resolve_sources(self, source_ids):
+        return self.links.resolve(source_ids,self.request_aliases)
 
     def _capture_window(self, *args, **kwargs):
         return self.source_archive.capture(*args, **kwargs)

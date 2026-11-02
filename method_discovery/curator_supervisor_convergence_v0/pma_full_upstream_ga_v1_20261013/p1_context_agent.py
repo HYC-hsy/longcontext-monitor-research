@@ -96,6 +96,14 @@ class ContextSourceP1Agent(LinkedSourceP1Agent):
             return None, {**resolution, 'status':'memory_target_changed'}
         return target, resolution
 
+    def _resolve_sources(self, source_ids):
+        resolved = super()._resolve_sources(source_ids)
+        # _apply has validated each H1 grant before reaching this binding hook.
+        cited = list(dict.fromkeys(token for token in source_ids if token.startswith(PREFIX)))
+        if cited:
+            resolved['cited_history_handles'] = cited
+        return resolved
+
     def _capture_window(self, *args, **kwargs):
         kwargs['input_memory_coverage'] = self.history.coverage(
             self._input_history_records,kwargs.get('presented_source_receipts',()))
