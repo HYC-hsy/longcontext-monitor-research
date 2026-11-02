@@ -1,0 +1,27 @@
+# 离线验收
+
+最终代码树 c597d900a47f5a8ffa09f5217a344be598f7d449。源码远端提交 b2bc53856863c971107fa02fc57aae60f142be33；本地测试提交 37e3528 与其完整 tree 相同，差异仅 GitHub 连接器创建的提交身份/时间。Git CLI 因缺凭据未推送，连接器上传后再拉回远端分支，未 force-push。六个改动文件逐一从该固定 SHA 回读，原文完全相等。未触碰 DMS 工作区。
+
+```sh
+PMA_TEST_STRICT_IMPORTS=1 LITELLM_LOCAL_MODEL_COST_MAP=True <EXISTING_PYTHON> -B pma_evidence_review/tools/run_p1_source_checks.py --source-links-context --report <NEW_REPORT_JSON>
+```
+
+69 tests，0 errors/failures/skips，15.007 秒；报告 exit_code=0。沿用已有真实依赖环境和网络守卫，没有缺包替身。旧 58 项加新 11 项；原始结果在 /tmp/context-check-release.{json,stdout,stderr}。公开 offline-checks.* 仅替换工作区/依赖根路径，原始字节哈希保存在 IDENTITIES.json。
+
+|边界|验证|
+|---|---|
+|A+B 摘要只选 B|sources 无 A；context 包含 A 并逐字等于冻结 prompt，新窗口出现后仍不变|
+|源与上下文分离|legacy sources 返回未关联，context 单独返回冻结输入；缺选中事件不会阻断有效 context|
+|冻结身份/完整性|活动内容、task、cycle、窗口字节/hash、缺失/损坏拒绝；无窗口 page_sequence_complete=false|
+|游标|双向跨 view、跨任务、跨条目拒绝；旧来源快照与别名冻结检查继续通过|
+|长文本|长 Unicode、CRLF、制表符、嵌套 JSON/反斜线逐字拼回；每页 encode 后 ≤8000 Unicode chars|
+|预算/续轮|两视图共同四读；最多两续轮/三次逻辑调用；第三轮实际 schema write-only|
+|候选隔离|旧实际 system/schema 与归档相等；旧六例输入/hash 不变；默认 source-read 旧回归通过|
+|身份/收集|新模块进入 62 文件实际 source_identity，删除/改字节拒绝；新测试进入显式检查入口|
+|运行接线|新候选六例 in-process fake client 与固定源码实际 CLI 均完成；每例一次 no-op 假调用|
+
+SCRIPTED_CLI.json 记录固定源码 CLI 的每例输入 SHA、system/schema/prompt SHA、62 文件一致性和终态；原件保留 /tmp/context-scripted-cli。没有读取真实 profile，没有真实 provider、Task、P2、eval，也没有重跑旧真实组。旧 client adapter 回归仍以合成 profile/fake provider 跑通。
+
+开发第一轮 64 项中一项新增夹具把 observation 直接传成 dict，现有投影不接受，改为实际支持的 JSON 字符串后通过；未放宽实现合同。之后补齐身份/游标检查，最终 69/69。
+
+未覆盖真实模型选择/消费质量、语义结论是否改善、在线长程收益、P2 集成、并发写入、通用外部窗口迁移。context 只返回生成时实际可见 prompt，不返回存档中非展示的 raw_generation_context。即使完整分页读完，也没有证明摘要正确；有些窗口超出本轮预算仍需明确未读。

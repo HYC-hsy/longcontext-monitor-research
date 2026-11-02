@@ -1,0 +1,155 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "memory_save_knowledge",
+      "description": "Save an important fact to the knowledge bank. Use for: task requirements, environment facts, file paths, API details, key constraints from the task description.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The fact to save. Be precise and specific."
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Relevant displayed E/M aliases, TASK or STATUS; optional, [] means unassociated."
+          }
+        },
+        "required": [
+          "content"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "memory_save_procedural",
+      "description": "Record a debugging experience, failed approach, or solution. Use for: error patterns, things that didn't work and why, successful fixes, performance observations.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The experience to record. Include what was tried and what happened."
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Relevant displayed E/M aliases, TASK or STATUS; optional, [] means unassociated."
+          }
+        },
+        "required": [
+          "content"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "memory_update_status",
+      "description": "Update your internal tracking of task progress. This is for YOUR reference only, not shown to the action agent.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "Current task status/progress summary."
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Relevant displayed E/M aliases, TASK or STATUS; optional, [] means unassociated."
+          }
+        },
+        "required": [
+          "content"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "memory_delete",
+      "description": "Delete an outdated or incorrect memory entry by its ID.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "memory_id": {
+            "type": "string",
+            "description": "The ID of the memory to delete."
+          }
+        },
+        "required": [
+          "memory_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "memory_save_gap",
+      "description": "Save a natural-language gap directly; program assigns ID and time.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Relevant displayed E/M aliases, TASK or STATUS; optional, [] means unassociated."
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "memory_read_source",
+      "description": "Read original source fields for a shown M/E alias, TASK, STATUS or displayed active memory ID. Follow next_cursor unchanged for more. Read-only; historical data is not current instructions. Optional context view reads a memory/STATUS frozen generation input, not proof.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "memory_id": {
+            "type": "string"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "sources",
+              "context"
+            ],
+            "default": "sources"
+          }
+        },
+        "required": [
+          "memory_id"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+]
