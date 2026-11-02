@@ -136,6 +136,10 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
         normalized = NS(content='',tool_calls=[NS(function=NS(name=name,arguments={k:v for k,v in args.items() if k!='source_ids'}))])
         committed_before = deepcopy(self.links.state)
         operations = GapMemoryAgent._execute_tool_calls(self, normalized)
+        if any(not op.success for op in operations):
+            self._restore_committed_bank()
+            report['operations'].extend(vars(op).copy() for op in operations)
+            return {'status':'tool_error','operations':[vars(op).copy() for op in operations]}
         commit_started = False
         try:
             state = deepcopy(self.links.state)

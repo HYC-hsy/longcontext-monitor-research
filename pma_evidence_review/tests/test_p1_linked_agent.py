@@ -222,7 +222,7 @@ class LinkedAgentTests(unittest.TestCase):
         methods={'memory_save_knowledge':'save_knowledge','memory_save_procedural':'save_procedural',
                  'memory_save_gap':'save_gap','memory_update_status':'update_status'}
         for tool,method in methods.items():
-            for cause in ('arguments','operation'):
+            for cause in ('arguments','operation','operation_after_mutation'):
                 with self.subTest(tool=tool,cause=cause),tempfile.TemporaryDirectory() as root:
                     bank=GapMemory();old=bank.save_knowledge('preserve')
                     async def fake(**kwargs):
@@ -230,8 +230,13 @@ class LinkedAgentTests(unittest.TestCase):
                         return reply([(tool,args),('memory_delete',{'memory_id':old})])
                     a=LinkedSourceP1Agent(task='task',task_id='task1',source_root=root,memory=bank,llm=NS(call=fake))
                     before=bank.to_dict()
-                    if cause=='operation':
-                        with patch.object(bank,method,side_effect=ValueError('injected write failure')):
+                    if cause!='arguments':
+                        original=getattr(type(bank),method)
+                        def fault(instance,content):
+                            if cause=='operation_after_mutation':
+                                original(instance,content)
+                            raise ValueError('injected write failure')
+                        with patch.object(type(bank),method,new=fault):
                             result=asyncio.run(a.maintain([],cycle_id='c'))
                     else:
                         result=asyncio.run(a.maintain([],cycle_id='c'))
