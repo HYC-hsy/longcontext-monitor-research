@@ -90,7 +90,7 @@ class ContextTests(unittest.TestCase):
         ref['context_sha256']=digest('not json'); self.target['ref']=deepcopy(ref)
         self.assertEqual(self.read()['status'],'source_binding_error')
         window=json.loads(raw);window['task_id']='other'
-        path.write_text(encode(window))
+        path.write_bytes(encode(window).encode('utf-8'))
         ref['context_sha256']=digest(encode(window));self.target['ref']=deepcopy(ref)
         self.assertEqual(self.read()['status'],'source_binding_error')
         path.unlink()
@@ -217,7 +217,7 @@ class ContextTests(unittest.TestCase):
         self.target={'kind':'status','id':'STATUS','ref':deepcopy(state['refs']['STATUS'])}
         path=self.agent.source_archive.window_path('c_r0')
         window=json.loads(path.read_text());window['task_id']='another'
-        path.write_text(encode(window));state['task_id']='another'
+        path.write_bytes(encode(window).encode('utf-8'));state['task_id']='another'
         self.agent.source_archive.task_id='another'
         state['refs']['STATUS']['context_sha256']=digest(encode(window))
         self.target['ref']=deepcopy(state['refs']['STATUS'])
@@ -268,3 +268,152 @@ class ContextTests(unittest.TestCase):
                 self.assertEqual(digest(path.read_bytes().decode('utf-8')),ref['context_sha256'])
                 self.assertEqual(self.read()['status'],'source_binding_error')
         self.agent.source_archive.task='task'
+
+    def test_real_shape_m2_source_context_delete_and_original_journal(self):
+        key=self.agent.memory.save_knowledge('Correct fix')
+        self.agent.source_archive.capture('legacy','legacy raw\r\n'*3000,[])
+        state=deepcopy(self.agent.links.state)
+        self.agent.links.bind_state(state,key,'knowledge','Correct fix',{
+            'sources':[],'inherited_unassociated':[],'association':'legacy_unassociated'},'legacy')
+        state['bank']=self.agent.memory.to_dict();self.agent.links.commit(state)
+        self.responses.extend([
+            reply([('memory_read_source',{'memory_id':'M2'})]),
+            reply([('memory_read_source',{'memory_id':'M2','view':'context'})]),
+            reply([('memory_delete',{'memory_id':'M2'}),
+                   ('memory_update_status',{'content':'updated','source_ids':[]})])])
+        result=asyncio.run(self.agent.maintain([],cycle_id='delete_shape'))
+        self.assertEqual(result['status'],'completed')
+        self.assertNotIn(key,self.agent._active_records())
+        self.assertEqual(self.agent.memory.status,'updated')
+        receipts=[t['tool_results'][0]['result'] for t in result['turns']]
+        self.assertEqual([r['status'] for r in receipts],['source_unassociated','context_partial','applied'])
+        self.assertEqual([receipts[0]['target'],receipts[1]['target'],receipts[2]['target_resolution']['resolved_memory_id']],[key]*3)
+        self.assertEqual(result['turns'][2]['tool_calls'][0]['arguments'],{'memory_id':'M2'})
+        self.assertEqual(result['operations'][0]['memory_id'],key)
+        records=[json.loads(line) for line in (Path(self.temp.name)/'maintenance.jsonl').read_text().splitlines()]
+        turn=next(r for r in records if r.get('kind')=='response_and_receipts' and r['window_id'].endswith('r2'))
+        self.assertEqual(turn['tool_calls'][0]['arguments'],{'memory_id':'M2'})
+        self.assertEqual(turn['tool_results'][0]['result']['target_resolution']['resolved_memory_id'],key)
+
+    def test_alias_and_actual_id_share_resolution_reject_ambiguity_and_stale_targets(self):
+        a=self.agent;key=a.memory.save_knowledge('victim')
+        a._input('',0,[]);a.request_aliases=deepcopy(a.frozen_aliases)
+        def apply(name,value):
+            return a._apply({'name':name,'arguments':{'memory_id':value}},'unused',0,
+                {'operations':[],'read_requests':0,'reads_used':0})
+        for value in ('M2',key):
+            self.assertEqual(apply('memory_read_source',value)['target'],key)
+        # Actual ID collision with the alias must fail for both operations.
+        a.memory.knowledge[0].id='M2'
+        a._input('',0,[]);a.request_aliases=deepcopy(a.frozen_aliases)
+        for name in ('memory_read_source','memory_delete'):
+            self.assertEqual(apply(name,'M2')['status'],'ambiguous_memory_id')
+        self.assertEqual(len(a.memory.knowledge),2)
+        for value in ('E1','TASK','STATUS','unknown'):
+            self.assertNotEqual(apply('memory_delete',value)['status'],'applied')
+        # Fresh unambiguous snapshot supports actual ID deletion.
+        a.memory.knowledge[0].id='keeper'
+        a._input('',0,[]);a.request_aliases=deepcopy(a.frozen_aliases)
+        a.memory.knowledge[1].content='changed'
+        for name in ('memory_read_source','memory_delete'):
+            self.assertEqual(apply(name,'M2')['status'],'memory_target_changed')
+        a.memory.knowledge[1].content='victim'
+        state=deepcopy(a.links.state);state['bank']=a.memory.to_dict();a.links.commit(state)
+        self.assertEqual(apply('memory_delete',key)['status'],'applied')
+        self.assertEqual(apply('memory_delete','M2')['status'],'entry_not_found')
+        self.assertIn('keeper',a._active_records())
+
+    def test_delete_binding_change_is_rejected_without_deleting(self):
+        a=self.agent;key=next(iter(a._active_records()))
+        a._input('',0,[]);a.request_aliases=deepcopy(a.frozen_aliases)
+        a.links.state['refs'][key]={'changed':True}
+        result=a._apply({'name':'memory_delete','arguments':{'memory_id':'M1'}},'unused',0,
+            {'operations':[],'read_requests':0,'reads_used':0})
+        self.assertEqual(result['status'],'memory_target_changed')
+        self.assertIn(key,a._active_records())
+
+    def test_invalid_tool_or_failed_delete_stops_remaining_batch_preserves_prior_commit(self):
+        from unittest.mock import patch
+        failures=[('memory_delete',{'memory_id':'missing'}),
+                  ('unknown_tool',{}),('memory_delete',{'memory_id':4}),
+                  ('memory_delete',{'memory_id':'M1'})]
+        for index,bad in enumerate(failures):
+            with self.subTest(bad=bad),tempfile.TemporaryDirectory() as tmp:
+                bank=GapMemory();keep=bank.save_knowledge('keep')
+                async def fake(**kwargs):
+                    return reply([('memory_save_gap',{'content':'committed before failure'}),bad,
+                        ('memory_save_knowledge',{'content':'must not save'}),
+                        ('memory_delete',{'memory_id':keep}),
+                        ('memory_update_status',{'content':'must not update'})])
+                a=ContextSourceP1Agent(task='t',task_id='t',memory=bank,llm=NS(call=fake),source_root=tmp)
+                with patch.object(type(bank),'delete',return_value=False) if index==3 else patch.dict({},{}):
+                    result=asyncio.run(a.maintain([],cycle_id='failure'))
+                self.assertEqual(result['status'],'tool_error')
+                self.assertEqual([r['result']['status'] for r in result['turns'][0]['tool_results']][2:],
+                    ['not_executed_after_tool_failure']*3)
+                self.assertIn(keep,a._active_records())
+                self.assertEqual([r.content for r in a.gaps.entries],['committed before failure'])
+                self.assertEqual(len(a.memory.knowledge),1)
+                self.assertNotEqual(a.memory.status,'must not update')
+                self.assertEqual(a.links.state['bank'],a.memory.to_dict())
+
+    def test_recorded_a04_visible_calls_replay_deletes_exact_original_id(self):
+        import hashlib
+        from pma_evidence_review.tools.run_p1_source_case import build_case
+        fixture_path=ROOT/'pma_evidence_review/fixtures/context_delete_a04_replay.json'
+        fixture=json.loads(fixture_path.read_text(encoding='utf-8'))
+        case_path=ROOT/'pma_evidence_review/p1_source_read_delivery/cases'/fixture['case_file']
+        case=json.loads(case_path.read_text(encoding='utf-8'))
+        case['source_manifest']=fixture['archived_source_manifest']
+        self.assertEqual(hashlib.sha256(encode(case).encode()).hexdigest(),
+                         fixture['archived_case_canonical_sha256'])
+        recorded=deepcopy(fixture['turns']);requests=[]
+        async def fake(**kwargs):
+            requests.append(deepcopy(kwargs))
+            return reply([(c['name'],c['arguments']) for c in recorded.pop(0)])
+        with tempfile.TemporaryDirectory() as tmp:
+            a=build_case(case,tmp,NS(call=fake),candidate='source-links-context-v1')
+            self.assertIn('RL3HYG6d',a._active_records())
+            result=asyncio.run(a.maintain(case['entries'],observation=case.get('observation'),
+                step_count=case['step_count'],cycle_id='recorded_replay'))
+            self.assertEqual(result['status'],'completed')
+            self.assertEqual(len(requests),3)
+            self.assertFalse(recorded)
+            self.assertNotIn('RL3HYG6d',a._active_records())
+            turns=result['turns']
+            self.assertEqual([turns[i]['tool_results'][0]['result']['status'] for i in (0,1)],
+                             ['source_unassociated','context_partial'])
+            self.assertEqual([turns[i]['tool_results'][0]['result']['target'] for i in (0,1)],
+                             ['RL3HYG6d']*2)
+            self.assertEqual(turns[2]['tool_results'][0]['result']['target_resolution']['resolved_memory_id'],
+                             'RL3HYG6d')
+            self.assertEqual([r['result']['status'] for r in turns[2]['tool_results']],['applied']*6)
+            for actual,expected in zip(turns,fixture['turns']):
+                self.assertEqual([{'name':c['name'],'arguments':c['arguments']} for c in actual['tool_calls']],expected)
+            self.assertEqual(a.links.state['bank'],a.memory.to_dict())
+            self.assertEqual(a.memory.status,fixture['turns'][2][-1]['arguments']['content'])
+            for turn in turns:
+                for item in turn['tool_results']:
+                    self.assertLessEqual(len(encode(item['result'])),8000)
+
+    def test_repeated_delete_stops_batch_without_restoring_first_delete(self):
+        key=next(iter(self.agent._active_records()))
+        self.responses.append(reply([
+            ('memory_delete',{'memory_id':'M1'}),('memory_delete',{'memory_id':'M1'}),
+            ('memory_save_knowledge',{'content':'must not save'})]))
+        result=asyncio.run(self.agent.maintain([],cycle_id='repeated_delete'))
+        self.assertEqual(result['status'],'tool_error')
+        self.assertNotIn(key,self.agent._active_records())
+        self.assertEqual([r['result']['status'] for r in result['turns'][0]['tool_results']],
+            ['applied','entry_not_found','not_executed_after_tool_failure'])
+        self.assertEqual(self.agent.links.state['bank'],self.agent.memory.to_dict())
+
+    def test_unavailable_context_remains_read_receipt_not_semantic_failure(self):
+        self.responses.extend([
+            reply([('memory_read_source',{'memory_id':'M1','view':'context'})]),
+            reply([('memory_update_status',{'content':'still usable'})])])
+        result=asyncio.run(self.agent.maintain([],cycle_id='unavailable'))
+        self.assertEqual(result['status'],'completed')
+        self.assertEqual(result['turns'][0]['tool_results'][0]['result']['status'],'context_unavailable')
+        self.assertEqual(len(self.requests),2)
+        self.assertEqual(self.agent.memory.status,'still usable')

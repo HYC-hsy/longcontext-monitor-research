@@ -1,0 +1,101 @@
+{
+  "schema": "context-delete-visible-calls-replay-v1",
+  "source_commit": "992f7b56f95afffb9d09197d12baa355ee79916c",
+  "archive": "PMA_P1_CONTEXT_DMS_PARTIAL_REAL_20261102.zip",
+  "archive_sha256": "0077ec48962e92baa9eb794b760301cf67a9b7a90ecd9e302857cd815045c86f",
+  "source_result": "real/A/04-counterevidence-to-old-claim/result.json",
+  "case_file": "04-counterevidence-to-old-claim.json",
+  "archived_case_sha256": "21edff89a86570aacc3c10703a3cb589e0a0f1926a5e95cdc4d7b11e866c1ad1",
+  "archived_case_canonical_sha256": "7a101aeadf5921835532f315cf1cf8c58685b1e5ed098925fc9de8cf2c7cd0d5",
+  "archived_source_manifest": {
+    "accepted_event_ids": [
+      "acfcf8d4ff6f4dc8b13e6d17982e4b62",
+      "0a53ddb130b44c7fbcbac9904dcd03eb",
+      "ea07f7f63a9e4121b9e8dd64880575df",
+      "9692d12e403c4ca38962318700288035",
+      "e2917941744646d4ac93bdad35432276",
+      "537fff0cf75c4e748752b792afb54bc0",
+      "f457bc765c3449b28f184b250458650f",
+      "9d9cbf7d323047ac951dfd4b7a733649"
+    ],
+    "archive_url": "[REDACTED]",
+    "maintenance_step": 28,
+    "members": {
+      "runs/fix-ocaml-gc/host-events.jsonl": "7a4189298579f7c787587b7dced0c35c4334a71a58a25e90b81e41ca9db12c43",
+      "runs/fix-ocaml-gc/maintenance-cycles.jsonl": "80943152cff80018ab0673f952dc293d93d2be5349c8cb2b9d65644a92d7789b",
+      "runs/fix-ocaml-gc/maintenance-selection-requests.jsonl": "9e773984d790540f722699c4ad99e4300c9a70032fa125329224472ff2cf9a73"
+    },
+    "transformation": "Initial bank is the public memory_derived view with separator newlines removed and synthetic metadata. Source catalog is reconstructed from matching prior public writes and their visible requests/windows; it is NOT an original production manifest. No future events, evaluations, hidden reasoning or credentials are included.",
+    "zip_sha256": "d598c0eb6e0af33570c633af20e7cf2e79f5258c4d8be584cd208211b05d71f9"
+  },
+  "scope": "Exact recorded visible names/arguments, no model or semantic score. Reconstruct archived case from unchanged local frozen case by replacing only the public-redacted source_manifest metadata; model-input fields are equal. Original failure archive preserved.",
+  "turns": [
+    [
+      {
+        "name": "memory_read_source",
+        "arguments": {
+          "memory_id": "M2"
+        }
+      }
+    ],
+    [
+      {
+        "name": "memory_read_source",
+        "arguments": {
+          "memory_id": "M2",
+          "view": "context"
+        }
+      }
+    ],
+    [
+      {
+        "name": "memory_delete",
+        "arguments": {
+          "memory_id": "M2"
+        }
+      },
+      {
+        "name": "memory_save_knowledge",
+        "arguments": {
+          "content": "pool_sweep function at lines 543-676 in runtime/shared_heap.c uses RLE compression where free blocks have POOL_FREE_HEADER(N) with N=count of FOLLOWING free blocks (not including current). Line 644 `p += wh * Wosize_hd(hd)` skips N following blocks. Applied fix: after line 644, added new line 645 with `p += wh;` to advance past current free block; line 649 in else branch keeps `p += Whsize_hd(hd);` for live blocks. However, this fix still causes segmentation fault during bootstrap at camlinternalFormatBasics.cmi compilation.",
+          "source_ids": [
+            "E8"
+          ]
+        }
+      },
+      {
+        "name": "memory_save_procedural",
+        "arguments": {
+          "content": "Second fix attempt added `p += wh;` after line 644 to skip current free block, keeping `p += Whsize_hd(hd);` only in else branch for live blocks. Build still crashes with segmentation fault at same location (camlinternalFormatBasics.cmi in stdlib/). The fix logic may still be incorrect - need deeper analysis of RLE encoding semantics or pointer arithmetic.",
+          "source_ids": [
+            "E8"
+          ]
+        }
+      },
+      {
+        "name": "memory_save_gap",
+        "arguments": {
+          "content": "Current fix still causes segmentation fault. Need to re-analyze pool_sweep RLE implementation: verify whether Wosize_hd(hd) for free blocks actually represents count of following blocks or total span, and whether wh advancement logic is correct. After finding correct fix, must rebuild and run testsuite: \"make -C testsuite one DIR=tests/basic\".",
+          "source_ids": [
+            "E8"
+          ]
+        }
+      },
+      {
+        "name": "memory_delete",
+        "arguments": {
+          "memory_id": "gap_kWbRX5Rj"
+        }
+      },
+      {
+        "name": "memory_update_status",
+        "arguments": {
+          "content": "Applied second fix (added `p += wh;` after line 644, kept `p += Whsize_hd(hd);` in else branch only) but build still crashes with segmentation fault at same location. Fix logic still incorrect. Need deeper analysis of RLE encoding and pointer arithmetic in pool_sweep before next attempt.",
+          "source_ids": [
+            "E8"
+          ]
+        }
+      }
+    ]
+  ]
+}

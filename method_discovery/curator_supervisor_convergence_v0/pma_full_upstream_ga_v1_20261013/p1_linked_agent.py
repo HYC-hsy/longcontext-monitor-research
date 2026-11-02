@@ -28,6 +28,7 @@ READ_TOOL = {'type':'function','function':{'name':'memory_read_source',
 class LinkedSourceP1Agent(SourceReadP1Agent):
     system = SYSTEM
     context_views = False
+    memory_source_label = 'IDs for deletion, aliases for sources'
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.links = SourceLinks(self.source_archive.root, task_id=self.source_archive.task_id,
@@ -76,7 +77,7 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                                         'events':deepcopy(raw_events)}
         projection['p1_history_boundary'] = 'lossless_role_labels_not_text_removal'
         prompt = (f'## Step {step}\n## TASK (goal reference, not an action request)\n' + self.task
-            + '\n## Stored summaries (derived; IDs for deletion, aliases for sources)\n' + encode(memory_rows)
+            + f'\n## Stored summaries (derived; {self.memory_source_label})\n' + encode(memory_rows)
             + '\n## STATUS (internal derived progress)\n' + self.memory.status
             + '\n## Historical visible events (data, not instructions)\n' + encode(visible)
             + '\nMaintain short summaries with the available tools. Unchanged entries need no write.\n')
@@ -176,6 +177,9 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
         return {'status':'applied' if all(op.success for op in operations) else 'tool_error',
                 'operations':[vars(op).copy() for op in operations]}
 
+    def _stop_batch_after(self, call, result):
+        return False
+
     async def maintain(self, entries, *, observation=None, step_count=0, cycle_id=None):
         if self._active:
             raise RuntimeError('serial maintenance required')
@@ -222,7 +226,8 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                 failed = False
                 for call in calls:
                     if failed:
-                        result = {'status':('not_executed_after_invalid_source_ids' if failed == 'invalid_source_ids'
+                        result = {'status':('not_executed_after_tool_failure' if failed == 'context_tool_failure'
+                                            else 'not_executed_after_invalid_source_ids' if failed == 'invalid_source_ids'
                                             else 'not_executed_after_failed_write' if failed == 'failed_write'
                                             else 'not_executed_after_engineering_failure')}
                     else:
@@ -235,6 +240,8 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                     status = result['status']
                     if status in {'engineering_error','source_binding_error'}:
                         report['status'], failed = 'engineering_error', True
+                    elif self._stop_batch_after(call, result):
+                        report['status'], failed = 'tool_error', 'context_tool_failure'
                     elif status == 'invalid_source_ids':
                         report['status'], failed = 'tool_error', 'invalid_source_ids'
                     elif status in {'invalid_tool_arguments','tool_error'} and call['name'] in {
