@@ -127,7 +127,13 @@ class DMSMaterialStore(SourceLinks):
                         raw=path.read_text(encoding='utf-8')
                         if digest(raw) != ref.get('context_sha256'):
                             raise ValueError('legacy window integrity error')
-                        fields.append((key,'legacy_generation_context_not_proof','raw_string',json.loads(raw)['model_input']))
+                        window=json.loads(raw)
+                        if (window.get('task_id') != self.state['task_id']
+                                or window.get('cycle_id') != ref['context_window']
+                                or ref.get('task_id',self.state['task_id']) != self.state['task_id']
+                                or ref.get('cycle_id',ref['context_window']) != ref['context_window']):
+                            raise ValueError('legacy window scope mismatch')
+                        fields.append((key,'legacy_generation_context_not_proof','raw_string',window['model_input']))
                 else:
                     fields.append((key,'legacy_window_state','raw_string','unrecorded'))
             else:
@@ -141,11 +147,15 @@ class DMSMaterialStore(SourceLinks):
 
 class DMSP1Agent(LinkedSourceP1Agent):
     final_turn_text = '\nFinal turn: source reads closed; keep or delete materials, or leave them unchanged.\n'
+    stop_after_unknown_tool = True
     maintenance_system = SYSTEM
     write_tool_names = frozenset({'memory_keep'})
 
     def __init__(self, **kwargs):
         SourceReadP1Agent.__init__(self, **kwargs)
+        # Group bank content is an ID index, not searchable natural language.
+        # This P1-only candidate exposes all current records; no new retriever.
+        self.use_bm25_prefilter=False
         self.links=DMSMaterialStore(self.source_archive.root,task_id=self.source_archive.task_id,
                                     task=self.task,bank=self.memory.to_dict())
 

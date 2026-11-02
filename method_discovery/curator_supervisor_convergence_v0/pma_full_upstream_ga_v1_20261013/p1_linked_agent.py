@@ -27,6 +27,7 @@ READ_TOOL = {'type':'function','function':{'name':'memory_read_source',
 
 class LinkedSourceP1Agent(SourceReadP1Agent):
     final_turn_text = '\nFinal turn: source reads closed; write summaries or leave the bank unchanged.\n'
+    stop_after_unknown_tool = False
     maintenance_system = SYSTEM
     write_tool_names = frozenset({'memory_save_knowledge','memory_save_procedural','memory_save_gap','memory_update_status'})
     def __init__(self, **kwargs):
@@ -222,6 +223,7 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                     if failed:
                         result = {'status':('not_executed_after_invalid_source_ids' if failed == 'invalid_source_ids'
                                             else 'not_executed_after_failed_write' if failed == 'failed_write'
+                                            else 'not_executed_after_forbidden_tool' if failed == 'forbidden_tool'
                                             else 'not_executed_after_engineering_failure')}
                     else:
                         try:
@@ -233,6 +235,8 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                     status = result['status']
                     if status in {'engineering_error','source_binding_error'}:
                         report['status'], failed = 'engineering_error', True
+                    elif status == 'unknown_tool' and self.stop_after_unknown_tool:
+                        report['status'], failed = 'tool_error', 'forbidden_tool'
                     elif status == 'invalid_source_ids':
                         report['status'], failed = 'tool_error', 'invalid_source_ids'
                     elif status in {'invalid_tool_arguments','tool_error'} and call['name'] in self.write_tool_names:

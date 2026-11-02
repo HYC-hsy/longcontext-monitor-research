@@ -157,3 +157,74 @@ class DMSTests(unittest.TestCase):
         self.assertTrue(result['operations'][0]['success']);self.assertIn(old,a._active_records())
         self.assertEqual(a.links.state['bank'],bank.to_dict())
         self.assertEqual(len(source_identity(candidate='dms-inspired-v1',strict=False)['source_files']),62)
+
+    def test_groups_above_threshold_keep_payload_only_keyword_visible(self):
+        a,requests=self.agent([reply([('memory_keep',{'category':'knowledge','source_ids':['E1']}),
+                                      ('memory_keep',{'category':'knowledge','source_ids':['E2']})]),reply()])
+        a.max_memory_in_prompt=1
+        rows=[{'event_id':'first','commands':['NEEDLE_PAYLOAD_ONLY'],'observation':'failure'},
+              {'event_id':'second','commands':['unrelated'],'observation':'other'}]
+        first=asyncio.run(a.maintain(rows,cycle_id='c1'))
+        wanted=first['operations'][0]['memory_id']
+        self.assertNotIn('NEEDLE_PAYLOAD_ONLY',a._active_records()[wanted].content)
+        self.assertGreater(len(a.memory.knowledge),a.max_memory_in_prompt)
+        self.assertFalse(a.use_bm25_prefilter)
+        with patch.object(a.memory,'search_knowledge',side_effect=AssertionError('ID BM25 must not run')):
+            result=asyncio.run(a.maintain([],observation='NEEDLE_PAYLOAD_ONLY',cycle_id='c2'))
+        self.assertEqual(result['status'],'completed')
+        self.assertIn('NEEDLE_PAYLOAD_ONLY',requests[1]['prompt'])
+        self.assertIn(wanted,requests[1]['prompt'])
+        self.assertTrue(any(x.get('id')==wanted for x in a.request_aliases.values()))
+        from p1_linked_agent import LinkedSourceP1Agent
+        with tempfile.TemporaryDirectory() as other:
+            old=LinkedSourceP1Agent(task='old',task_id='old',source_root=other,memory=GapMemory(),
+                                    llm=None,use_bm25_prefilter=True,max_memory_in_prompt=1)
+            self.assertTrue(old.use_bm25_prefilter)
+
+    def test_legacy_window_wrong_scope_rejected_even_with_matching_digest(self):
+        from p1_source_archive import encode,digest
+        for bad_field in ('task_id','cycle_id','binding_task','binding_cycle'):
+            with self.subTest(field=bad_field),tempfile.TemporaryDirectory() as root:
+                bank=GapMemory();key=bank.save_knowledge('legacy')
+                async def fake(**kw):return reply([('memory_keep',{'category':'knowledge','source_ids':['M1']})])
+                a=DMSP1Agent(task='task',task_id='task',source_root=root,memory=bank,llm=NS(call=fake))
+                a.source_archive.capture('old_window','FOREIGN_SENTINEL',[])
+                state=deepcopy(a.links.state)
+                a.links.bind_state(state,key,'knowledge','legacy',
+                    {'sources':[],'inherited_unassociated':[],'association':'legacy_unassociated'},'old_window')
+                a.links.commit(state)
+                r=asyncio.run(a.maintain([],cycle_id='c1'))
+                group=r['operations'][0]['memory_id']
+                state=deepcopy(a.links.state);ref=state['legacy_snapshots'][key]['old_source']
+                path=a.source_archive.window_path('old_window');window=json.loads(path.read_text())
+                if bad_field in ('task_id','cycle_id'):window[bad_field]='other'
+                else:ref['task_id' if bad_field=='binding_task' else 'cycle_id']='other'
+                raw=encode(window);path.write_text(raw,encoding='utf-8');ref['context_sha256']=digest(raw)
+                a.links.commit(state)
+                with self.assertRaisesRegex(ValueError,'scope mismatch'):
+                    a.links.read({'kind':'memory','id':group},a._active_records())
+                a.request_aliases={'M1':{'kind':'memory','id':group,'ref':deepcopy(a.links.state['refs'][group])}}
+                report={'read_requests':0,'reads_used':0}
+                with self.assertRaisesRegex(ValueError,'scope mismatch'):
+                    a._apply({'name':'memory_read_source','arguments':{'memory_id':'M1'}},'unused',0,report)
+
+    def test_forbidden_or_unknown_tool_stops_delete_but_keeps_prior_commit(self):
+        bad_calls=[('memory_save_knowledge',{'content':'forbidden prose'}),
+                   ('memory_update_status',{'content':'forbidden completion'}),
+                   ('file_read',{'path':'not read'})]
+        for bad in bad_calls:
+            with self.subTest(tool=bad[0]),tempfile.TemporaryDirectory() as root:
+                bank=GapMemory();old=bank.save_knowledge('preserve old')
+                async def fake(**kw):return reply([('memory_keep',{'category':'knowledge','source_ids':['TASK']}),
+                                                   bad,('memory_delete',{'memory_id':old})])
+                a=DMSP1Agent(task='task',task_id='task',source_root=root,memory=bank,llm=NS(call=fake))
+                result=asyncio.run(a.maintain([],cycle_id='c'))
+                self.assertEqual(result['status'],'tool_error')
+                self.assertEqual([x['result']['status'] for x in result['turns'][0]['tool_results']],
+                                 ['applied','unknown_tool','not_executed_after_forbidden_tool'])
+                self.assertIn(old,a._active_records());self.assertEqual(len(bank.knowledge),2)
+                self.assertEqual(len(result['operations']),1);self.assertTrue(result['operations'][0]['success'])
+                self.assertEqual(a.links.state['bank'],bank.to_dict())
+                self.assertIn(bad[0],(Path(root)/'maintenance.jsonl').read_text())
+        from p1_linked_agent import LinkedSourceP1Agent
+        self.assertFalse(LinkedSourceP1Agent.stop_after_unknown_tool)
