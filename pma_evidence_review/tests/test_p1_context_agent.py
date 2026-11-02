@@ -149,6 +149,8 @@ class ContextTests(unittest.TestCase):
                 result=asyncio.run(run_case(json.loads((folder/item['file']).read_text()),
                     tmp,NS(call=fake),candidate='source-links-context-v1'))
                 self.assertEqual(result['status'],'completed')
+                config=json.loads((Path(tmp)/'run_config.json').read_text())
+                self.assertEqual((config['read_limit'],config['continuation_limit']),(4,2))
                 self.assertEqual(len(requests),1)
                 self.assertEqual(requests[0]['system'],SYSTEM)
                 self.assertIn('view',requests[0]['tools'][-1]['function']['parameters']['properties'])

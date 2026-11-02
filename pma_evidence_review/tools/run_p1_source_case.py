@@ -27,7 +27,8 @@ def candidate_config(candidate='source-read'):
         return SourceReadP1Agent, SYSTEM, READ_LIMIT, CONTINUATION_LIMIT
     if candidate == 'source-links-context-v1':
         from p1_context_agent import ContextSourceP1Agent, SYSTEM as context_system
-        return ContextSourceP1Agent, context_system, READ_LIMIT, CONTINUATION_LIMIT
+        from p1_linked_agent import READ_LIMIT as reads, CONTINUATION_LIMIT as continuations
+        return ContextSourceP1Agent, context_system, reads, continuations
     if candidate == 'source-links-v1':
         from p1_linked_agent import LinkedSourceP1Agent, SYSTEM as linked_system
         from p1_linked_agent import READ_LIMIT as reads, CONTINUATION_LIMIT as continuations
