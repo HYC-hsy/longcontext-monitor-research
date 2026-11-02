@@ -217,7 +217,7 @@ class ContextTests(unittest.TestCase):
         self.target={'kind':'status','id':'STATUS','ref':deepcopy(state['refs']['STATUS'])}
         path=self.agent.source_archive.window_path('c_r0')
         window=json.loads(path.read_text());window['task_id']='another'
-        path.write_text(encode(window));state['task_id']='another'
+        path.write_bytes(encode(window).encode('utf-8'));state['task_id']='another'
         self.agent.source_archive.task_id='another'
         state['refs']['STATUS']['context_sha256']=digest(encode(window))
         self.target['ref']=deepcopy(state['refs']['STATUS'])
