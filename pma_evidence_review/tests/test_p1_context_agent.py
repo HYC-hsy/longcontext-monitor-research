@@ -475,7 +475,10 @@ class ContextTests(unittest.TestCase):
     def test_context_protocol_and_gap_wording_stay_candidate_only(self):
         self.assertIn('TASK, STATUS or returned H1 handles in source_ids',SYSTEM)
         self.assertIn('conditions still to satisfy or questions still to answer',SYSTEM)
-        self.assertIn('Keep failure details in experiences, not gaps',SYSTEM)
+        self.assertIn('Gaps are not failure logs, guessed causes or action plans',SYSTEM)
+        self.assertIn('its condition is satisfied, its question answered, or that need clearly no longer applies',SYSTEM)
+        self.assertIn('A failure can answer an outcome question without satisfying a success condition',SYSTEM)
+        self.assertIn('clearing another blocker does not close an unrelated gap',SYSTEM)
         self.assertNotIn('Default view=',SYSTEM)
         self.assertIn('select relevant shown E/M aliases or TASK in source_ids',OLD_SYSTEM)
         self.assertNotIn('returned H1 handles',OLD_SYSTEM)

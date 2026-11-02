@@ -6,8 +6,10 @@ from p1_context_history import InputMemoryHistory, HistoryError, PREFIX
 from p1_linked_agent import LinkedSourceP1Agent, SYSTEM as LINKED_SYSTEM, READ_LIMIT, CONTINUATION_LIMIT
 
 GAP_DESCRIPTION = ('Record task-relevant conditions still to satisfy or questions still to answer. '
-    'Keep failure details in experiences, not gaps; gaps are not guessed causes or action plans. '
-    'Knowing a failure or clearing another blocker does not resolve the open condition.')
+    'Gaps are not failure logs, guessed causes or action plans. '
+    'Close a gap when its condition is satisfied, its question answered, or that need clearly no longer applies. '
+    'A failure can answer an outcome question without satisfying a success condition; '
+    'clearing another blocker does not close an unrelated gap.')
 OLD_GAP = ('Record task-relevant unmet or unverified conditions, based on task requirements or observations. '
     'Keep unresolved parts when a blocker clears; close only what is resolved or no longer applies.')
 SYSTEM = LINKED_SYSTEM.replace(
