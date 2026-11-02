@@ -26,6 +26,9 @@ READ_TOOL = {'type':'function','function':{'name':'memory_read_source',
 
 
 class LinkedSourceP1Agent(SourceReadP1Agent):
+    final_turn_text = '\nFinal turn: source reads closed; write summaries or leave the bank unchanged.\n'
+    maintenance_system = SYSTEM
+    write_tool_names = frozenset({'memory_save_knowledge','memory_save_procedural','memory_save_gap','memory_update_status'})
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.links = SourceLinks(self.source_archive.root, task_id=self.source_archive.task_id,
@@ -199,12 +202,12 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                 self.source_archive.capture(window_id,prompt,window_events,presented_source_receipts=receipts,
                     raw_generation_context=self._raw_generation_context,input_projection=projection)
                 request = {'kind':'request','cycle_id':report['cycle_id'],'window_id':window_id,
-                    'prompt':prompt,'system':SYSTEM,'tools':tools,'source_aliases':deepcopy(self.request_aliases)}
+                    'prompt':prompt,'system':self.maintenance_system,'tools':tools,'source_aliases':deepcopy(self.request_aliases)}
                 self._journal(request)
                 if self.before_request:
                     self.before_request(request)
                 report['model_calls_attempted'] += 1
-                response = await self.llm.call(prompt=prompt,system=SYSTEM,tools=tools)
+                response = await self.llm.call(prompt=prompt,system=self.maintenance_system,tools=tools)
                 report['model_calls_completed'] += 1
                 calls = self._calls(response,round_index)
                 turn = {'window_id':window_id,'assistant_text':self._strip_thinking(getattr(response,'content',None) or ''),
@@ -232,8 +235,7 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                         report['status'], failed = 'engineering_error', True
                     elif status == 'invalid_source_ids':
                         report['status'], failed = 'tool_error', 'invalid_source_ids'
-                    elif status in {'invalid_tool_arguments','tool_error'} and call['name'] in {
-                            'memory_save_knowledge','memory_save_procedural','memory_save_gap','memory_update_status'}:
+                    elif status in {'invalid_tool_arguments','tool_error'} and call['name'] in self.write_tool_names:
                         report['status'], failed = 'tool_error', 'failed_write'
                     elif status in {'budget_exhausted','continuation_unavailable'} and report['status']=='completed':
                         report['status']='budget_limited'
@@ -248,7 +250,7 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                     report['continuations_used'] += 1
                     history.append(turn)
                     prompt = initial+'\n## Previous P1 calls and receipts (historical data)\n'+encode(history)
-                    prompt += ('\nFinal turn: source reads closed; write summaries or leave the bank unchanged.\n' if round_index+1==CONTINUATION_LIMIT or report['reads_used']>=READ_LIMIT
+                    prompt += (self.final_turn_text if round_index+1==CONTINUATION_LIMIT or report['reads_used']>=READ_LIMIT
                                else '\nContinue from exact receipts; follow next_cursor only if useful.\n')
                 else:
                     break
