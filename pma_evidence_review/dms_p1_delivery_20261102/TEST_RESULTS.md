@@ -1,3 +1,13 @@
+# 当前接口修复：73/73离线检查
+
+固定源码 053cff29aa2c03c65c785a3f2f63dae4a4ac5bc9，本地6e2d6e4与该远端源码tree相同，两次均73 tests、0 errors、0 failures。命令仍为 run_p1_source_checks.py --dms --report <fresh>，真实调用0。当前完整安全投影是dms-delete-checked.* / dms-delete-remote.*；原件与hash保留，公开投影仅替换本机任务根为<WORKSPACE>。
+
+新增4项回归覆盖：read M2与delete M2同一目标、原始参数未改及解析目标审计；真实ID兼容、已删删除失败后keep/delete不再执行；未知/E/T/STATUS、重复映射、真实ID与别名碰撞、绑定变化的读取删除一致拒绝；无效读取参数后停止后续变更。既有部分来源、legacy未关联与读预算路径继续通过，不当语义失败。旧source-read/source-links-v1保留原行为。
+
+本次源码/测试128行增删，低于600。没有重新启动案例批次；此前scripted CLI、66/69检查保留历史，不冒充本次新案例。DMS真实P1从未启动；其他路线A的992f7b56归档不混入本路结果。没有新增模型步骤，没有整批回滚事务，仅逐操作提交与失败后停止。
+
+以下为前一轮69项修复历史说明：
+
 # 离线验收
 
 命令：

@@ -25,3 +25,5 @@ if ($LASTEXITCODE -ne 0) { throw 'Stop batch and preserve case' }
 每例最多4次读源、3次逻辑P1调用，全批最多18次逻辑调用。工具不强制调用，预算未设置的模型参数如实 unknown/uncapped；继承客户端 HTTP 重试单独记录，不能当作逻辑轮数。工程故障暂停后续，禁止外层自动重试或补跑抹掉失败。初始六例及bank不能重写；case04未读完仍如实保留，case06原A/B不得偷偷补成更容易的新输入。
 
 保存完整可见请求、模型正文/tool calls、工具回执、实际读页及cursor、操作、bank_after、中央原事件、typed legacy引用、组原文展开及当前视图、终态、usage和可取得模型参数。bank_after.content 是索引，不能只上传索引却漏原文。私有原件不动，公开投影排除完整profile、凭据、私有端点、隐藏推理/signature，source_links.json的secret必须删除；不能整目录直接上传。投影明确标注删减并重算逐文件hash，上传后远端回读。语义审计由主线程负责，不用操作数量或无格式错误宣布收益。
+
+本次接口修复固定源码为053cff29aa2c03c65c785a3f2f63dae4a4ac5bc9。离线应为73项；当前不自动重跑已有案例，DMS真实批次尚未开始。后续命令仍须主线程明确放行；日志同时保留原始memory_id与工程resolved_memory_id，任何协议/删除错误后核对后续操作未执行。
