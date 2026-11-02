@@ -1,0 +1,13 @@
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/p1_context_agent.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/p1_context_agent.py
+index c352f449..b82d4ed6 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/p1_context_agent.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/p1_context_agent.py
+@@ -98,0 +99,8 @@ class ContextSourceP1Agent(LinkedSourceP1Agent):
++    def _resolve_sources(self, source_ids):
++        resolved = super()._resolve_sources(source_ids)
++        # _apply has validated each H1 grant before reaching this binding hook.
++        cited = list(dict.fromkeys(token for token in source_ids if token.startswith(PREFIX)))
++        if cited:
++            resolved['cited_history_handles'] = cited
++        return resolved
++

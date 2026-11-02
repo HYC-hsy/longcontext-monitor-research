@@ -1,0 +1,86 @@
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/p1_context_history.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/p1_context_history.py
+index e4c3c427..0128ad0f 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/p1_context_history.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/p1_context_history.py
+@@ -92,4 +92,18 @@ class InputMemoryHistory:
+-        if not ref or not ref.get('context_window'):
+-            return [], {}, 'unrecorded'
+-        window = self._window(ref['context_window'],ref.get('context_sha256'))
+-        coverage = window.get('input_memory_coverage')
++        rows, pending, seen = [], {}, set()
++        cited = (ref or {}).get('cited_history_handles',[])
++        if not isinstance(cited,list):
++            raise HistoryError('source_binding_error')
++        for handle in cited:
++            if not isinstance(handle,str):
++                raise HistoryError('source_binding_error')
++            try:
++                row = self.load(handle)
++            except HistoryError:
++                raise HistoryError('source_binding_error') from None
++            if handle not in seen:
++                rows.append((handle,row,'explicitly_cited_history'));seen.add(handle)
++        coverage = None
++        if ref and ref.get('context_window'):
++            window = self._window(ref['context_window'],ref.get('context_sha256'))
++            coverage = window.get('input_memory_coverage')
++        coverage_status = 'unrecorded' if coverage is None else 'recorded'
+@@ -97,2 +111,2 @@ class InputMemoryHistory:
+-            return [], {}, 'unrecorded'
+-        if (not isinstance(coverage,dict) or coverage.get('schema') != 'input-memory-coverage-v1' or
++            coverage = {'records':[],'read_handles':[]}
++        elif (not isinstance(coverage,dict) or coverage.get('schema') != 'input-memory-coverage-v1' or
+@@ -101 +114,0 @@ class InputMemoryHistory:
+-        rows, pending = [], {}
+@@ -108 +121,2 @@ class InputMemoryHistory:
+-            rows.append((handle,row,'displayed_record'))
++            if handle not in seen:
++                rows.append((handle,row,'displayed_record'));seen.add(handle)
+@@ -112 +126,6 @@ class InputMemoryHistory:
+-            rows.append((handle,self.load(handle),'earlier_read_handle'))
++            try:
++                row = self.load(handle)
++            except HistoryError:
++                raise HistoryError('source_binding_error') from None
++            if handle not in seen:
++                rows.append((handle,row,'earlier_read_handle'));seen.add(handle)
+@@ -120 +139 @@ class InputMemoryHistory:
+-        return fields, pending, 'recorded'
++        return fields, pending, coverage_status
+@@ -144 +162,0 @@ class InputMemoryHistory:
+-        directory, pending, coverage_status = self._directory(ref)
+@@ -146,0 +165,14 @@ class InputMemoryHistory:
++        coverage_error, citations_available = None, True
++        try:
++            directory, pending, coverage_status = self._directory(ref)
++        except HistoryError as exc:
++            if resolved != 'sources':
++                raise
++            # Output citations are stored in the ref, independently of input-window coverage.
++            try:
++                directory, pending, _ = self._directory({'cited_history_handles':
++                    (ref or {}).get('cited_history_handles',[])})
++            except HistoryError:
++                directory, pending, citations_available = [], {}, False
++            coverage_error = exc.status
++            coverage_status = 'unavailable' if exc.status=='context_missing' else 'integrity_error'
+@@ -149,2 +181,6 @@ class InputMemoryHistory:
+-                    'input_memory_count':len(directory),'input_memory_coverage':coverage_status,
+-                    'input_memory_scope':'Generation input coverage, not claim support; history handles are read-only.'}
++                    'input_memory_count':None if coverage_error else len(directory),
++                    'input_memory_coverage':coverage_status,'input_memory_coverage_error':coverage_error,
++                    'input_memory_directory_available':bool(directory) or coverage_status=='recorded',
++                    'explicitly_cited_history_count':None if not citations_available else sum(
++                        json.loads(text)['visibility']=='explicitly_cited_history' for _,_,_,text in directory),
++                    'input_memory_scope':'Frozen input coverage and explicit output citations are distinct; neither proves claims or original reads.'}
+diff --git a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/p1_linked_agent.py b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/p1_linked_agent.py
+index 51af2262..1630b0b6 100644
+--- a/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/p1_linked_agent.py
++++ b/method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/p1_linked_agent.py
+@@ -139 +139 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
+-                resolved = self.links.resolve(args.get('source_ids',[]), self.request_aliases)
++                resolved = self._resolve_sources(args.get('source_ids',[]))
+@@ -179,0 +180,3 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
++    def _resolve_sources(self, source_ids):
++        return self.links.resolve(source_ids,self.request_aliases)
++
