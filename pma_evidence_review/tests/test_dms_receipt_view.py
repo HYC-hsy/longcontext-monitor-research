@@ -135,3 +135,18 @@ class ReceiptViewTests(unittest.TestCase):
         self.assertFalse(stdout['preview_only'])
         self.assertIn('bash: line 13: sqlite3: command not found',stdout['text'])
         self.assertLessEqual(len(encode(rows)),rows[0]['serialized_limit'])
+
+    def test_outer_remainder_not_duplicated_and_first_kept_receipt_keeps_identity(self):
+        result={'tool_use_id':'a','unknown':'x'*3000,
+                'content':json.dumps({'stdout':'literal error','exit_code':0})}
+        rows,_=project({'commands':[{'id':'a'}],'observation':json.dumps({'content':'actor','tool_results':[result]})})
+        self.assertFalse(any(r['field']=='tool_results[0].unknown' for r in rows))
+        self.assertEqual(rows[0]['unclassified_field_count'],1)
+        receipts=[r for r in rows if r.get('receipt_index')==0]
+        self.assertTrue(receipts)
+        self.assertEqual(receipts[0]['identity_fields'],{'tool_use_id':'a'})
+        self.assertEqual(receipts[0]['paired_command_indices'],[0])
+        self.assertEqual(receipts[0]['pairing'],'explicit')
+        self.assertTrue(any(r['field'].endswith('stdout') and r.get('text')=='literal error' for r in receipts))
+        self.assertEqual(sum('identity_fields' in r for r in receipts),1)
+        self.assertLessEqual(len(encode(rows)),rows[0]['serialized_limit'])

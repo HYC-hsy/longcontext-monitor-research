@@ -77,13 +77,13 @@ def event_preview(store, source):
                     if index in link['receipts'] and link['pairing']=='explicit':
                         meta['paired_command_indices'].extend(link['commands']);meta['pairing']='explicit'
                 emitted=False
-                remainder={k:v for k,v in result.items() if k not in meta['identity_fields'] and k not in STREAM_KEYS and k!='content'}
-                if remainder:
-                    add(receipts,f'tool_results[{index}].unclassified_remainder',remainder,
-                        'unclassified_tool_fields',field_count=len(remainder),**meta)
+                outer_remainder={k:v for k,v in result.items() if k not in meta['identity_fields'] and k not in STREAM_KEYS and k!='content'}
+                if outer_remainder:
+                    add(receipts,f'tool_results[{index}].unclassified_remainder',outer_remainder,
+                        'unclassified_tool_fields',field_count=len(outer_remainder),**meta)
                     emitted=True
                 for key,value in result.items():
-                    if key in meta['identity_fields'] or key in remainder:continue
+                    if key in meta['identity_fields'] or key in outer_remainder:continue
                     emitted=True
                     parsed=value
                     if key=='content' and isinstance(value,str):
@@ -93,9 +93,9 @@ def event_preview(store, source):
                         for subkey in parsed:
                             if subkey in STREAM_KEYS:
                                 add(receipts,f'tool_results[{index}].content.{subkey}',parsed[subkey],'tool_receipt',**meta)
-                        remainder={k:v for k,v in parsed.items() if k not in STREAM_KEYS}
-                        if remainder:add(receipts,f'tool_results[{index}].content.unclassified_remainder',
-                                         remainder,'unclassified_tool_fields',field_count=len(remainder),**meta)
+                        inner_remainder={k:v for k,v in parsed.items() if k not in STREAM_KEYS}
+                        if inner_remainder:add(receipts,f'tool_results[{index}].content.unclassified_remainder',
+                                         inner_remainder,'unclassified_tool_fields',field_count=len(inner_remainder),**meta)
                     else:
                         add(receipts,f'tool_results[{index}].{key}',value,'tool_receipt',**meta)
                 if not emitted:
@@ -113,15 +113,10 @@ def event_preview(store, source):
     left-=sum(receipt_limits)
     actor_limits=fair_limits(actors,max(0,left-context_reserve),cap=800);left-=sum(actor_limits)
     context_limits=fair_limits(context,left,cap=200)
-    entries=[];limits=[];seen_receipts=set()
+    entries=[];limits=[]
     for rows,allocated in ((actions,action_limits),(receipts,receipt_limits),(actors,actor_limits),(context,context_limits)):
         for entry,limit in zip(rows,allocated):
             entry=dict(entry)
-            index=entry.get('receipt_index')
-            if index is not None:
-                if index in seen_receipts:
-                    for key in ('identity_fields','paired_command_indices','pairing'):entry.pop(key,None)
-                seen_receipts.add(index)
             # Prefer whole short stdout/stderr without keyword inspection.
             if entry['field'].endswith(('.stdout','.stderr')) and len(entry['text'])<=2048:
                 limit=len(entry['text'])
@@ -149,9 +144,14 @@ def event_preview(store, source):
                 'unclassified_field_count':sum(e.get('field_count',0) for e in entries),
                 'unshown_receipt_count':None if receipt_count is None else receipt_count-len(visible_receipts),
                 'raw_read':'memory_read_source(current_group_M_alias, cursor)'}
-        output=[header]
+        output=[header];seen_receipts=set()
         for i in kept:
-            entry=entries[i];limit=limits[i]
+            entry=dict(entries[i]);limit=limits[i]
+            index=entry.get('receipt_index')
+            if index is not None:
+                if index in seen_receipts:
+                    for key in ('identity_fields','paired_command_indices','pairing'):entry.pop(key,None)
+                seen_receipts.add(index)
             output.append({**{k:v for k,v in entry.items() if k!='text'},**excerpt(entry['text'],limit)})
         return output
     count=min(16,len(entries))
