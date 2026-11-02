@@ -1,4 +1,4 @@
-CURRENT ENGINEERING FIX: DELETE_INTERFACE_FIX.md; source 449817cd94b846fef9dee995c6784463f5af39a3. Latest offline result: 78/78. Earlier counts and CLI records below are historical. Runtime identity/schema have been refreshed.
+CURRENT ENGINEERING FIX: DELETE_INTERFACE_FIX.md; source 55e5a3122720e4502dcad28f8b71c7c0f33ff5ce. Latest offline result: 81/81. Read/delete share displayed-memory scope and avoid alias reinterpretation. SYSTEM only adds STATUS to an already-supported parameter list. Earlier reports/counts below are historical.
 
 # P1 source-links-context-v1：冻结生成上下文入口
 
@@ -24,7 +24,7 @@ CURRENT ENGINEERING FIX: DELETE_INTERFACE_FIX.md; source 449817cd94b846fef9dee99
 
 - p1_source_links.py：在旧调用默认路径之外增加显式视图；复用冻结 ref/window 和原分页器。
 - p1_linked_agent.py：实例 system 与 opt-in view 接口，原类默认值和写策略保持原状。
-- p1_context_agent.py：19 行独立候选，只有一个新增提示段和 view schema。
+- p1_context_agent.py：独立候选的 context 入口、仅限已展示对象的读删共同解析及失败后停止；当前合同见 DELETE_INTERFACE_FIX.md。
 - run_p1_source_case.py：显式候选路由，运行源码身份纳入新模块（62 项）。
 - run_p1_source_checks.py：新增 --source-links-context，收集旧 58 项和新 11 项检查。
 - test_p1_context_agent.py：冻结窗口、原文分页、边界、预算与真实请求接线的离线检查。

@@ -1,4 +1,4 @@
-CURRENT ENGINEERING FIX: DELETE_INTERFACE_FIX.md; source 449817cd94b846fef9dee995c6784463f5af39a3. Latest offline result: 78/78. Earlier counts and CLI records below are historical. Runtime identity/schema have been refreshed.
+CURRENT ENGINEERING FIX: DELETE_INTERFACE_FIX.md; source 55e5a3122720e4502dcad28f8b71c7c0f33ff5ce. Latest offline result: 81/81. Read/delete share displayed-memory scope and avoid alias reinterpretation. SYSTEM only adds STATUS to an already-supported parameter list. Earlier reports/counts below are historical.
 
 # 离线验收
 
