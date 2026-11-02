@@ -119,7 +119,7 @@ class InputMemoryHistory:
             fields.append(('input_memory_'+str(index),'input_memory','json_value',encode(data)))
         return fields, pending, 'recorded'
 
-    def read(self, target, active, *, requested_view=None, cursor=None, handle=None):
+    def read(self, target, active, *, requested_view=None, cursor=None, handle=None, read_metadata=None):
         if requested_view not in (None,'sources','context'):
             raise HistoryError('invalid_tool_arguments')
         reader = self.links
@@ -130,7 +130,7 @@ class InputMemoryHistory:
             reader = copy(self.links)
             reader.state = {**self.links.state,'refs':{handle:historical['ref']}}
             target = {'kind':'memory','id':handle,'ref':historical['ref'],
-                      'historical_memory_id':historical['memory_id']}
+                      'historical_memory_id':historical['memory_id'],'historical_record':historical}
             active = {handle:NS(content=historical['content'],category=historical['category'])}
         key = target.get('id',target.get('source_id'))
         ref = reader.state['refs'].get(key) if target['kind'] in ('memory','status') else None
@@ -149,6 +149,8 @@ class InputMemoryHistory:
                     'fallback_reason':'no_linked_sources' if requested_view is None and resolved=='context' else None,
                     'input_memory_count':len(directory),'input_memory_coverage':coverage_status,
                     'input_memory_scope':'Generation input coverage, not claim support; history handles are read-only.'}
+        if read_metadata is not None:
+            metadata.update(read_metadata)
         fields = list(directory)
         if historical is not None:
             metadata.update(historical=True,historical_memory_id=historical['memory_id'])
