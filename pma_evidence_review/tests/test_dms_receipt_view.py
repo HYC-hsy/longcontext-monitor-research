@@ -12,7 +12,7 @@ from p1_source_links import call_links
 import tempfile
 
 def shown(row):
-    return len(row['text']) if 'text' in row else sum(p['end']-p['start'] for p in row['segments'])
+    return len(row['text']) if 'text' in row else sum(p['end']-p['start'] for p in row.get('segments',[]))
 
 
 FIX=ROOT/'pma_evidence_review/tests/fixtures/dms_receipts'
@@ -84,4 +84,54 @@ class ReceiptViewTests(unittest.TestCase):
         self.assertTrue(any(r['field'].endswith('stderr') and 'end error' in str(r) for r in rows))
         self.assertTrue(all(not r.get('paired_command_indices',[]) for r in rows if r.get('receipt_index')==0))
         self.assertLessEqual(sum(shown(r) for r in rows),rows[0]['source_event_text_budget'])
-        self.assertTrue(any(r['field']=='observation.content' and r['omitted_ranges'] for r in rows))
+        self.assertTrue(any(r['field']=='observation.content' and r.get('omitted_ranges') for r in rows)
+                        or rows[0]['omitted_roles'].get('actor_history',0)>0)
+
+    def test_wide_dict_and_many_receipts_have_full_serialized_hard_cap(self):
+        for n in (1000,5000):
+            body={'stdout':'visible output','exit_code':0,**{'key_'+str(i):'x' for i in range(n)}}
+            rows,_=project({'commands':['run'],'observation':json.dumps({'content':'actor',
+                'tool_results':[{'tool_use_id':'a','content':json.dumps(body)}]})})
+            self.assertLessEqual(len(encode(rows)),rows[0]['serialized_limit'])
+            self.assertEqual(rows[0]['unclassified_field_count'],n)
+            self.assertLessEqual(len(rows),17)
+            self.assertIn('raw_read',rows[0])
+        outer={'tool_use_id':'a','stdout':'output',**{'other_'+str(i):'x' for i in range(1000)}}
+        rows,_=project({'commands':['run'],'observation':json.dumps({'content':'actor','tool_results':[outer]})})
+        self.assertEqual(rows[0]['unclassified_field_count'],1000)
+        self.assertLessEqual(len(encode(rows)),rows[0]['serialized_limit'])
+        rows,_=project({'commands':['run'],'observation':json.dumps({'content':'actor','tool_results':[{}]*1000})})
+        self.assertLessEqual(len(encode(rows)),rows[0]['serialized_limit'])
+        self.assertEqual(rows[0]['receipt_count'],1000)
+        self.assertGreater(rows[0]['unshown_receipt_count'],0)
+        self.assertTrue(rows[0]['omitted_row_ranges'])
+
+    def test_empty_and_identity_only_receipts_are_not_absent(self):
+        rows,_=project({'commands':[{'id':'a'}],'observation':json.dumps({'content':'actor',
+            'tool_results':[{}, {'tool_use_id':'a'}]})})
+        self.assertEqual(rows[0]['receipt_count'],2)
+        empty=[r for r in rows if r['role']=='receipt_present_no_content']
+        self.assertEqual(len(empty),2)
+        self.assertEqual(empty[1]['identity_fields'],{'tool_use_id':'a'})
+        self.assertEqual(empty[1]['paired_command_indices'],[0])
+        self.assertTrue(rows[0]['original_read_not_implied'])
+        self.assertEqual(rows[0]['via'],'selected')
+        self.assertEqual(rows[0]['order_basis'],'host_acceptance')
+
+    def test_line_aligned_fragments_and_short_stdout_keep_full_failure_context(self):
+        text=''.join('line '+str(i)+'🙂\r\n' for i in range(300))
+        row=excerpt(text,240)
+        for part in row['segments']:
+            self.assertEqual(part['text'],text[part['start']:part['end']])
+            self.assertFalse(part['starts_mid_line']);self.assertFalse(part['ends_mid_line'])
+        line=excerpt('🙂'*10000,240)
+        self.assertTrue(line['preview_only'])
+        self.assertTrue(any(p['starts_mid_line'] or p['ends_mid_line'] for p in line['segments']))
+        data=json.loads((FIX/'01-local-success-scope.json').read_text())
+        rows,_=project(data['raw'],data['call_links'])
+        stdout=next(r for r in rows if r['field'].endswith('.stdout'))
+        original=json.loads(json.loads(data['raw']['observation'])['tool_results'][0]['content'])['stdout']
+        self.assertEqual(stdout.get('text'),original)
+        self.assertFalse(stdout['preview_only'])
+        self.assertIn('bash: line 13: sqlite3: command not found',stdout['text'])
+        self.assertLessEqual(len(encode(rows)),rows[0]['serialized_limit'])

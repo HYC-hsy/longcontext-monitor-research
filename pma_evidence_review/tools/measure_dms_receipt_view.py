@@ -11,6 +11,7 @@ import zipfile
 from run_p1_source_case import ROOT, BankDisplayAgent
 from p1_dms_agent import DMSP1Agent
 from p1_dms_view import material_previews
+from p1_source_archive import encode
 
 
 def old_preview(store,sources):
@@ -52,6 +53,12 @@ def measure(archive):
                     before=a._input('',1,[])[0]
                 after=a._input('',1,[])[0]
                 sources={s['source_id'] for ref in state['refs'].values() for s in ref.get('sources',[]) if s['source_id'] in state['events']}
+                budgets=[]
+                for sid in sorted(sources):
+                    preview=material_previews(a.links,[{'source_id':sid,'via':'selected'}])
+                    budgets.append({'source_id':sid,'serialized_characters':len(encode(preview)),
+                                    'serialized_limit':preview[0]['serialized_limit']})
+                assert all(r['serialized_characters']<=r['serialized_limit'] for r in budgets)
                 visibility=[]
                 # Expectations are measurement assertions, never algorithm rules.
                 expected={'event_7':'command not found'} if '/01-' in member else {'event_8':'Segmentation fault'} if '/04-' in member else {}
@@ -67,7 +74,7 @@ def measure(archive):
                     'before_characters':len(before),'after_characters':len(after),'delta_characters':len(after)-len(before),
                     'before_utf8_bytes':len(before.encode()),'after_utf8_bytes':len(after.encode()),
                     'delta_utf8_bytes':len(after.encode())-len(before.encode()),'selected_event_count':len(sources),
-                    'visibility':visibility,'real_model_calls':0})
+                    'event_serialized_budgets':budgets,'visibility':visibility,'real_model_calls':0})
     return {'archive_sha256':hashlib.sha256(Path(archive).read_bytes()).hexdigest(),'cases':output}
 
 
