@@ -1,8 +1,9 @@
-# Windows 离线交接
+# Windows offline development handoff
 
-使用最终回复的固定交付 SHA。保持已有依赖环境，不加载真实 profile，不用 authorize-real-p1，不跑 Task/P2/eval/旧真实组。源码提交 afc14c3a3b714bc9b1f19b28a36cb3097a94b85d；材料尾提交不改运行源码。
+Use the fixed FINAL_DELIVERY_SHA from the final response. Independent branch: pma/source-links-context-v1. Current source commit: 449817cd94b846fef9dee995c6784463f5af39a3. Use the existing dependency environment.
 
 ```powershell
+$env:PYTHONUTF8 = '1'
 git -c core.autocrlf=false fetch origin pma/source-links-context-v1
 git switch --detach <FINAL_DELIVERY_SHA>
 git config --local core.autocrlf false
@@ -11,15 +12,10 @@ git status --porcelain
 if ($LASTEXITCODE -ne 0) { throw 'Stop: offline verification failed' }
 ```
 
-按 MANIFEST 验证材料/代码，重建 source_identity(candidate='source-links-context-v1')，62 文件哈希应与 SOURCE_IDENTITY 相同，code_commit 是当前交付 SHA。旧候选 source-links-v1 和默认 source-read 的源码身份须在本 checkout 重建，不能挪用旧源码哈希清单。
+Expected: 78 tests, zero errors/failures/skips. The suite includes a fake-client replay of the exact three visible A04 tool-call rounds from the preserved failed archive; it makes no real model requests. Do not load a real profile or add authorize-real-p1. Do not run Task/P2/eval or resume A05-06/B. Future real runs require separate instructions. Do not repeat historical real groups.
 
-仅需 CLI 接线验证时：
+Verify MANIFEST and rebuild source_identity(candidate='source-links-context-v1'): all 62 source hashes must match SOURCE_IDENTITY; code_commit becomes the checked-out delivery SHA. Old source identities/CLI results remain historical and cannot stand in for this version. The replay fixture is included in MANIFEST; original frozen case inputs are unchanged. PYTHONUTF8=1 plus explicit UTF-8 fixture bytes avoids the Windows encoding failure without weakening production hashes.
 
-```powershell
-& $P1Python -B pma_evidence_review/tools/run_p1_source_case.py --candidate source-links-context-v1 --mode scripted --case $FrozenCasePath --output $FreshPrivateOutput
-if ($LASTEXITCODE -ne 0) { throw 'Stop and preserve terminal result' }
-```
+Candidate selection remains --candidate source-links-context-v1. memory_read_source accepts optional view=sources|context and cursor. memory_delete now accepts the same frozen M alias or an original ID; ambiguity/stale objects are rejected. Original tool-call arguments remain intact, and receipts/operations record resolved IDs. Failed/invalid calls stop subsequent operations in their batch; prior committed operations remain.
 
-新输出目录不可重试覆盖。读源最多四次、续轮最多两次/三次逻辑 P1 调用，末轮 write-only；两视图共用预算。真实实验的启动/参数另行安排。原件与窗口保留；不能直接公开整个运行目录：source_links.json 含游标签名 secret，须去除凭据/profile/私有端点/隐藏推理及签名，并为公开投影重算哈希。
-
-Independent-review addendum: final directed check count is 71/71; the earlier 69-test report is preserved. Runtime code and all 62 source hashes are unchanged. See TEST_RESULTS.md and review-addendum-checks.* for r1/r2 frozen-input and valid-hash identity/type regressions.
+Preserve raw windows/bank/results privately. Do not publish whole output directories: source_links.json contains a cursor-signing secret; remove credentials/profiles/private endpoints/hidden reasoning/signatures and rehash public projections.

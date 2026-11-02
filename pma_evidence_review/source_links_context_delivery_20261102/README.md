@@ -1,3 +1,5 @@
+CURRENT ENGINEERING FIX: DELETE_INTERFACE_FIX.md; source 449817cd94b846fef9dee995c6784463f5af39a3. Latest offline result: 78/78. Earlier counts and CLI records below are historical. Runtime identity/schema have been refreshed.
+
 # P1 source-links-context-v1：冻结生成上下文入口
 
 从固定 eb406f2a4b1cc74d8d4a34f21fe958d558fa0c4e 分出；与 DMS 候选独立，没有修改或合并其工作区。源码提交 afc14c3a3b714bc9b1f19b28a36cb3097a94b85d，最终交付提交只补材料。用户已授权本阶段修复与 GitHub 交付，未运行真实模型、Task、P2 或评价，未重跑旧真实组。

@@ -1,3 +1,5 @@
+CURRENT ENGINEERING FIX: DELETE_INTERFACE_FIX.md; source 449817cd94b846fef9dee995c6784463f5af39a3. Latest offline result: 78/78. Earlier counts and CLI records below are historical. Runtime identity/schema have been refreshed.
+
 # 离线验收
 
 最终源码提交 afc14c3a3b714bc9b1f19b28a36cb3097a94b85d，测试代码树 bc5803ec59b2c0e176885b8b90f014a917d63cbe。六个改动源码/测试/runner 文件已在该 SHA 逐一远端回读，原文一致。Git CLI 无凭据，改用已连接 GitHub 上传，再拉回本地；未 force-push，未触碰 DMS 工作区。
