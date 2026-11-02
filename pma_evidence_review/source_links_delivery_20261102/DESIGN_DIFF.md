@@ -8,7 +8,7 @@
 |三类摘要和状态来源|LinkedSourceP1Agent._input/_apply；source_ids 可空；M/STATUS 冻结后展开；未知继承不被后续有效来源洗掉|
 |同一读工具分页|SourceLinks.read；原字符串区间或结构化值的 JSON 编码；目录也是可分页字段；HMAC cursor 绑定任务、目标、来源快照及位置，不能指定路径|
 |来源变化|首次读也检查请求冻结 ref；同批 status 更新后旧 STATUS 返回 source_changed，等下次维护重新展示；不自动加一轮刷新|
-|原子性|同一文件的当前 bank 与 refs 一起 replace；异常前后注入测试验证无幽灵绑定；对账已提交的保存仍记 success=true，并另记工程异常及 persistence_outcome|
+|原子性|同一文件的当前 bank 与 refs 一起 replace；准备阶段与替换前后注入测试验证无幽灵绑定；任一失败替代写停止后续删除；对账已提交的保存仍记 success=true，并另记工程异常及 persistence_outcome|
 |完整性|完整页序与来源完整分开；有未知继承或无关联不能报完整；删除只去活动条目与绑定|
 
 最小选择：只支持完整 TASK（没有新增段落切分）；保留旧 memory_id 读参数名，增加 cursor；状态入口用 STATUS。显示 bank 的 BM25 开关、原阈值与每类 top20 规则、status 长度截断保持原设置，绑定保存实际截断后的 status。持久化重开要求传入单一提交包中的当前 bank；不迁移旧 evidence/revision 格式，旧入口仍按旧类读取。

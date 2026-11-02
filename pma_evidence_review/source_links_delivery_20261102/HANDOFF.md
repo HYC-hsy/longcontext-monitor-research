@@ -1,6 +1,6 @@
 # Windows 交接：本次仅离线验收
 
-没有真实批次授权。不要启动真实模型、Task、P2、评价、额外真实冒烟或旧组，不影响其他线程。使用最终回复固定交付 SHA；源码固定 8b9dcf3e334ceaba4c1729cdaa06d12474b59529，交付尾提交只加材料。
+没有真实批次授权。不要启动真实模型、Task、P2、评价、额外真实冒烟或旧组，不影响其他线程。使用最终回复固定交付 SHA；源码固定 022a6d3152e310c3a5943401673a3a1c65a488e3，交付尾提交只加材料。
 
 ```powershell
 git -c core.autocrlf=false fetch origin pma-p1-source-links-20261102
