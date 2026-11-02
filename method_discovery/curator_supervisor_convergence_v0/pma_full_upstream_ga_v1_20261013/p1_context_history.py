@@ -109,7 +109,11 @@ class InputMemoryHistory:
         for handle in coverage['read_handles']:
             if not isinstance(handle,str):
                 raise HistoryError('source_binding_error')
-            rows.append((handle,self.load(handle),'earlier_read_handle'))
+            try:
+                row = self.load(handle)
+            except HistoryError:
+                raise HistoryError('source_binding_error') from None
+            rows.append((handle,row,'earlier_read_handle'))
         fields = []
         for index,(handle,row,visibility) in enumerate(rows):
             data = {'history_handle':handle,'memory_id':row['memory_id'],'category':row['category'],
@@ -142,12 +146,22 @@ class InputMemoryHistory:
                 return {'status':'source_changed'}
             if ref and (ref['content_sha256'] != digest(row.content) or ref['category'] != row.category):
                 raise HistoryError('source_binding_error')
-        directory, pending, coverage_status = self._directory(ref)
         sources = (ref or {}).get('sources',[]) if target['kind'] in ('memory','status') else [target]
         resolved = requested_view or ('context' if not sources and ref and ref.get('context_window') else 'sources')
+        coverage_error = None
+        try:
+            directory, pending, coverage_status = self._directory(ref)
+        except HistoryError as exc:
+            if resolved != 'sources':
+                raise
+            directory, pending = [], {}
+            coverage_error = exc.status
+            coverage_status = 'unavailable' if exc.status=='context_missing' else 'integrity_error'
         metadata = {'requested_view':requested_view or 'auto','resolved_view':resolved,
                     'fallback_reason':'no_linked_sources' if requested_view is None and resolved=='context' else None,
-                    'input_memory_count':len(directory),'input_memory_coverage':coverage_status,
+                    'input_memory_count':None if coverage_error else len(directory),
+                    'input_memory_coverage':coverage_status,'input_memory_coverage_error':coverage_error,
+                    'input_memory_directory_available':coverage_status=='recorded',
                     'input_memory_scope':'Generation input coverage, not claim support; history handles are read-only.'}
         if read_metadata is not None:
             metadata.update(read_metadata)

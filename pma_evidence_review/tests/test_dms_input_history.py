@@ -119,10 +119,10 @@ class DMSHistoryAgentTests(unittest.TestCase):
         return next(json.loads(p['text'])['history_handle'] for p in page['parts']
                     if p['field']=='input_memory' and json.loads(p['text'])['memory_id']==memory_id)
 
-    def make_group(self):
+    def make_group(self, receipt='B receipt '+'x'*30000):
         self.responses.append(self.reply([('memory_keep',{'category':'procedural','source_ids':['E1']}),
                                           ('memory_delete',{'memory_id':'M1'})]))
-        result=self.maintain('group',[{'event_id':'B','commands':['run B'], 'observation':'B receipt '+'x'*30000}])
+        result=self.maintain('group',[{'event_id':'B','commands':['run B'], 'observation':receipt}])
         self.assertEqual(result['status'],'completed',result)
         self.assertNotIn(self.old,self.a._active_records())
         return result['operations'][0]['memory_id']
@@ -237,3 +237,68 @@ class DMSHistoryAgentTests(unittest.TestCase):
         page=self.a.links.read({'kind':'memory','id':key},self.a._active_records())
         self.assertTrue(any(p['field']=='historical_derived_status_not_fact' for p in page['parts']))
         self.assertFalse(page['complete'])
+
+    def test_intact_sources_survive_bad_coverage_without_handles_context_stays_strict(self):
+        import json
+        from p1_source_archive import digest
+        group=self.make_group(receipt='E8 original receipt')
+        ref=deepcopy(self.a.links.state['refs'][group])
+        path=self.a.source_archive.window_path(ref['context_window']);original=path.read_bytes()
+        grants=deepcopy(self.a.links.state.get('history_grants',{}))
+        for fault in ('missing','hash_bad','bad_directory_reference'):
+            with self.subTest(fault=fault):
+                current=deepcopy(ref)
+                if fault=='missing':path.unlink()
+                elif fault=='hash_bad':path.write_bytes(original+b' ')
+                else:
+                    window=json.loads(original);window['input_memory_coverage']['read_handles']=['H1.'+'0'*64]
+                    text=encode(window);path.write_bytes(text.encode());current['context_sha256']=digest(text)
+                state=deepcopy(self.a.links.state);state['refs'][group]=current;self.a.links.commit(state)
+                self.prime();page=self.read(group)
+                self.assertEqual((page['status'],page['resolved_view']),('source_complete','sources'))
+                self.assertTrue(any(p['field']=='observation' and p['text']=='E8 original receipt' for p in page['parts']))
+                self.assertFalse(page['input_memory_directory_available']);self.assertIsNone(page['input_memory_count'])
+                self.assertEqual(page['input_memory_coverage'],'unavailable' if fault=='missing' else 'integrity_error')
+                self.assertEqual(page['input_memory_coverage_error'],'context_missing' if fault=='missing' else 'source_binding_error')
+                self.assertFalse(any(p['field']=='input_memory' for p in page['parts']))
+                self.assertLessEqual(len(encode(page)),8000);self.assertFalse(page['complete'])
+                with self.assertRaises(HistoryError):
+                    self.a.history.read({'kind':'memory','id':group,'ref':current},self.a._active_records(),requested_view='context')
+                self.assertEqual(self.a.links.state.get('history_grants',{}),grants)
+                path.write_bytes(original)
+                state=deepcopy(self.a.links.state);state['refs'][group]=deepcopy(ref);self.a.links.commit(state)
+
+    def test_history_long_origin_remains_partial_in_two_serial_read_turns(self):
+        self.a.source_archive.capture('long_origin','A original receipt\r\n🙂'*6000,[])
+        state=deepcopy(self.a.links.state)
+        self.a.links.bind_state(state,self.old,'knowledge',self.a._active_records()[self.old].content,
+            {'sources':[],'inherited_unassociated':[],'association':'legacy_unassociated'},'long_origin')
+        self.a.links.commit(state)
+        group=self.make_group(receipt='short B receipt')
+        def read_old():
+            page=self.a.last_p1_report['turns'][0]['tool_results'][0]['result']
+            return self.reply([('memory_read_source',{'memory_id':self.handle(page,self.old)})])
+        self.responses.extend([self.reply([('memory_read_source',{'memory_id':group})]),read_old,self.reply()])
+        result=self.maintain('long_consume')
+        self.assertEqual((result['status'],result['reads_used'],result['continuations_used']),('completed',2,2))
+        self.assertEqual(result['model_calls_attempted'],3)
+        page=result['turns'][1]['tool_results'][0]['result']
+        self.assertFalse(page['page_sequence_complete']);self.assertIsNotNone(page['next_cursor'])
+        self.assertEqual([len(r['tools']) for r in self.requests[-3:]],[3,3,2])
+        self.assertEqual(result['operations'],[])
+
+    def test_history_grant_persistence_failure_stops_following_keep(self):
+        from unittest.mock import patch
+        group=self.make_group(receipt='short B receipt');commit=self.a.links.commit
+        before=self.a.memory.to_dict()
+        def reject_grant(state):
+            if state.get('history_grants'):raise OSError('injected grant persistence failure')
+            return commit(state)
+        self.responses.append(self.reply([('memory_read_source',{'memory_id':group}),
+                                          ('memory_keep',{'category':'knowledge','source_ids':['TASK']})]))
+        with patch.object(self.a.links,'commit',side_effect=reject_grant):
+            result=self.maintain('grant_failure')
+        self.assertEqual(result['status'],'engineering_error');self.assertEqual(result['model_calls_attempted'],1)
+        self.assertEqual([r['result']['status'] for r in result['turns'][0]['tool_results']],
+                         ['engineering_error','not_executed_after_engineering_failure'])
+        self.assertEqual(self.a.memory.to_dict(),before);self.assertFalse(self.a.links.state.get('history_grants'))
