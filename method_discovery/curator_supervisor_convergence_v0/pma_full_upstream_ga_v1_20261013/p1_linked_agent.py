@@ -27,6 +27,7 @@ READ_TOOL = {'type':'function','function':{'name':'memory_read_source',
 
 class LinkedSourceP1Agent(SourceReadP1Agent):
     final_turn_text = '\nFinal turn: source reads closed; write summaries or leave the bank unchanged.\n'
+    stop_after_tool_error = False
     stop_after_unknown_tool = False
     maintenance_system = SYSTEM
     write_tool_names = frozenset({'memory_save_knowledge','memory_save_procedural','memory_save_gap','memory_update_status'})
@@ -224,6 +225,7 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                         result = {'status':('not_executed_after_invalid_source_ids' if failed == 'invalid_source_ids'
                                             else 'not_executed_after_failed_write' if failed == 'failed_write'
                                             else 'not_executed_after_forbidden_tool' if failed == 'forbidden_tool'
+                                            else 'not_executed_after_tool_error' if failed == 'tool_error'
                                             else 'not_executed_after_engineering_failure')}
                     else:
                         try:
@@ -241,6 +243,9 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                         report['status'], failed = 'tool_error', 'invalid_source_ids'
                     elif status in {'invalid_tool_arguments','tool_error'} and call['name'] in self.write_tool_names:
                         report['status'], failed = 'tool_error', 'failed_write'
+                    elif self.stop_after_tool_error and status in {
+                            'invalid_tool_arguments','tool_error','invalid_cursor','source_not_displayed'}:
+                        report['status'], failed = 'tool_error', 'tool_error'
                     elif status in {'budget_exhausted','continuation_unavailable'} and report['status']=='completed':
                         report['status']='budget_limited'
                     elif status in {'unknown_tool','invalid_tool_arguments','invalid_source_ids','invalid_cursor','source_not_displayed','tool_error'} and report['status']=='completed':

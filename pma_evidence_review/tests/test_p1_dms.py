@@ -228,3 +228,61 @@ class DMSTests(unittest.TestCase):
                 self.assertIn(bad[0],(Path(root)/'maintenance.jsonl').read_text())
         from p1_linked_agent import LinkedSourceP1Agent
         self.assertFalse(LinkedSourceP1Agent.stop_after_unknown_tool)
+
+    def test_read_M2_and_delete_M2_resolve_same_target_and_keep_raw_args(self):
+        bank=GapMemory();first=bank.save_knowledge('first');second=bank.save_knowledge('second')
+        a,requests=self.agent([reply([('memory_read_source',{'memory_id':'M2'}),
+                                      ('memory_delete',{'memory_id':'M2'})]),reply()],bank)
+        result=asyncio.run(a.maintain([],cycle_id='c'))
+        self.assertEqual(result['status'],'completed')
+        turn=result['turns'][0]
+        self.assertEqual(turn['tool_results'][0]['result']['target'],second)
+        deleted=turn['tool_results'][1]['result']
+        self.assertEqual(deleted['requested_memory_id'],'M2');self.assertEqual(deleted['resolved_memory_id'],second)
+        self.assertEqual(turn['tool_calls'][1]['arguments'],{'memory_id':'M2'})
+        self.assertNotIn(second,a._active_records());self.assertIn(first,a._active_records())
+        self.assertEqual(result['operations'][0]['requested_memory_id'],'M2')
+
+    def test_real_id_delete_compatible_and_failed_delete_stops_keep_and_delete(self):
+        bank=GapMemory();one=bank.save_knowledge('one');two=bank.save_knowledge('two')
+        a,requests=self.agent([reply([('memory_delete',{'memory_id':one}),('memory_delete',{'memory_id':'M1'}),
+            ('memory_keep',{'category':'knowledge','source_ids':['TASK']}),('memory_delete',{'memory_id':two})])],bank)
+        result=asyncio.run(a.maintain([],cycle_id='c'))
+        self.assertEqual(result['status'],'tool_error')
+        statuses=[x['result']['status'] for x in result['turns'][0]['tool_results']]
+        self.assertEqual(statuses,['applied','tool_error','not_executed_after_tool_error','not_executed_after_tool_error'])
+        self.assertNotIn(one,a._active_records());self.assertIn(two,a._active_records())
+        self.assertEqual(len(result['operations']),1);self.assertEqual(len(a.memory.knowledge),1)
+
+    def test_bad_delete_mappings_never_guess_or_delete(self):
+        for mode in ('unknown','E1','T1','TASK','STATUS','ambiguous','alias_collision','changed'):
+            with self.subTest(mode=mode),tempfile.TemporaryDirectory() as root:
+                bank=GapMemory();key=bank.save_knowledge('preserve')
+                if mode=='alias_collision':
+                    bank._knowledge[0].id='M2';key='M2';bank.save_knowledge('second')
+                a=DMSP1Agent(task='task',task_id='task',source_root=root,memory=bank,llm=None)
+                a._input('',1,[{'event_id':'e','commands':['run'],'observation':'ok'}])
+                a.request_aliases=deepcopy(a.frozen_aliases)
+                token='M2' if mode=='alias_collision' else mode
+                if mode=='ambiguous':
+                    a.request_aliases['M2']=deepcopy(a.request_aliases['M1']);token=key
+                if mode=='changed':
+                    state=deepcopy(a.links.state);state['refs'][key]['association']='changed';a.links.commit(state);token='M1'
+                before=bank.to_dict();report={'operations':[]}
+                result=a._apply({'name':'memory_delete','arguments':{'memory_id':token}},'unused',0,report)
+                self.assertEqual(result['status'],'tool_error');self.assertEqual(bank.to_dict(),before)
+                self.assertEqual(report['operations'],[])
+                if mode in ('unknown','ambiguous','alias_collision','changed'):
+                    read_report={'read_requests':0,'reads_used':0,'operations':[]}
+                    read=a._apply({'name':'memory_read_source','arguments':{'memory_id':token}},'unused',0,read_report)
+                    self.assertEqual(read['status'],'tool_error')
+                    self.assertEqual(read['error'],result['error'])
+        from p1_linked_agent import LinkedSourceP1Agent
+        self.assertFalse(LinkedSourceP1Agent.stop_after_tool_error)
+
+    def test_invalid_read_arguments_stop_following_changes(self):
+        bank=GapMemory();key=bank.save_knowledge('preserve')
+        a,requests=self.agent([reply([('memory_read_source',{'memory_id':42}),('memory_delete',{'memory_id':key})])],bank)
+        result=asyncio.run(a.maintain([],cycle_id='c'))
+        self.assertEqual(result['status'],'tool_error');self.assertIn(key,a._active_records())
+        self.assertEqual(result['turns'][0]['tool_results'][1]['result']['status'],'not_executed_after_tool_error')

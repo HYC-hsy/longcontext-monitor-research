@@ -41,7 +41,7 @@ KEEP_TOOL = {'type':'function','function':{'name':'memory_keep',
         'source_ids':{'type':'array','items':{'type':'string'},'minItems':1}},
         'required':['category','source_ids'],'additionalProperties':False}}}
 DELETE_TOOL = {'type':'function','function':{'name':'memory_delete',
-    'description':'Remove an active record by its displayed memory ID; preserve accepted events and referenced snapshots.',
+    'description':'Delete an active displayed record using its frozen M alias or real memory ID. The host resolves the target; accepted events and referenced snapshots remain.',
     'parameters':{'type':'object','properties':{'memory_id':{'type':'string'}},
                   'required':['memory_id'],'additionalProperties':False}}}
 
@@ -147,6 +147,7 @@ class DMSMaterialStore(SourceLinks):
 
 class DMSP1Agent(LinkedSourceP1Agent):
     final_turn_text = '\nFinal turn: source reads closed; keep or delete materials, or leave them unchanged.\n'
+    stop_after_tool_error = True
     stop_after_unknown_tool = True
     maintenance_system = SYSTEM
     write_tool_names = frozenset({'memory_keep'})
@@ -161,7 +162,7 @@ class DMSP1Agent(LinkedSourceP1Agent):
 
     def get_tools_schema(self):
         tools=deepcopy([KEEP_TOOL,DELETE_TOOL,READ_TOOL])
-        tools[-1]['function']['description']='Read displayed T/E/M aliases, TASK or active memory IDs; return next_cursor unchanged to continue. Legacy material is not verified original experience.'
+        tools[-1]['function']['description']='Read a frozen T/E/M alias, TASK/STATUS or shown real memory ID. Ambiguous identifiers are rejected. Return next_cursor unchanged; legacy material is not verified original experience.'
         return tools
 
     def _input(self, observation, step, raw_events):
@@ -189,13 +190,71 @@ class DMSP1Agent(LinkedSourceP1Agent):
                               'kind':'legacy_derived_summary_not_verified','text':row.content})
         prompt=(f'## Step {step}\n## TASK: original requirement\n'+self.task
             +'\n## Requirement paragraphs (exact offsets; TASK remains whole)\n'+encode(self.links.state['task_segments'])
-            +'\n## Current records\n'+encode(views)
+            +'\n## Current records (M alias and memory_id identify the same record; ambiguous identifiers are rejected)\n'+encode(views)
             +'\n## Historical derived status, not a current completion claim\n'+self.memory.status
             +'\n## Recent accepted events; Actor analysis/plans are self-reports\n'+encode(visible)
             +'\nKeep useful original materials with the three tools. No new status or conclusions.\n')
         return prompt,marked,projection,visible
 
+    def _resolve_displayed_target(self, requested, *, delete=False):
+        audit={'requested_memory_id':requested,'resolved_memory_id':None}
+        members=[(alias,item) for alias,item in self.request_aliases.items()
+                 if re.fullmatch(r'M[1-9][0-9]*',alias) and item.get('kind')=='memory']
+        candidates=[]
+        if requested in self.request_aliases:
+            candidates.append(self.request_aliases[requested])
+        candidates.extend(item for alias,item in members if item.get('id')==requested)
+        def identity(item):
+            return item['kind'],item.get('id',item.get('source_id'))
+        if not candidates or len({identity(item) for item in candidates})!=1:
+            return None,{**audit,'status':'tool_error','error':'unknown_or_ambiguous_target'}
+        target=candidates[0]
+        if target['kind']!='memory':
+            if delete:
+                return None,{**audit,'status':'tool_error','error':'nonmemory_delete_target'}
+            return target,audit
+        key=target['id']
+        if sum(item.get('id')==key for alias,item in members)!=1:
+            return None,{**audit,'status':'tool_error','error':'ambiguous_memory_mapping'}
+        audit['resolved_memory_id']=key
+        row=self._active_records().get(key);ref=self.links.state['refs'].get(key)
+        if row is None:
+            return None,{**audit,'status':'tool_error','error':'target_no_longer_active'}
+        if (not ref or target.get('ref')!=ref or ref.get('content_sha256')!=digest(row.content)
+                or ref.get('category')!=row.category):
+            return None,{**audit,'status':'tool_error','error':'target_binding_changed'}
+        return target,audit
+
+    def _delete(self, call, window_id, round_index, report):
+        args=call['arguments']
+        if not isinstance(args,dict) or set(args)!={'memory_id'} or not isinstance(args.get('memory_id'),str):
+            return {'status':'invalid_tool_arguments'}
+        target,audit=self._resolve_displayed_target(args['memory_id'],delete=True)
+        if target is None:
+            return audit
+        normalized={**call,'arguments':{'memory_id':target['id']}}
+        start=len(report['operations'])
+        result=super()._apply(normalized,window_id,round_index,report)
+        for operation in report['operations'][start:]:
+            operation.update(audit)
+        for operation in result.get('operations',[]):
+            operation.update(audit)
+        return {**result,**audit}
+
     def _apply(self, call, window_id, round_index, report):
+        if call['name']=='memory_read_source':
+            args=call['arguments']
+            if (round_index<CONTINUATION_LIMIT and report['reads_used']<READ_LIMIT
+                    and isinstance(args,dict) and not set(args)-{'memory_id','cursor'}
+                    and isinstance(args.get('memory_id'),str)):
+                target,audit=self._resolve_displayed_target(args['memory_id'])
+                if target is None:
+                    report['read_requests']+=1;report['reads_used']+=1
+                    return audit
+                return {**super()._apply(call,window_id,round_index,report),**audit}
+            return super()._apply(call,window_id,round_index,report)
+        if call['name']=='memory_delete':
+            return self._delete(call,window_id,round_index,report)
         if call['name']!='memory_keep':
             return super()._apply(call,window_id,round_index,report)
         args=call['arguments']
