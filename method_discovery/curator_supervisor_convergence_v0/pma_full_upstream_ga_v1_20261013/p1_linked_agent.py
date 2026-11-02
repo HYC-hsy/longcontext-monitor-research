@@ -136,6 +136,7 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
         normalized = NS(content='',tool_calls=[NS(function=NS(name=name,arguments={k:v for k,v in args.items() if k!='source_ids'}))])
         committed_before = deepcopy(self.links.state)
         operations = GapMemoryAgent._execute_tool_calls(self, normalized)
+        commit_started = False
         try:
             state = deepcopy(self.links.state)
             for op in operations:
@@ -149,11 +150,12 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                 elif op.action in {'delete','delete_gap'}:
                     state['refs'].pop(op.memory_id,None)
             state['bank'] = self.memory.to_dict()
+            commit_started = True
             self.links.commit(state)
         except Exception as exc:
             self._restore_committed_bank()
-            outcome = ('committed_reconciled_after_error' if self.links.state == state else
-                       'not_committed_reconciled' if self.links.state == committed_before else
+            outcome = ('not_committed_reconciled' if not commit_started or self.links.state == committed_before else
+                       'committed_reconciled_after_error' if self.links.state == state else
                        'other_committed_state_reconciled')
             report['operations'].extend({**vars(op),
                 'success':op.success if outcome == 'committed_reconciled_after_error' else False,
@@ -212,6 +214,7 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                 for call in calls:
                     if failed:
                         result = {'status':('not_executed_after_invalid_source_ids' if failed == 'invalid_source_ids'
+                                            else 'not_executed_after_failed_write' if failed == 'failed_write'
                                             else 'not_executed_after_engineering_failure')}
                     else:
                         try:
@@ -225,6 +228,9 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                         report['status'], failed = 'engineering_error', True
                     elif status == 'invalid_source_ids':
                         report['status'], failed = 'tool_error', 'invalid_source_ids'
+                    elif status in {'invalid_tool_arguments','tool_error'} and call['name'] in {
+                            'memory_save_knowledge','memory_save_procedural','memory_save_gap','memory_update_status'}:
+                        report['status'], failed = 'tool_error', 'failed_write'
                     elif status in {'budget_exhausted','continuation_unavailable'} and report['status']=='completed':
                         report['status']='budget_limited'
                     elif status in {'unknown_tool','invalid_tool_arguments','invalid_source_ids','invalid_cursor','source_not_displayed','tool_error'} and report['status']=='completed':

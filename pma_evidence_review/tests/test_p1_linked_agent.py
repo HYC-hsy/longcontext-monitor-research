@@ -217,3 +217,41 @@ class LinkedAgentTests(unittest.TestCase):
         self.assertEqual(r['status'],'engineering_error')
         self.assertEqual(a.memory.status,'prior')
         self.assertEqual(a.links.state['refs']['STATUS'],before['refs']['STATUS'])
+
+    def test_replacement_argument_and_underlying_failures_stop_later_delete(self):
+        methods={'memory_save_knowledge':'save_knowledge','memory_save_procedural':'save_procedural',
+                 'memory_save_gap':'save_gap','memory_update_status':'update_status'}
+        for tool,method in methods.items():
+            for cause in ('arguments','operation'):
+                with self.subTest(tool=tool,cause=cause),tempfile.TemporaryDirectory() as root:
+                    bank=GapMemory();old=bank.save_knowledge('preserve')
+                    async def fake(**kwargs):
+                        args={'content':42} if cause=='arguments' else {'content':'replacement','source_ids':['TASK']}
+                        return reply([(tool,args),('memory_delete',{'memory_id':old})])
+                    a=LinkedSourceP1Agent(task='task',task_id='task1',source_root=root,memory=bank,llm=NS(call=fake))
+                    before=bank.to_dict()
+                    if cause=='operation':
+                        with patch.object(bank,method,side_effect=ValueError('injected write failure')):
+                            result=asyncio.run(a.maintain([],cycle_id='c'))
+                    else:
+                        result=asyncio.run(a.maintain([],cycle_id='c'))
+                    self.assertEqual(result['status'],'tool_error')
+                    self.assertEqual(bank.to_dict(),before)
+                    self.assertEqual(a.links.state['bank'],before)
+                    self.assertIn(old,a._active_records())
+                    self.assertEqual(result['turns'][0]['tool_results'][1]['result']['status'],'not_executed_after_failed_write')
+
+    def test_binding_preparation_failure_is_not_reported_as_committed(self):
+        bank=GapMemory();old=bank.save_knowledge('keep old')
+        a,req=self.agent([reply([('memory_save_knowledge',{'content':'new','source_ids':['TASK']}),
+                                ('memory_delete',{'memory_id':old})])],bank)
+        before=bank.to_dict()
+        with patch.object(a.links,'bind_state',side_effect=OSError('window read failed before binding')):
+            result=asyncio.run(a.maintain([],cycle_id='c'))
+        self.assertEqual(result['status'],'engineering_error')
+        self.assertEqual(result['operations'][0]['persistence_outcome'],'not_committed_reconciled')
+        self.assertFalse(result['operations'][0]['success'])
+        self.assertEqual(bank.to_dict(),before)
+        self.assertEqual(a.links.state['bank'],before)
+        self.assertEqual(a.links.state['refs'],{})
+        self.assertEqual(result['turns'][0]['tool_results'][1]['result']['status'],'not_executed_after_engineering_failure')

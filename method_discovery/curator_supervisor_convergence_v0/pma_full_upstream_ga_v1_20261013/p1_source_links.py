@@ -65,7 +65,7 @@ def call_links(event):
         observation = None
     receipts = observation.get('tool_results', []) if isinstance(observation, dict) else []
     def ids(rows):
-        result = {}
+        result, conflicts = {}, set()
         for i, row in enumerate(rows if isinstance(rows, list) else []):
             if isinstance(row, str):
                 try:
@@ -73,13 +73,19 @@ def call_links(event):
                 except ValueError:
                     continue
             if isinstance(row, dict):
-                key = row.get('tool_use_id', row.get('tool_call_id', row.get('call_id', row.get('id'))))
-                if isinstance(key, str):
+                keys = list(dict.fromkeys(row[k] for k in ('tool_use_id','tool_call_id','call_id','id')
+                                          if isinstance(row.get(k), str) and row[k]))
+                for key in keys:
                     result.setdefault(key, []).append(i)
-        return result
-    actions, results = ids(commands), ids(receipts)
+                if len(keys) > 1:
+                    conflicts.update(keys)
+        return result, conflicts
+    actions, action_conflicts = ids(commands)
+    results, result_conflicts = ids(receipts)
+    conflicts = action_conflicts | result_conflicts
     return [{'call_id': key, 'commands': actions.get(key, []), 'receipts': results.get(key, []),
-             'pairing': 'explicit' if len(actions.get(key, [])) == len(results.get(key, [])) == 1 else 'unknown_or_ambiguous'}
+             'conflicting_id_fields':key in conflicts,
+             'pairing': 'explicit' if key not in conflicts and len(actions.get(key, [])) == len(results.get(key, [])) == 1 else 'unknown_or_ambiguous'}
             for key in dict.fromkeys([*actions, *results])]
 
 

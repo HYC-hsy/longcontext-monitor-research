@@ -173,3 +173,14 @@ class SourceLinkStoreTests(unittest.TestCase):
         row['event_id']='different';row['commands'].append({'tool_call_id':'cx'})
         self.store.ingest([row])
         self.assertEqual(self.store.state['events']['event_2']['call_links'][0]['pairing'],'unknown_or_ambiguous')
+
+    def test_conflicting_id_fields_are_never_paired_by_priority(self):
+        self.store.ingest([{'event_id':'conflict','commands':[{'id':'a','tool_call_id':'b'}],
+            'observation':{'tool_results':[{'tool_use_id':'a','content':'one'},{'tool_call_id':'b','content':'two'}]}}])
+        links=self.store.state['events']['event_1']['call_links']
+        self.assertEqual({x['call_id'] for x in links},{'a','b'})
+        self.assertTrue(all(x['conflicting_id_fields'] for x in links))
+        self.assertTrue(all(x['pairing']=='unknown_or_ambiguous' for x in links))
+        self.store.ingest([{'event_id':'same-id','commands':[{'id':'c','tool_call_id':'c'}],
+            'observation':{'tool_results':[{'tool_use_id':'c','content':'ok'}]}}])
+        self.assertEqual(self.store.state['events']['event_2']['call_links'][0]['pairing'],'explicit')
