@@ -24,7 +24,8 @@ def main():
         'test_p1_source_client.py','test_p1_source_cases.py','test_p1_source_isolation.py')]
     if args.source_links:
         files += ['pma_evidence_review/tests/test_p1_source_links.py',
-                  'pma_evidence_review/tests/test_p1_linked_agent.py']
+                  'pma_evidence_review/tests/test_p1_linked_agent.py',
+                  'pma_evidence_review/tests/test_p1_linked_runner.py']
     with patch.object(runner,'suite_manifest',return_value=files):
         return runner.run_phase('pma',args.report)
 

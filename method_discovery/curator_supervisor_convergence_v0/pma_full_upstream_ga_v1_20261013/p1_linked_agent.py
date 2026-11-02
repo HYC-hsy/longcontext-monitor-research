@@ -134,6 +134,7 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
             except ValueError:
                 return {'status':'invalid_source_ids'}
         normalized = NS(content='',tool_calls=[NS(function=NS(name=name,arguments={k:v for k,v in args.items() if k!='source_ids'}))])
+        committed_before = deepcopy(self.links.state)
         operations = GapMemoryAgent._execute_tool_calls(self, normalized)
         try:
             state = deepcopy(self.links.state)
@@ -151,8 +152,15 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
             self.links.commit(state)
         except Exception as exc:
             self._restore_committed_bank()
-            report['operations'].extend({**vars(op),'success':False,'error':'source_bundle_commit_failed'} for op in operations)
-            raise SourceAssociationError(type(exc).__name__) from exc
+            outcome = ('committed_reconciled_after_error' if self.links.state == state else
+                       'not_committed_reconciled' if self.links.state == committed_before else
+                       'other_committed_state_reconciled')
+            report['operations'].extend({**vars(op),
+                'success':op.success if outcome == 'committed_reconciled_after_error' else False,
+                'persistence_outcome':outcome,'commit_exception':type(exc).__name__} for op in operations)
+            error = SourceAssociationError(type(exc).__name__)
+            error.persistence_outcome = outcome
+            raise error from exc
         report['operations'].extend(vars(op).copy() for op in operations)
         return {'status':'applied' if all(op.success for op in operations) else 'tool_error',
                 'operations':[vars(op).copy() for op in operations]}
@@ -180,7 +188,9 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                     tools = tools[:-1]
                 self.request_aliases = deepcopy(self.frozen_aliases)
                 window_id = report['cycle_id']+f'_r{round_index}'
-                self.source_archive.capture(window_id,prompt,marked,presented_source_receipts=receipts,
+                window_events = [{'event_id':r['source_id'],'presentation':r['presentation']}
+                                 for r in self.shown_events]
+                self.source_archive.capture(window_id,prompt,window_events,presented_source_receipts=receipts,
                     raw_generation_context=self._raw_generation_context,input_projection=projection)
                 request = {'kind':'request','cycle_id':report['cycle_id'],'window_id':window_id,
                     'prompt':prompt,'system':SYSTEM,'tools':tools,'source_aliases':deepcopy(self.request_aliases)}
@@ -190,7 +200,6 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                 report['model_calls_attempted'] += 1
                 response = await self.llm.call(prompt=prompt,system=SYSTEM,tools=tools)
                 report['model_calls_completed'] += 1
-                self.links.mark_presented(self.shown_events)
                 calls = self._calls(response,round_index)
                 turn = {'window_id':window_id,'assistant_text':self._strip_thinking(getattr(response,'content',None) or ''),
                         'tool_calls':calls,'tool_results':[]}
@@ -198,19 +207,24 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                 turn['usage'] = {k:getattr(usage,k) for k in ('prompt_tokens','completion_tokens','cache_tokens','cost_usd')
                                 if usage is not None and getattr(usage,k,None) is not None}
                 report['turns'].append(turn)
+                self.links.mark_presented(self.shown_events)
                 failed = False
                 for call in calls:
                     if failed:
-                        result = {'status':'not_executed_after_engineering_failure'}
+                        result = {'status':('not_executed_after_invalid_source_ids' if failed == 'invalid_source_ids'
+                                            else 'not_executed_after_engineering_failure')}
                     else:
                         try:
                             result = self._apply(call,window_id,round_index,report)
                         except Exception as exc:
                             failed = True
-                            result = {'status':'engineering_error','error_type':type(exc).__name__}
+                            result = {'status':'engineering_error','error_type':type(exc).__name__,
+                                      'persistence_outcome':getattr(exc,'persistence_outcome','not_reconciled_or_not_a_write')}
                     status = result['status']
                     if status in {'engineering_error','source_binding_error'}:
                         report['status'], failed = 'engineering_error', True
+                    elif status == 'invalid_source_ids':
+                        report['status'], failed = 'tool_error', 'invalid_source_ids'
                     elif status in {'budget_exhausted','continuation_unavailable'} and report['status']=='completed':
                         report['status']='budget_limited'
                     elif status in {'unknown_tool','invalid_tool_arguments','invalid_source_ids','invalid_cursor','source_not_displayed','tool_error'} and report['status']=='completed':

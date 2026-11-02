@@ -37,6 +37,9 @@ class SourceLinkStoreTests(unittest.TestCase):
             self.store.ingest([{**raw, 'commands': ['changed']}])
         self.store.ingest([{'commands': ['same']}, {'commands': ['same']}])
         self.assertEqual(len(self.store.state['events']), 4)
+        self.store.ingest([{'event_id':'serialized','commands':[json.dumps({'id':'cx','args':{'x':1}})],
+            'observation':json.dumps({'tool_results':[{'tool_use_id':'cx','content':'receipt'}]})}])
+        self.assertEqual(self.store.state['events']['event_5']['call_links'][0]['pairing'],'explicit')
 
     def test_resolution_is_frozen_and_inherited_never_claims_read(self):
         self.store.ingest([{'event_id':'e', 'commands':['run']}])
@@ -128,3 +131,45 @@ class SourceLinkStoreTests(unittest.TestCase):
         state['refs']['STATUS']['sources']=[{'source_id':'TASK','via':'selected'}]
         self.store.commit(state)
         self.assertEqual(self.store.read(target,active,cursor=token)['status'],'invalid_cursor')
+
+    def test_multihop_unknown_inheritance_and_host_order_are_not_lost(self):
+        self.store.ingest([{'event_id':'first','observation':'a'}, {'event_id':'second','observation':'b'}])
+        aliases={'E1':{'kind':'event','source_id':'event_1'},'E2':{'kind':'event','source_id':'event_2'}}
+        ref=self.store.resolve(['E2','E1'],aliases)
+        self.assertEqual([x['source_id'] for x in ref['sources']],['event_1','event_2'])
+        ref['inherited_unassociated']=['legacy-parent']
+        second=self.store.resolve(['M1'],{'M1':{'kind':'memory','id':'parent','ref':ref}})
+        third=self.store.resolve(['M2'],{'M2':{'kind':'memory','id':'next','ref':second}})
+        self.assertEqual(third['inherited_unassociated'],['legacy-parent'])
+        state=deepcopy(self.store.state)
+        self.store.bind_state(state,'m','knowledge','mixed',third,'w')
+        self.store.commit(state)
+        page=self.store.read({'kind':'memory','id':'m'},{'m':NS(content='mixed',category='knowledge')})
+        self.assertFalse(page['complete'])
+        self.assertTrue(page['page_sequence_complete'])
+        self.assertEqual(page['unread_reason'],'unassociated_inherited_sources')
+
+    def test_provider_boundary_removes_hidden_blocks_not_tool_payload_keys(self):
+        payload={'profile':'legitimate result','endpoint':'public result','thinking':'literal tool data','signature':'literal data'}
+        self.assertEqual(visible_event({'observation':payload})['observation'],payload)
+        observation={'content':[{'type':'thinking','thinking':'HIDDEN_SENTINEL','signature':'PRIVATE_SIG'},
+            {'type':'text','text':'  visible🙂\n','signature':'PRIVATE_SIG'}],
+            'tool_results':[{'tool_use_id':'c','content':payload}]}
+        for raw in (observation,json.dumps(observation,ensure_ascii=False,indent=2)):
+            clean=visible_event({'observation':raw})['observation']
+            decoded=json.loads(clean) if isinstance(clean,str) else clean
+            self.assertEqual(decoded['tool_results'][0]['content'],payload)
+            self.assertEqual(decoded['content'],[{'type':'text','text':'  visible🙂\n'}])
+            self.assertNotIn('HIDDEN_SENTINEL',encode(clean))
+            self.assertNotIn('PRIVATE_SIG',encode(clean))
+        raw=json.dumps({'content':'unchanged','tool_results':[{'content':payload}]},indent=3,ensure_ascii=False)
+        self.assertEqual(visible_event({'observation':raw})['observation'],raw)
+
+    def test_tool_call_id_pairing_keeps_ambiguity(self):
+        row={'event_id':'e','commands':[{'tool_call_id':'cx'}],
+             'observation':{'tool_results':[{'tool_call_id':'cx','content':'ok'}]}}
+        self.store.ingest([row])
+        self.assertEqual(self.store.state['events']['event_1']['call_links'][0]['pairing'],'explicit')
+        row['event_id']='different';row['commands'].append({'tool_call_id':'cx'})
+        self.store.ingest([row])
+        self.assertEqual(self.store.state['events']['event_2']['call_links'][0]['pairing'],'unknown_or_ambiguous')

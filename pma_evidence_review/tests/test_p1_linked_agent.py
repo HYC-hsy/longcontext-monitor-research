@@ -45,6 +45,9 @@ class LinkedAgentTests(unittest.TestCase):
         gaps=[v for v in refs.values() if v['category']=='gap']
         self.assertEqual(gaps[0]['inherited_unassociated'],[old])
         self.assertEqual(len(a.links.state['events']),1)
+        window=json.loads(a.source_archive.window_path('c_r0').read_text())
+        self.assertEqual(set(window['visible_events'][0]),{'event_id','presentation'})
+        self.assertEqual(window['raw_generation_context']['events'][0]['commands'],['run'])
         self.assertEqual(a.links.state['bank'],bank.to_dict())
         self.assertEqual(a.frozen_aliases['M1']['id'],old)
         a.llm=NS(call=lambda **kw:None)
@@ -99,6 +102,9 @@ class LinkedAgentTests(unittest.TestCase):
                     r=asyncio.run(a.maintain([],cycle_id='c'))
                 self.assertEqual(r['status'],'engineering_error')
                 self.assertIn(old,a._active_records())
+                outcome='committed_reconciled_after_error' if after else 'not_committed_reconciled'
+                self.assertEqual(r['operations'][0]['persistence_outcome'],outcome)
+                self.assertEqual(r['operations'][0]['success'],after)
                 self.assertEqual(r['turns'][0]['tool_results'][-1]['result']['status'],'not_executed_after_engineering_failure')
                 reopened=SourceLinks(root,task_id='task1',task='task',bank=bank.to_dict())
                 self.assertEqual(reopened.state['bank'],bank.to_dict())
@@ -109,7 +115,7 @@ class LinkedAgentTests(unittest.TestCase):
                                 ('file_read',{'path':'secret'})])])
         r=asyncio.run(a.maintain([],cycle_id='c'))
         self.assertEqual(r['status'],'tool_error')
-        self.assertEqual([x['result']['status'] for x in r['turns'][0]['tool_results']],['invalid_source_ids','unknown_tool'])
+        self.assertEqual([x['result']['status'] for x in r['turns'][0]['tool_results']],['invalid_source_ids','not_executed_after_invalid_source_ids'])
         self.assertEqual(len(req),1);self.assertEqual(r['operations'],[])
         self.assertEqual(a.memory.to_dict(),a.links.state['bank'])
 
@@ -145,6 +151,8 @@ class LinkedAgentTests(unittest.TestCase):
         page=r['turns'][0]['tool_results'][0]['result']
         self.assertEqual(page['association'],'legacy_unassociated')
         self.assertEqual(page['source_count'],0)
+        self.assertEqual(page['status'],'source_unrecorded')
+        self.assertFalse(page['complete'])
         self.assertEqual(bank.knowledge[0].id,key)
         async def write(**kw):
             return reply([('memory_update_status',{'content':'x'*5000,'source_ids':[]})])
@@ -164,3 +172,48 @@ class LinkedAgentTests(unittest.TestCase):
         self.assertEqual(r['turns'][1]['tool_results'][0]['result']['status'],'invalid_source_ids')
         self.assertEqual(len(a.memory.knowledge),1)
         self.assertEqual(len(a.memory.procedural),0)
+
+    def test_invalid_source_save_stops_following_delete_of_old_knowledge(self):
+        bank=GapMemory();old=bank.save_knowledge('preserve old')
+        a,req=self.agent([reply([('memory_save_knowledge',{'content':'replacement','source_ids':['E99']}),
+                                ('memory_delete',{'memory_id':old})])],bank)
+        r=asyncio.run(a.maintain([],cycle_id='c'))
+        self.assertEqual(r['status'],'tool_error')
+        self.assertEqual(r['operations'],[])
+        self.assertIn(old,a._active_records())
+        self.assertEqual(r['turns'][0]['tool_results'][1]['result']['status'],'not_executed_after_invalid_source_ids')
+        self.assertEqual(a.links.state['bank'],bank.to_dict())
+
+    def test_unknown_tool_alone_is_rejected_without_extra_call(self):
+        a,req=self.agent([reply([('file_read',{'path':'not opened'})])])
+        r=asyncio.run(a.maintain([],cycle_id='c'))
+        self.assertEqual(r['status'],'tool_error')
+        self.assertEqual(r['turns'][0]['tool_results'][0]['result']['status'],'unknown_tool')
+        self.assertEqual(len(req),1)
+
+    def test_status_changed_in_same_request_is_not_silently_read_as_new_source(self):
+        a,req=self.agent([reply([('memory_update_status',{'content':'new','source_ids':['TASK']}),
+                                 ('memory_read_source',{'memory_id':'STATUS'})]),reply()])
+        r=asyncio.run(a.maintain([],cycle_id='c'))
+        page=r['turns'][0]['tool_results'][1]['result']
+        self.assertEqual(page['status'],'source_changed')
+        self.assertTrue(page['refresh_required'])
+        self.assertNotIn('parts',page)
+
+    def test_status_write_failure_is_reconciled_with_prior_binding(self):
+        a,req=self.agent([reply([('memory_update_status',{'content':'prior','source_ids':['TASK']})])])
+        asyncio.run(a.maintain([],cycle_id='c1'))
+        before=deepcopy(a.links.state)
+        async def fake(**kwargs):
+            return reply([('memory_update_status',{'content':'replacement','source_ids':[]})])
+        a.llm=NS(call=fake)
+        commit=a.links.commit
+        def fail(state):
+            if state['bank']['status']=='replacement':
+                raise OSError('status fail')
+            commit(state)
+        with patch.object(a.links,'commit',side_effect=fail):
+            r=asyncio.run(a.maintain([],cycle_id='c2'))
+        self.assertEqual(r['status'],'engineering_error')
+        self.assertEqual(a.memory.status,'prior')
+        self.assertEqual(a.links.state['refs']['STATUS'],before['refs']['STATUS'])
