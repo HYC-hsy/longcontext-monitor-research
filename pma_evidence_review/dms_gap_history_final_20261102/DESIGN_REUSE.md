@@ -1,0 +1,16 @@
+# 契约、复用与限制
+
+1. 保留keep/delete/read三工具。keep参数category/source_ids，唯GAP多pending。写入生成新ID；逐操作提交，save失败/工具或工程错误阻止同批后续破坏性操作，先前成功不整批回滚。没有新status、审核器、评分器、Planner或模型阶段。
+2. 事实/经历仍为host原文索引；GAP独立typed短未决项。引用旧GAP时从校验过的冻结record.content恢复pending，不能按同memory_id读当前groups。继承索引明确标generated，不成为新观察；无源legacy保留typed/unknown。
+3. 复用本仓库A源码f6a3982b73d4c7d657242cba4e6c0f3073848ff5的InputMemoryHistory，叠加6c00dc5c48f038ed42185559116b915bd18bb89a故障隔离及26ff924d083616c5b6c91136b6ee6af312f8f83c的explicit引用目录。未导入A Agent或其GAP提示；未复制第三方无license代码。DMS结构启发及官方不可得/第三方无license边界沿用dms_p1_delivery_20261102说明，不冒称完整复现。
+4. 仅移植SourceArchive可选coverage字段、SourceLinks的有界目录/原子条目/元数据分页，并保留B_read_fields；LinkedSource增加默认不改旧行为的capture/fail-stop hooks。split_visible_observation和receipt renderer不覆盖。实际新增helper进入65项身份清单。
+5. B必要helper适配：历史目标携已校验historical_record供typed pending读取；directory_first优先目录；read_metadata把resolved ID放入8000字符预算；citations_as_sources令只有H引用的组默认读取引用目录，而非被当前生成窗口故障遮蔽。A默认行为不由这些B opt-in改变。页cursor绑定task/target/字段快照，H能力绑定已发放窗口/记录和任务。
+6. 目录区分displayed_record、earlier_read_handle、explicitly_cited_history。只有完整目录条目实际返回才发放新H；已持久explicit H不伪装生成前覆盖。引用已发放H会校验task/窗口/记录，保存原始模型参数，冻结来源与typed pending/inherited缺口继承；直接或通过M继承的明确H列表保真，不递归推导语义依赖图。错误/跨任务/未发放/篡改H拒绝，旧active删除不删除事件/已引用快照。
+7. coverage对应已展示记录的底层内容与ref，B底层group是索引；完整model_input保存实际部分预览。目录不是逐句支持，不保证所有原文读过或必要经验全被保留。读取依然三逻辑轮/四请求、页8000字符；元数据和原文一起计预算。续答沿用完整原输入加可见calls/results的文本续接，非原生messages工具续轮；离线假客户端只验证既有适配接口，不证明live provider效果。
+8. 旧候选提示/schema/预算保留；共享runtime源码字节有变化，因此旧manifest不能跨checkout复用。新存档candidate明确隔离，不迁移旧运行；旧实验日志/源码历史保留。P2尚不能直接消费DMS bank_after材料索引，完整Task和P2接线不在本轮范围。
+
+## 提示三原则
+
+完整性：保留来源非证明、继承非已读、partial非完整、实际执行区别、scope/矛盾、强制原文及预算；补未决项定义、增量维护、旧解释受观察限制和H可引用不可删。
+简洁性：就地替换原开头/原GAP句，历史只加短说明；参数仅pending和原cursor，没有新模型报告或隐藏枚举输出。
+自然性：pending写普通短条件/问题，不加单行格式义务；输入末句明确允许GAP短索引，禁止新status/factual conclusions。SYSTEM/schema/实际六例请求哈希由运行构建取得，不把文本一致当语义效果。

@@ -1,0 +1,81 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "memory_keep",
+      "description": "Keep selected original materials. For gap only, add one short pending condition or question; it is a generated unresolved index, not a fact or plan. Returned H1 handles may be cited to inherit frozen material.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "knowledge",
+              "procedural",
+              "gap"
+            ]
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "pending": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "description": "Required only for gap: one short unresolved condition or question. Forbidden for other categories."
+          }
+        },
+        "required": [
+          "category",
+          "source_ids"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "memory_delete",
+      "description": "Delete an active displayed record using its frozen M alias or real memory ID. The host resolves the target; accepted events and referenced snapshots remain.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "memory_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "memory_id"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "memory_read_source",
+      "description": "Read a frozen T/E/M alias, TASK/STATUS or shown real memory ID. Ambiguous identifiers are rejected. Return next_cursor unchanged; legacy material is not verified original experience. Group reads include a generation-input directory, not evidence. Returned H1 handles can be read or cited, never deleted; continue next_cursor unchanged.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "memory_id": {
+            "type": "string"
+          },
+          "cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "memory_id"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+]
