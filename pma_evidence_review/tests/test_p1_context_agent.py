@@ -222,3 +222,49 @@ class ContextTests(unittest.TestCase):
         state['refs']['STATUS']['context_sha256']=digest(encode(window))
         self.target['ref']=deepcopy(state['refs']['STATUS'])
         self.assertEqual(self.read(cursor=cursor)['status'],'invalid_cursor')
+
+    def test_r1_r2_saves_recover_each_actual_continuation_prompt(self):
+        self.responses.extend([
+            reply([('memory_read_source',{'memory_id':'E1'})]),
+            reply([('memory_save_knowledge',{'content':'saved at r1','source_ids':['E1']}),
+                   ('memory_read_source',{'memory_id':'E1'})]),
+            reply([('memory_save_knowledge',{'content':'saved at r2','source_ids':['E1']})])])
+        result=asyncio.run(self.agent.maintain(
+            [{'event_id':'continuation','observation':'receipt with 🙂\r\n'}],cycle_id='continuation'))
+        self.assertEqual(result['status'],'completed')
+        self.assertEqual(len(self.requests),3)
+        self.assertEqual([len(r['tools']) for r in self.requests],[6,6,5])
+        for round_index in (1,2):
+            with self.subTest(round=round_index):
+                row=next(r for r in self.agent._active_records().values()
+                         if r.content==f'saved at r{round_index}')
+                ref=self.agent.links.state['refs'][row.id]
+                self.assertEqual(ref['context_window'],f'continuation_r{round_index}')
+                self.target={'kind':'memory','id':row.id,'ref':deepcopy(ref)}
+                context=''.join(p['text'] for p in self.collect('context'))
+                actual=self.requests[round_index]['prompt']
+                self.assertEqual(context,actual)
+                self.assertNotEqual(context,self.requests[0]['prompt'])
+                self.assertIn('## Previous P1 calls and receipts (historical data)',context)
+                self.assertIn(encode(result['turns'][:round_index]),context)
+
+    def test_valid_hash_does_not_override_window_identity_or_type(self):
+        self.save()
+        path=self.agent.source_archive.window_path('c_r0')
+        original=json.loads(path.read_text())
+        ref=self.agent.links.state['refs']['STATUS']
+        for fault in ('cycle_id','archive_task','model_input'):
+            with self.subTest(fault=fault):
+                window=deepcopy(original)
+                if fault=='cycle_id':
+                    window['cycle_id']='different_cycle'
+                elif fault=='model_input':
+                    window['model_input']={'not':'a prompt string'}
+                self.agent.source_archive.task='wrong task text' if fault=='archive_task' else 'task'
+                raw=encode(window)
+                path.write_bytes(raw.encode('utf-8'))
+                ref['context_sha256']=digest(raw)
+                self.target['ref']=deepcopy(ref)
+                self.assertEqual(digest(path.read_bytes().decode('utf-8')),ref['context_sha256'])
+                self.assertEqual(self.read()['status'],'source_binding_error')
+        self.agent.source_archive.task='task'

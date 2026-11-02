@@ -34,3 +34,5 @@
 69 tests，0 failures/errors/skips。A50+B200、只选 B 的确定性夹具：sources 不含 A，context 精确拼回生成 prompt 并包含 A。六个旧冻结输入通过新 runner 各一次 scripted no-op；只说明接线正常，不是语义改善。完整检查与边界见 TEST_RESULTS.md；Windows 离线入口见 HANDOFF.md；运行哈希见 SOURCE_IDENTITY.json，文件覆盖见 MANIFEST.json。
 
 这轮只修消费者入口。可能仍有漏读、错误理解和过度推断；窗口可能超过四次读预算；完整 context 中也可能有旧错误。未验证真实模型效果、在线长程收益、P2、并发写入或跨版本历史迁移。工程通过不能替代之后另行授权的语义/真实验证。
+
+Independent-review addendum: final directed check count is 71/71; the earlier 69-test report is preserved. Runtime code and all 62 source hashes are unchanged. See TEST_RESULTS.md and review-addendum-checks.* for r1/r2 frozen-input and valid-hash identity/type regressions.

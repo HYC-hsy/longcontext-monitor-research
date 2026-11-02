@@ -21,3 +21,5 @@ if ($LASTEXITCODE -ne 0) { throw 'Stop and preserve terminal result' }
 ```
 
 新输出目录不可重试覆盖。读源最多四次、续轮最多两次/三次逻辑 P1 调用，末轮 write-only；两视图共用预算。真实实验的启动/参数另行安排。原件与窗口保留；不能直接公开整个运行目录：source_links.json 含游标签名 secret，须去除凭据/profile/私有端点/隐藏推理及签名，并为公开投影重算哈希。
+
+Independent-review addendum: final directed check count is 71/71; the earlier 69-test report is preserved. Runtime code and all 62 source hashes are unchanged. See TEST_RESULTS.md and review-addendum-checks.* for r1/r2 frozen-input and valid-hash identity/type regressions.

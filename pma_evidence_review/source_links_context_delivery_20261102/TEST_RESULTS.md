@@ -27,3 +27,12 @@ SCRIPTED_CLI.json 记录固定源码 CLI 的每例输入 SHA、system/schema/pro
 未覆盖真实模型选择/消费质量、语义结论是否改善、在线长程收益、P2 集成、并发写入、通用外部窗口迁移。context 只返回生成时实际可见 prompt，不返回存档中非展示的 raw_generation_context。即使完整分页读完，也没有证明摘要正确；有些窗口超出本轮预算仍需明确未读。
 
 最终核查还修正 runner 的预算元数据：曾误记默认候选 2/1，现与实际 linked 执行一致为 4/2，新增配置断言。修后复验遇到 sparse checkout 缺既有身份 helper 模块；补齐已跟踪源码后最终 69/69。中间失败记录保留 /tmp/context-check-budgetfix*，未放宽测试标准。
+
+## Independent-review regression addendum
+
+Parent: c919d0b069bc4b957e03e338e5a3515f3cc42051. Only 46 test lines added; no implementation or runtime-source changes. Same --source-links-context entry point: 71 tests, 0 errors/failures/skips, 14.966 seconds, exit_code=0. New public reports: review-addendum-checks.*; raw reports: /tmp/context-check-review-addendum.*. IDENTITIES records original hashes. Earlier 69-test offline-checks.* remains historical evidence.
+
+- r0 reads E1; r1 saves a knowledge entry and reads E1; r2 saves another entry. Each saved entry's paginated context equals its exact actual r1/r2 prompt, including serialized prior calls and receipts, and differs from r0.
+- With recomputed valid window hashes, wrong cycle_id, mismatched archive.task text, and a non-string model_input each return source_binding_error.
+
+No real profile/model, Task, P2 or eval. No separate CLI rerun because all 62 runtime sources remain unchanged; the suite retains existing six-case fake-client checks. Earlier SOURCE_REMOTE_READBACK.json records the six-file snapshot at afc14c3; this addendum changes its test file only. Final delivery SHA will be read back separately.
