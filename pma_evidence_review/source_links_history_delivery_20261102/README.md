@@ -1,6 +1,6 @@
 # A：冻结输入记忆入口与默认读取优化
 
-基线 `19405c86d4081c0a48517608671265ff622f71bf`；最新源码固定为 `26ff924d083616c5b6c91136b6ee6af312f8f83c`。仍显式选择 `--candidate source-links-context-v1`。本目录是本轮交付；旧 `source_links_context_delivery_20261102` 目录仅保留历史版本证据。
+基线 `19405c86d4081c0a48517608671265ff622f71bf`；最终源码固定为 `22fb79813bf64d4c42b6b2f6408403bf807be3a7`。共享历史能力仍与 `26ff924d` 相同，最后仅核对 GAP 关闭措辞。仍显式选择 `--candidate source-links-context-v1`。本目录是本轮交付；旧 `source_links_context_delivery_20261102` 目录仅保留历史版本证据。
 
 本轮修复两点：默认读取不再先空耗一轮；生成时实际看见的旧记忆，其来源入口不再随活动条目删除而丢失。没有增加模型步骤、自动祖先遍历、语义审核或向量库。GAP 同时按新授权调整定义，语义收益尚未验证。
 
@@ -28,7 +28,7 @@
 
 ## GAP 与提示
 
-仅替换 A 候选原 GAP 定义与工具说明：GAP 是任务相关、仍需满足的条件或仍需得到的答案；不是失败日志、原因猜测或行动计划。失败细节放经历，status 只写当前进展。知道失败或解除另一个阻塞，不自动解决原未决条件。沿用 content/source_ids 和 save-before-delete，没有新字段、审核或模型阶段。
+仅替换 A 候选原 GAP 定义与工具说明：GAP 是任务相关、仍需满足的条件或仍需得到的答案，不是失败日志、原因猜测或行动计划。事实/经历留结果，status 留进展。对应条件已满足、对应问题已回答，或该需要明确不再适用时才关闭；失败可以回答结果问题，但不满足仍待成功的条件，另一阻塞解除也不关闭无关 GAP。沿用 content/source_ids 和 save-before-delete，没有新字段、审核或模型阶段。
 
 SYSTEM 还做必要的默认视图/H1 协议对齐；本轮不再声称 SYSTEM 字节不变。冻结文本与差异见 SYSTEM.txt、PROMPT.diff 和 TOOL_SCHEMA.diff。旧 source-read/source-links-v1 的实际 system/schema/行为检查继续通过；它们的源码身份须在新 checkout 重建，不挪用旧哈希清单。
 

@@ -1,6 +1,6 @@
 # Windows：预检与真实 P1 入口
 
-源码固定 26ff924d083616c5b6c91136b6ee6af312f8f83c；最终交付尾提交只加材料，完整 SHA 由最终回复给出。使用 A 的独立 checkout/worktree 和已有依赖环境，不改 B 的工作区。旧交付目录的身份/schema 仅是历史版本，本轮按本目录核对。
+源码固定 22fb79813bf64d4c42b6b2f6408403bf807be3a7；最终交付尾提交只加材料，完整 SHA 由最终回复给出。使用 A 的独立 checkout/worktree 和已有依赖环境，不改 B 的工作区。旧交付目录的身份/schema 仅是历史版本，本轮按本目录核对。
 
 ```powershell
 $env:PYTHONUTF8 = '1'

@@ -1,8 +1,8 @@
 # 本轮离线验收
 
-最新源码 26ff924d083616c5b6c91136b6ee6af312f8f83c，完整 tree af2a4c283017260a697ddd741d2db112532a7735。该 tree 与在 6c00dc5c 上测试的四文件引用补丁完全一致。此前 f6a3982b 与本地 924a0a11 相同的结论仅指初版历史入口源码；本次已叠加独立来源可用性及明确引用修复。没有 force-push。
+最终源码 22fb79813bf64d4c42b6b2f6408403bf807be3a7，完整 tree d8246728b39433981c102dc53938465f1e7c1d99。共享历史能力相对 26ff924d 未改，最后两文件只核对 GAP 关闭措辞及对应断言。此前 f6a3982b 与本地 924a0a11 相同的结论仅指初版历史入口源码；当前含独立来源可用性及明确引用修复。没有 force-push。
 
-最终定向入口 `run_p1_source_checks.py --source-links-context`：**95 tests，0 errors/failures/skips，20.785 秒，exit_code=0**。沿用真实依赖环境及网络守卫，没有缺包替身。原始记录保留 `/tmp/context-history-cited-release.{json,stdout,stderr}`；此前 90/93 项记录另行保留。公开 offline-checks.* 只替换工作区/依赖根路径，原件字节哈希在 IDENTITIES.json。
+最终定向入口 `run_p1_source_checks.py --source-links-context`：**95 tests，0 errors/failures/skips，17.910 秒，exit_code=0**。沿用真实依赖环境及网络守卫，没有缺包替身。原始记录保留 `/tmp/context-history-gap-final.{json,stdout,stderr}`；此前 90/93/引用修复 95 项记录另行保留。公开 offline-checks.* 只替换工作区/依赖根路径，原件字节哈希在 IDENTITIES.json。
 
 |检查|结果与含义|
 |---|---|
@@ -19,12 +19,15 @@
 |预算与多轮|短 A06 形状真实 maintain fake：summary→H(A)→原回执→r2 write，只有两次读；长 origin 在第二读明确 partial。四次是总 read 上限，仅 r0/r1 两个串行读取轮，r2 write-only|
 |legacy|来源缺失如实 unrecorded/不关联；派生内容、输入目录和原文分字段，不冒充完整证据|
 |身份/收集|63 项实际运行源码含新 helper；缺失/改字节拒绝；新增测试模块进入显式检查入口|
+|GAP 关闭文字/接口|只关闭对应已满足条件、已回答问题或明确不适用需要；失败可回答结果问题，不代表成功条件满足；旧候选文字及既有参数不变。这里只检查冻结文字/接口，不评估语义收益|
 
 初版 f6a3982b 另做了无模型的 A04 实际可见调用回放和两次开发侧读取探针，历史摘要保留在 RECORDED_A04_PROBE.json，不能冒充本次新源码探针。当前 95 项 suite 中同一实际三轮可见调用回放也继续通过。原参数未改、原失败归档不覆盖。探针输出目录含内部签名密钥，仅本机保留，未整体发布。
 
 工程分两步：第一步 274 行增加、5 行删除（helper/底层可选扩展与定点检查）；第二步 330 行增加、43 行删除（A 接入、GAP 与集成回归）。每一步均小于 600 行；本目录报告/schema/清单是生成或说明材料，不计为新增机制代码。
 
 后续独立复审窄修分别为 99 增/6 删（目录故障不遮蔽来源）和 123 增/15 删（明确引用身份与原子性）。仍未超过单步 600 行。GAP/status 是用户授权的语义分工调整，独立冻结于 GAP_STATUS.diff，不能将整轮说成只有工程协议变更；其语义收益仍待真实验证。
+
+最后 GAP 措辞核对为 8 增/3 删，没有新增功能或测试集。
 
 helper 的百页循环只是逐字传输/目录授权检查。真实 P1 不能串行读百页；sources 目录在大来源之后也可能本轮不可达。“只读”是不得改记忆内容，首次授予 handle 确有 grant 元数据写入，其失败必须保留工程错误。
 
