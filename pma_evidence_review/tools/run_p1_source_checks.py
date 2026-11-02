@@ -28,7 +28,8 @@ def main():
                   'pma_evidence_review/tests/test_p1_linked_agent.py',
                   'pma_evidence_review/tests/test_p1_linked_runner.py']
     if args.dms:
-        files += ['pma_evidence_review/tests/test_p1_dms.py']
+        files += ['pma_evidence_review/tests/test_p1_dms.py',
+                  'pma_evidence_review/tests/test_dms_receipt_view.py']
     with patch.object(runner,'suite_manifest',return_value=files):
         return runner.run_phase('pma',args.report)
 

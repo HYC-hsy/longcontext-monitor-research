@@ -45,6 +45,18 @@ def historical_events(events):
     return rows
 
 
+def split_visible_observation(observation):
+    """Recognize only the existing host envelope; unknown data stays literal."""
+    try:
+        envelope=json.loads(observation) if isinstance(observation,str) else observation
+    except (ValueError,TypeError):
+        envelope=None
+    if (isinstance(envelope,dict) and set(envelope)=={'content','tool_results'}
+            and isinstance(envelope['content'],str) and isinstance(envelope['tool_results'],list)):
+        return True,envelope['content'],envelope['tool_results']
+    return False,None,None
+
+
 def source_view(result, window, full_text):
     """Latest whole event units first, displayed chronologically; no snippet guessing."""
     events = historical_events(window.get('visible_events', []))
@@ -59,14 +71,10 @@ def source_view(result, window, full_text):
                 'commands': event.get('commands', [])}
         report = {k: event[k] for k in ('analysis', 'plan') if k in event}
         observation = event.get('observation', '')
-        try:
-            envelope = json.loads(observation) if isinstance(observation, str) else observation
-        except (ValueError, TypeError):
-            envelope = None
-        if (isinstance(envelope, dict) and set(envelope) == {'content', 'tool_results'}
-                and isinstance(envelope['content'], str) and isinstance(envelope['tool_results'], list)):
-            unit['tool_results'] = envelope['tool_results']
-            report['observation_content'] = envelope['content']
+        known, actor, results = split_visible_observation(observation)
+        if known:
+            unit['tool_results'] = results
+            report['observation_content'] = actor
         else:
             unit['unclassified_observation'] = observation
         units.append(unit)

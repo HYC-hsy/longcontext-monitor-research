@@ -156,7 +156,7 @@ class DMSTests(unittest.TestCase):
         self.assertEqual(result['operations'][0]['persistence_outcome'],'committed_reconciled_after_error')
         self.assertTrue(result['operations'][0]['success']);self.assertIn(old,a._active_records())
         self.assertEqual(a.links.state['bank'],bank.to_dict())
-        self.assertEqual(len(source_identity(candidate='dms-inspired-v1',strict=False)['source_files']),62)
+        self.assertEqual(len(source_identity(candidate='dms-inspired-v1',strict=False)['source_files']),63)
 
     def test_groups_above_threshold_keep_payload_only_keyword_visible(self):
         a,requests=self.agent([reply([('memory_keep',{'category':'knowledge','source_ids':['E1']}),

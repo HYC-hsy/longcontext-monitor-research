@@ -7,6 +7,7 @@ import re
 from p1_linked_agent import LinkedSourceP1Agent, READ_TOOL, READ_LIMIT, CONTINUATION_LIMIT
 from p1_source_agent import SourceReadP1Agent, SourceAssociationError
 from p1_source_links import SourceLinks
+from p1_dms_view import material_previews
 from p1_source_archive import encode, digest
 
 SYSTEM = '''You maintain source material for another Action Agent, not solve its task.
@@ -178,11 +179,7 @@ class DMSP1Agent(LinkedSourceP1Agent):
             if item['kind']!='memory': continue
             key=item['id'];row=self._active_records()[key]
             if key in self.links.state['groups']:
-                previews=[]
-                for sid,field,encoding,text in self.links._fields(item['ref']['sources']):
-                    previews.append({'source_id':sid,'field':field,'encoding':encoding,
-                                     'text':text[:800],'shown_characters':min(800,len(text)),
-                                     'total_characters':len(text),'preview_only':len(text)>800})
+                previews=material_previews(self.links,item['ref']['sources'])
                 views.append({'alias':alias,'memory_id':key,'category':row.category,
                               'kind':'selected_material_group','materials':previews,'outcome':'unknown'})
             else:
