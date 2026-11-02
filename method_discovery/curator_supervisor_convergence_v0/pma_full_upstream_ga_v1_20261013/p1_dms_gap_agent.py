@@ -28,6 +28,8 @@ class GapIndexMaterialStore(DMSMaterialStore):
 
 class GapIndexP1Agent(DMSP1Agent):
     maintenance_system = SYSTEM
+    input_tail = ('\nKeep useful original materials with the three tools. No new status or factual conclusions; '
+                  'only gap may add a short pending index.\n')
     store_type = GapIndexMaterialStore
 
     def get_tools_schema(self):
@@ -48,8 +50,7 @@ class GapIndexP1Agent(DMSP1Agent):
             return super()._valid_keep(args)
         text = args.get('pending')
         return (set(args) == {'category','source_ids','pending'} and isinstance(text,str)
-                and bool(text.strip()) and len(text) <= PENDING_MAX_CHARS
-                and '\n' not in text and '\r' not in text)
+                and bool(text.strip()) and len(text) <= PENDING_MAX_CHARS)
 
     def _group_metadata(self, args):
         group = super()._group_metadata(args)

@@ -152,6 +152,7 @@ class DMSP1Agent(LinkedSourceP1Agent):
     stop_after_tool_error = True
     stop_after_unknown_tool = True
     maintenance_system = SYSTEM
+    input_tail = '\nKeep useful original materials with the three tools. No new status or conclusions.\n'
     store_type = DMSMaterialStore
     write_tool_names = frozenset({'memory_keep'})
 
@@ -193,7 +194,7 @@ class DMSP1Agent(LinkedSourceP1Agent):
             +'\n## Current records (M alias and memory_id identify the same record; ambiguous identifiers are rejected)\n'+encode(views)
             +'\n## Historical derived status, not a current completion claim\n'+self.memory.status
             +'\n## Recent accepted events; Actor analysis/plans are self-reports\n'+encode(visible)
-            +'\nKeep useful original materials with the three tools. No new status or conclusions.\n')
+            +self.input_tail)
         return prompt,marked,projection,visible
 
     def _group_label(self, key):

@@ -33,7 +33,6 @@ class GapIndexTests(unittest.TestCase):
                  {'category':'gap','source_ids':['TASK'],'pending':''},
                  {'category':'gap','source_ids':['TASK'],'pending':' \t'},
                  {'category':'gap','source_ids':['TASK'],'pending':'x'*(PENDING_MAX_CHARS+1)},
-                 {'category':'gap','source_ids':['TASK'],'pending':'a\nb'},
                  {'category':[],'source_ids':['TASK']},
                  {'category':'knowledge','source_ids':['TASK'],'pending':'question'},
                  {'category':'procedural','source_ids':['TASK'],'pending':None},
@@ -125,3 +124,16 @@ class GapIndexTests(unittest.TestCase):
                 self.assertEqual(path.read_bytes(),before)
         p='method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/tag_selection_contract.py'
         self.assertEqual((ROOT/p).read_bytes(),subprocess.check_output(['git','show','8d36aca1d2aa5b95ca37e13b445ebdf688356b9c:'+p],cwd=ROOT))
+
+    def test_short_multiline_pending_is_preserved_and_input_tail_has_gap_exception(self):
+        text='Required condition\r\nremains unresolved.'
+        a,requests=self.agent([('memory_keep',{'category':'gap','source_ids':['TASK'],'pending':text})])
+        r=asyncio.run(a.maintain([],cycle_id='multiline'))
+        self.assertEqual(r['status'],'completed')
+        key=r['operations'][0]['memory_id']
+        self.assertEqual(json.loads(a._active_records()[key].content)['pending'],text)
+        page=a.links.read({'kind':'memory','id':key},a._active_records())
+        self.assertEqual(page['parts'][0]['text'],text)
+        self.assertIn('only gap may add a short pending index.',requests[0]['prompt'])
+        self.assertNotIn('No new status or conclusions.',requests[0]['prompt'])
+        self.assertEqual(DMSP1Agent.input_tail,'\nKeep useful original materials with the three tools. No new status or conclusions.\n')
