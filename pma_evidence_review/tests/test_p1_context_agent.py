@@ -417,3 +417,66 @@ class ContextTests(unittest.TestCase):
         self.assertEqual(result['turns'][0]['tool_results'][0]['result']['status'],'context_unavailable')
         self.assertEqual(len(self.requests),2)
         self.assertEqual(self.agent.memory.status,'still usable')
+
+    def test_bm25_hidden_old_id_is_rejected_by_both_read_and_delete(self):
+        from unittest.mock import patch
+        a=self.agent;shown=a.memory.knowledge[0]
+        hidden=a.memory.save_knowledge('hidden old entry')
+        state=deepcopy(a.links.state);state['bank']=a.memory.to_dict();a.links.commit(state)
+        a.use_bm25_prefilter=True;a.max_memory_in_prompt=1
+        with patch.object(type(a.memory),'search_knowledge',return_value=[shown]), \
+                patch.object(type(a.memory),'search_procedural',return_value=[]):
+            prompt,*_=a._input('',0,[])
+        a.request_aliases=deepcopy(a.frozen_aliases)
+        self.assertNotIn(hidden,prompt)
+        self.assertNotIn(hidden,a._context_records)
+        self.assertEqual({t['id'] for t in a.request_aliases.values() if t['kind']=='memory'},{shown.id})
+        before=deepcopy(a.memory.to_dict());links_before=deepcopy(a.links.state)
+        for name in ('memory_read_source','memory_delete'):
+            result=a._apply({'name':name,'arguments':{'memory_id':hidden}},'unused',0,
+                {'operations':[],'read_requests':0,'reads_used':0})
+            self.assertEqual(result['status'],'source_not_displayed')
+            self.assertEqual(a.memory.to_dict(),before)
+            self.assertEqual(a.links.state,links_before)
+        self.assertIn(hidden,a._active_records())
+
+    def test_alias_read_does_not_reinterpret_resolved_id_as_another_alias(self):
+        a=self.agent;a.memory.knowledge[0].id='M2'
+        a.memory.save_knowledge('other row');a.memory.knowledge[1].id='X'
+        state=deepcopy(a.links.state)
+        for key,text in (('M2','row one context'),('X','row two context')):
+            a.source_archive.capture('window_'+key,text,[])
+            row=a._active_records()[key]
+            a.links.bind_state(state,key,row.category,row.content,{
+                'sources':[],'inherited_unassociated':[],'association':'legacy_unassociated'},'window_'+key)
+        state['bank']=a.memory.to_dict();a.links.commit(state)
+        a._input('',0,[]);a.request_aliases=deepcopy(a.frozen_aliases)
+        self.assertEqual(a.request_aliases['M1']['id'],'M2')
+        self.assertEqual(a.request_aliases['M2']['id'],'X')
+        def apply(name,value,**kwargs):
+            call={'name':name,'arguments':{'memory_id':value,**kwargs}}
+            original=deepcopy(call)
+            result=a._apply(call,'unused',0,{'operations':[],'read_requests':0,'reads_used':0})
+            self.assertEqual(call,original)
+            return result
+        self.assertEqual(apply('memory_read_source','M1')['target'],'M2')
+        context=apply('memory_read_source','M1',view='context')
+        self.assertEqual(context['target'],'M2')
+        self.assertEqual(''.join(p['text'] for p in context['parts']),'row one context')
+        for name in ('memory_read_source','memory_delete'):
+            self.assertEqual(apply(name,'M2')['status'],'ambiguous_memory_id')
+        deleted=apply('memory_delete','M1')
+        self.assertEqual(deleted['target_resolution']['resolved_memory_id'],'M2')
+        self.assertNotIn('M2',a._active_records())
+        self.assertIn('X',a._active_records())
+
+    def test_context_system_only_fills_existing_status_parameter_value(self):
+        baseline=subprocess.check_output(['git','show',
+            '0423acf980f2cf2193638d8348ac6adce1ed8523:pma_evidence_review/source_links_context_delivery_20261102/SYSTEM.txt'],
+            cwd=ROOT,text=True)
+        old='select relevant shown E/M aliases or TASK in source_ids'
+        new='select relevant shown E/M aliases, TASK or STATUS in source_ids'
+        self.assertEqual(baseline.count(old),1)
+        self.assertEqual(SYSTEM,baseline.replace(old,new))
+        self.assertIn(old,OLD_SYSTEM)
+        self.assertNotIn(new,OLD_SYSTEM)

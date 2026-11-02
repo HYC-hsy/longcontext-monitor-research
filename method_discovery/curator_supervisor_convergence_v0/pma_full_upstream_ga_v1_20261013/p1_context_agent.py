@@ -3,7 +3,9 @@ from copy import deepcopy
 from p1_source_archive import digest, encode
 from p1_linked_agent import LinkedSourceP1Agent, SYSTEM as LINKED_SYSTEM, READ_LIMIT, CONTINUATION_LIMIT
 
-SYSTEM = LINKED_SYSTEM + ("\nWhen selected sources are insufficient to understand an entry, memory_read_source "
+SYSTEM = LINKED_SYSTEM.replace(
+    'select relevant shown E/M aliases or TASK in source_ids',
+    'select relevant shown E/M aliases, TASK or STATUS in source_ids') + ("\nWhen selected sources are insufficient to understand an entry, memory_read_source "
     "with view='context' can page its frozen visible generation input. Default view='sources' "
     "returns selected sources. Context is not per-claim evidence; read only when useful.\n")
 
@@ -16,7 +18,7 @@ class ContextSourceP1Agent(LinkedSourceP1Agent):
     def get_tools_schema(self):
         tools = super().get_tools_schema()
         delete = next(t['function'] for t in tools if t['function']['name']=='memory_delete')
-        delete['description'] += ' Accepts a frozen displayed M alias or an original memory ID; never E/TASK/STATUS.'
+        delete['description'] += ' Accepts a frozen displayed M alias or its displayed memory ID; never E/TASK/STATUS.'
         tool = tools[-1]['function']
         tool['description'] += ' Frozen M aliases and displayed memory IDs resolve identically; ambiguity is rejected. Optional context view reads a memory/STATUS frozen generation input, not proof.'
         tool['parameters']['properties']['view'] = {
@@ -25,10 +27,11 @@ class ContextSourceP1Agent(LinkedSourceP1Agent):
 
     def _input(self, observation, step, raw_events):
         prompt, marked, projection, visible = super()._input(observation, step, raw_events)
+        displayed = {t['id'] for t in self.frozen_aliases.values() if t['kind']=='memory'}
         self._context_records = {key: {
             'content_sha256':digest(row.content), 'category':row.category,
             'ref':deepcopy(self.links.state['refs'].get(key))}
-            for key,row in self._active_records().items()}
+            for key,row in self._active_records().items() if key in displayed}
         return prompt, marked, projection, visible
 
     def _resolve_target(self, value, *, deleting):
@@ -38,8 +41,6 @@ class ContextSourceP1Agent(LinkedSourceP1Agent):
         candidates.extend(t for t in self.request_aliases.values()
                           if t.get('kind') == 'memory' and t.get('id') == value)
         frozen = self._context_records
-        if value in frozen and (deleting or candidates):
-            candidates.append({'kind':'memory','id':value,'ref':frozen[value]['ref']})
         unique = {encode(t):t for t in candidates}
         resolution = {'resolved_memory_id':None}
         if not unique:
@@ -81,7 +82,7 @@ class ContextSourceP1Agent(LinkedSourceP1Agent):
                 report['reads_used'] += 1
             return {'status':resolution['status'],'target_resolution':resolution}
         normalized = deepcopy(call)
-        if target['kind'] == 'memory':
+        if name == 'memory_delete':
             normalized['arguments']['memory_id'] = target['id']
         result = super()._apply(normalized,window_id,round_index,report)
         return result if name == 'memory_read_source' else {**result, 'target_resolution':resolution}
