@@ -219,6 +219,9 @@ class SourceLinks:
         signature = hmac.new(self.state['secret'].encode(), raw, hashlib.sha256).hexdigest()
         return token + '.' + signature
 
+    def _read_fields(self, target, sources):
+        return self._fields(sources)
+
     def read(self, target, active, *, cursor=None, archive=None):
         # target is a frozen displayed object, never an arbitrary path or lookup.
         key = target.get('id', target.get('source_id'))
@@ -235,7 +238,7 @@ class SourceLinks:
             sources = (ref or {}).get('sources', [])
         else:
             sources = [{'source_id': target['source_id'], 'via': 'selected'}]
-        fields = self._fields(sources)
+        fields = self._read_fields(target, sources)
         association = (ref or {}).get('association', 'legacy_unassociated' if target['kind'] in {'memory', 'status'} else 'selected')
         if not fields and ref and archive is not None and ref.get('context_window'):
             try:

@@ -32,6 +32,9 @@ def candidate_config(candidate='source-read'):
     if candidate == 'dms-inspired-v1':
         from p1_dms_agent import DMSP1Agent, SYSTEM as dms_system
         return DMSP1Agent, dms_system, 4, 2
+    if candidate == 'dms-gap-index-v1':
+        from p1_dms_gap_agent import GapIndexP1Agent, SYSTEM as gap_system
+        return GapIndexP1Agent, gap_system, 4, 2
     raise ValueError('unknown P1 candidate')
 
 
@@ -46,10 +49,12 @@ def source_identity(root=ROOT, *, strict=True, candidate='source-read'):
         'vendor/pma_89e5c0d/external/harbor/src/harbor/llms/utils.py',
         'vendor/pma_89e5c0d/external/harbor/src/harbor/models/metric/usage_info.py')]
     candidate_config(candidate)
-    if candidate in ('source-links-v1','dms-inspired-v1'):
+    if candidate in ('source-links-v1','dms-inspired-v1','dms-gap-index-v1'):
         paths += [REL+'/p1_source_links.py', REL+'/p1_linked_agent.py']
-    if candidate == 'dms-inspired-v1':
+    if candidate in ('dms-inspired-v1','dms-gap-index-v1'):
         paths += [REL+'/p1_dms_agent.py', REL+'/p1_dms_view.py']
+    if candidate == 'dms-gap-index-v1':
+        paths += [REL+'/p1_dms_gap_agent.py']
     paths += ['pma_evidence_review/tools/run_p1_source_case.py']
     return {'kind':'committed_sources' if strict else 'working_tree_sources',
             'code_commit': subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip(),
@@ -83,7 +88,7 @@ def build_case(case, output, llm, *, candidate='source-read'):
     active = agent._active_records()
     for ref in case.get('entry_sources',[]):
         row = active[ref['memory_id']]
-        if candidate in ('source-links-v1','dms-inspired-v1'):
+        if candidate in ('source-links-v1','dms-inspired-v1','dms-gap-index-v1'):
             # Reconstructed old windows are broad legacy context, never exact event links.
             state = deepcopy(agent.links.state)
             agent.links.bind_state(state,row.id,row.category,row.content,
@@ -92,7 +97,7 @@ def build_case(case, output, llm, *, candidate='source-read'):
         else:
             agent.source_archive.bind(row.id,row.category,row.content,ref['window_id'])
     prior = case.get('prior_presentations',[])
-    if candidate in ('source-links-v1','dms-inspired-v1'):
+    if candidate in ('source-links-v1','dms-inspired-v1','dms-gap-index-v1'):
         agent.links.mark_presented(agent.links.ingest(prior))
     else:
         agent.source_archive.mark_presented(agent.source_archive.classify(prior))
@@ -152,7 +157,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--case',required=True,type=Path,help='exactly one frozen case JSON')
     parser.add_argument('--output',required=True,type=Path,help='new private output directory')
-    parser.add_argument('--candidate',choices=('source-read','source-links-v1','dms-inspired-v1'),default='source-read')
+    parser.add_argument('--candidate',choices=('source-read','source-links-v1','dms-inspired-v1','dms-gap-index-v1'),default='source-read')
     parser.add_argument('--mode',choices=('scripted','real'),default='scripted')
     parser.add_argument('--profile-file',type=Path,help='existing private profile; real mode only')
     parser.add_argument('--authorize-real-p1',action='store_true',help='requires separate human authorization; never implied by this delivery')

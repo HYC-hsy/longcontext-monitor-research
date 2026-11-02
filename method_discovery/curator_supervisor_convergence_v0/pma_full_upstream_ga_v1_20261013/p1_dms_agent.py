@@ -48,9 +48,10 @@ DELETE_TOOL = {'type':'function','function':{'name':'memory_delete',
 
 
 class DMSMaterialStore(SourceLinks):
+    candidate_name = 'dms-inspired-v1'
     def __init__(self, root, **kwargs):
         path = Path(root)/'source_links.json'
-        if path.exists() and json.loads(path.read_text(encoding='utf-8'))['data'].get('candidate') != 'dms-inspired-v1':
+        if path.exists() and json.loads(path.read_text(encoding='utf-8'))['data'].get('candidate') != self.candidate_name:
             raise ValueError('do not reinterpret another candidate archive')
         super().__init__(root, **kwargs)
         if 'candidate' not in self.state:
@@ -62,7 +63,7 @@ class DMSMaterialStore(SourceLinks):
             for i,end in enumerate(ends,1):
                 segments['T'+str(i)] = {'start':start,'end':end,'text':self.state['task'][start:end]}
                 start = end
-            state.update(candidate='dms-inspired-v1',task_segments=segments,legacy_snapshots={},groups={})
+            state.update(candidate=self.candidate_name,task_segments=segments,legacy_snapshots={},groups={})
             self.commit(state)
 
     def freeze_legacy(self, records):
@@ -151,6 +152,7 @@ class DMSP1Agent(LinkedSourceP1Agent):
     stop_after_tool_error = True
     stop_after_unknown_tool = True
     maintenance_system = SYSTEM
+    store_type = DMSMaterialStore
     write_tool_names = frozenset({'memory_keep'})
 
     def __init__(self, **kwargs):
@@ -158,7 +160,7 @@ class DMSP1Agent(LinkedSourceP1Agent):
         # Group bank content is an ID index, not searchable natural language.
         # This P1-only candidate exposes all current records; no new retriever.
         self.use_bm25_prefilter=False
-        self.links=DMSMaterialStore(self.source_archive.root,task_id=self.source_archive.task_id,
+        self.links=self.store_type(self.source_archive.root,task_id=self.source_archive.task_id,
                                     task=self.task,bank=self.memory.to_dict())
 
     def get_tools_schema(self):
@@ -181,7 +183,8 @@ class DMSP1Agent(LinkedSourceP1Agent):
             if key in self.links.state['groups']:
                 previews=material_previews(self.links,item['ref']['sources'])
                 views.append({'alias':alias,'memory_id':key,'category':row.category,
-                              'kind':'selected_material_group','materials':previews,'outcome':'unknown'})
+                              'kind':'selected_material_group','materials':previews,'outcome':'unknown',
+                              **self._group_label(key)})
             else:
                 views.append({'alias':alias,'memory_id':key,'category':row.category,
                               'kind':'legacy_derived_summary_not_verified','text':row.content})
@@ -192,6 +195,16 @@ class DMSP1Agent(LinkedSourceP1Agent):
             +'\n## Recent accepted events; Actor analysis/plans are self-reports\n'+encode(visible)
             +'\nKeep useful original materials with the three tools. No new status or conclusions.\n')
         return prompt,marked,projection,visible
+
+    def _group_label(self, key):
+        return {}
+
+    def _valid_keep(self, args):
+        return (isinstance(args,dict) and set(args)=={'category','source_ids'}
+                and args.get('category') in {'knowledge','procedural','gap'})
+
+    def _group_metadata(self, args):
+        return {'category':args['category'],'outcome':'unknown'}
 
     def _resolve_displayed_target(self, requested, *, delete=False):
         audit={'requested_memory_id':requested,'resolved_memory_id':None}
@@ -255,7 +268,7 @@ class DMSP1Agent(LinkedSourceP1Agent):
         if call['name']!='memory_keep':
             return super()._apply(call,window_id,round_index,report)
         args=call['arguments']
-        if not isinstance(args,dict) or set(args)!={'category','source_ids'} or args.get('category') not in {'knowledge','procedural','gap'}:
+        if not self._valid_keep(args):
             return {'status':'invalid_tool_arguments'}
         try:
             resolved=self.links.resolve(args['source_ids'],self.request_aliases)
@@ -265,14 +278,14 @@ class DMSP1Agent(LinkedSourceP1Agent):
         # The plain-bank string is an index, not a model-authored body. Canonical
         # original material is rendered from central sources, never nested copies.
         index=encode({'selected_material_ids':[s['source_id'] for s in resolved['sources']],
-                      'category':args['category'],'outcome':'unknown'})
+                      **self._group_metadata(args)})
         commit_started=False
         try:
             method=self.gaps.save_gap if args['category']=='gap' else getattr(self.memory,'save_'+args['category'])
             key=method(index)
             state=deepcopy(before)
             self.links.bind_state(state,key,args['category'],index,resolved,window_id)
-            state['groups'][key]={'category':args['category'],'outcome':'unknown'}
+            state['groups'][key]=self._group_metadata(args)
             state['bank']=self.memory.to_dict()
             commit_started=True
             self.links.commit(state)
