@@ -124,11 +124,11 @@ class HistoryAgentTests(unittest.TestCase):
         return next(json.loads(p['text'])['history_handle'] for p in receipt['parts']
                     if p['field']=='input_memory' and json.loads(p['text'])['memory_id']==memory_id)
 
-    def make_summary(self):
+    def make_summary(self, event='B', receipt='B receipt'):
         self.responses.append(self.reply([
             ('memory_save_knowledge',{'content':'A+B summary','source_ids':['E1']}),
             ('memory_delete',{'memory_id':'M1'})]))
-        result=self.maintain('summarize',[{'event_id':'B','observation':'B receipt'}])
+        result=self.maintain('summarize',[{'event_id':event,'observation':receipt}])
         self.assertEqual(result['status'],'completed')
         self.assertNotIn(self.old,self.a._active_records())
         return result['operations'][0]['memory_id']
@@ -147,7 +147,7 @@ class HistoryAgentTests(unittest.TestCase):
         self.a.source_archive.window_path('manual_origin').write_bytes(b'corrupt')
         self.assertEqual(self.read('M1')['status'],'source_binding_error')
 
-    def test_selected_b_keeps_deleted_a_source_and_accepts_handle_citation(self):
+    def test_short_a06_shape_selected_b_deleted_a_reads_then_final_write(self):
         summary=self.make_summary()
         token=None
         def read_history():
@@ -286,3 +286,82 @@ class HistoryAgentTests(unittest.TestCase):
         self.assertEqual(''.join(text),original)
         with self.assertRaises(HistoryError):
             helper.read(None,{},handle=token,requested_view='auto')
+
+    def test_sources_survive_context_or_directory_failure_without_issuing_handles(self):
+        import json
+        from p1_source_archive import digest
+        summary=self.make_summary(event='E8',receipt='E8 original receipt')
+        ref=deepcopy(self.a.links.state['refs'][summary])
+        path=self.a.source_archive.window_path(ref['context_window']);original=path.read_bytes()
+        before=deepcopy(self.a.links.state.get('history_grants',{}))
+        for fault in ('missing','hash_bad','bad_directory_reference'):
+            with self.subTest(fault=fault):
+                current=deepcopy(ref)
+                if fault=='missing':
+                    path.unlink()
+                elif fault=='hash_bad':
+                    path.write_bytes(original+b' ')
+                else:
+                    window=json.loads(original)
+                    window['input_memory_coverage']['read_handles']=['H1.'+'0'*64]
+                    raw=encode(window);path.write_bytes(raw.encode())
+                    current['context_sha256']=digest(raw)
+                state=deepcopy(self.a.links.state);state['refs'][summary]=current;self.a.links.commit(state)
+                self.prime()
+                for kwargs in ({'view':'sources'},{}):
+                    page=self.read(summary,**kwargs)
+                    self.assertEqual((page['status'],page['resolved_view']),('source_complete','sources'))
+                    self.assertTrue(any(p['field']=='event_id' and p['text']=='E8' for p in page['parts']))
+                    self.assertTrue(any(p['field']=='observation' and p['text']=='E8 original receipt' for p in page['parts']))
+                    self.assertFalse(page['input_memory_directory_available'])
+                    self.assertIsNone(page['input_memory_count'])
+                    self.assertEqual(page['input_memory_coverage'],'unavailable' if fault=='missing' else 'integrity_error')
+                    self.assertEqual(page['input_memory_coverage_error'],'context_missing' if fault=='missing' else 'source_binding_error')
+                    self.assertFalse(any(p['field']=='input_memory' for p in page['parts']))
+                    self.assertFalse(page['complete'])
+                    self.assertLessEqual(len(encode(page)),8000)
+                strict=self.read(summary,view='context')
+                self.assertEqual(strict['status'],'context_missing' if fault=='missing' else 'source_binding_error')
+                self.assertEqual(self.a.links.state.get('history_grants',{}),before)
+                path.write_bytes(original)
+                state=deepcopy(self.a.links.state);state['refs'][summary]=deepcopy(ref);self.a.links.commit(state)
+
+    def test_long_origin_stays_partial_with_only_two_serial_read_turns(self):
+        self.a.source_archive.capture('long_a','original A\r\n🙂'*6000,[])
+        state=deepcopy(self.a.links.state)
+        self.a.links.bind_state(state,self.old,'knowledge','known A',{
+            'sources':[],'inherited_unassociated':[],'association':'legacy_unassociated'},'long_a')
+        self.a.links.commit(state)
+        summary=self.make_summary()
+        def read_history():
+            page=self.a.last_p1_report['turns'][0]['tool_results'][0]['result']
+            return self.reply([('memory_read_source',{'memory_id':self.handle(page,self.old)})])
+        self.responses.extend([self.reply([('memory_read_source',{'memory_id':summary})]),read_history,self.reply()])
+        result=self.maintain('long_consume')
+        self.assertEqual((result['status'],result['reads_used'],result['continuations_used']),('completed',2,2))
+        self.assertEqual(result['model_calls_attempted'],3)
+        page=result['turns'][1]['tool_results'][0]['result']
+        self.assertEqual(page['status'],'context_partial')
+        self.assertTrue(page['truncated']);self.assertIsNotNone(page['next_cursor'])
+        self.assertEqual([len(r['tools']) for r in self.requests[-3:]],[6,6,5])
+        self.assertEqual(result['operations'],[])
+
+    def test_first_handle_grant_persistence_failure_remains_engineering_error(self):
+        import asyncio
+        from unittest.mock import patch
+        summary=self.make_summary();commit=self.a.links.commit
+        def reject_new_grants(state):
+            if state.get('history_grants'):
+                raise OSError('injected grant persistence failure')
+            return commit(state)
+        self.responses.append(self.reply([('memory_read_source',{'memory_id':summary}),
+                                         ('memory_save_gap',{'content':'must not execute'})]))
+        with patch.object(self.a.links,'commit',side_effect=reject_new_grants):
+            result=asyncio.run(self.a.maintain([],cycle_id='grant_failure'))
+        self.assertEqual(result['status'],'engineering_error')
+        self.assertEqual(result['model_calls_attempted'],1)
+        self.assertEqual([r['result']['status'] for r in result['turns'][0]['tool_results']],
+                         ['engineering_error','not_executed_after_engineering_failure'])
+        self.assertEqual(result['turns'][0]['tool_results'][0]['result']['error_type'],'OSError')
+        self.assertEqual(self.a.gaps.entries,[])
+        self.assertFalse(self.a.links.state.get('history_grants'))
