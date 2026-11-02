@@ -1,26 +1,26 @@
-# 离线验收与长度
+# 当前离线验收
 
 ```sh
 PMA_TEST_STRICT_IMPORTS=1 LITELLM_LOCAL_MODEL_COST_MAP=True python -B pma_evidence_review/tools/run_p1_source_checks.py --dms --report <fresh-report.json>
 LITELLM_LOCAL_MODEL_COST_MAP=True python -B pma_evidence_review/tools/measure_dms_receipt_view.py --archive <public-zip> --output <fresh-measure.json>
 ```
 
-本地3a9015e与固定远端3b34b6a的完整tree相同。两次最终检查均77 tests、0 errors、0 failures，包含旧73项。初次77项仅旧DMS清单数仍断言62而失败，新增展示模块后正确更新为63；没有降低校验。曾测得初版JSON包装增量过大，收紧重复元数据及固定片段分配后采用下表最终版本。
+当前本地641b54e与固定远端f66005c源码tree相同，两个最终检查均80 tests/0 errors/0 failures/0 skipped。旧73项加展示7项，无可选依赖替身。覆盖宽内外dict、多空/仅ID回执、完整序列化上限、继承/顺序标签、长行/多行/CRLF/Unicode、B01完整stdout与B04失败、配对/未知格式、预览只读、旧source/keep/delete/分页边界。中间分配实现曾失败，原件本机保留；这些失败未冒称通过。当前变更源码+测试+脚本163行增删，低于600。
 
-覆盖真实B01/B04选中事件预览及配对动作、外壳success/exit0和stdout失败同时保留、多调用反序不串配、未知/超长/Unicode/缺回执、Actor历史不能占掉回执、原文区间可追溯、预览不改事件状态、原始字段读回保真；旧分页/哈希/ID/keep/delete与候选回归继续通过。真实LLM零，假客户端不能证明收益。未运行Task/P2/eval或真实旧组，旧472全套未扩大运行，已有U/A问题未动。
+receipt-cap-final2.*及receipt-cap-remote.*为当前80项原始输出的公开投影，仅替换本机task根目录为<WORKSPACE>，原件hash见IDENTITIES。旧receipt-view-checked3/remote.*为587第一版77项历史，不是本版证据。原本已知U/A问题未改；未扩大跑旧472全套。
 
-六例公开投影重建输入精确长度（不是原运行输入）：
+完整重建输入精确长度如下（Unicode字符，另列UTF-8增量）：
 
 |案例|旧字符|新字符|字符增量|UTF-8字节增量|
 |---|---:|---:|---:|---:|
-|01-local-success-scope|23353|27029|3676|3754|
-|02-checkpoint-not-new-install|24814|24870|56|68|
-|03-no-new-result-history|28800|31745|2945|3079|
-|04-counterevidence-to-old-claim|29600|33048|3448|4086|
-|05-distinct-executions-same-output|4050|3158|-892|-892|
-|06-optional-read-preserve-correct-memory|3338|3019|-319|-319|
+|01-local-success-scope|23353|25955|2602|2602|
+|02-checkpoint-not-new-install|24814|26481|1667|1679|
+|03-no-new-result-history|28800|31473|2673|2787|
+|04-counterevidence-to-old-claim|29600|32456|2856|3444|
+|05-distinct-executions-same-output|4050|3812|-238|-238|
+|06-optional-read-preserve-correct-memory|3338|3346|8|8|
 
 
-B01 event_7和B04 event_8在before该事件预览都无目标失败原文，after回执分区均有。不能解释为当轮初始输入没见过；没有语义评分或新模型结果。每页原始读源仍8000字符，预算不改。
+B01完整1615字符stdout保留，B04仍有失败原文；算法无对应词。每选中事件的实际完整JSON<=原预览序列化长度+512，逐项见MEASUREMENTS。新分区仍增加部分输入，未声称零成本；总视图没有另加全局总量硬限，组/事件数量仍可增长，大bank未做规模优化。
 
-receipt-view-checked3.*和receipt-view-remote.*为原始检查输出的公开投影，仅替换本机任务根目录为<WORKSPACE>；原始文件/hash本机保留，IDENTITIES记录原件元数据，MANIFEST对公开投影取hash。生成fixture/测量/清单为数据；本步全部增删398行，连同数据亦不超过600。
+真实模型/Task/P2/eval均0，假客户端及fixture不构成模型语义效果。没有测删早期经历/保留旧错误的改进；GAP新候选后续单独验收。

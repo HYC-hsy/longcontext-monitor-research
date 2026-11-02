@@ -1,17 +1,15 @@
-# DMS已存材料的回执展示修复（仅离线）
+# DMS材料展示修复：完整序列化限额版（仅离线）
 
-源码固定 `3b34b6a813364b935862a9998febd6d20e321b48`，基线 `183e67ae70592bb0f5b7d16e3db53750a4ff4b1c`。独立分支 pma-dms-receipt-view-20261102，最终交付SHA见线程回复。仅改存后重建展示，未改保留/删除策略、摘要准则、SYSTEM、工具schema、读源分页或4读/3逻辑调用预算，未合并其他线程改动。
+已发布源码 `f66005c2f28f8896a909c22b4253902e97f26389`，基线 `183e67ae70592bb0f5b7d16e3db53750a4ff4b1c`，分支 pma-dms-receipt-view-20261102。最终文档SHA见交付回复。源码本地641b54e与已发布源码tree逐字相同。本轮只改展示，不改保留/删除策略、GAP定义、SYSTEM/schema、原文归档/分页及4读/3逻辑调用预算。
 
-真实B九例包中，P1当轮初始输入确实含完整回执。本缺陷发生在材料保存后的组预览：旧展示将整个observation前800字符暴露，历史WORKING MEMORY挤掉后面的实际tool_results。不能据此说模型当轮从未看到失败。
+第一版587fa0ad仅约束正文字符，存在JSON元数据膨胀、空回执消失、片段截断命令上下文的问题；该版保留为历史，不作为当前交付。修正后完整每事件JSON预览硬上限为旧_fields前800预览序列化长度+512字符，另保留旧原文字符预算。最多16个数据行加1个简短元数据行，未知字段汇为未分类剩余块；明确省略行区间、角色数量、未显示回执数量及raw read入口。限额按Unicode字符，不是token或UTF-8字节。
 
-现在按已知{content,tool_results} envelope分开动作/参数、可见工具回执、Actor历史/自述。对已知JSON回执保留status、exit_code、stdout、stderr等原值，其他字段保留为未分类数据；外壳success、exit_code=0都不代表任务成功。未知格式不猜字段，仍有原文预览。配对只复用既有真实callID及歧义结果，不按位置或文字相似猜配。
+已知host envelope分区动作/参数、真实工具回执、Actor历史/自述。外壳success及exit_code=0与stdout原文同时保留，不解释成任务成功。非空空结构/仅ID回执明确标记存在但无内容；via、继承不代表读过原文、宿主接受顺序均保留。未知格式不猜字段。
 
-长字段采用确定性头/尾区间，头约1/4、尾约3/4，明确总长度与省略范围；短字段全文。每个选中事件的原文字符总预算不超过原_fields各字段min(800,len)之和，Actor只先预留有限份额，不能抢占回执。重复身份元数据只在对应receipt首次出现展示；后续字段通过receipt_index关联。完整raw archive及原文分页完全不变，展示是projection而非原始HTTP字节。
+短stdout/stderr（<=2048字符）优先完整显示；其余确定性头尾片段尽量对齐真实换行，保留精确offset、省略范围与是否切在长行中间。不能解码字面\n冒充原换行。预算不足仍可能省略字段/中间内容，分页可读全部，但固定读预算不保证读完。
 
-B01 event_7、B04 event_8的配对动作与command not found/Segmentation fault原文在新预览可见（算法无这些词或语言/任务特判）。这只是fixture预期通过，不是语义效果评分。头尾展示仍可能省略中间信息，读源预算不保证一轮读完；新结构也不保证模型更改删除或旧结论选择。
+B01 event_7的1615字符stdout现完整保留，包括命令名/行号；B04 event_8失败回执及动作仍可见。这只是fixture预期，不是语义改善。真实P1当轮初始输入本就含完整回执，缺陷在存后重建展示，不能说模型初始未看到。
 
-当前77/77离线检查通过，包含旧73项与4项新增展示回归。真实模型/Task/P2/eval调用均为0，未启动或重跑真实案例。本轮没有改变P2，未来消费新projection仍需明确适配，不能直接把bank_after索引当原文。
+最终本地及固定远端源码各80/80离线检查通过，无依赖替身，真实模型/Task/P2/eval均0。P2尚不能直接消费bank_after的材料ID索引；本轮仅P1 renderer/read可展开。事件表去重不保证模型不重复keep同来源。GAP/历史保留策略留待另阶段，不与展示归因混淆。
 
-原SYSTEM与schema完整文件继续在同提交dms_p1_delivery_20261102目录，SHA见IDENTITIES。旧候选共享的SourceArchive仅抽出同一识别条件的纯函数，source_view输出结构/内容保持原行为；没有导入未许可第三方代码。
-
-详见DESIGN.md、TEST_RESULTS.md、MEASUREMENTS.json、MANIFEST.json；HANDOFF仅离线验收。本目录公开输出均无profile、凭据、私有端点、hidden thinking/signature或cursor secret。
+SYSTEM/schema完整原件在同提交dms_p1_delivery_20261102，哈希见IDENTITIES。详见DESIGN、TEST_RESULTS、MEASUREMENTS、MANIFEST与offline-only HANDOFF。
