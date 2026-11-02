@@ -137,7 +137,7 @@ class ContextTests(unittest.TestCase):
     def test_new_candidate_runner_identity_and_six_frozen_scripted_cases(self):
         from pma_evidence_review.tools.run_p1_source_case import source_identity, run_case
         identity=source_identity(strict=False,candidate='source-links-context-v1')
-        self.assertEqual(len(identity['source_files']),62)
+        self.assertEqual(len(identity['source_files']),63)
         added=[p for p in identity['source_files'] if p.endswith('/p1_context_agent.py')]
         self.assertEqual(len(added),1)
         folder=ROOT/'pma_evidence_review/p1_source_read_delivery/cases'
@@ -195,13 +195,15 @@ class ContextTests(unittest.TestCase):
                 'commit','-qm','fixture'],cwd=root,check=True)
             self.assertEqual(source_identity(root=root,candidate='source-links-context-v1')['source_files'],
                 identity['source_files'])
-            path=root/next(n for n in identity['source_files'] if n.endswith('/p1_context_agent.py'))
-            original=path.read_bytes();path.unlink()
-            with self.assertRaises(RuntimeError):
-                source_identity(root=root,candidate='source-links-context-v1')
-            path.write_bytes(original+b'\n')
-            with self.assertRaises(RuntimeError):
-                source_identity(root=root,candidate='source-links-context-v1')
+            for name in ('p1_context_agent.py','p1_context_history.py'):
+                path=root/next(n for n in identity['source_files'] if n.endswith('/'+name))
+                original=path.read_bytes();path.unlink()
+                with self.assertRaises(RuntimeError):
+                    source_identity(root=root,candidate='source-links-context-v1')
+                path.write_bytes(original+b'\n')
+                with self.assertRaises(RuntimeError):
+                    source_identity(root=root,candidate='source-links-context-v1')
+                path.write_bytes(original)
 
     def test_context_cursor_task_target_and_invalid_view_rejected(self):
         self.save('🙂'*20000)
@@ -286,7 +288,7 @@ class ContextTests(unittest.TestCase):
         self.assertNotIn(key,self.agent._active_records())
         self.assertEqual(self.agent.memory.status,'updated')
         receipts=[t['tool_results'][0]['result'] for t in result['turns']]
-        self.assertEqual([r['status'] for r in receipts],['source_unassociated','context_partial','applied'])
+        self.assertEqual([r['status'] for r in receipts],['context_partial','context_partial','applied'])
         self.assertEqual([receipts[0]['target'],receipts[1]['target'],receipts[2]['target_resolution']['resolved_memory_id']],[key]*3)
         self.assertEqual(result['turns'][2]['tool_calls'][0]['arguments'],{'memory_id':'M2'})
         self.assertEqual(result['operations'][0]['memory_id'],key)
@@ -382,7 +384,7 @@ class ContextTests(unittest.TestCase):
             self.assertNotIn('RL3HYG6d',a._active_records())
             turns=result['turns']
             self.assertEqual([turns[i]['tool_results'][0]['result']['status'] for i in (0,1)],
-                             ['source_unassociated','context_partial'])
+                             ['context_partial','context_partial'])
             self.assertEqual([turns[i]['tool_results'][0]['result']['target'] for i in (0,1)],
                              ['RL3HYG6d']*2)
             self.assertEqual(turns[2]['tool_results'][0]['result']['target_resolution']['resolved_memory_id'],
@@ -470,13 +472,12 @@ class ContextTests(unittest.TestCase):
         self.assertNotIn('M2',a._active_records())
         self.assertIn('X',a._active_records())
 
-    def test_context_system_only_fills_existing_status_parameter_value(self):
-        baseline=subprocess.check_output(['git','show',
-            '0423acf980f2cf2193638d8348ac6adce1ed8523:pma_evidence_review/source_links_context_delivery_20261102/SYSTEM.txt'],
-            cwd=ROOT,text=True)
-        old='select relevant shown E/M aliases or TASK in source_ids'
-        new='select relevant shown E/M aliases, TASK or STATUS in source_ids'
-        self.assertEqual(baseline.count(old),1)
-        self.assertEqual(SYSTEM,baseline.replace(old,new))
-        self.assertIn(old,OLD_SYSTEM)
-        self.assertNotIn(new,OLD_SYSTEM)
+    def test_context_protocol_and_gap_wording_stay_candidate_only(self):
+        self.assertIn('TASK, STATUS or returned H1 handles in source_ids',SYSTEM)
+        self.assertIn('conditions still to satisfy or questions still to answer',SYSTEM)
+        self.assertIn('Keep failure details in experiences, not gaps',SYSTEM)
+        self.assertNotIn('Default view=',SYSTEM)
+        self.assertIn('select relevant shown E/M aliases or TASK in source_ids',OLD_SYSTEM)
+        self.assertNotIn('returned H1 handles',OLD_SYSTEM)
+        self.assertIn('relevant next steps',OLD_SYSTEM)
+        self.assertNotIn('relevant next steps',SYSTEM)

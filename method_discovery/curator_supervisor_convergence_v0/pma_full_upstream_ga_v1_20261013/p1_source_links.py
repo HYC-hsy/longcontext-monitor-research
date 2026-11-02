@@ -220,7 +220,7 @@ class SourceLinks:
         return token + '.' + signature
 
     def read(self, target, active, *, cursor=None, archive=None, view=None,
-             _extra_fields=(), _read_metadata=None, _atomic_fields=()):
+             _extra_fields=(), _read_metadata=None, _atomic_fields=(), _extra_first=True):
         # target is a frozen displayed object, never an arbitrary path or lookup.
         key = target.get('id', target.get('source_id'))
         ref = None
@@ -279,7 +279,7 @@ class SourceLinks:
             if window['task_id'] != self.state['task_id']:
                 return {'status': 'source_binding_error'}
             fields = [('context', 'generation_window_not_selected_evidence', 'raw_string', window['model_input'])]
-        fields = list(_extra_fields) + fields
+        fields = list(_extra_fields) + fields if _extra_first else fields + list(_extra_fields)
         snapshot = digest(encode({'task_id': self.state['task_id'], 'target': key,
                                  'ref': ref, 'fields': fields}))
         if view is not None:

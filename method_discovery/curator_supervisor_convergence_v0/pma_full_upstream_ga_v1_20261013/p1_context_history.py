@@ -39,7 +39,8 @@ class InputMemoryHistory:
     def coverage(self, records, receipts):
         handles = []
         for item in receipts:
-            value = item.get('call',{}).get('arguments',{}).get('memory_id')
+            args = item.get('call',{}).get('arguments',{})
+            value = args.get('memory_id') if isinstance(args,dict) else None
             if isinstance(value,str) and value.startswith(PREFIX) and value in self.links.state.get('history_grants',{}):
                 self.load(value)
                 if value not in handles:
@@ -68,6 +69,8 @@ class InputMemoryHistory:
         return PREFIX + hmac.new(self.links.state['secret'].encode(),payload,hashlib.sha256).hexdigest()
 
     def load(self, handle):
+        if not isinstance(handle,str) or not handle.startswith(PREFIX):
+            raise HistoryError('invalid_history_handle')
         locator = self.links.state.get('history_grants',{}).get(handle)
         if locator is None or not isinstance(locator,dict) or not hmac.compare_digest(handle,self._handle(locator)):
             raise HistoryError('invalid_history_handle')
@@ -117,6 +120,8 @@ class InputMemoryHistory:
         return fields, pending, 'recorded'
 
     def read(self, target, active, *, requested_view=None, cursor=None, handle=None):
+        if requested_view not in (None,'sources','context'):
+            raise HistoryError('invalid_tool_arguments')
         reader = self.links
         historical = None
         if handle is not None:
@@ -149,9 +154,12 @@ class InputMemoryHistory:
             fields.append(('history','derived_memory_content','raw_string',historical['content']))
         result = reader.read(target,active,view=resolved,cursor=cursor,archive=self.archive,
             _extra_fields=fields,_read_metadata=metadata,
-            _atomic_fields={(sid,field) for sid,field,_,_ in directory})
+            _atomic_fields={(sid,field) for sid,field,_,_ in directory}, _extra_first=resolved=='context')
         if 'requested_view' not in result:
             result.update(metadata)
+        for name,value in (('complete',False),('page_sequence_complete',False),
+                           ('semantic_verification_performed',False),('next_cursor',None)):
+            result.setdefault(name,value)
         issued = {}
         for part in result.get('parts',[]):
             if part['field']=='input_memory' and part['start']==0 and part['end']==part['total']:
