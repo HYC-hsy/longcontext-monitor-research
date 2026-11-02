@@ -1,6 +1,6 @@
 # Windows 离线交接
 
-使用最终回复的固定交付 SHA。保持已有依赖环境，不加载真实 profile，不用 authorize-real-p1，不跑 Task/P2/eval/旧真实组。源码提交 b2bc53856863c971107fa02fc57aae60f142be33；材料尾提交不改运行源码。
+使用最终回复的固定交付 SHA。保持已有依赖环境，不加载真实 profile，不用 authorize-real-p1，不跑 Task/P2/eval/旧真实组。源码提交 afc14c3a3b714bc9b1f19b28a36cb3097a94b85d；材料尾提交不改运行源码。
 
 ```powershell
 git -c core.autocrlf=false fetch origin pma/source-links-context-v1
