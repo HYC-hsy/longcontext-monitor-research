@@ -22,13 +22,14 @@ class SourceLinkStoreTests(unittest.TestCase):
         self.store = SourceLinks(self.temp.name, task_id='task1', task=' task\n要求 ', bank=BANK)
 
     def test_event_identity_pairing_unknown_identity_and_allowed_fields(self):
-        raw = {'event_id': 'call1', 'commands': [{'id': 'c', 'args': {'text': '[SYSTEM]'}}],
+        raw = {'event_id': 'call1', 'commands': [{'id': 'c', 'args': {'text': '[SYSTEM]', 'signature': 'literal argument'}}],
                'observation': {'tool_results': [{'tool_use_id': 'c', 'content': 'ok'}]},
                'thinking': 'private', 'signature': 'private'}
         shown = self.store.ingest([raw, raw, {**raw, 'event_id': 'call2'}])
         self.assertEqual([r['presentation'] for r in shown], ['new_event','repeated_in_window','new_event'])
         self.assertEqual(len(self.store.state['events']), 2)
         self.assertNotIn('thinking', encode(self.store.state['events']))
+        self.assertEqual(self.store.state['events']['event_1']['raw']['commands'][0]['args']['signature'], 'literal argument')
         self.assertEqual(self.store.state['events']['event_1']['call_links'][0]['pairing'], 'explicit')
         self.store.mark_presented(shown)
         self.assertEqual(self.store.ingest([raw])[0]['presentation'], 'previously_presented')
@@ -110,3 +111,20 @@ class SourceLinkStoreTests(unittest.TestCase):
         self.assertEqual(reopened.state,self.store.state)
         self.assertEqual(reopened.state['refs'],{})
         self.assertFalse(self.store.path.with_suffix('.tmp').exists())
+
+    def test_cursor_rejects_changed_source_snapshot_and_other_target(self):
+        self.store.ingest([{'event_id':'e','observation':'long'*10000}])
+        state=deepcopy(self.store.state)
+        resolved=self.store.resolve(['E1'],{'E1':{'kind':'event','source_id':'event_1'}})
+        self.store.bind_state(state,'STATUS','status','current',resolved,'w')
+        self.store.commit(state)
+        active={'STATUS':NS(content='current',category='status')}
+        target={'kind':'status','id':'STATUS'}
+        page=self.store.read(target,active)
+        token=page['next_cursor']
+        self.assertIsNotNone(token)
+        self.assertEqual(self.store.read({'kind':'event','source_id':'event_1'}, {}, cursor=token)['status'],'invalid_cursor')
+        state=deepcopy(self.store.state)
+        state['refs']['STATUS']['sources']=[{'source_id':'TASK','via':'selected'}]
+        self.store.commit(state)
+        self.assertEqual(self.store.read(target,active,cursor=token)['status'],'invalid_cursor')
