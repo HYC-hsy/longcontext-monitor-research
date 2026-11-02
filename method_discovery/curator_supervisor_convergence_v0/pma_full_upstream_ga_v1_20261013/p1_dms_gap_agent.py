@@ -33,12 +33,22 @@ def frozen_pending(row):
     return None
 
 
+def cited_handles(source_ids, aliases):
+    cited=[]
+    for token in source_ids:
+        item=aliases.get(token) if isinstance(token,str) else None
+        if item is None or item['kind']!='memory':continue
+        if token.startswith(PREFIX) and item.get('historical_row') is not None:cited.append(token)
+        cited.extend(item['ref'].get('cited_history_handles',[]))
+    return list(dict.fromkeys(cited))
+
+
 class GapIndexMaterialStore(DMSMaterialStore):
     candidate_name = CANDIDATE
 
     def resolve(self, source_ids, aliases):
         resolved=super().resolve(source_ids,aliases)
-        pending=[];snapshots={};extra_sources=[]
+        pending=[]
         for token in source_ids:
             item=aliases[token]
             if item['kind']!='memory':continue
@@ -50,34 +60,14 @@ class GapIndexMaterialStore(DMSMaterialStore):
                                 'pending':group['pending']})
             row=item.get('historical_row')
             if row is not None and not ref['sources']:
-                # Only genuinely unlinked records need a typed legacy snapshot.
-                snapshots[token]={'content':row['content'],'category':row['category'],
-                                  'old_source':row['ref'],'origin':'issued_history_handle'}
-                extra_sources.append({'source_id':'legacy:'+token,'via':'inherited'})
                 resolved['inherited_unassociated'].append(row['memory_id'])
         unique={}
         for value in pending:unique.setdefault((value['memory_id'],value['pending']),value)
         if unique:resolved['inherited_pending_indices']=list(unique.values())
-        if snapshots:
-            resolved['_new_legacy_snapshots']=snapshots
-            order={token:i for i,token in enumerate(self.state.get('history_grants',{}))}
-            resolved['sources'].extend(sorted(extra_sources,key=lambda x:order[x['source_id'][7:]]))
+        cited=cited_handles(source_ids,aliases)
+        if cited:resolved['cited_history_handles']=cited
         resolved['inherited_unassociated']=list(dict.fromkeys(resolved['inherited_unassociated']))
         return resolved
-
-    def bind_state(self, state, target, category, content, resolved, window_id):
-        resolved=deepcopy(resolved)
-        for key,row in resolved.pop('_new_legacy_snapshots',{}).items():
-            if key in state['legacy_snapshots'] and state['legacy_snapshots'][key]!=row:
-                raise ValueError('historical snapshot changed')
-            state['legacy_snapshots'][key]=row
-        return super().bind_state(state,target,category,content,resolved,window_id)
-
-    def _fields(self, sources):
-        fields=super()._fields(sources)
-        return [(sid,'historical_derived_status_not_fact' if field=='legacy_summary_not_verified'
-                 and self.state['legacy_snapshots'][sid[7:]]['category']=='status' else field,encoding,text)
-                for sid,field,encoding,text in fields]
 
     def _read_fields(self, target, sources):
         fields = super()._read_fields(target, sources)
@@ -107,6 +97,7 @@ class GapIndexP1Agent(DMSP1Agent):
         self.history = InputMemoryHistory(self.links,self.source_archive)
         # Make a historical entry reachable even when selected raw sources are long.
         self.history.directory_first = True
+        self.history.citations_as_sources = True
 
     def _input(self, observation, step, raw_events):
         result = super()._input(observation,step,raw_events)
@@ -143,6 +134,8 @@ class GapIndexP1Agent(DMSP1Agent):
                         row=self.history.load(token)
                         ref=row['ref'] or {'sources':[],'inherited_unassociated':[row['memory_id']]}
                         extended[token]={'kind':'memory','id':row['memory_id'],'ref':ref,'historical_row':row}
+                for handle in cited_handles(args['source_ids'],extended):
+                    self.history.load(handle)
                 self.request_aliases=extended
                 return super()._apply(call,window_id,round_index,report)
             except HistoryError as exc:
@@ -207,6 +200,8 @@ class GapIndexP1Agent(DMSP1Agent):
         group = super()._group_metadata(args)
         if args['category'] == 'gap':
             group.update(pending=args['pending'], index_kind='generated_unresolved_index_not_fact')
+        cited=cited_handles(args['source_ids'],self.request_aliases)
+        if cited:group['cited_history_handles']=cited
         return group
 
     def _group_label(self, key):
@@ -214,6 +209,8 @@ class GapIndexP1Agent(DMSP1Agent):
         label={}
         if group['category'] == 'gap':
             label['generated_unresolved_index']={'text':group['pending'],'kind':group['index_kind']}
+        cited=self.links.state['refs'][key].get('cited_history_handles')
+        if cited:label['history_citations_not_proof']=cited
         inherited=self.links.state['refs'][key].get('inherited_pending_indices')
         if inherited:label['inherited_unresolved_indices']=deepcopy(inherited)
         return label

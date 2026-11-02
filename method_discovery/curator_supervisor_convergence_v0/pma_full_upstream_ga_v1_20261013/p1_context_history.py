@@ -89,23 +89,37 @@ class InputMemoryHistory:
             raise HistoryError('source_binding_error') from None
 
     def _directory(self, ref):
-        if not ref or not ref.get('context_window'):
-            return [], {}, 'unrecorded'
-        window = self._window(ref['context_window'],ref.get('context_sha256'))
-        coverage = window.get('input_memory_coverage')
+        rows, pending, seen = [], {}, set()
+        cited = (ref or {}).get('cited_history_handles',[])
+        if not isinstance(cited,list):
+            raise HistoryError('source_binding_error')
+        for handle in cited:
+            if not isinstance(handle,str):
+                raise HistoryError('source_binding_error')
+            try:
+                row = self.load(handle)
+            except HistoryError:
+                raise HistoryError('source_binding_error') from None
+            if handle not in seen:
+                rows.append((handle,row,'explicitly_cited_history'));seen.add(handle)
+        coverage = None
+        if ref and ref.get('context_window'):
+            window = self._window(ref['context_window'],ref.get('context_sha256'))
+            coverage = window.get('input_memory_coverage')
+        coverage_status = 'unrecorded' if coverage is None else 'recorded'
         if coverage is None:
-            return [], {}, 'unrecorded'
-        if (not isinstance(coverage,dict) or coverage.get('schema') != 'input-memory-coverage-v1' or
+            coverage = {'records':[],'read_handles':[]}
+        elif (not isinstance(coverage,dict) or coverage.get('schema') != 'input-memory-coverage-v1' or
                 not isinstance(coverage.get('records'),list) or not isinstance(coverage.get('read_handles'),list)):
             raise HistoryError('source_binding_error')
-        rows, pending = [], {}
         for index, row in enumerate(coverage['records']):
             self._validate_record(row)
             locator = {'window_id':ref['context_window'],'window_sha256':ref['context_sha256'],
                        'index':index,'record_sha256':digest(encode(row))}
             handle = self._handle(locator)
             pending[handle] = locator
-            rows.append((handle,row,'displayed_record'))
+            if handle not in seen:
+                rows.append((handle,row,'displayed_record'));seen.add(handle)
         for handle in coverage['read_handles']:
             if not isinstance(handle,str):
                 raise HistoryError('source_binding_error')
@@ -113,7 +127,8 @@ class InputMemoryHistory:
                 row = self.load(handle)
             except HistoryError:
                 raise HistoryError('source_binding_error') from None
-            rows.append((handle,row,'earlier_read_handle'))
+            if handle not in seen:
+                rows.append((handle,row,'earlier_read_handle'));seen.add(handle)
         fields = []
         for index,(handle,row,visibility) in enumerate(rows):
             data = {'history_handle':handle,'memory_id':row['memory_id'],'category':row['category'],
@@ -121,7 +136,7 @@ class InputMemoryHistory:
                     'association':(row['ref'] or {}).get('association','legacy_unrecorded'),
                     'visibility':visibility,'original_read_not_implied':True}
             fields.append(('input_memory_'+str(index),'input_memory','json_value',encode(data)))
-        return fields, pending, 'recorded'
+        return fields, pending, coverage_status
 
     def read(self, target, active, *, requested_view=None, cursor=None, handle=None, read_metadata=None):
         if requested_view not in (None,'sources','context'):
@@ -133,8 +148,7 @@ class InputMemoryHistory:
             # Only this frozen record is substituted; event data, task and signing key are shared.
             reader = copy(self.links)
             reader.state = {**self.links.state,'refs':{handle:historical['ref']}}
-            target = {'kind':'memory','id':handle,'ref':historical['ref'],
-                      'historical_memory_id':historical['memory_id'],'historical_record':historical}
+            target = {'kind':'memory','id':handle,'ref':historical['ref'], 'historical_record':historical}
             active = {handle:NS(content=historical['content'],category=historical['category'])}
         key = target.get('id',target.get('source_id'))
         ref = reader.state['refs'].get(key) if target['kind'] in ('memory','status') else None
@@ -147,22 +161,29 @@ class InputMemoryHistory:
             if ref and (ref['content_sha256'] != digest(row.content) or ref['category'] != row.category):
                 raise HistoryError('source_binding_error')
         sources = (ref or {}).get('sources',[]) if target['kind'] in ('memory','status') else [target]
-        resolved = requested_view or ('context' if not sources and ref and ref.get('context_window') else 'sources')
-        coverage_error = None
+        resolved = requested_view or ('context' if not sources and not (getattr(self,'citations_as_sources',False) and (ref or {}).get('cited_history_handles')) and ref and ref.get('context_window') else 'sources')
+        coverage_error, citations_available = None, True
         try:
             directory, pending, coverage_status = self._directory(ref)
         except HistoryError as exc:
             if resolved != 'sources':
                 raise
-            directory, pending = [], {}
+            # Output citations are stored in the ref, independently of input-window coverage.
+            try:
+                directory, pending, _ = self._directory({'cited_history_handles':
+                    (ref or {}).get('cited_history_handles',[])})
+            except HistoryError:
+                directory, pending, citations_available = [], {}, False
             coverage_error = exc.status
             coverage_status = 'unavailable' if exc.status=='context_missing' else 'integrity_error'
         metadata = {'requested_view':requested_view or 'auto','resolved_view':resolved,
                     'fallback_reason':'no_linked_sources' if requested_view is None and resolved=='context' else None,
                     'input_memory_count':None if coverage_error else len(directory),
                     'input_memory_coverage':coverage_status,'input_memory_coverage_error':coverage_error,
-                    'input_memory_directory_available':coverage_status=='recorded',
-                    'input_memory_scope':'Generation input coverage, not claim support; history handles are read-only.'}
+                    'input_memory_directory_available':bool(directory) or coverage_status=='recorded',
+                    'explicitly_cited_history_count':None if not citations_available else sum(
+                        json.loads(text)['visibility']=='explicitly_cited_history' for _,_,_,text in directory),
+                    'input_memory_scope':'Frozen input coverage and explicit output citations are distinct; neither proves claims or original reads.'}
         if read_metadata is not None:
             metadata.update(read_metadata)
         fields = list(directory)

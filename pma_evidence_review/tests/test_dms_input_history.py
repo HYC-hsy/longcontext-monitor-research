@@ -132,7 +132,7 @@ class DMSHistoryAgentTests(unittest.TestCase):
         group=self.make_group();self.prime()
         page=self.read(group);token=self.handle(page,self.old)
         self.assertEqual(page['source_count'],1)
-        self.assertFalse(page['complete']);self.assertIn('not claim support',page['input_memory_scope'])
+        self.assertFalse(page['complete']);self.assertIn('neither proves claims',page['input_memory_scope'])
         self.assertEqual(page['parts'][0]['field'],'input_memory')
         self.assertLessEqual(len(encode(page)),8000)
         window=json.loads(self.a.source_archive.window_path('group_r0').read_bytes())
@@ -234,9 +234,21 @@ class DMSHistoryAgentTests(unittest.TestCase):
         result=self.maintain('typed-status');self.assertEqual(result['status'],'completed')
         key=result['operations'][0]['memory_id'];ref=self.a.links.state['refs'][key]
         self.assertIn('STATUS',ref['inherited_unassociated'])
-        page=self.a.links.read({'kind':'memory','id':key},self.a._active_records())
-        self.assertTrue(any(p['field']=='historical_derived_status_not_fact' for p in page['parts']))
-        self.assertFalse(page['complete'])
+        self.assertEqual(ref['sources'],[])
+        self.assertEqual(ref['cited_history_handles'],[token])
+        self.assertEqual(self.a.links.state['legacy_snapshots'],snapshots)
+        self.prime();page=self.read(key)
+        self.assertEqual(page['source_count'],0)
+        self.assertEqual(self.handle(page,'STATUS'),token)
+        self.assertEqual(page['resolved_view'],'sources')
+        self.a.source_archive.window_path(ref['context_window']).unlink();self.prime()
+        independent=self.read(key)
+        self.assertEqual(self.handle(independent,'STATUS'),token)
+        self.assertEqual(independent['input_memory_coverage'],'unavailable')
+        self.assertEqual(independent['explicitly_cited_history_count'],1)
+        history=self.read(token)
+        self.assertTrue(any(p['field']=='derived_memory_content' and p['text']==before['status'] for p in history['parts']))
+        self.assertFalse(history['complete'])
 
     def test_intact_sources_survive_bad_coverage_without_handles_context_stays_strict(self):
         import json
@@ -302,3 +314,63 @@ class DMSHistoryAgentTests(unittest.TestCase):
         self.assertEqual([r['result']['status'] for r in result['turns'][0]['tool_results']],
                          ['engineering_error','not_executed_after_engineering_failure'])
         self.assertEqual(self.a.memory.to_dict(),before);self.assertFalse(self.a.links.state.get('history_grants'))
+
+    def test_cited_unread_handle_is_atomic_not_input_coverage_and_inherits_via_M(self):
+        import json
+        parent=self.make_group(receipt='short B receipt');token=None;windows={}
+        self.a.before_request=lambda request:windows.setdefault(request['window_id'],
+            self.a.source_archive.window_path(request['window_id']).read_bytes())
+        def cite_unread():
+            nonlocal token
+            page=self.a.last_p1_report['turns'][0]['tool_results'][0]['result']
+            token=self.handle(page,self.old)
+            return self.reply([('memory_keep',{'category':'knowledge','source_ids':[token]}),
+                               ('memory_delete',{'memory_id':parent})])
+        self.responses.extend([self.reply([('memory_read_source',{'memory_id':parent})]),cite_unread])
+        result=self.maintain('cite_unread')
+        self.assertEqual((result['status'],result['reads_used'],result['model_calls_attempted']),('completed',1,2))
+        child=result['operations'][0]['memory_id'];ref=self.a.links.state['refs'][child]
+        self.assertEqual(ref['cited_history_handles'],[token]);self.assertNotIn(parent,self.a._active_records())
+        self.assertNotIn(self.old,self.a._active_records())
+        persisted=json.loads(self.a.links.path.read_bytes())['data']
+        self.assertEqual(persisted['refs'][child],ref)
+        raw=self.a.source_archive.window_path('cite_unread_r1').read_bytes()
+        self.assertEqual(raw,windows['cite_unread_r1'])
+        self.assertEqual(json.loads(raw)['input_memory_coverage']['read_handles'],[])
+        self.assertNotIn('cited_history_handles',json.loads(raw)['input_memory_coverage'])
+        self.assertEqual(json.loads(raw)['model_input'],self.requests[-1]['prompt'])
+        self.prime();page=self.read(child)
+        directory=[json.loads(p['text']) for p in page['parts'] if p['field']=='input_memory']
+        self.assertEqual(directory[0]['history_handle'],token)
+        self.assertEqual(directory[0]['visibility'],'explicitly_cited_history')
+        self.assertTrue(directory[0]['original_read_not_implied'])
+        self.assertEqual(page['explicitly_cited_history_count'],1)
+        self.a.source_archive.window_path(ref['context_window']).unlink();self.prime()
+        independent=self.read(child)
+        self.assertEqual(self.handle(independent,self.old),token)
+        self.assertEqual(independent['input_memory_coverage'],'unavailable')
+        self.assertEqual(independent['explicitly_cited_history_count'],1)
+        self.assertIn('A original query receipt',encode(self.read(token)))
+        self.responses.append(self.reply([('memory_keep',{'category':'procedural','source_ids':['M1']})]))
+        inherited=self.maintain('inherit-M');self.assertEqual(inherited['status'],'completed')
+        key=inherited['operations'][0]['memory_id']
+        self.assertEqual(self.a.links.state['refs'][key]['cited_history_handles'],[token])
+        self.assertEqual(json.loads(self.a._active_records()[key].content)['cited_history_handles'],[token])
+
+    def test_citation_commit_failure_has_no_half_ref_and_stops_delete(self):
+        import json
+        from unittest.mock import patch
+        parent=self.make_group(receipt='short B receipt');self.prime();token=self.handle(self.read(parent),self.old)
+        before=deepcopy(self.a.links.state);commit=self.a.links.commit
+        def reject_new_citation(state):
+            if any(ref.get('cited_history_handles') for ref in state['refs'].values()):
+                raise OSError('injected citation persistence failure')
+            return commit(state)
+        self.responses.append(self.reply([('memory_keep',{'category':'knowledge','source_ids':[token]}),
+                                          ('memory_delete',{'memory_id':parent})]))
+        with patch.object(self.a.links,'commit',side_effect=reject_new_citation):
+            result=self.maintain('citation_failure')
+        self.assertEqual(result['status'],'engineering_error');self.assertIn(parent,self.a._active_records())
+        saved=json.loads(self.a.links.path.read_bytes())['data']
+        self.assertFalse(any(ref.get('cited_history_handles') for ref in saved['refs'].values()))
+        self.assertEqual(saved['bank'],before['bank']);self.assertEqual(saved['history_grants'],before['history_grants'])
