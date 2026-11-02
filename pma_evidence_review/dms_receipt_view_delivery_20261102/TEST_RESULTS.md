@@ -5,9 +5,9 @@ PMA_TEST_STRICT_IMPORTS=1 LITELLM_LOCAL_MODEL_COST_MAP=True python -B pma_eviden
 LITELLM_LOCAL_MODEL_COST_MAP=True python -B pma_evidence_review/tools/measure_dms_receipt_view.py --archive <public-zip> --output <fresh-measure.json>
 ```
 
-当前本地641b54e与固定远端f66005c源码tree相同，两个最终检查均80 tests/0 errors/0 failures/0 skipped。旧73项加展示7项，无可选依赖替身。覆盖宽内外dict、多空/仅ID回执、完整序列化上限、继承/顺序标签、长行/多行/CRLF/Unicode、B01完整stdout与B04失败、配对/未知格式、预览只读、旧source/keep/delete/分页边界。中间分配实现曾失败，原件本机保留；这些失败未冒称通过。当前变更源码+测试+脚本163行增删，低于600。
+当前本地ac920fa与固定远端3f8473b源码tree相同，两个最终检查均81 tests/0 errors/0 failures/0 skipped。旧73项加展示8项，无可选依赖替身。覆盖宽内外dict、多空/仅ID回执、完整序列化上限、继承/顺序标签、长行/多行/CRLF/Unicode、B01完整stdout与B04失败、配对/未知格式、预览只读、旧source/keep/delete/分页边界。中间分配实现曾失败，原件本机保留；这些失败未冒称通过。本次窄修源码+测试47行增删，前步163行，各步低于600。
 
-receipt-cap-final2.*及receipt-cap-remote.*为当前80项原始输出的公开投影，仅替换本机task根目录为<WORKSPACE>，原件hash见IDENTITIES。旧receipt-view-checked3/remote.*为587第一版77项历史，不是本版证据。原本已知U/A问题未改；未扩大跑旧472全套。
+receipt-identity-final.*及receipt-identity-remote.*为当前81项原始输出的公开投影，仅替换本机task根目录为<WORKSPACE>，原件hash见IDENTITIES。旧receipt-view-checked3/remote.*为587第一版77项，receipt-cap-final2/remote.*为8d36的80项，均仅历史，不是本版证据。原本已知U/A问题未改；未扩大跑旧472全套。
 
 完整重建输入精确长度如下（Unicode字符，另列UTF-8增量）：
 

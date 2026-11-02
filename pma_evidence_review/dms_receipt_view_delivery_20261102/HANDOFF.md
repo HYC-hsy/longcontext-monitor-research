@@ -11,7 +11,7 @@ $env:LITELLM_LOCAL_MODEL_COST_MAP = 'True'
 if ($LASTEXITCODE -ne 0) { throw 'Stop and preserve offline failure' }
 ```
 
-应80项通过。核对MANIFEST与SOURCE_IDENTITY63项；source_identity(candidate='dms-inspired-v1')重新生成时commit为当前检出，源码文件hash须一致。报告及测量输出用新路径，不覆盖历史。公开临时重关联目录不能当生产原件。
+应81项通过。核对MANIFEST与SOURCE_IDENTITY63项；source_identity(candidate='dms-inspired-v1')重新生成时commit为当前检出，源码文件hash须一致。报告及测量输出用新路径，不覆盖历史。公开临时重关联目录不能当生产原件。
 
 本轮SYSTEM/schema、三工具及4读/3调用预算不变。展示硬限是每事件完整JSON，整体bank无新增总量上限；可能省略中间材料，raw分页仍保真。P2未适配索引。后续真实批次和GAP策略须另安排。
 
