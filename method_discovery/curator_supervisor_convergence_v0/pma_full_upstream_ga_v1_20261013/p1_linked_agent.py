@@ -26,6 +26,8 @@ READ_TOOL = {'type':'function','function':{'name':'memory_read_source',
 
 
 class LinkedSourceP1Agent(SourceReadP1Agent):
+    system = SYSTEM
+    context_views = False
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.links = SourceLinks(self.source_archive.root, task_id=self.source_archive.task_id,
@@ -106,7 +108,9 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
             if report['reads_used'] >= READ_LIMIT:
                 return {'status':'budget_exhausted','unread_remainder':True}
             report['reads_used'] += 1
-            if not isinstance(args,dict) or set(args)-{'memory_id','cursor'} or not isinstance(args.get('memory_id'),str):
+            if not isinstance(args,dict) or set(args)-({'memory_id','cursor','view'} if self.context_views else {'memory_id','cursor'}) or not isinstance(args.get('memory_id'),str):
+                return {'status':'invalid_tool_arguments'}
+            if self.context_views and args.get('view','sources') not in ('sources','context'):
                 return {'status':'invalid_tool_arguments'}
             target = self.request_aliases.get(args['memory_id'])
             if target is None:
@@ -115,7 +119,8 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                 return {'status':'source_not_displayed'}
             active = self._active_records()
             active['STATUS'] = NS(content=self.memory.status, category='status')
-            return self.links.read(target, active, cursor=args.get('cursor'), archive=self.source_archive)
+            return self.links.read(target, active, cursor=args.get('cursor'), archive=self.source_archive,
+                **({'view':args.get('view','sources')} if self.context_views else {}))
         names = {t['function']['name'] for t in self.get_tools_schema()[:-1]}
         if name not in names:
             return {'status':'unknown_tool'}
@@ -199,12 +204,12 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                 self.source_archive.capture(window_id,prompt,window_events,presented_source_receipts=receipts,
                     raw_generation_context=self._raw_generation_context,input_projection=projection)
                 request = {'kind':'request','cycle_id':report['cycle_id'],'window_id':window_id,
-                    'prompt':prompt,'system':SYSTEM,'tools':tools,'source_aliases':deepcopy(self.request_aliases)}
+                    'prompt':prompt,'system':self.system,'tools':tools,'source_aliases':deepcopy(self.request_aliases)}
                 self._journal(request)
                 if self.before_request:
                     self.before_request(request)
                 report['model_calls_attempted'] += 1
-                response = await self.llm.call(prompt=prompt,system=SYSTEM,tools=tools)
+                response = await self.llm.call(prompt=prompt,system=self.system,tools=tools)
                 report['model_calls_completed'] += 1
                 calls = self._calls(response,round_index)
                 turn = {'window_id':window_id,'assistant_text':self._strip_thinking(getattr(response,'content',None) or ''),

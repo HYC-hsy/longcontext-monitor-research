@@ -219,7 +219,7 @@ class SourceLinks:
         signature = hmac.new(self.state['secret'].encode(), raw, hashlib.sha256).hexdigest()
         return token + '.' + signature
 
-    def read(self, target, active, *, cursor=None, archive=None):
+    def read(self, target, active, *, cursor=None, archive=None, view=None):
         # target is a frozen displayed object, never an arbitrary path or lookup.
         key = target.get('id', target.get('source_id'))
         ref = None
@@ -235,9 +235,39 @@ class SourceLinks:
             sources = (ref or {}).get('sources', [])
         else:
             sources = [{'source_id': target['source_id'], 'via': 'selected'}]
-        fields = self._fields(sources)
+        if view is not None and view not in ('sources', 'context'):
+            return {'status': 'invalid_tool_arguments'}
+        if view == 'context':
+            if not ref or not ref.get('context_window') or archive is None:
+                return {'status':'context_unavailable', 'view':'context',
+                        'page_sequence_complete':False, 'complete':False, 'next_cursor':None}
+            try:
+                # Read bytes: text-mode newline conversion would break CRLF integrity.
+                raw = archive.window_path(ref['context_window']).read_bytes().decode('utf-8')
+                if not ref.get('context_sha256') or digest(raw) != ref['context_sha256']:
+                    raise ValueError('window hash')
+                window = json.loads(raw)
+                if (window['task_id'] != self.state['task_id'] or
+                        archive.task != self.state['task'] or archive.task_id != self.state['task_id'] or
+                        window['cycle_id'] != ref['context_window'] or
+                        not isinstance(window['model_input'], str)):
+                    raise ValueError('window identity')
+            except FileNotFoundError:
+                return {'status':'context_missing', 'view':'context',
+                        'page_sequence_complete':False, 'complete':False, 'next_cursor':None}
+            except (ValueError, KeyError, TypeError, OSError):
+                return {'status':'source_binding_error'}
+            fields = [('context', 'model_input', 'raw_string', window['model_input'])]
+        else:
+            try:
+                fields = self._fields(sources)
+            except KeyError:
+                if view is None:
+                    raise
+                return {'status':'source_missing', 'view':view,
+                        'page_sequence_complete':False, 'complete':False, 'next_cursor':None}
         association = (ref or {}).get('association', 'legacy_unassociated' if target['kind'] in {'memory', 'status'} else 'selected')
-        if not fields and ref and archive is not None and ref.get('context_window'):
+        if view is None and not fields and ref and archive is not None and ref.get('context_window'):
             try:
                 raw = archive.window_path(ref['context_window']).read_text(encoding='utf-8')
             except FileNotFoundError:
@@ -250,6 +280,8 @@ class SourceLinks:
             fields = [('context', 'generation_window_not_selected_evidence', 'raw_string', window['model_input'])]
         snapshot = digest(encode({'task_id': self.state['task_id'], 'target': key,
                                  'ref': ref, 'fields': fields}))
+        if view is not None:
+            snapshot = digest(encode([snapshot, view]))
         i, offset = 0, 0
         if cursor is not None:
             try:
@@ -278,6 +310,15 @@ class SourceLinks:
             'page_sequence_complete':not fields,
             'unread_reason':'no_linked_sources' if unassociated else 'unassociated_inherited_sources' if unresolved else None,
             'page_char_limit': PAGE_CHARS}
+        if view is not None:
+            result.update(view=view, available_views=['sources'] + (
+                ['context'] if ref and ref.get('context_window') and ref.get('context_sha256') else []),
+                truncated=bool(fields), complete=False, semantic_verification_performed=False,
+                scope=('Frozen visible generation input; not per-claim evidence or semantic verification.'
+                       if view == 'context' else
+                       'Selected or inherited sources; not proof or semantic verification.'))
+        if view == 'context':
+            result['unread_reason'] = None
         while i < len(fields):
             sid, field, encoding, text = fields[i]
             low, high, best = offset, len(text), None
@@ -290,6 +331,11 @@ class SourceLinks:
                 trial['page_sequence_complete'] = ni == len(fields)
                 trial['complete'] = trial['page_sequence_complete'] and not unassociated and not unresolved
                 trial['status'] = complete_status if trial['page_sequence_complete'] else 'source_unassociated' if unassociated else 'source_partial'
+                if view is not None:
+                    trial['truncated'] = not trial['page_sequence_complete']
+                    trial['complete'] = False
+                    if view == 'context':
+                        trial['status'] = 'context_complete' if trial['page_sequence_complete'] else 'context_partial'
                 trial['next_cursor'] = None if trial['page_sequence_complete'] else self._cursor([self.state['task_id'], key, snapshot, ni, no])
                 if len(encode(trial)) <= PAGE_CHARS:
                     best = trial, ni, no
