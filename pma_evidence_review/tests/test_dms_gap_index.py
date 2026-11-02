@@ -107,6 +107,10 @@ class GapIndexTests(unittest.TestCase):
         self.assertTrue(DMSP1Agent._valid_keep(a,{'category':'gap','source_ids':['TASK']}))
         with self.assertRaises(ValueError):
             DMSP1Agent(task=a.task,task_id='task',source_root=self.tmp.name,memory=GapMemory(),llm=None)
+        # Text contract, not a claim about model judgment.
+        self.assertIn('its condition is met, its question is answered',SYSTEM)
+        self.assertIn('clearly no longer applies',SYSTEM)
+        self.assertIn('A failure result may answer what happened',SYSTEM)
         self.assertIs(candidate_config(CANDIDATE)[0],GapIndexP1Agent)
         self.assertEqual(len(source_identity(candidate=CANDIDATE,strict=False)['source_files']),65)
 
