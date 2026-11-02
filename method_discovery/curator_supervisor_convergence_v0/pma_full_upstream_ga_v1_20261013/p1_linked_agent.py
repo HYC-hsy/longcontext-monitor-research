@@ -177,6 +177,9 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
         return {'status':'applied' if all(op.success for op in operations) else 'tool_error',
                 'operations':[vars(op).copy() for op in operations]}
 
+    def _capture_window(self, *args, **kwargs):
+        return self.source_archive.capture(*args, **kwargs)
+
     def _stop_batch_after(self, call, result):
         return False
 
@@ -205,7 +208,7 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                 window_id = report['cycle_id']+f'_r{round_index}'
                 window_events = [{'event_id':r['source_id'],'presentation':r['presentation']}
                                  for r in self.shown_events]
-                self.source_archive.capture(window_id,prompt,window_events,presented_source_receipts=receipts,
+                self._capture_window(window_id,prompt,window_events,presented_source_receipts=receipts,
                     raw_generation_context=self._raw_generation_context,input_projection=projection)
                 request = {'kind':'request','cycle_id':report['cycle_id'],'window_id':window_id,
                     'prompt':prompt,'system':self.system,'tools':tools,'source_aliases':deepcopy(self.request_aliases)}

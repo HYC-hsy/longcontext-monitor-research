@@ -219,7 +219,8 @@ class SourceLinks:
         signature = hmac.new(self.state['secret'].encode(), raw, hashlib.sha256).hexdigest()
         return token + '.' + signature
 
-    def read(self, target, active, *, cursor=None, archive=None, view=None):
+    def read(self, target, active, *, cursor=None, archive=None, view=None,
+             _extra_fields=(), _read_metadata=None, _atomic_fields=()):
         # target is a frozen displayed object, never an arbitrary path or lookup.
         key = target.get('id', target.get('source_id'))
         ref = None
@@ -278,10 +279,13 @@ class SourceLinks:
             if window['task_id'] != self.state['task_id']:
                 return {'status': 'source_binding_error'}
             fields = [('context', 'generation_window_not_selected_evidence', 'raw_string', window['model_input'])]
+        fields = list(_extra_fields) + fields
         snapshot = digest(encode({'task_id': self.state['task_id'], 'target': key,
                                  'ref': ref, 'fields': fields}))
         if view is not None:
             snapshot = digest(encode([snapshot, view]))
+        if _read_metadata is not None:
+            snapshot = digest(encode([snapshot, _read_metadata]))
         i, offset = 0, 0
         if cursor is not None:
             try:
@@ -294,7 +298,9 @@ class SourceLinks:
                 if not hmac.compare_digest(sig, expected) or value[:3] != [self.state['task_id'], key, snapshot]:
                     raise ValueError('cursor scope')
                 i, offset = value[3:]
-                if type(i) is not int or type(offset) is not int or i < 0 or i >= len(fields) or not 0 <= offset <= len(fields[i][3]):
+                if (type(i) is not int or type(offset) is not int or i < 0 or i >= len(fields) or
+                        not 0 <= offset <= len(fields[i][3]) or
+                        ((fields[i][0],fields[i][1]) in _atomic_fields and offset != 0)):
                     raise ValueError('cursor position')
             except (ValueError, TypeError, KeyError, IndexError):
                 return {'status': 'invalid_cursor'}
@@ -317,11 +323,15 @@ class SourceLinks:
                 scope=('Frozen visible generation input; not per-claim evidence or semantic verification.'
                        if view == 'context' else
                        'Selected or inherited sources; not proof or semantic verification.'))
+        if _read_metadata is not None:
+            result.update(_read_metadata)
         if view == 'context':
             result['unread_reason'] = None
         while i < len(fields):
             sid, field, encoding, text = fields[i]
             low, high, best = offset, len(text), None
+            if (sid,field) in _atomic_fields:
+                low = high = len(text)
             while low <= high:
                 end = (low + high) // 2
                 ni, no = (i + 1, 0) if end == len(text) else (i, end)

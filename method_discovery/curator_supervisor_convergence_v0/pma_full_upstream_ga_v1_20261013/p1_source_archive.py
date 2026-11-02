@@ -185,7 +185,7 @@ class SourceArchive:
         return rows
 
     def capture(self, cycle_id, model_input, events, *, presented_source_receipts=(),
-                raw_generation_context=None, input_projection=None):
+                raw_generation_context=None, input_projection=None, input_memory_coverage=None):
         path = self.window_path(cycle_id)
         path.parent.mkdir(exist_ok=True)
         value = {'task_id': self.task_id, 'cycle_id': cycle_id,
@@ -197,6 +197,8 @@ class SourceArchive:
         if raw_generation_context is not None:
             value['raw_generation_context'] = deepcopy(raw_generation_context)
             value['input_projection'] = deepcopy(input_projection)
+        if input_memory_coverage is not None:
+            value['input_memory_coverage'] = deepcopy(input_memory_coverage)
         with path.open('x', encoding='utf-8') as stream:
             stream.write(encode(value))
         return value
