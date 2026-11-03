@@ -51,7 +51,8 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
                        research_candidate: str = "U",
                        citation_review_gate: str | None = None, citation_review_strategy: str | None = None,
                        memory_maintenance_policy: str | None = None) -> MemoryEnabledTerminus2:
-    from citation_gate_config import validate_gate,validate_strategy,validate_maintenance,BANK_DISPLAY_POLICY
+    from citation_gate_config import (validate_gate,validate_strategy,validate_maintenance,
+                                      BANK_DISPLAY_POLICY,REQUIREMENT_REMINDER_POLICY)
     validate_maintenance(memory_maintenance_policy,research_candidate,citation_review_gate,citation_review_strategy)
     validate_gate(citation_review_gate,research_candidate)
     review_strategy=validate_strategy(citation_review_gate,citation_review_strategy)
@@ -103,7 +104,7 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
             from gap_memory_agent import GapMemoryAgent
             from gap_store import GapMemory
         original = agent._memory_agent
-        if memory_maintenance_policy == BANK_DISPLAY_POLICY:
+        if memory_maintenance_policy in (BANK_DISPLAY_POLICY,REQUIREMENT_REMINDER_POLICY):
             from bank_display_agent import BankDisplayAgent
             bank = BankDisplayAgent.load_bank(agent._memory.to_dict())
         else:
@@ -115,7 +116,11 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
             use_bm25_prefilter=original.use_bm25_prefilter,
             keep_thinking=original.keep_thinking,
             use_structured_tools=original.use_structured_tools)
-        if memory_maintenance_policy is not None:
+        if memory_maintenance_policy == REQUIREMENT_REMINDER_POLICY:
+            # The P1 archive must be created only after the real original task arrives.
+            agent._memory_maintenance_policy = REQUIREMENT_REMINDER_POLICY
+            agent._requirement_source_root = Path(logs_dir)/'requirement_sources'
+        elif memory_maintenance_policy is not None:
             if memory_maintenance_policy == BANK_DISPLAY_POLICY:
                 policy_class = BankDisplayAgent
             else:
@@ -202,6 +207,38 @@ class PMAEpisode:
         self._lock = asyncio.Lock()
         self._failure = None
         self._active_event_id = None
+        self._requirement_entries = []
+
+    async def _run_requirement_reminder(self, *, step_count: int) -> None:
+        """The opt-in composed candidate; do not use upstream's silent error handler."""
+        from p1_source_archive import encode
+        pipeline = self.agent._requirement_pipeline
+        p1, p2 = pipeline.p1, pipeline.p2
+        before = self.agent._memory.to_dict()
+        def p1_before(request):
+            p1.transport_phase = ('requirement_initialization' if
+                                  request.get('kind') == 'requirement_initialization' else 'maintenance')
+        def p2_before(request):
+            p1.transport_phase = 'selection'
+        p1.before_request, p2.before_request = p1_before, p2_before
+        entries = deepcopy(self._requirement_entries[-8:])
+        report = await pipeline.run(entries, observation=None, step_count=step_count,
+                                    cycle_id=f'{self.run_id}_step_{step_count}')
+        row = {'step':step_count,'entries':entries,'bank_before':before,
+               'bank_after':self.agent._memory.to_dict(),'report':report}
+        with (self.archive/'requirement_cycles.jsonl').open('a',encoding='utf-8') as stream:
+            stream.write(encode(row)+'\n')
+            stream.flush()
+            os.fsync(stream.fileno())
+        if report['status'] not in ('intervention','no_intervention'):
+            raise RuntimeError('requirement reminder cycle failed: '+report['status'])
+        self.agent._memory_trigger_count += 1
+        if report['should_inject']:
+            self.agent._pending_injection = report['context_for_action']
+            self.agent._injection_used = False
+            self.agent._injection_count += 1
+        else:
+            self.agent._noop_count += 1
 
     def _record(self, event: dict[str, Any], result: dict[str, Any]) -> None:
         line = json.dumps({"event": event, "result": result},
@@ -274,6 +311,7 @@ class PMAEpisode:
                                    failure.get('failure_id', 'unavailable'))
             self._record(event, result)
             if (getattr(self.agent, '_research_candidate', None) in {'pma_gap_memory_v0', 'pma_gap_evidence_v1'}
+                    and getattr(self.agent,'_memory_maintenance_policy',None) != 'pma-requirement-reminder-v1'
                     and result.get('triggered')):
                 with (self.archive / 'gap_cycle.jsonl').open('a', encoding='utf-8') as stream:
                     stream.write(json.dumps({
@@ -323,6 +361,13 @@ class PMAEpisode:
             raise ValueError("task_start is only valid once")
         raw = event.get("initial_user_content")
         text = stable_initial_text(raw)
+        if getattr(self.agent,'_memory_maintenance_policy',None) == 'pma-requirement-reminder-v1':
+            from p1_requirement_agent import RequirementP1Agent
+            from p2_requirement_reminder import RequirementReminderPipeline
+            p1 = RequirementP1Agent(task=text,task_id=self.task_id,memory=self.agent._memory,
+                llm=self.agent._memory_llm,source_root=self.agent._requirement_source_root)
+            self.agent._memory_agent = p1
+            self.agent._requirement_pipeline = RequirementReminderPipeline(p1)
         self.agent._memory_step_in_episode = 0
         self.agent._trigger.reset()
         self.agent._accumulated_observations.clear()
@@ -355,14 +400,17 @@ class PMAEpisode:
         triggered, reason = self.agent._trigger.should_trigger(step_count=1)
         self.started = True
         if triggered:
-            if getattr(self.agent, "_research_candidate", None) == "pma_gap_evidence_v1":
+            if getattr(self.agent,'_memory_maintenance_policy',None) == 'pma-requirement-reminder-v1':
+                await self._run_requirement_reminder(step_count=1)
+            elif getattr(self.agent, "_research_candidate", None) == "pma_gap_evidence_v1":
                 from evidence_gap_context import prepare_context
                 prepare_context(self.agent)
             elif getattr(self.agent, '_memory_maintenance_policy', None) == 'pma-bank-display-v1':
                 self.agent._memory_agent.prepare_selection_context(
                     self.agent._get_memory_agent_context(),
                     self.agent._accumulated_observations[1:][-self.agent._sliding_window_size:])
-            await self.agent._trigger_memory_agent(step_count=1)
+            if getattr(self.agent,'_memory_maintenance_policy',None) != 'pma-requirement-reminder-v1':
+                await self.agent._trigger_memory_agent(step_count=1)
         return {"status": "started", "triggered": triggered, "trigger_reason": reason,
                 "initial_envelope_sha256": hashlib.sha256(
                     json.dumps(raw, ensure_ascii=False, sort_keys=True).encode()).hexdigest()}
@@ -376,7 +424,11 @@ class PMAEpisode:
         self.agent._memory_step_in_episode = attempt
         self.last_attempt = attempt
         candidate_agent = self.agent._memory_agent
-        if hasattr(candidate_agent, "pending_refs_valid") and self.agent._pending_injection:
+        if getattr(self.agent,'_memory_maintenance_policy',None) == 'pma-requirement-reminder-v1' and self.agent._pending_injection:
+            if not self.agent._requirement_pipeline.p2.pending_refs_valid():
+                raise RuntimeError('requirement reminder invalid before Task delivery')
+        if (getattr(self.agent,'_memory_maintenance_policy',None) != 'pma-requirement-reminder-v1'
+                and hasattr(candidate_agent, "pending_refs_valid") and self.agent._pending_injection):
             if not candidate_agent.pending_refs_valid():
                 self.agent._pending_injection = None
                 candidate_agent.last_delivery_status = "invalid_reference_no_delivery"
@@ -470,6 +522,9 @@ class PMAEpisode:
                 or source_id.startswith(event["event_id"] + ":")]
         self.agent._accumulate_step(step=step, observation=observation,
                                     analysis=analysis, plan=plan, commands=commands)
+        if getattr(self.agent,'_memory_maintenance_policy',None) == 'pma-requirement-reminder-v1':
+            self._requirement_entries.append({'step':step,'event_id':event['event_id'],
+                'analysis':analysis,'plan':plan,'commands':commands,'observation':observation})
         if hasattr(self.agent._memory, "register_source"):
             self.agent._accumulated_observations[-1]["_source_event_id"] = event["event_id"]
         if getattr(self.agent, "_research_candidate", None) == "pma_gap_evidence_v1":
@@ -480,14 +535,17 @@ class PMAEpisode:
                 self.agent._accumulated_observations[-1]["_execution_inventory"] = inventory_from_accepted_event(event)
         triggered, reason = self.agent._trigger.should_trigger(step_count=step)
         if triggered:
-            if getattr(self.agent, "_research_candidate", None) == "pma_gap_evidence_v1":
+            if getattr(self.agent,'_memory_maintenance_policy',None) == 'pma-requirement-reminder-v1':
+                await self._run_requirement_reminder(step_count=step)
+            elif getattr(self.agent, "_research_candidate", None) == "pma_gap_evidence_v1":
                 from evidence_gap_context import prepare_context
                 prepare_context(self.agent)
             elif getattr(self.agent, '_memory_maintenance_policy', None) == 'pma-bank-display-v1':
                 self.agent._memory_agent.prepare_selection_context(
                     self.agent._get_memory_agent_context(),
                     self.agent._accumulated_observations[1:][-self.agent._sliding_window_size:])
-            await self.agent._trigger_memory_agent(step_count=step)
+            if getattr(self.agent,'_memory_maintenance_policy',None) != 'pma-requirement-reminder-v1':
+                await self.agent._trigger_memory_agent(step_count=step)
         self.last_completed_attempt = attempt
         return {"status": "observed", "triggered": triggered,
                 "trigger_reason": reason, "step_count": step}

@@ -1,6 +1,7 @@
 """Small shared opt-in contract; no imports of clients, profiles or benchmark data."""
 MAINTENANCE_POLICY='maintain-scoped-latest-no-review-v1'
 BANK_DISPLAY_POLICY='pma-bank-display-v1'
+REQUIREMENT_REMINDER_POLICY='pma-requirement-reminder-v1'
 MODES=('gate-only','gate-one-repair')
 STRATEGY='semantic-support-one-sentence-v1'
 CLAIM_SPLIT='claim-split-same-evidence-v2'
@@ -60,7 +61,8 @@ def gate_source_paths():
 
 def validate_maintenance(policy,candidate,mode=None,strategy=None,condition='B'):
     carriers = {MAINTENANCE_POLICY: 'pma_gap_evidence_v1',
-                BANK_DISPLAY_POLICY: 'pma_gap_memory_v0'}
+                BANK_DISPLAY_POLICY: 'pma_gap_memory_v0',
+                REQUIREMENT_REMINDER_POLICY: 'pma_gap_memory_v0'}
     if policy is not None and (policy not in carriers or
             candidate != carriers[policy] or condition != 'B' or
             mode is not None or strategy is not None):
@@ -78,6 +80,17 @@ def require_maintenance_binding(policy,config,candidate,condition='B'):
 
 def maintenance_source_paths(policy=MAINTENANCE_POLICY):
     from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.single_run_certification import EVIDENCE_GAP_SOURCE_FILES, GAP_SOURCE_FILES
+    if policy == REQUIREMENT_REMINDER_POLICY:
+        from pathlib import Path
+        stage=Path(__file__).resolve().parent
+        root=stage.parents[2]
+        names=('bank_display_agent.py','selection_context.py','p1_source_archive.py',
+            'p1_source_agent.py','p1_source_links.py','p1_linked_agent.py',
+            'p1_context_history.py','p1_context_agent.py','p1_requirements.py',
+            'p1_requirement_agent.py','p2_requirement_view.py',
+            'p2_requirement_agent.py','p2_requirement_reminder.py')
+        return list(dict.fromkeys(list(GAP_SOURCE_FILES)+[
+            (stage/name).relative_to(root).as_posix() for name in names]))
     return list(GAP_SOURCE_FILES if policy == BANK_DISPLAY_POLICY else EVIDENCE_GAP_SOURCE_FILES)
 
 

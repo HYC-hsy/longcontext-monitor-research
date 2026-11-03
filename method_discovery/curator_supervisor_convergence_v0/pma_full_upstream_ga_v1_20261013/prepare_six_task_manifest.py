@@ -268,7 +268,9 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
     if schema == 'pma-ga-live-manifest-v5':
         method['research_candidate'] = candidate
         if candidate in ('pma_gap_memory_v0', 'pma_gap_evidence_v1'):
-            label = ('GA_plus_evidence_gap_PMA_v1' if candidate == 'pma_gap_evidence_v1'
+            label = ('GA_plus_requirement_P1_generated_P2_v1' if
+                     maintenance_policy == 'pma-requirement-reminder-v1' else
+                     'GA_plus_evidence_gap_PMA_v1' if candidate == 'pma_gap_evidence_v1'
                      else 'GA_plus_reviewed_gap_PMA_v0')
             method.update(conditions={'B': label},
                           task_turns_max=None)

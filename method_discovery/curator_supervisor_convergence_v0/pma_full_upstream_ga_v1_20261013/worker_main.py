@@ -280,7 +280,7 @@ def main() -> None:
     parser.add_argument("--citation-review-gate",choices=('gate-only','gate-one-repair'))
     from citation_gate_config import STRATEGIES
     parser.add_argument('--citation-review-strategy',choices=STRATEGIES)
-    parser.add_argument('--memory-maintenance-policy',choices=('maintain-scoped-latest-no-review-v1','pma-bank-display-v1'))
+    parser.add_argument('--memory-maintenance-policy',choices=('maintain-scoped-latest-no-review-v1','pma-bank-display-v1','pma-requirement-reminder-v1'))
     parser.add_argument("--research-candidate", choices=("U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0", "pma_gap_evidence_v1"), default="U")
     asyncio.run(serve(parser.parse_args()))
 
