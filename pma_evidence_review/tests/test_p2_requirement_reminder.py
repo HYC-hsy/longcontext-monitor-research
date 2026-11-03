@@ -57,6 +57,23 @@ class ReminderTests(unittest.TestCase):
                 self.assertFalse(result['should_inject'])
                 self.assertIsNone(result['delivery'])
 
+    def test_explicit_no_op_with_trailing_plain_explanation_is_not_a_host_failure(self):
+        self.build()
+        raw = '<no_intervention/>\n\nThe agent is proceeding with the visible requirements.'
+        self.p2_responses = [reply(content=raw)]
+        result = self.run_reminder()
+        self.assertEqual(result['status'], 'no_intervention')
+        self.assertFalse(result['should_inject'])
+        self.assertEqual(result['raw_output'], raw)
+        self.assertEqual(result['normalized_output'], '<no_intervention/>')
+        self.assertTrue(result['ignored_trailing_explanation'])
+        for invalid in ('<no_intervention/>\n<context_for_action>note</context_for_action>',
+                        '<no_intervention/>\n<tool_call>bad</tool_call>',
+                        '<context_for_action>note</context_for_action>\nexplanation'):
+            with self.subTest(invalid=invalid):
+                self.p2_responses = [reply(content=invalid)]
+                self.assertEqual(self.run_reminder()['status'], 'selection_error')
+
     def test_theme_and_flat_then_evidence_then_synthesized_reminder(self):
         self.build()
         self.p2.max_memory_in_prompt = 0

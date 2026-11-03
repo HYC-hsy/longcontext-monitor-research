@@ -50,8 +50,21 @@ class RequirementReminderAgent(RequirementSelectionAgent):
             '<context_for_action>...</context_for_action>; otherwise return <no_intervention/>.\n')
 
     @staticmethod
+    def _normalize_final(raw):
+        """Ignore prose after an explicit no-op tag, never a second decision/tag."""
+        if raw == '<no_intervention/>':
+            return raw, False
+        prefix = '<no_intervention/>\n'
+        if raw.startswith(prefix):
+            explanation = raw[len(prefix):].strip()
+            if explanation and '<' not in explanation and '>' not in explanation:
+                return '<no_intervention/>', True
+        return raw, False
+
+    @staticmethod
     def _complete_final(raw):
-        if raw=='<no_intervention/>':
+        normalized, _ = RequirementReminderAgent._normalize_final(raw)
+        if normalized=='<no_intervention/>':
             return True
         match = re.fullmatch(r'<context_for_action>([\s\S]*?)</context_for_action>',raw)
         return bool(match and match.group(1).strip() and raw.count('<context_for_action>')==1 and
@@ -89,14 +102,16 @@ class RequirementReminderAgent(RequirementSelectionAgent):
             if not self._version_valid():
                 raise ValueError(self.view.validation_error or 'frozen_reminder_version_changed')
             raw = text.strip()
+            normalized, ignored_explanation = self._normalize_final(raw)
             if not self._complete_final(raw):
                 raise ValueError('invalid_reminder_protocol')
             # Reuse the actual pinned PMA parser after strict framing: upstream's malformed
             # response fallback to no-op must not disguise an engineering failure.
-            note = MemoryAgent._parse_phase2_response(self,raw)
+            note = MemoryAgent._parse_phase2_response(self,normalized)
             report.update(status='intervention' if note is not None else 'no_intervention',
                 should_inject=note is not None,context_for_action=note,delivery=note,
-                grounding='model-synthesized; not mechanically verified',raw_output=raw)
+                grounding='model-synthesized; not mechanically verified',raw_output=raw,
+                normalized_output=normalized,ignored_trailing_explanation=ignored_explanation)
         except ValueError as exc:
             report.update(status='selection_error',error=str(exc))
 
