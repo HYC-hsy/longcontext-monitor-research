@@ -359,6 +359,134 @@ class RequirementTaskEntryTests(unittest.TestCase):
                 self.assertIsNone(episode._failure)
 
 
+    def test_provider_failure_never_waives_corrupt_dirty_or_running_p1(self):
+        from copy import deepcopy
+        from p1_requirements import KEY
+        for phase in ('maintenance','selection'):
+            for kind in ('dirty','running','file_corrupt','refs_corrupt'):
+                def final(agent):
+                    p1=agent._memory_agent
+                    if kind=='dirty':
+                        p1.memory.status='UNCOMMITTED STATUS'
+                    elif kind=='file_corrupt':
+                        p1.links.path.write_bytes(b'corrupt persisted bundle')
+                    else:
+                        state=deepcopy(p1.links.state)
+                        if kind=='running':state[KEY]['cycles']['interrupted']={'phase':'running'}
+                        else:state['refs']=None
+                        p1.links.commit(state)
+                    raise RuntimeError('synthetic provider failure')
+                with self.subTest(kind=kind,phase=phase),tempfile.TemporaryDirectory() as tmp:
+                    episode,_=self.setup_run(Path(tmp),[
+                        reply(calls=[('requirements_initialize',{'requirements':[]})]),
+                        *([reply()] if phase=='selection' else []),final])
+                    with self.assertRaises(EpisodeFault):
+                        asyncio.run(episode.handle(event('task_start',1,initial_user_content='Original task')))
+                    report=json.loads((episode.archive/'requirement_cycles.jsonl').read_text().splitlines()[0])['report']
+                    self.assertEqual(report['status'],'engineering_error')
+                    if phase=='selection':
+                        self.assertEqual(report['failure_kind'],'integrity')
+                        self.assertEqual(report['p2']['status'],'memory_error')
+                    else:
+                        self.assertIsNone(report['p2'])
+                    self.assertNotIn('error_policy',report)
+                    if phase=='selection':
+                        self.assertEqual((report['model_calls_attempted'],report['model_calls_completed']),(3,2))
+                    if kind=='file_corrupt':
+                        self.assertEqual(episode.agent._memory_agent.links.path.read_bytes(),b'corrupt persisted bundle')
+                    self.assertIsNotNone(episode._failure)
+                    self.assertIsNone(episode.agent._pending_injection)
+                    self.assertEqual(episode.agent._noop_count,0)
+
+    def test_final_state_structure_errors_are_never_model_output_recovery(self):
+        from copy import deepcopy
+        from p1_requirements import KEY
+        for kind in ('catalog_none','catalog_type','validator_typeerror'):
+            def final(agent):
+                p1=agent._memory_agent
+                if kind=='validator_typeerror':
+                    def broken_validation():raise TypeError('synthetic state validator failure')
+                    agent._requirement_pipeline.p2._version_valid=broken_validation
+                else:
+                    state=deepcopy(p1.links.state)
+                    state[KEY]['catalog']=None if kind=='catalog_none' else 7
+                    p1.links.commit(state)
+                return reply('ordinary prefix <context_for_action>note</context_for_action>')
+            with self.subTest(kind=kind),tempfile.TemporaryDirectory() as tmp:
+                episode,_=self.setup_run(Path(tmp),[
+                    reply(calls=[('requirements_initialize',{'requirements':[]})]),reply(),final])
+                with self.assertRaises(EpisodeFault):
+                    asyncio.run(episode.handle(event('task_start',1,initial_user_content='Original task')))
+                report=json.loads((episode.archive/'requirement_cycles.jsonl').read_text().splitlines()[0])['report']
+                self.assertNotIn('error_policy',report)
+                self.assertIn(report['p2']['failure_kind'],('integrity','engineering'))
+                self.assertNotEqual(report['p2']['failure_kind'],'model_output')
+                self.assertIsNone(episode.agent._pending_injection)
+                self.assertEqual((report['model_calls_attempted'],report['model_calls_completed']),(3,3))
+
+    def test_adapter_rechecks_soft_exit_after_pipeline_and_after_initialization_abort(self):
+        from copy import deepcopy
+        from unittest.mock import patch
+        from p1_requirements import KEY
+        from p2_requirement_reminder import RequirementReminderPipeline
+        original=RequirementReminderPipeline.run
+        async def late_mutation(pipeline,*args,**kwargs):
+            report=await original(pipeline,*args,**kwargs)
+            pipeline.p1.memory.status='DIRTY AFTER PIPELINE VALIDATED'
+            return report
+        with tempfile.TemporaryDirectory() as tmp:
+            episode,_=self.setup_run(Path(tmp),[
+                reply(calls=[('requirements_initialize',{'requirements':[]})]),reply(),RuntimeError('provider failure')])
+            with patch.object(RequirementReminderPipeline,'run',late_mutation),self.assertRaises(EpisodeFault):
+                asyncio.run(episode.handle(event('task_start',1,initial_user_content='Original task')))
+            report=json.loads((episode.archive/'requirement_cycles.jsonl').read_text().splitlines()[0])['report']
+            self.assertEqual(report['error'],'p1_live_bank_not_committed')
+            self.assertNotIn('error_policy',report)
+        def fail_init(agent):
+            p1=agent._memory_agent
+            state=deepcopy(p1.links.state)
+            state[KEY]['cycles']['other_interrupted']={'phase':'running'}
+            p1.links.commit(state)
+            raise RuntimeError('initialization provider failure')
+        with tempfile.TemporaryDirectory() as tmp:
+            episode,_=self.setup_run(Path(tmp),[fail_init])
+            with self.assertRaises(EpisodeFault):
+                asyncio.run(episode.handle(event('task_start',1,initial_user_content='Original task')))
+            report=json.loads((episode.archive/'requirement_cycles.jsonl').read_text().splitlines()[0])['report']
+            self.assertEqual(report['error'],'unresolved_p1_maintenance_cycle')
+            self.assertNotIn('error_policy',report)
+            self.assertIsNone(episode.agent._memory_agent.requirement_state.data['catalog'])
+
+
+    def test_bundle_container_and_secret_types_cannot_be_waived_by_provider_error(self):
+        from copy import deepcopy
+        from p1_requirements import KEY
+        corruptions=[(key,value) for key in ('events','accepted','refs','bank',KEY,'history_grants')
+                     for value in (None,[])]
+        corruptions += [('presented',None),('presented',{}),('secret',None),('secret',17),
+                        ('secret',[]),('secret',''),('schema',None),('schema','unknown-schema')]
+        for phase in ('maintenance','selection'):
+            for key,value in corruptions:
+                def fail(agent):
+                    p1=agent._memory_agent
+                    state=deepcopy(p1.links.state)
+                    state[key]=value
+                    p1.links.commit(state)
+                    try:raise ValueError('inner synthetic exception')
+                    except ValueError as inner:raise RuntimeError('wrapped provider exception') from inner
+                with self.subTest(phase=phase,key=key,value=value),tempfile.TemporaryDirectory() as tmp:
+                    answers=[reply(calls=[('requirements_initialize',{'requirements':[]})])]
+                    answers += [reply()] if phase=='selection' else []
+                    episode,_=self.setup_run(Path(tmp),answers+[fail])
+                    with self.assertRaises(EpisodeFault):
+                        asyncio.run(episode.handle(event('task_start',1,initial_user_content='Original task')))
+                    report=json.loads((episode.archive/'requirement_cycles.jsonl').read_text().splitlines()[0])['report']
+                    self.assertNotIn('error_policy',report)
+                    self.assertIsNotNone(episode._failure)
+                    self.assertIsNone(episode.agent._pending_injection)
+                    self.assertEqual(episode.agent._noop_count,0)
+
+
 
 if __name__=='__main__':
     unittest.main()

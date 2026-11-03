@@ -6,11 +6,11 @@ import uuid
 from p1_source_archive import encode, digest
 from p1_source_links import SourceLinks
 from p1_context_history import HistoryError, InputMemoryHistory
-from p1_requirements import RequirementHistory, KEY, canonical
+from p1_requirements import RequirementHistory, KEY, canonical, catalog, assignment
 from tag_selection_contract import Snapshot, Item
 
 
-def p1_boundary_error(p1):
+def p1_boundary_error(p1, *, allow_uninitialized=False):
     if p1._active or p1._requirement_active:
         return 'p1_maintenance_active'
     try:
@@ -20,15 +20,62 @@ def p1_boundary_error(p1):
             return 'p1_state_unavailable_or_corrupt'
         if saved['sha256']!=digest(encode(p1.links.state)):
             return 'p1_state_not_reconciled'
+        if (state.get('schema')!='p1-source-links-v1' or
+                any(not isinstance(state.get(key),dict) for key in ('events','accepted','refs','bank',KEY)) or
+                not isinstance(state.get('history_grants',{}),dict) or
+                not isinstance(state.get('presented'),list) or
+                not isinstance(state.get('secret'),str) or not state['secret']):
+            return 'p1_state_unavailable_or_corrupt'
         if encode(state['bank'])!=encode(p1.memory.to_dict()):
             return 'p1_live_bank_not_committed'
-        cycles = state[KEY]['cycles']
+        if not isinstance(state['refs'],dict) or not isinstance(state['bank']['status'],str):
+            return 'p1_state_unavailable_or_corrupt'
+        status_ref = state['refs'].get('STATUS')
+        if status_ref is None and state['bank']['status']:
+            return 'p1_state_unavailable_or_corrupt'
+        if status_ref is not None and (status_ref['category']!='status' or
+                status_ref['content_sha256']!=digest(state['bank']['status'])):
+            return 'p1_state_unavailable_or_corrupt'
+        metadata = state[KEY]
+        fixed = metadata['catalog']
+        if (metadata['schema']!=KEY or metadata['task_sha256']!=digest(p1.task)
+                or state['task']!=p1.task or state['task_id']!=p1.source_archive.task_id):
+            return 'p1_state_unavailable_or_corrupt'
+        if fixed is None:
+            if not allow_uninitialized:
+                return 'p1_requirements_uninitialized'
+            if state['refs'] or any(state['bank'][k] for k in ('knowledge','procedural','gaps','status')):
+                return 'p1_state_unavailable_or_corrupt'
+        elif catalog(fixed)!=fixed:
+            return 'p1_state_unavailable_or_corrupt'
+        for key,row in p1._active_records().items():
+            ref = state['refs'][key]
+            if (ref['category']!=row.category or ref['content_sha256']!=digest(row.content)
+                    or assignment(ref['requirements'],fixed or [])!=ref['requirements']):
+                return 'p1_state_unavailable_or_corrupt'
+        cycles = metadata['cycles']
         if not isinstance(cycles,dict) or any(not isinstance(row,dict) or
                 row.get('phase') not in ('done','abandoned') for row in cycles.values()):
             return 'unresolved_p1_maintenance_cycle'
-    except (OSError,ValueError,KeyError,TypeError):
+    except (OSError,ValueError,KeyError,TypeError,AttributeError):
         return 'p1_state_unavailable_or_corrupt'
     return None
+
+
+def validate_continuation(p1, report, *, allow_uninitialized=False):
+    """Ordinary memory errors may continue only from a currently healthy P1 state."""
+    if report.get('error_policy')!='continue_without_reminder':
+        return
+    try:
+        error = p1_boundary_error(p1,allow_uninitialized=allow_uninitialized)
+    except Exception as exc:
+        error = 'p1_state_validation_failed'
+        report['validation_error_type'] = type(exc).__name__
+    if error:
+        report.update(optional_memory_status=report['status'],status='engineering_error',
+            failure_kind='integrity',error_stage='continuation_validation',error=error,
+            should_inject=False,context_for_action=None,delivery=None)
+        report.pop('error_policy',None)
 
 
 class SnapshotLinks(SourceLinks):

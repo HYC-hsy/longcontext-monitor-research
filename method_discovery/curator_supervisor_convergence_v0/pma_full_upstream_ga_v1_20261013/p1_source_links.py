@@ -120,6 +120,11 @@ class SourceLinks:
                 temp.unlink()
 
     def commit(self, state):
+        if getattr(self,'require_current_bundle',False):
+            state = deepcopy(state)  # Caller receipts must not mutate the committed cache later.
+            saved = json.loads(self.path.read_bytes())
+            if saved['sha256']!=digest(encode(saved['data'])) or saved['sha256']!=digest(encode(self.state)):
+                raise ValueError('source-link current bundle corrupt or not reconciled')
         self._persist(state)
         self.state = state
 

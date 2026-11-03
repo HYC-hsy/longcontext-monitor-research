@@ -24,6 +24,7 @@ class RequirementP1Agent(ContextSourceP1Agent):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.links.require_current_bundle = True
         self.requirement_state = RequirementState(self)
         self.history = RequirementHistory(self.links,self.source_archive)
         self._requirement_active = False

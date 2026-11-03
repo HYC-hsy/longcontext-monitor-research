@@ -183,6 +183,7 @@ class RequirementSelectionAgent(BankDisplayAgent):
                 calls = self._response_calls(response,index,text)
                 turn['tool_calls'] = calls
                 if not calls:
+                    stage = 'finalization'
                     self._finish(text,report)
                     break
                 failed = None

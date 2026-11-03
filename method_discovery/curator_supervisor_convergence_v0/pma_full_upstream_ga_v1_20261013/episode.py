@@ -237,6 +237,8 @@ class PMAEpisode:
                 and p1.requirement_state.data['catalog'] is None and self.agent._memory.to_dict()==before):
             p1.requirement_state.phase(phase1['cycle_id'],'done',result=phase1)
             report.update(error_policy='continue_without_reminder',initialization_aborted_without_maintenance=True)
+        from p2_requirement_view import validate_continuation
+        validate_continuation(p1,report,allow_uninitialized=bool(report.get('initialization_aborted_without_maintenance')))
         from memory_agent.memory.memory_agent import MemoryAgentResult, MemoryOperation
         operations = [MemoryOperation(**{k:v for k,v in op.items() if k in
             {'action','memory_id','content','success','error'}}) for op in phase1.get('operations',[])]

@@ -6,6 +6,7 @@ from p1_source_archive import encode
 from p1_source_links import visible_event
 from p1_requirements import KEY, upstream_observation
 from p2_requirement_agent import RequirementSelectionAgent, ResponseProtocolError
+from p2_requirement_view import p1_boundary_error, validate_continuation
 
 SYSTEM = PHASE2_SYSTEM + '''
 The memory bank is a fallible overview. Optional flat, fixed-requirement or unclassified browsing shows accumulated active records, counts and recorded GAPs; this is not a verified completion checklist. When relevant, you may inspect an entry's selected sources, generation context or historical handle to judge support. Retain the distinction between observed results and unverified explanations and any applicable scope. Missing evidence does not establish success or failure. No retrieval or audit is mandatory. M labels locate current entries; historical handles locate frozen older records. Partial pages are incomplete. Four shared reads and two continuations are available; the last turn has no tools.
@@ -97,21 +98,22 @@ class RequirementReminderAgent(RequirementSelectionAgent):
 
     def _finish(self, text, report):
         report.update(should_inject=False,context_for_action=None,delivery=None)
-        try:
-            if not self._version_valid():
-                raise ValueError(self.view.validation_error or 'frozen_reminder_version_changed')
-            raw = text.strip()
-            note = MemoryAgent._parse_phase2_response(self,raw)
-            usable_note = re.search(r'<context_for_action>([\s\S]*?)</context_for_action>',raw)
-            explicit = bool(usable_note and usable_note.group(1).strip()) or '<no_intervention' in raw
-            report.update(status='intervention' if note is not None else 'no_intervention',
-                should_inject=note is not None,context_for_action=note,delivery=note,
-                grounding='model-synthesized; not mechanically verified',raw_output=raw,
-                parse_status='upstream_tag_extraction' if explicit else 'upstream_default_no_intervention')
-            if not explicit:
-                report['format_warning'] = 'No usable decision tag; upstream PMA defaults to no intervention.'
-        except ValueError as exc:
-            report.update(status='selection_error',error=str(exc),failure_kind='integrity')
+        # State validation is independent of model parsing. Structural errors here
+        # must reach the engineering/finalization path, never model_output recovery.
+        if not self._version_valid():
+            report.update(status='selection_error',failure_kind='integrity',error_stage='state_validation',
+                error=self.view.validation_error or 'frozen_reminder_version_changed')
+            return
+        raw = text.strip()
+        note = MemoryAgent._parse_phase2_response(self,raw)
+        usable_note = re.search(r'<context_for_action>([\s\S]*?)</context_for_action>',raw)
+        explicit = bool(usable_note and usable_note.group(1).strip()) or '<no_intervention' in raw
+        report.update(status='intervention' if note is not None else 'no_intervention',
+            should_inject=note is not None,context_for_action=note,delivery=note,
+            grounding='model-synthesized; not mechanically verified',raw_output=raw,
+            parse_status='upstream_tag_extraction' if explicit else 'upstream_default_no_intervention')
+        if not explicit:
+            report['format_warning'] = 'No usable decision tag; upstream PMA defaults to no intervention.'
 
     def pending_refs_valid(self):
         report,view = self.last_p2_report,getattr(self,'view',None)
@@ -143,9 +145,12 @@ class RequirementReminderPipeline:
             result.update(model_calls_attempted=0 if phase1.get('replayed_completed_cycle') else phase1['model_calls_attempted'],
                 model_calls_completed=0 if phase1.get('replayed_completed_cycle') else phase1['model_calls_completed'])
             if phase1['status']!='completed':
-                from p2_requirement_view import p1_boundary_error
                 recoverable = phase1['status'] in {'tool_error','budget_limited','memory_error'}
-                if not recoverable or p1_boundary_error(self.p1):
+                boundary = p1_boundary_error(self.p1)
+                if recoverable and boundary:
+                    return {**result,'status':'engineering_error','failure_kind':'integrity',
+                        'error_stage':'continuation_validation','error':boundary}
+                if not recoverable:
                     return {**result,'status':'p1_incomplete','failure_kind':phase1.get('failure_kind','engineering'),
                         'p2_not_run_reason':phase1['status']}
                 result['p1_warning'] = phase1['status']
@@ -159,6 +164,7 @@ class RequirementReminderPipeline:
                 result.update(failure_kind=phase2['failure_kind'],error_policy='continue_without_reminder')
             result['model_calls_attempted'] += phase2['model_calls_attempted']
             result['model_calls_completed'] += phase2['model_calls_completed']
+            validate_continuation(self.p1,result)
             if phase2['status']=='intervention':
                 if self.p2.pending_refs_valid():
                     result.update(should_inject=True,context_for_action=phase2['context_for_action'],delivery=phase2['delivery'])
@@ -166,9 +172,10 @@ class RequirementReminderPipeline:
                     result['status'] = 'delivery_revoked'
             return result
         except Exception as exc:
+            result.pop('error_policy',None)
             # A raised P1 persistence/journal exception can bypass its returned counters.
             # Do not invent a zero model-call count from a previous/stale report.
-            return {**result,'status':'engineering_error','error_type':type(exc).__name__,
+            return {**result,'status':'engineering_error','failure_kind':'engineering','error_type':type(exc).__name__,
                     'model_calls_attempted':None,'model_calls_completed':None,
                     'count_status':'unknown; phase raised before a report was returned'}
         finally:
