@@ -1,8 +1,16 @@
 # Windows development thread instructions
 
-Current state: local implementation and offline acceptance complete; **public branch creation and source upload are blocked by automatic approval review**. The planned branch is `pma/requirement-attributes-v1` in `HYC-hsy/longcontext-monitor-research`. Do not assume it exists remotely. A publishing thread must first obtain relevant explicit authorization, retry only the denied connector operations once, then publish/read back and substitute its final remote SHA below. These commands are prepared, not proof of upload or authorization to run real models.
+Current state: published on the independent branch `pma/requirement-attributes-v1` in `HYC-hsy/longcontext-monitor-research`. Source was byte-verified at `7072ef28c387813695bd8bfeca374039d4ac471b`; the final delivery reply gives the later fixed documentation SHA. Use that final SHA for checkout. Public upload authorization does not authorize a real model experiment.
 
-Use a separate checkout, preserve the previous A/DMS worktrees and keep the original six-case archives unchanged. After publication, fetch the independent branch and detach at the **verified remote delivery SHA**. Base is `b831347b4aff9e2802eb3478303ce4af5d0660bf`; source identity was recorded at local source commit `5f1e3f395228412281102f2a12d2eb099a036c4e` and verifies file hashes independently of later documentation commits.
+Use a separate checkout, preserve previous A/DMS worktrees and keep original six-case archives unchanged. In the existing repository, fetch this branch, then create a new worktree at the fixed delivery SHA from the final reply:
+
+```powershell
+git fetch origin pma/requirement-attributes-v1
+git worktree add ..\pma-requirement-attributes <FIXED_DELIVERY_SHA_FROM_FINAL_REPLY>
+Set-Location ..\pma-requirement-attributes
+```
+
+The source identity points to the remote code commit; 66 runtime file hashes verify source equivalence independently of later documentation commits. Use your existing PMA-compatible venv (adjust its path below if shared outside this new worktree):
 
 ```powershell
 $env:PYTHONUTF8 = '1'

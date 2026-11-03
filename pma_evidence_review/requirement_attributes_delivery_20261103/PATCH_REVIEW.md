@@ -1,6 +1,6 @@
 # Local audit repairs, 2026-11-03
 
-Scope: two independently reproduced engineering defects only. No prompt, model, tool arguments, maintenance budget, requirement definition or P2 behavior changed. Publication remains on hold pending the parent thread's review and user confirmation; no remote mutation was attempted in this repair turn.
+Scope: two independently reproduced engineering defects only. No prompt, model, tool arguments, maintenance budget, requirement definition or P2 behavior changed. The repair turn made no remote mutations. After independent review and subsequent explicit public authorization, publication succeeded; see PUBLICATION_READBACK.json and the final delivery reply.
 
 ## Historical requirement paging
 
