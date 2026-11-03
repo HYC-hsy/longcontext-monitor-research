@@ -1,0 +1,17 @@
+> 当前为已授权发布、尚未完成最终验收的中间审查版。独立分支pma/upstream-compat-review-intermediate；源码固定提交见SOURCE_IDENTITY.json。
+
+# 39c独立反例的本地修补
+
+前一交付39c833ac不是本轮最终版。其普通模型错误分类能绕过健康状态检查：provider失败同时存在未提交STATUS/running周期，或最终要求目录变成None时，可能继续Task。本轮修补不改变P1/P2提示、工具schema、原版文本提取、读预算或整理策略。
+
+1. `validate_continuation`在独立pipeline和Task适配器的每个continue_without_reminder出口重新检查当前P1：持久化checksum/cache一致、live bank一致、固定要求schema/任务身份/合法列表、正文与要求ref绑定、周期终态。失败改成明确engineering/integrity错误并移除继续策略，原provider/工具错误仍保留在phase报告中。初始化未成功的None目录只在已确认未维护、空库未变、已显式关闭自身失败尝试这一特例允许；其他未解决周期仍拒绝。
+2. 最终状态检查与模型解析分类分开；状态检查中的TypeError等结构异常不再被当model_output。有效标签的原始文字仍记录，状态失败时不交付。没有把这些错误记为主动no_intervention或正常noop。
+3. 同类P1反例还确认，provider等待期间bundle文件损坏，周期记账可能用缓存覆盖原件。要求候选现在每次写bundle前核对现有checksum及缓存版本，并复制待提交对象，避免receipt随后原地修改已提交缓存。坏文件保持原样并停止；旧候选不启用此检查。代价是每次该候选bundle写入前多一次本地读取/哈希，不增加模型调用或归档全扫描。
+
+新增三个定点测试方法，覆盖P1/P2 provider与dirty/running/文件损坏/refs结构损坏组合；None/错误类型目录及状态校验TypeError；pipeline校验后、Task继续前再次变脏；初始化失败关闭后另有running周期。健康provider、普通只读参数错、三份真实可见输出仍保持原有兼容路径。完整207项通过，无失败/错误/跳过。
+
+未修改的独立反例脚本复跑结果在INDEPENDENT_COUNTEREXAMPLES.json：健康provider继续，dirty/running/None目录均EpisodeFault。源文件和三份真实失败归档未覆盖。校验的是bundle/快照结构与一致性，来源窗口/事件正文仍在实际读取时按既有hash检查；这不是逐条语义审核，也不保证所有历史材料永远可用。持久化异常若使phase报告未返回，调用数明确unknown而非伪造0；底层transport记录仍保留。
+
+本轮仅发布已有中间版源码，零真实模型、真实Task、原生评价和旧组重跑；源码身份与离线清单已刷新。
+
+9493之后仅补充来源bundle基本类型：schema必须匹配v1，events/accepted/refs/bank/要求元数据必须为字典，history_grants存在时须为字典，presented须为列表，secret须为非空字符串。只做容器和类型检查，不扫描历史正文，不增加模型调用。已有207项离线通过记录；独立最终验收尚未完成。
