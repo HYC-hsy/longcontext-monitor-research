@@ -62,6 +62,7 @@ class UpstreamCompatibilityTests(unittest.TestCase):
         self.assertIn('requirements attribute',P1_SYSTEM)
         self.assertNotIn('Only the six memory tools',P1_SYSTEM)
         self.assertNotIn('Agent claims and self-printed success',P1_SYSTEM)
+        self.assertNotIn('save the replacement before deleting',P1_SYSTEM)
         self.assertLess(len(P1_SYSTEM),4000)
 
     def test_original_task_plus_eight_steps_is_query_and_raw_history_stays_visible(self):
