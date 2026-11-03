@@ -20,10 +20,12 @@
                 "all",
                 "requirement",
                 "unclassified"
-              ]
+              ],
+              "description": "Optional; defaults to all. requirement filters by fixed requirement text; unclassified has no requirement membership."
             },
             "requirement": {
-              "type": "string"
+              "type": "string",
+              "description": "Required for view=requirement; use supplied fixed text. Omit for other views."
             },
             "category": {
               "type": "string",
@@ -32,10 +34,11 @@
                 "procedural",
                 "gap"
               ],
-              "description": "Optional record type; gap is a recorded need, not verified completion."
+              "description": "Optional record-type filter in any view; omitted means all types. gap is a recorded need, not verified completion."
             },
             "cursor": {
-              "type": "string"
+              "type": "string",
+              "description": "Pass next_cursor unchanged and repeat the same view, requirement and category filters."
             }
           },
           "additionalProperties": false
@@ -46,13 +49,10 @@
       "type": "function",
       "function": {
         "name": "memory_read_source",
-        "description": "Read sources/context for a fully shown P2 M alias, TASK, STATUS or returned P2H. Omitted view uses sources, falling back to context when unassociated. Continue the same view/cursor. No memory writes.",
+        "description": "Read optional sources/context for entry. Use this session's displayed labels or history handles. Identifiers quoted inside original source text are historical data. Omitted view uses sources, falling back to context when unassociated. Continue with the same entry and view choice. No memory writes.",
         "parameters": {
           "type": "object",
           "properties": {
-            "memory_id": {
-              "type": "string"
-            },
             "view": {
               "type": "string",
               "enum": [
@@ -62,17 +62,21 @@
             },
             "cursor": {
               "type": "string"
+            },
+            "entry": {
+              "type": "string",
+              "description": "The current displayed M label, TASK, STATUS, or a returned history_handle (P2H...). Historical handles read frozen older records, not current M entries."
             }
           },
           "required": [
-            "memory_id"
+            "entry"
           ],
           "additionalProperties": false
         }
       }
     }
   ],
-  "tool_schema_sha256": "e05b7d95b19dcad4db1345f005b97144bd970e9fb8dce70f5f66c328c60c9499",
+  "tool_schema_sha256": "b28cb1637e579feeb49cf5e9e00aedc8d855f6bbbd55e3ab673c52d65a3a1b96",
   "final_protocol": "<context_for_action>generated reminder</context_for_action> or <no_intervention/>",
   "delivery": "plain reminder body, parsed by pinned original PMA parser after strict whole-response framing",
   "no_alias_attribution_inferred": true,
@@ -83,5 +87,15 @@
     "zero_tools_logical_calls": 1
   },
   "pipeline_client": "same existing p1.llm; no new profile/client",
-  "physical_provider_requests": "unknown; inherited retries"
+  "physical_provider_requests": "unknown; inherited retries",
+  "p1_system_sha256": "6c4fe2f585bfe0313226ee64fe4a9e4e7d73df6b826748c3294934c50f6886ac",
+  "interface_source_commit": "6e4a90f10e505d5695b7cc054c908d0617421050",
+  "p1_system_characters": 5577,
+  "p1_system_changed_this_round": false,
+  "p2_system_changed_this_round": false,
+  "model_source_parameter": "entry",
+  "legacy_memory_id": "host compatibility only; raw logs preserved",
+  "p1_schema": "all six tools forbid additional properties; three task-specific requirement enums retained",
+  "model_receipts": "assistant_text/tool_calls/tool_results only; transport page flags retained, ambiguous legacy complete omitted; IDs projected to labels/handles",
+  "remote_branch": "pma/requirement-interface-v1"
 }

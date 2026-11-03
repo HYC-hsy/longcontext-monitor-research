@@ -1,4 +1,6 @@
-# Local follow-up: live-bank and final-response boundaries
+Current interface follow-up: see INTERFACE_REVIEW.md. The following review describes the previously published baseline and its 167-test acceptance.
+
+# Historical baseline review: live-bank and final-response boundaries
 
 Baseline e548a0a28b7761a95a0065b46cd06c8252803826. Only the two reproduced engineering gaps were repaired. SYSTEM, tool schema, output note format, budgets, P1 update policy and Task isolation are unchanged. The repair was accepted locally first; the same code was subsequently published after explicit authorization. See PUBLICATION_READBACK.json.
 
