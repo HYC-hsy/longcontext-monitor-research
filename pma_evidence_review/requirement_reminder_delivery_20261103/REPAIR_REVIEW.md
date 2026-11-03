@@ -1,0 +1,11 @@
+# Local follow-up: live-bank and final-response boundaries
+
+Baseline e548a0a28b7761a95a0065b46cd06c8252803826. Only the two reproduced engineering gaps were repaired. SYSTEM, tool schema, output note format, budgets, P1 update policy and Task isolation are unchanged. This round was not pushed.
+
+The shared p1_boundary_error now compares the actual live memory.to_dict() against the checksum-verified committed bank, in addition to the cached-links/disk agreement and settled-cycle checks. Freeze and final/delayed validation all reach this same check (generated _version_valid → view.selection_valid → p1_boundary_error). Direct uncommitted body, STATUS or new-entry mutation cannot pass through an unchanged links.state bank. Tests cover all three before freeze, while awaiting final output and before delayed delivery; explicit committed version changes remain rejected too.
+
+Generated-response classification now precedes the old text-tool scanner. With no native calls, a whole valid final reminder or no_intervention is final data, including literal tool XML inside the reminder body. Native calls are authoritative only without conflicting final markup. Mixed final/tool envelopes or mixed final tags are explicit errors and execute no tools. Non-final tool-only text still reaches the existing fallback; no parser/model repair round is added. The original PMA note parser still extracts the final note after strict framing. The isolated verbatim selector keeps its default extraction path.
+
+The parent's independent script was rerun unchanged: uncommitted body/status/addition and committed body change all returned selection_error, should_inject=false and pending_refs_valid=false; the literal memory_browse example returned intervention in one fake logical call, zero reads and no executed tool names. Sanitized outputs and script hash are in INDEPENDENT_COUNTEREXAMPLES.json. No source script, private profile, raw bundle or signing key was copied into this delivery.
+
+Full strict suite: **167 passed, zero errors/failures/skips**. Source identity and current manifest were refreshed. No real model, Task, native evaluation or old real experiment group ran. Semantic quality, real client behavior and Task enqueue integration remain outside this offline acceptance.
