@@ -65,12 +65,13 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
             selected.extend(rows)
         selected.extend(self.gaps.entries)
         memory_rows = []
-        for i, row in enumerate(selected, 1):
+        for i, row in enumerate(self._ordered_memory_rows(selected), 1):
             alias = 'M' + str(i)
             ref = deepcopy(self.links.state['refs'].get(row.id))
             aliases[alias] = {'kind':'memory','id':row.id,'ref':ref}
             memory_rows.append({'alias':alias,'memory_id':row.id,'category':records[row.id].category,
-                'content':row.content,'source_association':(ref or {}).get('association','legacy_unassociated')})
+                'content':row.content,'source_association':(ref or {}).get('association','legacy_unassociated'),
+                **self._memory_attributes(row)})
         aliases['STATUS'] = {'kind':'status','id':'STATUS','ref':deepcopy(self.links.state['refs'].get('STATUS'))}
         self.frozen_aliases = aliases
         self._raw_generation_context = {'task':self.task,'stored_memory':deepcopy(self.memory.to_dict()),
@@ -83,6 +84,12 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
             + '\nMaintain short summaries with the available tools. Unchanged entries need no write.\n')
         marked = [{**r, 'presentation':s['presentation']} for r,s in zip(raw_events,self.shown_events)]
         return prompt, marked, projection, visible
+
+    def _ordered_memory_rows(self, rows):
+        return rows
+
+    def _memory_attributes(self, row):
+        return {}
 
     def _restore_committed_bank(self):
         # A replace can succeed before its caller raises. Reload the single bundle,

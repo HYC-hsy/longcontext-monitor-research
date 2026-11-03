@@ -1,0 +1,157 @@
+"""Fixed task requirements and crash checkpoints in the existing atomic bundle."""
+from copy import deepcopy
+import re
+import unicodedata
+from p1_source_archive import encode, digest
+from p1_context_history import InputMemoryHistory
+
+KEY = 'requirement_attributes_v1'
+INIT_SYSTEM = '''Extract what the original task ultimately requires to be achieved. Return fixed, readable requirement sentences, retaining necessary constraints such as paths, options and scope. Separate final conditions from suggested execution steps and historical facts. A paragraph may contain several requirements; matching a phrase does not establish complete semantic coverage. Use only the original task, not later plans or obstacles. Keep the original meaning without inventing conditions. Use requirements_initialize once; use [] only when no final requirement can be identified. This organizes memory; it does not solve or evaluate the task.'''
+INIT_TOOL = {'type':'function','function':{'name':'requirements_initialize',
+    'description':'Propose fixed requirement text; at most 32 unique sentences, 512 characters each, 2048 total. No record IDs or completion states.',
+    'parameters':{'type':'object','properties':{'requirements':{'type':'array','maxItems':32,
+        'items':{'type':'string','maxLength':512}}},'required':['requirements'],'additionalProperties':False}}}
+
+class RequirementError(ValueError):
+    def __init__(self, reason):
+        self.reason = reason
+        super().__init__(reason)
+
+
+def canonical(text):
+    if not isinstance(text,str):
+        raise RequirementError('requirement_not_text')
+    value = unicodedata.normalize('NFC',text.replace('\r\n','\n').replace('\r','\n')).strip()
+    if not value or len(value)>512 or any(unicodedata.category(c)=='Cc' and c!='\n' for c in value):
+        raise RequirementError('empty_oversized_or_control_character_text')
+    return value
+
+
+def catalog(values):
+    if not isinstance(values,list) or len(values)>32:
+        raise RequirementError('invalid_requirement_list')
+    result = [canonical(x) for x in values]
+    if len(result)!=len(set(result)):
+        raise RequirementError('duplicate_requirement')
+    if sum(map(len,result))>2048:
+        raise RequirementError('oversized_catalog')
+    return result
+
+
+def assignment(values, fixed):
+    if not isinstance(values,list) or len(values)>32:
+        raise RequirementError('invalid_requirement_assignment')
+    chosen = {canonical(x) for x in values}
+    if chosen-set(fixed):
+        raise RequirementError('unknown_requirement_choose_supplied_text_or_empty')
+    return [x for x in fixed if x in chosen]
+
+
+class RequirementHistory(InputMemoryHistory):
+    def _requirements(self, row):
+        return deepcopy((row['ref'] or {}).get('requirements',[]))
+
+    def _record_attributes(self, row):
+        # The ref is frozen together with the body; never consult current active metadata.
+        values = self._requirements(row)
+        attributes = {'requirements':values}
+        # A directory JSON string is escaped again inside its page's text field.
+        # Bound that wire representation, leaving room for metadata + a whole grant item.
+        if len(encode({'text':encode(attributes)})) <= 2500:
+            return attributes
+        return {'requirements_paged':True,'requirements_count':len(values),
+                'requirements_sha256':digest(encode(values)),
+                'requirements_location':'Read this H handle; join requirements parts, then JSON-decode.'}
+
+    def _historical_fields(self, row):
+        if self._record_attributes(row).get('requirements_paged'):
+            return [('history','requirements','json_value',encode(self._requirements(row)))]
+        return []
+
+
+class RequirementState:
+    def __init__(self, agent):
+        self.agent, self.links = agent, agent.links
+        state = deepcopy(self.links.state)
+        if KEY not in state:
+            bank = state['bank']
+            if state['refs'] or state['events'] or any(bank[k] for k in ('knowledge','procedural','gaps','status')):
+                raise ValueError('new candidate requires an empty new-task bank; no migration')
+            state[KEY] = {'schema':KEY,'task_sha256':digest(agent.task),'catalog':None,'cycles':{}}
+            self.links.commit(state)
+        data = self.data
+        if data['schema']!=KEY or data['task_sha256']!=digest(agent.task):
+            raise ValueError('requirement task mismatch')
+        if data['catalog'] is not None and catalog(data['catalog'])!=data['catalog']:
+            raise ValueError('invalid frozen catalog')
+        for ref in self.links.state['refs'].values():
+            if ref['category']!='status' and assignment(ref.get('requirements'),data['catalog'] or [])!=ref['requirements']:
+                raise ValueError('invalid stored requirement assignment')
+
+    @property
+    def data(self):
+        return self.links.state[KEY]
+
+    def write(self, mutate):
+        state = deepcopy(self.links.state)
+        mutate(state[KEY])
+        # Reconcile even os.replace-success-then-error, as the existing write path does.
+        try:
+            self.links.commit(state)
+        except BaseException:
+            self.agent._restore_committed_bank()
+            raise
+
+    def begin(self, cycle, payload):
+        if not isinstance(cycle,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,90}',cycle):
+            raise ValueError('cycle_id must be 1..90 safe characters')
+        sha = digest(encode(payload))
+        previous = self.data['cycles'].get(cycle)
+        if previous:
+            if previous['input_sha256']!=sha:
+                raise ValueError('cycle input changed')
+            if previous['phase']=='done':
+                return deepcopy(previous['result'])
+            if previous['phase'] in ('running','abandoned'):
+                raise RuntimeError('recovery_required; inspect partial commits and acknowledge interruption')
+        for key,item in self.data['cycles'].items():
+            if key!=cycle and item['phase'] not in ('done','abandoned'):
+                raise RuntimeError('pending cycle must be resolved first')
+        if previous is None:
+            self.write(lambda d:d['cycles'].update({cycle:{'phase':'pending','input_sha256':sha,
+                'input':deepcopy(payload),'initialization_attempts':[]}}))
+        return None
+
+    def phase(self, cycle, phase, **values):
+        self.write(lambda d:d['cycles'][cycle].update(phase=phase,**deepcopy(values)))
+
+    def acknowledge_interrupted(self, cycle):
+        """Host-only recovery: never replay writes; a fresh cycle may use the committed bank."""
+        if self.data['cycles'][cycle]['phase']!='running':
+            raise ValueError('only uncertain interrupted maintenance needs acknowledgement')
+        self.phase(cycle,'abandoned')
+
+    def event_span(self, key):
+        ref = self.links.state['refs'].get(key) or {}
+        order = {sid:i+1 for i,sid in enumerate(self.links.state['events'])}
+        sources = ref.get('sources',[])
+        positions = [order[s['source_id']] for s in sources if s.get('source_id') in order]
+        return {'kind':'accepted_event_range' if positions else 'unknown',
+                'first':min(positions) if positions else None,'last':max(positions) if positions else None,
+                'meaning':'selected/inherited source acceptance order; not execution time or claim support'}
+
+    def attributes(self, row):
+        return {'requirements':deepcopy(self.links.state['refs'][row.id]['requirements']),
+                'source_event_order':self.event_span(row.id)}
+
+    def ordered(self, rows):
+        unique = {row.id:row for row in rows}
+        return sorted(unique.values(),key=lambda r:(self.event_span(r.id)['first'] is None,
+            self.event_span(r.id)['first'] or 0,self.event_span(r.id)['last'] or 0,r.id))
+
+    def groups(self, rows):
+        rows = self.ordered(rows)
+        result = [{'requirement':text,'memory_ids':[r.id for r in rows if text in
+            self.links.state['refs'][r.id]['requirements']]} for text in self.data['catalog'] or []]
+        return {'requirements':result,'unclassified_memory_ids':[r.id for r in rows if not
+            self.links.state['refs'][r.id]['requirements']]}

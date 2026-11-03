@@ -88,6 +88,12 @@ class InputMemoryHistory:
                 raise
             raise HistoryError('source_binding_error') from None
 
+    def _record_attributes(self, row):
+        return {}
+
+    def _historical_fields(self, row):
+        return []
+
     def _directory(self, ref):
         rows, pending, seen = [], {}, set()
         cited = (ref or {}).get('cited_history_handles',[])
@@ -134,7 +140,7 @@ class InputMemoryHistory:
             data = {'history_handle':handle,'memory_id':row['memory_id'],'category':row['category'],
                     'content_preview':row['content'][:60],'content_preview_truncated':len(row['content'])>60,
                     'association':(row['ref'] or {}).get('association','legacy_unrecorded'),
-                    'visibility':visibility,'original_read_not_implied':True}
+                    'visibility':visibility,'original_read_not_implied':True, **self._record_attributes(row)}
             fields.append(('input_memory_'+str(index),'input_memory','json_value',encode(data)))
         return fields, pending, coverage_status
 
@@ -186,7 +192,9 @@ class InputMemoryHistory:
                     'input_memory_scope':'Frozen input coverage and explicit output citations are distinct; neither proves claims or original reads.'}
         fields = list(directory)
         if historical is not None:
-            metadata.update(historical=True,historical_memory_id=historical['memory_id'])
+            metadata.update(historical=True,historical_memory_id=historical['memory_id'],
+                            **self._record_attributes(historical))
+            fields.extend(self._historical_fields(historical))
             fields.append(('history','derived_memory_content','raw_string',historical['content']))
         result = reader.read(target,active,view=resolved,cursor=cursor,archive=self.archive,
             _extra_fields=fields,_read_metadata=metadata,
