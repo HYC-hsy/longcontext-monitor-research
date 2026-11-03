@@ -1,4 +1,4 @@
-> 当前为已授权发布、尚未完成最终验收的中间审查版。独立分支pma/upstream-compat-review-intermediate；源码固定提交见SOURCE_IDENTITY.json。
+> 个人复核版；源码固定提交见 SOURCE_IDENTITY.json。离线测试不能证明真实模型或任务效果。
 
 # 本地离线交接
 
@@ -42,4 +42,6 @@ Write-Output $sha # 与交付回复中的固定SHA核对
 $checkout = Join-Path (Split-Path (git rev-parse --show-toplevel).Trim() -Parent) ('pma-intermediate-' + $sha.Substring(0,8))
 git -c core.autocrlf=false worktree add --detach $checkout $sha
 ```
-这是继续人工检查和修改的中间版；207项为已有离线记录，不是最终验收批准。本次上传没有重跑模型或测试。
+这是继续人工检查和修改的中间版；207项为已有离线记录，不是最终验收批准。个人复核时已重新运行 207 项假客户端离线测试，未运行真实模型。
+
+个人复核版本的执行源码提交：5920dd0d1fa6131d2aa07cfd173e39714577e783。一阶段不再强制先保存后删除。请使用最终交付固定提交，不使用中间审查分支的旧清单。
