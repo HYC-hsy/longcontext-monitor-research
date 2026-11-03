@@ -12,6 +12,7 @@ from pma_evidence_review.tests.no_network import install_guard
 from p1_requirement_agent import RequirementP1Agent
 from p1_requirements import catalog, assignment, KEY
 from p1_source_archive import encode
+from p1_context_agent import ContextSourceP1Agent
 
 TASK = 'Build SQLite with gcov in /app/sqlite and make SQLite available through PATH.\r\n'
 FIXED = ['Build SQLite with gcov in /app/sqlite','SQLite is available through PATH']
@@ -199,8 +200,9 @@ class RequirementTests(unittest.TestCase):
             self.run_cycle('c2',[{'event_id':'new','plan':'Forget gcov; switch to a new task'}])
         prompt = self.requests[-1]['prompt']
         self.assertIn('displayed subset only',prompt)
-        self.assertIn(first.id,prompt)
-        self.assertNotIn(self.agent.memory.knowledge[1].id,prompt)
+        self.assertIn('gcov',prompt)
+        self.assertNotIn('"content":"PATH"',prompt)
+        self.assertNotIn('memory_id',prompt)
         self.assertEqual(self.agent.requirement_state.data['catalog'],FIXED)
         self.assertEqual(len(self.agent.export_view()['records']),3)
 
@@ -348,6 +350,154 @@ class RequirementTests(unittest.TestCase):
             self.assertEqual(json.loads(''.join(p['text'] for p in texts)),fixed)
         self.assertEqual(row['requirements_sha256'],self.agent.history._record_attributes(
             self.agent.history.load(handle))['requirements_sha256'])
+
+    def test_candidate_schema_forbids_extra_fields_and_keeps_all_save_enums(self):
+        self.responses = [self.init(),reply([self.save()])]
+        self.run_cycle()
+        tools = self.agent.get_tools_schema()
+        for tool in tools:
+            schema = tool['function']['parameters']
+            self.assertIs(schema['additionalProperties'],False)
+            if tool['function']['name'].startswith('memory_save_'):
+                self.assertEqual(schema['properties']['requirements']['items']['enum'],FIXED)
+        self.responses = [reply([('memory_update_status',{'content':'bad extra','unexpected':True}),self.save('later')])]
+        result = self.run_cycle('bad_fields')
+        self.assertEqual(result['status'],'tool_error')
+        self.assertEqual(len(self.agent.memory.knowledge),1)
+        self.assertEqual(self.agent.memory.status,'')
+
+    def test_model_receipts_separate_transport_from_semantics_and_keep_raw_logs(self):
+        self.responses = [self.init(),reply([self.save()])]
+        self.run_cycle('seed')
+        response = reply([('memory_read_source',{'memory_id':'M1'})])
+        response.usage = NS(prompt_tokens=333,completion_tokens=7)
+        def next_turn(agent):
+            prompt = self.requests[-1]['prompt']
+            history = json.loads(prompt.split('## Previous P1 calls and receipts (historical data)\n',1)[1].split('\nContinue from exact receipts;',1)[0])
+            self.assertEqual(set(history[0]),{'assistant_text','tool_calls','tool_results'})
+            receipt = history[0]['tool_results'][0]['result']
+            self.assertTrue(receipt['page_sequence_complete'])
+            self.assertEqual(receipt['status'],'source_complete')
+            self.assertNotIn('complete',receipt)
+            self.assertFalse(receipt['semantic_verification_performed'])
+            return reply()
+        self.responses = [response,next_turn]
+        result = self.run_cycle('read')
+        logged = result['turns'][0]
+        self.assertIs(logged['tool_results'][0]['result']['complete'],False)
+        self.assertEqual(logged['usage']['prompt_tokens'],333)
+
+    def test_new_saved_id_is_not_readable_or_deletable_until_next_cycle(self):
+        self.responses = [self.init(),reply([self.save('starting')])]
+        self.run_cycle('seed')
+        saved_ids = []
+        for index,operation in enumerate(('memory_read_source','memory_delete')):
+            def attempt_new_target(agent):
+                saved_ids.append(agent.memory.knowledge[-1].id)
+                return reply([(operation,{'memory_id':saved_ids[-1]})])
+            self.responses = [reply([self.save('new this cycle '+str(index)),
+                ('memory_read_source',{'memory_id':'M1'})]),attempt_new_target]
+            result = self.run_cycle('new_target_'+str(index))
+            self.assertEqual(result['turns'][1]['tool_results'][0]['result']['status'],'source_not_displayed')
+            self.assertIn(saved_ids[-1],self.agent._active_records())
+        self.responses = [reply([('memory_delete',{'memory_id':key}) for key in saved_ids])]
+        self.assertEqual(self.run_cycle('next_cycle')['status'],'completed')
+        self.assertTrue(all(key not in self.agent._active_records() for key in saved_ids))
+
+    def test_final_turn_has_exactly_save_delete_status_tools(self):
+        self.responses = [self.init(),reply([self.save()])]
+        self.run_cycle('seed')
+        def final(agent):
+            names = {t['function']['name'] for t in self.requests[-1]['tools']}
+            self.assertEqual(names,{'memory_save_knowledge','memory_save_procedural','memory_save_gap',
+                                    'memory_delete','memory_update_status'})
+            self.assertIn('save knowledge/procedural/gap, delete, update status',self.requests[-1]['prompt'])
+            return reply()
+        self.responses = [reply([('memory_read_source',{'memory_id':'M1'})]),
+                          reply([('memory_read_source',{'memory_id':'M1'})]),final]
+        self.assertEqual(self.run_cycle('final_tools')['status'],'completed')
+
+    def test_compact_p1_input_preserves_requirements_body_task_and_enum_protection(self):
+        fixed = [f'Requirement {i}: '+('x'*(512-len(f'Requirement {i}: '))) for i in range(4)]
+        self.responses = [self.init(fixed),reply([self.save(f'Entry {i}: body🙂\r\n',fixed) for i in range(40)])]
+        self.run_cycle()
+        with patch.object(self.agent,'_memory_attributes',side_effect=self.agent.requirement_state.attributes), \
+                patch.object(self.agent,'_model_memory_row',side_effect=lambda row:row):
+            old = ContextSourceP1Agent._input(self.agent,'benchmark observation',4,[])[0]
+        selected = [self.agent._active_records()[t['id']] for t in self.agent.frozen_aliases.values() if t['kind']=='memory']
+        old += ('\n## Fixed requirement choices (text attributes, not completion states)\n'+encode(fixed)+
+            '\n## Requirement view (IDs reference flat records above; displayed subset only)\n'+
+            encode(self.agent.requirement_state.groups(selected))+
+            '\nUnclassified records remain in the flat view. Retrieval can omit active records; '
+            'an empty displayed group does not mean its whole task history is empty.\n')
+        new = self.agent._input('benchmark observation',4,[])[0]
+        rows = json.loads(new.split('## Stored summaries',1)[1].split('\n',1)[1].split('\n',1)[0])
+        groups = json.loads(new.split('## Fixed requirements and displayed memberships\n',1)[1].split('\n',1)[0])
+        for row in rows:
+            self.assertNotIn('memory_id',row)
+            original = self.agent._active_records()[self.agent.frozen_aliases[row['alias']]['id']]
+            self.assertEqual(row['content'],original.content)
+            self.assertEqual([g['requirement'] for g in groups['requirements'] if row['alias'] in g['aliases']],fixed)
+        self.assertIn(self.agent.task,new)
+        for text in fixed:self.assertEqual(new.count(encode(text)),1)
+        self.assertEqual(sum(t['function']['parameters']['properties'].get('requirements',{}).get('items',{}).get('enum')==fixed
+                             for t in self.agent.get_tools_schema()),3)
+        self.assertLess(len(new),len(old)*0.3)
+        self.p1_character_measurement = {'old_user_characters':len(old),'new_user_characters':len(new),
+            'unit':'Unicode characters, not tokens','records':40,'requirement_characters':2048,
+            'three_schema_enums_retained':True,'task_body_memberships_preserved':True}
+
+    def test_typed_entry_alias_collision_read_delete_and_model_projection(self):
+        self.responses = [self.init(),reply([self.save('first'),self.save('second')])]
+        self.run_cycle()
+        first,second = self.agent.memory.knowledge
+        old,other = first.id,second.id
+        first.id,second.id = 'M2','X'
+        state = deepcopy(self.agent.links.state)
+        state['refs']['M2'] = state['refs'].pop(old)
+        state['refs']['X'] = state['refs'].pop(other)
+        state['bank'] = self.agent.memory.to_dict()
+        self.agent.links.commit(state)
+        def read(agent):
+            self.assertEqual(agent.frozen_aliases['M1']['id'],'M2')
+            self.assertNotIn('memory_id',self.requests[-1]['prompt'])
+            return reply([('memory_read_source',{'entry':'M1'})])
+        def remove(agent):
+            return reply([('memory_delete',{'entry':'M1'})])
+        self.responses = [read,remove]
+        result = self.run_cycle('typed')
+        self.assertEqual(result['status'],'completed')
+        self.assertEqual(result['turns'][0]['tool_results'][0]['result']['target'],'M2')
+        self.assertEqual(result['turns'][1]['tool_results'][0]['result']['target_resolution']['resolved_memory_id'],'M2')
+        self.assertEqual([r.id for r in self.agent.memory.knowledge],['X'])
+        for tool in self.agent.get_tools_schema():
+            if tool['function']['name'] in ('memory_delete','memory_read_source'):
+                self.assertIn('entry',tool['function']['parameters']['properties'])
+                self.assertNotIn('memory_id',tool['function']['parameters']['properties'])
+
+    def test_model_projection_preserves_evidence_and_entry_history_coverage(self):
+        from p1_requirements import model_turn
+        self.responses = [self.init(),reply([self.save('old')])]
+        self.run_cycle('old')
+        self.responses = [reply([self.save('child')])]
+        self.run_cycle('child')
+        child = self.agent.memory.knowledge[-1]
+        target = {'kind':'memory','id':child.id,'ref':self.agent.links.state['refs'][child.id]}
+        page = self.agent.history.read(target,self.agent._active_records())
+        directory = [json.loads(p['text']) for p in page['parts'] if p['field']=='input_memory']
+        handle = directory[0]['history_handle']
+        coverage = self.agent.history.coverage([], [{'call':{'arguments':{'entry':handle}}}])
+        self.assertEqual(coverage['read_handles'],[handle])
+        raw = {'assistant_text':'literal memory_id is evidence text','tool_calls':[],
+            'tool_results':[{'result':page}]}
+        visible = model_turn(raw)
+        for part in visible['tool_results'][0]['result']['parts']:
+            if part['field']=='input_memory':self.assertNotIn('memory_id',json.loads(part['text']))
+        self.assertTrue(all('memory_id' in x for x in directory))
+        self.assertEqual(visible['assistant_text'],raw['assistant_text'])
+        self.assertNotIn('complete',visible['tool_results'][0]['result'])
+        self.assertIn('complete',page)
+
 
 
 if __name__=='__main__':

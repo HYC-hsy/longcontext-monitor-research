@@ -226,6 +226,100 @@ class ReminderTests(unittest.TestCase):
         self.assertEqual(result['error'],'mixed_native_tools_and_final_output')
         self.assertEqual(result['reads_used'],0)
 
+    def test_internal_id_source_call_and_generation_receipts_are_consistent(self):
+        self.build()
+        def first(p2):
+            key = next(r.id for r in p2.view.aliases.values() if r.content=='A earlier')
+            return reply([('memory_read_source',{'memory_id':key})])
+        def final(p2):
+            page = p2.last_p2_report['turns'][0]['tool_results'][0]['result']
+            self.assertIn('A original raw',json.dumps(page))
+            return reply(content='<context_for_action>The original A receipt concerns the earlier observation.</context_for_action>')
+        self.p2_responses = [first,final]
+        result = self.run_reminder()
+        self.assertEqual((result['status'],result['reads_used']),('intervention',1))
+        props = self.p2_requests[0]['tools'][1]['function']['parameters']['properties']
+        self.assertIn('entry',props)
+        self.assertNotIn('memory_id',props)
+
+    def test_continuations_receive_only_visible_calls_receipts_and_text_not_diagnostics(self):
+        self.build()
+        response = reply([('memory_browse',{'view':'all'})],content='Browse the recorded overview.')
+        response.usage = type('Usage',(),{'prompt_tokens':123456,'completion_tokens':789,'cost_usd':0.125})()
+        def second(p2):
+            prompt = self.p2_requests[1]['prompt']
+            history = json.loads(prompt.split('## Visible P2 calls and receipts (historical data)\n',1)[1])
+            self.assertEqual(set(history[0]),{'assistant_text','tool_calls','tool_results'})
+            receipt = history[0]['tool_results'][0]['result']
+            self.assertIn('record_scope',receipt)
+            self.assertNotIn('selection_rule',receipt)
+            self.assertNotIn('may be selected',json.dumps(receipt))
+            return reply([('memory_read_source',{'memory_id':'M1'})])
+        def final(p2):
+            prompt = self.p2_requests[2]['prompt'].split('\nTools closed.',1)[0]
+            history = json.loads(prompt.split('## Visible P2 calls and receipts (historical data)\n',1)[1])
+            self.assertEqual(len(history),2)
+            for turn in history:
+                self.assertEqual(set(turn),{'assistant_text','tool_calls','tool_results'})
+            return reply(content='<context_for_action>A scoped generated reminder.</context_for_action>')
+        self.p2_responses = [response,second,final]
+        result = self.run_reminder()
+        self.assertEqual(result['status'],'intervention')
+        logged = result['turns'][0]
+        self.assertEqual(logged['usage']['prompt_tokens'],123456)
+        self.assertIn('prompt_sha256',logged)
+
+    def test_model_entry_labels_flat_theme_history_and_host_traceability(self):
+        self.build()
+        self.responses = [reply([self.save('child',fixtures.fixtures.FIXED)])]
+        self.assertEqual(self.run_cycle('child')['status'],'completed')
+        for browse in ({'view':'all'},{'view':'requirement','requirement':fixtures.fixtures.FIXED[0]}):
+            self.p2_requests = []
+            self.p2.max_memory_in_prompt = 0
+            chosen = {}
+            def after_browse(p2):
+                page = p2.last_p2_report['turns'][0]['tool_results'][0]['result']
+                rows = [json.loads(p['text']) for p in page['parts']]
+                self.assertTrue(all('memory_id' not in r for r in rows))
+                chosen['alias'] = next(r['alias'] for r in rows if r['content']=='child')
+                return reply([('memory_read_source',{'entry':chosen['alias']})])
+            def final(p2):
+                history = json.loads(self.p2_requests[-1]['prompt'].split('## Visible P2 calls and receipts (historical data)\n')[1].split('\nTools closed.')[0])
+                page = history[1]['tool_results'][0]['result']
+                self.assertEqual(page['target'],chosen['alias'])
+                directory = [json.loads(p['text']) for p in page['parts'] if p['field']=='input_memory']
+                self.assertTrue(directory)
+                self.assertTrue(all('memory_id' not in r and r['history_handle'].startswith('P2H.') for r in directory))
+                chosen['handle'] = directory[0]['history_handle']
+                return reply(content='<context_for_action>A scoped note.</context_for_action>')
+            self.p2_responses = [reply([('memory_browse',browse)]),after_browse,final]
+            result = self.run_reminder()
+            self.assertEqual(result['status'],'intervention')
+            raw = result['turns'][1]['tool_results'][0]['result']
+            self.assertEqual(raw['target'],result['entry_id_map'][chosen['alias']])
+            directory = [json.loads(p['text']) for p in raw['parts'] if p['field']=='input_memory']
+            self.assertTrue(all('memory_id' in r for r in directory))
+        # An independent source→history request chain uses the returned handle, never an old M label.
+        self.p2.max_memory_in_prompt = 100
+        def first(p2):
+            alias = next(a for a,r in p2.view.aliases.items() if r.content=='child')
+            return reply([('memory_read_source',{'entry':alias})])
+        def follow(p2):
+            raw = p2.last_p2_report['turns'][0]['tool_results'][0]['result']
+            handle = next(json.loads(p['text'])['history_handle'] for p in raw['parts'] if p['field']=='input_memory')
+            return reply([('memory_read_source',{'entry':handle})])
+        def finish(p2):
+            prompt = self.p2_requests[-1]['prompt']
+            history = json.loads(prompt.split('## Visible P2 calls and receipts (historical data)\n')[1].split('\nTools closed.')[0])
+            self.assertNotIn('historical_memory_id',history[1]['tool_results'][0]['result'])
+            self.assertIn('historical_memory_id',p2.last_p2_report['turns'][1]['tool_results'][0]['result'])
+            rows = json.loads(self.p2_requests[-3]['prompt'].split('## Original task and shown memory (data)\n')[1].split('\n')[0])
+            self.assertTrue(all('memory_id' not in row for row in rows))
+            return reply(content='<context_for_action>Evidence remains scoped to its original observation.</context_for_action>')
+        self.p2_responses = [first,follow,finish]
+        self.assertEqual(self.run_reminder()['status'],'intervention')
+
+
 
 if __name__=='__main__':
     unittest.main()

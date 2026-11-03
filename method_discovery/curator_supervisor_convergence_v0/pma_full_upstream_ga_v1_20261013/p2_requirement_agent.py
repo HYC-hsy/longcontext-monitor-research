@@ -2,6 +2,7 @@
 from copy import deepcopy
 from p1_source_agent import SourceReadP1Agent
 from p1_source_archive import encode, digest
+from p1_requirements import model_turn
 from bank_display_agent import BankDisplayAgent, SELECTION_SYSTEM
 from p2_requirement_view import RequirementSelectionView
 from selection_context import project_steps, render_selection
@@ -20,6 +21,7 @@ class ResponseProtocolError(ValueError):
 class RequirementSelectionAgent(BankDisplayAgent):
     system = SYSTEM
     delivery_protocol = 'verbatim-selection-v1'
+    source_parameter = 'memory_id'
     final_turn_instruction = 'Tools closed. Return the original TASK/M selection protocol or no_intervention.'
     final_output_error = 'final_turn_requires_original_selection_text'
 
@@ -37,13 +39,16 @@ class RequirementSelectionAgent(BankDisplayAgent):
     def tools(self):
         return [{'type':'function','function':{'name':'memory_browse',
             'description':'Read frozen full active records flat, by fixed requirement, or unclassified. Join record parts and JSON-decode; select its stable M alias only after the full record returns.',
-            'parameters':{'type':'object','properties':{'view':{'type':'string','enum':['all','requirement','unclassified']},
-                'requirement':{'type':'string'},'category':{'type':'string','enum':['knowledge','procedural','gap'],
-                    'description':'Optional record type; gap is a recorded need, not verified completion.'},
-                'cursor':{'type':'string'}},'additionalProperties':False}}},
+            'parameters':{'type':'object','properties':{'view':{'type':'string','enum':['all','requirement','unclassified'],
+                    'description':'Optional; defaults to all. requirement filters by fixed requirement text; unclassified has no requirement membership.'},
+                'requirement':{'type':'string','description':'Required for view=requirement; use supplied fixed text. Omit for other views.'},
+                'category':{'type':'string','enum':['knowledge','procedural','gap'],
+                    'description':'Optional record-type filter in any view; omitted means all types. gap is a recorded need, not verified completion.'},
+                'cursor':{'type':'string','description':'Pass next_cursor unchanged and repeat the same view, requirement and category filters.'}},'additionalProperties':False}}},
             {'type':'function','function':{'name':'memory_read_source',
-            'description':'Read sources/context for a fully shown P2 M alias, TASK, STATUS or returned P2H. Omitted view uses sources, falling back to context when unassociated. Continue the same view/cursor. No memory writes.',
-            'parameters':{'type':'object','properties':{'memory_id':{'type':'string'},
+            'description':'Read sources/context for a fully shown record, TASK, STATUS or returned P2H. Omitted view uses sources, falling back to context when unassociated. Continue with the same target and view choice. No memory writes.',
+            'parameters':{'type':'object','properties':{'memory_id':{'type':'string',
+                'description':'A fully shown P2 M label, TASK, STATUS or a returned history_handle (P2H...) from this session.'},
                 'view':{'type':'string','enum':['sources','context']},'cursor':{'type':'string'}},
                 'required':['memory_id'],'additionalProperties':False}}}]
 
@@ -58,7 +63,8 @@ class RequirementSelectionAgent(BankDisplayAgent):
         aliases = [alias for alias,row in view.aliases.items() if row.id in ids]
         self._selection_snapshot = view.snapshot
         self._active_selection_cycle = view.snapshot.cycle
-        rows = [{'alias':'TASK','content':view.task}]+view.initial_records(aliases)
+        rows = [{'alias':'TASK','content':view.task}]+[
+            {key:value for key,value in row.items() if key!='memory_id'} for row in view.initial_records(aliases)]
         steps = project_steps(entries)[0] if entries is not None else observation
         scope = 'all_frozen_active_records' if len(aliases)==len(view.items) else 'subset_of_frozen_active_records'
         initial = self._render_initial(rows,bank.status,steps,step,
@@ -81,15 +87,17 @@ class RequirementSelectionAgent(BankDisplayAgent):
         name,args = call['name'],call['arguments']
         if name not in ('memory_browse','memory_read_source'):
             return {'status':'unknown_tool'}
-        allowed = {'view','requirement','category','cursor'} if name=='memory_browse' else {'memory_id','view','cursor'}
+        allowed = {'view','requirement','category','cursor'} if name=='memory_browse' else {'entry','memory_id','view','cursor'}
         if (not isinstance(args,dict) or set(args)-allowed or
                 any(not isinstance(value,str) for value in args.values())):
             return {'status':'invalid_tool_arguments'}
         if name=='memory_browse':
-            return self.view.browse(**args)
-        if 'memory_id' not in args or args.get('view','sources') not in ('sources','context'):
+            return self.view.browse(**args,model_view=True)
+        if ('memory_id' in args)==('entry' in args) or args.get('view','sources') not in ('sources','context'):
             return {'status':'invalid_tool_arguments'}
-        return self.view.read_source(**args)
+        options = {key:value for key,value in args.items() if key not in ('entry','memory_id')}
+        return self.view.read_source(memory_id=args.get('entry',args.get('memory_id')),
+                                     alias_only='entry' in args,**options)
 
     def _finish(self, text, report):
         try:
@@ -135,6 +143,7 @@ class RequirementSelectionAgent(BankDisplayAgent):
             initial,shown = self._prepare(observation,entries,step_count)
             report.update(snapshot_id=self.view.id,initial_aliases=shown,frozen_active_count=len(self.view.items),
                 initial_scope='all_frozen_active_records' if len(shown)==len(self.view.items) else 'subset_of_frozen_active_records')
+            report['entry_id_map'] = {alias:row.id for alias,row in self.view.aliases.items()}
             prompt, history = initial,[]
             for index in range(CONTINUATION_LIMIT+1):
                 tools = self.tools() if index<CONTINUATION_LIMIT and report['reads_used']<READ_LIMIT else []
@@ -166,7 +175,7 @@ class RequirementSelectionAgent(BankDisplayAgent):
                         report['reads_used'] += 1
                         result = self._read(call)
                         failed = result['status'] in {'unknown_tool','invalid_tool_arguments','unknown_requirement',
-                            'invalid_cursor','record_not_yet_shown','source_not_in_snapshot_scope','invalid_history_handle'}
+                            'invalid_cursor','record_not_yet_shown','source_not_in_snapshot_scope','invalid_history_handle','ambiguous_memory_id'}
                     turn['tool_results'].append({'tool_call_id':call['tool_call_id'],'result':result})
                 if failed:
                     report['status'] = 'tool_error'
@@ -175,7 +184,7 @@ class RequirementSelectionAgent(BankDisplayAgent):
                     report['status'] = 'selection_error'
                     report['error'] = self.final_output_error
                     break
-                history.append(turn)
+                history.append(model_turn(turn,{row.id:alias for alias,row in self.view.aliases.items()},self.source_parameter))
                 report['continuations_used'] += 1
                 prompt = initial+'\n## Visible P2 calls and receipts (historical data)\n'+encode(history)
                 if index+1==CONTINUATION_LIMIT or report['reads_used']>=READ_LIMIT:

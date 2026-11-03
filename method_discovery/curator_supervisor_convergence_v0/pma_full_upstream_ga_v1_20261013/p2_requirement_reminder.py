@@ -14,6 +14,7 @@ The memory bank is a fallible overview. When an entry seems relevant, you may in
 class RequirementReminderAgent(RequirementSelectionAgent):
     system = SYSTEM
     delivery_protocol = 'pma-context-reminder-v1'
+    source_parameter = 'entry'
     final_turn_instruction = 'Tools closed. Return context_for_action with your synthesized reminder, or no_intervention.'
     final_output_error = 'final_turn_requires_reminder_protocol'
 
@@ -31,6 +32,14 @@ class RequirementReminderAgent(RequirementSelectionAgent):
         tools[0]['function']['description'] = ('Read frozen full active records flat, by fixed requirement, '
             'or unclassified. Join record parts and JSON-decode. Partial records are not complete; '
             'use stable P2 aliases to optionally read their sources.')
+        source = tools[1]['function']
+        source['parameters']['properties'].pop('memory_id')
+        source['parameters']['properties']['entry'] = {'type':'string',
+            'description':'The current displayed M label, TASK, STATUS, or a returned history_handle (P2H...). Historical handles read frozen older records, not current M entries.'}
+        source['parameters']['required'] = ['entry']
+        source['description'] = ('Read optional sources/context for entry. Use this session\'s displayed labels or history handles. '
+            'Identifiers quoted inside original source text are historical data. Omitted view uses sources, '
+            'falling back to context when unassociated. Continue with the same entry and view choice. No memory writes.')
         return tools
 
     def _render_initial(self, catalogue, status, steps, step_count, *, memory_note):

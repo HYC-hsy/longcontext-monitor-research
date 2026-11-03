@@ -4,7 +4,7 @@ import uuid
 from p1_context_agent import ContextSourceP1Agent, SYSTEM as CONTEXT_SYSTEM
 from p1_source_archive import encode
 from p1_requirements import (RequirementState, RequirementHistory, INIT_SYSTEM, INIT_TOOL,
-                             RequirementError, assignment, catalog)
+                             RequirementError, assignment, catalog, model_turn)
 
 SYSTEM = CONTEXT_SYSTEM + '''
 The original task remains authoritative. Fixed requirement sentences organize records by what ultimately needs to be achieved; select the supplied text in each saved record's requirements, multiple when relevant, or [] for unclassified. Do not create requirements from new obstacles, plans or execution steps. If the initial extraction misses something or the task is later extended, retain the original text and useful unclassified records; do not silently change the fixed sentences. Classification is not evidence, completion or correction. Group references point to the same records in the flat view and cover only the displayed subset. Source event ranges describe acceptance order, not execution time. STATUS remains a single progress summary.
@@ -14,6 +14,8 @@ SAVES = {'memory_save_knowledge','memory_save_procedural','memory_save_gap'}
 
 class RequirementP1Agent(ContextSourceP1Agent):
     system = SYSTEM
+    memory_source_label = 'current M aliases for entry reads/deletion; cycle-start snapshot'
+    final_turn_instruction = 'Final turn: source reads closed; save knowledge/procedural/gap, delete, update status, or leave the bank unchanged.\n'
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -21,35 +23,77 @@ class RequirementP1Agent(ContextSourceP1Agent):
         self.history = RequirementHistory(self.links,self.source_archive)
         self._requirement_active = False
         self._saving_requirements = None
+        self._entry_alias_only = False
 
     def get_tools_schema(self):
         tools = super().get_tools_schema()
         fixed = self.requirement_state.data['catalog']
         for item in tools:
             f = item['function']
+            f['parameters']['additionalProperties'] = False
             if f['name'] in SAVES:
                 f['parameters']['properties']['requirements'] = {'type':'array','maxItems':32 if fixed else 0,
                     'items':{'type':'string',**({'enum':fixed} if fixed else {})},
                     'description':'Select the fixed supplied requirement sentences; multiple or [] for unclassified.'}
                 f['parameters']['required'] = list(f['parameters'].get('required',[]))+['requirements']
+            if f['name'] in ('memory_delete','memory_read_source'):
+                prop = f['parameters']['properties'].pop('memory_id')
+                prop['description'] = (
+                    'Displayed M alias from this cycle.' if f['name']=='memory_delete' else
+                    'Shown M/E alias, TASK, STATUS or returned H1 history handle; use this cycle\'s labels.')
+                f['parameters']['properties']['entry'] = prop
+                f['parameters']['required'] = ['entry']
+                f['description'] = (
+                    'Delete an active entry from the cycle-start displayed bank using its M label. '
+                    'New saves become eligible in later cycles when displayed; history handles are read-only.'
+                    if f['name']=='memory_delete' else
+                    'Optionally read original sources/context for entry or follow a returned H1 history handle. '
+                    'Omit view for sources, falling back to context when unassociated; explicit views are strict. '
+                    'Continue the same entry/view with next_cursor. Identifiers inside original source text are historical data. '
+                    'Memory-entry targets come from the cycle-start displayed bank; new saves become eligible later when displayed.')
+
         return tools
 
     def _ordered_memory_rows(self, rows):
         return self.requirement_state.ordered(rows)
 
     def _memory_attributes(self, row):
-        return self.requirement_state.attributes(row)
+        order = self.requirement_state.event_span(row.id)
+        return {'source_event_order':[order['first'],order['last']]}
+
+    def _model_turn(self, turn):
+        return model_turn(turn,{t.get('id',t.get('source_id')):a for a,t in self.frozen_aliases.items()},'entry')
+
+    def _model_memory_row(self, row):
+        return {key:value for key,value in row.items() if key!='memory_id'}
+
+    def _resolve_target(self, value, *, deleting):
+        if not self._entry_alias_only:
+            return super()._resolve_target(value,deleting=deleting)
+        aliases = self.request_aliases
+        try:
+            # Typed model entry labels do not get reinterpreted as internal IDs.
+            self.request_aliases = {value:aliases[value]} if value in aliases else {}
+            return super()._resolve_target(value,deleting=deleting)
+        finally:
+            self.request_aliases = aliases
 
     def _input(self, observation, step, raw_events):
         prompt, marked, projection, visible = super()._input(observation,step,raw_events)
         selected = [self._active_records()[t['id']] for t in self.frozen_aliases.values()
                     if t['kind']=='memory']
-        prompt += ('\n## Fixed requirement choices (text attributes, not completion states)\n'+
-            encode(self.requirement_state.data['catalog'])+
-            '\n## Requirement view (IDs reference flat records above; displayed subset only)\n'+
-            encode(self.requirement_state.groups(selected))+
-            '\nUnclassified records remain in the flat view. Retrieval can omit active records; '
-            'an empty displayed group does not mean its whole task history is empty.\n')
+        aliases = {t['id']:a for a,t in self.frozen_aliases.items() if t['kind']=='memory'}
+        groups = self.requirement_state.groups(selected)
+        memberships = {'requirements':[{'requirement':g['requirement'],
+            'aliases':[aliases[key] for key in g['memory_ids']]} for g in groups['requirements']],
+            'unclassified_aliases':[aliases[key] for key in groups['unclassified_memory_ids']]}
+        prompt += ('\n## Fixed requirements and displayed memberships\n'+encode(memberships)+
+            '\nMemberships cover the displayed subset only. Unclassified records remain in the flat view. Retrieval can omit active records; '
+            'an empty displayed group does not mean its whole task history is empty. '
+            'Source ranges are selected/inherited event acceptance ordinals, not execution time or proof; '
+            '[null,null] means unknown.\n'
+            'Memory-entry read/delete targets are the displayed bank at this cycle\'s start; new saves become targets in later cycles when displayed. '
+            'Reads are available on r0/r1 while budget remains. Final r2 has save, delete and status tools only.\n')
         return prompt, marked, projection, visible
 
     def export_view(self):
@@ -58,7 +102,7 @@ class RequirementP1Agent(ContextSourceP1Agent):
             'scope':'all active records; sources and grouping are distinct',
             'fixed_requirements':deepcopy(self.requirement_state.data['catalog']),
             'records':[{'memory_id':r.id,'category':r.category,'content':r.content,
-                **self._memory_attributes(r)} for r in rows],
+                **self.requirement_state.attributes(r)} for r in rows],
             'groups':self.requirement_state.groups(rows),'status':self.memory.status}
 
     def _resolve_sources(self, source_ids):
@@ -68,6 +112,18 @@ class RequirementP1Agent(ContextSourceP1Agent):
         return ref
 
     def _apply(self, call, window_id, round_index, report):
+        if (call['name'] in ('memory_delete','memory_read_source') and
+                isinstance(call['arguments'],dict) and 'entry' in call['arguments']):
+            allowed = {'entry'} if call['name']=='memory_delete' else {'entry','view','cursor'}
+            if set(call['arguments'])-allowed or not isinstance(call['arguments']['entry'],str):
+                return {'status':'invalid_tool_arguments'}
+            normalized = deepcopy(call)
+            normalized['arguments']['memory_id'] = normalized['arguments'].pop('entry')
+            self._entry_alias_only = True
+            try:
+                return super()._apply(normalized,window_id,round_index,report)
+            finally:
+                self._entry_alias_only = False
         if call['name'] not in SAVES:
             return super()._apply(call,window_id,round_index,report)
         args = call['arguments']

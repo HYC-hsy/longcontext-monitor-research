@@ -1,11 +1,50 @@
 """Fixed task requirements and crash checkpoints in the existing atomic bundle."""
 from copy import deepcopy
+import json
 import re
 import unicodedata
 from p1_source_archive import encode, digest
 from p1_context_history import InputMemoryHistory
 
 KEY = 'requirement_attributes_v1'
+
+
+def model_turn(turn, aliases=None, source_parameter='memory_id'):
+    """Visible conversation only; retain full diagnostics/legacy fields in the log."""
+    visible = {key:deepcopy(turn[key]) for key in ('assistant_text','tool_calls','tool_results')}
+    aliases = aliases or {}
+    for call in visible['tool_calls']:
+        args = call['arguments']
+        if call['name'] in ('memory_read_source','memory_delete') and isinstance(args,dict) and 'memory_id' in args:
+            value = args['memory_id']
+            args['memory_id'] = aliases.get(value,value)
+            if source_parameter!='memory_id':
+                args[source_parameter] = args.pop('memory_id')
+    for item in visible['tool_results']:
+        receipt = item.get('result',{})
+        if 'page_sequence_complete' in receipt:
+            receipt.pop('complete',None)
+        receipt.pop('target_resolution',None)
+        receipt.pop('historical_memory_id',None)
+        if 'target' in receipt:
+            if str(receipt['target']).startswith('P2_BROWSE_'):
+                receipt.pop('target')
+            else:
+                receipt['target'] = aliases.get(receipt['target'],receipt['target'])
+        for operation in receipt.get('operations',[]):
+            key = operation.pop('memory_id',None)
+            if key in aliases:
+                operation['entry'] = aliases[key]
+        for part in receipt.get('parts',[]):
+            if part['field']=='input_memory' and part['start']==0 and part['end']==part['total']:
+                # Atomic directory protocol JSON; original evidence text is never rewritten.
+                data = json.loads(part['text'])
+                data.pop('memory_id',None)
+                part['text'] = encode(data)
+                part['end'] = part['total'] = len(part['text'])
+    return visible
+
+
 INIT_SYSTEM = '''Extract what the original task ultimately requires to be achieved. Return fixed, readable requirement sentences, retaining necessary constraints such as paths, options and scope. Separate final conditions from suggested execution steps and historical facts. A paragraph may contain several requirements; matching a phrase does not establish complete semantic coverage. Use only the original task, not later plans or obstacles. Keep the original meaning without inventing conditions. Use requirements_initialize once; use [] only when no final requirement can be identified. This organizes memory; it does not solve or evaluate the task.'''
 INIT_TOOL = {'type':'function','function':{'name':'requirements_initialize',
     'description':'Propose fixed requirement text; at most 32 unique sentences, 512 characters each, 2048 total. No record IDs or completion states.',
@@ -48,6 +87,14 @@ def assignment(values, fixed):
 
 
 class RequirementHistory(InputMemoryHistory):
+    def coverage(self, records, receipts):
+        normalized = deepcopy(receipts)
+        for item in normalized:
+            args = item.get('call',{}).get('arguments',{})
+            if isinstance(args,dict) and 'entry' in args:
+                args['memory_id'] = args.pop('entry')
+        return super().coverage(records,normalized)
+
     def _requirements(self, row):
         return deepcopy((row['ref'] or {}).get('requirements',[]))
 

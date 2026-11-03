@@ -1,5 +1,6 @@
 """Frozen P2 full-bank navigation, without model calls or persistent grants."""
 import json
+from copy import deepcopy
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -170,6 +171,73 @@ class ViewTests(unittest.TestCase):
             self.assertTrue(any(token.startswith(view.history.prefix) for token in view.links.state['history_grants']))
             writer.assert_not_called()
         self.assertEqual(self.files(),before)
+
+    def test_alias_and_displayed_internal_id_resolve_one_record_without_hidden_access(self):
+        view = self.seed()
+        row = view.aliases['M1']
+        self.assertEqual(view.read_source(memory_id=row.id)['status'],'record_not_yet_shown')
+        view.present(['M1'])
+        a = view.read_source(memory_id='M1',view='sources')
+        b = view.read_source(memory_id=row.id,view='sources')
+        self.assertEqual(a,b)
+        self.assertEqual(a['target'],row.id)
+        self.assertEqual(view.read_source(memory_id='nonexistent')['status'],'source_not_in_snapshot_scope')
+
+    def test_alias_internal_id_collision_is_rejected_without_double_resolution(self):
+        self.seed()
+        # First source-ordered object has internal ID M2; a later one is aliased M2.
+        first = next(r for r in self.agent.memory.knowledge if r.content=='multi')
+        second = next(r for r in self.agent.memory.knowledge if r.content=='unclassified')
+        old,other = first.id,second.id
+        first.id,second.id = 'M2','X'
+        state = deepcopy(self.agent.links.state)
+        state['refs']['M2'] = state['refs'].pop(old)
+        state['refs']['X'] = state['refs'].pop(other)
+        state['bank'] = self.agent.memory.to_dict()
+        self.agent.links.commit(state)
+        view = RequirementSelectionView(self.agent)
+        view.present(list(view.aliases))
+        self.assertEqual(view.aliases['M1'].id,'M2')
+        self.assertEqual(view.read_source(memory_id='M2')['status'],'ambiguous_memory_id')
+        self.assertEqual(view.read_source(memory_id='M1')['target'],'M2')
+        self.assertEqual(view.read_source(memory_id='M2',alias_only=True)['target'],'X')
+        self.assertEqual(view.read_source(memory_id='M1',alias_only=True)['target'],'M2')
+        self.assertEqual(view.read_source(memory_id='X',alias_only=True)['status'],'source_not_in_snapshot_scope')
+        self.assertEqual(view.read_source(memory_id='X')['target'],'X')
+
+    def test_browse_condition_misuse_and_same_filter_cursor_contract(self):
+        self.responses = [self.init(),reply([self.save('long🙂'*6000,[FIXED[0]])])]
+        self.run_cycle()
+        view = RequirementSelectionView(self.agent)
+        for args in ({'view':'requirement'},{'view':'all','requirement':FIXED[0]},
+                     {'view':'unclassified','requirement':FIXED[0]},{'category':'gaps'}):
+            self.assertEqual(view.browse(**args)['status'],'invalid_tool_arguments')
+        page = view.browse(view='requirement',requirement=FIXED[0],category='knowledge')
+        self.assertIsNotNone(page['next_cursor'])
+        self.assertEqual(view.browse(view='requirement',requirement=FIXED[0],category='gap',
+            cursor=page['next_cursor'])['status'],'invalid_cursor')
+        continued = view.browse(view='requirement',requirement=FIXED[0],category='knowledge',cursor=page['next_cursor'])
+        self.assertNotEqual(continued['status'],'invalid_cursor')
+
+    def test_model_browse_pages_hide_internal_ids_without_changing_host_records(self):
+        self.responses = [self.init(),reply([self.save('long🙂'*6000,[FIXED[0]])])]
+        self.run_cycle()
+        view = RequirementSelectionView(self.agent)
+        page = view.browse(model_view=True)
+        self.assertEqual(view.browse(cursor=page['next_cursor'])['status'],'invalid_cursor')
+        parts = page['parts'][:]
+        while page['next_cursor']:
+            page = view.browse(model_view=True,cursor=page['next_cursor'])
+            self.assertLessEqual(len(encode(page)),8000)
+            parts.extend(page['parts'])
+        row = json.loads(''.join(p['text'] for p in parts))
+        self.assertEqual(row['alias'],'M1')
+        self.assertNotIn('memory_id',row)
+        self.assertEqual(row['content'],'long🙂'*6000)
+        self.assertIn('memory_id',view.record('M1'))
+        grouped = view.browse(view='requirement',requirement=FIXED[0],model_view=True)
+        self.assertEqual(grouped['parts'][0]['source_id'],'M1')
+
 
 
 if __name__=='__main__':

@@ -132,11 +132,13 @@ class RequirementSelectionView:
                     self.attributes[a]['requirements']]} for text in self.catalog],
                 'unclassified_aliases':[a for a in aliases if not self.attributes[a]['requirements']]}
 
-    def browse(self, *, view='all', requirement=None, category=None, cursor=None):
+    def browse(self, *, view='all', requirement=None, category=None, cursor=None, model_view=False):
         if (view not in ('all','requirement','unclassified') or (view!='requirement' and requirement is not None) or
                 category not in (None,'knowledge','procedural','gap')):
             return {'status':'invalid_tool_arguments'}
         if view=='requirement':
+            if requirement is None:
+                return {'status':'invalid_tool_arguments'}
             try:
                 requirement = canonical(requirement)
             except ValueError:
@@ -147,20 +149,23 @@ class RequirementSelectionView:
             (view=='unclassified' and not self.attributes[a]['requirements']) or
             (view=='requirement' and requirement in self.attributes[a]['requirements'])]
         aliases = [a for a in aliases if category is None or self.aliases[a].category==category]
-        fields = [(a,'record','json_value',encode(self.record(a))) for a in aliases]
+        records = {a:self.record(a) for a in aliases}
+        if model_view:
+            for record in records.values():record.pop('memory_id',None)
+        fields = [(a,'record','json_value',encode(records[a])) for a in aliases]
         metadata = {'snapshot_id':self.id,'browse_view':view,'requirement':requirement,'category':category,
             'scope':'all frozen active records matching this filter; not only the initial BM25 subset',
             'matching_record_count':len(aliases),'all_active_record_count':len(self.items),
             'matching_category_counts':{c:sum(self.aliases[a].category==c for a in aliases)
                                         for c in ('knowledge','procedural','gap')},
             'gap_scope':'Active GAP records describe recorded needs, not verified completion.',
-            'selection_rule':'Only initial full records or completely returned record parts may be selected.'}
+            'record_scope':'Records may span pages; join record parts and JSON-decode. Partial records are incomplete.'}
         result = self.links.read({'kind':'status','id':'P2_BROWSE_'+self.id,'ref':None},
             {'P2_BROWSE_'+self.id:NS(content='',category='status')},view='sources',cursor=cursor,
             _extra_fields=fields,_read_metadata=metadata)
         for part in result.get('parts',[]):
             alias = part['source_id']
-            ranges = self._coverage.setdefault(alias,[])
+            ranges = self._coverage.setdefault((alias,model_view),[])
             ranges.append((part['start'],part['end']))
             end = 0
             for start,stop in sorted(ranges):
@@ -173,16 +178,23 @@ class RequirementSelectionView:
             result['status'] = 'browse_complete' if result['page_sequence_complete'] else 'browse_partial'
         return result
 
-    def read_source(self, *, memory_id, view=None, cursor=None):
+    def read_source(self, *, memory_id, view=None, cursor=None, alias_only=False):
+        if not isinstance(memory_id,str):
+            return {'status':'invalid_tool_arguments'}
+        matches = {a for a,row in self.aliases.items() if a==memory_id or (not alias_only and row.id==memory_id)}
+        special = memory_id in ('TASK','STATUS') or memory_id.startswith(self.history.prefix)
+        if len(matches)+bool(special)>1:
+            return {'status':'ambiguous_memory_id'}
         active = {row.id:row for row in self.items}
         active['STATUS'] = NS(content=self.links.state['bank']['status'],category='status')
         try:
             if memory_id.startswith(self.history.prefix):
                 return self.history.read(None,{},requested_view=view,cursor=cursor,handle=memory_id)
-            if memory_id in self.aliases:
-                if memory_id not in self.seen:
+            if matches:
+                alias = next(iter(matches))
+                if alias not in self.seen:
                     return {'status':'record_not_yet_shown'}
-                key = self.aliases[memory_id].id
+                key = self.aliases[alias].id
                 target = {'kind':'memory','id':key,'ref':self.links.state['refs'][key]}
             elif memory_id=='STATUS':
                 target = {'kind':'status','id':'STATUS','ref':self.links.state['refs'].get('STATUS')}

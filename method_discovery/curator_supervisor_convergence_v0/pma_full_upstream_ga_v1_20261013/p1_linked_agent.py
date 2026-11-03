@@ -27,6 +27,7 @@ READ_TOOL = {'type':'function','function':{'name':'memory_read_source',
 
 class LinkedSourceP1Agent(SourceReadP1Agent):
     system = SYSTEM
+    final_turn_instruction = 'Final turn: source reads closed; write summaries or leave the bank unchanged.\n'
     context_views = False
     memory_source_label = 'IDs for deletion, aliases for sources'
     def __init__(self, **kwargs):
@@ -69,9 +70,9 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
             alias = 'M' + str(i)
             ref = deepcopy(self.links.state['refs'].get(row.id))
             aliases[alias] = {'kind':'memory','id':row.id,'ref':ref}
-            memory_rows.append({'alias':alias,'memory_id':row.id,'category':records[row.id].category,
+            memory_rows.append(self._model_memory_row({'alias':alias,'memory_id':row.id,'category':records[row.id].category,
                 'content':row.content,'source_association':(ref or {}).get('association','legacy_unassociated'),
-                **self._memory_attributes(row)})
+                **self._memory_attributes(row)}))
         aliases['STATUS'] = {'kind':'status','id':'STATUS','ref':deepcopy(self.links.state['refs'].get('STATUS'))}
         self.frozen_aliases = aliases
         self._raw_generation_context = {'task':self.task,'stored_memory':deepcopy(self.memory.to_dict()),
@@ -90,6 +91,9 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
 
     def _memory_attributes(self, row):
         return {}
+
+    def _model_memory_row(self, row):
+        return row
 
     def _restore_committed_bank(self):
         # A replace can succeed before its caller raises. Reload the single bundle,
@@ -193,6 +197,9 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
     def _stop_batch_after(self, call, result):
         return False
 
+    def _model_turn(self, turn):
+        return turn
+
     async def maintain(self, entries, *, observation=None, step_count=0, cycle_id=None):
         if self._active:
             raise RuntimeError('serial maintenance required')
@@ -271,9 +278,9 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                 if round_index < CONTINUATION_LIMIT and any(c['name']=='memory_read_source' for c in calls):
                     receipts.extend({'call':deepcopy(c),'receipt':deepcopy(r['result'])} for c,r in zip(calls,turn['tool_results']) if c['name']=='memory_read_source')
                     report['continuations_used'] += 1
-                    history.append(turn)
+                    history.append(self._model_turn(turn))
                     prompt = initial+'\n## Previous P1 calls and receipts (historical data)\n'+encode(history)
-                    prompt += ('\nFinal turn: source reads closed; write summaries or leave the bank unchanged.\n' if round_index+1==CONTINUATION_LIMIT or report['reads_used']>=READ_LIMIT
+                    prompt += ('\n'+self.final_turn_instruction if round_index+1==CONTINUATION_LIMIT or report['reads_used']>=READ_LIMIT
                                else '\nContinue from exact receipts; follow next_cursor only if useful.\n')
                 else:
                     break

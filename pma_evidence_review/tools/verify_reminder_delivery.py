@@ -16,7 +16,7 @@ def main():
         if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest()!=expected:
             failures.append(name)
     result = json.loads((DELIVERY/'OFFLINE_RESULTS.json').read_bytes())
-    if (result['tests_run']!=167 or not result['successful'] or
+    if (result['tests_run']!=181 or not result['successful'] or
             any(result[key] for key in ('errors','failures','skipped'))):
         failures.append('offline result')
     print(json.dumps({'status':'failed' if failures else 'passed','manifest_files':len(manifest['files']),

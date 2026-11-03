@@ -190,6 +190,7 @@ class SelectionTests(unittest.TestCase):
                     rows = [json.loads(p['text']) for p in page['parts']]
                     row = next(r for r in rows if r['content']=='A earlier')
                     selected.update(row)
+                    selected['memory_id'] = p2.view.aliases[row['alias']].id
                     return reply([('memory_read_source',{'memory_id':row['alias'],'view':'sources'})])
                 def third(p2):
                     page = p2.last_p2_report['turns'][1]['tool_results'][0]['result']
