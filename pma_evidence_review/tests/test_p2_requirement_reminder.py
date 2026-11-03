@@ -42,37 +42,36 @@ class ReminderTests(unittest.TestCase):
         self.assertEqual(self.p2_requests[0]['system'],SYSTEM)
         self.assertNotIn('select its stable M alias',self.p2_requests[0]['tools'][0]['function']['description'])
 
-    def test_no_intervention_and_invalid_output_are_distinct(self):
+    def test_explicit_and_upstream_default_no_intervention_are_distinguished(self):
         self.build()
         self.p2_responses = [reply(content='<no_intervention/>')]
         result = self.run_reminder()
         self.assertEqual((result['status'],result['should_inject'],result['context_for_action']),('no_intervention',False,None))
-        for raw in ('', 'untagged reminder','<intervene>M1</intervene>',
-                    '<context_for_action> </context_for_action>',
-                    '<context_for_action>x</context_for_action><no_intervention/>'):
+        for raw in ('','untagged reminder','<intervene>M1</intervene>',
+                    '<context_for_action> </context_for_action>','<context_for_action>broken'):
             with self.subTest(raw=raw):
                 self.p2_responses = [reply(content=raw)]
                 result = self.run_reminder()
-                self.assertEqual(result['status'],'selection_error')
-                self.assertFalse(result['should_inject'])
+                self.assertEqual(result['status'],'no_intervention')
+                self.assertEqual(result['parse_status'],'upstream_default_no_intervention')
+                self.assertIn('format_warning',result)
                 self.assertIsNone(result['delivery'])
+        self.p2_responses = [reply(content='<context_for_action>x</context_for_action><no_intervention/>')]
+        self.assertEqual(self.run_reminder()['failure_kind'],'model_output')
 
-    def test_explicit_no_op_with_trailing_plain_explanation_is_not_a_host_failure(self):
+    def test_explicit_tags_accept_surrounding_prose_like_upstream(self):
         self.build()
-        raw = '<no_intervention/>\n\nThe agent is proceeding with the visible requirements.'
-        self.p2_responses = [reply(content=raw)]
-        result = self.run_reminder()
-        self.assertEqual(result['status'], 'no_intervention')
-        self.assertFalse(result['should_inject'])
-        self.assertEqual(result['raw_output'], raw)
-        self.assertEqual(result['normalized_output'], '<no_intervention/>')
-        self.assertTrue(result['ignored_trailing_explanation'])
-        for invalid in ('<no_intervention/>\n<context_for_action>note</context_for_action>',
-                        '<no_intervention/>\n<tool_call>bad</tool_call>',
-                        '<context_for_action>note</context_for_action>\nexplanation'):
-            with self.subTest(invalid=invalid):
-                self.p2_responses = [reply(content=invalid)]
-                self.assertEqual(self.run_reminder()['status'], 'selection_error')
+        from memory_agent.memory.memory_agent import MemoryAgent
+        for raw in ('prefix <no_intervention/> explanation with <ordinary> markup',
+                    '<context_for_action>note</context_for_action> explanation',
+                    'explanation <context_for_action>note</context_for_action>',
+                    '```xml\n<context_for_action>note</context_for_action>\n```',
+                    '<no_intervention/>\n\nThe agent is proceeding with the visible requirements.'):
+            self.p2_responses = [reply(content=raw)]
+            result = self.run_reminder()
+            self.assertEqual(result['context_for_action'],MemoryAgent._parse_phase2_response(self.p2,raw))
+            self.assertEqual(result['raw_output'],raw)
+            self.assertNotIn(result['status'],('selection_error','engineering_error'))
 
     def test_theme_and_flat_then_evidence_then_synthesized_reminder(self):
         self.build()
@@ -114,7 +113,7 @@ class ReminderTests(unittest.TestCase):
         result = self.run_reminder()
         self.assertEqual(result['status'],'intervention')
         self.assertIn('unverified',result['delivery'])
-        self.assertIn('missing evidence does not establish success or failure',SYSTEM)
+        self.assertIn('Missing evidence does not establish success or failure',SYSTEM)
 
     def test_whole_bank_change_revokes_generated_note_without_invented_used_aliases(self):
         self.build()
@@ -167,8 +166,8 @@ class ReminderTests(unittest.TestCase):
         result = self.run_reminder()
         self.assertEqual(result['status'],'intervention')
         self.assertIn('fallible overview',SYSTEM)
-        self.assertIn('no routine per-topic or per-entry audit',SYSTEM)
-        self.assertIn('No retrieval or evidence read is mandatory',SYSTEM)
+        self.assertIn('No retrieval or audit is mandatory',SYSTEM)
+        self.assertIn('No retrieval or audit is mandatory',SYSTEM)
 
     def test_pending_and_initializing_durable_cycles_reject_even_no_intervention(self):
         self.build()

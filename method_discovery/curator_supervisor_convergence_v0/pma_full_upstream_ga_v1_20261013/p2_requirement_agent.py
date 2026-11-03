@@ -22,6 +22,7 @@ class RequirementSelectionAgent(BankDisplayAgent):
     system = SYSTEM
     delivery_protocol = 'verbatim-selection-v1'
     source_parameter = 'memory_id'
+    upstream_error_semantics = False
     final_turn_instruction = 'Tools closed. Return the original TASK/M selection protocol or no_intervention.'
     final_output_error = 'final_turn_requires_original_selection_text'
 
@@ -52,6 +53,9 @@ class RequirementSelectionAgent(BankDisplayAgent):
                 'view':{'type':'string','enum':['sources','context']},'cursor':{'type':'string'}},
                 'required':['memory_id'],'additionalProperties':False}}}]
 
+    def _visible_steps(self, entries):
+        return project_steps(entries)[0]
+
     def _prepare(self, observation, entries, step):
         view = RequirementSelectionView(self.p1)
         self.view = view
@@ -65,7 +69,7 @@ class RequirementSelectionAgent(BankDisplayAgent):
         self._active_selection_cycle = view.snapshot.cycle
         rows = [{'alias':'TASK','content':view.task}]+[
             {key:value for key,value in row.items() if key!='memory_id'} for row in view.initial_records(aliases)]
-        steps = project_steps(entries)[0] if entries is not None else observation
+        steps = self._visible_steps(entries) if entries is not None else observation
         scope = 'all_frozen_active_records' if len(aliases)==len(view.items) else 'subset_of_frozen_active_records'
         initial = self._render_initial(rows,bank.status,steps,step,
             memory_note=('Initial catalogue scope: '+scope+'; tools can browse the frozen full active bank. '
@@ -114,7 +118,9 @@ class RequirementSelectionAgent(BankDisplayAgent):
             report.update(diagnostic(outcome),status=outcome.kind,delivery=delivery_json(outcome),
                           selected_aliases=list(aliases))
         except ValueError as exc:
-            report.update(status='selection_error',error=str(exc),delivery=None)
+            report.update(status='selection_error',error=str(exc),failure_kind='model_output',delivery=None)
+            if report['turns']:
+                report['turns'][-1]['parse_error'] = str(exc)
 
     def pending_refs_valid(self):
         report,view = self.last_p2_report,getattr(self,'view',None)
@@ -126,6 +132,12 @@ class RequirementSelectionAgent(BankDisplayAgent):
             report['delivery_revoked'] = True
             report['delivery_error'] = view.validation_error or 'snapshot_record_or_task_changed'
         return valid
+
+    def _tool_failure_kind(self, result):
+        return 'model_tool' if result['status'] in {
+            'unknown_tool','invalid_tool_arguments','unknown_requirement','invalid_cursor',
+            'record_not_yet_shown','source_not_in_snapshot_scope','invalid_history_handle',
+            'ambiguous_memory_id'} else None
 
     async def select(self, *, observation='', entries=None, step_count=0):
         if self._selecting:
@@ -139,6 +151,7 @@ class RequirementSelectionAgent(BankDisplayAgent):
             'physical_provider_requests':'unknown; inherited client retries','persistent_writes':False}
         report['delivery_protocol'] = self.delivery_protocol
         self.last_p2_report = report
+        stage = 'snapshot'
         try:
             initial,shown = self._prepare(observation,entries,step_count)
             report.update(snapshot_id=self.view.id,initial_aliases=shown,frozen_active_count=len(self.view.items),
@@ -150,21 +163,25 @@ class RequirementSelectionAgent(BankDisplayAgent):
                 request = {'prompt':prompt,'system':self.system,**({'tools':tools} if tools else {})}
                 if self.before_request:
                     self.before_request(deepcopy(request))
+                stage = 'model_call'
                 report['model_calls_attempted'] += 1
                 response = await self.llm.call(**request)
                 report['model_calls_completed'] += 1
                 text = self._strip_thinking(getattr(response,'content',None) or '')
-                calls = self._response_calls(response,index,text)
                 usage = getattr(response,'usage',None)
-                turn = {'assistant_text':text,'tool_calls':calls,'tool_results':[],
+                turn = {'assistant_text':text,'tool_calls':[],'tool_results':[],
                     'prompt_sha256':digest(prompt),'system_sha256':digest(self.system),'tools_sha256':digest(encode(tools)),
                     'usage':{k:getattr(usage,k) for k in ('prompt_tokens','completion_tokens','cache_tokens','cost_usd')
                              if usage is not None and getattr(usage,k,None) is not None}}
                 report['turns'].append(turn)
+                stage = 'model_output'
+                calls = self._response_calls(response,index,text)
+                turn['tool_calls'] = calls
                 if not calls:
                     self._finish(text,report)
                     break
-                failed = False
+                failed = None
+                stage = 'tool_execution'
                 for call in calls:
                     report['tool_requests'] += 1
                     if failed:
@@ -174,15 +191,15 @@ class RequirementSelectionAgent(BankDisplayAgent):
                     else:
                         report['reads_used'] += 1
                         result = self._read(call)
-                        failed = result['status'] in {'unknown_tool','invalid_tool_arguments','unknown_requirement',
-                            'invalid_cursor','record_not_yet_shown','source_not_in_snapshot_scope','invalid_history_handle','ambiguous_memory_id'}
+                        failed = self._tool_failure_kind(result)
                     turn['tool_results'].append({'tool_call_id':call['tool_call_id'],'result':result})
                 if failed:
-                    report['status'] = 'tool_error'
+                    report.update(status='tool_error',failure_kind=failed)
                     break
                 if index==CONTINUATION_LIMIT:
                     report['status'] = 'selection_error'
                     report['error'] = self.final_output_error
+                    report['failure_kind'] = 'model_output'
                     break
                 history.append(model_turn(turn,{row.id:alias for alias,row in self.view.aliases.items()},self.source_parameter))
                 report['continuations_used'] += 1
@@ -190,9 +207,13 @@ class RequirementSelectionAgent(BankDisplayAgent):
                 if index+1==CONTINUATION_LIMIT or report['reads_used']>=READ_LIMIT:
                     prompt += '\n'+self.final_turn_instruction+'\n'
         except ResponseProtocolError as exc:
-            report.update(status='selection_error',error=str(exc),delivery=None)
+            report.update(status='selection_error',error=str(exc),failure_kind='model_output',delivery=None)
+            if report['turns']:
+                report['turns'][-1]['parse_error'] = str(exc)
         except Exception as exc:
-            report.update(status='engineering_error',error_type=type(exc).__name__,delivery=None)
+            report.update(status='memory_error' if self.upstream_error_semantics and stage=='model_call' else 'engineering_error',
+                failure_kind='transport' if stage=='model_call' else 'engineering',
+                error_stage=stage,error_type=type(exc).__name__,delivery=None)
         finally:
             report['fully_shown_aliases'] = sorted(getattr(getattr(self,'view',None),'seen',()))
             self._selecting = False

@@ -51,6 +51,21 @@ INIT_TOOL = {'type':'function','function':{'name':'requirements_initialize',
     'parameters':{'type':'object','properties':{'requirements':{'type':'array','maxItems':32,
         'items':{'type':'string','maxLength':512}}},'required':['requirements'],'additionalProperties':False}}}
 
+def upstream_observation(task, entries):
+    """Reuse PMA's exact task + eight-step BM25 context, separate from evidence IDs."""
+    from types import SimpleNamespace
+    from memory_agent.memory_enabled_agent import MemoryEnabledTerminus2
+    rows = deepcopy(entries[-8:])
+    for index,row in enumerate(rows):
+        row.setdefault('step',index+2)
+        if row.get('commands'):
+            row['commands'] = [str(c) for c in row['commands']]
+    state = SimpleNamespace(_task_description=task,_sliding_window_size=8,
+        _accumulated_observations=[{'step':1,'observation':task}]+rows,
+        _format_step_entry=MemoryEnabledTerminus2._format_step_entry)
+    return MemoryEnabledTerminus2._get_memory_agent_context(state)
+
+
 class RequirementError(ValueError):
     def __init__(self, reason):
         self.reason = reason

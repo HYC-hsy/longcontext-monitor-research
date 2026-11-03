@@ -49,7 +49,7 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
 
     def _input(self, observation, step, raw_events):
         self.shown_events = self.links.ingest(raw_events)
-        visible, projection = project_steps(raw_events)
+        visible, projection = self._visible_input(raw_events)
         visible = historical_events(visible)
         aliases = {'TASK':{'kind':'task','source_id':'TASK'}}
         for i, (row, saved) in enumerate(zip(visible, self.shown_events), 1):
@@ -85,6 +85,9 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
             + '\nMaintain short summaries with the available tools. Unchanged entries need no write.\n')
         marked = [{**r, 'presentation':s['presentation']} for r,s in zip(raw_events,self.shown_events)]
         return prompt, marked, projection, visible
+
+    def _visible_input(self, raw_events):
+        return project_steps(raw_events)
 
     def _ordered_memory_rows(self, rows):
         return rows

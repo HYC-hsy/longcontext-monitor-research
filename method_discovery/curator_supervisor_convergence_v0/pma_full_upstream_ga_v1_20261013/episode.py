@@ -222,7 +222,7 @@ class PMAEpisode:
             p1.transport_phase = 'selection'
         p1.before_request, p2.before_request = p1_before, p2_before
         entries = deepcopy(self._requirement_entries[-8:])
-        report = await pipeline.run(entries, observation=None, step_count=step_count,
+        report = await pipeline.run(entries, observation=self.agent._get_memory_agent_context(), step_count=step_count,
                                     cycle_id=f'{self.run_id}_step_{step_count}')
         row = {'step':step_count,'entries':entries,'bank_before':before,
                'bank_after':self.agent._memory.to_dict(),'report':report}
