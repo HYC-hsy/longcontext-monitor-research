@@ -215,24 +215,63 @@ class PMAEpisode:
         pipeline = self.agent._requirement_pipeline
         p1, p2 = pipeline.p1, pipeline.p2
         before = self.agent._memory.to_dict()
+        self.agent._memory_trigger_count += 1
+        prompts = {}
         def p1_before(request):
+            prompts['p1'] = request['prompt']
             p1.transport_phase = ('requirement_initialization' if
                                   request.get('kind') == 'requirement_initialization' else 'maintenance')
         def p2_before(request):
+            prompts['p2'] = request['prompt']
             p1.transport_phase = 'selection'
         p1.before_request, p2.before_request = p1_before, p2_before
         entries = deepcopy(self._requirement_entries[-8:])
         report = await pipeline.run(entries, observation=self.agent._get_memory_agent_context(), step_count=step_count,
                                     cycle_id=f'{self.run_id}_step_{step_count}')
+        report.update(mode='requirement_reminder_task_adapter',task_enabled=True)
+        # Initialization validation has not executed maintenance or changed the bank.
+        # Close this failed attempt explicitly so a later trigger can retry extraction.
+        phase1 = report.get('p1') or {}
+        if (report['status']=='p1_incomplete' and phase1.get('status')=='initialization_failed'
+                and phase1.get('failure_kind') in {'model_output','transport'} and not phase1.get('operations')
+                and p1.requirement_state.data['catalog'] is None and self.agent._memory.to_dict()==before):
+            p1.requirement_state.phase(phase1['cycle_id'],'done',result=phase1)
+            report.update(error_policy='continue_without_reminder',initialization_aborted_without_maintenance=True)
+        from memory_agent.memory.memory_agent import MemoryAgentResult, MemoryOperation
+        operations = [MemoryOperation(**{k:v for k,v in op.items() if k in
+            {'action','memory_id','content','success','error'}}) for op in phase1.get('operations',[])]
+        self.agent._memory_operation_count += len(operations)
+        last_text = lambda phase: next((t.get('assistant_text') for t in reversed(
+            (phase or {}).get('turns') or (phase or {}).get('initialization_attempts',[]))),None)
+        recorded = MemoryAgentResult(operations=operations,should_inject=bool(report['should_inject']),
+            context_for_action=report['context_for_action'],raw_response_phase1=last_text(phase1),
+            raw_response_phase2=last_text(report.get('p2')),
+            user_prompt_phase1=prompts.get('p1'),user_prompt_phase2=prompts.get('p2'))
+        self.agent._record_memory_step(trigger_step=self.agent._memory_step_in_episode,
+            step_count=step_count,observation=self.agent._get_memory_agent_context(),result=recorded)
+        entry = self.agent._memory_trajectory_steps[-1]
+        entry['requirement_cycle_status'] = report['status']
+        entry['memory_snapshot']['gap_count'] = len(self.agent._memory.entries)
+        if report.get('p1_warning'):
+            entry['memory_warning'] = {'phase':'p1','status':phase1['status'],
+                'failure_kind':phase1.get('failure_kind','model_tool'),'error_type':phase1.get('error_type')}
+        if report['status'] not in ('intervention','no_intervention'):
+            self.agent._memory_trajectory_steps[-1]['memory_error'] = {
+                'status':report['status'],'failure_kind':report.get('failure_kind','engineering'),
+                'error_policy':report.get('error_policy','fail_stop')}
         row = {'step':step_count,'entries':entries,'bank_before':before,
                'bank_after':self.agent._memory.to_dict(),'report':report}
         with (self.archive/'requirement_cycles.jsonl').open('a',encoding='utf-8') as stream:
             stream.write(encode(row)+'\n')
             stream.flush()
             os.fsync(stream.fileno())
+        self._last_requirement_cycle_status = report['status']
+        if report['status'] not in ('intervention','no_intervention') or report.get('p1_warning'):
+            self.agent._requirement_memory_error_count = getattr(self.agent,'_requirement_memory_error_count',0)+1
         if report['status'] not in ('intervention','no_intervention'):
+            if report.get('error_policy')=='continue_without_reminder':
+                return
             raise RuntimeError('requirement reminder cycle failed: '+report['status'])
-        self.agent._memory_trigger_count += 1
         if report['should_inject']:
             self.agent._pending_injection = report['context_for_action']
             self.agent._injection_used = False
@@ -412,6 +451,7 @@ class PMAEpisode:
             if getattr(self.agent,'_memory_maintenance_policy',None) != 'pma-requirement-reminder-v1':
                 await self.agent._trigger_memory_agent(step_count=1)
         return {"status": "started", "triggered": triggered, "trigger_reason": reason,
+                **({'memory_cycle_status':self._last_requirement_cycle_status} if hasattr(self,'_last_requirement_cycle_status') else {}),
                 "initial_envelope_sha256": hashlib.sha256(
                     json.dumps(raw, ensure_ascii=False, sort_keys=True).encode()).hexdigest()}
 
@@ -548,6 +588,7 @@ class PMAEpisode:
                 await self.agent._trigger_memory_agent(step_count=step)
         self.last_completed_attempt = attempt
         return {"status": "observed", "triggered": triggered,
+                **({'memory_cycle_status':self._last_requirement_cycle_status} if triggered and hasattr(self,'_last_requirement_cycle_status') else {}),
                 "trigger_reason": reason, "step_count": step}
 
     def _task_end(self, event: dict[str, Any]) -> dict[str, Any]:

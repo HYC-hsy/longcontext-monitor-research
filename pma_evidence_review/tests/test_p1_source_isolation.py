@@ -124,9 +124,11 @@ class P1IsolationTests(unittest.TestCase):
             self.assertEqual(result['operations'],[])
             self.assertEqual(result['turns'][0]['tool_results'][0]['result']['status'],'unknown_tool')
 
-    def test_original_cases_p2_system_input_and_default_paths_are_byte_frozen(self):
+    def test_original_cases_p2_system_input_and_core_paths_are_byte_frozen(self):
+        # Task adapter/CLI paths gained an explicit opt-in at fd00; the default
+        # execution path is exercised in test_requirement_reminder_task_entry.
         files=list(CASES.glob('*.json'))+[STAGE/n for n in ('selection_context.py','tag_selection_contract.py',
-            'verbatim_selection_mixin.py','bank_display_agent.py','episode.py','worker_main.py','live_launcher.py')]
+            'verbatim_selection_mixin.py','bank_display_agent.py')]
         for path in files:
             name=path.relative_to(ROOT).as_posix()
             self.assertEqual(path.read_bytes(),subprocess.check_output(['git','show',BASE+':'+name],cwd=ROOT),name)

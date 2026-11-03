@@ -142,12 +142,14 @@ class ReminderTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'reminder-only'):
             asyncio.run(pipeline.p2.process())
 
-    def test_pipeline_p1_failure_stops_before_p2_and_is_not_no_intervention(self):
-        self.responses = [self.init(),reply([self.save(requirements=['unknown'])])]
+    def test_pipeline_ordinary_p1_tool_failure_preserves_error_and_runs_p2(self):
+        self.responses = [self.init(),reply([self.save(requirements=['unknown'])]),reply(content='<no_intervention/>')]
         result = asyncio.run(RequirementReminderPipeline(self.agent).run([],cycle_id='bad'))
-        self.assertEqual(result['status'],'p1_incomplete')
-        self.assertIsNone(result['p2'])
-        self.assertEqual(len(self.requests),2)
+        self.assertEqual(result['status'],'no_intervention')
+        self.assertEqual(result['p1']['status'],'tool_error')
+        self.assertEqual(result['p1_warning'],'tool_error')
+        self.assertEqual(len(self.requests),3)
+        self.assertEqual(self.agent.memory.knowledge,[])
         self.assertFalse(result['should_inject'])
 
     def test_optional_theme_gap_counts_and_fallible_overview_prompt(self):

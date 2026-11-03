@@ -69,7 +69,8 @@ class UpstreamCompatibilityTests(unittest.TestCase):
         prefix = '\n### [WORKING MEMORY]\n<earlier_context>\nOLD RAW\n</earlier_context>\n<history>\nHISTORY RAW\n</history>\nCurrent turn: 9\n\n<key_info>CHECKPOINT RAW</key_info>'
         raw = json.dumps({'content':prefix,'tool_results':[{'content':'RECEIPT RAW'}]})
         entries = [{'step':i+2,'event_id':'new-'+str(i),'commands':['echo a']*6,
-                    'observation':raw,'analysis':'visible actor analysis','plan':'visible plan'} for i in range(10)]
+                    'observation':raw,'analysis':'visible actor analysis','plan':'visible plan',
+                    'evaluation_label':'DO NOT SEND EVALUATION METADATA'} for i in range(10)]
         original = deepcopy(entries)
         expected = upstream_observation(self.agent.task,entries)
         self.assertIn(self.agent.task,expected)
@@ -95,7 +96,15 @@ class UpstreamCompatibilityTests(unittest.TestCase):
         p2prompt,_=self.p2._prepare(expected,entries,12)
         self.assertIn('HISTORY RAW',p2prompt)
         self.assertIn('CHECKPOINT RAW',p2prompt)
+        self.assertNotIn('DO NOT SEND EVALUATION METADATA',p2prompt)
         self.assertEqual(len(self.agent.links.state['events']),10)  # two prior + eight new, no wrapper re-ingest.
+        bad = reply([('memory_save_knowledge',{})])
+        bad.tool_calls[0].function.arguments = '{broken'
+        self.responses = [bad]
+        report = self.run_cycle('bad_seen',[{'event_id':'after-error','observation':'already presented raw'}])
+        self.assertEqual(report['failure_kind'],'model_output')
+        accepted = self.agent.links.state['accepted']['after-error']
+        self.assertIn(accepted,self.agent.links.state['presented'])
 
 
 if __name__=='__main__':

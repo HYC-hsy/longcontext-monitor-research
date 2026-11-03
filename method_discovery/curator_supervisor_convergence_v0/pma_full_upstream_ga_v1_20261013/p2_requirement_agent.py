@@ -167,12 +167,17 @@ class RequirementSelectionAgent(BankDisplayAgent):
                 report['model_calls_attempted'] += 1
                 response = await self.llm.call(**request)
                 report['model_calls_completed'] += 1
+                stage = 'model_output'
                 text = self._strip_thinking(getattr(response,'content',None) or '')
                 usage = getattr(response,'usage',None)
                 turn = {'assistant_text':text,'tool_calls':[],'tool_results':[],
                     'prompt_sha256':digest(prompt),'system_sha256':digest(self.system),'tools_sha256':digest(encode(tools)),
                     'usage':{k:getattr(usage,k) for k in ('prompt_tokens','completion_tokens','cache_tokens','cost_usd')
                              if usage is not None and getattr(usage,k,None) is not None}}
+                if self.upstream_error_semantics:
+                    turn['response_tool_calls'] = [{'name':getattr(getattr(c,'function',c),'name',None),
+                        'arguments':deepcopy(getattr(getattr(c,'function',c),'arguments',None))}
+                        for c in (getattr(response,'tool_calls',None) or [])]
                 report['turns'].append(turn)
                 stage = 'model_output'
                 calls = self._response_calls(response,index,text)
@@ -211,8 +216,9 @@ class RequirementSelectionAgent(BankDisplayAgent):
             if report['turns']:
                 report['turns'][-1]['parse_error'] = str(exc)
         except Exception as exc:
-            report.update(status='memory_error' if self.upstream_error_semantics and stage=='model_call' else 'engineering_error',
-                failure_kind='transport' if stage=='model_call' else 'engineering',
+            report.update(status=('memory_error' if stage=='model_call' else 'selection_error')
+                    if self.upstream_error_semantics and stage in {'model_call','model_output'} else 'engineering_error',
+                failure_kind='transport' if stage=='model_call' else 'model_output' if stage=='model_output' else 'engineering',
                 error_stage=stage,error_type=type(exc).__name__,delivery=None)
         finally:
             report['fully_shown_aliases'] = sorted(getattr(getattr(self,'view',None),'seen',()))

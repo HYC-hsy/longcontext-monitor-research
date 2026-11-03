@@ -1,9 +1,9 @@
 """Original PMA reminder generation, with optional frozen browse/evidence tools."""
 import re
-from copy import deepcopy
 from types import SimpleNamespace as NS
 from memory_agent.memory.memory_agent import MemoryAgent, PHASE2_SYSTEM
 from p1_source_archive import encode
+from p1_source_links import visible_event
 from p1_requirements import KEY, upstream_observation
 from p2_requirement_agent import RequirementSelectionAgent, ResponseProtocolError
 
@@ -45,7 +45,7 @@ class RequirementReminderAgent(RequirementSelectionAgent):
         return tools
 
     def _visible_steps(self, entries):
-        return deepcopy(entries[-8:])
+        return [visible_event(row) for row in entries[-8:]]
 
     def _render_initial(self, catalogue, status, steps, step_count, *, memory_note):
         return (f'## Step {step_count}\n## Original task and shown memory (data)\n'+encode(catalogue)+
@@ -143,10 +143,20 @@ class RequirementReminderPipeline:
             result.update(model_calls_attempted=0 if phase1.get('replayed_completed_cycle') else phase1['model_calls_attempted'],
                 model_calls_completed=0 if phase1.get('replayed_completed_cycle') else phase1['model_calls_completed'])
             if phase1['status']!='completed':
-                return {**result,'status':'p1_incomplete','p2_not_run_reason':phase1['status']}
+                from p2_requirement_view import p1_boundary_error
+                recoverable = phase1['status'] in {'tool_error','budget_limited','memory_error'}
+                if not recoverable or p1_boundary_error(self.p1):
+                    return {**result,'status':'p1_incomplete','failure_kind':phase1.get('failure_kind','engineering'),
+                        'p2_not_run_reason':phase1['status']}
+                result['p1_warning'] = phase1['status']
+
             phase2 = await self.p2.remind(observation=observation,
                 entries=entries,step_count=step_count)
             result.update(p2=phase2,status=phase2['status'])
+            if phase2.get('failure_kind'):
+                result['failure_kind'] = phase2['failure_kind']
+            if phase2.get('failure_kind') in {'model_output','model_tool','transport'}:
+                result.update(failure_kind=phase2['failure_kind'],error_policy='continue_without_reminder')
             result['model_calls_attempted'] += phase2['model_calls_attempted']
             result['model_calls_completed'] += phase2['model_calls_completed']
             if phase2['status']=='intervention':

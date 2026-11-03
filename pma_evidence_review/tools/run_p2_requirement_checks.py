@@ -15,6 +15,7 @@ def main():
         files = checks.runner.suite_manifest(phase)+[
             'pma_evidence_review/tests/'+name for name in (
                 'test_p2_requirement_view.py','test_p2_requirement_agent.py','test_p2_requirement_reminder.py',
+                'test_requirement_reminder_task_entry.py','test_pma_upstream_compatibility.py',
                 'test_bank_display.py','test_selection_context.py','test_tag_selection_integration.py')]
         with patch.object(checks.runner,'suite_manifest',return_value=files):
             return original(phase,report)

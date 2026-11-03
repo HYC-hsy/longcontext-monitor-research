@@ -5,7 +5,7 @@ from p1_context_agent import ContextSourceP1Agent, GAP_DESCRIPTION
 from memory_agent.memory.memory_agent import PHASE1_SYSTEM
 from p1_source_archive import encode
 from p1_requirements import (RequirementState, RequirementHistory, INIT_SYSTEM, INIT_TOOL,
-                             RequirementError, assignment, catalog, model_turn, upstream_observation)
+                             RequirementError, assignment, catalog, model_turn, upstream_observation, MemoryModelError)
 
 SYSTEM = PHASE1_SYSTEM + '\nAdditional memory support:\n- memory_save_gap: ' + GAP_DESCRIPTION + '''
 - Each saved fact, experience or GAP has a requirements attribute: choose the supplied fixed sentences from the original task, multiple or [] for unclassified. Keep the original task authoritative; new plans or obstacles do not create new requirements. Classification is not evidence or completion.
@@ -18,6 +18,7 @@ SAVES = {'memory_save_knowledge','memory_save_procedural','memory_save_gap'}
 
 class RequirementP1Agent(ContextSourceP1Agent):
     system = SYSTEM
+    capture_native_response = True
     memory_source_label = 'current M aliases for entry reads/deletion; cycle-start snapshot'
     final_turn_instruction = 'Final turn: source reads closed; save knowledge/procedural/gap, delete, update status, or leave the bank unchanged.\n'
 
@@ -60,6 +61,18 @@ class RequirementP1Agent(ContextSourceP1Agent):
 
     def _visible_input(self, raw_events):
         return deepcopy(raw_events), {'mode':'accepted_events_verbatim','removed':[]}
+
+    async def _call_model(self, **request):
+        try:
+            return await super()._call_model(**request)
+        except Exception as exc:
+            raise MemoryModelError(exc,'transport') from exc
+
+    def _calls(self, response, round_index):
+        try:
+            return super()._calls(response,round_index)
+        except (ValueError,TypeError,AttributeError) as exc:
+            raise MemoryModelError(exc,'model_output') from exc
 
     def _ordered_memory_rows(self, rows):
         return self.requirement_state.ordered(rows)
@@ -152,6 +165,7 @@ class RequirementP1Agent(ContextSourceP1Agent):
         return result['status']=='invalid_requirements' or super()._stop_batch_after(call,result)
 
     async def _initialize(self, cycle):
+        self._initialization_call_counts = {'attempted':0,'completed':0}
         state = self.requirement_state
         attempts = state.data['cycles'][cycle]['initialization_attempts']
         number = len(attempts)
@@ -165,13 +179,20 @@ class RequirementP1Agent(ContextSourceP1Agent):
         if self.before_request:
             self.before_request(request)
         state.write(lambda d:d['cycles'][cycle]['initialization_attempts'][number].update(attempted=1))
-        response = await self.llm.call(prompt=prompt,system=INIT_SYSTEM,tools=request['tools'])
-        calls = self._calls(response,0)
+        self._initialization_call_counts['attempted'] = 1
+        response = await self._call_model(prompt=prompt,system=INIT_SYSTEM,tools=request['tools'])
+        self._initialization_call_counts['completed'] = 1
         usage = getattr(response,'usage',None)
-        receipt = {'attempted':1,'completed':1,'tool_calls':deepcopy(calls),
+        receipt = {'attempted':1,'completed':1,'tool_calls':[],
+            'response_tool_calls':[{'name':getattr(getattr(c,'function',c),'name',None),
+                'arguments':deepcopy(getattr(getattr(c,'function',c),'arguments',None))}
+                for c in (getattr(response,'tool_calls',None) or [])],
             'assistant_text':self._strip_thinking(getattr(response,'content',None) or ''),
             'usage':{k:getattr(usage,k) for k in ('prompt_tokens','completion_tokens','cache_tokens','cost_usd')
                      if usage is not None and getattr(usage,k,None) is not None}}
+        state.write(lambda d:d['cycles'][cycle]['initialization_attempts'].__setitem__(number,receipt))
+        calls = self._calls(response,0)
+        receipt['tool_calls'] = deepcopy(calls)
         state.write(lambda d:d['cycles'][cycle]['initialization_attempts'].__setitem__(number,receipt))
         self._journal({'kind':'requirement_initialization_response','cycle_id':cycle,**receipt})
         if len(calls)!=1 or calls[0]['name']!='requirements_initialize':
@@ -207,12 +228,13 @@ class RequirementP1Agent(ContextSourceP1Agent):
                     # No maintenance has run; explicit same-input retry is safe and charged.
                     state.phase(cycle,'pending')
                     attempts = deepcopy(state.data['cycles'][cycle]['initialization_attempts'])
-                    return {'cycle_id':cycle,'status':'initialization_failed','error_type':type(exc).__name__,
+                    return {'cycle_id':cycle,'status':'initialization_failed','error_type':getattr(exc,'original_error_type',type(exc).__name__),
                         'error_code':getattr(exc,'reason','initialization_transport_or_persistence_error'),
                         'operations':[],'initialization_attempts':attempts,
-                        'model_calls_attempted':sum(x['attempted'] for x in attempts[len(before):]),
-                        'model_calls_completed':sum(x['completed'] for x in attempts[len(before):]),
-                        'pending_input_preserved':True}
+                        'model_calls_attempted':self._initialization_call_counts['attempted'],
+                        'model_calls_completed':self._initialization_call_counts['completed'],
+                        'pending_input_preserved':True,
+                        'failure_kind':getattr(exc,'memory_failure_kind','model_output' if isinstance(exc,RequirementError) else 'engineering')}
             state.phase(cycle,'running')
             report = await super().maintain(entries,observation=observation,step_count=step_count,cycle_id=cycle)
             attempts = deepcopy(state.data['cycles'][cycle]['initialization_attempts'])

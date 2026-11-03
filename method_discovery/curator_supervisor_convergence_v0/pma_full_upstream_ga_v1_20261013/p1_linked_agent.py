@@ -29,6 +29,7 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
     system = SYSTEM
     final_turn_instruction = 'Final turn: source reads closed; write summaries or leave the bank unchanged.\n'
     context_views = False
+    capture_native_response = False
     memory_source_label = 'IDs for deletion, aliases for sources'
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -203,6 +204,9 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
     def _model_turn(self, turn):
         return turn
 
+    async def _call_model(self, **request):
+        return await self.llm.call(**request)
+
     async def maintain(self, entries, *, observation=None, step_count=0, cycle_id=None):
         if self._active:
             raise RuntimeError('serial maintenance required')
@@ -236,16 +240,21 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                 if self.before_request:
                     self.before_request(request)
                 report['model_calls_attempted'] += 1
-                response = await self.llm.call(prompt=prompt,system=self.system,tools=tools)
+                response = await self._call_model(prompt=prompt,system=self.system,tools=tools)
                 report['model_calls_completed'] += 1
-                calls = self._calls(response,round_index)
                 turn = {'window_id':window_id,'assistant_text':self._strip_thinking(getattr(response,'content',None) or ''),
-                        'tool_calls':calls,'tool_results':[]}
+                        'tool_calls':[],'tool_results':[]}
                 usage = getattr(response,'usage',None)
                 turn['usage'] = {k:getattr(usage,k) for k in ('prompt_tokens','completion_tokens','cache_tokens','cost_usd')
                                 if usage is not None and getattr(usage,k,None) is not None}
+                if self.capture_native_response:
+                    turn['response_tool_calls'] = [{'name':getattr(getattr(c,'function',c),'name',None),
+                        'arguments':deepcopy(getattr(getattr(c,'function',c),'arguments',None))}
+                        for c in (getattr(response,'tool_calls',None) or [])]
                 report['turns'].append(turn)
                 self.links.mark_presented(self.shown_events)
+                calls = self._calls(response,round_index)
+                turn['tool_calls'] = calls
                 failed = False
                 for call in calls:
                     if failed:
@@ -288,7 +297,9 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
                 else:
                     break
         except Exception as exc:
-            report.update(status='engineering_error',error_type=type(exc).__name__)
+            kind = getattr(exc,'memory_failure_kind',None)
+            report.update(status='memory_error' if kind=='transport' else 'tool_error' if kind=='model_output' else 'engineering_error',
+                failure_kind=kind or 'engineering',error_type=getattr(exc,'original_error_type',type(exc).__name__))
         finally:
             self._active = False
             self._journal({'kind':'maintenance_result',**report,'bank_after':self.memory.to_dict()})

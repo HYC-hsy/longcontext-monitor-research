@@ -66,6 +66,13 @@ def upstream_observation(task, entries):
     return MemoryEnabledTerminus2._get_memory_agent_context(state)
 
 
+class MemoryModelError(RuntimeError):
+    def __init__(self, error, kind):
+        self.memory_failure_kind = kind
+        self.original_error_type = type(error).__name__
+        super().__init__(str(error))
+
+
 class RequirementError(ValueError):
     def __init__(self, reason):
         self.reason = reason
