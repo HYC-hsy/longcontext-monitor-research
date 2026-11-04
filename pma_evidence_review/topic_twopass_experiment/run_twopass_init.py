@@ -112,7 +112,7 @@ async def run_one(item, output, client, public_params):
     write(output / 'run_config.json', {'code_sha':CODE_SHA,'dataset_sha':DATA_SHA,
           'task_id':item['task_id'], 'model_parameters':public_params,
           'draft_system_sha256':digest(INIT_DRAFT_SYSTEM.encode()), 'refine_system_sha256':digest(INIT_REFINE_SYSTEM.encode()),
-          'tools_sha256':digest(json.dumps([INIT_TOOL],ensure_ascii=False,sort_keys=True).encode()),
+          'final_tools_sha256':digest(json.dumps([INIT_TOOL],ensure_ascii=False,sort_keys=True).encode()),
           'task_sha256':item['task_sha256'],'init_only':True,
           'physical_http_attempts':'unknown; inherited client retries'})
     status = 'completed'
