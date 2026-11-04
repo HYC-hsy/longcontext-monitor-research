@@ -51,9 +51,9 @@ def model_turn(turn, aliases=None, source_parameter='memory_id'):
     return visible
 
 
-INIT_SYSTEM = '''Extract what the original task ultimately requires to be achieved. Return fixed, readable requirement sentences, retaining necessary constraints such as paths, options and scope. Separate final conditions from suggested execution steps and historical facts. A paragraph may contain several requirements; matching a phrase does not establish complete semantic coverage. Use only the original task, not later plans or obstacles. Keep the original meaning without inventing conditions. Use requirements_initialize once; use [] only when no final requirement can be identified. Do not create a General topic; the host supplies it. This organizes memory; it does not solve or evaluate the task.'''
+INIT_SYSTEM = '''Organize the original task into fixed, readable topics around what needs to be done. Keep closely related requirements and constraints together, including necessary paths, options and scope. Preserve the distinction between required, recommended and optional details; do not invent requirements or narrow their meaning. Use only the original task, not later plans or obstacles. Use requirements_initialize once; use [] only when no task requirement can be identified. Do not create a General topic; the host supplies it. This organizes memory; it does not solve or evaluate the task.'''
 INIT_TOOL = {'type':'function','function':{'name':'requirements_initialize',
-    'description':'Propose fixed requirement text; at most 32 unique sentences, 512 characters each, 2048 total. No record IDs or completion states.',
+    'description':'Propose fixed task topics; at most 32 unique topics, 512 characters each, 2048 total. No record IDs or completion states.',
     'parameters':{'type':'object','properties':{'requirements':{'type':'array','maxItems':32,
         'items':{'type':'string','maxLength':512}}},'required':['requirements'],'additionalProperties':False}}}
 
