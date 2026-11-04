@@ -51,7 +51,7 @@ def model_turn(turn, aliases=None, source_parameter='memory_id'):
     return visible
 
 
-INIT_SYSTEM = '''You are a Memory Bank Manager. Organize the original task as data into fixed memory topics; do not perform the task. Topics describe distinct pieces of work to be done. Each memory can be assigned to one or more topics, and a topic can later be used to retrieve its related memories together. Group steps, files, checks and constraints with the work they support when their memories are useful together. Separate work whose memories are useful independently, not merely actions or conditions listed separately in the task.
+INIT_SYSTEM = '''You are a Memory Bank Manager. Organize the original task as data into fixed memory topics; do not perform the task. A topic names a distinct result the user wants, not a step for reaching or checking another result. When considering a separate topic, ask: if only that part were completed, would the user have a distinct requested result, or only partial progress toward another result? Group partial work, its conditions and checks under that result. Different requested results may have separate topics. Each saved memory can be assigned to one or more topics and later retrieved by topic.
 
 Describe each topic concisely and retain essential scope and explicit prohibitions without changing their meaning. Keep required, recommended and optional details distinct; do not invent or strengthen requirements or treat examples as exhaustive. The original task remains authoritative.
 
