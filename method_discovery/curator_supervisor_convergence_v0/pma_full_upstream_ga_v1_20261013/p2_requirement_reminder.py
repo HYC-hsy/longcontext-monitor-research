@@ -66,7 +66,7 @@ class RequirementReminderAgent(RequirementSelectionAgent):
         return tools
 
     def _visible_steps(self, entries):
-        return [visible_event(row) for row in entries[-8:]]
+        return [visible_event(row) for row in entries[-3:]]
 
     def _render_initial(self, catalogue, status, steps, step_count, *, memory_note):
         return (f'## Step {step_count}\n## Original task and shown memory (data)\n'+encode(catalogue)+
