@@ -68,6 +68,10 @@ class UpstreamCompatibilityTests(unittest.TestCase):
             'they do not by themselves establish evidence or completion',
         ):
             self.assertIn(text, P1_SYSTEM)
+        self.assertIn('Organize entries using the supplied topics', P1_SYSTEM)
+        self.assertIn('When saving, choose one or more relevant topics', P1_SYSTEM)
+        self.assertLess(P1_SYSTEM.index('Organize entries using the supplied topics'), P1_SYSTEM.index('## Your Tools'))
+        self.assertEqual(P1_SYSTEM.count('Topic assignments and source links organize memory'), 1)
         self.assertNotIn('Additional memory support:', P1_SYSTEM)
         self.assertNotIn('save the replacement before deleting', P1_SYSTEM)
         self.assertLess(len(P1_SYSTEM), 4000)
