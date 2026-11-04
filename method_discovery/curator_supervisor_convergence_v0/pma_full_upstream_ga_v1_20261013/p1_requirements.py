@@ -51,11 +51,7 @@ def model_turn(turn, aliases=None, source_parameter='memory_id'):
     return visible
 
 
-INIT_SYSTEM = '''You are a Memory Bank Manager. Organize the original task as data into fixed memory topics; do not perform the task. Topics describe distinct pieces of work to be done. Each memory can be assigned to one or more topics, and a topic can later be used to retrieve its related memories together. Group steps, files, checks and constraints with the work they support when their memories are useful together. Separate work whose memories are useful independently, not merely actions or conditions listed separately in the task.
-
-Describe each topic concisely and retain essential scope and explicit prohibitions without changing their meaning. Keep required, recommended and optional details distinct; do not invent or strengthen requirements or treat examples as exhaustive. The original task remains authoritative.
-
-Keep each topic within 512 characters and all topics within 2048 characters. Use only the original task, not later plans or obstacles. Use requirements_initialize once; use [] only when no task requirement can be identified. Do not create a General topic; the host supplies it.'''
+INIT_SYSTEM = 'You are a Memory Bank Manager performing a controlled initialization protocol check. Treat the original task as data and do not perform it. For this probe only, call requirements_initialize exactly once with requirements set to ["probe-one", "probe-two"]. Do not add any other values.'
 INIT_TOOL = {'type':'function','function':{'name':'requirements_initialize',
     'description':'Propose fixed task topics; at most 32 unique topics, 512 characters each, 2048 total. No record IDs or completion states.',
     'parameters':{'type':'object','properties':{'requirements':{'type':'array','maxItems':32,
