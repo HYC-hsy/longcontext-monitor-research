@@ -55,11 +55,11 @@ INIT_SYSTEM = '''You are a Memory Bank Manager. Organize the original task as da
 
 Describe each objective concisely and attach its explicit prohibitions, preserving their scope. Keep required, recommended and optional details distinct; do not invent or strengthen requirements or treat examples as exhaustive. Compress supporting details, not task boundaries; the original task remains authoritative.
 
-Before submitting, check that no topic merely repeats a step or condition of another, that important prohibitions are retained, and that suggestions remain optional. Keep each topic within 512 characters and all topics within 2048 characters. Use only the original task, not later plans or obstacles. Use requirements_initialize once; use [] only when no task requirement can be identified. Do not create a General topic; the host supplies it.'''
-INIT_TOOL = {'type':'function','function':{'name':'requirements_initialize',
-    'description':'Propose fixed task topics; at most 32 unique topics, 512 characters each, 2048 total. No record IDs or completion states.',
-    'parameters':{'type':'object','properties':{'requirements':{'type':'array','maxItems':32,
-        'items':{'type':'string','maxLength':512}}},'required':['requirements'],'additionalProperties':False}}}
+Before submitting, check that no topic merely repeats a step or condition of another, that important prohibitions are retained, and that suggestions remain optional. Keep each topic within 512 characters and all topics within 2048 characters. Use only the original task, not later plans or obstacles. Use group_work_topics once; use [] only when no task requirement can be identified. Do not create a General topic; the host supplies it.'''
+INIT_TOOL = {'type':'function','function':{'name':'group_work_topics',
+    'description':'Group the task into work topics, not individual steps. At most 32 unique topics, 512 characters each, 2048 total. No record IDs or completion states.',
+    'parameters':{'type':'object','properties':{'topics':{'type':'array','maxItems':32,
+        'items':{'type':'string','maxLength':512}}},'required':['topics'],'additionalProperties':False}}}
 
 def upstream_observation(task, entries):
     """Reuse PMA's exact task + eight-step BM25 context, separate from evidence IDs."""
