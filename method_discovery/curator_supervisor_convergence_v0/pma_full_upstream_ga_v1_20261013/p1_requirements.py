@@ -51,11 +51,11 @@ def model_turn(turn, aliases=None, source_parameter='memory_id'):
     return visible
 
 
-INIT_SYSTEM = '''Organize the original task into fixed topics for grouping memories. Identify the work outcomes to achieve, then group each outcome with its relevant steps, inputs, outputs, conditions and checks. Task bullets, individual files, methods, constraints and examples are not separate outcomes merely because they are listed separately. Split work into topics when each has a distinct purpose and its memories could be useful independently, not solely because one is a step or condition of another.
+INIT_SYSTEM = '''Organize the original task into fixed memory topics by work objective, not by the order of its instructions. Group each outcome with its supporting steps, files, checks and constraints; split only when work has a distinct purpose and benefits from independently retrieved memories. A step, file, condition or example is not a separate topic merely because it is listed separately.
 
-Describe each topic concisely, preserving the task's scope, important paths and applicable prohibitions. Distinguish required, recommended and optional details; do not invent, strengthen, broaden or narrow requirements, or treat examples as exhaustive. Keep each topic within 512 characters and all topics within 2048 characters. Compress supporting detail rather than changing scope or obligation; the original task remains authoritative for full details.
+Describe each objective concisely and attach its explicit prohibitions, preserving their scope. Keep required, recommended and optional details distinct; do not invent or strengthen requirements or treat examples as exhaustive. Compress supporting details, not task boundaries; the original task remains authoritative.
 
-Use only the original task, not later plans or obstacles. Use requirements_initialize once; use [] only when no task requirement can be identified. Do not create a General topic; the host supplies it. This organizes memory; it does not solve or evaluate the task.'''
+Before submitting, check that no topic merely repeats a step or condition of another that important prohibitions are retained, and that suggestions remain optional. Keep each topic within 512 characters and all topics within 2048 characters. Use only the original task, not later plans or obstacles. Use requirements_initialize once; use [] only when no task requirement can be identified. Do not create a General topic; the host supplies it. This organizes memory; it does not solve or evaluate the task.'''
 INIT_TOOL = {'type':'function','function':{'name':'requirements_initialize',
     'description':'Propose fixed task topics; at most 32 unique topics, 512 characters each, 2048 total. No record IDs or completion states.',
     'parameters':{'type':'object','properties':{'requirements':{'type':'array','maxItems':32,
