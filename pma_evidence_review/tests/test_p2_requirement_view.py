@@ -26,7 +26,7 @@ class ViewTests(unittest.TestCase):
     def files(self):
         return {str(p.relative_to(self.temp.name)):p.read_bytes() for p in Path(self.temp.name).rglob('*') if p.is_file()}
 
-    def test_full_groups_unclassified_stable_aliases_and_no_files_changed(self):
+    def test_full_groups_general_stable_aliases_and_no_files_changed(self):
         view = self.seed()
         before = self.files()
         all_page = view.browse()
@@ -37,8 +37,12 @@ class ViewTests(unittest.TestCase):
             page = view.browse(view='requirement',requirement=text)
             group = [json.loads(p['text']) for p in page['parts']]
             self.assertEqual(next(r['alias'] for r in group if r['content']=='multi'),aliases['multi'])
-        page = view.browse(view='unclassified')
+            self.assertEqual(next(r['alias'] for r in group if r['content']=='unclassified'),aliases['unclassified'])
+            self.assertEqual(len({r['alias'] for r in group}),len(group))
+        page = view.browse(view='requirement',requirement='General')
         self.assertEqual([json.loads(p['text'])['content'] for p in page['parts']],['unclassified'])
+        self.assertEqual(json.loads(page['parts'][0]['text'])['requirements'],['General'])
+        self.assertEqual(view.browse(view='unclassified')['parts'],[])
         self.assertEqual(view.browse(view='requirement',requirement='new plan')['status'],'unknown_requirement')
         self.assertEqual(view.browse(view='all',requirement=FIXED[0])['status'],'invalid_tool_arguments')
         self.assertEqual(self.files(),before)
@@ -54,7 +58,7 @@ class ViewTests(unittest.TestCase):
         self.assertEqual(view.read_source(memory_id='M1')['status'],'record_not_yet_shown')
         self.assertLessEqual(len(encode(page)),8000)
         self.assertIsNotNone(page['next_cursor'])
-        self.assertEqual(view.browse(view='unclassified',cursor=page['next_cursor'])['status'],'invalid_cursor')
+        self.assertEqual(view.browse(view='requirement',requirement='General',cursor=page['next_cursor'])['status'],'invalid_cursor')
         other = RequirementSelectionView(self.agent)
         self.assertEqual(other.browse(cursor=page['next_cursor'])['status'],'invalid_cursor')
         parts = page['parts'][:]

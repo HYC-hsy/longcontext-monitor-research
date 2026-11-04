@@ -56,13 +56,13 @@ class SelectionTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'P1-only'):
             asyncio.run(self.agent.process())
 
-    def test_hidden_theme_and_unclassified_reachable_with_stable_full_snapshot_aliases(self):
+    def test_hidden_theme_and_general_reachable_with_stable_full_snapshot_aliases(self):
         self.build()
         self.p2.max_memory_in_prompt = 0
         self.p2.use_bm25_prefilter = True
         # Initial BM25 sees only B; full P2 aliases are A=M1, B=M2, unclassified=M3.
         self.p2_responses = [reply([('memory_browse',{'view':'requirement','requirement':fixtures.FIXED[0]}),
-                                    ('memory_browse',{'view':'unclassified'})]),
+                                    ('memory_browse',{'view':'requirement','requirement':'General'})]),
             reply(content='<intervene>M3,M1</intervene>')]
         with patch('memory_agent.memory.universal_memory.UniversalMemory.search_knowledge',
                    return_value=[self.agent.memory.knowledge[0]]):
@@ -280,21 +280,22 @@ class SelectionTests(unittest.TestCase):
             '\n## Groups of initially displayed records (scope: '+scope+')\n'+encode(p2.view.groups(aliases))+
             '\nP2 full snapshot active record count: '+str(len(p2.view.items))+'. Unclassified remains reachable.\n')
         rows = json.loads(new.split('## Selectable catalogue\n',1)[1].split('\n',1)[0])
-        groups = json.loads(new.split('## Fixed requirements and initial memberships\n',1)[1].split('\n',1)[0])
+        self.assertNotIn('## Fixed requirements and initial memberships',new)
+        self.assertEqual(len(rows),41)
         self.assertEqual(rows[0]['content'],self.agent.task)
         for row in rows[1:]:
             alias = row['alias']
             original = p2.view.record(alias)
             self.assertEqual(row['content'],original['content'])
-            membership = [g['requirement'] for g in groups['requirements'] if alias in g['aliases']]
-            self.assertEqual(membership,original['requirements'])
+            self.assertEqual(row['requirements'],original['requirements'])
             self.assertEqual(row['source']['association'],original['source_association'])
             self.assertEqual(row['source']['count'],original['source_count'])
             order = original['source_event_order']
             self.assertEqual(row['source']['accepted_event_range'],[order['first'],order['last']])
         for requirement in fixed:
-            self.assertEqual(new.count(encode(requirement)),1)
-        self.assertLess(len(new),len(old)*0.3)
+            self.assertEqual(new.count(encode(requirement)),len(aliases))
+        # Topics intentionally repeat on each record; only metadata remains compact.
+        self.assertLess(len(new),len(old))
         self.prompt_measurement = {'old_characters':len(old),'new_characters':len(new),
             'unit':'Python Unicode characters, not tokens','records':40,'requirement_characters':2048,
             'task_preserved':rows[0]['content']==self.agent.task}

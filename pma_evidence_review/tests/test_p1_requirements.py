@@ -61,8 +61,11 @@ class RequirementTests(unittest.TestCase):
         self.assertEqual(self.requests[1]['tools'][-1]['function']['name'],'memory_read_source')
         view = self.agent.export_view()
         key = self.agent.memory.knowledge[0].id
-        self.assertEqual([g['memory_ids'] for g in view['groups']['requirements']],[[key],[key]])
-        self.assertEqual(len(view['groups']['unclassified_memory_ids']),1)
+        general = self.agent.memory.entries[0].id
+        self.assertEqual([g['requirement'] for g in view['groups']['requirements']], FIXED+['General'])
+        self.assertEqual([g['memory_ids'] for g in view['groups']['requirements']],[[key],[key],[general]])
+        self.assertEqual(view['groups']['unclassified_memory_ids'],[])
+        self.assertEqual(self.agent.links.state['refs'][general]['requirements'],['General'])
         self.reopen()
         self.responses = [reply()]
         self.assertEqual(self.run_cycle('c2')['model_calls_attempted'],1)
