@@ -54,16 +54,42 @@ class UpstreamCompatibilityTests(unittest.TestCase):
             self.assertIn('parse_error',result['turns'][0])
             self.assertIsNone(result['delivery'])
 
-    def test_prompts_keep_entire_original_system_and_only_feature_appendices(self):
+    def test_prompts_preserve_p2_and_align_p1_to_approved_guidance(self):
         self.build()
-        self.assertTrue(P1_SYSTEM.startswith(PHASE1_SYSTEM))
         self.assertTrue(self.p2.system.startswith(PHASE2_SYSTEM))
-        self.assertIn('memory_save_gap',P1_SYSTEM)
-        self.assertIn('requirements attribute',P1_SYSTEM)
-        self.assertNotIn('Only the six memory tools',P1_SYSTEM)
-        self.assertNotIn('Agent claims and self-printed success',P1_SYSTEM)
-        self.assertNotIn('save the replacement before deleting',P1_SYSTEM)
-        self.assertLess(len(P1_SYSTEM),4000)
+        for text in (
+            'You are a Memory Bank Manager.',
+            'The original task remains authoritative',
+            'Include a cause or explanation only when supported',
+            'A local or partial result does not by itself establish',
+            'The action agent\'s statements and existing memory may be mistaken',
+            'If the conflict is unresolved, preserve the uncertainty',
+            'until the condition is satisfied, the question is answered',
+            'they do not by themselves establish evidence or completion',
+        ):
+            self.assertIn(text, P1_SYSTEM)
+        self.assertNotIn('Additional memory support:', P1_SYSTEM)
+        self.assertNotIn('save the replacement before deleting', P1_SYSTEM)
+        self.assertLess(len(P1_SYSTEM), 4000)
+
+    def test_p1_tool_contract_is_unchanged(self):
+        self.build()
+        tools = {row['function']['name']: row['function']
+                 for row in self.agent.get_tools_schema()}
+        self.assertEqual(set(tools), {
+            'memory_save_knowledge', 'memory_save_procedural', 'memory_save_gap',
+            'memory_update_status', 'memory_delete', 'memory_read_source'})
+        for name in ('memory_save_knowledge', 'memory_save_procedural', 'memory_save_gap'):
+            params = tools[name]['parameters']
+            self.assertEqual(set(params['required']), {'content', 'requirements'})
+            self.assertEqual(set(params['properties']), {'content', 'requirements', 'source_ids'})
+            self.assertFalse(params['additionalProperties'])
+        self.assertEqual(set(tools['memory_update_status']['parameters']['required']), {'content'})
+        self.assertEqual(set(tools['memory_delete']['parameters']['required']), {'entry'})
+        self.assertEqual(set(tools['memory_read_source']['parameters']['required']), {'entry'})
+        self.assertIn('only when supported', tools['memory_save_procedural']['description'])
+        self.assertIn('history handles are read-only', tools['memory_delete']['description'])
+        self.assertIn('same entry and view', tools['memory_read_source']['description'])
 
     def test_original_task_plus_eight_steps_is_query_and_raw_history_stays_visible(self):
         self.build()
