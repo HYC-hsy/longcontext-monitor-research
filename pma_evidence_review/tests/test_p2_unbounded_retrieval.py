@@ -65,6 +65,48 @@ class UnboundedRetrievalTests(unittest.TestCase):
         self.assertNotIn('Four shared reads', SYSTEM)
         self.assertNotIn('last turn has no tools', SYSTEM)
 
+    def test_twenty_tool_rounds_then_one_tool_free_final_turn(self):
+        self.build()
+        before = self.files()
+        note = 'Use the original task scope after reviewing the available evidence.'
+
+        def read_again(p2):
+            self.assertTrue(self.p2_requests[-1].get('tools'))
+            self.assertNotIn(p2.final_turn_instruction, self.p2_requests[-1]['prompt'])
+            self.assertFalse(p2.last_p2_report['limit_reached'])
+            return reply([('memory_read_source', {'entry': 'TASK'})])
+
+        def final(p2):
+            self.assertEqual(len(self.p2_requests), 21)
+            self.assertNotIn('tools', self.p2_requests[-1])
+            self.assertTrue(all(request.get('tools') for request in self.p2_requests[:20]))
+            prompt = self.p2_requests[-1]['prompt']
+            self.assertTrue(prompt.endswith('\n' + p2.final_turn_instruction + '\n'))
+            history_text = prompt.split(
+                '## Visible P2 calls and receipts (historical data)\n', 1)[1]
+            history, end = json.JSONDecoder().raw_decode(history_text)
+            self.assertEqual(history_text[end:].strip(), p2.final_turn_instruction)
+            self.assertEqual(len(history), 20)
+            self.assertEqual(sum(len(turn['tool_results']) for turn in history), 20)
+            self.assertTrue(p2.last_p2_report['limit_reached'])
+            self.assertEqual(read.call_count, 20)
+            return reply(content='<context_for_action>' + note + '</context_for_action>')
+
+        self.p2_responses = [read_again] * 20 + [final]
+        with patch.object(self.p2, '_read', wraps=self.p2._read) as read:
+            result = self.run_reminder()
+        self.assertEqual(read.call_count, 20)
+        self.assertEqual((result['model_calls_attempted'], result['model_calls_completed'],
+                          result['reads_used'], result['continuations_used']), (21, 21, 20, 20))
+        self.assertTrue(result['limit_reached'])
+        self.assertEqual((result['status'], result['should_inject'], result['delivery']),
+                         ('intervention', True, note))
+        self.assertEqual(len(result['turns']), 21)
+        self.assertEqual(sum(len(turn['tool_results']) for turn in result['turns']), 20)
+        self.assertEqual(result['turns'][-1]['tool_results'], [])
+        self.assertEqual(self.p2_responses, [])
+        self.assertEqual(self.files(), before)
+
     def test_record_not_yet_shown_is_visible_and_model_can_browse_then_retry(self):
         self.build()
         self.p2.max_memory_in_prompt = 0

@@ -146,7 +146,7 @@ class RequirementSelectionAgent(BankDisplayAgent):
         self.transport_phase = 'selection'
         self.view = None
         report = {'status':'building','model_calls_attempted':0,'model_calls_completed':0,
-            'tool_requests':0,'reads_used':0,'continuations_used':0,'turns':[],'delivery':None,
+            'tool_requests':0,'reads_used':0,'continuations_used':0,'limit_reached':False,'turns':[],'delivery':None,
             'limits':{'reads':self.read_limit,'continuations':self.continuation_limit,
                       'logical_calls':None if self.continuation_limit is None else self.continuation_limit+1},
             'physical_provider_requests':'unknown; inherited client retries','persistent_writes':False}
@@ -219,6 +219,7 @@ class RequirementSelectionAgent(BankDisplayAgent):
                 index += 1
                 if ((self.continuation_limit is not None and index==self.continuation_limit) or
                         (self.read_limit is not None and report['reads_used']>=self.read_limit)):
+                    report['limit_reached'] = True
                     prompt += '\n'+self.final_turn_instruction+'\n'
         except ResponseProtocolError as exc:
             report.update(status='selection_error',error=str(exc),failure_kind='model_output',delivery=None)

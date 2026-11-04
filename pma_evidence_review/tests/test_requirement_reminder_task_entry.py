@@ -353,15 +353,23 @@ class RequirementTaskEntryTests(unittest.TestCase):
             responses=[reply(calls=[('requirements_initialize',{'requirements':[]})]),
                        bad if phase=='maintenance' else reply(),
                        reply('<no_intervention/>') if phase=='maintenance' else bad]
+            if phase=='selection':
+                responses.append(reply('<no_intervention/>'))
             with self.subTest(phase=phase),tempfile.TemporaryDirectory() as tmp:
                 episode,_=self.setup_run(Path(tmp),responses)
                 result=asyncio.run(episode.handle(event('task_start',1,initial_user_content='Original task')))
                 self.assertEqual(result['status'],'started')
                 report=json.loads((episode.archive/'requirement_cycles.jsonl').read_text().splitlines()[0])['report']
                 record=report['p1' if phase=='maintenance' else 'p2']
-                self.assertEqual(record['failure_kind'],'model_output')
+                if phase=='maintenance':
+                    self.assertEqual(record['failure_kind'],'model_output')
+                    expected_calls = 3
+                else:
+                    self.assertEqual(record['status'],'no_intervention')
+                    self.assertEqual(record['turns'][0]['tool_results'][0]['result']['status'],'invalid_tool_arguments')
+                    expected_calls = 4
                 self.assertEqual(record['turns'][0]['response_tool_calls'][0]['arguments'],'{broken')
-                self.assertEqual((report['model_calls_attempted'],report['model_calls_completed']),(3,3))
+                self.assertEqual((report['model_calls_attempted'],report['model_calls_completed']),(expected_calls,expected_calls))
                 self.assertEqual(episode.agent._memory.knowledge,[])
                 self.assertIsNone(episode._failure)
 

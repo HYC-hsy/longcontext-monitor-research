@@ -28,9 +28,9 @@ class RequirementReminderAgent(RequirementSelectionAgent):
     source_parameter = 'entry'
     upstream_error_semantics = True
     read_limit = None
-    continuation_limit = None
+    continuation_limit = 20
     recover_model_tool_errors = True
-    final_turn_instruction = 'Tools closed. Return context_for_action with your synthesized reminder, or no_intervention.'
+    final_turn_instruction = 'Tool-round limit reached. Based on the available information, return context_for_action with your synthesized reminder, or no_intervention.'
     final_output_error = 'final_turn_requires_reminder_protocol'
 
     async def process(self, *args, **kwargs):
