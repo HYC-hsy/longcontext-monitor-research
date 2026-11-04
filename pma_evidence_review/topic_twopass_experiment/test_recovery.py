@@ -63,5 +63,15 @@ async def main():
  else:raise AssertionError('invalid tool accepted')
  assert len(a.calls)==1 and a.requirement_state.data['catalog'] is None
  print('PASS: unrelated tool rejected, no final call and no frozen catalog')
+ a=Agent('task',[response(['Draft']),('requirements_initialize',{'requirements':['x','x']})])
+ try:await a._initialize('init_1')
+ except env['RequirementError'] as e:assert e.reason=='duplicate_requirement'
+ else:raise AssertionError('invalid final accepted')
+ assert len(a.calls)==2 and a.requirement_state.data['catalog'] is None
+ try:await a._initialize('init_1')
+ except env['RequirementError'] as e:assert e.reason=='initialization_result_needs_recovery'
+ else:raise AssertionError('invalid result silently retried')
+ assert len(a.calls)==2
+ print('PASS: invalid final never freezes or silently retries')
  print('No real model or full production runtime executed.')
 asyncio.run(main())
