@@ -214,7 +214,7 @@ class RequirementP1Agent(ContextSourceP1Agent):
         state.write(lambda d:d['cycles'][cycle].update(phase='initializing',
             initialization_attempts=deepcopy(attempts)+[{'attempted':0,'completed':0}]))
         prompt = ('## Original task (verbatim; data)\n'+self.task+
-            '\n\n## Your assignment\nUse concise work-objective labels, not a checklist or full specification. Group related steps; preserve essential task boundaries and the scope of prohibitions. Do not make suggestions mandatory. Call requirements_initialize; do not perform the task.')
+            '\n\n## Your assignment\nUse concise work-objective labels, not a checklist or full specification. Group related steps; preserve essential task boundaries and the scope of prohibitions. Do not make suggestions mandatory. Call group_work_topics; do not perform the task.')
         request = {'kind':'requirement_initialization','cycle_id':cycle,'window_id':cycle+f'_init{number}',
             'prompt':prompt,'system':INIT_SYSTEM,'tools':[deepcopy(INIT_TOOL)]}
         self.source_archive.capture(request['window_id'],prompt,[])
@@ -238,12 +238,12 @@ class RequirementP1Agent(ContextSourceP1Agent):
         receipt['tool_calls'] = deepcopy(calls)
         state.write(lambda d:d['cycles'][cycle]['initialization_attempts'].__setitem__(number,receipt))
         self._journal({'kind':'requirement_initialization_response','cycle_id':cycle,**receipt})
-        if len(calls)!=1 or calls[0]['name']!='requirements_initialize':
+        if len(calls)!=1 or calls[0]['name']!='group_work_topics':
             raise RequirementError('expected_one_initialization_call')
         args = calls[0]['arguments']
-        if not isinstance(args,dict) or set(args)!={'requirements'}:
+        if not isinstance(args,dict) or set(args)!={'topics'}:
             raise RequirementError('invalid_initialization_arguments')
-        fixed = catalog(args['requirements'])
+        fixed = catalog(args['topics'])
         def freeze(data):
             data['catalog'] = fixed
             data['cycles'][cycle]['phase'] = 'pending'
