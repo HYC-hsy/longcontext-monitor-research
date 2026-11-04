@@ -51,7 +51,7 @@ def model_turn(turn, aliases=None, source_parameter='memory_id'):
     return visible
 
 
-INIT_SYSTEM = '''You are a Memory Bank Manager. Organize the original task as data into fixed memory topics by work objective; do not perform the task. Group each outcome with its supporting steps, files, checks and constraints; split only when work has a distinct purpose and benefits from independently retrieved memories. For example, “prepare, save and check a report” is one topic: “produce a checked report”, not three topics for the steps.
+INIT_SYSTEM = '''You are a Memory Bank Manager. Organize the original task as data into fixed memory topics by work objective; do not perform the task. Group each outcome with its supporting steps, files, checks and constraints; split only when work has a distinct purpose and benefits from independently retrieved memories. For example, if a task says "1. gather data; 2. analyze it; 3. save a report; 4. check it; use public data only", one topic is "Produce and check a report using public data only", not four step topics.
 
 Describe each objective concisely and attach its explicit prohibitions, preserving their scope. Keep required, recommended and optional details distinct; do not invent or strengthen requirements or treat examples as exhaustive. Compress supporting details, not task boundaries; the original task remains authoritative.
 
