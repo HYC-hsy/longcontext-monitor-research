@@ -98,7 +98,7 @@ async def run_one(item, output, client, public_params):
         request_seen.append(request)
         write(output / 'pre_request.json', request)
         assert request['system'] == INIT_SYSTEM and request['tools'] == [INIT_TOOL]
-        assert request['prompt'] == ('## Original task (verbatim; data)\n' + item['task'] + '\n\n## Your assignment\nGroup by work objective, not individual steps. Keep topics concise and preserve applicable prohibitions and their scope; do not turn suggestions into requirements. Use requirements_initialize; do not perform the task.')
+        assert request['prompt'] == ('## Original task (verbatim; data)\n' + item['task'] + '\n\n## Your assignment\nUse concise work-objective labels, not a checklist or full specification. Group related steps; preserve essential task boundaries and the scope of prohibitions. Do not make suggestions mandatory. Call requirements_initialize; do not perform the task.')
     agent.before_request = before
     write(output / 'frozen_input.json', item)
     write(output / 'run_config.json', {'code_sha':CODE_SHA,'dataset_sha':DATA_SHA,
@@ -145,7 +145,7 @@ async def offline(items, root):
                 continue
             async def fake(**kwargs):
                 assert kwargs['system'] == INIT_SYSTEM and kwargs['tools'] == [INIT_TOOL]
-                assert kwargs['prompt'] == ('## Original task (verbatim; data)\n' + item['task'] + '\n\n## Your assignment\nGroup by work objective, not individual steps. Keep topics concise and preserve applicable prohibitions and their scope; do not turn suggestions into requirements. Use requirements_initialize; do not perform the task.')
+                assert kwargs['prompt'] == ('## Original task (verbatim; data)\n' + item['task'] + '\n\n## Your assignment\nUse concise work-objective labels, not a checklist or full specification. Group related steps; preserve essential task boundaries and the scope of prohibitions. Do not make suggestions mandatory. Call requirements_initialize; do not perform the task.')
                 return NS(content='', tool_calls=[NS(function=NS(
                     name='requirements_initialize',
                     arguments=json.dumps({'requirements':requirements})))], usage=None)
