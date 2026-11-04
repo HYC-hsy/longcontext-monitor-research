@@ -49,7 +49,9 @@ class LinkedSourceP1Agent(SourceReadP1Agent):
         return [visible_event(row) for row in entries[-8:]]
 
     def _input(self, observation, step, raw_events):
-        self.shown_events = self.links.ingest(raw_events)
+        all_events = self.links.ingest(raw_events)
+        raw_events = raw_events[-3:]
+        self.shown_events = all_events[-3:]
         visible, projection = self._visible_input(raw_events)
         visible = historical_events(visible)
         aliases = {'TASK':{'kind':'task','source_id':'TASK'}}
