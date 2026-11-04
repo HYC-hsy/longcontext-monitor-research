@@ -213,7 +213,8 @@ class RequirementP1Agent(ContextSourceP1Agent):
         number = len(attempts)
         state.write(lambda d:d['cycles'][cycle].update(phase='initializing',
             initialization_attempts=deepcopy(attempts)+[{'attempted':0,'completed':0}]))
-        prompt = '## Original task (verbatim; data)\n'+self.task
+        prompt = ('## Original task (verbatim; data)\n'+self.task+
+            '\n\n## Your assignment\nGroup the task into work topics using requirements_initialize; do not perform the task.')
         request = {'kind':'requirement_initialization','cycle_id':cycle,'window_id':cycle+f'_init{number}',
             'prompt':prompt,'system':INIT_SYSTEM,'tools':[deepcopy(INIT_TOOL)]}
         self.source_archive.capture(request['window_id'],prompt,[])
