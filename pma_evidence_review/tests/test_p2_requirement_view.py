@@ -42,7 +42,7 @@ class ViewTests(unittest.TestCase):
         page = view.browse(view='requirement',requirement='General')
         self.assertEqual([json.loads(p['text'])['content'] for p in page['parts']],['unclassified'])
         self.assertEqual(json.loads(page['parts'][0]['text'])['requirements'],['General'])
-        self.assertEqual(view.browse(view='unclassified')['parts'],[])
+        self.assertEqual(view.browse(view='unclassified')['status'],'invalid_tool_arguments')
         self.assertEqual(view.browse(view='requirement',requirement='new plan')['status'],'unknown_requirement')
         self.assertEqual(view.browse(view='all',requirement=FIXED[0])['status'],'invalid_tool_arguments')
         self.assertEqual(self.files(),before)

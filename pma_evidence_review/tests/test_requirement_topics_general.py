@@ -36,11 +36,11 @@ class TopicGeneralTests(unittest.TestCase):
         self.assertEqual(self.run_cycle()['status'], 'completed')
         return RequirementSelectionView(self.agent)
 
-    def read_all(self, view, **filters):
+    def read_all(self, reader, **filters):
         chunks, order = {}, []
         cursor = None
         for _ in range(100):
-            page = view.browse(cursor=cursor, **filters)
+            page = reader.browse(cursor=cursor, **filters)
             self.assertIn(page['status'], ('browse_partial', 'browse_complete'))
             self.assertLessEqual(len(encode(page)), 8000)
             for part in page['parts']:

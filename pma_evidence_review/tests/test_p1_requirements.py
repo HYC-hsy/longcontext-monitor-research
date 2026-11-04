@@ -362,7 +362,7 @@ class RequirementTests(unittest.TestCase):
             schema = tool['function']['parameters']
             self.assertIs(schema['additionalProperties'],False)
             if tool['function']['name'].startswith('memory_save_'):
-                self.assertEqual(schema['properties']['requirements']['items']['enum'],FIXED)
+                self.assertEqual(schema['properties']['requirements']['items']['enum'],FIXED+['General'])
         self.responses = [reply([('memory_update_status',{'content':'bad extra','unexpected':True}),self.save('later')])]
         result = self.run_cycle('bad_fields')
         self.assertEqual(result['status'],'tool_error')
@@ -443,7 +443,7 @@ class RequirementTests(unittest.TestCase):
             self.assertEqual([g['requirement'] for g in groups['requirements'] if row['alias'] in g['aliases']],fixed)
         self.assertIn(self.agent.task,new)
         for text in fixed:self.assertEqual(new.count(encode(text)),1)
-        self.assertEqual(sum(t['function']['parameters']['properties'].get('requirements',{}).get('items',{}).get('enum')==fixed
+        self.assertEqual(sum(t['function']['parameters']['properties'].get('requirements',{}).get('items',{}).get('enum')==fixed+['General']
                              for t in self.agent.get_tools_schema()),3)
         self.assertLess(len(new),len(old)*0.3)
         self.p1_character_measurement = {'old_user_characters':len(old),'new_user_characters':len(new),
