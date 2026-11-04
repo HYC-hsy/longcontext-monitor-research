@@ -1,14 +1,14 @@
 # 主题初始化：20 题人工拆分与理由
 
-固定任务来源：`harbor-framework/terminal-bench-2`，提交 `2fd12b88aafdd04a52c298e3940bcb189f9766d6`，每题 `instruction.md`。以下是设计时人工构造的一组**可接受拆法**，不是唯一答案，也不是模型应看到的示例或固定评分模板。每个主题围绕待完成的工作，相关约束放在对应工作内。原任务全文仍是权威来源；下文未复述的细节不能视作取消。
+固定任务来源：`harbor-framework/terminal-bench-2`，提交 `2fd12b88aafdd04a52c298e3940bcb189f9766d6`，每题 `instruction.md`。实际实验输入需经真实运行使用的 Harbor 任务加载器处理（包括 canary 和开头空行处理），不能简单假定 Git 原始字节就是模型输入。以下是设计时人工构造的一组**可接受拆法**，不是唯一答案，也不是模型应看到的示例或固定评分模板。每个主题围绕待完成的工作，相关约束放在对应工作内。原任务全文仍是权威来源；下文未复述的细节不能视作取消。
 
 1. **git-leak-recovery**：① 找回泄露内容并写入 `/app/secret.txt`；② 清理 `/app/repo` 中的泄露，同时不改变无关文件及提交信息。理由：恢复产物和清除仓库痕迹是两个不同目标；保持无关内容不变约束清理工作，不另立主题。
 2. **git-multibranch**：① 建立 SSH Git 服务与 push 自动部署，满足指定账号、仓库、hook 和 3 秒约束；② 通过 HTTPS 分别提供 main/dev 的内容。理由：Git 服务/触发部署与 HTTPS 提供内容是可区分但有联系的工作，两个分支及各端点属于同一对外服务目标，不按每个 URL 单独拆。任务原文中的具体端点应保留在实际主题或原任务中。
 3. **feal-linear-cryptanalysis**：从已知明密文恢复密钥，并用它解密全部指定密文，保存 `/app/plaintexts.txt`。理由：密钥恢复与解密是同一验证交付链；算法背景和 20 位 seed 条件作为相关细节。
 4. **query-optimize**：优化指定 SQLite 查询并将同等输出的单条无注释 SQL 写至 `/app/sol.sql`，以分号结尾。理由：性能和等价性共同约束同一交付，语法、文件和格式不另成主题。
 5. **mcmc-sampling-stan**：① 使用 RStan 2.32.7 实现层级模型并编写 Stan/R 采样文件；② 从 `/app/data.csv` 采样并输出 alpha、beta 后验均值。理由：模型/程序与采样结果可分别被后续经验引用；4 链、10 万迭代、种子 1 是推荐设置，不变成强制要求。
-6. **fix-ocaml-gc**：修复 OCaml GC 导致的自举崩溃，并运行指定 basic testsuite。理由：验证是修复工作的验收条件，不必独立成主题。
-7. **rstan-to-pystan**：① 将 `/app/gp_rstan.R` 转成 `/app/pystan_analysis.py`，保持模型、数据、采样参数与行为要求，并使用 PyStan 3.10.0；② 运行采样并输出 alpha、sigma 各一个数及 rho、beta 各三行的纯数字均值文件。理由：转换程序和产生结果是两块相关工作，四个 CSV 是同一输出工作，不拆四项；不安装/运行 R、不能用 cmdstanr/cmdstanpy、`stan.build` 的 `random_seed=1` 属于第一项的相关约束；内存优化是可选的。
+6. **fix-ocaml-gc**：修复 OCaml GC 导致的自举崩溃，并确保指定 basic testsuite 通过。理由：验证是修复工作的验收条件，不必独立成主题。
+7. **rstan-to-pystan**：① 将 `/app/gp_rstan.R` 转成 `/app/pystan_analysis.py`，保持模型、数据、采样参数与行为要求，并使用 PyStan 3.10.0；② 运行采样并输出 alpha、sigma 各一个数及 rho、beta 各三行的纯数字均值文件。理由：转换程序和产生结果是两块相关工作，四个 CSV 是同一输出工作，不拆四项；不安装 R 或 RStan、不运行给定 R 脚本、不能用 cmdstanr/cmdstanpy 做后验采样、`stan.build` 的 `random_seed=1` 属于第一项的相关约束；内存优化是可选的。
 8. **merge-diff-arc-agi-task**：① 从两个 bundle 建立 branch1/branch2，以 branch1 为基础合并 branch2 并解决冲突；② 在合并结果中实现并验证 `/app/repo/algo.py` 的 `map`，满足样例并可泛化。理由：Git 分支/合并结果和映射函数正确性是不同的验收目标；不能把提取文件当作已完成 Git 合并，也不能将样例视作完整输入范围。
 9. **break-filter-js-from-html**：创建 `/app/out.html`，经 `/app/filter.py` 处理后打开时仍自动触发 alert，无需交互。理由：是一个明确产物和行为目标；可选测试方法不拆开。
 10. **nginx-request-logging**：① 配置并启动 localhost:8080 的 Nginx，提供指定静态内容和 404 页面；② 完成指定请求/错误日志与速率限制配置。理由：服务内容与日志/限流是可分别复用的配置工作；日志字段/路径、10 请求每秒、burst 10、10MB zone、配置位置、测试和尽量减少命令作为相应细节，不拆成一堆主题。
@@ -21,7 +21,7 @@
 17. **sanitize-git-repo**：清除仓库中的 API 密钥，用一致的指定占位符替换，同时不修改未受污染的文件。理由：删除、替换和不误改是同一清理任务的组成条件；不要把密钥类别分别拆成主题。
 18. **build-pov-ray**：获取并构建 POV-Ray 2.2，按指定路径安装并可渲染给定场景，不修改场景文件。理由：下载、编译、安装、测试服务于同一构建交付；给定命令是 sanity check。
 19. **reshard-c4-data**：① 实现 `/app/compress.py` 进行分片并满足目录/文件大小及 CLI 约束；② 实现 `/app/decompress.py` 原地精确恢复结构和内容。理由：压缩与恢复有各自输入输出和可复用经验，应可区分；uv 环境、通用性和指定样本是两者的共同条件。
-20. **db-wal-recovery**：修复/处理 WAL 并恢复全部 11 条记录，将按 id 排序的 JSON 保存到 `/app/recovered.json`。理由：修复、提取和输出是同一恢复目标；不能把当前仅见 5 条当作任务范围。
+20. **db-wal-recovery**：修复 WAL 使 SQLite 可读取，并恢复包含 WAL 变更的全部 11 条记录，将按 id 排序的 JSON 保存到 `/app/recovered.json`。理由：修复、提取和输出是同一恢复目标；不能把当前仅见 5 条当作任务范围。
 
 ## 从 20 题抽出的通用原则
 
