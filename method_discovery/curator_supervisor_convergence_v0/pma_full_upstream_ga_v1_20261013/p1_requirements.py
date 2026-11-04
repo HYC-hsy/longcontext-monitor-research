@@ -51,7 +51,7 @@ def model_turn(turn, aliases=None, source_parameter='memory_id'):
     return visible
 
 
-INIT_SYSTEM = '''Organize the original task into fixed memory topics by work objective, not by the order of its instructions. Group each outcome with its supporting steps, files, checks and constraints; split only when work has a distinct purpose and benefits from independently retrieved memories. A step, file, condition or example is not a separate topic merely because it is listed separately.
+INIT_SYSTEM = '''Organize the original task into fixed memory topics by work objective, not by the order of its instructions. Group each outcome with its supporting steps, files, checks and constraints; split only when work has a distinct purpose and benefits from independently retrieved memories. For example, preparing a report, saving it and checking it serve one objective, not three separate topics.
 
 Describe each objective concisely and attach its explicit prohibitions, preserving their scope. Keep required, recommended and optional details distinct; do not invent or strengthen requirements or treat examples as exhaustive. Compress supporting details, not task boundaries; the original task remains authoritative.
 
