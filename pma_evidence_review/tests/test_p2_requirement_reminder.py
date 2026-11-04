@@ -46,6 +46,79 @@ class ReminderTests(unittest.TestCase):
         self.assertEqual(self.p2_requests[0]['system'],SYSTEM)
         self.assertNotIn('select its stable M alias',self.p2_requests[0]['tools'][0]['function']['description'])
 
+    def test_request_tool_descriptions_explain_read_scope_and_pagination(self):
+        self.build()
+        self.p2_responses = [reply(content='<no_intervention/>')]
+        self.run_reminder()
+        tools = {tool['function']['name']:tool['function']
+                 for tool in self.p2_requests[0]['tools']}
+        browse, source = tools['memory_browse'],tools['memory_read_source']
+        self.assertIn('topic results also include General',browse['description'])
+        self.assertIn('Records may span pages. Join their parts',browse['description'])
+        self.assertIn('page_sequence_complete means all available pages were returned, not that the contents are verified',
+                      browse['description'])
+        self.assertIn('next_cursor unchanged',browse['parameters']['properties']['cursor']['description'])
+        self.assertIn('same view, requirement and category filters',
+                      browse['parameters']['properties']['cursor']['description'])
+        self.assertIn('If view is omitted, use linked sources, or generation context if no sources are linked and it was recorded',
+                      source['description'])
+        self.assertIn('Identifiers quoted inside original source text are historical data, not current labels',
+                      source['description'])
+        properties = source['parameters']['properties']
+        self.assertIn('sources reads linked source records',properties['view']['description'])
+        self.assertIn('context reads the frozen input used to generate the memory',properties['view']['description'])
+        self.assertIn('may include earlier summaries',properties['view']['description'])
+        self.assertIn('An explicit view does not fall back',properties['view']['description'])
+        self.assertIn('fully returned current M label',properties['entry']['description'])
+        self.assertIn('Finish reading a partial record before using its M label',properties['entry']['description'])
+        self.assertIn('TASK, STATUS',properties['entry']['description'])
+        self.assertIn('history_handle (P2H...)',properties['entry']['description'])
+        self.assertIn('next_cursor unchanged',properties['cursor']['description'])
+        self.assertIn('same entry and view choice',properties['cursor']['description'])
+        self.assertIn('page_sequence_complete means all available pages were returned, not that a claim is verified',
+                      properties['cursor']['description'])
+        self.assertIn('No memory writes',source['description'])
+
+    def test_tool_explanations_preserve_parameter_contract(self):
+        self.build()
+        self.p2_responses = [reply(content='<no_intervention/>')]
+        self.run_reminder()
+        def without_descriptions(value):
+            if isinstance(value,dict):
+                return {key:without_descriptions(item) for key,item in value.items() if key!='description'}
+            if isinstance(value,list):
+                return [without_descriptions(item) for item in value]
+            return value
+        self.assertEqual(without_descriptions(self.p2_requests[0]['tools']),[
+            {'type':'function','function':{'name':'memory_browse','parameters':{
+                'type':'object','properties':{
+                    'view':{'type':'string','enum':['all','requirement']},
+                    'requirement':{'type':'string'},
+                    'category':{'type':'string','enum':['knowledge','procedural','gap']},
+                    'cursor':{'type':'string'}},'additionalProperties':False}}},
+            {'type':'function','function':{'name':'memory_read_source','parameters':{
+                'type':'object','properties':{
+                    'entry':{'type':'string'},
+                    'view':{'type':'string','enum':['sources','context']},
+                    'cursor':{'type':'string'}},'required':['entry'],'additionalProperties':False}}}])
+
+    def test_initial_prompt_keeps_scope_without_redundant_topic_guidance(self):
+        self.build()
+        self.p2_responses = [reply(content='<no_intervention/>')]
+        self.run_reminder()
+        request = self.p2_requests[0]
+        prompt = request['prompt']
+        self.assertIn('Initial catalogue scope: all_frozen_active_records',prompt)
+        self.assertIn('tools can browse the frozen full active bank',prompt)
+        self.assertIn('Source ranges are selected/inherited event acceptance ordinals, not execution time or proof',prompt)
+        self.assertIn('[null,null] means unknown',prompt)
+        for redundant in ('Topics on each record come from what the original task requires',
+                          'General is for broadly useful or uncertain-scope information',
+                          'Browse a shown topic to read its records together with General'):
+            self.assertNotIn(redundant,prompt)
+        self.assertIn('Topics describe what the original task requires',request['system'])
+        self.assertIn('General covers broadly useful or uncertain-scope information',request['system'])
+
     def test_explicit_and_upstream_default_no_intervention_are_distinguished(self):
         self.build()
         self.p2_responses = [reply(content='<no_intervention/>')]

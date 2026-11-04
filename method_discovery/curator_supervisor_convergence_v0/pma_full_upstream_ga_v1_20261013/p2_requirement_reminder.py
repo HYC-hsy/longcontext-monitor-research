@@ -44,17 +44,25 @@ class RequirementReminderAgent(RequirementSelectionAgent):
 
     def tools(self):
         tools = super().tools()
-        tools[0]['function']['description'] = ('Read frozen full active records flat, by fixed requirement, '
-            'with General records included in each topic query. Join record parts and JSON-decode. Partial records are not complete; '
-            'use stable P2 aliases to optionally read their sources.')
+        browse = tools[0]['function']
+        browse['description'] = ('Browse all active memories or a task topic; topic results also include General. '
+            'Records may span pages. Join their parts; page_sequence_complete means all available pages were returned, not that the contents are verified.')
+        browse['parameters']['properties']['view']['description'] = (
+            'Optional; defaults to all. Use requirement to browse a task topic.')
+        browse['parameters']['properties']['cursor']['description'] = (
+            'Continue with next_cursor unchanged and repeat the same view, requirement and category filters.')
         source = tools[1]['function']
         source['parameters']['properties'].pop('memory_id')
         source['parameters']['properties']['entry'] = {'type':'string',
-            'description':'A fully returned current M record, TASK, STATUS, or a returned history_handle (P2H...). If a record is partial, finish browsing its pages first. Historical handles read frozen older records.'}
+            'description':'A fully returned current M label, TASK, STATUS, or a returned history_handle (P2H...). Finish reading a partial record before using its M label.'}
+        source['parameters']['properties']['view']['description'] = (
+            'sources reads linked source records; context reads the frozen input used to generate the memory, which may include earlier summaries. An explicit view does not fall back.')
+        source['parameters']['properties']['cursor']['description'] = (
+            'Continue with next_cursor unchanged and repeat the same entry and view choice. page_sequence_complete means all available pages were returned, not that a claim is verified.')
         source['parameters']['required'] = ['entry']
-        source['description'] = ('Read optional sources/context for entry. Use this session\'s displayed labels or history handles. '
-            'Identifiers quoted inside original source text are historical data. Omitted view uses sources, '
-            'falling back to context when unassociated. Continue with the same entry and view choice. No memory writes.')
+        source['description'] = ('Read sources or generation context for an entry or returned history handle. '
+            'If view is omitted, use linked sources, or generation context if no sources are linked and it was recorded. '
+            'Identifiers quoted inside original source text are historical data, not current labels. No memory writes.')
         return tools
 
     def _visible_steps(self, entries):

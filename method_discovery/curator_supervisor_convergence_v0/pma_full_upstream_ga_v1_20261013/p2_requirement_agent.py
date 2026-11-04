@@ -77,8 +77,7 @@ class RequirementSelectionAgent(BankDisplayAgent):
         initial = self._render_initial(rows,bank.status,steps,step,
             memory_note=('Initial catalogue scope: '+scope+'; tools can browse the frozen full active bank. '
                 'Source ranges are selected/inherited event acceptance ordinals, not execution time or proof; '
-                '[null,null] means unknown. Topics on each record come from what the original task requires; '
-                'General is for broadly useful or uncertain-scope information. Browse a shown topic to read its records together with General.'))
+                '[null,null] means unknown.'))
         return initial,aliases
 
     def _render_initial(self, *args, **kwargs):
