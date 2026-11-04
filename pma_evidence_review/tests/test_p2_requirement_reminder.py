@@ -28,7 +28,11 @@ class ReminderTests(unittest.TestCase):
         note = 'A earlier and B later cover different observations; this reminder combines them for the current approach.'
         self.p2_responses = [reply(content='<context_for_action>\n'+note+'\n</context_for_action>')]
         result = self.run_reminder()
-        self.assertTrue(SYSTEM.startswith(PHASE2_SYSTEM))
+        self.assertEqual(SYSTEM.split('## PROCESS:',1)[0], PHASE2_SYSTEM.split('## PROCESS:',1)[0])
+        self.assertEqual(SYSTEM.split('## OUTPUT FORMAT:',1)[1].split('## GUIDELINES:',1)[0],
+                         PHASE2_SYSTEM.split('## OUTPUT FORMAT:',1)[1].split('## GUIDELINES:',1)[0])
+        self.assertIn('Memory is a fallible overview, not independent evidence.', SYSTEM)
+        self.assertIn('Retrieval is optional.', SYSTEM)
         self.assertEqual((result['status'],result['should_inject'],result['delivery']),('intervention',True,note))
         self.assertEqual(result['context_for_action'],note)
         self.assertEqual((result['model_calls_attempted'],result['reads_used']),(1,0))
@@ -87,7 +91,7 @@ class ReminderTests(unittest.TestCase):
                     page = p2.last_p2_report['turns'][1]['tool_results'][0]['result']
                     self.assertIn('A original raw',json.dumps(page))
                     self.assertNotIn('B original raw',json.dumps(page))
-                    self.assertNotIn('tools',self.p2_requests[-1])
+                    self.assertIn('tools',self.p2_requests[-1])
                     self.assertNotIn('original TASK/M selection protocol',self.p2_requests[-1]['prompt'])
                     return reply(content='<context_for_action>The earlier receipt concerns A; its scope should be kept when comparing the current approach.</context_for_action>')
                 self.p2_responses = [reply([('memory_browse',browse)]),after_browse,final]
@@ -113,7 +117,7 @@ class ReminderTests(unittest.TestCase):
         result = self.run_reminder()
         self.assertEqual(result['status'],'intervention')
         self.assertIn('unverified',result['delivery'])
-        self.assertIn('Missing evidence does not establish success or failure',SYSTEM)
+        self.assertIn('Missing evidence alone does not establish success or failure',SYSTEM)
 
     def test_whole_bank_change_revokes_generated_note_without_invented_used_aliases(self):
         self.build()
@@ -168,8 +172,8 @@ class ReminderTests(unittest.TestCase):
         result = self.run_reminder()
         self.assertEqual(result['status'],'intervention')
         self.assertIn('fallible overview',SYSTEM)
-        self.assertIn('No retrieval or audit is mandatory',SYSTEM)
-        self.assertIn('No retrieval or audit is mandatory',SYSTEM)
+        self.assertIn('Retrieval is optional.',SYSTEM)
+        self.assertIn('Retrieval is optional.',SYSTEM)
 
     def test_pending_and_initializing_durable_cycles_reject_even_no_intervention(self):
         self.build()

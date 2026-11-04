@@ -56,7 +56,13 @@ class UpstreamCompatibilityTests(unittest.TestCase):
 
     def test_prompts_preserve_p2_and_align_p1_to_approved_guidance(self):
         self.build()
-        self.assertTrue(self.p2.system.startswith(PHASE2_SYSTEM))
+        self.assertEqual(self.p2.system.split('## PROCESS:',1)[0], PHASE2_SYSTEM.split('## PROCESS:',1)[0])
+        self.assertEqual(self.p2.system.split('## OUTPUT FORMAT:',1)[1].split('## GUIDELINES:',1)[0],
+                         PHASE2_SYSTEM.split('## OUTPUT FORMAT:',1)[1].split('## GUIDELINES:',1)[0])
+        self.assertIn('Memory is a fallible overview, not independent evidence.', self.p2.system)
+        self.assertIn('Retrieval is optional.', self.p2.system)
+        self.assertNotIn('Four shared reads', self.p2.system)
+        self.assertNotIn('last turn has no tools', self.p2.system)
         for text in (
             'You are a Memory Bank Manager.',
             'The original task remains authoritative',

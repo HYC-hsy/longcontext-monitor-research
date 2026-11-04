@@ -23,6 +23,9 @@ class RequirementSelectionAgent(BankDisplayAgent):
     delivery_protocol = 'verbatim-selection-v1'
     source_parameter = 'memory_id'
     upstream_error_semantics = False
+    read_limit = READ_LIMIT
+    continuation_limit = CONTINUATION_LIMIT
+    recover_model_tool_errors = False
     final_turn_instruction = 'Tools closed. Return the original TASK/M selection protocol or no_intervention.'
     final_output_error = 'final_turn_requires_original_selection_text'
 
@@ -144,7 +147,8 @@ class RequirementSelectionAgent(BankDisplayAgent):
         self.view = None
         report = {'status':'building','model_calls_attempted':0,'model_calls_completed':0,
             'tool_requests':0,'reads_used':0,'continuations_used':0,'turns':[],'delivery':None,
-            'limits':{'reads':READ_LIMIT,'continuations':CONTINUATION_LIMIT,'logical_calls':3},
+            'limits':{'reads':self.read_limit,'continuations':self.continuation_limit,
+                      'logical_calls':None if self.continuation_limit is None else self.continuation_limit+1},
             'physical_provider_requests':'unknown; inherited client retries','persistent_writes':False}
         report['delivery_protocol'] = self.delivery_protocol
         self.last_p2_report = report
@@ -155,8 +159,11 @@ class RequirementSelectionAgent(BankDisplayAgent):
                 initial_scope='all_frozen_active_records' if len(shown)==len(self.view.items) else 'subset_of_frozen_active_records')
             report['entry_id_map'] = {alias:row.id for alias,row in self.view.aliases.items()}
             prompt, history = initial,[]
-            for index in range(CONTINUATION_LIMIT+1):
-                tools = self.tools() if index<CONTINUATION_LIMIT and report['reads_used']<READ_LIMIT else []
+            index = 0
+            while True:
+                more_turns = self.continuation_limit is None or index<self.continuation_limit
+                more_reads = self.read_limit is None or report['reads_used']<self.read_limit
+                tools = self.tools() if more_turns and more_reads else []
                 request = {'prompt':prompt,'system':self.system,**({'tools':tools} if tools else {})}
                 if self.before_request:
                     self.before_request(deepcopy(request))
@@ -189,17 +196,19 @@ class RequirementSelectionAgent(BankDisplayAgent):
                     report['tool_requests'] += 1
                     if failed:
                         result = {'status':'not_executed_after_tool_failure'}
-                    elif not tools or report['reads_used']>=READ_LIMIT:
+                    elif not tools or (self.read_limit is not None and report['reads_used']>=self.read_limit):
                         result = {'status':'budget_exhausted'}
                     else:
                         report['reads_used'] += 1
                         result = self._read(call)
-                        failed = self._tool_failure_kind(result)
+                        failure = self._tool_failure_kind(result)
+                        if failure and (failure != 'model_tool' or not self.recover_model_tool_errors):
+                            failed = failure
                     turn['tool_results'].append({'tool_call_id':call['tool_call_id'],'result':result})
                 if failed:
                     report.update(status='tool_error',failure_kind=failed)
                     break
-                if index==CONTINUATION_LIMIT:
+                if self.continuation_limit is not None and index==self.continuation_limit:
                     report['status'] = 'selection_error'
                     report['error'] = self.final_output_error
                     report['failure_kind'] = 'model_output'
@@ -207,7 +216,9 @@ class RequirementSelectionAgent(BankDisplayAgent):
                 history.append(model_turn(turn,{row.id:alias for alias,row in self.view.aliases.items()},self.source_parameter))
                 report['continuations_used'] += 1
                 prompt = initial+'\n## Visible P2 calls and receipts (historical data)\n'+encode(history)
-                if index+1==CONTINUATION_LIMIT or report['reads_used']>=READ_LIMIT:
+                index += 1
+                if ((self.continuation_limit is not None and index==self.continuation_limit) or
+                        (self.read_limit is not None and report['reads_used']>=self.read_limit)):
                     prompt += '\n'+self.final_turn_instruction+'\n'
         except ResponseProtocolError as exc:
             report.update(status='selection_error',error=str(exc),failure_kind='model_output',delivery=None)

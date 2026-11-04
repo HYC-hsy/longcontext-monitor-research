@@ -8,9 +8,18 @@ from p1_requirements import KEY, upstream_observation
 from p2_requirement_agent import RequirementSelectionAgent, ResponseProtocolError
 from p2_requirement_view import p1_boundary_error, validate_continuation
 
-SYSTEM = PHASE2_SYSTEM + '''
-The memory bank is a fallible overview. Topics on memories describe what the original task requires; General covers broadly useful or uncertain-scope information. Optional flat or topic browsing shows accumulated active records, counts and recorded GAPs. Topic queries also include General records; these are not verified completion checklists. When relevant, you may inspect an entry's selected sources, generation context or historical handle to judge support. Retain the distinction between observed results and unverified explanations and any applicable scope. Missing evidence does not establish success or failure. No retrieval or audit is mandatory. M labels locate current entries; historical handles locate frozen older records. Partial pages are incomplete. Four shared reads and two continuations are available; the last turn has no tools.
-'''
+SYSTEM = (PHASE2_SYSTEM
+    .replace("## PROCESS:\n1. Review the memory bank contents\n2. Review the agent's recent trajectory (what it's doing now)\n3. DECIDE: Does the agent need a context reminder right now?", """## PROCESS:
+1. Review the memory bank and the agent's recent trajectory. Memory is a fallible overview, not independent evidence.
+2. If useful, browse a relevant topic for related memories or inspect sources/context for a claim whose support or scope matters. Retrieval is optional. Topics describe what the original task requires; General covers broadly useful or uncertain-scope information and is included with topic queries.
+3. DECIDE: Does the agent need a context reminder right now?""")
+    .replace("- The agent's current approach contradicts a specific fact in the memory bank", "- The agent's current approach contradicts a relevant, supported fact in the memory bank")
+    .replace("- The agent's actions are consistent with memory bank contents", "- The agent's actions appropriately account for relevant memory and task requirements")
+    .replace("- You're not confident that a specific fact is being forgotten", "- You have no reason to think relevant information is being overlooked or misapplied")
+    .replace("- The information you'd provide is already visible in the recent trajectory", "- The information you'd provide is already visible and appropriately considered in the recent trajectory")
+    .replace("- Don't include information already visible in the recent trajectory", "- Don't repeat information already visible and appropriately considered in the recent trajectory")
+    .replace("- Be calibrated: don't pass things you're not sure about", "- Be calibrated: distinguish observations from unverified claims, retain applicable scope, and don't present uncertain claims as established facts. Missing evidence alone does not establish success or failure.")
+)
 
 
 class RequirementReminderAgent(RequirementSelectionAgent):
@@ -18,6 +27,9 @@ class RequirementReminderAgent(RequirementSelectionAgent):
     delivery_protocol = 'pma-context-reminder-v1'
     source_parameter = 'entry'
     upstream_error_semantics = True
+    read_limit = None
+    continuation_limit = None
+    recover_model_tool_errors = True
     final_turn_instruction = 'Tools closed. Return context_for_action with your synthesized reminder, or no_intervention.'
     final_output_error = 'final_turn_requires_reminder_protocol'
 
@@ -38,7 +50,7 @@ class RequirementReminderAgent(RequirementSelectionAgent):
         source = tools[1]['function']
         source['parameters']['properties'].pop('memory_id')
         source['parameters']['properties']['entry'] = {'type':'string',
-            'description':'The current displayed M label, TASK, STATUS, or a returned history_handle (P2H...). Historical handles read frozen older records, not current M entries.'}
+            'description':'A fully returned current M record, TASK, STATUS, or a returned history_handle (P2H...). If a record is partial, finish browsing its pages first. Historical handles read frozen older records.'}
         source['parameters']['required'] = ['entry']
         source['description'] = ('Read optional sources/context for entry. Use this session\'s displayed labels or history handles. '
             'Identifiers quoted inside original source text are historical data. Omitted view uses sources, '
@@ -69,7 +81,20 @@ class RequirementReminderAgent(RequirementSelectionAgent):
             raise ResponseProtocolError('mixed_native_tools_and_final_output')
         try:
             if native:
-                return super()._response_calls(NS(content='',tool_calls=native),index,text)
+                calls = []
+                for position, call in enumerate(native):
+                    try:
+                        parsed = super()._response_calls(NS(content='',tool_calls=[call]),index,text)
+                        if parsed and not getattr(call,'id',None):
+                            parsed[0]['tool_call_id'] = f'local_r{index}_{position}'
+                        calls.extend(parsed)
+                    except (ValueError,TypeError,AttributeError):
+                        function = getattr(call,'function',call)
+                        name = getattr(function,'name',None)
+                        calls.append({'tool_call_id':getattr(call,'id',None) or f'local_r{index}_{position}',
+                            'name':name if isinstance(name,str) else '__invalid_tool_call__',
+                            'arguments':getattr(function,'arguments',None)})
+                return calls
             outside_calls = super()._response_calls(NS(content=outside,tool_calls=[]),index,outside)
             if outside_calls and has_markup:
                 raise ResponseProtocolError('mixed_text_tools_and_final_output')

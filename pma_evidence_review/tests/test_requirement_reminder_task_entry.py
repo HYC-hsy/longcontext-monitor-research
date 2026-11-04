@@ -152,16 +152,23 @@ class RequirementTaskEntryTests(unittest.TestCase):
             asyncio.run(run())
             self.assertIsNotNone(episode._failure)
 
-    def test_p2_tool_error_is_not_normal_no_intervention(self):
+    def test_p2_tool_error_receipt_is_visible_and_model_recovers_explicitly(self):
         responses=[reply(calls=[('requirements_initialize',{'requirements':[]})]),
-            reply(),reply(calls=[('memory_read_source',{'entry':'UNKNOWN'})])]
+            reply(),reply(calls=[('memory_read_source',{'entry':'UNKNOWN'})]),
+            reply('<no_intervention/>')]
         with tempfile.TemporaryDirectory() as tmp:
-            episode,_=self.setup_run(Path(tmp),responses)
+            episode,seen=self.setup_run(Path(tmp),responses)
             result = asyncio.run(episode.handle(event('task_start',1,initial_user_content='Do A under C')))
-            self.assertEqual(result['memory_cycle_status'],'tool_error')
+            self.assertEqual(result['memory_cycle_status'],'no_intervention')
             self.assertIsNone(episode._failure)
             report=episode.agent._requirement_pipeline.p2.last_p2_report
-            self.assertEqual(report['status'],'tool_error')
+            self.assertEqual(report['status'],'no_intervention')
+            self.assertEqual(report['model_calls_completed'],2)
+            self.assertEqual(report['turns'][0]['tool_results'][0]['result']['status'],
+                             'source_not_in_snapshot_scope')
+            self.assertIn('source_not_in_snapshot_scope',seen[-1][1]['prompt'])
+            self.assertEqual(report['turns'][-1]['assistant_text'],'<no_intervention/>')
+            self.assertEqual(report['parse_status'],'upstream_tag_extraction')
             self.assertIsNone(episode.agent._pending_injection)
 
     def test_initialization_failure_stops_before_p2(self):
