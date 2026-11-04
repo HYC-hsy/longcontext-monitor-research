@@ -240,9 +240,9 @@ class RequirementP1Agent(ContextSourceP1Agent):
         if len(calls)!=1 or calls[0]['name']!='requirements_initialize':
             raise RequirementError('expected_one_initialization_call')
         args = calls[0]['arguments']
-        if not isinstance(args,dict) or set(args)!={'requirements'}:
+        if not isinstance(args,dict) or set(args)!={'topics'}:
             raise RequirementError('invalid_initialization_arguments')
-        fixed = catalog(args['requirements'])
+        fixed = catalog(args['topics'])
         def freeze(data):
             data['catalog'] = fixed
             data['cycles'][cycle]['phase'] = 'pending'
