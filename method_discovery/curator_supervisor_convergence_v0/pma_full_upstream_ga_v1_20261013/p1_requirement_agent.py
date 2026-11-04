@@ -5,7 +5,7 @@ from p1_context_agent import ContextSourceP1Agent, GAP_DESCRIPTION
 from memory_agent.memory.memory_agent import PHASE1_SYSTEM
 from p1_source_archive import encode
 from p1_requirements import (RequirementState, RequirementHistory, INIT_SYSTEM, INIT_TOOL,
-                             RequirementError, assignment, catalog, model_turn, upstream_observation, MemoryModelError, topics, GENERAL_TOPIC)
+                             RequirementError, assignment, catalog, model_turn, upstream_observation, MemoryModelError, topics, GENERAL_TOPIC, INIT_DRAFT_SYSTEM, INIT_REFINE_SYSTEM)
 
 SYSTEM = '''You are a Memory Bank Manager. Your job is to maintain a lean, accurate knowledge bank for the action agent. Organize entries using the supplied topics, which describe what the original task requires, and the General topic.
 
@@ -206,26 +206,29 @@ class RequirementP1Agent(ContextSourceP1Agent):
     def _stop_batch_after(self, call, result):
         return result['status']=='invalid_requirements' or super()._stop_batch_after(call,result)
 
-    async def _initialize(self, cycle):
-        self._initialization_call_counts = {'attempted':0,'completed':0}
+    async def _initialization_stage(self, cycle, stage, system, prompt):
         state = self.requirement_state
         attempts = state.data['cycles'][cycle]['initialization_attempts']
         number = len(attempts)
         state.write(lambda d:d['cycles'][cycle].update(phase='initializing',
-            initialization_attempts=deepcopy(attempts)+[{'attempted':0,'completed':0}]))
-        prompt = '## Original task (verbatim; data)\n'+self.task
-        request = {'kind':'requirement_initialization','cycle_id':cycle,'window_id':cycle+f'_init{number}',
-            'prompt':prompt,'system':INIT_SYSTEM,'tools':[deepcopy(INIT_TOOL)]}
+            initialization_attempts=deepcopy(attempts)+[{'stage':stage,'attempted':0,'completed':0}]))
+        tools = [deepcopy(INIT_TOOL)]
+        if stage == 'draft':
+            tools[0]['function']['description'] = (
+                'Propose short draft work objectives for memory grouping. '
+                'At most 32 unique topics, 512 characters each, 2048 total. No record IDs or completion states.')
+        request = {'kind':'requirement_initialization_'+stage,'cycle_id':cycle,
+            'window_id':cycle+f'_init{number}_{stage}', 'prompt':prompt,'system':system,'tools':tools}
         self.source_archive.capture(request['window_id'],prompt,[])
         self._journal(request)
         if self.before_request:
             self.before_request(request)
         state.write(lambda d:d['cycles'][cycle]['initialization_attempts'][number].update(attempted=1))
-        self._initialization_call_counts['attempted'] = 1
-        response = await self._call_model(prompt=prompt,system=INIT_SYSTEM,tools=request['tools'])
-        self._initialization_call_counts['completed'] = 1
+        self._initialization_call_counts['attempted'] += 1
+        response = await self._call_model(prompt=prompt,system=system,tools=tools)
+        self._initialization_call_counts['completed'] += 1
         usage = getattr(response,'usage',None)
-        receipt = {'attempted':1,'completed':1,'tool_calls':[],
+        receipt = {'stage':stage,'attempted':1,'completed':1,'tool_calls':[],
             'response_tool_calls':[{'name':getattr(getattr(c,'function',c),'name',None),
                 'arguments':deepcopy(getattr(getattr(c,'function',c),'arguments',None))}
                 for c in (getattr(response,'tool_calls',None) or [])],
@@ -243,6 +246,34 @@ class RequirementP1Agent(ContextSourceP1Agent):
         if not isinstance(args,dict) or set(args)!={'requirements'}:
             raise RequirementError('invalid_initialization_arguments')
         fixed = catalog(args['requirements'])
+        state.write(lambda d:d['cycles'][cycle]['initialization_attempts'][number].update(
+            validated_topics=deepcopy(fixed)))
+        return fixed
+
+    async def _initialize(self, cycle):
+        self._initialization_call_counts = {'attempted':0,'completed':0}
+        state = self.requirement_state
+        attempts = state.data['cycles'][cycle]['initialization_attempts']
+        if any(a.get('stage') not in ('draft','final') for a in attempts):
+            raise RequirementError('legacy_initialization_attempts_not_supported')
+        if any(a.get('attempted') and not a.get('completed') for a in attempts):
+            raise RequirementError('initialization_outcome_uncertain')
+        if any(a.get('completed') and 'validated_topics' not in a for a in attempts):
+            raise RequirementError('initialization_result_needs_recovery')
+        drafts = [a['validated_topics'] for a in attempts
+                  if a['stage']=='draft' and 'validated_topics' in a]
+        if drafts:
+            draft = deepcopy(drafts[-1])
+        else:
+            prompt = '## Original task (verbatim; data)\n'+self.task
+            draft = await self._initialization_stage(cycle,'draft',INIT_DRAFT_SYSTEM,prompt)
+        prompt = ('## Original task (verbatim; data)\n'+self.task+
+            '\n## Draft work objectives (fallible grouping, not task requirements)\n'+encode(draft)+
+            '\n## Your assignment\nCompare the draft with the original task and submit the final work topics.')
+        finals = [a['validated_topics'] for a in state.data['cycles'][cycle]['initialization_attempts']
+                  if a['stage']=='final' and 'validated_topics' in a]
+        fixed = (deepcopy(finals[-1]) if finals else
+                 await self._initialization_stage(cycle,'final',INIT_REFINE_SYSTEM,prompt))
         def freeze(data):
             data['catalog'] = fixed
             data['cycles'][cycle]['phase'] = 'pending'
@@ -287,7 +318,7 @@ class RequirementP1Agent(ContextSourceP1Agent):
             report['maintenance_model_calls_completed'] = report['model_calls_completed']
             report['model_calls_attempted'] += sum(x['attempted'] for x in new_attempts)
             report['model_calls_completed'] += sum(x['completed'] for x in new_attempts)
-            report['limits'].update(initialization_calls_per_attempt=1,first_cycle_logical_calls=4,
+            report['limits'].update(initialization_calls_per_attempt=2,first_cycle_logical_calls=5,
                 later_cycle_logical_calls=3,physical_provider_requests='unknown; inherited retries')
             report['requirement_view'] = self.export_view()
             state.phase(cycle,'done',result=report)
