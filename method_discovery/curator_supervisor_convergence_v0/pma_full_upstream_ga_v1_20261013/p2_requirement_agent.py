@@ -10,7 +10,7 @@ from tag_selection_contract import Item, parse_output, dispatch, delivery_json, 
 
 READ_LIMIT, CONTINUATION_LIMIT = 4, 2
 SYSTEM = SELECTION_SYSTEM + '''
-You may decide directly from the initial displayed records, or optionally browse the frozen full active bank by fixed requirement, unclassified records, or flat view. P2 aliases remain stable throughout this selection. A partial record must be read completely before selecting it. Grouping is organization, not evidence or completion. memory_read_source reads selected sources or frozen context for already shown records; returned P2H handles are historical, not selectable records. Source and context pages are not semantic verification. At most four browse/source calls and two continuations are available; the last turn has no tools. Keep the original TASK/M alias output format, with no rewritten advice.
+You may decide directly from the initial displayed records, or optionally browse the frozen full active bank by a task-derived topic (including General records) or flat view. P2 aliases remain stable throughout this selection. A partial record must be read completely before selecting it. Grouping is organization, not evidence or completion. memory_read_source reads selected sources or frozen context for already shown records; returned P2H handles are historical, not selectable records. Source and context pages are not semantic verification. At most four browse/source calls and two continuations are available; the last turn has no tools. Keep the original TASK/M alias output format, with no rewritten advice.
 '''
 
 
@@ -39,10 +39,10 @@ class RequirementSelectionAgent(BankDisplayAgent):
 
     def tools(self):
         return [{'type':'function','function':{'name':'memory_browse',
-            'description':'Read frozen full active records flat, by fixed requirement, or unclassified. Join record parts and JSON-decode; select its stable M alias only after the full record returns.',
-            'parameters':{'type':'object','properties':{'view':{'type':'string','enum':['all','requirement','unclassified'],
-                    'description':'Optional; defaults to all. requirement filters by fixed requirement text; unclassified has no requirement membership.'},
-                'requirement':{'type':'string','description':'Required for view=requirement; use supplied fixed text. Omit for other views.'},
+            'description':'Read frozen active records flat or by a task-derived topic. A topic query includes General records. Join record parts and JSON-decode; select its stable M alias only after the full record returns.',
+            'parameters':{'type':'object','properties':{'view':{'type':'string','enum':['all','requirement'],
+                    'description':'Optional; defaults to all. requirement selects a task-derived topic and includes General records.'},
+                'requirement':{'type':'string','description':'Required for view=requirement; copy a topic shown on a memory record. Omit for other views.'},
                 'category':{'type':'string','enum':['knowledge','procedural','gap'],
                     'description':'Optional record-type filter in any view; omitted means all types. gap is a recorded need, not verified completion.'},
                 'cursor':{'type':'string','description':'Pass next_cursor unchanged and repeat the same view, requirement and category filters.'}},'additionalProperties':False}}},
@@ -74,11 +74,8 @@ class RequirementSelectionAgent(BankDisplayAgent):
         initial = self._render_initial(rows,bank.status,steps,step,
             memory_note=('Initial catalogue scope: '+scope+'; tools can browse the frozen full active bank. '
                 'Source ranges are selected/inherited event acceptance ordinals, not execution time or proof; '
-                '[null,null] means unknown.'))
-        initial += ('\n## Fixed requirements and initial memberships\n'+encode(view.groups(aliases))+
-            '\nMembership lists cover only this initial catalogue, not hidden records. '
-            'Use the supplied requirement text for optional full-bank browsing.\n'+
-            '\nP2 full snapshot active record count: '+str(len(view.items))+'. Unclassified remains reachable.\n')
+                '[null,null] means unknown. Topics on each record come from what the original task requires; '
+                'General is for broadly useful or uncertain-scope information. Browse a shown topic to read its records together with General.'))
         return initial,aliases
 
     def _render_initial(self, *args, **kwargs):

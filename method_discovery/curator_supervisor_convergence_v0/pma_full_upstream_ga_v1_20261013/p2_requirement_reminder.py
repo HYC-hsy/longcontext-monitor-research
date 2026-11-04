@@ -9,7 +9,7 @@ from p2_requirement_agent import RequirementSelectionAgent, ResponseProtocolErro
 from p2_requirement_view import p1_boundary_error, validate_continuation
 
 SYSTEM = PHASE2_SYSTEM + '''
-The memory bank is a fallible overview. Optional flat, fixed-requirement or unclassified browsing shows accumulated active records, counts and recorded GAPs; this is not a verified completion checklist. When relevant, you may inspect an entry's selected sources, generation context or historical handle to judge support. Retain the distinction between observed results and unverified explanations and any applicable scope. Missing evidence does not establish success or failure. No retrieval or audit is mandatory. M labels locate current entries; historical handles locate frozen older records. Partial pages are incomplete. Four shared reads and two continuations are available; the last turn has no tools.
+The memory bank is a fallible overview. Topics on memories describe what the original task requires; General covers broadly useful or uncertain-scope information. Optional flat or topic browsing shows accumulated active records, counts and recorded GAPs. Topic queries also include General records; these are not verified completion checklists. When relevant, you may inspect an entry's selected sources, generation context or historical handle to judge support. Retain the distinction between observed results and unverified explanations and any applicable scope. Missing evidence does not establish success or failure. No retrieval or audit is mandatory. M labels locate current entries; historical handles locate frozen older records. Partial pages are incomplete. Four shared reads and two continuations are available; the last turn has no tools.
 '''
 
 
@@ -33,7 +33,7 @@ class RequirementReminderAgent(RequirementSelectionAgent):
     def tools(self):
         tools = super().tools()
         tools[0]['function']['description'] = ('Read frozen full active records flat, by fixed requirement, '
-            'or unclassified. Join record parts and JSON-decode. Partial records are not complete; '
+            'with General records included in each topic query. Join record parts and JSON-decode. Partial records are not complete; '
             'use stable P2 aliases to optionally read their sources.')
         source = tools[1]['function']
         source['parameters']['properties'].pop('memory_id')

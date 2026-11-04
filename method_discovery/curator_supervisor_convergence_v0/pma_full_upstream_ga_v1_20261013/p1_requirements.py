@@ -7,6 +7,12 @@ from p1_source_archive import encode, digest
 from p1_context_history import InputMemoryHistory
 
 KEY = 'requirement_attributes_v1'
+GENERAL_TOPIC = 'General'
+
+
+def topics(fixed):
+    """Fixed task-derived topics plus the host-provided general topic."""
+    return list(dict.fromkeys([*(fixed or []), GENERAL_TOPIC]))
 
 
 def model_turn(turn, aliases=None, source_parameter='memory_id'):
@@ -45,7 +51,7 @@ def model_turn(turn, aliases=None, source_parameter='memory_id'):
     return visible
 
 
-INIT_SYSTEM = '''Extract what the original task ultimately requires to be achieved. Return fixed, readable requirement sentences, retaining necessary constraints such as paths, options and scope. Separate final conditions from suggested execution steps and historical facts. A paragraph may contain several requirements; matching a phrase does not establish complete semantic coverage. Use only the original task, not later plans or obstacles. Keep the original meaning without inventing conditions. Use requirements_initialize once; use [] only when no final requirement can be identified. This organizes memory; it does not solve or evaluate the task.'''
+INIT_SYSTEM = '''Extract what the original task ultimately requires to be achieved. Return fixed, readable requirement sentences, retaining necessary constraints such as paths, options and scope. Separate final conditions from suggested execution steps and historical facts. A paragraph may contain several requirements; matching a phrase does not establish complete semantic coverage. Use only the original task, not later plans or obstacles. Keep the original meaning without inventing conditions. Use requirements_initialize once; use [] only when no final requirement can be identified. Do not create a General topic; the host supplies it. This organizes memory; it does not solve or evaluate the task.'''
 INIT_TOOL = {'type':'function','function':{'name':'requirements_initialize',
     'description':'Propose fixed requirement text; at most 32 unique sentences, 512 characters each, 2048 total. No record IDs or completion states.',
     'parameters':{'type':'object','properties':{'requirements':{'type':'array','maxItems':32,
@@ -100,12 +106,16 @@ def catalog(values):
 
 
 def assignment(values, fixed):
-    if not isinstance(values,list) or len(values)>32:
+    if not isinstance(values,list) or len(values)>33:
         raise RequirementError('invalid_requirement_assignment')
+    available = topics(fixed)
     chosen = {canonical(x) for x in values}
-    if chosen-set(fixed):
-        raise RequirementError('unknown_requirement_choose_supplied_text_or_empty')
-    return [x for x in fixed if x in chosen]
+    if chosen-set(available):
+        raise RequirementError('unknown_requirement_choose_supplied_text')
+    # Empty selection is safely retained as General rather than dropping memory.
+    if not chosen:
+        chosen = {GENERAL_TOPIC}
+    return [x for x in available if x in chosen]
 
 
 class RequirementHistory(InputMemoryHistory):
@@ -221,6 +231,6 @@ class RequirementState:
     def groups(self, rows):
         rows = self.ordered(rows)
         result = [{'requirement':text,'memory_ids':[r.id for r in rows if text in
-            self.links.state['refs'][r.id]['requirements']]} for text in self.data['catalog'] or []]
+            self.links.state['refs'][r.id]['requirements']]} for text in topics(self.data['catalog'])]
         return {'requirements':result,'unclassified_memory_ids':[r.id for r in rows if not
             self.links.state['refs'][r.id]['requirements']]}

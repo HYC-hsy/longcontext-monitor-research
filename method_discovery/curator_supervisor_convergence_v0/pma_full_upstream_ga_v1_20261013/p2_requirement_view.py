@@ -6,7 +6,7 @@ import uuid
 from p1_source_archive import encode, digest
 from p1_source_links import SourceLinks
 from p1_context_history import HistoryError, InputMemoryHistory
-from p1_requirements import RequirementHistory, KEY, canonical, catalog, assignment
+from p1_requirements import RequirementHistory, KEY, canonical, catalog, assignment, topics, GENERAL_TOPIC
 from tag_selection_contract import Snapshot, Item
 
 
@@ -169,6 +169,7 @@ class RequirementSelectionView:
             ref = self.links.state['refs'][row.id]
             order = attributes['source_event_order']
             rows.append({'alias':alias,'memory_id':row.id,'category':row.category,'content':row.content,
+                'requirements':deepcopy(attributes['requirements']),
                 'source':{'association':ref['association'],'count':len(ref['sources']),
                           'accepted_event_range':[order['first'],order['last']]}})
         self.seen.update(aliases)
@@ -176,11 +177,11 @@ class RequirementSelectionView:
 
     def groups(self, aliases):
         return {'requirements':[{'requirement':text,'aliases':[a for a in aliases if text in
-                    self.attributes[a]['requirements']]} for text in self.catalog],
+                    self.attributes[a]['requirements']]} for text in topics(self.catalog)],
                 'unclassified_aliases':[a for a in aliases if not self.attributes[a]['requirements']]}
 
     def browse(self, *, view='all', requirement=None, category=None, cursor=None, model_view=False):
-        if (view not in ('all','requirement','unclassified') or (view!='requirement' and requirement is not None) or
+        if (view not in ('all','requirement') or (view!='requirement' and requirement is not None) or
                 category not in (None,'knowledge','procedural','gap')):
             return {'status':'invalid_tool_arguments'}
         if view=='requirement':
@@ -190,18 +191,18 @@ class RequirementSelectionView:
                 requirement = canonical(requirement)
             except ValueError:
                 return {'status':'unknown_requirement'}
-            if requirement not in self.catalog:
+            if requirement not in topics(self.catalog):
                 return {'status':'unknown_requirement'}
         aliases = [a for a in self.aliases if view=='all' or
-            (view=='unclassified' and not self.attributes[a]['requirements']) or
-            (view=='requirement' and requirement in self.attributes[a]['requirements'])]
+            (view=='requirement' and (requirement in self.attributes[a]['requirements'] or
+                                      GENERAL_TOPIC in self.attributes[a]['requirements']))]
         aliases = [a for a in aliases if category is None or self.aliases[a].category==category]
         records = {a:self.record(a) for a in aliases}
         if model_view:
             for record in records.values():record.pop('memory_id',None)
         fields = [(a,'record','json_value',encode(records[a])) for a in aliases]
         metadata = {'snapshot_id':self.id,'browse_view':view,'requirement':requirement,'category':category,
-            'scope':'all frozen active records matching this filter; not only the initial BM25 subset',
+            'scope':'all frozen active records matching this filter; requirement views also include General; not only the initial BM25 subset',
             'matching_record_count':len(aliases),'all_active_record_count':len(self.items),
             'matching_category_counts':{c:sum(self.aliases[a].category==c for a in aliases)
                                         for c in ('knowledge','procedural','gap')},

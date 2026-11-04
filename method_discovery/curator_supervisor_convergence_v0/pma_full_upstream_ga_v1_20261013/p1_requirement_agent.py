@@ -5,7 +5,7 @@ from p1_context_agent import ContextSourceP1Agent, GAP_DESCRIPTION
 from memory_agent.memory.memory_agent import PHASE1_SYSTEM
 from p1_source_archive import encode
 from p1_requirements import (RequirementState, RequirementHistory, INIT_SYSTEM, INIT_TOOL,
-                             RequirementError, assignment, catalog, model_turn, upstream_observation, MemoryModelError)
+                             RequirementError, assignment, catalog, model_turn, upstream_observation, MemoryModelError, topics, GENERAL_TOPIC)
 
 SYSTEM = '''You are a Memory Bank Manager. Your job is to maintain a lean, accurate knowledge bank for the action agent.
 
@@ -40,7 +40,7 @@ SYSTEM = '''You are a Memory Bank Manager. Your job is to maintain a lean, accur
 - Performance or score tracking
 - Task-relevant conditions or questions that remain unresolved
 
-Requirement classifications and source links organize memory; they do not by themselves establish evidence or completion.
+Topics are derived from what the original task requires. Assign each entry to relevant fixed topics; use General for broadly useful information or when no specific topic fits. Topic assignments and source links organize memory; they do not by themselves establish evidence or completion.
 '''
 
 TOOL_DESCRIPTIONS = {
@@ -72,14 +72,14 @@ class RequirementP1Agent(ContextSourceP1Agent):
 
     def get_tools_schema(self):
         tools = super().get_tools_schema()
-        fixed = self.requirement_state.data['catalog']
+        fixed = topics(self.requirement_state.data['catalog'])
         for item in tools:
             f = item['function']
             f['parameters']['additionalProperties'] = False
             if f['name'] in SAVES:
-                f['parameters']['properties']['requirements'] = {'type':'array','maxItems':32 if fixed else 0,
+                f['parameters']['properties']['requirements'] = {'type':'array','maxItems':len(fixed),
                     'items':{'type':'string',**({'enum':fixed} if fixed else {})},
-                    'description':'Select the fixed supplied requirement sentences; multiple or [] for unclassified.'}
+                    'description':'Select relevant task-derived topics; choose General when broadly useful or no specific topic fits. Multiple topics are allowed.'}
                 f['parameters']['required'] = list(f['parameters'].get('required',[]))+['requirements']
             if f['name'] in ('memory_delete','memory_read_source'):
                 prop = f['parameters']['properties'].pop('memory_id')
@@ -149,9 +149,9 @@ class RequirementP1Agent(ContextSourceP1Agent):
         groups = self.requirement_state.groups(selected)
         memberships = {'requirements':[{'requirement':g['requirement'],
             'aliases':[aliases[key] for key in g['memory_ids']]} for g in groups['requirements']],
-            'unclassified_aliases':[aliases[key] for key in groups['unclassified_memory_ids']]}
+            'general_topic':GENERAL_TOPIC}
         prompt += ('\n## Fixed requirements and displayed memberships\n'+encode(memberships)+
-            '\nMemberships cover the displayed subset only. Unclassified records remain in the flat view. Retrieval can omit active records; '
+            '\nTopics describe what the original task requires; General is for broadly useful or uncertain-scope information. Memberships cover the displayed subset only. Retrieval can omit active records; '
             'an empty displayed group does not mean its whole task history is empty. '
             'Source ranges are selected/inherited event acceptance ordinals, not execution time or proof; '
             '[null,null] means unknown.\n'
@@ -195,8 +195,8 @@ class RequirementP1Agent(ContextSourceP1Agent):
         try:
             self._saving_requirements = assignment(args['requirements'],self.requirement_state.data['catalog'])
         except ValueError as exc:
-            return {'status':'invalid_requirements','allowed_requirements':self.requirement_state.data['catalog'],
-                    'unclassified_value':[],'error_code':getattr(exc,'reason','invalid_requirements')}
+            return {'status':'invalid_requirements','allowed_requirements':topics(self.requirement_state.data['catalog']),
+                    'general_topic':GENERAL_TOPIC,'error_code':getattr(exc,'reason','invalid_requirements')}
         try:
             normalized = deepcopy(call)
             normalized['arguments'].pop('requirements')
