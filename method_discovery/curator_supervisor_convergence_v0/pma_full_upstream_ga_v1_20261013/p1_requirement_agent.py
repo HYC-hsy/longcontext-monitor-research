@@ -217,7 +217,7 @@ class RequirementP1Agent(ContextSourceP1Agent):
             tools[0]['function']['description'] = (
                 'Propose short draft work objectives for memory grouping. '
                 'At most 32 unique topics, 512 characters each, 2048 total. No record IDs or completion states.')
-        request = {'kind':'requirement_initialization_'+stage,'cycle_id':cycle,
+        request = {'kind':'requirement_initialization','stage':stage,'cycle_id':cycle,
             'window_id':cycle+f'_init{number}_{stage}', 'prompt':prompt,'system':system,'tools':tools}
         self.source_archive.capture(request['window_id'],prompt,[])
         self._journal(request)
