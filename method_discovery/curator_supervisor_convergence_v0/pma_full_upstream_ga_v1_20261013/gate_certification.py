@@ -6,7 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from .citation_gate_config import (MODES, STRATEGIES, CLAIM_SPLIT, verify_gate_sources,
+from .citation_gate_config import (MODES, STRATEGIES, CLAIM_SPLIT, CLAIM_SPLIT_SIMPLE, verify_gate_sources,
                                    gate_source_paths, require_strategy_binding, validate_strategy)
 from pma_evidence_review import citation_inputs as ci, citation_review as cr
 from pma_evidence_review.inputs import require, digest
@@ -140,6 +140,25 @@ def inspect_evidence(base, mode, strategy=None):
                     calls=claim_split.audit_calls(attempt)
                     require(attempt['engineering_status']=='ok','gate_verdict')
                     expected.extend(('citation_review',request,raw) for request,raw in calls)
+                elif effective==CLAIM_SPLIT_SIMPLE:
+                    from pma_evidence_review import claim_split_simple as simple
+                    request=simple.split_request(material,row['index'])
+                    require(attempt['request']==request==attempt['split']['request'],
+                            'gate_request_projection')
+                    require(attempt['engineering_status']=='ok' and
+                            attempt['split']['engineering_status']=='ok' and
+                            attempt['batch']['engineering_status']=='ok', 'gate_verdict')
+                    claims=simple.parse_split(attempt['split']['raw_response'])
+                    require(attempt['claims']==claims and attempt['raw_response']==attempt['split']['raw_response'],
+                            'gate_split_identity')
+                    batch_request=simple.verification_request(material,claims)
+                    require(attempt['batch']['request']==batch_request,'gate_batch_projection')
+                    reviews,overall,verdict=simple.parse_batch(attempt['batch']['raw_response'],claims)
+                    require(attempt['claim_reviews']==reviews and attempt['overall']==overall and
+                            attempt['verdict']==verdict and attempt['model_verdict']==overall['verdict'],
+                            'gate_batch_verdict')
+                    expected.extend((('citation_review',request,attempt['split']['raw_response']),
+                                     ('citation_review',batch_request,attempt['batch']['raw_response'])))
                 else:
                     request=apply_strategy(cr.request_from_material(material,row['index']),ONE_SENTENCE)
                     require(request==attempt['request'],'gate_request_projection')

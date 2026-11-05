@@ -147,11 +147,15 @@ async def serve(args: argparse.Namespace) -> None:
                     return LLMResponse(content='', tool_calls=calls)
                 if phase == 'citation_review':
                     # Finite engineering fixture only: fixed labels, no semantic inference.
-                    from citation_gate_config import CLAIM_SPLIT
-                    if getattr(args,'citation_review_strategy',None)==CLAIM_SPLIT:
+                    from citation_gate_config import CLAIM_SPLIT, CLAIM_SPLIT_SIMPLE
+                    strategy=getattr(args,'citation_review_strategy',None)
+                    if strategy in (CLAIM_SPLIT, CLAIM_SPLIT_SIMPLE):
                         if prompt.startswith('CLOSED MATERIAL (A is not evidence):\n'):
                             material=json.loads(prompt.split('\n',1)[1])
                             op=material['original_operation'];text=op['content']
+                            if strategy==CLAIM_SPLIT_SIMPLE:
+                                return LLMResponse(content=json.dumps([
+                                    text+' synthetic clause '+str(i) for i in (1,2)]))
                             return LLMResponse(content=json.dumps({'op_index':op['op_index'],
                                 'claims':[{'claim':text+' synthetic clause '+str(i),
                                     'original_text':text,'start':0,'end':len(text)} for i in (1,2)]}))
@@ -160,6 +164,12 @@ async def serve(args: argparse.Namespace) -> None:
                         op=material['original_operation']
                         verdict=('supported' if op['content'] in (
                             'GATE_FIXTURE_ACCEPTED','GATE_FIXTURE_REPAIRED') else 'insufficient')
+                        if strategy==CLAIM_SPLIT_SIMPLE:
+                            return LLMResponse(content=json.dumps({'overall':{
+                                'verdict':verdict,'reason':'GATE_FIXTURE_REVIEW_CONTROL_ONLY'},
+                                'results':[{'verdict':verdict,
+                                    'reason':'GATE_FIXTURE_REVIEW_CONTROL_ONLY'}
+                                    for _ in material['claims']]}))
                         return LLMResponse(content=json.dumps({'results':[
                             {'claim_index':claim['index'],'verdict':verdict,'evidence_ids':['E1'],
                              'original_fragment':claim['original_text'],
