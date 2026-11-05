@@ -258,6 +258,9 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
             for name in gate_source_paths()}
     if schema == 'pma-ga-live-manifest-v5':
         method['research_candidate'] = candidate
+        if candidate == 'pma_predictive_f838_v1':
+            method.update(conditions={'B': 'GA_plus_predictive_PMA_f838_v1'},
+                          task_turns_max=None, agent_wall_seconds=None)
         if candidate in ('pma_gap_memory_v0', 'pma_gap_evidence_v1'):
             label = ('GA_plus_evidence_gap_PMA_v1' if candidate == 'pma_gap_evidence_v1'
                      else 'GA_plus_reviewed_gap_PMA_v0')
@@ -369,7 +372,8 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
         certification = {'source_files': (source_identity(checkout) if stateful else
                              source_identity(checkout, candidate=research is not None,
                                  gap=research == 'pma_gap_memory_v0',
-                                 evidence_gap=research == 'pma_gap_evidence_v1')),
+                                 evidence_gap=research == 'pma_gap_evidence_v1',
+                                 predictive=research == 'pma_predictive_f838_v1')),
                          'evidence_path': evidence.relative_to(checkout).as_posix(),
                          'evidence': (verify_evidence(evidence) if stateful else
                              verify_evidence(evidence, research_candidate=research,

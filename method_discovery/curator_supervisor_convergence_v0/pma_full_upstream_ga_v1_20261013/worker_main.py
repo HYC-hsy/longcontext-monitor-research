@@ -89,7 +89,7 @@ def fake_evidence_gap_arguments(candidate_agent, prompt):
 
 
 async def serve(args: argparse.Namespace) -> None:
-    if args.deadline_epoch is None and args.research_candidate not in ('U', 'V1', 'D1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1'):
+    if args.deadline_epoch is None and args.research_candidate not in ('U', 'V1', 'D1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1', 'pma_predictive_f838_v1'):
         raise RuntimeError('uncapped PMA worker requires gap candidate identity')
     vendor = Path(__file__).resolve().parent / "vendor" / "pma_89e5c0d"
     sources = (Path(inspect.getfile(MemoryEnabledTerminus2)).resolve(),
@@ -128,6 +128,14 @@ async def serve(args: argparse.Namespace) -> None:
 
         gate_fixture_reviews={}
         async def offline_memory(*, prompt, system, tools=None):
+            if args.research_candidate == 'pma_predictive_f838_v1':
+                if tools:
+                    calls = ([SimpleNamespace(function=SimpleNamespace(
+                        name='memory_add', arguments={'content':
+                        'Synthetic public result remains available.'}))]
+                        if getattr(args, 'fake_memory_update', False) else [])
+                    return LLMResponse(content='', tool_calls=calls)
+                return LLMResponse(content='<context_for_action>Synthetic public result remains available.</context_for_action>')
             if args.research_candidate in ('pma_gap_memory_v0', 'pma_gap_evidence_v1'):
                 phase = agent._memory_agent.transport_phase
                 if phase == 'maintenance':

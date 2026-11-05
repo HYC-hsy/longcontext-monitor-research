@@ -94,7 +94,8 @@ def main() -> None:
                                   else source_identity(checkout,
                                       candidate=args.research_candidate != 'U',
                                       gap=args.research_candidate == 'pma_gap_memory_v0',
-                                      evidence_gap=args.research_candidate == 'pma_gap_evidence_v1')),
+                                      evidence_gap=args.research_candidate == 'pma_gap_evidence_v1',
+                                      predictive=args.research_candidate == 'pma_predictive_f838_v1')),
                  'vendor_files': (manifest['vendor_files_sha256'] if args.condition == 'P'
                                   else vendor_identity(checkout)),
                  'harbor_commit': harbor_head,

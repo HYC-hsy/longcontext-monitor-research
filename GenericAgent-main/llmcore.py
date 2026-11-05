@@ -3,6 +3,44 @@ from datetime import datetime
 from research_runtime import emit as _research_emit, new_id as _research_id, payload_summary as _payload_summary, sha256_json as _sha256_json, telemetry_enabled as _telemetry_enabled, consume_pending_intervention as _consume_pending_intervention, consume_pending_pma_reminder as _consume_pending_pma_reminder, register_provider_call as _register_provider_call, current_provider_call as _current_provider_call
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 _RESP_CACHE_KEY = str(uuid.uuid4()); _RESP_CODEX_KEY = str(uuid.uuid4())
+
+def _public_response_blocks(blocks):
+    """Project only public provider blocks, preserving their original order."""
+    result = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            return None
+        kind = block.get('type')
+        if kind in ('thinking', 'redacted_thinking'):
+            continue
+        if kind == 'text' and isinstance(block.get('text'), str):
+            result.append({'type': 'text', 'text': block['text']})
+        elif (kind == 'tool_use' and isinstance(block.get('name'), str)
+              and isinstance(block.get('input'), dict)):
+            result.append({'type': 'tool_use', 'id': block.get('id', ''),
+                           'name': block['name'], 'input': copy.deepcopy(block['input'])})
+        else:
+            return None
+    return result
+
+def _native_user_content(combined_content, tool_results, pending_tool_ids):
+    """Mirror NativeToolClient's next user block assembly without mutating it."""
+    combined_content = copy.deepcopy(combined_content)
+    tr_id_set, tool_result_blocks = set(), []
+    for tr in tool_results:
+        tool_use_id, content = tr.get('tool_use_id', ''), tr.get('content', '')
+        tr_id_set.add(tool_use_id)
+        if tool_use_id:
+            tool_result_blocks.append({'type': 'tool_result', 'tool_use_id': tool_use_id,
+                                       'content': content})
+        else:
+            combined_content = [{'type': 'text', 'text':
+                f'<tool_result>{content}</tool_result>'}] + combined_content
+    for tid in pending_tool_ids:
+        if tid not in tr_id_set:
+            tool_result_blocks.append({'type': 'tool_result', 'tool_use_id': tid, 'content': ''})
+    filtered = [c for c in combined_content if c.get('text', '').strip()]
+    return tool_result_blocks + filtered or [{'type': 'text', 'text': '.'}]
 _parser_capture_emit = contextvars.ContextVar('parser_capture_emit', default=None)
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path: sys.path.append(_ROOT)
@@ -1475,6 +1513,7 @@ class NativeClaudeSession(BaseSession):
                 content = re.sub(think_pattern, "", content, flags=re.DOTALL)
         response = MockResponse(thinking, content, tool_calls, str(content_blocks))
         response.complete_response_accepted = bool(strict and self.last_response_acceptance == 'complete')
+        response.public_blocks = _public_response_blocks(content_blocks)
         return response
 
     def ask_stateless(self, msg):

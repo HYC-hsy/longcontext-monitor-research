@@ -168,6 +168,34 @@ class MemoryEnabledTerminus2(Terminus2):
 
     @staticmethod
     def _format_step_entry(entry: dict) -> str:
+        if "public_blocks" in entry:
+            sections = [f"[Step {entry['step']}]", "[Prepared input for this actor call]"]
+            actor_input = entry.get("public_input")
+            if actor_input is None:
+                sections.append("[Prepared input unavailable]")
+            else:
+                for block in actor_input:
+                    if block.get("type") == "text":
+                        sections.append(block.get("text", ""))
+                    elif block.get("type") == "tool_result":
+                        sections.append("[Tool result] " + json.dumps(block, ensure_ascii=False))
+            sections.append("[Assistant visible output]")
+            blocks = entry.get("public_blocks")
+            if blocks is None:
+                sections.append("[Original public blocks unavailable]")
+            else:
+                for block in blocks:
+                    if block.get("type") == "text":
+                        sections.append(block.get("text", ""))
+                    elif block.get("type") == "tool_use":
+                        sections.append("[Tool call] " + json.dumps(block, ensure_ascii=False))
+            sections.append("[Post-step result and framework input before any next-call reminder]")
+            for block in entry.get("public_results", []):
+                if block.get("type") == "text":
+                    sections.append(block.get("text", ""))
+                elif block.get("type") == "tool_result":
+                    sections.append("[Tool result] " + json.dumps(block, ensure_ascii=False))
+            return "\n".join(sections)
         step = entry["step"]
         sections = [f"[Step {step}]"]
 

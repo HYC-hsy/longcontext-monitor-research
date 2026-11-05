@@ -72,6 +72,14 @@ EVIDENCE_GAP_SOURCE_FILES = GAP_SOURCE_FILES + tuple(
                          'vendor/langextract_3a68580/tokenizer.py',
                          'vendor/langextract_3a68580/requirements.txt')
 )
+PREDICTIVE_SOURCE_FILES = SOURCE_FILES + (
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'episode.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'vendor/pma_89e5c0d/src/memory_agent/memory/predictive_memory_agent.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'vendor/pma_89e5c0d/src/memory_agent/memory_enabled_agent.py',
+)
 EVIDENCE_FILES = (
     'execution_identity.json',
     'live_result.json', 'agent_start_identity.json', 'agent_end_native.json',
@@ -147,7 +155,8 @@ def verify_evidence(evidence: Path, *, require_committed: bool = True,
         current = source_identity(checkout,
             candidate=research_candidate is not None and condition == 'B',
             gap=research_candidate == 'pma_gap_memory_v0' and condition == 'B',
-            evidence_gap=research_candidate == 'pma_gap_evidence_v1' and condition == 'B')
+            evidence_gap=research_candidate == 'pma_gap_evidence_v1' and condition == 'B',
+            predictive=research_candidate == 'pma_predictive_f838_v1' and condition == 'B')
         base = evidence / condition
         required = [name for name in EVIDENCE_FILES
                     if condition == 'B' or name != 'memory_payload.jsonl']
@@ -255,8 +264,10 @@ def verify_evidence(evidence: Path, *, require_committed: bool = True,
 
 
 def source_identity(checkout: Path, *, candidate: bool = False,
-                    gap: bool = False, evidence_gap: bool = False) -> dict:
-    files = (EVIDENCE_GAP_SOURCE_FILES if evidence_gap else GAP_SOURCE_FILES if gap else
+                    gap: bool = False, evidence_gap: bool = False,
+                    predictive: bool = False) -> dict:
+    files = (PREDICTIVE_SOURCE_FILES if predictive else
+             EVIDENCE_GAP_SOURCE_FILES if evidence_gap else GAP_SOURCE_FILES if gap else
              CANDIDATE_SOURCE_FILES if candidate else SOURCE_FILES)
     return {name: _committed_source_sha(checkout, name) for name in files}
 

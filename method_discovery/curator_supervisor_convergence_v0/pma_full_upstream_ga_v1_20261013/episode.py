@@ -50,7 +50,7 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
     from citation_gate_config import validate_gate,validate_strategy
     validate_gate(citation_review_gate,research_candidate)
     review_strategy=validate_strategy(citation_review_gate,citation_review_strategy)
-    if research_candidate not in {"U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0", "pma_gap_evidence_v1"}:
+    if research_candidate not in {"U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0", "pma_gap_evidence_v1", "pma_predictive_f838_v1"}:
         raise ValueError("unknown research candidate")
     if memory_profile is not None:
         if (memory_profile.get("provider"), memory_profile.get("api_mode"),
@@ -79,7 +79,17 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
     )
     if agent._llm is not actor:
         raise RuntimeError("upstream actor backend was not disabled")
-    if research_candidate in {"V1", "D1"}:
+    if research_candidate == "pma_predictive_f838_v1":
+        from memory_agent.memory.predictive_memory_agent import MemoryAgent as PredictiveMemoryAgent
+        original = agent._memory_agent
+        agent._memory_agent = PredictiveMemoryAgent(
+            llm=agent._memory_llm, memory=agent._memory,
+            max_memory_in_prompt=original.max_memory_in_prompt,
+            use_bm25_prefilter=original.use_bm25_prefilter,
+            keep_thinking=original.keep_thinking,
+            use_structured_tools=original.use_structured_tools)
+        agent._research_candidate = research_candidate
+    elif research_candidate in {"V1", "D1"}:
         from decision_reminder_agent import DecisionReminderAgent
         original = agent._memory_agent
         agent._memory_agent = DecisionReminderAgent(
@@ -172,6 +182,7 @@ class PMAEpisode:
         self.last_attempt = 0
         self.last_completed_attempt = 0
         self.last_sequence = 0
+        self.batch_steps = 0
         self._responses: dict[str, tuple[str, dict[str, Any]]] = {}
         self._lock = asyncio.Lock()
 
@@ -294,6 +305,13 @@ class PMAEpisode:
                 else:
                     entries.clear()
         self.agent._accumulate_step(step=1, observation=text)
+        if getattr(self.agent, "_research_candidate", None) == "pma_predictive_f838_v1":
+            self.started = True
+            await self.agent._trigger_memory_agent(step_count=1)
+            return {"status": "started", "triggered": True,
+                    "trigger_reason": "task_start",
+                    "initial_envelope_sha256": hashlib.sha256(
+                        json.dumps(raw, ensure_ascii=False, sort_keys=True).encode()).hexdigest()}
         if getattr(self.agent, "_research_candidate", None) == "pma_gap_evidence_v1":
             from evidence_gap_context import event_identity
             self.agent._evidence_task_identity = event_identity(event)
@@ -331,6 +349,13 @@ class PMAEpisode:
                 or attempt <= self.last_completed_attempt):
             raise ValueError("actor step does not match active attempt")
         status = event.get("step_status")
+        if getattr(self.agent, "_research_candidate", None) == "pma_predictive_f838_v1":
+            if status in {"provider_cancelled", "completed"}:
+                self.last_completed_attempt = attempt
+                return {"status": "skipped", "reason": status, "actor_attempt": attempt}
+            if status not in {"normal", "parse_error"}:
+                raise ValueError("unknown actor step status")
+            return await self._predictive_actor_step(event, attempt, status)
         if status in {"parse_error", "provider_cancelled", "completed"}:
             self.last_completed_attempt = attempt
             return {"status": "skipped", "reason": status, "actor_attempt": attempt}
@@ -426,6 +451,35 @@ class PMAEpisode:
         return {"status": "observed", "triggered": triggered,
                 "trigger_reason": reason, "step_count": step}
 
+    async def _predictive_actor_step(self, event: dict[str, Any], attempt: int,
+                                     status: str) -> dict[str, Any]:
+        blocks, results = event.get("public_blocks"), event.get("public_results")
+        actor_input = event.get("public_input")
+        if actor_input is not None and (not isinstance(actor_input, list) or any(
+                not isinstance(b, dict) or b.get("type") not in {"text", "tool_result"}
+                for b in actor_input)):
+            raise ValueError("invalid prepared actor input")
+        if blocks is not None and (not isinstance(blocks, list) or any(
+                not isinstance(b, dict) or b.get("type") not in {"text", "tool_use"}
+                for b in blocks)):
+            raise ValueError("invalid public actor blocks")
+        if not isinstance(results, list) or any(
+                not isinstance(b, dict) or b.get("type") not in {"text", "tool_result"}
+                for b in results):
+            raise ValueError("invalid public result blocks")
+        self.agent._accumulated_observations.append({
+            "step": attempt, "public_blocks": blocks, "public_results": results,
+            "public_input": actor_input, "step_status": status})
+        self.batch_steps += 1
+        triggered = self.batch_steps == 8
+        if triggered:
+            await self.agent._trigger_memory_agent(step_count=attempt)
+            self.batch_steps = 0
+        self.last_completed_attempt = attempt
+        return {"status": "observed", "triggered": triggered,
+                "trigger_reason": "eight_new_steps" if triggered else "awaiting_eight_steps",
+                "step_count": attempt}
+
     def _task_end(self, event: dict[str, Any]) -> dict[str, Any]:
         if not self.started or self.ended or self.finalization_attempted:
             raise ValueError("task_end out of order")
@@ -447,8 +501,14 @@ class PMAEpisode:
             self._record(event, {"status": "save_failed", "error_type": type(exc).__name__,
                                  "terminal": terminal})
             raise
-        return {"status": "saved", "terminal": terminal,
-                "actor_attempts": self.last_attempt}
+        result = {"status": "saved", "terminal": terminal,
+                  "actor_attempts": self.last_attempt}
+        if getattr(self.agent, "_research_candidate", None) == "pma_predictive_f838_v1":
+            result.update({"unprocessed_tail_steps": self.batch_steps,
+                           "unprocessed_tail_attempts": [entry["step"] for entry in
+                            self.agent._accumulated_observations[-self.batch_steps:]]
+                            if self.batch_steps else []})
+        return result
 
     def finalize_without_event(self, reason: str) -> dict[str, Any]:
         """Bounded host shutdown after ordinary Task event channel is unavailable."""
