@@ -7,6 +7,43 @@ _parser_capture_emit = contextvars.ContextVar('parser_capture_emit', default=Non
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path: sys.path.append(_ROOT)
 
+def _public_response_blocks(blocks):
+    """Preserve public provider blocks without copying hidden reasoning or raw replies."""
+    result = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            return None
+        kind = block.get('type')
+        if kind in ('thinking', 'redacted_thinking'):
+            continue
+        if kind == 'text' and isinstance(block.get('text'), str):
+            if re.search(r'<think(?:ing)?(?:\s|>)', block['text'], re.I):
+                return None
+            result.append({'type': 'text', 'text': block['text']})
+        elif kind == 'tool_use' and isinstance(block.get('name'), str) and isinstance(block.get('input'), dict):
+            result.append({'type': 'tool_use', 'id': block.get('id', ''),
+                           'name': block['name'], 'input': copy.deepcopy(block['input'])})
+        else:
+            return None
+    return result
+
+def _native_user_content(combined_content, tool_results, pending_tool_ids):
+    """Build native user blocks in the same order used for the next request."""
+    combined_content = copy.deepcopy(combined_content)
+    tr_id_set, tool_result_blocks = set(), []
+    for tr in tool_results:
+        tool_use_id, content = tr.get('tool_use_id', ''), tr.get('content', '')
+        tr_id_set.add(tool_use_id)
+        if tool_use_id:
+            tool_result_blocks.append({'type': 'tool_result', 'tool_use_id': tool_use_id, 'content': content})
+        else:
+            combined_content = [{'type': 'text', 'text': f'<tool_result>{content}</tool_result>'}] + combined_content
+    for tid in pending_tool_ids:
+        if tid not in tr_id_set:
+            tool_result_blocks.append({'type': 'tool_result', 'tool_use_id': tid, 'content': ''})
+    filtered = [c for c in combined_content if c.get('text', '').strip()]
+    return tool_result_blocks + filtered or [{'type': 'text', 'text': '.'}]
+
 def _load_mykeys():
     global _mykey_path
     try:
@@ -1445,7 +1482,10 @@ class NativeClaudeSession(BaseSession):
             except BaseException:
                 with self.lock: self.history = prior_history
                 raise
+        public_blocks = _public_response_blocks(content_blocks)
+        private_summary_injected = False
         if content_blocks and (_injected := _ensure_text_block(content_blocks)):
+            private_summary_injected = True
             try:
                 yield _injected
                 if strict: _task_check_wait(self, _task_deadline(self))
@@ -1474,6 +1514,8 @@ class NativeClaudeSession(BaseSession):
                 thinking = think_match.group(1).strip()
                 content = re.sub(think_pattern, "", content, flags=re.DOTALL)
         response = MockResponse(thinking, content, tool_calls, str(content_blocks))
+        response.public_blocks = public_blocks
+        response.private_summary_injected = private_summary_injected
         response.complete_response_accepted = bool(strict and self.last_response_acceptance == 'complete')
         return response
 
@@ -1888,19 +1930,8 @@ class NativeToolClient:
             if isinstance(c, str): combined_content.append({"type": "text", "text": c})
             elif isinstance(c, list): combined_content.extend(c)
             if msg['role'] == 'user' and msg.get('tool_results'): tool_results.extend(msg['tool_results'])
-        tr_id_set = set();  tool_result_blocks = []
-        for tr in tool_results:
-            tool_use_id, content = tr.get("tool_use_id", ""), tr.get("content", "")
-            tr_id_set.add(tool_use_id)
-            if tool_use_id: tool_result_blocks.append({"type": "tool_result", "tool_use_id": tool_use_id, "content": tr.get("content", "")})
-            else: combined_content = [{"type": "text", "text": f'<tool_result>{content}</tool_result>'}] + combined_content
-        for tid in self._pending_tool_ids:
-            if tid not in tr_id_set: tool_result_blocks.append({"type": "tool_result", "tool_use_id": tid, "content": ""})
+        final_content = _native_user_content(combined_content, tool_results, self._pending_tool_ids)
         self._pending_tool_ids = []
-        # Filter whitespace-only text blocks that cause 400 on strict API proxies
-        filtered_content = [c for c in combined_content if c.get("text", "").strip()]
-        final_content = tool_result_blocks + filtered_content
-        if not final_content: final_content = [{"type": "text", "text": "."}]
         merged = {"role": "user", "content": final_content}
         _write_llm_log('Prompt', json.dumps(merged, ensure_ascii=False, indent=2), self.log_path)
         gen = self.backend.ask(merged)

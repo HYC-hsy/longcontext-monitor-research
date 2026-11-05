@@ -66,7 +66,22 @@ class RequirementReminderAgent(RequirementSelectionAgent):
         return tools
 
     def _visible_steps(self, entries):
-        return [visible_event(row) for row in entries[-8:]]
+        from p1_source_links import legacy_public_text, legacy_public_observation, valid_public_history
+        rows = [visible_event(row) for row in entries[-3:]]
+        for row in rows:
+            if valid_public_history(row.get('public_blocks'), row.get('public_results')):
+                row['analysis'] = '\n'.join(b['text'] for b in row['public_blocks'] if b['type'] == 'text')
+            elif row.get('public_history_unavailable'):
+                row['analysis'] = '[public response unavailable]'
+                if 'observation' in row:
+                    row['observation'] = legacy_public_observation(row['observation'])
+            else:
+                row['analysis'] = legacy_public_text(row.get('analysis', ''))
+                if 'observation' in row:
+                    row['observation'] = legacy_public_observation(row['observation'])
+            if row.get('plan'):
+                row['plan'] = legacy_public_text(row['plan'])
+        return rows
 
     def _render_initial(self, catalogue, status, steps, step_count, *, memory_note):
         return (f'## Step {step_count}\n## Original task and shown memory (data)\n'+encode(catalogue)+

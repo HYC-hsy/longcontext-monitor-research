@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,35 @@ from pma_evidence_review.private_faults import EpisodeFault, record_failure
 
 from harbor.llms.base import BaseLLM, LLMResponse
 from memory_agent.memory_enabled_agent import MemoryEnabledTerminus2
+
+
+def valid_public_history(blocks, results):
+    """Accept only explicitly public blocks; never accept hidden reasoning fields."""
+    if not isinstance(blocks, list) or not isinstance(results, list):
+        return False
+    for block in blocks:
+        if not isinstance(block, dict):
+            return False
+        if block.get('type') == 'text':
+            if set(block) != {'type', 'text'} or not isinstance(block['text'], str) or re.search(r'<think(?:ing)?(?:\s|>)', block['text'], re.I):
+                return False
+        elif block.get('type') == 'tool_use':
+            if set(block) != {'type', 'id', 'name', 'input'} or not isinstance(block['id'], str) or not isinstance(block['name'], str) or not isinstance(block['input'], dict):
+                return False
+        else:
+            return False
+    for block in results:
+        if not isinstance(block, dict):
+            return False
+        if block.get('type') == 'text':
+            if set(block) != {'type', 'text'} or not isinstance(block['text'], str):
+                return False
+        elif block.get('type') == 'tool_result':
+            if set(block) != {'type', 'tool_use_id', 'content'} or not isinstance(block['tool_use_id'], str) or not isinstance(block['content'], str):
+                return False
+        else:
+            return False
+    return True
 
 
 class DisabledActorLLM(BaseLLM):
@@ -562,11 +592,29 @@ class PMAEpisode:
                 if source_id == next(iter(bank.sources))
                 or any(source_id.startswith(str(event_id) + ":") for event_id in previous)
                 or source_id.startswith(event["event_id"] + ":")]
+        accumulated_analysis = analysis
+        if (getattr(self.agent,'_memory_maintenance_policy',None) == 'pma-requirement-reminder-v1'
+                and ('public_blocks' in event or 'public_results' in event)):
+            if valid_public_history(event.get('public_blocks'), event.get('public_results')):
+                public_text = '\n'.join(b['text'] for b in event['public_blocks'] if b['type'] == 'text')
+                if re.search(r'<think(?:ing)?(?:\s|>)', analysis, re.I) or ('<summary>' in analysis and '<summary>' not in public_text):
+                    accumulated_analysis = public_text
+            else:
+                from p1_source_links import legacy_public_text
+                accumulated_analysis = legacy_public_text(analysis)
         self.agent._accumulate_step(step=step, observation=observation,
-                                    analysis=analysis, plan=plan, commands=commands)
+                                    analysis=accumulated_analysis, plan=plan, commands=commands)
         if getattr(self.agent,'_memory_maintenance_policy',None) == 'pma-requirement-reminder-v1':
-            self._requirement_entries.append({'step':step,'event_id':event['event_id'],
-                'analysis':analysis,'plan':plan,'commands':commands,'observation':observation})
+            row = {'step':step,'event_id':event['event_id'],
+                'analysis':analysis,'plan':plan,'commands':commands,'observation':observation}
+            if valid_public_history(event.get('public_blocks'), event.get('public_results')):
+                row['public_blocks'] = event['public_blocks']
+                row['public_results'] = event['public_results']
+                row['analysis'] = '\n'.join(b['text'] for b in event['public_blocks'] if b['type'] == 'text')
+            elif 'public_blocks' in event or 'public_results' in event:
+                row['public_history_unavailable'] = True
+                row['analysis'] = ''
+            self._requirement_entries.append(row)
         if hasattr(self.agent._memory, "register_source"):
             self.agent._accumulated_observations[-1]["_source_event_id"] = event["event_id"]
         if getattr(self.agent, "_research_candidate", None) == "pma_gap_evidence_v1":

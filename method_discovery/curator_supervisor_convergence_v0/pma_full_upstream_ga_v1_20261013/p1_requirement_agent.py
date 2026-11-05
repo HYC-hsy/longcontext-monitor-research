@@ -4,6 +4,7 @@ import uuid
 from p1_context_agent import ContextSourceP1Agent, GAP_DESCRIPTION
 from memory_agent.memory.memory_agent import PHASE1_SYSTEM
 from p1_source_archive import encode
+from p1_source_links import visible_event
 from p1_requirements import (RequirementState, RequirementHistory, INIT_SYSTEM, INIT_TOOL,
                              RequirementError, assignment, catalog, model_turn, upstream_observation, MemoryModelError, topics)
 
@@ -253,6 +254,9 @@ class RequirementP1Agent(ContextSourceP1Agent):
             raise ValueError('task mismatch; the original task is immutable')
         cycle = cycle_id or 'p1_'+uuid.uuid4().hex
         state = self.requirement_state
+        # New-format inputs are validated before cycle checkpoints persist them.
+        # Legacy entries remain untouched for backward-compatible replay.
+        entries = [visible_event(e) if any(k in e for k in ('public_blocks','public_results','public_history_unavailable')) else deepcopy(e) for e in entries]
         observation = observation if observation is not None else upstream_observation(self.task,entries)
         payload = {'entries':deepcopy(entries),'observation':observation,'step_count':step_count}
         cached = state.begin(cycle,payload)

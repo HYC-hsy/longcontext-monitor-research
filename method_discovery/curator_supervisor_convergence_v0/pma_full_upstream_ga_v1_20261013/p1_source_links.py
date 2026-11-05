@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 from pathlib import Path
 import uuid
 
@@ -15,7 +16,47 @@ from p1_source_archive import encode, digest, HISTORICAL_ROLE
 
 PAGE_CHARS = 8000
 VISIBLE = {'step', 'analysis', 'plan', 'commands', 'observation', 'event_id',
-           '_source_event_id', 'call_id', 'tool_call_id'}
+           '_source_event_id', 'call_id', 'tool_call_id', 'public_blocks', 'public_results',
+           'public_history_unavailable'}
+
+def legacy_public_text(value):
+    """Older records may contain private-derived summaries; do not expose them."""
+    if not isinstance(value, str):
+        return ''
+    # Incomplete tags are withheld rather than guessed to be public.
+    if re.search(r'<(?:think(?:ing)?|summary)(?:\s|>)', value, re.I):
+        return '[legacy response withheld: private-derived text cannot be ruled out]'
+    return value
+
+def legacy_public_observation(value):
+    """Do not replay old framework history whose provenance cannot be checked."""
+    try:
+        envelope = json.loads(value) if isinstance(value, str) else value
+    except (ValueError, TypeError):
+        envelope = None
+    if isinstance(envelope, dict) and set(envelope) == {'content', 'tool_results'} and isinstance(envelope['tool_results'], list):
+        return encode({'content':'[legacy framework history withheld]', 'tool_results':envelope['tool_results']})
+    return legacy_public_text(value)
+
+def valid_public_history(blocks, results):
+    if not isinstance(blocks, list) or not isinstance(results, list):
+        return False
+    for block in blocks:
+        if not isinstance(block, dict): return False
+        if block.get('type') == 'text':
+            if set(block) != {'type','text'} or not isinstance(block['text'], str) or re.search(r'<think(?:ing)?(?:\s|>)', block['text'], re.I): return False
+        elif block.get('type') == 'tool_use':
+            if set(block) != {'type','id','name','input'} or not isinstance(block['id'], str) or not isinstance(block['name'], str) or not isinstance(block['input'], dict): return False
+        else: return False
+    for block in results:
+        if not isinstance(block, dict): return False
+        if block.get('type') == 'text':
+            if set(block) != {'type','text'} or not isinstance(block['text'], str): return False
+        elif block.get('type') == 'tool_result':
+            if set(block) != {'type','tool_use_id','content'} or not isinstance(block['tool_use_id'], str) or not isinstance(block['content'], str): return False
+        else: return False
+    return True
+
 def visible_event(row):
     # Whitelist the accepted event surface. Payloads are opaque data; only
     # known provider message/content blocks have a removable private boundary.
@@ -42,6 +83,16 @@ def visible_event(row):
                 result.append(deepcopy(block))
         return result
     result = {k:deepcopy(v) for k,v in row.items() if k in VISIBLE}
+    if ('public_blocks' in result or 'public_results' in result) and not valid_public_history(result.get('public_blocks'), result.get('public_results')):
+        result.pop('public_blocks', None)
+        result.pop('public_results', None)
+        result['public_history_unavailable'] = True
+    if valid_public_history(result.get('public_blocks'), result.get('public_results')):
+        result['analysis'] = '\n'.join(b['text'] for b in result['public_blocks'] if b['type'] == 'text')
+        result.pop('plan', None)
+    elif result.get('public_history_unavailable'):
+        result.pop('analysis', None)
+        result.pop('plan', None)
     original = result.get('observation')
     try:
         observation = json.loads(original) if isinstance(original, str) else original
@@ -214,6 +265,12 @@ class SourceLinks:
                          'inherited_from': source.get('inherited_from', []), 'call_links': links}
             fields.append((sid, 'directory', 'json_value', encode(directory)))
             for name, value in record.items():
+                if name in {'analysis', 'plan'}:
+                    if record.get('public_history_unavailable') or valid_public_history(record.get('public_blocks'), record.get('public_results')):
+                        continue
+                    value = legacy_public_text(value)
+                if name == 'observation' and not valid_public_history(record.get('public_blocks'), record.get('public_results')):
+                    value = legacy_public_observation(value)
                 fields.append((sid, name, 'raw_string' if isinstance(value, str) else 'json_value',
                                value if isinstance(value, str) else encode(value)))
         return fields
@@ -263,6 +320,9 @@ class SourceLinks:
                         'page_sequence_complete':False, 'complete':False, 'next_cursor':None}
             except (ValueError, KeyError, TypeError, OSError):
                 return {'status':'source_binding_error'}
+            if (window.get('input_projection') or {}).get('p1_history_boundary') != 'public_history_v1':
+                return {'status':'legacy_context_unavailable', 'view':'context',
+                        'page_sequence_complete':False, 'complete':False, 'next_cursor':None}
             fields = [('context', 'model_input', 'raw_string', window['model_input'])]
         else:
             try:
@@ -283,6 +343,9 @@ class SourceLinks:
             window = json.loads(raw)
             if window['task_id'] != self.state['task_id']:
                 return {'status': 'source_binding_error'}
+            if (window.get('input_projection') or {}).get('p1_history_boundary') != 'public_history_v1':
+                return {'status':'legacy_context_unavailable', 'view':'context',
+                        'page_sequence_complete':False, 'complete':False, 'next_cursor':None}
             fields = [('context', 'generation_window_not_selected_evidence', 'raw_string', window['model_input'])]
         fields = list(_extra_fields) + fields if _extra_first else fields + list(_extra_fields)
         snapshot = digest(encode({'task_id': self.state['task_id'], 'target': key,

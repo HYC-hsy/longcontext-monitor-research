@@ -103,10 +103,11 @@ class UpstreamPMAClient:
         return self.exchange('before_actor_call', actor_attempt=attempt).get('reminder')
 
     def actor_step(self, attempt, *, status, response='', commands=(), observation='',
-                   request_event_id=None):
+                   request_event_id=None, public_blocks=None, public_results=None):
         return self.exchange('actor_step', actor_attempt=attempt, step_status=status,
                              response=response, commands=list(commands),
                              observation=observation,
+                             public_blocks=public_blocks, public_results=public_results,
                              request_event_id=request_event_id)
 
     def task_end(self, terminal):
