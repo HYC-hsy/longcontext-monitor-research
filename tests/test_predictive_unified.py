@@ -9,20 +9,11 @@ import sys
 import tempfile
 import types
 import unittest
-import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 STAGE = ROOT / 'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013'
 VENDOR = STAGE / 'vendor/pma_89e5c0d/src/memory_agent'
-if 'shortuuid' not in sys.modules:
-    stub = types.ModuleType('shortuuid')
-    stub.uuid = lambda: uuid.uuid4().hex
-    sys.modules['shortuuid'] = stub
-for name, path in [('memory_agent', VENDOR), ('memory_agent.memory', VENDOR / 'memory')]:
-    if name not in sys.modules:
-        package = types.ModuleType(name)
-        package.__path__ = [str(path)]
-        sys.modules[name] = package
+sys.path.insert(0, str(VENDOR.parent))
 from memory_agent.memory.predictive_memory_agent import (
     BANK_TOOLS, MemoryAgent as PredictiveMemoryAgent, PHASE1_SYSTEM, PHASE2_SYSTEM)
 from memory_agent.memory.memory_agent import MemoryAgent as OriginalMemoryAgent
