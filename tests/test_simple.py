@@ -11,7 +11,7 @@ from memory_agent.memory.memory_agent import MemoryAgent, BANK_TOOLS
 from memory_agent.memory.universal_memory import UniversalMemory
 
 def ast_class(file, name, namespace):
- tree=ast.parse(file.read_text()); node=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name==name)
+ tree=ast.parse(file.read_text(encoding='utf-8')); node=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name==name)
  exec(compile(ast.fix_missing_locations(ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),node],type_ignores=[])),str(file),'exec'),namespace); return namespace[name]
 
 class FakeLLM:
@@ -59,7 +59,7 @@ class Tests(unittest.IsolatedAsyncioTestCase):
    self.assertEqual(a.groups,[list(range(1,9)),list(range(9,17))]);self.assertEqual(e.batch_steps,1)
  def test_public_blocks_exclude_private_and_preserve_order(self):
   import re, copy
-  src=ROOT/'GenericAgent-main/llmcore.py'; tree=ast.parse(src.read_text())
+  src=ROOT/'GenericAgent-main/llmcore.py'; tree=ast.parse(src.read_text(encoding='utf-8'))
   fun=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='_public_response_blocks')
   ns={'re':re,'copy':copy};exec(compile(ast.Module(body=[fun],type_ignores=[]),str(src),'exec'),ns)
   f=ns['_public_response_blocks']
