@@ -1,10 +1,47 @@
-import os, json, re, time, requests, sys, threading, urllib3, base64, importlib, uuid, pathlib, hashlib
+import os, json, re, time, requests, sys, threading, urllib3, base64, importlib, uuid, pathlib, hashlib, copy
 from datetime import datetime
 from research_runtime import emit as _research_emit, new_id as _research_id, payload_summary as _payload_summary, sha256_json as _sha256_json, telemetry_enabled as _telemetry_enabled, consume_pending_intervention as _consume_pending_intervention, consume_pending_pma_reminder as _consume_pending_pma_reminder, register_provider_call as _register_provider_call, current_provider_call as _current_provider_call
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 _RESP_CACHE_KEY = str(uuid.uuid4()); _RESP_CODEX_KEY = str(uuid.uuid4())
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path: sys.path.append(_ROOT)
+
+def _public_response_blocks(blocks):
+    """Preserve public provider blocks without copying hidden reasoning or raw replies."""
+    result = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            return None
+        kind = block.get('type')
+        if kind in ('thinking', 'redacted_thinking'):
+            continue
+        if kind == 'text' and isinstance(block.get('text'), str):
+            if re.search(r'<think(?:ing)?(?:\s|>)', block['text'], re.I):
+                return None
+            result.append({'type': 'text', 'text': block['text']})
+        elif kind == 'tool_use' and isinstance(block.get('name'), str) and isinstance(block.get('input'), dict):
+            result.append({'type': 'tool_use', 'id': block.get('id', ''),
+                           'name': block['name'], 'input': copy.deepcopy(block['input'])})
+        else:
+            return None
+    return result
+
+def _native_user_content(combined_content, tool_results, pending_tool_ids):
+    """Build native user blocks in the same order used for the next request."""
+    combined_content = copy.deepcopy(combined_content)
+    tr_id_set, tool_result_blocks = set(), []
+    for tr in tool_results:
+        tool_use_id, content = tr.get('tool_use_id', ''), tr.get('content', '')
+        tr_id_set.add(tool_use_id)
+        if tool_use_id:
+            tool_result_blocks.append({'type': 'tool_result', 'tool_use_id': tool_use_id, 'content': content})
+        else:
+            combined_content = [{'type': 'text', 'text': f'<tool_result>{content}</tool_result>'}] + combined_content
+    for tid in pending_tool_ids:
+        if tid not in tr_id_set:
+            tool_result_blocks.append({'type': 'tool_result', 'tool_use_id': tid, 'content': ''})
+    filtered = [c for c in combined_content if c.get('text', '').strip()]
+    return tool_result_blocks + filtered or [{'type': 'text', 'text': '.'}]
 
 def _load_mykeys():
     global _mykey_path
@@ -958,7 +995,11 @@ class NativeClaudeSession(BaseSession):
         try:
             while True: yield next(gen)
         except StopIteration as e: content_blocks = e.value or []
-        if content_blocks and (_injected := _ensure_text_block(content_blocks)): yield _injected
+        public_blocks = _public_response_blocks(content_blocks)
+        private_summary_injected = False
+        if content_blocks and (_injected := _ensure_text_block(content_blocks)):
+            private_summary_injected = True
+            yield _injected
         if content_blocks and not (len(content_blocks) == 1 and content_blocks[0].get("text", "").startswith("!!!Error:")):
             self.history.append({"role": "assistant", "content": content_blocks})
         text_parts = [b["text"] for b in content_blocks if b.get("type") == "text"]
@@ -973,7 +1014,10 @@ class NativeClaudeSession(BaseSession):
             if think_match:
                 thinking = think_match.group(1).strip()
                 content = re.sub(think_pattern, "", content, flags=re.DOTALL)
-        return MockResponse(thinking, content, tool_calls, str(content_blocks))
+        response = MockResponse(thinking, content, tool_calls, str(content_blocks))
+        response.public_blocks = public_blocks
+        response.private_summary_injected = private_summary_injected
+        return response
 
 class NativeOAISession(NativeClaudeSession):
     native_ua = "codex_exec/0.139.0 (Windows 10.0.26200; x86_64) unknown (codex_exec; 0.139.0)"

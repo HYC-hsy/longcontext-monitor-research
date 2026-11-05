@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 from research_runtime import CompletionProposal, decide_completion, emit as _research_emit, telemetry_enabled as _telemetry_enabled, consume_provider_call as _consume_provider_call, register_pending_pma_reminder as _register_pending_pma_reminder, sha256_json as _sha256_json
 from experiment_conditions import condition_initial_task
-from llmcore import ProviderResponseCancelled
+from llmcore import ProviderResponseCancelled, _native_user_content
 try: from plugins.hooks import trigger as _hook
 except ImportError: _hook = lambda *a, **k: None
 @dataclass
@@ -56,6 +56,10 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
     ]
     local_turn = 0; turn = int(turn_offset); handler.max_turns = max_turns
     exit_reason = {}; response = None
+    _pma_backend = getattr(client, 'backend', None)
+    pma_private_history = bool(getattr(_pma_backend, 'history', None) or
+                               getattr(_pma_backend, 'pma_private_history', False) or
+                               getattr(handler, 'history_info', None))
     _hook('agent_before', locals())
     pma = None
     pma_upstream = None
@@ -180,6 +184,12 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             })
 
         completion_decision = None
+        if pma_upstream is not None:
+            pma_private_history = bool(pma_private_history or
+                getattr(response, 'private_summary_injected', True) or
+                getattr(response, 'public_blocks', None) is None)
+            if _pma_backend is not None:
+                _pma_backend.pma_private_history = pma_private_history
         provider_error_response = _is_provider_error_response(response)
         if not response.tool_calls and not provider_error_response:
             if (_telemetry_enabled() or hasattr(handler, 'completion_gate') or
@@ -264,10 +274,9 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
         if len(next_prompts) == 0 or exit_reason:
             if len(handler._done_hooks) == 0 or exit_reason.get('result', '') == 'EXITED':
                 if pma_upstream is not None:
-                    pma_upstream.actor_step(
-                        turn, status='completed', response=response.content or '',
-                        commands=[json.dumps(call, ensure_ascii=False, default=json_default)
-                                  for call in tool_calls])
+                    # No PMA inference occurs on completion; do not archive an
+                    # unprojected response that may include a synthetic summary.
+                    pma_upstream.actor_step(turn, status='completed')
                 break
             next_prompts.add(handler._done_hooks.pop(0))
         next_prompt = handler.turn_end_callback(response, tool_calls, tool_results, turn, '\n'.join(next_prompts), exit_reason)
@@ -281,12 +290,15 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             step_status = ('provider_cancelled' if provider_error_response else
                            'parse_error' if any(call['tool_name'] == 'bad_json'
                                                 for call in tool_calls) else 'normal')
+            safe_next = ('[framework history withheld: private-derived content may be present]'
+                         if pma_private_history else next_prompt)
+            public = getattr(response, 'public_blocks', None)
             pma_upstream.actor_step(
-                turn, status=step_status, response=response.content or '',
-                commands=[json.dumps(call, ensure_ascii=False, default=json_default)
-                          for call in tool_calls],
-                observation=json.dumps({'content': next_prompt, 'tool_results': tool_results},
-                                       ensure_ascii=False, default=json_default),
+                turn, status=step_status, response='', commands=[],
+                observation='', public_blocks=public,
+                public_results=_native_user_content(
+                    [{'type': 'text', 'text': safe_next}], tool_results,
+                    [tc.id for tc in (getattr(response, 'tool_calls', None) or [])]),
                 request_event_id=(provider_link or {}).get('provider_request_event_id'))
         messages = [{"role": "user", "content": next_prompt, "tool_results": tool_results}]   # just new message, history is kept in *Session
     if exit_reason: handler.turn_end_callback(response, tool_calls, tool_results, turn, '', exit_reason)

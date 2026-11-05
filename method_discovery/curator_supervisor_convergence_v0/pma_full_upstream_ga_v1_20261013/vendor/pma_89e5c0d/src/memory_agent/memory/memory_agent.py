@@ -22,85 +22,16 @@ logger = logging.getLogger(__name__)
 # Tool Definitions — Phase 1 only (bank management)
 # =============================================================================
 
-BANK_TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "memory_save_knowledge",
-            "description": (
-                "Save an important fact to the knowledge bank. Use for: "
-                "task requirements, environment facts, file paths, API details, "
-                "key constraints from the task description."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "content": {
-                        "type": "string",
-                        "description": "The fact to save. Be precise and specific.",
-                    }
-                },
-                "required": ["content"],
-            },
-        },
+BANK_TOOLS = [{
+    "type": "function",
+    "function": {
+        "name": "memory_add",
+        "description": "Save information expected to be useful within the next 10 turns.",
+        "parameters": {"type": "object", "properties": {
+            "content": {"type": "string", "description": "Information to save."}
+        }, "required": ["content"]},
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "memory_save_procedural",
-            "description": (
-                "Record a debugging experience, failed approach, or solution. "
-                "Use for: error patterns, things that didn't work and why, "
-                "successful fixes, performance observations."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "content": {
-                        "type": "string",
-                        "description": "The experience to record. Include what was tried and what happened.",
-                    }
-                },
-                "required": ["content"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "memory_update_status",
-            "description": "Update your internal tracking of task progress. This is for YOUR reference only, not shown to the action agent.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "content": {
-                        "type": "string",
-                        "description": "Current task status/progress summary.",
-                    }
-                },
-                "required": ["content"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "memory_delete",
-            "description": "Delete an outdated or incorrect memory entry by its ID.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "memory_id": {
-                        "type": "string",
-                        "description": "The ID of the memory to delete.",
-                    }
-                },
-                "required": ["memory_id"],
-            },
-        },
-    },
-]
-
+}]
 
 # =============================================================================
 # Data Classes
@@ -134,33 +65,9 @@ class MemoryAgentResult:
 # System Prompts — with_strategy variant
 # =============================================================================
 
-PHASE1_SYSTEM = '''You are a Memory Bank Manager. Your job is to maintain a lean, accurate knowledge bank.
+PHASE1_SYSTEM = """You organize information from the task execution.
 
-## Your Tools
-- memory_save_knowledge: Save important FACTS (task requirements, env details, API constraints, file paths)
-- memory_save_procedural: Record EXPERIENCES (failed approaches, error patterns, successful fixes)
-- memory_update_status: Track progress internally (not shown to action agent)
-- memory_delete: Remove outdated/incorrect entries
-
-## Guidelines
-1. **Be selective**: Only save information that would be LOST if the action agent's context window scrolls past it
-2. **Prioritize task requirements**: API signatures, output formats, specific constraints from the task description
-3. **Record failures**: What was tried, why it failed, what the error was — so it's not repeated
-4. **Keep it lean**: Delete entries that are superseded by newer information
-5. **Don't save obvious things**: Terminal output the agent just saw, general knowledge about tools
-
-## What to save at Step 1 (task description):
-- Specific API requirements (function signatures, argument orders, input types)
-- Required output files and formats
-- Constraints that are easy to forget mid-task
-- Key domain-specific details
-
-## What to save at later steps:
-- Environment discoveries (package versions, tool availability)
-- Error patterns and fixes
-- Approach changes and why
-- Performance or score tracking
-'''
+Based on the task description, the task agent's recent trajectory, and the information already saved, organize and save information expected to be useful within the next 10 turns."""
 
 PHASE2_SYSTEM = '''You are a Selective Attention module for an Action Agent working on a coding task.
 
@@ -267,46 +174,18 @@ class MemoryAgent:
         return "\n".join([f"[{e.id}] {e.content}" for e in entries])
 
     def _format_memory_bank(self, observation: str = "") -> str:
-        """Format the memory bank for the LLM prompt."""
-        k_count = len(self.memory.knowledge)
-        p_count = len(self.memory.procedural)
-        total = k_count + p_count
-
-        if total <= self.max_memory_in_prompt or not self.use_bm25_prefilter:
-            knowledge_str = self._format_memory_list(self.memory.knowledge)
-            procedural_str = self._format_memory_list(self.memory.procedural)
-        else:
-            k_filtered = self.memory.search_knowledge(observation, top_k=20)
-            p_filtered = self.memory.search_procedural(observation, top_k=20)
-            knowledge_str = self._format_memory_list(k_filtered) + f"\n(showing top 20 of {k_count})"
-            procedural_str = self._format_memory_list(p_filtered) + f"\n(showing top 20 of {p_count})"
-
-        return f"""<memory_bank>
-<status>{self.memory.status or "(no status)"}</status>
-<knowledge>
-{knowledge_str}
-</knowledge>
-<procedural>
-{procedural_str}
-</procedural>
-</memory_bank>"""
-
-    # -----------------------------------------------------------------
-    # Prompt building
-    # -----------------------------------------------------------------
+        # One flat bank; legacy storage field remains internal only.
+        entries = self.memory.knowledge + self.memory.procedural
+        return "<memory_bank>\n" + self._format_memory_list(entries) + "\n</memory_bank>"
 
     def _build_phase1_prompt(self, observation: str, step_count: int) -> str:
-        memory_content = self._format_memory_bank(observation)
-        return f"""## Step {step_count}
-
-## Current Memory Bank
-{memory_content}
-
-## Context (Task Description + Recent Trajectory)
+        return f"""## Task description and recent trajectory
 {observation}
 
-## Your Task
-Analyze the trajectory and update the memory bank. Save important facts, record experiences, delete outdated entries. Be selective — only save what would be lost as the agent's context scrolls.
+## Saved information
+{self._format_memory_bank(observation)}
+
+Organize and save information expected to be useful within the next 10 turns.
 """
 
     def _build_phase2_prompt(self, observation: str, step_count: int) -> str:
@@ -483,28 +362,14 @@ If no, write <no_intervention/>.
                 continue
 
             try:
-                if name == "memory_save_knowledge":
+                if name == "memory_add":
                     content = args.get("content", "")
+                    if not isinstance(content, str) or not content.strip():
+                        raise ValueError("memory content must be nonempty text")
                     mem_id = self.memory.save_knowledge(content)
-                    operations.append(MemoryOperation(action="save_knowledge", memory_id=mem_id, content=content))
-
-                elif name == "memory_save_procedural":
-                    content = args.get("content", "")
-                    mem_id = self.memory.save_procedural(content)
-                    operations.append(MemoryOperation(action="save_procedural", memory_id=mem_id, content=content))
-
-                elif name == "memory_update_status":
-                    content = args.get("content", "")
-                    self.memory.update_status(content)
-                    operations.append(MemoryOperation(action="update_status", content=content))
-
-                elif name == "memory_delete":
-                    mem_id = args.get("memory_id", "")
-                    success = self.memory.delete(mem_id)
-                    operations.append(MemoryOperation(
-                        action="delete", memory_id=mem_id, success=success,
-                        error=None if success else "ID not found",
-                    ))
+                    operations.append(MemoryOperation(action="add", memory_id=mem_id, content=content))
+                else:
+                    operations.append(MemoryOperation(action=name, success=False, error="unsupported tool"))
 
             except Exception as e:
                 logger.warning(f"Failed to execute {name}: {e}")

@@ -168,27 +168,36 @@ class MemoryEnabledTerminus2(Terminus2):
 
     @staticmethod
     def _format_step_entry(entry: dict) -> str:
-        step = entry["step"]
-        sections = [f"[Step {step}]"]
-
-        if entry.get("analysis"):
-            sections.append(f"Agent Analysis: {entry['analysis']}")
-
-        if entry.get("plan"):
-            sections.append(f"Agent Plan: {entry['plan']}")
-
-        if entry.get("commands"):
-            cmds = entry["commands"][:5]
-            cmd_str = "; ".join(cmds)
-            if len(entry["commands"]) > 5:
-                cmd_str += f" (+{len(entry['commands']) - 5} more)"
-            sections.append(f"Commands Executed: {cmd_str}")
-
-        obs = entry.get("observation", "")
-        # observation is already truncated to ~10KB by Terminus2._limit_output_length
-        # Pass it through unchanged so memory agent sees exactly what action agent saw
-        sections.append(f"Terminal Output: {obs}")
-
+        if "public_blocks" not in entry:
+            # Preserve the original standalone Terminus2 path. GA always sends
+            # a public_blocks key, even when projection is unavailable.
+            sections = [f"[Step {entry['step']}]"]
+            if entry.get("analysis"):
+                sections.append(f"Agent Analysis: {entry['analysis']}")
+            if entry.get("plan"):
+                sections.append(f"Agent Plan: {entry['plan']}")
+            if entry.get("commands"):
+                cmds = entry["commands"][:5]
+                suffix = f" (+{len(entry['commands']) - 5} more)" if len(entry["commands"]) > 5 else ""
+                sections.append("Commands Executed: " + "; ".join(cmds) + suffix)
+            sections.append(f"Terminal Output: {entry.get('observation', '')}")
+            return "\n".join(sections)
+        sections = [f"[Step {entry['step']}]", "[Assistant visible output]"]
+        blocks = entry.get("public_blocks")
+        if blocks is None:
+            sections.append("[Original public blocks unavailable]")
+        else:
+            for block in blocks:
+                if block.get("type") == "text":
+                    sections.append(block.get("text", ""))
+                elif block.get("type") == "tool_use":
+                    sections.append("[Tool call] " + json.dumps(block, ensure_ascii=False))
+        sections.append("[Next user-visible input]")
+        for block in entry.get("public_results", []):
+            if block.get("type") == "text":
+                sections.append(block.get("text", ""))
+            elif block.get("type") == "tool_result":
+                sections.append("[Tool result] " + json.dumps(block, ensure_ascii=False))
         return "\n".join(sections)
 
     # -----------------------------------------------------------------

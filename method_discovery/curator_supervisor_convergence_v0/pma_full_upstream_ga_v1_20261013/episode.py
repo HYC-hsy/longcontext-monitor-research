@@ -106,6 +106,7 @@ class PMAEpisode:
         self.last_attempt = 0
         self.last_completed_attempt = 0
         self.last_sequence = 0
+        self.batch_steps = 0
         self._responses: dict[str, tuple[str, dict[str, Any]]] = {}
         self._lock = asyncio.Lock()
 
@@ -178,10 +179,9 @@ class PMAEpisode:
         if self.agent._reset_procedural_on_episode:
             self.agent._memory.procedural.clear()
         self.agent._accumulate_step(step=1, observation=text)
-        triggered, reason = self.agent._trigger.should_trigger(step_count=1)
+        # The first call waits for a complete batch of eight actor steps.
+        triggered, reason = False, "awaiting_eight_steps"
         self.started = True
-        if triggered:
-            await self.agent._trigger_memory_agent(step_count=1)
         return {"status": "started", "triggered": triggered, "trigger_reason": reason,
                 "initial_envelope_sha256": hashlib.sha256(
                     json.dumps(raw, ensure_ascii=False, sort_keys=True).encode()).hexdigest()}
@@ -204,33 +204,33 @@ class PMAEpisode:
                 or attempt <= self.last_completed_attempt):
             raise ValueError("actor step does not match active attempt")
         status = event.get("step_status")
-        if status in {"parse_error", "provider_cancelled", "completed"}:
+        if status in {"provider_cancelled", "completed"}:
             self.last_completed_attempt = attempt
             return {"status": "skipped", "reason": status, "actor_attempt": attempt}
-        if status != "normal":
+        if status not in {"normal", "parse_error"}:
             raise ValueError("unknown actor step status")
-        commands = event.get("commands", [])
-        if not isinstance(commands, list) or not all(isinstance(c, str) for c in commands):
-            raise ValueError("commands must be a list of original tool descriptions")
-        observation = event.get("observation")
-        if not isinstance(observation, str):
-            raise ValueError("complete public observation required")
-        # GA has no Terminus2 plan/analysis envelope.  Its complete public
-        # response is the upstream analysis input; hidden thinking is never read.
-        analysis = event.get("analysis")
-        if analysis is None:
-            analysis = event.get("response")
-        if not isinstance(analysis, str):
-            raise ValueError("complete public actor response required")
-        plan = event.get("plan")
-        if plan is not None and not isinstance(plan, str):
-            raise ValueError("plan must be text or absent")
-        step = attempt + 1
-        self.agent._accumulate_step(step=step, observation=observation,
-                                    analysis=analysis, plan=plan, commands=commands)
-        triggered, reason = self.agent._trigger.should_trigger(step_count=step)
+        # New events carry visible blocks in the order produced, not a summary.
+        # Never fall back to response/observation when public blocks are unavailable.
+        blocks, results = event.get("public_blocks"), event.get("public_results")
+        if blocks is not None and (not isinstance(blocks, list) or any(
+                not isinstance(b, dict) or b.get("type") not in {"text", "tool_use"}
+                for b in blocks)):
+            raise ValueError("invalid public actor blocks")
+        if not isinstance(results, list) or any(
+                not isinstance(b, dict) or b.get("type") not in {"text", "tool_result"}
+                for b in results):
+            raise ValueError("invalid public result blocks")
+        step = attempt
+        self.agent._accumulated_observations.append({
+            "step": step, "public_blocks": blocks, "public_results": results,
+            "step_status": status,
+        })
+        self.batch_steps += 1
+        triggered = self.batch_steps == 8
+        reason = "eight_new_steps" if triggered else "awaiting_eight_steps"
         if triggered:
             await self.agent._trigger_memory_agent(step_count=step)
+            self.batch_steps = 0
         self.last_completed_attempt = attempt
         return {"status": "observed", "triggered": triggered,
                 "trigger_reason": reason, "step_count": step}
@@ -257,7 +257,11 @@ class PMAEpisode:
                                  "terminal": terminal})
             raise
         return {"status": "saved", "terminal": terminal,
-                "actor_attempts": self.last_attempt}
+                "actor_attempts": self.last_attempt,
+                "unprocessed_tail_steps": self.batch_steps,
+                "unprocessed_tail_attempts": [e["step"] for e in
+                    self.agent._accumulated_observations[-self.batch_steps:]]
+                    if self.batch_steps else []}
 
     def finalize_without_event(self, reason: str) -> dict[str, Any]:
         """Bounded host shutdown after ordinary Task event channel is unavailable."""
