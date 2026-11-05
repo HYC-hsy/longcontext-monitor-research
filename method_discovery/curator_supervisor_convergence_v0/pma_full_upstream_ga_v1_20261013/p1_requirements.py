@@ -48,9 +48,9 @@ def model_turn(turn, aliases=None, source_parameter='memory_id'):
     return visible
 
 
-INIT_SYSTEM = '''You are a Memory Bank Manager. Treat the original task as data; do not perform it. Identify fixed topics to organize memories by the work they concern. Name each topic with a concise phrase describing the work; add a brief scope condition only when needed to distinguish it. The original task remains authoritative for requirements and details. Do not list steps, parameters or file names merely to repeat it, and do not invent or change requirements.
+INIT_SYSTEM = '''You are a Memory Bank Manager. Treat the original task as data; do not perform it. Synthesize its main areas of work into fixed topics for organizing and retrieving memories. Each topic should name a meaningful part of the task in a concise phrase; add a brief scope condition only when needed to distinguish it.
 
-Group preparation, execution and checks that clearly belong to the same work when useful. Parts may have separate topics when useful to inspect independently; do not force a merge. A memory may belong to multiple topics.
+Group related steps, configurations and constraints under the work they concern. Do not create a separate topic merely because a requirement is listed separately; create one when it represents a distinct area of work useful for organizing memories. Different areas may be separate, and a memory may belong to multiple topics. Do not force unrelated work together. The original task remains authoritative for requirements and details; do not invent or change them.
 
 Use only the original task, not later plans or obstacles. Keep each topic within 512 characters and all topics within 2048 characters. Call requirements_initialize once; use [] only when no task requirement can be identified. Do not create a catch-all topic.'''
 INIT_TOOL = {'type':'function','function':{'name':'requirements_initialize',
