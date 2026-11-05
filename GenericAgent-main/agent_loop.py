@@ -56,10 +56,6 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
     ]
     local_turn = 0; turn = int(turn_offset); handler.max_turns = max_turns
     exit_reason = {}; response = None
-    _pma_backend = getattr(client, 'backend', None)
-    pma_private_history = bool(getattr(_pma_backend, 'history', None) or
-                               getattr(_pma_backend, 'pma_private_history', False) or
-                               getattr(handler, 'history_info', None))
     _hook('agent_before', locals())
     pma = None
     pma_upstream = None
@@ -132,6 +128,31 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
                             event, actor_attempt=turn,
                             pma_event_id=pma_upstream.last_event_id)
         _hook('llm_before', locals())
+        # Capture the input prepared for this actor call after reminder/hooks.
+        # A provider receipt is still needed to establish actual delivery.
+        pma_prepared_input = None
+        if pma_upstream is not None and hasattr(client, '_pending_tool_ids'):
+            _pma_content, _pma_results = [], []
+            for _pma_message in messages:
+                if _pma_message.get('role') == 'system':
+                    continue
+                _pma_piece = _pma_message.get('content', '')
+                if isinstance(_pma_piece, str):
+                    _pma_content.append({'type': 'text', 'text': _pma_piece})
+                elif isinstance(_pma_piece, list):
+                    _pma_content.extend(_pma_piece)
+                if _pma_message.get('role') == 'user':
+                    _pma_results.extend(_pma_message.get('tool_results') or [])
+            # NativeToolClient clears stale pending IDs if the backend history
+            # is empty before constructing the request.
+            _pma_backend = getattr(client, 'backend', None)
+            _pma_pending = (client._pending_tool_ids if
+                            _pma_backend is None or getattr(_pma_backend, 'history', None)
+                            else [])
+            pma_prepared_input = _native_user_content(
+                _pma_content, _pma_results, _pma_pending)
+        if pma_upstream is not None and pma_prepared_input is None:
+            raise RuntimeError('PMA cannot capture this actor input without omissions')
         response_gen = client.chat(messages=messages, tools=tools_schema)
         try:
             if verbose:
@@ -146,13 +167,15 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             except Exception: pass
             yield "\n[Task Agent response interrupted for monitor correction.]\n"
             if pma_upstream is not None:
-                pma_upstream.actor_step(turn, status='provider_cancelled')
+                pma_upstream.actor_step(turn, status='provider_cancelled', public_input=pma_prepared_input)
             messages = [{
                 "role": "user",
                 "content": "The previous response was interrupted before it became an accepted action.",
             }]
             continue
         _hook('llm_after', locals())
+        if pma_upstream is not None and getattr(response, 'public_blocks', None) is None:
+            raise RuntimeError('PMA cannot capture this actor response without omissions')
 
         provider_link = _consume_provider_call() if _telemetry_enabled() else None
         if provider_link:
@@ -184,12 +207,6 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             })
 
         completion_decision = None
-        if pma_upstream is not None:
-            pma_private_history = bool(pma_private_history or
-                getattr(response, 'private_summary_injected', True) or
-                getattr(response, 'public_blocks', None) is None)
-            if _pma_backend is not None:
-                _pma_backend.pma_private_history = pma_private_history
         provider_error_response = _is_provider_error_response(response)
         if not response.tool_calls and not provider_error_response:
             if (_telemetry_enabled() or hasattr(handler, 'completion_gate') or
@@ -274,9 +291,11 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
         if len(next_prompts) == 0 or exit_reason:
             if len(handler._done_hooks) == 0 or exit_reason.get('result', '') == 'EXITED':
                 if pma_upstream is not None:
-                    # No PMA inference occurs on completion; do not archive an
-                    # unprojected response that may include a synthetic summary.
-                    pma_upstream.actor_step(turn, status='completed')
+                    # Preserve the final visible output for the audit; completion
+                    # remains excluded from the eight-step inference cadence.
+                    pma_upstream.actor_step(turn, status='completed',
+                        public_blocks=getattr(response, 'public_blocks', None),
+                        public_input=pma_prepared_input)
                 break
             next_prompts.add(handler._done_hooks.pop(0))
         next_prompt = handler.turn_end_callback(response, tool_calls, tool_results, turn, '\n'.join(next_prompts), exit_reason)
@@ -290,14 +309,14 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             step_status = ('provider_cancelled' if provider_error_response else
                            'parse_error' if any(call['tool_name'] == 'bad_json'
                                                 for call in tool_calls) else 'normal')
-            safe_next = ('[framework history withheld: private-derived content may be present]'
-                         if pma_private_history else next_prompt)
+            # Mirror the same framework content the actor receives, without
+            # replacing ordinary working memory or tool instructions.
             public = getattr(response, 'public_blocks', None)
             pma_upstream.actor_step(
                 turn, status=step_status, response='', commands=[],
-                observation='', public_blocks=public,
+                observation='', public_blocks=public, public_input=pma_prepared_input,
                 public_results=_native_user_content(
-                    [{'type': 'text', 'text': safe_next}], tool_results,
+                    [{'type': 'text', 'text': next_prompt}], tool_results,
                     [tc.id for tc in (getattr(response, 'tool_calls', None) or [])]),
                 request_event_id=(provider_link or {}).get('provider_request_event_id'))
         messages = [{"role": "user", "content": next_prompt, "tool_results": tool_results}]   # just new message, history is kept in *Session

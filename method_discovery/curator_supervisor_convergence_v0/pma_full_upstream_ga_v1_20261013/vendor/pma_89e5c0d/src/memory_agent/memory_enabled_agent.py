@@ -182,7 +182,17 @@ class MemoryEnabledTerminus2(Terminus2):
                 sections.append("Commands Executed: " + "; ".join(cmds) + suffix)
             sections.append(f"Terminal Output: {entry.get('observation', '')}")
             return "\n".join(sections)
-        sections = [f"[Step {entry['step']}]", "[Assistant visible output]"]
+        sections = [f"[Step {entry['step']}]", "[Prepared input for this actor call]"]
+        actor_input = entry.get("public_input")
+        if actor_input is None:
+            sections.append("[Prepared input unavailable]")
+        else:
+            for block in actor_input:
+                if block.get("type") == "text":
+                    sections.append(block.get("text", ""))
+                elif block.get("type") == "tool_result":
+                    sections.append("[Tool result] " + json.dumps(block, ensure_ascii=False))
+        sections.append("[Assistant visible output]")
         blocks = entry.get("public_blocks")
         if blocks is None:
             sections.append("[Original public blocks unavailable]")
@@ -192,7 +202,7 @@ class MemoryEnabledTerminus2(Terminus2):
                     sections.append(block.get("text", ""))
                 elif block.get("type") == "tool_use":
                     sections.append("[Tool call] " + json.dumps(block, ensure_ascii=False))
-        sections.append("[Next user-visible input]")
+        sections.append("[Post-step result and framework input before any next-call reminder]")
         for block in entry.get("public_results", []):
             if block.get("type") == "text":
                 sections.append(block.get("text", ""))

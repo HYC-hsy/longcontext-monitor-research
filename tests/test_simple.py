@@ -65,7 +65,7 @@ class Tests(unittest.IsolatedAsyncioTestCase):
   f=ns['_public_response_blocks']
   blocks=[{'type':'text','text':'before'},{'type':'thinking','thinking':'secret'}, {'type':'tool_use','id':'a','name':'shell','input':{'cmd':'echo'}}]
   got=f(blocks);self.assertEqual([b['type'] for b in got],['text','tool_use']);self.assertNotIn('secret',str(got))
-  self.assertIsNone(f([{'type':'text','text':'<thinking>secret</thinking>'}]))
+  self.assertEqual(f([{'type':'text','text':'visible <thinking>text</thinking>'}]), [{'type':'text','text':'visible <thinking>text</thinking>'}])
  async def test_skips_and_partial_batch(self):
   import hashlib,os
   C=ast_class(BASE/'episode.py','PMAEpisode',{'Any':object,'Path':Path,'asyncio':asyncio,'json':json,'hashlib':hashlib,'os':os})
@@ -105,4 +105,14 @@ class Tests(unittest.IsolatedAsyncioTestCase):
    for n in range(1,9):
     e.last_attempt=n;await e._actor_step({'actor_attempt':n,'step_status':'normal','public_blocks':[],'public_results':[]})
    self.assertEqual(a.groups,[(1,[]),(8,list(range(1,9)))])
+ def test_formatter_contains_actor_input_and_pre_reminder_output(self):
+  cls=ast_class(V/'memory_enabled_agent.py','MemoryEnabledTerminus2',{'Terminus2':object,'Path':Path,'Any':object,'UniversalMemory':object,'json':json})
+  entry={'step':8,'public_input':[{'type':'tool_result','tool_use_id':'p','content':'prior tool result'}, {'type':'text','text':'exact framework context'}],
+         'public_blocks':[{'type':'text','text':'visible actor output'},{'type':'tool_use','id':'c','name':'probe','input':{}}],
+         'public_results':[{'type':'tool_result','tool_use_id':'c','content':'result now'}, {'type':'text','text':'next framework context'}]}
+  text=cls._format_step_entry(entry)
+  self.assertLess(text.index('exact framework context'),text.index('visible actor output'))
+  self.assertLess(text.index('visible actor output'),text.index('result now'))
+  self.assertLess(text.index('result now'),text.index('next framework context'))
+  self.assertIn('before any next-call reminder',text)
 if __name__=='__main__': unittest.main()

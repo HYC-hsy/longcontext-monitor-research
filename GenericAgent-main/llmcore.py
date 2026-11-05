@@ -16,8 +16,6 @@ def _public_response_blocks(blocks):
         if kind in ('thinking', 'redacted_thinking'):
             continue
         if kind == 'text' and isinstance(block.get('text'), str):
-            if re.search(r'<think(?:ing)?(?:\s|>)', block['text'], re.I):
-                return None
             result.append({'type': 'text', 'text': block['text']})
         elif kind == 'tool_use' and isinstance(block.get('name'), str) and isinstance(block.get('input'), dict):
             result.append({'type': 'tool_use', 'id': block.get('id', ''),
@@ -995,11 +993,13 @@ class NativeClaudeSession(BaseSession):
         try:
             while True: yield next(gen)
         except StopIteration as e: content_blocks = e.value or []
-        public_blocks = _public_response_blocks(content_blocks)
         private_summary_injected = False
         if content_blocks and (_injected := _ensure_text_block(content_blocks)):
             private_summary_injected = True
             yield _injected
+        # Capture what GA actually exposes as text/tool calls, including a
+        # framework-synthesized visible summary, but never native thinking blocks.
+        public_blocks = _public_response_blocks(content_blocks)
         if content_blocks and not (len(content_blocks) == 1 and content_blocks[0].get("text", "").startswith("!!!Error:")):
             self.history.append({"role": "assistant", "content": content_blocks})
         text_parts = [b["text"] for b in content_blocks if b.get("type") == "text"]

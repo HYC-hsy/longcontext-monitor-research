@@ -214,6 +214,11 @@ class PMAEpisode:
         # New events carry visible blocks in the order produced, not a summary.
         # Never fall back to response/observation when public blocks are unavailable.
         blocks, results = event.get("public_blocks"), event.get("public_results")
+        actor_input = event.get("public_input")
+        if actor_input is not None and (not isinstance(actor_input, list) or any(
+                not isinstance(b, dict) or b.get("type") not in {"text", "tool_result"}
+                for b in actor_input)):
+            raise ValueError("invalid prepared actor input")
         if blocks is not None and (not isinstance(blocks, list) or any(
                 not isinstance(b, dict) or b.get("type") not in {"text", "tool_use"}
                 for b in blocks)):
@@ -225,7 +230,7 @@ class PMAEpisode:
         step = attempt
         self.agent._accumulated_observations.append({
             "step": step, "public_blocks": blocks, "public_results": results,
-            "step_status": status,
+            "public_input": actor_input, "step_status": status,
         })
         self.batch_steps += 1
         triggered = self.batch_steps == 8
