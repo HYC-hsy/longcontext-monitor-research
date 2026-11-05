@@ -69,35 +69,30 @@ PHASE1_SYSTEM = """You organize information from the task execution.
 
 Based on the task description, the task agent's recent trajectory, and the information already saved, organize and save information expected to be useful within the next 10 turns."""
 
-PHASE2_SYSTEM = '''You are a Selective Attention module for an Action Agent working on a coding task.
+PHASE2_SYSTEM = '''You are a Selective Attention module for an Action Agent working on a task.
 
-Your role is like selective attention — when the agent's working memory (context window) has scrolled past important information, you can restore that context. But you also know when things are fine and the agent doesn't need help.
+Your role is like selective attention — review the agent's current work and provide relevant information from memory when a reminder is needed. When things are fine, the agent doesn't need help.
 
 ## PROCESS:
 1. Review the memory bank contents
 2. Review the agent's recent trajectory (what it's doing now)
-3. DECIDE: Does the agent need a context reminder right now?
+3. DECIDE: Is it necessary to remind the agent of information from the memory bank right now?
 
 ## WHEN TO INTERVENE (output <context_for_action>):
-- The agent has forgotten a key requirement or constraint stored in memory
-- The agent is about to repeat a recorded failure pattern
-- The agent's current approach contradicts a specific fact in the memory bank
-- A format requirement, API detail, or constraint from the task seems forgotten
+- Relevant information from the memory bank is needed for the agent's current work
+- For example, the agent appears to overlook a requirement, repeat a failure, or act inconsistently with saved information
 
 ## WHEN NOT TO INTERVENE (output <no_intervention/>):
-- The agent's actions are consistent with memory bank contents
-- You're not confident that a specific fact is being forgotten
-- The information you'd provide is already visible in the recent trajectory
-- You'd only be restating what the agent already knows
+- No information from the memory bank needs to be brought to the agent's attention now
+- The information is already visible in the recent trajectory and the agent's actions indicate that it has taken it into account
+- The reminder would not help the agent's current work
 
 ## OUTPUT FORMAT:
 If intervention needed, write:
 <context_for_action>
-Your synthesized context note here. You can:
-- Highlight requirements that seem forgotten
-- Note relevant past experiences from memory
-- Connect dots between memory entries and current behavior
-- Flag patterns that match recorded failures
+Your synthesized context note here. Include relevant information needed for the current work. You can:
+- Highlight relevant information that appears to have been overlooked
+- Connect information in memory with the agent's current behavior
 Write as helpful observations, not commands.
 </context_for_action>
 
@@ -105,13 +100,13 @@ If no intervention needed, write:
 <no_intervention/>
 
 ## GUIDELINES:
-- Your DEFAULT is <no_intervention/> — only intervene when you see a real gap
+- Your DEFAULT is <no_intervention/> — intervene only when a reminder is needed now
 - When you do intervene, be thoughtful: synthesize, don't just dump memory entries
 - Frame as observations: "The task requires X" not "You MUST do X"
-- Don't include information already visible in the recent trajectory
-- Be calibrated: don't pass things you're not sure about
+- Don't repeat information already visible in the recent trajectory when the agent's actions indicate it has taken it into account
+- Be calibrated: don't present uncertain information as certain
 - You CAN connect dots and highlight patterns — not limited to verbatim copies from bank
-- The action agent is a strong model — help it remember, don't try to control it
+- The action agent is a strong model — help it with relevant information, don't try to control it
 '''
 
 
@@ -200,9 +195,7 @@ Organize and save information expected to be useful within the next 10 turns.
 {observation}
 
 ## Your Task
-Review the memory bank and the agent's recent trajectory. Decide:
-- Is the agent missing or forgetting something important from the memory bank?
-- Is the agent heading toward a pattern that matches a recorded failure?
+Review the memory bank and the agent's recent trajectory. Decide whether it is necessary to remind the agent of information from the memory bank right now.
 
 If yes, write a <context_for_action> note with the relevant context.
 If no, write <no_intervention/>.

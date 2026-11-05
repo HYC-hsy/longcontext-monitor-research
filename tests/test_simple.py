@@ -79,4 +79,14 @@ class Tests(unittest.IsolatedAsyncioTestCase):
     x=await e._actor_step({'actor_attempt':n,'step_status':status,'public_blocks':[],'public_results':[]})
    self.assertEqual(a.groups,[9]);self.assertEqual(e.batch_steps,0)
    self.assertEqual([x['step'] for x in a._accumulated_observations[1:]],[1,2,4,5,6,7,8,9])
+ def test_phase2_contract(self):
+  from memory_agent.memory.memory_agent import PHASE1_SYSTEM, PHASE2_SYSTEM
+  bank=UniversalMemory();bank.save_knowledge('A saved note');a=MemoryAgent(llm=None,memory=bank)
+  prompt=a._build_phase2_prompt('trajectory',8)
+  self.assertIn('within the next 10 turns',PHASE1_SYSTEM)
+  self.assertIn('necessary to remind',prompt);self.assertIn('A saved note',prompt)
+  self.assertIn("agent's actions indicate",PHASE2_SYSTEM)
+  self.assertNotIn('coding task',PHASE2_SYSTEM)
+  self.assertEqual(a._parse_phase2_response('<context_for_action>hello</context_for_action>'),'hello')
+  self.assertIsNone(a._parse_phase2_response('<no_intervention/>'))
 if __name__=='__main__': unittest.main()
