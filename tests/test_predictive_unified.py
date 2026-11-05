@@ -43,6 +43,20 @@ class FakeLLM:
 
 
 class PredictiveTests(unittest.IsolatedAsyncioTestCase):
+    async def test_uncapped_turn_predicate_ignores_plan_mode_100_and_old_300(self):
+        parsed = ast.parse((ROOT / 'GenericAgent-main/agent_loop.py').read_text(encoding='utf-8'))
+        function = next(node for node in ast.walk(parsed)
+                        if isinstance(node, ast.FunctionDef) and node.name == 'within_turn_limit')
+        namespace = {'explicit_turn_policy': True, 'max_turns': None,
+                     'local_turn': 301, 'handler': types.SimpleNamespace(max_turns=100),
+                     'os': os, 'stateful_enabled': False, 'stateful_mode': None}
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[function], type_ignores=[])),
+                     '<actual-GA-turn-policy>', 'exec'), namespace)
+        self.assertTrue(namespace['within_turn_limit']())
+        namespace['max_turns'] = 7
+        namespace['local_turn'] = 7
+        self.assertFalse(namespace['within_turn_limit']())
+
     async def test_isolated_prompts_tool_and_flat_bank(self):
         self.assertEqual([x['function']['name'] for x in BANK_TOOLS], ['memory_add'])
         self.assertEqual(PHASE1_SYSTEM, (STAGE / 'vendor/pma_89e5c0d/src/memory_agent/memory/'
