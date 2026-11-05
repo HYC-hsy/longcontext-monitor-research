@@ -1,11 +1,8 @@
-"""Memory Agent V3 — Multi-Turn Tool Use Architecture.
+"""Two-phase predictive memory with GA-style per-phase conversation history.
 
-Key design:
-- Phase 1: LLM call with tools → bank management (save/delete/update)
-- Tool results returned to model
-- Phase 2: LLM generates text response → context decision (inject or no_intervention)
-- Both phases in ONE conversation (multi-turn), sharing context
-- For RL: two forward passes per step, but in same conversation with shared KV cache
+P1 and P2 retain separate public/tool transcripts across wakes. Signed provider
+thinking blocks are retained as opaque provider-only state and never in audit
+text; each phase still receives its own existing system prompt.
 """
 
 import json
@@ -14,6 +11,7 @@ import re
 from dataclasses import dataclass
 
 from .universal_memory import UniversalMemory, MemoryEntry
+from .ga_context_history import prepare_history, GAHistoryIntegrityError
 
 logger = logging.getLogger(__name__)
 
@@ -115,15 +113,7 @@ If no intervention needed, write:
 # =============================================================================
 
 class MemoryAgent:
-    """Memory Agent V3 — Multi-turn tool use architecture.
-
-    Each step is a multi-turn conversation:
-      Turn 1 (Phase 1): System=PHASE1_SYSTEM, tools=BANK_TOOLS → model returns tool calls
-      Turn 2 (Phase 2): Tool results + System=PHASE2_SYSTEM → model returns text (inject/noop)
-
-    Both turns share the same conversation context.
-    For RL training, each turn is a separate forward pass with its own prompt_ids/logprobs.
-    """
+    """Maintain separate GA-style P1 and P2 histories across task wakes."""
 
     def __init__(
         self,
@@ -140,6 +130,15 @@ class MemoryAgent:
         self.use_bm25_prefilter = use_bm25_prefilter
         self.keep_thinking = keep_thinking
         self.use_structured_tools = use_structured_tools
+        # Separate GA-style conversations preserve each phase's role.
+        self._phase1_history = []
+        self._phase2_history = []
+        self._last_phase1_records = []
+
+    def reset_conversation_history(self):
+        self._phase1_history.clear()
+        self._phase2_history.clear()
+        self._last_phase1_records.clear()
 
     # -----------------------------------------------------------------
     # LLM calls (overridable for training)
@@ -147,17 +146,24 @@ class MemoryAgent:
 
     async def _call_llm_phase1(self, user_prompt: str):
         """Phase 1: bank management with tools."""
-        kwargs = dict(prompt=user_prompt, system=PHASE1_SYSTEM)
+        prior = prepare_history(self._phase1_history, user_prompt)
+        kwargs = dict(prompt=user_prompt, system=PHASE1_SYSTEM, message_history=prior)
         if self.use_structured_tools:
             kwargs["tools"] = BANK_TOOLS
         return await self.llm.call(**kwargs)
 
     async def _call_llm_phase2(self, user_prompt: str):
         """Phase 2: context decision, text only (no tools)."""
-        return await self.llm.call(
-            prompt=user_prompt,
-            system=PHASE2_SYSTEM,
+        prior = prepare_history(self._phase2_history, user_prompt)
+        response = await self.llm.call(
+            prompt=user_prompt, system=PHASE2_SYSTEM, message_history=prior,
         )
+        assistant = {"role": "assistant", "content": [
+            {"type": "text", "text": getattr(response, "content", None) or ""}]}
+        if getattr(response, "thinking_blocks", None):
+            assistant["_provider_thinking_blocks"] = response.thinking_blocks
+        self._phase2_history.append(assistant)
+        return response
 
     # -----------------------------------------------------------------
     # Memory formatting
@@ -232,7 +238,29 @@ If no, write <no_intervention/>.
             response1 = await self._call_llm_phase1(phase1_prompt)
             raw1 = getattr(response1, 'content', None)
             reasoning1 = getattr(response1, 'reasoning_content', None)
+            native_calls = getattr(response1, 'tool_calls', None) or []
+            # Check the entire batch before any write, so malformed calls cannot
+            # leave a partially mutated bank without corresponding history.
+            seen_ids = set()
+            for call in native_calls:
+                try:
+                    name, args = self._extract_tool_call(call)
+                    call_id = call.get('id') if isinstance(call, dict) else getattr(call, 'id', None)
+                    if (not name or not isinstance(args, dict) or not isinstance(call_id, str)
+                            or not call_id or call_id in seen_ids):
+                        raise ValueError("invalid tool call or missing/duplicate ID")
+                    seen_ids.add(call_id)
+                except Exception as exc:
+                    raise GAHistoryIntegrityError("invalid phase-one tool-call history") from exc
+            if (native_calls and '<tool_call>' in (getattr(response1, 'content', None) or '')
+                    and any(not self._extract_tool_call(call)[1].get('content') for call in native_calls)):
+                raise GAHistoryIntegrityError("ambiguous structured and text tool calls")
+            if native_calls and reasoning1 and not getattr(response1, 'thinking_blocks', None):
+                raise GAHistoryIntegrityError("signed thinking blocks unavailable for tool continuation")
             operations = self._execute_tool_calls(response1)
+            self._record_phase1_response(response1)
+        except GAHistoryIntegrityError:
+            raise
         except Exception as e:
             logger.error(f"Phase 1 error: {e}", exc_info=True)
 
@@ -254,6 +282,8 @@ If no, write <no_intervention/>.
             reasoning2 = getattr(response2, 'reasoning_content', None)
             context_for_action = self._parse_phase2_response(raw2)
             should_inject = context_for_action is not None
+        except GAHistoryIntegrityError:
+            raise
         except Exception as e:
             logger.error(f"Phase 2 error: {e}", exc_info=True)
 
@@ -265,8 +295,9 @@ If no, write <no_intervention/>.
             context_for_action=context_for_action,
             raw_response_phase1=raw1,
             raw_response_phase2=raw2,
-            reasoning_phase1=reasoning1,
-            reasoning_phase2=reasoning2,
+            # Provider-only reasoning is never written to trajectory artifacts.
+            reasoning_phase1=None,
+            reasoning_phase2=None,
             user_prompt_phase1=phase1_prompt,
             user_prompt_phase2=phase2_prompt,
         )
@@ -324,9 +355,36 @@ If no, write <no_intervention/>.
             parsed.append((name, args))
         return parsed
 
+    def _record_phase1_response(self, response) -> None:
+        """Store actual public response and operation receipts; never replay calls."""
+        content = getattr(response, "content", None) or ""
+        blocks = [{"type": "text", "text": content}] if content else []
+        records = self._last_phase1_records
+        native = bool(records) and all(record['id'] for record in records)
+        if native:
+            blocks.extend({"type": "tool_use", "id": record['id'],
+                           "name": record['name'], "input": record['args']}
+                          for record in records)
+        elif records:
+            # Some text-only/fake transports have no native call IDs. Preserve
+            # the actual operations as labeled text, not fabricated tool calls.
+            blocks.append({"type": "text", "text": "[Executed memory calls] " +
+                           json.dumps([{k: v for k, v in r.items() if k != 'id'}
+                                       for r in records], ensure_ascii=False)})
+        assistant = {"role": "assistant", "content": blocks}
+        if getattr(response, "thinking_blocks", None):
+            assistant["_provider_thinking_blocks"] = response.thinking_blocks
+        self._phase1_history.append(assistant)
+        if native:
+            self._phase1_history.append({"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": record['id'],
+                 "content": json.dumps(record['receipt'], ensure_ascii=False)}
+                for record in records]})
+
     def _execute_tool_calls(self, response) -> list[MemoryOperation]:
         """Execute bank management tool calls from Phase 1 response."""
         operations = []
+        self._last_phase1_records = []
         tool_calls = getattr(response, "tool_calls", None) or []
 
         # Fallback: if no structured tool_calls, or if structured calls have empty content
@@ -367,6 +425,13 @@ If no, write <no_intervention/>.
             except Exception as e:
                 logger.warning(f"Failed to execute {name}: {e}")
                 operations.append(MemoryOperation(action=name, success=False, error=str(e)))
+
+            op = operations[-1]
+            self._last_phase1_records.append({
+                'id': (tool_call.get('id') if isinstance(tool_call, dict)
+                       else getattr(tool_call, 'id', None)), 'name': name, 'args': args,
+                'receipt': {'action': op.action, 'success': op.success,
+                            'memory_id': op.memory_id, 'error': op.error}})
 
         return operations
 
@@ -410,16 +475,18 @@ If no, write <no_intervention/>.
 
     def _extract_tool_call(self, tool_call) -> tuple[str | None, dict]:
         """Extract name and args from a tool call object."""
-        if hasattr(tool_call, "function"):
+        if isinstance(tool_call, dict):
+            function = tool_call.get("function") or tool_call
+            name = function.get("name")
+            args = function.get("arguments", function.get("args", {}))
+        elif hasattr(tool_call, "function"):
             name = tool_call.function.name
             args = tool_call.function.arguments
-            if isinstance(args, str):
-                args = json.loads(args)
         else:
             name = getattr(tool_call, "name", None)
             args = getattr(tool_call, "args", {}) or getattr(tool_call, "arguments", {})
-            if isinstance(args, str):
-                args = json.loads(args)
+        if isinstance(args, str):
+            args = json.loads(args)
         return name, args
 
     def get_tools_schema(self) -> list[dict]:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import hashlib
 import inspect
 import json
@@ -38,15 +39,24 @@ def install_transport_audit(agent, archive: Path) -> None:
     """Observe the original two calls without changing its exception policy."""
     original = agent._memory_llm.call
 
-    async def audited_call(*, prompt, system, tools=None):
+    async def audited_call(*, prompt, system, tools=None, message_history=None):
         phase = "bank_management" if tools else "context_decision"
         started = time.time()
         status = "complete"
+        # Signed reasoning blocks are provider-only state, not audit content.
+        safe_history = copy.deepcopy(message_history or [])
+        for item in safe_history:
+            if isinstance(item, dict) and 'thinking_blocks' in item:
+                item['thinking_blocks'] = [{'type': block.get('type', 'unknown'),
+                                            'redacted': True}
+                                           for block in item['thinking_blocks']]
         append_private_audit(archive / "memory_payload.jsonl", {
             "phase": phase, "prompt": prompt, "system": system,
-            "tools": tools, "started_epoch": started})
+            "tools": tools, "message_history": safe_history,
+            "started_epoch": started})
         try:
-            return await original(prompt=prompt, system=system, tools=tools)
+            return await original(prompt=prompt, system=system, tools=tools,
+                                  message_history=message_history or [])
         except BaseException as exc:
             status = type(exc).__name__
             raise
@@ -91,11 +101,11 @@ async def serve(args: argparse.Namespace) -> None:
     if args.fake_memory:
         from harbor.llms.base import LLMResponse
 
-        async def offline_memory(*, prompt, system, tools=None):
+        async def offline_memory(*, prompt, system, tools=None, message_history=None):
             if tools:
                 if getattr(args, "fake_memory_update", False) and "PMA_OFFLINE_TOOL_OK" in prompt:
-                    call = SimpleNamespace(function=SimpleNamespace(
-                        name="memory_save_knowledge", arguments={
+                    call = SimpleNamespace(id="offline-call-1", function=SimpleNamespace(
+                        name="memory_add", arguments={
                             "content": "Public tool returned PMA_OFFLINE_TOOL_OK"}))
                     return LLMResponse(content="", tool_calls=[call])
                 return LLMResponse(content="", tool_calls=[])

@@ -78,10 +78,10 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
         memory_llm._reasoning_effort = memory_profile["reasoning_effort"]
         original_call = memory_llm.call
 
-        async def profiled_call(*, prompt, system, tools=None):
+        async def profiled_call(*, prompt, system, tools=None, message_history=None):
             return await original_call(
                 prompt=prompt, system=system, tools=tools,
-                max_tokens=memory_profile["max_tokens"],
+                message_history=message_history or [], max_tokens=memory_profile["max_tokens"],
                 thinking={"type": "adaptive"},
                 timeout=memory_profile["read_timeout"],
             )
@@ -169,6 +169,7 @@ class PMAEpisode:
         self.agent._memory_step_in_episode = 0
         self.agent._trigger.reset()
         self.agent._accumulated_observations.clear()
+        self.agent._memory_agent.reset_conversation_history()
         self.agent._pending_injection = None
         self.agent._injection_used = False
         self.agent._task_description = text

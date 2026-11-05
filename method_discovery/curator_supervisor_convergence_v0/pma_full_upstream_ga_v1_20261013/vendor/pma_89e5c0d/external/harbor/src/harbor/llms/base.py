@@ -26,6 +26,8 @@ class LLMResponse:
     completion_token_ids: list[int] | None = None
     logprobs: list[float] | None = None
     tool_calls: list[Any] | None = None
+    # Provider-issued signed blocks are replayed only to the same model API.
+    thinking_blocks: list[dict[str, Any]] | None = None
 
 
 class ContextLengthExceededError(Exception):

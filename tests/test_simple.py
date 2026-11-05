@@ -19,7 +19,7 @@ class FakeLLM:
  async def call(self, **kw):
   self.calls.append(kw)
   if len(self.calls)%2:
-   return types.SimpleNamespace(content='',tool_calls=[types.SimpleNamespace(function=types.SimpleNamespace(name='memory_add',arguments={'content':'保存 🧪'}))])
+   return types.SimpleNamespace(content='',tool_calls=[types.SimpleNamespace(id='fake-call',function=types.SimpleNamespace(name='memory_add',arguments={'content':'保存 🧪'}))])
   return types.SimpleNamespace(content='<no_intervention/>')
 
 class Tests(unittest.IsolatedAsyncioTestCase):
@@ -95,7 +95,7 @@ class Tests(unittest.IsolatedAsyncioTestCase):
   class A:
    def __init__(self):
     self._trigger=types.SimpleNamespace(reset=lambda:None); self._accumulated_observations=[]
-    self._reset_status_on_episode=False;self._reset_knowledge_on_episode=False;self._reset_procedural_on_episode=False;self.groups=[]
+    self._reset_status_on_episode=False;self._reset_knowledge_on_episode=False;self._reset_procedural_on_episode=False;self.groups=[]; self._memory_agent=types.SimpleNamespace(reset_conversation_history=lambda:None)
    def _accumulate_step(self,step,observation):self._accumulated_observations.append({'step':step,'observation':observation})
    async def _trigger_memory_agent(self,step_count):self.groups.append((step_count,[x['step'] for x in self._accumulated_observations[1:]]))
   with tempfile.TemporaryDirectory() as d:

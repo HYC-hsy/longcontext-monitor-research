@@ -20,6 +20,7 @@ from harbor.llms.base import ContextLengthExceededError
 from harbor.llms.lite_llm import LiteLLM
 from harbor.models.agent.context import AgentContext
 
+from .memory.ga_context_history import GAHistoryIntegrityError
 from .memory import (
     UniversalMemory,
     MemoryAgent,
@@ -257,6 +258,8 @@ class MemoryEnabledTerminus2(Terminus2):
             if self._snapshot_dir and self._environment:
                 await self._save_container_snapshot(step_count)
 
+        except GAHistoryIntegrityError:
+            raise
         except Exception as e:
             logger.error(f"Memory agent error at step {step_count}: {e}", exc_info=True)
             self._record_memory_step(
