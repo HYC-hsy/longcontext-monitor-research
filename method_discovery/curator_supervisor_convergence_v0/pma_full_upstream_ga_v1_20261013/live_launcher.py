@@ -352,6 +352,21 @@ def _advance_worker_stop(root: Path, worker: subprocess.Popen | None,
     return pending_at, stop_at
 
 
+def _require_worker_until_task_end(root: Path, worker: subprocess.Popen | None,
+                                   run_id: str) -> None:
+    """A dead PMA worker cannot answer an accepted actor event under uncapped time."""
+    if worker is None or worker.poll() is None:
+        return
+    try:
+        receipt = json.loads((root / 'host_private/worker_exit.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        receipt = None
+    if (isinstance(receipt, dict) and receipt.get('run_id') == run_id and
+            receipt.get('task_end_saved') is True):
+        return  # Native evaluation may continue after the PMA worker ends.
+    raise RuntimeError('PMA host worker exited before a verified task_end')
+
+
 def _native_trial_result(root: Path) -> dict:
     """Read this fresh Harbor job's result, without interpreting task answers."""
     def bootstrap_failure():
@@ -919,6 +934,7 @@ def run_live(args) -> dict:
                 pending_end_at, stop_requested_at = _advance_worker_stop(
                     root, worker, deadline, pending_end_at, stop_requested_at)
                 _worker_clearance(root, worker, args.run_id)
+                _require_worker_until_task_end(root, worker, args.run_id)
                 if outer_deadline is not None and time.time() >= outer_deadline:
                     raise subprocess.TimeoutExpired(command, outer_timeout_seconds)
                 time.sleep(.25)
