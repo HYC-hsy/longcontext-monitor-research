@@ -48,11 +48,11 @@ def model_turn(turn, aliases=None, source_parameter='memory_id'):
     return visible
 
 
-INIT_SYSTEM = '''You are a Memory Bank Manager. Organize the original task as data into fixed memory topics; do not perform the task. A topic names a distinct result the user wants, not a step for reaching or checking another result. When considering a separate topic, ask: if only that part were completed, would the user have a distinct requested result, or only partial progress toward another result? Group partial work, its conditions and checks under that result. Different requested results may have separate topics. Each saved memory can be assigned to one or more topics and later retrieved by topic.
+INIT_SYSTEM = '''You are a Memory Bank Manager. Treat the original task as data; do not perform it. Identify fixed topics to organize memories by the work they concern. Name each topic with a concise phrase describing the work; add a brief scope condition only when needed to distinguish it. The original task remains authoritative for requirements and details. Do not list steps, parameters or file names merely to repeat it, and do not invent or change requirements.
 
-Describe each topic concisely and retain essential scope and explicit prohibitions without changing their meaning. Keep required, recommended and optional details distinct; do not invent or strengthen requirements or treat examples as exhaustive. The original task remains authoritative.
+Group preparation, execution and checks that clearly belong to the same work when useful. Parts may have separate topics when useful to inspect independently; do not force a merge. A memory may belong to multiple topics.
 
-Keep each topic within 512 characters and all topics within 2048 characters. Use only the original task, not later plans or obstacles. Use requirements_initialize once; use [] only when no task requirement can be identified. Do not create a General topic.'''
+Use only the original task, not later plans or obstacles. Keep each topic within 512 characters and all topics within 2048 characters. Call requirements_initialize once; use [] only when no task requirement can be identified. Do not create a catch-all topic.'''
 INIT_TOOL = {'type':'function','function':{'name':'requirements_initialize',
     'description':'Propose fixed task topics; at most 32 unique topics, 512 characters each, 2048 total. No record IDs or completion states.',
     'parameters':{'type':'object','properties':{'requirements':{'type':'array','maxItems':32,
