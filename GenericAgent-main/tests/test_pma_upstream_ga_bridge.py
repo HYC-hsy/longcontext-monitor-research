@@ -52,8 +52,9 @@ class Handler(BaseHandler):
         return next_prompt
 
 
-def response(content, tool_calls=()):
-    return SimpleNamespace(content=content, tool_calls=list(tool_calls), thinking='')
+def response(content, tool_calls=(), public_blocks=None):
+    return SimpleNamespace(content=content, tool_calls=list(tool_calls),
+                           public_blocks=public_blocks, thinking='')
 
 
 def test_default_off_keeps_task_loop_without_pma(monkeypatch):
@@ -74,7 +75,11 @@ def test_two_ga_attempts_use_one_pma_pending_reminder(monkeypatch):
                         classmethod(lambda cls, content, turn_offset=0: bridge))
     tool = SimpleNamespace(id='tool-1', function=SimpleNamespace(
         name='probe', arguments=json.dumps({'value': 1})))
-    client = FakeClient([response('tool choice', [tool]), response('done')])
+    client = FakeClient([response('tool choice', [tool], [
+        {'type': 'text', 'text': 'tool choice'},
+        {'type': 'tool_use', 'id': 'tool-1', 'name': 'probe',
+         'input': {'value': 1}},
+    ]), response('done')])
     handler = Handler()
     result = exhaust(agent_runner_loop(client, 'system', 'public task', handler, [],
                                        max_turns=2, verbose=False))
@@ -84,7 +89,15 @@ def test_two_ga_attempts_use_one_pma_pending_reminder(monkeypatch):
     assert 'fixture reminder' not in client.requests[1][0][0]['content']
     assert [item[0] for item in bridge.calls] == ['before', 'step', 'before', 'step']
     assert bridge.calls[1][2]['status'] == 'normal'
-    assert bridge.calls[1][2]['commands'][0].find('probe') >= 0
+    assert bridge.calls[1][2]['commands'] == []
+    assert bridge.calls[1][2]['public_blocks'] == [
+        {'type': 'text', 'text': 'tool choice'},
+        {'type': 'tool_use', 'id': 'tool-1', 'name': 'probe',
+         'input': {'value': 1}},
+    ]
+    assert any(item.get('type') == 'tool_result' and
+               item.get('tool_use_id') == 'tool-1'
+               for item in bridge.calls[1][2]['public_results'])
     assert bridge.calls[3][2]['status'] == 'completed'
 
 
