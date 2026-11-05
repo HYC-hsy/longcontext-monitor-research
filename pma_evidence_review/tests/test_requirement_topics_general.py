@@ -7,7 +7,7 @@ import unittest
 
 from pma_evidence_review.tests import test_p1_requirements as fixtures
 from pma_evidence_review.tests.test_bank_display import reply
-from p1_requirements import assignment, topics, GENERAL_TOPIC
+from p1_requirements import assignment, topics
 from p1_source_archive import encode
 from p2_requirement_agent import RequirementSelectionAgent
 from p2_requirement_reminder import RequirementReminderAgent
@@ -30,8 +30,8 @@ class TopicGeneralTests(unittest.TestCase):
             self.save(self.bodies['specific'], [a]),
             self.save(self.bodies['other'], [b]),
             self.save(self.bodies['general'], []),
-            self.save(self.bodies['both'], [a, GENERAL_TOPIC]),
-            self.save(self.bodies['gap'], [GENERAL_TOPIC], category='gap'),
+            self.save(self.bodies['both'], [a, b]),
+            self.save(self.bodies['gap'], [], category='gap'),
         ])]
         self.assertEqual(self.run_cycle()['status'], 'completed')
         return RequirementSelectionView(self.agent)
@@ -55,39 +55,38 @@ class TopicGeneralTests(unittest.TestCase):
         self.fail('browse pagination did not terminate')
 
     def test_empty_assignment_falls_back_and_catalog_stays_task_derived(self):
-        self.assertEqual(assignment([], fixtures.FIXED), [GENERAL_TOPIC])
-        self.assertEqual(assignment([], []), [GENERAL_TOPIC])
-        self.assertEqual(topics([GENERAL_TOPIC]), [GENERAL_TOPIC])
+        self.assertEqual(assignment([], fixtures.FIXED), [])
+        self.assertEqual(assignment([], []), [])
+        self.assertEqual(topics(fixtures.FIXED), fixtures.FIXED)
         self.seed()
         self.assertEqual(self.agent.requirement_state.data['catalog'], fixtures.FIXED)
         self.reopen()
         record = next(r for r in self.agent.export_view()['records'] if r['content'] == 'general')
-        self.assertEqual(record['requirements'], [GENERAL_TOPIC])
+        self.assertEqual(record['requirements'], [])
 
     def test_empty_catalog_can_save_and_browse_general(self):
         self.responses = [self.init([]), reply([self.save('still useful', [])])]
         self.assertEqual(self.run_cycle()['status'], 'completed')
-        rows, _ = self.read_all(RequirementSelectionView(self.agent), view='requirement', requirement=GENERAL_TOPIC)
-        self.assertEqual([(r['content'], r['requirements']) for r in rows], [('still useful', [GENERAL_TOPIC])])
+        rows, _ = self.read_all(RequirementSelectionView(self.agent), view='all')
+        self.assertEqual([r['content'] for r in rows], ['still useful'])
+        self.assertNotIn('requirements', rows[0])
 
     def test_topic_union_deduplicates_before_pagination_and_preserves_order(self):
         view = self.seed(long=True)
-        expected = [a for a in view.aliases if fixtures.FIXED[0] in view.attributes[a]['requirements']
-                    or GENERAL_TOPIC in view.attributes[a]['requirements']]
+        expected = [a for a in view.aliases if fixtures.FIXED[0] in view.attributes[a]['requirements']]
         rows, page = self.read_all(view, view='requirement', requirement=fixtures.FIXED[0])
         self.assertEqual([r['alias'] for r in rows], expected)
-        self.assertEqual(len(rows), 4)
-        self.assertEqual(page['matching_record_count'], 4)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(page['matching_record_count'], 2)
         self.assertEqual(sum(r['content'] == self.bodies['both'] for r in rows), 1)
         self.assertTrue(set(expected) <= view.seen)
 
-    def test_general_query_and_category_intersection(self):
+    def test_no_general_query_and_category_intersection(self):
         view = self.seed()
-        rows, page = self.read_all(view, view='requirement', requirement=GENERAL_TOPIC)
-        self.assertEqual({r['content'] for r in rows}, {'general', 'both', 'general gap'})
-        self.assertEqual(page['matching_record_count'], 3)
-        rows, page = self.read_all(view, view='requirement', requirement=fixtures.FIXED[1], category='gap')
+        self.assertEqual(view.browse(view='requirement', requirement='General')['status'], 'unknown_requirement')
+        rows, page = self.read_all(view, view='all', category='gap')
         self.assertEqual([r['content'] for r in rows], ['general gap'])
+        self.assertNotIn('requirements', rows[0])
         self.assertEqual(page['matching_category_counts'], {'knowledge': 0, 'procedural': 0, 'gap': 1})
         self.assertEqual(view.browse(view='requirement', requirement='invented')['status'], 'unknown_requirement')
 
@@ -98,7 +97,7 @@ class TopicGeneralTests(unittest.TestCase):
         self.assertIsNotNone(page['next_cursor'])
         self.assertNotIn(alias, view.seen)
         self.assertEqual(view.read_source(memory_id=alias)['status'], 'record_not_yet_shown')
-        for filters in ({'view': 'requirement', 'requirement': GENERAL_TOPIC},
+        for filters in ({'view': 'requirement', 'requirement': fixtures.FIXED[1]},
                         {'view': 'requirement', 'requirement': fixtures.FIXED[0], 'category': 'knowledge'},
                         {'view': 'all'}):
             self.assertEqual(view.browse(cursor=page['next_cursor'], **filters)['status'], 'invalid_cursor')
@@ -120,12 +119,16 @@ class TopicGeneralTests(unittest.TestCase):
             rows = json.loads(prompt.split(marker, 1)[1].split('\n', 1)[0])[1:]
             self.assertEqual(len(rows), len(p2.view.aliases))
             for row in rows:
-                self.assertEqual(row['requirements'], p2.view.attributes[row['alias']]['requirements'])
-                self.assertIn(row['requirements'][0], prompt)
+                expected = p2.view.attributes[row['alias']]['requirements']
+                if expected:
+                    self.assertEqual(row['requirements'], expected)
+                else:
+                    self.assertNotIn('requirements', row)
             browse = p2.tools()[0]['function']
             self.assertEqual(browse['parameters']['properties']['view']['enum'], ['all', 'requirement'])
-            self.assertIn('General', browse['description'])
+            self.assertNotIn('General', browse['description'])
 
 
 if __name__ == '__main__':
     unittest.main()
+

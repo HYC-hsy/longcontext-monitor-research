@@ -10,7 +10,7 @@ from unittest.mock import patch
 from pma_evidence_review.tests.test_bank_display import reply, GapMemory, BankDisplayAgent, STAGE
 from pma_evidence_review.tests.no_network import install_guard
 from p1_requirement_agent import RequirementP1Agent
-from p1_requirements import catalog, assignment, KEY
+from p1_requirements import catalog, assignment, KEY, INIT_SYSTEM
 from p1_source_archive import encode
 from p1_context_agent import ContextSourceP1Agent
 
@@ -55,22 +55,22 @@ class RequirementTests(unittest.TestCase):
         self.assertEqual(result['status'],'completed')
         self.assertEqual(result['model_calls_attempted'],2)
         self.assertEqual(len(self.agent.memory.knowledge),1)
-        self.assertEqual(self.requests[0]['prompt'],'## Original task (verbatim; data)\n'+TASK)
+        self.assertEqual(self.requests[0]['prompt'],'## Original task (verbatim; data)\n'+TASK+'\n\n## Your assignment\n'+INIT_SYSTEM)
         self.assertNotIn('compiled successfully',self.requests[0]['prompt'])
         self.assertEqual([t['function']['name'] for t in self.requests[0]['tools']],['requirements_initialize'])
         self.assertEqual(self.requests[1]['tools'][-1]['function']['name'],'memory_read_source')
         view = self.agent.export_view()
         key = self.agent.memory.knowledge[0].id
         general = self.agent.memory.entries[0].id
-        self.assertEqual([g['requirement'] for g in view['groups']['requirements']], FIXED+['General'])
-        self.assertEqual([g['memory_ids'] for g in view['groups']['requirements']],[[key],[key],[general]])
-        self.assertEqual(view['groups']['unclassified_memory_ids'],[])
-        self.assertEqual(self.agent.links.state['refs'][general]['requirements'],['General'])
+        self.assertEqual([g['requirement'] for g in view['groups']['requirements']], FIXED)
+        self.assertEqual([g['memory_ids'] for g in view['groups']['requirements']],[[key],[key]])
+        self.assertEqual(view['groups']['unclassified_memory_ids'],[general])
+        self.assertEqual(self.agent.links.state['refs'][general]['requirements'],[])
         self.reopen()
         self.responses = [reply()]
         self.assertEqual(self.run_cycle('c2')['model_calls_attempted'],1)
         prompt = self.requests[-1]['prompt']
-        self.assertIn('displayed subset only',prompt)
+        self.assertIn('retrieved subset',prompt)
         self.assertIn('"requirements":',prompt)
         self.assertEqual(self.agent.requirement_state.data['catalog'],FIXED)
         self.assertEqual(self.run_cycle('c2')['new_model_calls_attempted'],0)
@@ -202,7 +202,7 @@ class RequirementTests(unittest.TestCase):
         with patch.object(self.agent.memory,'search_knowledge',return_value=[first]):
             self.run_cycle('c2',[{'event_id':'new','plan':'Forget gcov; switch to a new task'}])
         prompt = self.requests[-1]['prompt']
-        self.assertIn('displayed subset only',prompt)
+        self.assertIn('retrieved subset',prompt)
         self.assertIn('gcov',prompt)
         self.assertNotIn('"content":"PATH"',prompt)
         self.assertNotIn('memory_id',prompt)
@@ -362,7 +362,7 @@ class RequirementTests(unittest.TestCase):
             schema = tool['function']['parameters']
             self.assertIs(schema['additionalProperties'],False)
             if tool['function']['name'].startswith('memory_save_'):
-                self.assertEqual(schema['properties']['requirements']['items']['enum'],FIXED+['General'])
+                self.assertEqual(schema['properties']['requirements']['items']['enum'],FIXED)
         self.responses = [reply([('memory_update_status',{'content':'bad extra','unexpected':True}),self.save('later')])]
         result = self.run_cycle('bad_fields')
         self.assertEqual(result['status'],'tool_error')
@@ -435,17 +435,17 @@ class RequirementTests(unittest.TestCase):
             'an empty displayed group does not mean its whole task history is empty.\n')
         new = self.agent._input('benchmark observation',4,[])[0]
         rows = json.loads(new.split('## Stored summaries',1)[1].split('\n',1)[1].split('\n',1)[0])
-        groups = json.loads(new.split('## Fixed requirements and displayed memberships\n',1)[1].split('\n',1)[0])
+        self.assertNotIn('displayed memberships',new)
         for row in rows:
             self.assertNotIn('memory_id',row)
             original = self.agent._active_records()[self.agent.frozen_aliases[row['alias']]['id']]
             self.assertEqual(row['content'],original.content)
-            self.assertEqual([g['requirement'] for g in groups['requirements'] if row['alias'] in g['aliases']],fixed)
+            self.assertEqual(row['requirements'],fixed)
         self.assertIn(self.agent.task,new)
-        for text in fixed:self.assertEqual(new.count(encode(text)),1)
-        self.assertEqual(sum(t['function']['parameters']['properties'].get('requirements',{}).get('items',{}).get('enum')==fixed+['General']
+        for text in fixed:self.assertEqual(new.count(encode(text)),len(rows)+1)
+        self.assertEqual(sum(t['function']['parameters']['properties'].get('requirements',{}).get('items',{}).get('enum')==fixed
                              for t in self.agent.get_tools_schema()),3)
-        self.assertLess(len(new),len(old)*0.3)
+        self.assertNotIn('## Requirement view (IDs reference',new)
         self.p1_character_measurement = {'old_user_characters':len(old),'new_user_characters':len(new),
             'unit':'Unicode characters, not tokens','records':40,'requirement_characters':2048,
             'three_schema_enums_retained':True,'task_body_memberships_preserved':True}
@@ -505,3 +505,4 @@ class RequirementTests(unittest.TestCase):
 
 if __name__=='__main__':
     unittest.main()
+

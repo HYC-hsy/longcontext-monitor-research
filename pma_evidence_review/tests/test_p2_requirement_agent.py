@@ -62,7 +62,7 @@ class SelectionTests(unittest.TestCase):
         self.p2.use_bm25_prefilter = True
         # Initial BM25 sees only B; full P2 aliases are A=M1, B=M2, unclassified=M3.
         self.p2_responses = [reply([('memory_browse',{'view':'requirement','requirement':fixtures.FIXED[0]}),
-                                    ('memory_browse',{'view':'requirement','requirement':'General'})]),
+                                    ('memory_browse',{'view':'all'})]),
             reply(content='<intervene>M3,M1</intervene>')]
         with patch('memory_agent.memory.universal_memory.UniversalMemory.search_knowledge',
                    return_value=[self.agent.memory.knowledge[0]]):
@@ -304,3 +304,4 @@ class SelectionTests(unittest.TestCase):
 
 if __name__=='__main__':
     unittest.main()
+

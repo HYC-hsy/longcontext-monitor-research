@@ -7,12 +7,9 @@ from p1_source_archive import encode, digest
 from p1_context_history import InputMemoryHistory
 
 KEY = 'requirement_attributes_v1'
-GENERAL_TOPIC = 'General'
-
-
 def topics(fixed):
-    """Fixed task-derived topics plus the host-provided general topic."""
-    return list(dict.fromkeys([*(fixed or []), GENERAL_TOPIC]))
+    """Fixed task-derived topics only; no catch-all topic."""
+    return list(dict.fromkeys(fixed or []))
 
 
 def model_turn(turn, aliases=None, source_parameter='memory_id'):
@@ -55,7 +52,7 @@ INIT_SYSTEM = '''You are a Memory Bank Manager. Organize the original task as da
 
 Describe each topic concisely and retain essential scope and explicit prohibitions without changing their meaning. Keep required, recommended and optional details distinct; do not invent or strengthen requirements or treat examples as exhaustive. The original task remains authoritative.
 
-Keep each topic within 512 characters and all topics within 2048 characters. Use only the original task, not later plans or obstacles. Use requirements_initialize once; use [] only when no task requirement can be identified. Do not create a General topic; the host supplies it.'''
+Keep each topic within 512 characters and all topics within 2048 characters. Use only the original task, not later plans or obstacles. Use requirements_initialize once; use [] only when no task requirement can be identified. Do not create a General topic.'''
 INIT_TOOL = {'type':'function','function':{'name':'requirements_initialize',
     'description':'Propose fixed task topics; at most 32 unique topics, 512 characters each, 2048 total. No record IDs or completion states.',
     'parameters':{'type':'object','properties':{'requirements':{'type':'array','maxItems':32,
@@ -102,6 +99,8 @@ def catalog(values):
     if not isinstance(values,list) or len(values)>32:
         raise RequirementError('invalid_requirement_list')
     result = [canonical(x) for x in values]
+    if any(x.casefold() == 'general' for x in result):
+        raise RequirementError('reserved_topic_name')
     if len(result)!=len(set(result)):
         raise RequirementError('duplicate_requirement')
     if sum(map(len,result))>2048:
@@ -110,15 +109,12 @@ def catalog(values):
 
 
 def assignment(values, fixed):
-    if not isinstance(values,list) or len(values)>33:
+    if not isinstance(values,list) or len(values)>32:
         raise RequirementError('invalid_requirement_assignment')
     available = topics(fixed)
     chosen = {canonical(x) for x in values}
     if chosen-set(available):
         raise RequirementError('unknown_requirement_choose_supplied_text')
-    # Empty selection is safely retained as General rather than dropping memory.
-    if not chosen:
-        chosen = {GENERAL_TOPIC}
     return [x for x in available if x in chosen]
 
 
@@ -238,3 +234,4 @@ class RequirementState:
             self.links.state['refs'][r.id]['requirements']]} for text in topics(self.data['catalog'])]
         return {'requirements':result,'unclassified_memory_ids':[r.id for r in rows if not
             self.links.state['refs'][r.id]['requirements']]}
+

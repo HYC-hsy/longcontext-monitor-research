@@ -6,7 +6,7 @@ import uuid
 from p1_source_archive import encode, digest
 from p1_source_links import SourceLinks
 from p1_context_history import HistoryError, InputMemoryHistory
-from p1_requirements import RequirementHistory, KEY, canonical, catalog, assignment, topics, GENERAL_TOPIC
+from p1_requirements import RequirementHistory, KEY, canonical, catalog, assignment, topics
 from tag_selection_contract import Snapshot, Item
 
 
@@ -153,8 +153,11 @@ class RequirementSelectionView:
     def record(self, alias):
         row = self.aliases[alias]
         ref = self.links.state['refs'][row.id]
+        attributes = deepcopy(self.attributes[alias])
+        if not attributes['requirements']:
+            attributes.pop('requirements')
         return {'alias':alias,'memory_id':row.id,'category':row.category,'content':row.content,
-                **deepcopy(self.attributes[alias]),'source_association':ref['association'],
+                **attributes,'source_association':ref['association'],
                 'source_count':len(ref['sources']),'sources_are_not_proof':True}
 
     def present(self, aliases):
@@ -169,7 +172,7 @@ class RequirementSelectionView:
             ref = self.links.state['refs'][row.id]
             order = attributes['source_event_order']
             rows.append({'alias':alias,'memory_id':row.id,'category':row.category,'content':row.content,
-                'requirements':deepcopy(attributes['requirements']),
+                **({'requirements':deepcopy(attributes['requirements'])} if attributes['requirements'] else {}),
                 'source':{'association':ref['association'],'count':len(ref['sources']),
                           'accepted_event_range':[order['first'],order['last']]}})
         self.seen.update(aliases)
@@ -194,15 +197,14 @@ class RequirementSelectionView:
             if requirement not in topics(self.catalog):
                 return {'status':'unknown_requirement'}
         aliases = [a for a in self.aliases if view=='all' or
-            (view=='requirement' and (requirement in self.attributes[a]['requirements'] or
-                                      GENERAL_TOPIC in self.attributes[a]['requirements']))]
+            (view=='requirement' and requirement in self.attributes[a]['requirements'])]
         aliases = [a for a in aliases if category is None or self.aliases[a].category==category]
         records = {a:self.record(a) for a in aliases}
         if model_view:
             for record in records.values():record.pop('memory_id',None)
         fields = [(a,'record','json_value',encode(records[a])) for a in aliases]
         metadata = {'snapshot_id':self.id,'browse_view':view,'requirement':requirement,'category':category,
-            'scope':'all frozen active records matching this filter; requirement views also include General; not only the initial BM25 subset',
+            'scope':'all frozen active records matching this filter; not only the initial BM25 subset',
             'matching_record_count':len(aliases),'all_active_record_count':len(self.items),
             'matching_category_counts':{c:sum(self.aliases[a].category==c for a in aliases)
                                         for c in ('knowledge','procedural','gap')},
@@ -270,3 +272,4 @@ class RequirementSelectionView:
                     p1.links.state['refs'].get(row.id)!=self.links.state['refs'][row.id]):
                 return False
         return True
+

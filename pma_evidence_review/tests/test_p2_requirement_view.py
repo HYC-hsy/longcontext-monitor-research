@@ -37,11 +37,10 @@ class ViewTests(unittest.TestCase):
             page = view.browse(view='requirement',requirement=text)
             group = [json.loads(p['text']) for p in page['parts']]
             self.assertEqual(next(r['alias'] for r in group if r['content']=='multi'),aliases['multi'])
-            self.assertEqual(next(r['alias'] for r in group if r['content']=='unclassified'),aliases['unclassified'])
+            self.assertNotIn(aliases['unclassified'],[r['alias'] for r in group])
             self.assertEqual(len({r['alias'] for r in group}),len(group))
         page = view.browse(view='requirement',requirement='General')
-        self.assertEqual([json.loads(p['text'])['content'] for p in page['parts']],['unclassified'])
-        self.assertEqual(json.loads(page['parts'][0]['text'])['requirements'],['General'])
+        self.assertEqual(page['status'],'unknown_requirement')
         self.assertEqual(view.browse(view='unclassified')['status'],'invalid_tool_arguments')
         self.assertEqual(view.browse(view='requirement',requirement='new plan')['status'],'unknown_requirement')
         self.assertEqual(view.browse(view='all',requirement=FIXED[0])['status'],'invalid_tool_arguments')
@@ -58,7 +57,7 @@ class ViewTests(unittest.TestCase):
         self.assertEqual(view.read_source(memory_id='M1')['status'],'record_not_yet_shown')
         self.assertLessEqual(len(encode(page)),8000)
         self.assertIsNotNone(page['next_cursor'])
-        self.assertEqual(view.browse(view='requirement',requirement='General',cursor=page['next_cursor'])['status'],'invalid_cursor')
+        self.assertEqual(view.browse(view='requirement',requirement=fixed[0],cursor=page['next_cursor'])['status'],'invalid_cursor')
         other = RequirementSelectionView(self.agent)
         self.assertEqual(other.browse(cursor=page['next_cursor'])['status'],'invalid_cursor')
         parts = page['parts'][:]
@@ -246,3 +245,4 @@ class ViewTests(unittest.TestCase):
 
 if __name__=='__main__':
     unittest.main()
+

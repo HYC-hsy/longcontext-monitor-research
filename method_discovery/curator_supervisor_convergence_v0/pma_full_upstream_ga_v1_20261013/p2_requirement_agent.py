@@ -10,7 +10,7 @@ from tag_selection_contract import Item, parse_output, dispatch, delivery_json, 
 
 READ_LIMIT, CONTINUATION_LIMIT = 4, 2
 SYSTEM = SELECTION_SYSTEM + '''
-You may decide directly from the initial displayed records, or optionally browse the frozen full active bank by a task-derived topic (including General records) or flat view. P2 aliases remain stable throughout this selection. A partial record must be read completely before selecting it. Grouping is organization, not evidence or completion. memory_read_source reads selected sources or frozen context for already shown records; returned P2H handles are historical, not selectable records. Source and context pages are not semantic verification. At most four browse/source calls and two continuations are available; the last turn has no tools. Keep the original TASK/M alias output format, with no rewritten advice.
+You may decide directly from the initial displayed records, or optionally browse the frozen full active bank by a task-derived topic or flat view. P2 aliases remain stable throughout this selection. A partial record must be read completely before selecting it. Grouping is organization, not evidence or completion. memory_read_source reads selected sources or frozen context for already shown records; returned P2H handles are historical, not selectable records. Source and context pages are not semantic verification. At most four browse/source calls and two continuations are available; the last turn has no tools. Keep the original TASK/M alias output format, with no rewritten advice.
 '''
 
 
@@ -42,9 +42,9 @@ class RequirementSelectionAgent(BankDisplayAgent):
 
     def tools(self):
         return [{'type':'function','function':{'name':'memory_browse',
-            'description':'Read frozen active records flat or by a task-derived topic. A topic query includes General records. Join record parts and JSON-decode; select its stable M alias only after the full record returns.',
+            'description':'Read frozen active records flat or by a task-derived topic. Join record parts and JSON-decode; select its stable M alias only after the full record returns.',
             'parameters':{'type':'object','properties':{'view':{'type':'string','enum':['all','requirement'],
-                    'description':'Optional; defaults to all. requirement selects a task-derived topic and includes General records.'},
+                    'description':'Optional; defaults to all. requirement selects a task-derived topic.'},
                 'requirement':{'type':'string','description':'Required for view=requirement; copy a topic shown on a memory record. Omit for other views.'},
                 'category':{'type':'string','enum':['knowledge','procedural','gap'],
                     'description':'Optional record-type filter in any view; omitted means all types. gap is a recorded need, not verified completion.'},
@@ -233,3 +233,4 @@ class RequirementSelectionAgent(BankDisplayAgent):
             report['fully_shown_aliases'] = sorted(getattr(getattr(self,'view',None),'seen',()))
             self._selecting = False
         return report
+

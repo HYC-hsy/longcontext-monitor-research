@@ -5,9 +5,9 @@ from p1_context_agent import ContextSourceP1Agent, GAP_DESCRIPTION
 from memory_agent.memory.memory_agent import PHASE1_SYSTEM
 from p1_source_archive import encode
 from p1_requirements import (RequirementState, RequirementHistory, INIT_SYSTEM, INIT_TOOL,
-                             RequirementError, assignment, catalog, model_turn, upstream_observation, MemoryModelError, topics, GENERAL_TOPIC)
+                             RequirementError, assignment, catalog, model_turn, upstream_observation, MemoryModelError, topics)
 
-SYSTEM = '''You are a Memory Bank Manager. Your job is to maintain a lean, accurate knowledge bank for the action agent. Organize entries using the supplied topics, which describe what the original task requires, and the General topic.
+SYSTEM = '''You are a Memory Bank Manager. Your job is to maintain a lean, accurate knowledge bank for the action agent. Organize entries using the supplied task topics.
 
 ## Your Tools
 - memory_save_knowledge: Save important facts, including task requirements, environment details, API constraints, and file paths.
@@ -18,7 +18,7 @@ SYSTEM = '''You are a Memory Bank Manager. Your job is to maintain a lean, accur
 - memory_read_source: Read available sources or generation context when needed.
 
 ## Guidelines
-1. **Be selective**: Save information that may be useful later and could be lost as the action agent's context window moves on. Leave unchanged entries alone. When saving, choose one or more relevant topics; use General for broadly useful information or when no specific topic fits.
+1. **Be selective**: Save information that may be useful later and could be lost as the action agent's context window moves on. Leave unchanged entries alone. When saving, choose all relevant topics; use [] if none fits.
 2. **Prioritize task requirements**: Preserve important requirements and constraints. The original task remains authoritative; examples, current results, and the agent's plans do not change its requirements.
 3. **Record attempts and outcomes**: State what was tried and what happened. Include a cause or explanation only when supported; otherwise keep it as uncertain.
 4. **Preserve scope**: Keep the conditions that affect an observation or conclusion. A local or partial result does not by itself establish that the whole task is complete.
@@ -78,7 +78,7 @@ class RequirementP1Agent(ContextSourceP1Agent):
             if f['name'] in SAVES:
                 f['parameters']['properties']['requirements'] = {'type':'array','maxItems':len(fixed),
                     'items':{'type':'string',**({'enum':fixed} if fixed else {})},
-                    'description':'Select relevant task-derived topics; choose General when broadly useful or no specific topic fits. Multiple topics are allowed.'}
+                    'description':'Select one or more relevant supplied topics; use [] if none fits.'}
                 f['parameters']['required'] = list(f['parameters'].get('required',[]))+['requirements']
             if f['name'] in ('memory_delete','memory_read_source'):
                 prop = f['parameters']['properties'].pop('memory_id')
@@ -121,7 +121,11 @@ class RequirementP1Agent(ContextSourceP1Agent):
 
     def _memory_attributes(self, row):
         order = self.requirement_state.event_span(row.id)
-        return {'source_event_order':[order['first'],order['last']]}
+        result = {'source_event_order':[order['first'],order['last']]}
+        assigned = self.requirement_state.attributes(row)['requirements']
+        if assigned:
+            result['requirements'] = assigned
+        return result
 
     def _model_turn(self, turn):
         return model_turn(turn,{t.get('id',t.get('source_id')):a for a,t in self.frozen_aliases.items()},'entry')
@@ -142,16 +146,9 @@ class RequirementP1Agent(ContextSourceP1Agent):
 
     def _input(self, observation, step, raw_events):
         prompt, marked, projection, visible = super()._input(observation,step,raw_events)
-        selected = [self._active_records()[t['id']] for t in self.frozen_aliases.values()
-                    if t['kind']=='memory']
-        aliases = {t['id']:a for a,t in self.frozen_aliases.items() if t['kind']=='memory'}
-        groups = self.requirement_state.groups(selected)
-        memberships = {'requirements':[{'requirement':g['requirement'],
-            'aliases':[aliases[key] for key in g['memory_ids']]} for g in groups['requirements']],
-            'general_topic':GENERAL_TOPIC}
-        prompt += ('\n## Fixed requirements and displayed memberships\n'+encode(memberships)+
-            '\nTopics describe what the original task requires; General is for broadly useful or uncertain-scope information. Memberships cover the displayed subset only. Retrieval can omit active records; '
-            'an empty displayed group does not mean its whole task history is empty. '
+        fixed = topics(self.requirement_state.data['catalog'])
+        prompt += ('\n## Fixed task topics\n'+encode(fixed)+
+            '\nTopics identify related work, not evidence or completion. Displayed memory records may be a retrieved subset of the active bank. '
             'Source ranges are selected/inherited event acceptance ordinals, not execution time or proof; '
             '[null,null] means unknown.\n'
             'Memory-entry read/delete targets are the displayed bank at this cycle\'s start; new saves become targets in later cycles when displayed. '
@@ -195,7 +192,7 @@ class RequirementP1Agent(ContextSourceP1Agent):
             self._saving_requirements = assignment(args['requirements'],self.requirement_state.data['catalog'])
         except ValueError as exc:
             return {'status':'invalid_requirements','allowed_requirements':topics(self.requirement_state.data['catalog']),
-                    'general_topic':GENERAL_TOPIC,'error_code':getattr(exc,'reason','invalid_requirements')}
+                    'error_code':getattr(exc,'reason','invalid_requirements')}
         try:
             normalized = deepcopy(call)
             normalized['arguments'].pop('requirements')
@@ -296,4 +293,5 @@ class RequirementP1Agent(ContextSourceP1Agent):
             return report
         finally:
             self._requirement_active = False
+
 

@@ -53,7 +53,7 @@ class ReminderTests(unittest.TestCase):
         tools = {tool['function']['name']:tool['function']
                  for tool in self.p2_requests[0]['tools']}
         browse, source = tools['memory_browse'],tools['memory_read_source']
-        self.assertIn('topic results also include General',browse['description'])
+        self.assertNotIn('General',browse['description'])
         self.assertIn('Records may span pages. Join their parts',browse['description'])
         self.assertIn('page_sequence_complete means all available pages were returned, not that the contents are verified',
                       browse['description'])
@@ -116,8 +116,8 @@ class ReminderTests(unittest.TestCase):
                           'General is for broadly useful or uncertain-scope information',
                           'Browse a shown topic to read its records together with General'):
             self.assertNotIn(redundant,prompt)
-        self.assertIn('Topics describe what the original task requires',request['system'])
-        self.assertIn('General covers broadly useful or uncertain-scope information',request['system'])
+        self.assertIn('Topics describe work in the original task',request['system'])
+        self.assertNotIn('General covers broadly useful or uncertain-scope information',request['system'])
 
     def test_explicit_and_upstream_default_no_intervention_are_distinguished(self):
         self.build()
@@ -418,3 +418,4 @@ class ReminderTests(unittest.TestCase):
 
 if __name__=='__main__':
     unittest.main()
+

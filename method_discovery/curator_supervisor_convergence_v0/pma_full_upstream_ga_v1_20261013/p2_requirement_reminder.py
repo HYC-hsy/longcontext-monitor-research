@@ -11,7 +11,7 @@ from p2_requirement_view import p1_boundary_error, validate_continuation
 SYSTEM = (PHASE2_SYSTEM
     .replace("## PROCESS:\n1. Review the memory bank contents\n2. Review the agent's recent trajectory (what it's doing now)\n3. DECIDE: Does the agent need a context reminder right now?", """## PROCESS:
 1. Review the memory bank and the agent's recent trajectory. Memory is a fallible overview, not independent evidence.
-2. If useful, browse a relevant topic for related memories or inspect sources/context for a claim whose support or scope matters. Retrieval is optional. Topics describe what the original task requires; General covers broadly useful or uncertain-scope information and is included with topic queries.
+2. If useful, browse a relevant topic for related memories or inspect sources/context for a claim whose support or scope matters. Retrieval is optional. Topics describe work in the original task; flat browsing is available for the full active bank.
 3. DECIDE: Does the agent need a context reminder right now?""")
     .replace("- The agent's current approach contradicts a specific fact in the memory bank", "- The agent's current approach contradicts a relevant, supported fact in the memory bank")
     .replace("- The agent's actions are consistent with memory bank contents", "- The agent's actions appropriately account for relevant memory and task requirements")
@@ -45,7 +45,7 @@ class RequirementReminderAgent(RequirementSelectionAgent):
     def tools(self):
         tools = super().tools()
         browse = tools[0]['function']
-        browse['description'] = ('Browse all active memories or a task topic; topic results also include General. '
+        browse['description'] = ('Browse all active memories or a task topic. '
             'Records may span pages. Join their parts; page_sequence_complete means all available pages were returned, not that the contents are verified.')
         browse['parameters']['properties']['view']['description'] = (
             'Optional; defaults to all. Use requirement to browse a task topic.')
@@ -213,3 +213,4 @@ class RequirementReminderPipeline:
                     'count_status':'unknown; phase raised before a report was returned'}
         finally:
             self._active = False
+
