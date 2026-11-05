@@ -22,7 +22,8 @@ def main() -> None:
     parser.add_argument('--research-candidate', choices=(
         'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
         'pos_pma_complement_v1', 'pos_pma_shared_view_v1',
-        'pma_stateful_memory_v1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1'), default='U')
+        'pma_stateful_memory_v1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1',
+        'pma_predictive_f838_v1'), default='U')
     parser.add_argument('--citation-review-gate',choices=('gate-only','gate-one-repair'))
     from .citation_gate_config import STRATEGIES
     parser.add_argument('--citation-review-strategy',choices=STRATEGIES)
