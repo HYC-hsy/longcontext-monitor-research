@@ -20,6 +20,10 @@ from .export_official_evaluator import (COMMIT as OFFICIAL_COMMIT,
                                          export_task, official_members)
 from .prepare_six_task_manifest import (SOURCE_FILES, EVIDENCE_FILES,
                                         _committed_source_sha)
+from .two_task_plan import SCHEMA as TWO_TASK_SCHEMA
+
+
+NATIVE_SCHEMAS = {'pma-ga-live-manifest-v2', TWO_TASK_SCHEMA}
 
 
 def _sha(path: Path) -> str:
@@ -52,6 +56,30 @@ def _stage_verifier(root: Path, task: str, manifest: dict,
 
 def _require_evaluation_state_contract(manifest: dict) -> None:
     """Bind the native SHARED protocol to code and zero-model raw evidence."""
+    if manifest.get('schema') == TWO_TASK_SCHEMA:
+        from .prepare_two_task_manifest import source_identity
+        cert = manifest.get('native_shared_certification')
+        head, sources = source_identity()
+        if (manifest.get('status') != 'prepared_not_executed' or
+                manifest.get('code_commit') != head or
+                manifest.get('source_files_sha256') != sources or
+                manifest.get('harbor_commit') !=
+                '459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc' or
+                not isinstance(cert, dict)):
+            raise RuntimeError('two-task source or lifecycle binding differs')
+        report = Path(cert['preflight_path']).resolve(strict=True)
+        if _sha(report) != cert['preflight_sha256']:
+            raise RuntimeError('two-task preflight bytes changed')
+        checked = json.loads(report.read_text(encoding='utf-8'))
+        if (checked.get('code_commit') != head or
+                checked.get('harbor_commit') != manifest['harbor_commit'] or
+                checked.get('passed') is not True or
+                set(checked.get('fixtures', {})) != {
+                    'rstan-to-pystan', 'nginx-request-logging'} or
+                checked.get('nginx_service_preserved') is not True or
+                checked.get('extra_writer_rejected') is not True):
+            raise RuntimeError('two-task zero-model lifecycle not established')
+        return
     if manifest.get('schema') == 'pma-ga-live-manifest-v2':
         cert = manifest.get('native_shared_certification')
         if (manifest.get('status') != 'prepared_not_executed' or
@@ -226,7 +254,7 @@ def run_live(args) -> dict:
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
     authorized = json.loads(authorization_path.read_text(encoding='utf-8'))
     if (manifest.get('schema') not in {'pma-ga-live-manifest-v1',
-                                       'pma-ga-live-manifest-v2'} or
+                                       *NATIVE_SCHEMAS} or
             manifest.get('execution_authorized') is not False or
             authorized.get('execution_authorized') is not True or
             authorized.get('manifest_sha256') != _sha(manifest_path)):
@@ -275,7 +303,7 @@ def run_live(args) -> dict:
         'authorization_sha256': _sha(authorization_path),
         'audited_code_commit': authorized['audited_code_commit'],
     }
-    if manifest['schema'] == 'pma-ga-live-manifest-v2':
+    if manifest['schema'] in NATIVE_SCHEMAS:
         spec.update(repeat=args.repeat, batch_id=authorized['batch_id'],
                     config_sha256=manifest['config_sha256'],
                     evaluation_protocol='official_shared_v2',
@@ -358,9 +386,9 @@ def run_live(args) -> dict:
             '--disable-verification' if fixture else '--enable-verification',
             '--agent-timeout-multiplier', str(14400 /
                 manifest['assets'][args.task]['native_agent_seconds'])
-                if manifest['schema'] == 'pma-ga-live-manifest-v2' else '16',
+                if manifest['schema'] in NATIVE_SCHEMAS else '16',
             '--verifier-timeout-multiplier', '1']
-        if manifest['schema'] == 'pma-ga-live-manifest-v2':
+        if manifest['schema'] in NATIVE_SCHEMAS:
             command += ['--verifier-import-path',
                 'method_discovery.curator_supervisor_convergence_v0.'
                 'pma_full_upstream_ga_v1_20261013.native_shared_verifier:NativeSharedVerifier']
@@ -377,7 +405,7 @@ def run_live(args) -> dict:
             env.pop(name, None)
         python_roots = [str(repo), str(repo / 'GenericAgent-main'),
                         str(Path(args.bench_root).resolve(strict=True))]
-        if manifest['schema'] == 'pma-ga-live-manifest-v2':
+        if manifest['schema'] in NATIVE_SCHEMAS:
             harbor_source = Path(args.harbor_source_root).resolve(strict=True)
             head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=harbor_source,
                                   capture_output=True, text=True, check=True).stdout.strip()
@@ -389,7 +417,7 @@ def run_live(args) -> dict:
         env['PYTHONPATH'] = os.pathsep.join(python_roots)
         env.update(PMA_HARBOR_SPEC=str(spec_path), PYTHONUTF8='1', PYTHONIOENCODING='utf-8',
                    GA_RUN_ISOLATION=('networked-host-keyed-v1' if
-                       manifest['schema'] == 'pma-ga-live-manifest-v2' else
+                       manifest['schema'] in NATIVE_SCHEMAS else
                        'no-network-unix-inference-v1'),
                    GA_PMA_UPSTREAM_ENABLED='1' if args.condition == 'B' else '0',
                    GA_PMA_CAPTURE_TASK_REQUESTS='1' if args.condition == 'B' else '0',
@@ -451,7 +479,7 @@ def run_live(args) -> dict:
         except BaseException as exc:
             cleanup_errors.append(f'container_cleanup_unknown:{type(exc).__name__}:{exc}')
             remaining = None
-        native_shared = manifest['schema'] == 'pma-ga-live-manifest-v2'
+        native_shared = manifest['schema'] in NATIVE_SCHEMAS
         volumes = _owned_volume_clearance(root) if native_shared else None
         frozen = root / 'archive' / ('agent_end_native.json' if native_shared else
                                      'agent_end_frozen.json')
@@ -507,7 +535,7 @@ def run_live(args) -> dict:
 
 def live_status_success(status: dict) -> bool:
     native = status.get('native_result')
-    native_required = status.get('schema') == 'pma-ga-live-manifest-v2'
+    native_required = status.get('schema') in NATIVE_SCHEMAS
     return (status.get('primary_failure') is None and
             status.get('harbor_return_code') == 0 and
             status.get('cleanup_confirmed') is True and

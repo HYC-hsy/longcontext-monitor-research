@@ -14,6 +14,7 @@ from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_p
     PilotTrialHooks, _atomic, _tree_sha256,
 )
 from .six_task_plan import validate_plan
+from .two_task_plan import SCHEMA as TWO_TASK_SCHEMA, validate_plan as validate_two_tasks
 
 
 def _source_identity(value: str) -> str:
@@ -37,6 +38,64 @@ def _docker_top_pids(output: str) -> set[str]:
     return pids
 
 
+def _nginx_service_only(container: str, output: str, baseline_pids: set[str]) -> bool:
+    """Permit only the task's actual Nginx binary after GA has stopped.
+
+    Docker top reports host PIDs, while /proc inside the container uses its PID
+    namespace. Match the number of new Nginx rows to executable-verified
+    processes; an extra shell, Python, or other writer always fails closed.
+    """
+    lines = output.splitlines()
+    if not lines:
+        return False
+    columns = lines[0].split()
+    if 'PID' not in columns or 'CMD' not in columns:
+        return False
+    pid_col, cmd_col = columns.index('PID'), columns.index('CMD')
+    extra = []
+    for line in lines[1:]:
+        cells = line.split(maxsplit=cmd_col)
+        if len(cells) <= cmd_col:
+            return False
+        if cells[pid_col] not in baseline_pids:
+            extra.append(cells[cmd_col])
+    if not extra or any(not command.startswith(('nginx: master process',
+                                                 'nginx: worker process'))
+                        for command in extra):
+        return False
+    # Linux may deny readlink of an unprivileged worker's /proc/PID/exe even
+    # to container root. Verify the master binary and every worker's kernel
+    # name and parent, rather than trusting its user-controlled argv alone.
+    inventory = (
+        'import json,os,pathlib\n'
+        'rows=[]\n'
+        'for entry in pathlib.Path("/proc").iterdir():\n'
+        ' if not entry.name.isdigit(): continue\n'
+        ' try:\n'
+        '  status=(entry/"status").read_text()\n'
+        '  fields=dict(line.split(":",1) for line in status.splitlines() if ":" in line)\n'
+        '  if fields.get("Name","").strip()!="nginx": continue\n'
+        '  try: exe=os.readlink(entry/"exe")\n'
+        '  except OSError: exe=None\n'
+        '  rows.append({"pid":int(entry.name),"ppid":int(fields["PPid"].strip()),"exe":exe})\n'
+        ' except (OSError,ValueError,KeyError): continue\n'
+        'print(json.dumps(rows))\n'
+    )
+    checked = subprocess.run(['docker', 'exec', container, 'python3', '-c', inventory],
+                             capture_output=True, text=True, timeout=30)
+    if checked.returncode:
+        return False
+    try:
+        rows = json.loads(checked.stdout)
+        masters = {row['pid'] for row in rows if row['exe'] == '/usr/sbin/nginx'}
+        workers = [row for row in rows if row['exe'] is None and
+                   row['ppid'] in masters]
+    except (ValueError, TypeError, KeyError):
+        return False
+    return (len(masters) == 1 and len(rows) == len(extra) and
+            len(workers) == len(extra) - 1)
+
+
 def verify_live_spec(spec: dict) -> None:
     if spec.get('schema') != 'pma-ga-live-run-v1' or spec.get('mode') != 'authorized_live':
         raise RuntimeError('PMA live Harbor spec is not authorized')
@@ -49,6 +108,27 @@ def verify_live_spec(spec: dict) -> None:
     granted = json.loads(authorization.read_text(encoding='utf-8'))
     arms = frozen.get('arms')
     bindings = granted.get('run_bindings')
+    if frozen.get('schema') == TWO_TASK_SCHEMA:
+        if granted.get('manifest_sha256') != spec['manifest_sha256']:
+            raise RuntimeError('two-task approval does not bind manifest bytes')
+        bindings = validate_two_tasks(frozen, granted)
+        identity = {key: spec.get(key) for key in
+                    ('order', 'task', 'repeat', 'condition', 'run_id',
+                     'config_sha256')}
+        matching = [row for row in bindings
+                    if all(row.get(key) == value for key, value in identity.items())
+                    and Path(row['run_root']).resolve() ==
+                    Path(spec['run_root']).resolve()]
+        checkout = Path(__file__).resolve().parents[3]
+        head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=checkout,
+                              capture_output=True, text=True, timeout=10,
+                              check=True).stdout.strip()
+        if (len(matching) != 1 or spec.get('task_id') != spec.get('task') or
+                head != frozen.get('code_commit') or
+                head != granted.get('audited_code_commit') or
+                head != spec.get('audited_code_commit')):
+            raise RuntimeError('two-task run outside exact authorized binding')
+        return
     if frozen.get('schema') == 'pma-ga-live-manifest-v2':
         if granted.get('manifest_sha256') != spec['manifest_sha256']:
             raise RuntimeError('six-task approval does not bind manifest bytes')
@@ -254,8 +334,14 @@ class NativeSharedTrialHooks(PMATrialHooks):
         _atomic(self.archive / 'writer_termination_check.json', {
             'run_id': self.spec['run_id'], 'before': first_top,
             'after': top.stdout, 'docker_top_return_code': top.returncode})
+        extra_pids = (_docker_top_pids(top.stdout) - self.baseline_pids
+                      if top.returncode == 0 else set())
+        service_only = (self.spec['task'] == 'nginx-request-logging' and
+                        bool(extra_pids) and
+                        _nginx_service_only(self.container_id, top.stdout,
+                                            self.baseline_pids))
         if top.returncode or 'agentmain.py' in top.stdout.lower() or (
-                _docker_top_pids(top.stdout) - self.baseline_pids):
+                extra_pids and not service_only):
             raise RuntimeError('native Task writer termination unconfirmed')
         _atomic(self.archive / 'agent_end_native.json', {
             'run_id': self.spec['run_id'], 'container_id': self.container_id,
@@ -263,6 +349,7 @@ class NativeSharedTrialHooks(PMATrialHooks):
             'pma_finalization': clearance.get('pma_finalization'),
             'pma_worker_return_code': clearance.get('worker_return_code'),
             'writers_stopped': True, 'docker_top': top.stdout,
+            'nginx_service_preserved': service_only,
             'baseline_pids': sorted(self.baseline_pids),
             'agent_result_metadata': str(getattr(self.trial.result, 'agent_result', None)),
             'legal_agent_end_required': False})

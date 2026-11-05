@@ -23,6 +23,8 @@ TASKS = {
     "custom-memory-heap-crash": "alexgshaw/custom-memory-heap-crash:20251031",
     "multi-source-data-merger": "alexgshaw/multi-source-data-merger:20251031",
     "large-scale-text-editing": "alexgshaw/large-scale-text-editing:20251031",
+    "rstan-to-pystan": "alexgshaw/rstan-to-pystan:20251031",
+    "nginx-request-logging": "alexgshaw/nginx-request-logging:20251031",
 }
 STAGE = Path(__file__).resolve().parent
 
@@ -85,7 +87,17 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
                      else Path(args.manifest).resolve(strict=True))
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     task = root / "public_task"
-    if not fake_gateway and manifest.get("schema") == "pma-ga-live-manifest-v2":
+    if fake_gateway and args.task in {"rstan-to-pystan", "nginx-request-logging"}:
+        if not getattr(args, 'official_source_git', None):
+            raise RuntimeError('two-task zero-model fixture requires fixed official source')
+        from .six_task_assets import public_members
+        official = Path(args.official_source_git).resolve(strict=True)
+        members = public_members(official, args.task)
+        materialize_public(official, args.task, task,
+                           [{k: v for k, v in row.items() if k != 'raw'}
+                            for row in members])
+    elif not fake_gateway and manifest.get("schema") in {
+            "pma-ga-live-manifest-v2", "pma-ga-live-two-task-v1"}:
         materialize_public(Path(args.official_source_git).resolve(strict=True),
                            args.task, task, manifest["assets"][args.task]["public_members"])
     else:
@@ -104,7 +116,8 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
     source, compose = build_bundle(root / "bundle", ga_stage, runtime,
                                    args.python_home, args.task_profile, None, 15340,
                                    task_network_policy=("official" if not fake_gateway and
-                                       manifest.get("schema") == "pma-ga-live-manifest-v2"
+                                       manifest.get("schema") in {
+                                           "pma-ga-live-manifest-v2", "pma-ga-live-two-task-v1"}
                                        else "isolated"))
     if fake_gateway:
         _offline_gateway(root, runtime, args.python_home)
@@ -143,7 +156,8 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
                   Path(args.task_profile_file).read_bytes()).hexdigest(),
               "worker_private_mounted": "not_yet_inspected",
               "network_mode": ("official_requested" if not fake_gateway and
-                  manifest.get("schema") == "pma-ga-live-manifest-v2"
+                  manifest.get("schema") in {
+                      "pma-ga-live-manifest-v2", "pma-ga-live-two-task-v1"}
                   else "none_requested"),
               "native_evaluator_calls": 0, "fake_provider_only": fake_gateway}
     (root / "archive" / "prepared.json").write_text(
@@ -351,6 +365,7 @@ def main() -> None:
     parser.add_argument("--worker-python", required=True)
     parser.add_argument("--harbor-exe", required=True)
     parser.add_argument("--bench-root", required=True)
+    parser.add_argument("--official-source-git")
     parser.add_argument("--timeout-sec", type=int, default=180)
     parser.add_argument("--execution-authorized", action="store_true")
     parser.add_argument("--multiturn-fixture", action="store_true")
