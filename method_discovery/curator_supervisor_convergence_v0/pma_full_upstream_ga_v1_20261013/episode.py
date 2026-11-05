@@ -179,9 +179,11 @@ class PMAEpisode:
         if self.agent._reset_procedural_on_episode:
             self.agent._memory.procedural.clear()
         self.agent._accumulate_step(step=1, observation=text)
-        # The first call waits for a complete batch of eight actor steps.
-        triggered, reason = False, "awaiting_eight_steps"
+        # Startup uses the ordinary two-phase process on the task alone.
+        # It is separate from the subsequent nonoverlapping eight-step batches.
         self.started = True
+        triggered, reason = True, "task_start"
+        await self.agent._trigger_memory_agent(step_count=1)
         return {"status": "started", "triggered": triggered, "trigger_reason": reason,
                 "initial_envelope_sha256": hashlib.sha256(
                     json.dumps(raw, ensure_ascii=False, sort_keys=True).encode()).hexdigest()}

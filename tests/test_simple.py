@@ -89,4 +89,20 @@ class Tests(unittest.IsolatedAsyncioTestCase):
   self.assertNotIn('coding task',PHASE2_SYSTEM)
   self.assertEqual(a._parse_phase2_response('<context_for_action>hello</context_for_action>'),'hello')
   self.assertIsNone(a._parse_phase2_response('<no_intervention/>'))
+ async def test_startup_before_disjoint_batches(self):
+  import hashlib, os
+  C=ast_class(BASE/'episode.py','PMAEpisode',{'Any':object,'Path':Path,'asyncio':asyncio,'json':json,'hashlib':hashlib,'os':os,'stable_initial_text':lambda x:x})
+  class A:
+   def __init__(self):
+    self._trigger=types.SimpleNamespace(reset=lambda:None); self._accumulated_observations=[]
+    self._reset_status_on_episode=False;self._reset_knowledge_on_episode=False;self._reset_procedural_on_episode=False;self.groups=[]
+   def _accumulate_step(self,step,observation):self._accumulated_observations.append({'step':step,'observation':observation})
+   async def _trigger_memory_agent(self,step_count):self.groups.append((step_count,[x['step'] for x in self._accumulated_observations[1:]]))
+  with tempfile.TemporaryDirectory() as d:
+   a=A();e=C(a,run_id='r',task_id='t',archive=Path(d)/'a')
+   result=await e._task_start({'initial_user_content':'task'})
+   self.assertTrue(result['triggered']);self.assertEqual(a.groups,[(1,[])]);self.assertEqual(e.batch_steps,0)
+   for n in range(1,9):
+    e.last_attempt=n;await e._actor_step({'actor_attempt':n,'step_status':'normal','public_blocks':[],'public_results':[]})
+   self.assertEqual(a.groups,[(1,[]),(8,list(range(1,9)))])
 if __name__=='__main__': unittest.main()
