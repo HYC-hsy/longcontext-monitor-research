@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 
 
 _SCAN = r'''
@@ -41,10 +42,18 @@ print(json.dumps({'pid_namespace': os.readlink('/proc/1/ns/pid'),
 
 
 def scan(container: str, python_bin: str, run_id: str) -> dict:
-    result = subprocess.run(['docker', 'exec', container, python_bin, '-c', _SCAN, run_id],
-                            capture_output=True, text=True, timeout=30)
+    # Docker exec can fail transiently while the engine is otherwise healthy.
+    # Never accept a failed scan as an empty process list: require a fresh,
+    # successful scan before continuing the control-process watch.
+    for attempt in range(3):
+        result = subprocess.run(['docker', 'exec', container, python_bin, '-c', _SCAN, run_id],
+                                capture_output=True, text=True, timeout=30)
+        if result.returncode == 0:
+            break
+        if attempt < 2:
+            time.sleep(0.25)
     if result.returncode:
-        raise RuntimeError('GA control process scan unavailable')
+        raise RuntimeError(f'GA control process scan unavailable (docker exit {result.returncode})')
     data = json.loads(result.stdout)
     if (not isinstance(data.get('pid_namespace'), str) or
             not isinstance(data.get('processes'), list)):
