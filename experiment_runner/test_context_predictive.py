@@ -87,3 +87,21 @@ def test_installed_litellm_anthropic_transform_keeps_signed_continuation():
                for block in assistant["content"])
     assert any(block.get("type") == "tool_result" and block.get("tool_use_id") == "tool-1"
                for row in data["messages"] for block in row["content"])
+
+
+def test_context_candidate_keeps_f838_actor_projection(monkeypatch):
+    from pma_upstream_bridge import UpstreamPMAClient
+
+    client = object.__new__(UpstreamPMAClient)
+    seen = []
+    client.exchange = lambda kind, **fields: seen.append((kind, fields)) or {}
+    monkeypatch.setenv("GA_PMA_UPSTREAM_CANDIDATE", "pma_predictive_context_v1")
+    blocks = [{"type": "text", "text": "visible"},
+              {"type": "tool_use", "id": "tool-1", "name": "probe", "input": {"x": 1}}]
+    results = [{"tool_use_id": "tool-1", "content": "receipt"}]
+    client.actor_step(1, status="normal", public_blocks=blocks,
+                      public_results=results, public_input="framework-visible")
+    assert seen[0][0] == "actor_step"
+    assert seen[0][1]["public_blocks"] is blocks
+    assert seen[0][1]["public_results"] is results
+    assert seen[0][1]["public_input"] == "framework-visible"
