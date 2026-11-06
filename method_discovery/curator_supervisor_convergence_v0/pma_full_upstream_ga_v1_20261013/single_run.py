@@ -112,7 +112,8 @@ def prepare(args: argparse.Namespace) -> dict:
     # Fail before artifacts/profiles, fixture grants or runtime allocation.
     # Never invent timeout/turn budgets to repair a missing configuration.
     if getattr(args, 'research_candidate', 'U') in {
-            'pma_gap_memory_v0', 'pma_gap_evidence_v1', 'pma_predictive_f838_v1'}:
+            'pma_gap_memory_v0', 'pma_gap_evidence_v1', 'pma_predictive_f838_v1',
+            'pma_predictive_context_v1'}:
         if runtime_policy is None:
             raise ValueError('gap candidate requires an explicit runtime policy; '
                              'pass --runtime-policy-file with the approved requested policy')

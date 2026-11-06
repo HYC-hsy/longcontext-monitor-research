@@ -112,8 +112,8 @@ class UpstreamPMAClient:
                              **({'public_blocks': public_blocks,
                                  'public_results': public_results,
                                  'public_input': public_input}
-                                if os.environ.get('GA_PMA_UPSTREAM_CANDIDATE') ==
-                                   'pma_predictive_f838_v1' else {}))
+                                if os.environ.get('GA_PMA_UPSTREAM_CANDIDATE') in
+                                   ('pma_predictive_f838_v1', 'pma_predictive_context_v1') else {}))
 
     def task_end(self, terminal):
         return self.exchange('task_end', terminal=terminal)

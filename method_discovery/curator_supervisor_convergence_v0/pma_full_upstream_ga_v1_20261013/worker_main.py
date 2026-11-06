@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import hashlib
 import inspect
 import json
@@ -39,7 +40,7 @@ def install_transport_audit(agent, archive: Path) -> None:
     original = agent._memory_llm.call
     calls = 0
 
-    async def audited_call(*, prompt, system, tools=None):
+    async def audited_call(*, prompt, system, tools=None, message_history=None):
         nonlocal calls
         calls += 1
         candidate_agent = agent._memory_agent
@@ -47,12 +48,24 @@ def install_transport_audit(agent, archive: Path) -> None:
                  in ('pma_gap_memory_v0', 'pma_gap_evidence_v1') else "bank_management" if tools else "context_decision")
         started = time.time()
         status = "complete"
+        safe_history = copy.deepcopy(message_history or [])
+        for message in safe_history:
+            if isinstance(message, dict):
+                for key in ("thinking_blocks", "_provider_thinking_blocks"):
+                    if key in message:
+                        message[key] = "[provider-private blocks excluded]"
         append_private_audit(archive / "memory_payload.jsonl", {
             "phase": phase, "prompt": prompt, "system": system,
-            "tools": tools, "started_epoch": started,
+            "tools": tools, "message_history": safe_history,
+            "history_transform": (candidate_agent._history_transforms[-1]
+                                  if getattr(candidate_agent, "_history_transforms", None) else None),
+            "started_epoch": started,
             "cycle_step": getattr(candidate_agent, '_step', None), "call_sequence": calls})
         try:
-            response = await original(prompt=prompt, system=system, tools=tools)
+            kwargs = {"prompt": prompt, "system": system, "tools": tools}
+            if message_history is not None:
+                kwargs["message_history"] = message_history
+            response = await original(**kwargs)
             if getattr(agent, '_research_candidate', None) in ('pma_gap_memory_v0', 'pma_gap_evidence_v1'):
                 append_private_audit(archive / 'gap_visible_transport.jsonl', {
                     'phase': phase, 'call_sequence': calls,
@@ -89,7 +102,7 @@ def fake_evidence_gap_arguments(candidate_agent, prompt):
 
 
 async def serve(args: argparse.Namespace) -> None:
-    if args.deadline_epoch is None and args.research_candidate not in ('U', 'V1', 'D1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1', 'pma_predictive_f838_v1'):
+    if args.deadline_epoch is None and args.research_candidate not in ('U', 'V1', 'D1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1', 'pma_predictive_f838_v1', 'pma_predictive_context_v1'):
         raise RuntimeError('uncapped PMA worker requires an eligible candidate identity')
     vendor = Path(__file__).resolve().parent / "vendor" / "pma_89e5c0d"
     sources = (Path(inspect.getfile(MemoryEnabledTerminus2)).resolve(),
@@ -127,10 +140,10 @@ async def serve(args: argparse.Namespace) -> None:
         from harbor.llms.base import LLMResponse
 
         gate_fixture_reviews={}
-        async def offline_memory(*, prompt, system, tools=None):
-            if args.research_candidate == 'pma_predictive_f838_v1':
+        async def offline_memory(*, prompt, system, tools=None, message_history=None):
+            if args.research_candidate in ('pma_predictive_f838_v1', 'pma_predictive_context_v1'):
                 if tools:
-                    calls = ([SimpleNamespace(function=SimpleNamespace(
+                    calls = ([SimpleNamespace(id='offline-call-1', function=SimpleNamespace(
                         name='memory_add', arguments={'content':
                         'Synthetic public result remains available.'}))]
                         if getattr(args, 'fake_memory_update', False) else [])
@@ -278,7 +291,7 @@ def main() -> None:
     parser.add_argument("--citation-review-gate",choices=('gate-only','gate-one-repair'))
     from citation_gate_config import STRATEGIES
     parser.add_argument('--citation-review-strategy',choices=STRATEGIES)
-    parser.add_argument("--research-candidate", choices=("U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0", "pma_gap_evidence_v1", "pma_predictive_f838_v1"), default="U")
+    parser.add_argument("--research-candidate", choices=("U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0", "pma_gap_evidence_v1", "pma_predictive_f838_v1", "pma_predictive_context_v1"), default="U")
     asyncio.run(serve(parser.parse_args()))
 
 

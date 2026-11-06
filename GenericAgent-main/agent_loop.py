@@ -177,7 +177,8 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
             initial_content, turn_offset=turn_offset)
         handler.parent.pma_upstream_bridge = pma_upstream
     pma_predictive = (pma_upstream is not None and
-        os.environ.get('GA_PMA_UPSTREAM_CANDIDATE') == 'pma_predictive_f838_v1')
+        os.environ.get('GA_PMA_UPSTREAM_CANDIDATE') in
+        ('pma_predictive_f838_v1', 'pma_predictive_context_v1'))
     if os.environ.get('GA_PMA_ENABLED') == '1':
         from pma_baseline.runtime import from_environment
         pma = from_environment(initial_content)

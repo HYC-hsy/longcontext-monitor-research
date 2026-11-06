@@ -27,7 +27,8 @@ def code_identity(manifest):
         names = import_module(DRIVER + '.stateful_certification').SOURCE_FILES
     else:
         mod = import_module(DRIVER + '.single_run_certification')
-        names = (mod.PREDICTIVE_SOURCE_FILES if candidate == 'pma_predictive_f838_v1' else
+        names = (mod.CONTEXT_PREDICTIVE_SOURCE_FILES if candidate == 'pma_predictive_context_v1' else
+                 mod.PREDICTIVE_SOURCE_FILES if candidate == 'pma_predictive_f838_v1' else
                  mod.EVIDENCE_GAP_SOURCE_FILES if candidate == 'pma_gap_evidence_v1' else
                  mod.GAP_SOURCE_FILES if candidate == 'pma_gap_memory_v0' else
                  mod.CANDIDATE_SOURCE_FILES if candidate != 'U' else mod.SOURCE_FILES)

@@ -443,6 +443,15 @@ class LiteLLM(BaseLLM):
         # OpenRouter returns "reasoning" field; Anthropic direct returns "reasoning_content"
         reasoning_content = message.get("reasoning_content") or message.get("reasoning")
         tool_calls = message.get("tool_calls")
+        thinking_blocks = message.get("thinking_blocks")
+        if not thinking_blocks:
+            provider_fields = message.get("provider_specific_fields") or {}
+            if isinstance(provider_fields, dict):
+                thinking_blocks = provider_fields.get("thinking_blocks")
+        if thinking_blocks:
+            thinking_blocks = [block.model_dump(exclude_none=True)
+                               if hasattr(block, "model_dump") else dict(block)
+                               for block in thinking_blocks]
 
         # Sometimes the LLM returns a response with a finish reason of "length"
         # This typically means we hit the max_tokens limit, not the context window
@@ -463,6 +472,7 @@ class LiteLLM(BaseLLM):
             completion_token_ids=completion_token_ids,
             logprobs=logprobs,
             tool_calls=tool_calls,
+            thinking_blocks=thinking_blocks,
         )
 
     def _extract_token_ids(self, response) -> tuple[list[int] | None, list[int] | None]:

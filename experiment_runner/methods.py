@@ -48,6 +48,7 @@ _BUILTINS = (
     Method('pma-gap', 'B', 'pma_gap_memory_v0', False, None, True),
     Method('pma-gap-evidence', 'B', 'pma_gap_evidence_v1', False, None, True),
     Method('pma-predictive-f838', 'B', 'pma_predictive_f838_v1', False, None, True),
+    Method('pma-predictive-context', 'B', 'pma_predictive_context_v1', False, None, True),
     Method('pma-v1', 'B', 'V1'), Method('pma-d1', 'B', 'D1'),
     Method('pos', 'P', 'PoS', True),
     Method('pos-citation-fixed', 'P', 'PoS-citation-fixed', True),
