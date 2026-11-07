@@ -18,10 +18,19 @@ BANK_TOOLS = copy.deepcopy(ADD_TOOLS) + [{
     "function": {
         "name": "memory_read",
         "description": "Read all information currently saved in the memory bank.",
-        "parameters": {"type": "object", "properties": {},
+        "parameters": {"type": "object", "properties": {
+            "scope": {"type": "string", "enum": ["all"], "default": "all",
+                      "description": "Read the complete memory bank."}},
                        "additionalProperties": False},
     },
 }]
+BANK_TOOLS[0]["function"]["parameters"]["additionalProperties"] = False
+
+MAX_CONSECUTIVE_TOOL_ERROR_ROUNDS = 3
+
+
+class PMAToolRecoveryExhausted(RuntimeError):
+    """Consecutive error-bearing tool rounds exhausted this wake's recovery."""
 
 
 class ReadContextPredictiveMemoryAgent(ContextPredictiveMemoryAgent):
@@ -111,6 +120,7 @@ class ReadContextPredictiveMemoryAgent(ContextPredictiveMemoryAgent):
         prior = self._p1_prior(user_prompt, new_wake=True)
         self._new_trajectory = None  # A second wake must receive new host input.
         continuing = False
+        error_rounds = 0
         while True:
             try:
                 response = await self.llm.call(prompt=user_prompt, system=PHASE1_SYSTEM,
@@ -121,7 +131,15 @@ class ReadContextPredictiveMemoryAgent(ContextPredictiveMemoryAgent):
                 raise PMAPhaseError("P1", exc) from exc
             operations, called_read = self._record_p1_response(response)
             self._phase1_operations.extend(operations)
-            continuing = continuing or called_read
+            failed = any(not operation.success for operation in operations)
+            error_rounds = error_rounds + 1 if failed else 0
+            if error_rounds >= MAX_CONSECUTIVE_TOOL_ERROR_ROUNDS:
+                error = PMAToolRecoveryExhausted(
+                    f"{error_rounds} consecutive tool-error rounds; P2 not entered")
+                raise PMAPhaseError("P1", error) from error
+            # An invalid call must receive feedback in this wake, even before
+            # the first read. Keep successful add-only behavior unchanged.
+            continuing = continuing or called_read or failed
             if not operations or not continuing:
                 return response
             user_prompt = "Continue."
@@ -162,17 +180,19 @@ class ReadContextPredictiveMemoryAgent(ContextPredictiveMemoryAgent):
         for call_id, name, args in parsed:
             try:
                 if name == "memory_read":
-                    if args:
-                        raise ValueError("memory_read takes no arguments")
+                    if args and args != {"scope": "all"}:
+                        raise ValueError("memory_read accepts only {} or {scope: 'all'}")
                     operation = MemoryOperation(action="read", content=self._format_memory_bank())
                 elif name == "memory_add":
+                    if set(args) != {"content"}:
+                        raise ValueError("memory_add accepts only content")
                     content = args.get("content", "")
                     if not isinstance(content, str) or not content.strip():
                         raise ValueError("memory content must be nonempty text")
                     operation = MemoryOperation(action="add",
                         memory_id=self.memory.save_knowledge(content), content=content)
                 else:
-                    raise ValueError("unsupported tool")
+                    raise ValueError("unsupported tool; available tools: memory_add, memory_read")
             except Exception as exc:
                 operation = MemoryOperation(action=name, success=False, error=str(exc))
             operations.append(operation)

@@ -49,8 +49,11 @@ def test_prompt_schema_and_isolation():
     assert 'expected to be useful within the next 10 turns' in PHASE1_SYSTEM
     assert 'may be useful' not in PHASE1_SYSTEM
     assert [t['function']['name'] for t in BANK_TOOLS] == ['memory_add', 'memory_read']
-    assert BANK_TOOLS[1]['function']['parameters'] == {
-        'type': 'object', 'properties': {}, 'additionalProperties': False}
+    read_schema = BANK_TOOLS[1]['function']['parameters']
+    assert read_schema['type'] == 'object' and not read_schema['additionalProperties']
+    assert set(read_schema['properties']) == {'scope'}
+    assert read_schema['properties']['scope']['enum'] == ['all']
+    assert not read_schema.get('required')
     a = Agent(llm=Script(response()))
     schema = a.get_tools_schema()
     schema[0]['function']['name'] = 'mutated'

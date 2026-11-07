@@ -1,0 +1,10 @@
+# Run from the repository root. Dependencies must be available in the chosen environment.
+# This validation used an isolated test-only dependency directory, /tmp/pma_read_test_deps.
+export STAGE=method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013
+export PYTHONPATH="$STAGE/vendor/pma_89e5c0d/src:$STAGE/vendor/pma_89e5c0d/external/harbor/src:$STAGE:GenericAgent-main:experiment_runner:.:$PYTHONPATH"
+export LITELLM_LOCAL_MODEL_COST_MAP=True
+python -m pytest -q tests experiment_runner/test_context_predictive.py experiment_runner/test_runner_frontend.py experiment_runner/test_runtime_policy.py experiment_runner/test_runtime_compatibility.py experiment_runner/test_policy_evidence.py experiment_runner/test_runtime_integration.py experiment_runner/test_runtime_reuse.py experiment_runner/test_dataset_catalog.py experiment_runner/test_export_ga_visible_audit.py experiment_runner/test_evaluation_cache.py
+python -m compileall -q tests "$STAGE/vendor/pma_89e5c0d/src/memory_agent/memory/read_context_predictive_memory_agent.py"
+git diff --check
+
+# No model, provider, Docker, or real task calls are part of these commands.
