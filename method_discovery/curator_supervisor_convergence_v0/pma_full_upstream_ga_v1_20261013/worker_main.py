@@ -102,7 +102,7 @@ def fake_evidence_gap_arguments(candidate_agent, prompt):
 
 
 async def serve(args: argparse.Namespace) -> None:
-    if args.deadline_epoch is None and args.research_candidate not in ('U', 'V1', 'D1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1', 'pma_predictive_f838_v1', 'pma_predictive_context_v1'):
+    if args.deadline_epoch is None and args.research_candidate not in ('U', 'V1', 'D1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1', 'pma_predictive_f838_v1', 'pma_predictive_context_v1', 'pma_predictive_read_context_v1'):
         raise RuntimeError('uncapped PMA worker requires an eligible candidate identity')
     vendor = Path(__file__).resolve().parent / "vendor" / "pma_89e5c0d"
     sources = (Path(inspect.getfile(MemoryEnabledTerminus2)).resolve(),
@@ -140,10 +140,14 @@ async def serve(args: argparse.Namespace) -> None:
         from harbor.llms.base import LLMResponse
 
         gate_fixture_reviews={}
+        read_context_fake_calls = 0
         async def offline_memory(*, prompt, system, tools=None, message_history=None):
-            if args.research_candidate in ('pma_predictive_f838_v1', 'pma_predictive_context_v1'):
+            nonlocal read_context_fake_calls
+            read_context_fake_calls += 1
+            if args.research_candidate in ('pma_predictive_f838_v1', 'pma_predictive_context_v1', 'pma_predictive_read_context_v1'):
                 if tools:
-                    calls = ([SimpleNamespace(id='offline-call-1', function=SimpleNamespace(
+                    calls = ([SimpleNamespace(id=(f'offline-call-{read_context_fake_calls}'
+                        if args.research_candidate == 'pma_predictive_read_context_v1' else 'offline-call-1'), function=SimpleNamespace(
                         name='memory_add', arguments={'content':
                         'Synthetic public result remains available.'}))]
                         if getattr(args, 'fake_memory_update', False) else [])
@@ -238,6 +242,7 @@ async def serve(args: argparse.Namespace) -> None:
                 pass
     reason = "task_end"
     active = None
+    failure = None
     try:
         while not episode.ended:
             if stopped.is_set() or (private / "stop.request").exists():
@@ -261,6 +266,11 @@ async def serve(args: argparse.Namespace) -> None:
             await asyncio.sleep(0.05)
     except BaseException as exc:
         reason = f"worker_error:{type(exc).__name__}"
+        failure = {"error_type": type(exc).__name__,
+                   "phase": getattr(exc, "phase", None),
+                   "cause_type": getattr(exc, "error_type", None),
+                   **({"decision_produced": False}
+                      if getattr(exc, "phase", None) in ("P1", "P2") else {})}
         raise
     finally:
         if not episode.ended:
@@ -275,7 +285,7 @@ async def serve(args: argparse.Namespace) -> None:
         (private / "worker_exit.json").write_text(json.dumps({
             "run_id": args.run_id, "task_id": args.task_id,
             "task_end_saved": episode.ended and reason == "task_end",
-            "reason": reason, "ended_epoch": time.time()}, sort_keys=True), encoding="utf-8")
+            "reason": reason, "failure": failure, "ended_epoch": time.time()}, sort_keys=True), encoding="utf-8")
 
 
 def main() -> None:
@@ -291,7 +301,7 @@ def main() -> None:
     parser.add_argument("--citation-review-gate",choices=('gate-only','gate-one-repair'))
     from citation_gate_config import STRATEGIES
     parser.add_argument('--citation-review-strategy',choices=STRATEGIES)
-    parser.add_argument("--research-candidate", choices=("U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0", "pma_gap_evidence_v1", "pma_predictive_f838_v1", "pma_predictive_context_v1"), default="U")
+    parser.add_argument("--research-candidate", choices=("U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0", "pma_gap_evidence_v1", "pma_predictive_f838_v1", "pma_predictive_context_v1", "pma_predictive_read_context_v1"), default="U")
     asyncio.run(serve(parser.parse_args()))
 
 

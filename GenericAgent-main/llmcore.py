@@ -23,6 +23,23 @@ def _public_response_blocks(blocks):
             return None
     return result
 
+def _public_response_provenance(blocks, synthesized=False):
+    """Audit-only origins for postprocessed GA-visible blocks; never prompt data."""
+    origins = []
+    for index, block in enumerate(blocks):
+        if block.get('type') not in ('text', 'tool_use'):
+            continue
+        synthetic = synthesized and index == 1
+        origins.append({
+            'public_block_index': len(origins),
+            'origin': 'ga_synthetic_summary' if synthetic else 'provider_native',
+            'provider_block_index': None if synthetic else index - int(synthesized and index > 1),
+            **({'source_kind': 'provider_thinking',
+                'transformation': '_ensure_text_block:first_line_max60'} if synthetic else {}),
+        })
+    return {'schema': 'ga-visible-provenance-v1',
+            'visibility_scope': 'ga_visible_postprocessed', 'blocks': origins}
+
 def _native_user_content(combined_content, tool_results, pending_tool_ids):
     """Mirror NativeToolClient's next user block assembly without mutating it."""
     combined_content = copy.deepcopy(combined_content)
@@ -155,7 +172,9 @@ def trim_messages_history(history, sess):
     compress_history_tags(history, interval=getattr(sess, 'cut_msg_interval', 5))
     print(f'[Debug] Current context: {cost()} chars, {len(history)} messages.')
     if cost() <= cap:
-        if observing: _session_research_emit(sess, 'history_transform_finished', {**before, 'changed': False}, history_transform_id=transform_id)
+        if observing:
+            after = {'message_count': len(history), 'bytes': cost(), 'sha256': _sha256_json(history)}
+            _session_research_emit(sess, 'history_transform_finished', {**after, 'changed': after['sha256'] != before['sha256']}, history_transform_id=transform_id)
         return
     compress_history_tags(history, keep_recent=4, force=True)
     if cost() <= target:
@@ -1483,6 +1502,7 @@ class NativeClaudeSession(BaseSession):
             except BaseException:
                 with self.lock: self.history = prior_history
                 raise
+        _injected = None
         if content_blocks and (_injected := _ensure_text_block(content_blocks)):
             try:
                 yield _injected
@@ -1514,6 +1534,7 @@ class NativeClaudeSession(BaseSession):
         response = MockResponse(thinking, content, tool_calls, str(content_blocks))
         response.complete_response_accepted = bool(strict and self.last_response_acceptance == 'complete')
         response.public_blocks = _public_response_blocks(content_blocks)
+        response.public_blocks_provenance = _public_response_provenance(content_blocks, bool(_injected))
         return response
 
     def ask_stateless(self, msg):

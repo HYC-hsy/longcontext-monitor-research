@@ -75,7 +75,9 @@ def trim_messages_history(history, sess):
     compress_history_tags(history, interval=getattr(sess, 'cut_msg_interval', 5))
     print(f'[Debug] Current context: {cost()} chars, {len(history)} messages.')
     if cost() <= cap:
-        if observing: _research_emit('history_transform_finished', {**before, 'changed': False}, history_transform_id=transform_id)
+        if observing:
+            after = {'message_count': len(history), 'bytes': cost(), 'sha256': _sha256_json(history)}
+            _research_emit('history_transform_finished', {**after, 'changed': after['sha256'] != before['sha256']}, history_transform_id=transform_id)
         return
     compress_history_tags(history, keep_recent=4, force=True)
     if cost() <= target:

@@ -178,7 +178,7 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
         handler.parent.pma_upstream_bridge = pma_upstream
     pma_predictive = (pma_upstream is not None and
         os.environ.get('GA_PMA_UPSTREAM_CANDIDATE') in
-        ('pma_predictive_f838_v1', 'pma_predictive_context_v1'))
+        ('pma_predictive_f838_v1', 'pma_predictive_context_v1', 'pma_predictive_read_context_v1'))
     if os.environ.get('GA_PMA_ENABLED') == '1':
         from pma_baseline.runtime import from_environment
         pma = from_environment(initial_content)
@@ -606,6 +606,7 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                         commands=[json.dumps(call, ensure_ascii=False, default=json_default)
                                   for call in tool_calls],
                         **({'public_blocks': response.public_blocks,
+                            'public_blocks_provenance': getattr(response, 'public_blocks_provenance', None),
                             'public_input': pma_prepared_input} if pma_predictive else {}))
                 break
             next_prompts.add(handler._done_hooks.pop(0))
@@ -643,6 +644,7 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
             if pma_predictive:
                 pma_upstream.actor_step(
                     turn, status=step_status, public_blocks=response.public_blocks,
+                    public_blocks_provenance=getattr(response, 'public_blocks_provenance', None),
                     public_input=pma_prepared_input,
                     public_results=_native_user_content(
                         [{'type': 'text', 'text': next_prompt}], tool_results,

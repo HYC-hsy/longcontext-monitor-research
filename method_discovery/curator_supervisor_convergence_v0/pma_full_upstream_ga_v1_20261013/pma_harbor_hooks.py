@@ -379,11 +379,12 @@ class NativeSharedTrialHooks(PMATrialHooks):
                 ('pma-gap-evidence-v1' if self.spec['research_candidate'] ==
                  'pma_gap_evidence_v1' else 'pma-gap-memory-v0')):
             raise RuntimeError('gap diagnostic Harbor runtime policy not effective')
-        if self.spec.get('research_candidate') in ('pma_predictive_f838_v1', 'pma_predictive_context_v1') and (
+        if self.spec.get('research_candidate') in ('pma_predictive_f838_v1', 'pma_predictive_context_v1', 'pma_predictive_read_context_v1') and (
                 policy is None or self.trial._agent_timeout_sec != expected_agent or
                 self.trial._verifier_timeout_sec != expected_verifier or
                 getattr(self.trial.agent, 'condition_id', None) != (
-                    'pma-predictive-context-v1' if self.spec['research_candidate'] ==
+                    'pma-predictive-read-context-v1' if self.spec['research_candidate'] ==
+                    'pma_predictive_read_context_v1' else 'pma-predictive-context-v1' if self.spec['research_candidate'] ==
                     'pma_predictive_context_v1' else 'pma-predictive-f838-v1')):
             raise RuntimeError('predictive PMA Harbor runtime policy not effective')
         if policy is not None and (

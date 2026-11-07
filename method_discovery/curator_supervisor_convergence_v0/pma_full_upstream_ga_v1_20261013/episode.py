@@ -50,7 +50,7 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
     from citation_gate_config import validate_gate,validate_strategy
     validate_gate(citation_review_gate,research_candidate)
     review_strategy=validate_strategy(citation_review_gate,citation_review_strategy)
-    if research_candidate not in {"U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0", "pma_gap_evidence_v1", "pma_predictive_f838_v1", "pma_predictive_context_v1"}:
+    if research_candidate not in {"U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0", "pma_gap_evidence_v1", "pma_predictive_f838_v1", "pma_predictive_context_v1", "pma_predictive_read_context_v1"}:
         raise ValueError("unknown research candidate")
     if memory_profile is not None:
         if (memory_profile.get("provider"), memory_profile.get("api_mode"),
@@ -79,8 +79,10 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
     )
     if agent._llm is not actor:
         raise RuntimeError("upstream actor backend was not disabled")
-    if research_candidate in {"pma_predictive_f838_v1", "pma_predictive_context_v1"}:
-        if research_candidate == "pma_predictive_context_v1":
+    if research_candidate in {"pma_predictive_f838_v1", "pma_predictive_context_v1", "pma_predictive_read_context_v1"}:
+        if research_candidate == "pma_predictive_read_context_v1":
+            from memory_agent.memory.read_context_predictive_memory_agent import ReadContextPredictiveMemoryAgent as PredictiveMemoryAgent
+        elif research_candidate == "pma_predictive_context_v1":
             from memory_agent.memory.context_predictive_memory_agent import ContextPredictiveMemoryAgent as PredictiveMemoryAgent
         else:
             from memory_agent.memory.predictive_memory_agent import MemoryAgent as PredictiveMemoryAgent
@@ -291,6 +293,8 @@ class PMAEpisode:
         self.agent._pending_injection = None
         self.agent._injection_used = False
         self.agent._task_description = text
+        if getattr(self.agent, "_research_candidate", None) == "pma_predictive_read_context_v1":
+            self.agent._memory_agent.set_phase1_context(task=text, trajectory="")
         if getattr(self.agent, "_research_candidate", None) in {"pma_gap_memory_v0", "pma_gap_evidence_v1"}:
             self.agent._memory_agent.task = text
         if hasattr(self.agent._memory, "register_leaf"):
@@ -311,7 +315,7 @@ class PMAEpisode:
                 else:
                     entries.clear()
         self.agent._accumulate_step(step=1, observation=text)
-        if getattr(self.agent, "_research_candidate", None) in {"pma_predictive_f838_v1", "pma_predictive_context_v1"}:
+        if getattr(self.agent, "_research_candidate", None) in {"pma_predictive_f838_v1", "pma_predictive_context_v1", "pma_predictive_read_context_v1"}:
             self.started = True
             await self.agent._trigger_memory_agent(step_count=1)
             return {"status": "started", "triggered": True,
@@ -355,7 +359,7 @@ class PMAEpisode:
                 or attempt <= self.last_completed_attempt):
             raise ValueError("actor step does not match active attempt")
         status = event.get("step_status")
-        if getattr(self.agent, "_research_candidate", None) in {"pma_predictive_f838_v1", "pma_predictive_context_v1"}:
+        if getattr(self.agent, "_research_candidate", None) in {"pma_predictive_f838_v1", "pma_predictive_context_v1", "pma_predictive_read_context_v1"}:
             if status in {"provider_cancelled", "completed"}:
                 self.last_completed_attempt = attempt
                 return {"status": "skipped", "reason": status, "actor_attempt": attempt}
@@ -479,6 +483,11 @@ class PMAEpisode:
         self.batch_steps += 1
         triggered = self.batch_steps == 8
         if triggered:
+            if getattr(self.agent, "_research_candidate", None) == "pma_predictive_read_context_v1":
+                trajectory = "\n\n".join(self.agent._format_step_entry(entry)
+                    for entry in self.agent._accumulated_observations[-self.batch_steps:])
+                self.agent._memory_agent.set_phase1_context(
+                    task=self.agent._task_description, trajectory=trajectory)
             await self.agent._trigger_memory_agent(step_count=attempt)
             self.batch_steps = 0
         self.last_completed_attempt = attempt
@@ -509,7 +518,7 @@ class PMAEpisode:
             raise
         result = {"status": "saved", "terminal": terminal,
                   "actor_attempts": self.last_attempt}
-        if getattr(self.agent, "_research_candidate", None) in {"pma_predictive_f838_v1", "pma_predictive_context_v1"}:
+        if getattr(self.agent, "_research_candidate", None) in {"pma_predictive_f838_v1", "pma_predictive_context_v1", "pma_predictive_read_context_v1"}:
             result.update({"unprocessed_tail_steps": self.batch_steps,
                            "unprocessed_tail_attempts": [entry["step"] for entry in
                             self.agent._accumulated_observations[-self.batch_steps:]]

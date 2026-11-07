@@ -104,16 +104,17 @@ class UpstreamPMAClient:
 
     def actor_step(self, attempt, *, status, response='', commands=(), observation='',
                    request_event_id=None, public_blocks=None, public_results=None,
-                   public_input=None):
+                   public_input=None, public_blocks_provenance=None):
         return self.exchange('actor_step', actor_attempt=attempt, step_status=status,
                              response=response, commands=list(commands),
                              observation=observation,
                              request_event_id=request_event_id,
                              **({'public_blocks': public_blocks,
+                                 'public_blocks_provenance': public_blocks_provenance,
                                  'public_results': public_results,
                                  'public_input': public_input}
                                 if os.environ.get('GA_PMA_UPSTREAM_CANDIDATE') in
-                                   ('pma_predictive_f838_v1', 'pma_predictive_context_v1') else {}))
+                                   ('pma_predictive_f838_v1', 'pma_predictive_context_v1', 'pma_predictive_read_context_v1') else {}))
 
     def task_end(self, terminal):
         return self.exchange('task_end', terminal=terminal)

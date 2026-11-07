@@ -180,6 +180,7 @@ def _require_evaluation_state_contract(manifest: dict) -> None:
                                                CANDIDATE_SOURCE_FILES, GAP_SOURCE_FILES,
                                                EVIDENCE_GAP_SOURCE_FILES, PREDICTIVE_SOURCE_FILES,
                                                CONTEXT_PREDICTIVE_SOURCE_FILES,
+                                               READ_CONTEXT_PREDICTIVE_SOURCE_FILES,
                                                source_identity, verify_evidence)
         cert = manifest.get('native_shared_certification')
         checkout = STAGE.parents[2]
@@ -211,7 +212,8 @@ def _require_evaluation_state_contract(manifest: dict) -> None:
                     cert.get('evidence') != verify_stateful_evidence(evidence)):
                 raise RuntimeError('stateful same-run native certification differs')
             return
-        expected_files = (CONTEXT_PREDICTIVE_SOURCE_FILES if research == 'pma_predictive_context_v1' else
+        expected_files = (READ_CONTEXT_PREDICTIVE_SOURCE_FILES if research == 'pma_predictive_read_context_v1' else
+                          CONTEXT_PREDICTIVE_SOURCE_FILES if research == 'pma_predictive_context_v1' else
                           PREDICTIVE_SOURCE_FILES if research == 'pma_predictive_f838_v1' else
                           EVIDENCE_GAP_SOURCE_FILES if research == 'pma_gap_evidence_v1' else
                           GAP_SOURCE_FILES if research == 'pma_gap_memory_v0' else
@@ -223,7 +225,8 @@ def _require_evaluation_state_contract(manifest: dict) -> None:
                     candidate=research is not None, gap=research == 'pma_gap_memory_v0',
                     evidence_gap=research == 'pma_gap_evidence_v1',
                     predictive=research == 'pma_predictive_f838_v1',
-                    predictive_context=research == 'pma_predictive_context_v1')):
+                    predictive_context=research == 'pma_predictive_context_v1',
+                    predictive_read_context=research == 'pma_predictive_read_context_v1')):
             raise RuntimeError('single-run native lifecycle source certification differs')
         evidence = (checkout / cert.get('evidence_path', '')).resolve(strict=True)
         if (not evidence.is_relative_to(checkout) or
@@ -828,6 +831,7 @@ def run_live(args) -> dict:
                       manifest.get('config', {}).get('task_turns_max', 300)),
                   'llm_config_name': args.task_profile,
                   'condition_id': ('stateful-memory-v1' if stateful else
+                                   'pma-predictive-read-context-v1' if candidate == 'pma_predictive_read_context_v1' else
                                    'pma-predictive-context-v1' if candidate == 'pma_predictive_context_v1' else
                                    'pma-predictive-f838-v1' if candidate == 'pma_predictive_f838_v1' else
                                    'pma-gap-evidence-v1' if candidate == 'pma_gap_evidence_v1' else
@@ -1122,7 +1126,7 @@ def main() -> None:
         'U', 'V1', 'D1', 'PoS', 'PoS-citation-fixed',
         'pos_pma_complement_v1', 'pos_pma_shared_view_v1',
         'pma_stateful_memory_v1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1',
-        'pma_predictive_f838_v1', 'pma_predictive_context_v1'), default='U')
+        'pma_predictive_f838_v1', 'pma_predictive_context_v1', 'pma_predictive_read_context_v1'), default='U')
     parser.add_argument('--stateful-fake-replies')
     parser.add_argument('--task-profile', default='native_claude_cc_vibe_opus48')
     parser.add_argument('--pma-profile-file')

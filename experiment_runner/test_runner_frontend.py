@@ -54,7 +54,8 @@ class FakeBackend:
                 {'native_agent_seconds': 900, 'native_verifier_seconds': 900},
                 {'task_turns_max': (None if args.research_candidate in {
                     'pma_stateful_memory_v1', 'pma_gap_memory_v0', 'pma_gap_evidence_v1',
-                    'pma_predictive_f838_v1', 'pma_predictive_context_v1'} else 300)})
+                    'pma_predictive_f838_v1', 'pma_predictive_context_v1',
+                    'pma_predictive_read_context_v1'} else 300)})
             for key in ('native_context_policy', 'research_capture_policy'):
                 value = getattr(args, key, 'required')
                 single[key] = value

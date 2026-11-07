@@ -7,7 +7,16 @@ import json
 
 from .ga_context_history import GAHistoryIntegrityError, prepare_history
 from .predictive_memory_agent import BANK_TOOLS, MemoryAgent as PredictiveMemoryAgent
-from .predictive_memory_agent import PHASE1_SYSTEM, PHASE2_SYSTEM
+from .predictive_memory_agent import PHASE1_SYSTEM, PHASE2_SYSTEM, MemoryAgentResult
+
+
+class PMAPhaseError(GAHistoryIntegrityError):
+    """Failed phases are not decisions; cross both upstream silence handlers."""
+
+    def __init__(self, phase, error):
+        self.phase = phase
+        self.error_type = type(error).__name__
+        super().__init__(f"{phase} failed ({self.error_type}); no decision produced")
 
 
 class ContextPredictiveMemoryAgent(PredictiveMemoryAgent):
@@ -113,8 +122,32 @@ class ContextPredictiveMemoryAgent(PredictiveMemoryAgent):
         return operations
 
     async def process(self, observation, step_count=0):
-        result = await super().process(observation, step_count)
-        # Provider-private reasoning remains in opaque continuation state only.
-        result.reasoning_phase1 = None
-        result.reasoning_phase2 = None
-        return result
+        # Keep the predictive prompts, operations and decision parser unchanged.
+        # Unlike its historical best-effort process, neither phase may fail into
+        # a valid no-intervention result. BaseException also crosses the host's
+        # upstream except-Exception handler; cancellation remains untouched.
+        try:
+            phase1_prompt = self._build_phase1_prompt(observation, step_count)
+            response1 = await self._call_llm_phase1(phase1_prompt)
+            raw1 = getattr(response1, 'content', None)
+            operations = self._execute_tool_calls(response1)
+        except Exception as exc:
+            raise PMAPhaseError("P1", exc) from exc
+        try:
+            phase2_prompt = self._build_phase2_prompt(observation, step_count)
+            response2 = await self._call_llm_phase2(phase2_prompt)
+            raw2 = getattr(response2, 'content', None) or ""
+            context_for_action = self._parse_phase2_response(raw2)
+        except Exception as exc:
+            raise PMAPhaseError("P2", exc) from exc
+        return MemoryAgentResult(
+            operations=operations,
+            should_inject=context_for_action is not None,
+            context_for_action=context_for_action,
+            raw_response_phase1=raw1,
+            raw_response_phase2=raw2,
+            reasoning_phase1=None,
+            reasoning_phase2=None,
+            user_prompt_phase1=phase1_prompt,
+            user_prompt_phase2=phase2_prompt,
+        )

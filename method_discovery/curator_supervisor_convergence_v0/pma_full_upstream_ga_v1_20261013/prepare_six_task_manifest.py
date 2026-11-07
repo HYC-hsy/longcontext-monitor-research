@@ -261,6 +261,9 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
         if candidate == 'pma_predictive_f838_v1':
             method.update(conditions={'B': 'GA_plus_predictive_PMA_f838_v1'},
                           task_turns_max=None, agent_wall_seconds=None)
+        if candidate == 'pma_predictive_read_context_v1':
+            method.update(conditions={'B': 'GA_plus_predictive_PMA_read_context_v1'},
+                          task_turns_max=None, agent_wall_seconds=None)
         if candidate == 'pma_predictive_context_v1':
             method.update(conditions={'B': 'GA_plus_predictive_PMA_context_v1'},
                           task_turns_max=None, agent_wall_seconds=None)
@@ -377,7 +380,8 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
                                  gap=research == 'pma_gap_memory_v0',
                                  evidence_gap=research == 'pma_gap_evidence_v1',
                                  predictive=research == 'pma_predictive_f838_v1',
-                                 predictive_context=research == 'pma_predictive_context_v1')),
+                                 predictive_context=research == 'pma_predictive_context_v1',
+                                 predictive_read_context=research == 'pma_predictive_read_context_v1')),
                          'evidence_path': evidence.relative_to(checkout).as_posix(),
                          'evidence': (verify_evidence(evidence) if stateful else
                              verify_evidence(evidence, research_candidate=research,

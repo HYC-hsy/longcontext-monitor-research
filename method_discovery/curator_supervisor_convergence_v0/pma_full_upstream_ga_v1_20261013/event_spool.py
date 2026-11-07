@@ -130,6 +130,16 @@ class EventDispatcher:
             except Exception as exc:
                 # Do not expose the bank, prompts, raw errors or credentials to GA.
                 response = {"status": "error", "error_type": type(exc).__name__}
+            except BaseException as exc:
+                # Fatal phase/history failures must still unblock an uncapped
+                # actor bridge. Persist only a safe failure receipt, then keep
+                # the original fail-stop/cancellation semantics in the worker.
+                _atomic_json(self.responses / path.name, {
+                    "status": "error", "error_type": type(exc).__name__,
+                    "run_id": self.episode.run_id, "task_id": self.episode.task_id,
+                    "event_id": request["event_id"]})
+                self._processed.add(path.name)
+                raise
             if self.deadline_epoch is not None and time.time() >= self.deadline_epoch:
                 with (self.episode.archive / "late_results.jsonl").open(
                         "a", encoding="utf-8") as stream:
