@@ -1,0 +1,16 @@
+# Continuous-context input comparison: four real episodes
+
+Executed code: `b0a4b5140f23fa06ab0ac4bf79f86803e9b1fe9f` (only Windows test-path normalization relative to `41be615b9ad769159ea7ec1242f5656847224fb5`). Dataset: `2fd12b88aafdd04a52c298e3940bcb189f9766d6`; native Harbor: `459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc`. All four slots used `agent_timeout=uncapped`, `task_turns=uncapped`, `verifier_timeout=official`, and the same configured Task/PMA model identity. Runs were serial, isolated, and each launched once.
+
+| Slot | Method / task | Run ID | Native tests | Reward | Actor steps | P1 / P2 logical calls | Memory operations | Final knowledge entries | Reminders queued |
+| --- | --- | --- | --- | ---: | ---: | ---: | --- | ---: | ---: |
+| 01 | context / rstan-to-pystan | `pma-45ba773d2e944956` | 5/6 | 0.0 | 28 | 4 / 4 | 4 adds | 4 | 2 |
+| 02 | read-context / rstan-to-pystan | `pma-8ee0e06ea7ac48ea` | 3/6 | 0.0 | 44 | 11 / 6 | 8 adds, 1 failed read, 1 unsupported tool | 8 | 4 |
+| 03 | context / nginx-request-logging | `pma-145fd99bd41f4d82` | 8/8 | 1.0 | 9 | 2 / 2 | 2 adds | 2 | 0 |
+| 04 | read-context / nginx-request-logging | `pma-48d554bad2774bad` | 8/8 | 1.0 | 12 | 2 / 2 | 2 adds | 2 | 0 |
+
+The read-context rstan run attempted `memory_read` with arguments although that tool takes none, so the read failed; it also attempted unsupported `code_run`. These are observed tool/protocol events, not successful retrieval. Reminders **queued** are not automatically counted as delivered: the queue events record `input_sent=false`; exact subsequent actor-request delivery requires separate cross-event audit. The published trajectories retain those events and request bodies. This report does not score knowledge correctness or reminder helpfulness; four single episodes do not establish a general advantage. Task-model usage is recorded in `task/research_events.jsonl`; PMA token/cost totals and dollar cost are not verified here and remain unknown.
+
+Target-environment tests: initial imports failed because the test process lacked repository paths; after correcting `PYTHONPATH`, 102/104 passed and two Windows separator assertions failed. The two test-only path normalizations yielded 104/104. First prepare failed while Docker Desktop was stopped; after starting the existing engine, prepare succeeded. First real launcher attempt rejected a stale GA-source path **before Agent startup or model calls**; it is preserved in the package. The corrected private config was used for a new selection. All four final launchers exited 0, native evaluation reports were present, and owned cleanup was confirmed. No failed/partial episode was silently rerun.
+
+The ZIP is a **redacted visible projection**, not raw HTTP bytes or a restorable private run. It includes full task-visible events, P1/P2 host events and requests, memory snapshots, effective policies, evaluation summaries, failures and cleanup evidence. `SOURCE_MAP.json` maps public files to local originals' size and SHA-256; `FIELD_EXCLUSIONS.json` records excluded fields. Credentials, full profiles, private endpoints, provider thinking/signatures, hidden verifier bodies and task workspaces are excluded. Local private originals remain unchanged.
