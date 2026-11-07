@@ -17,10 +17,8 @@ BANK_TOOLS = copy.deepcopy(ADD_TOOLS) + [{
     "type": "function",
     "function": {
         "name": "memory_read",
-        "description": "Read all information currently saved in the memory bank.",
-        "parameters": {"type": "object", "properties": {
-            "scope": {"type": "string", "enum": ["all"], "default": "all",
-                      "description": "Read the complete memory bank."}},
+        "description": "Read all information currently saved in the memory bank. Takes no arguments.",
+        "parameters": {"type": "object", "properties": {},
                        "additionalProperties": False},
     },
 }]
@@ -180,8 +178,8 @@ class ReadContextPredictiveMemoryAgent(ContextPredictiveMemoryAgent):
         for call_id, name, args in parsed:
             try:
                 if name == "memory_read":
-                    if args and args != {"scope": "all"}:
-                        raise ValueError("memory_read accepts only {} or {scope: 'all'}")
+                    if args:
+                        raise ValueError("memory_read takes no arguments; call it with {}")
                     operation = MemoryOperation(action="read", content=self._format_memory_bank())
                 elif name == "memory_add":
                     if set(args) != {"content"}:

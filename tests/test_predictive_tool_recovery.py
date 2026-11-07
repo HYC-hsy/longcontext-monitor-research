@@ -43,9 +43,11 @@ def test_unknown_tool_recovers_before_p2_without_task_execution(tmp_path):
 
 @pytest.mark.parametrize('name,args', [
     ('memory_read', {'query': 'must not filter'}),
+    ('memory_read', {'scope': 'all'}),
     ('memory_read', {'scope': 'recent'}),
     ('memory_read', {'scope': 'all', 'query': 'unsupported'}),
     ('memory_read', {'_noargs': 'different'}),
+    ('memory_read', {'_noargs': 'unused'}),
     ('memory_read', {'_noargs': None}),
     ('memory_read', {'_noargs': 'unused', 'query': 'mixed'}),
     ('memory_add', {'content': 'must not save', 'extra': True}),
@@ -82,7 +84,7 @@ def test_error_limit_fails_closed_with_all_native_receipts():
 
 @pytest.mark.parametrize('success_call', [
     call('memory_add', {'content': 'valid'}, 'valid'),
-    call('memory_read', {'scope': 'all'}, 'valid'),
+    call('memory_read', {}, 'valid'),
 ])
 def test_error_budget_is_consecutive_not_cumulative(success_call):
     replies = [response(call('unknown', {}, f'bad-{i}')) for i in range(2)]
@@ -96,7 +98,7 @@ def test_error_budget_is_consecutive_not_cumulative(success_call):
 
 def test_successful_reads_are_not_capped_by_error_recovery_limit():
     count = MAX_CONSECUTIVE_TOOL_ERROR_ROUNDS + 2
-    a = Agent(llm=Script(*(response(call('memory_read', {'scope': 'all'}, f'read-{i}'))
+    a = Agent(llm=Script(*(response(call('memory_read', {}, f'read-{i}'))
                            for i in range(count)), response()))
     result = run(a)
     assert len(result.operations) == count and all(o.success for o in result.operations)
@@ -147,12 +149,13 @@ def test_object_native_envelope_is_validated_before_any_write(ident, arguments):
     assert not a.memory.knowledge and len(a.llm.calls) == 1
 
 
-@pytest.mark.parametrize('read_args', [{}, {'scope': 'all'}])
+@pytest.mark.parametrize('nonempty_bank', [False, True])
 @pytest.mark.parametrize('invalid_call', [
     ('code_run', {'script': 'DO NOT EXECUTE'}),
     ('memory_read', {'_noargs': 'unused'}),
+    ('memory_read', {'scope': 'all'}),
 ])
-def test_real_litellm_anthropic_tools_and_receipts_roundtrip(monkeypatch, read_args, invalid_call):
+def test_real_litellm_anthropic_tools_and_receipts_roundtrip(monkeypatch, nonempty_bank, invalid_call):
     from harbor.llms.lite_llm import LiteLLM
     from harbor.llms import lite_llm
     from litellm.llms.anthropic.chat.transformation import AnthropicConfig
@@ -163,7 +166,7 @@ def test_real_litellm_anthropic_tools_and_receipts_roundtrip(monkeypatch, read_a
                'signature': 'synthetic-signature'}]
     provider_replies = iter([
         [('bad', *invalid_call)],
-        [('read', 'memory_read', read_args)],
+        [('read', 'memory_read', {})],
         [('add', 'memory_add', {'content': 'saved exact <tool_call> text'})],
         [], [],
     ])
@@ -198,8 +201,14 @@ def test_real_litellm_anthropic_tools_and_receipts_roundtrip(monkeypatch, read_a
 
     monkeypatch.setattr(lite_llm.litellm, 'acompletion', completion)
     a = Agent(llm=LiteLLM('anthropic/claude-opus-4-8', api_key='synthetic-not-a-key'))
+    if nonempty_bank:
+        a.memory.save_knowledge('existing exact saved information')
     result = run(a, task='Exact task mentions code_run and memory_read. Do not rewrite it.')
     assert len(wire) == 5 and [o.success for o in result.operations] == [False, True, True]
+    read = result.operations[1]
+    assert ('existing exact saved information' in read.content) == nonempty_bank
+    assert ('(empty)' in read.content) != nonempty_bank
+    assert len(a.memory.knowledge) == 1 + int(nonempty_bank)
     for body in bodies[:-1]:
         assert [t['name'] for t in body['tools']] == ['memory_add', 'memory_read']
         for expected, actual in zip(BANK_TOOLS, body['tools']):
