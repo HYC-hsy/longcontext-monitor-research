@@ -15,10 +15,19 @@ from memory_agent.memory.read_context_predictive_memory_agent import (
 
 @pytest.fixture(autouse=True)
 def block_network(monkeypatch):
+    original_connect = socket.socket.connect
+    original_socketpair = socket.socketpair
     def blocked(*args, **kwargs):
         raise AssertionError('Offline tool test attempted network access')
+    def local_socketpair(*args, **kwargs):
+        # Windows implements asyncio's local wakeup socketpair with a loopback
+        # connect. Permit only that stdlib operation, not provider connections.
+        with monkeypatch.context() as local:
+            local.setattr(socket.socket, 'connect', original_connect)
+            return original_socketpair(*args, **kwargs)
     monkeypatch.setattr(socket.socket, 'connect', blocked)
     monkeypatch.setattr(socket, 'create_connection', blocked)
+    monkeypatch.setattr(socket, 'socketpair', local_socketpair)
 
 
 def test_unknown_tool_recovers_before_p2_without_task_execution(tmp_path):
