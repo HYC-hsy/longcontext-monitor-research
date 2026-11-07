@@ -324,11 +324,11 @@ def test_both_method_source_identities_bind_every_repaired_runtime_file():
     cert = import_module(startup.DRIVER + '.single_run_certification')
     common = ['GenericAgent-main/llmcore.py', 'GenericAgent-main/agent_loop.py',
               'GenericAgent-main/pma_upstream_bridge.py']
-    common += [str(STAGE.relative_to(ROOT) / path) for path in [
+    common += [(STAGE.relative_to(ROOT) / path).as_posix() for path in [
         'event_spool.py', 'worker_main.py', 'single_run_certification.py',
         'vendor/pma_89e5c0d/src/memory_agent/memory/ga_context_history.py',
         'vendor/pma_89e5c0d/src/memory_agent/memory/context_predictive_memory_agent.py']]
     for files in (cert.CONTEXT_PREDICTIVE_SOURCE_FILES, cert.READ_CONTEXT_PREDICTIVE_SOURCE_FILES):
         assert set(common) <= set(files)
     assert set(cert.READ_CONTEXT_PREDICTIVE_SOURCE_FILES) - set(cert.CONTEXT_PREDICTIVE_SOURCE_FILES) == {
-        str(STAGE.relative_to(ROOT) / 'vendor/pma_89e5c0d/src/memory_agent/memory/read_context_predictive_memory_agent.py')}
+        (STAGE.relative_to(ROOT) / 'vendor/pma_89e5c0d/src/memory_agent/memory/read_context_predictive_memory_agent.py').as_posix()}

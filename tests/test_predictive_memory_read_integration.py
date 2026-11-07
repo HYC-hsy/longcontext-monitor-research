@@ -126,7 +126,7 @@ def test_candidate_registry_source_identity_and_actor_projection(monkeypatch):
     method = resolve('pma-predictive-read-context')
     assert method.research_candidate == CANDIDATE and method.task_turns_max is None
     assert CANDIDATE in candidate_names('B')
-    file = str((STAGE / 'vendor/pma_89e5c0d/src/memory_agent/memory/read_context_predictive_memory_agent.py').relative_to(ROOT))
+    file = (STAGE / 'vendor/pma_89e5c0d/src/memory_agent/memory/read_context_predictive_memory_agent.py').relative_to(ROOT).as_posix()
     assert file in cert.READ_CONTEXT_PREDICTIVE_SOURCE_FILES
     assert file not in cert.CONTEXT_PREDICTIVE_SOURCE_FILES
     monkeypatch.setattr(cert, '_committed_source_sha', lambda root, name: name)
