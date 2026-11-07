@@ -50,9 +50,12 @@ def test_prompt_schema_and_isolation():
     assert 'may be useful' not in PHASE1_SYSTEM
     assert [t['function']['name'] for t in BANK_TOOLS] == ['memory_add', 'memory_read']
     read_schema = BANK_TOOLS[1]['function']['parameters']
-    assert read_schema == {'type': 'object', 'properties': {}, 'additionalProperties': False}
+    assert read_schema == {'type': 'object', 'properties': {
+        'bank_id': {'type': 'string', 'enum': ['knowledge'],
+                    'description': 'Memory bank to read. Use knowledge.'}
+    }, 'required': ['bank_id'], 'additionalProperties': False}
     assert BANK_TOOLS[1]['function']['description'] == (
-        'Read all information currently saved in the memory bank. Takes no arguments.')
+        'Read all information currently saved in the knowledge memory bank.')
     a = Agent(llm=Script(response()))
     schema = a.get_tools_schema()
     schema[0]['function']['name'] = 'mutated'
@@ -69,17 +72,22 @@ def test_prompt_schema_and_isolation():
 
 @pytest.mark.parametrize('nonempty', [False, True])
 def test_read_add_finish_same_wake(nonempty):
-    llm = Script(response(call('memory_read')), response(call('memory_add', {'content': 'new'}, 'add-2')), response())
+    llm = Script(response(call('memory_read', {'bank_id': 'knowledge'})), response(call('memory_add', {'content': 'new'}, 'add-2')), response())
     a = Agent(llm=llm)
     if nonempty:
         a.memory.save_knowledge('existing original text')
         a.memory.save_procedural('legacy flat entry')
+    before = copy.deepcopy(a.memory.to_dict())
+    expected_read = a._format_memory_bank()
     result = run(a)
     assert len(llm.calls) == 4
     assert [op.action for op in result.operations] == ['read', 'add']
     assert not result.should_inject
     read = receipts(llm.calls[1])[0]
     assert read['success'] and read['action'] == 'read'
+    assert read['content'] == expected_read
+    assert a.memory.to_dict()['knowledge'][:-1] == before['knowledge']
+    assert a.memory.to_dict()['procedural'] == before['procedural']
     assert ('existing original text' in read['content']) == nonempty
     assert ('legacy flat entry' in read['content']) == nonempty
     assert ('(empty)' in read['content']) != nonempty
@@ -107,8 +115,8 @@ def test_no_read_two_calls_next_wake_does_not_reexecute(add):
 
 
 def test_ordered_multiple_reads_and_adds_are_snapshots():
-    a = Agent(llm=Script(response(call('memory_read', ident='r1'),
-        call('memory_add', {'content': 'value'}, 'a1'), call('memory_read', ident='r2')), response()))
+    a = Agent(llm=Script(response(call('memory_read', {'bank_id': 'knowledge'}, ident='r1'),
+        call('memory_add', {'content': 'value'}, 'a1'), call('memory_read', {'bank_id': 'knowledge'}, ident='r2')), response()))
     result = run(a)
     first, saved, last = receipts(a.llm.calls[1])
     assert '(empty)' in first['content'] and 'value' not in first['content']
@@ -117,8 +125,8 @@ def test_ordered_multiple_reads_and_adds_are_snapshots():
 
 
 @pytest.mark.parametrize('calls', [
-    [call('memory_add', {'content': 'must not save'}), call('memory_read')],
-    [call('memory_add', {'content': 'must not save'}), call('memory_read', ident=None)],
+    [call('memory_add', {'content': 'must not save'}), call('memory_read', {'bank_id': 'knowledge'})],
+    [call('memory_add', {'content': 'must not save'}), call('memory_read', {'bank_id': 'knowledge'}, ident=None)],
     [{'id': 'bad-json', 'function': {'name': 'memory_read', 'arguments': '{'}}],
 ])
 def test_integrity_rejects_entire_envelope_before_write(calls):
@@ -138,7 +146,7 @@ def test_tool_errors_return_receipts_and_native_read_beats_xml():
 
 
 def test_missing_signed_blocks_and_provider_failure_fail_closed():
-    for r in [response(call('memory_read'), reasoning_content='private'), RuntimeError('transport failed')]:
+    for r in [response(call('memory_read', {'bank_id': 'knowledge'}), reasoning_content='private'), RuntimeError('transport failed')]:
         a = Agent(llm=Script(r))
         with pytest.raises(GAHistoryIntegrityError):
             run(a)
@@ -148,7 +156,7 @@ def test_missing_signed_blocks_and_provider_failure_fail_closed():
 def test_long_history_pins_task_current_wake_and_tool_pairs(monkeypatch):
     monkeypatch.setattr(GAHistoryConfig, 'context_win', 800)
     replies = [response(content='history' * 100) for _ in range(8)]
-    replies += [response(call('memory_read', ident='final-read')), response()]
+    replies += [response(call('memory_read', {'bank_id': 'knowledge'}, ident='final-read')), response()]
     a = Agent(llm=Script(*replies))
     for step in range(9):
         run(a, ('old' if step < 8 else 'LATEST') * 100, step)

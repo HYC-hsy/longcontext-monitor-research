@@ -33,7 +33,7 @@ def test_actual_litellm_and_anthropic_translation(monkeypatch, tmp_path):
 
     signed = [{'type': 'thinking', 'thinking': 'synthetic-private', 'signature': 'synthetic-signature'}]
     queue = iter([
-        {'content': '', 'tool_calls': [call('memory_read', ident='r1')],
+        {'content': '', 'tool_calls': [call('memory_read', {'bank_id': 'knowledge'}, ident='r1')],
          'provider_specific_fields': {'thinking_blocks': signed}, 'reasoning_content': 'synthetic-private'},
         {'content': '', 'tool_calls': [call('memory_add', {'content': 'exact public text'}, 'a1')],
          'thinking_blocks': signed},
@@ -143,8 +143,8 @@ def test_candidate_registry_source_identity_and_actor_projection(monkeypatch):
 
 
 def test_read_only_repeated_read_and_duplicate_replay():
-    a = Agent(llm=Script(response(call('memory_read', ident='one')),
-        response(call('memory_read', ident='two')), response()))
+    a = Agent(llm=Script(response(call('memory_read', {'bank_id': 'knowledge'}, ident='one')),
+        response(call('memory_read', {'bank_id': 'knowledge'}, ident='two')), response()))
     result = run(a)
     assert [o.action for o in result.operations] == ['read', 'read']
     assert not a.memory.knowledge and len(a.llm.calls) == 4
@@ -155,13 +155,13 @@ def test_read_only_repeated_read_and_duplicate_replay():
 
 
 def test_read_all_more_than_fifty_and_tool_failure(monkeypatch):
-    a = Agent(llm=Script(response(call('memory_read')), response()))
+    a = Agent(llm=Script(response(call('memory_read', {'bank_id': 'knowledge'})), response()))
     for i in range(65):
         a.memory.save_knowledge(f'entry-{i}')
     result = run(a)
     assert 'entry-0' in result.operations[0].content
     assert 'entry-64' in result.operations[0].content
-    a.llm = Script(response(call('memory_read', ident='failed-read')), response())
+    a.llm = Script(response(call('memory_read', {'bank_id': 'knowledge'}, ident='failed-read')), response())
     original = a._format_memory_bank
     count = 0
     def fail_read(*args):
@@ -178,7 +178,7 @@ def test_read_all_more_than_fifty_and_tool_failure(monkeypatch):
 
 
 def test_cancelled_continuation_does_not_enter_p2():
-    a = Agent(llm=Script(response(call('memory_read')), asyncio.CancelledError()))
+    a = Agent(llm=Script(response(call('memory_read', {'bank_id': 'knowledge'})), asyncio.CancelledError()))
     with pytest.raises(asyncio.CancelledError):
         run(a)
     assert len(a.llm.calls) == 2 and all(c.get('tools') for c in a.llm.calls)
@@ -220,7 +220,7 @@ def test_actual_constructor_selects_independent_agent(tmp_path, candidate, expec
 def test_large_original_and_read_receipt_are_not_new_failure_limits():
     task = '<history>' + 'exact original requirement ' * 5000 + '</history>'
     bank = '<tool_result>' + 'exact saved information ' * 5000 + '</tool_result>'
-    a = Agent(llm=Script(response(call('memory_read')), response()))
+    a = Agent(llm=Script(response(call('memory_read', {'bank_id': 'knowledge'})), response()))
     memory_id = a.memory.save_knowledge(bank)
     run(a, task=task)
     assert a.llm.calls[0]['prompt'] == '[Task Description]\n' + task

@@ -51,6 +51,16 @@ def test_unknown_tool_recovers_before_p2_without_task_execution(tmp_path):
 
 
 @pytest.mark.parametrize('name,args', [
+    ('memory_read', {}),
+    ('memory_read', {'bank_id': 'procedural'}),
+    ('memory_read', {'bank_id': 'Knowledge'}),
+    ('memory_read', {'bank_id': ''}),
+    ('memory_read', {'bank_id': None}),
+    ('memory_read', {'bank_id': 1}),
+    ('memory_read', {'bank_id': ['knowledge']}),
+    ('memory_read', {'bank_id': {'name': 'knowledge'}}),
+    ('memory_read', {'bank_id': 'knowledge', 'query': 'unsupported'}),
+    ('memory_read', {'bank_id': 'knowledge', '_noargs': 'unused'}),
     ('memory_read', {'query': 'must not filter'}),
     ('memory_read', {'scope': 'all'}),
     ('memory_read', {'scope': 'recent'}),
@@ -72,6 +82,27 @@ def test_invalid_arguments_are_receipted_same_wake_and_do_not_mutate(name, args)
     assert result.operations[0].success is False and not a.memory.knowledge
     tool_call = next(m for m in a.llm.calls[1]['message_history'] if m.get('tool_calls'))
     assert json.loads(tool_call['tool_calls'][0]['function']['arguments']) == args
+    if name == 'memory_read':
+        assert receipts(a.llm.calls[1])[0]['error'] == (
+            'memory_read requires exactly {"bank_id": "knowledge"}')
+
+
+@pytest.mark.parametrize('arguments', [{}, {'bank_id': 'procedural'},
+    {'bank_id': 'knowledge', 'scope': 'all'}, {'_noargs': 'unused'}])
+def test_bad_read_then_corrected_read_keeps_full_bank_and_ids(arguments):
+    a = Agent(llm=Script(response(call('memory_read', arguments, 'bad')),
+        response(call('memory_read', {'bank_id': 'knowledge'}, 'good')), response()))
+    a.memory.save_knowledge('original knowledge')
+    a.memory.save_procedural('original procedural')
+    before = copy.deepcopy(a.memory.to_dict())
+    expected = a._format_memory_bank()
+    result = run(a)
+    assert [o.success for o in result.operations] == [False, True]
+    assert result.operations[1].content == expected
+    assert a.memory.to_dict() == before
+    assert len(a.llm.calls) == 4 and all(c.get('tools') for c in a.llm.calls[:3])
+    assert [m['tool_call_id'] for m in a.llm.calls[2]['message_history']
+            if m['role'] == 'tool'] == ['bad', 'good']
 
 
 def test_error_limit_fails_closed_with_all_native_receipts():
@@ -93,7 +124,7 @@ def test_error_limit_fails_closed_with_all_native_receipts():
 
 @pytest.mark.parametrize('success_call', [
     call('memory_add', {'content': 'valid'}, 'valid'),
-    call('memory_read', {}, 'valid'),
+    call('memory_read', {'bank_id': 'knowledge'}, 'valid'),
 ])
 def test_error_budget_is_consecutive_not_cumulative(success_call):
     replies = [response(call('unknown', {}, f'bad-{i}')) for i in range(2)]
@@ -107,7 +138,7 @@ def test_error_budget_is_consecutive_not_cumulative(success_call):
 
 def test_successful_reads_are_not_capped_by_error_recovery_limit():
     count = MAX_CONSECUTIVE_TOOL_ERROR_ROUNDS + 2
-    a = Agent(llm=Script(*(response(call('memory_read', {}, f'read-{i}'))
+    a = Agent(llm=Script(*(response(call('memory_read', {'bank_id': 'knowledge'}, f'read-{i}'))
                            for i in range(count)), response()))
     result = run(a)
     assert len(result.operations) == count and all(o.success for o in result.operations)
@@ -161,6 +192,10 @@ def test_object_native_envelope_is_validated_before_any_write(ident, arguments):
 @pytest.mark.parametrize('nonempty_bank', [False, True])
 @pytest.mark.parametrize('invalid_call', [
     ('code_run', {'script': 'DO NOT EXECUTE'}),
+    ('memory_read', {}),
+    ('memory_read', {'bank_id': 'procedural'}),
+    ('memory_read', {'bank_id': None}),
+    ('memory_read', {'bank_id': 'knowledge', 'query': 'unsupported'}),
     ('memory_read', {'_noargs': 'unused'}),
     ('memory_read', {'scope': 'all'}),
 ])
@@ -175,7 +210,7 @@ def test_real_litellm_anthropic_tools_and_receipts_roundtrip(monkeypatch, nonemp
                'signature': 'synthetic-signature'}]
     provider_replies = iter([
         [('bad', *invalid_call)],
-        [('read', 'memory_read', {})],
+        [('read', 'memory_read', {'bank_id': 'knowledge'})],
         [('add', 'memory_add', {'content': 'saved exact <tool_call> text'})],
         [], [],
     ])
@@ -212,16 +247,27 @@ def test_real_litellm_anthropic_tools_and_receipts_roundtrip(monkeypatch, nonemp
     a = Agent(llm=LiteLLM('anthropic/claude-opus-4-8', api_key='synthetic-not-a-key'))
     if nonempty_bank:
         a.memory.save_knowledge('existing exact saved information')
+        a.memory.save_procedural('existing exact legacy procedural information')
+    before = copy.deepcopy(a.memory.to_dict())
+    expected_read = a._format_memory_bank()
     result = run(a, task='Exact task mentions code_run and memory_read. Do not rewrite it.')
     assert len(wire) == 5 and [o.success for o in result.operations] == [False, True, True]
     read = result.operations[1]
+    assert read.content == expected_read
     assert ('existing exact saved information' in read.content) == nonempty_bank
     assert ('(empty)' in read.content) != nonempty_bank
     assert len(a.memory.knowledge) == 1 + int(nonempty_bank)
+    assert a.memory.to_dict()['knowledge'][:-1] == before['knowledge']
+    assert a.memory.to_dict()['procedural'] == before['procedural']
     for body in bodies[:-1]:
         assert [t['name'] for t in body['tools']] == ['memory_add', 'memory_read']
         for expected, actual in zip(BANK_TOOLS, body['tools']):
             assert actual['input_schema'] == expected['function']['parameters']
+        read_schema = body['tools'][1]['input_schema']
+        assert read_schema['required'] == ['bank_id']
+        assert read_schema['properties']['bank_id']['enum'] == ['knowledge']
+        assert set(read_schema['properties']) == {'bank_id'}
+        assert read_schema['additionalProperties'] is False
     for index, expected in [(1, ['bad']), (2, ['bad', 'read']), (3, ['bad', 'read', 'add'])]:
         blocks = [b for m in bodies[index]['messages'] for b in m['content']]
         assert [b['id'] for b in blocks if b['type'] == 'tool_use'] == expected
@@ -235,6 +281,13 @@ def test_real_litellm_anthropic_tools_and_receipts_roundtrip(monkeypatch, nonemp
         if isinstance(content, list):  # Anthropic cached text-block form.
             content = ''.join(b['text'] for b in content)
         assert not json.loads(content)['success']
+        if index >= 2:
+            read_call = next(b for b in blocks if b.get('id') == 'read')
+            assert read_call['input'] == {'bank_id': 'knowledge'}
+            receipt = next(b['content'] for b in blocks if b.get('tool_use_id') == 'read')
+            if isinstance(receipt, list):
+                receipt = ''.join(b['text'] for b in receipt)
+            assert json.loads(receipt)['content'] == expected_read
     assert 'tools' not in wire[-1] and 'tools' not in bodies[-1]
     assert 'Exact task mentions code_run and memory_read. Do not rewrite it.' in str(bodies[1])
     assert 'saved exact <tool_call> text' in str(bodies[-1])
