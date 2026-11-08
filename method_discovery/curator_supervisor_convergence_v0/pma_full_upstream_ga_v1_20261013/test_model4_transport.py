@@ -27,6 +27,11 @@ class Model4TransportTests(unittest.TestCase):
         profile = self.profile()
         name, actual = load_profile(json.dumps({"pma_model": profile}).encode(), READ_CONTEXT)
         self.assertEqual((name, actual["model"]), ("pma_model", "gpt-6.1-sol"))
+        for model in ("gpt-6-sol", "gpt-6-astra"):
+            with self.subTest(model=model):
+                name, actual = load_profile(json.dumps({"pma_model": self.profile(model)}).encode(),
+                                            READ_CONTEXT)
+                self.assertEqual((name, actual["model"]), ("pma_model", model))
         with self.assertRaises(ValueError):
             load_profile(json.dumps({"pma_model": profile}).encode(), "U")
         for key, value in (("temperature", 0), ("store", True),
@@ -124,8 +129,9 @@ class Model4TransportTests(unittest.TestCase):
         self.assertEqual(llm.last_visible_response["output_item_types"], ["new_item"])
 
     def test_candidate_constructor_model_binding(self):
-        for model in ("claude-opus-4-8", "claude-opus-5", "claude-fable-5", "gpt-6.1-sol"):
-            if model == "gpt-6.1-sol":
+        for model in ("claude-opus-4-8", "claude-opus-5", "claude-fable-5",
+                      "gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra"):
+            if model.startswith("gpt-"):
                 profile = self.profile()
             else:
                 profile = {"provider": "anthropic", "api_mode": "messages", "model": model,
@@ -139,7 +145,7 @@ class Model4TransportTests(unittest.TestCase):
                 self.assertEqual(agent._research_candidate, READ_CONTEXT)
                 self.assertIn("ReadContextPredictiveMemoryAgent",
                               type(agent._memory_agent).__name__)
-                if model == "gpt-6.1-sol":
+                if model.startswith("gpt-"):
                     self.assertIsInstance(agent._memory_llm, ResponsesMemoryLLM)
 
     def test_installed_openai_sdk_serializes_responses_request(self):

@@ -11,7 +11,7 @@ import json
 
 READ_CONTEXT = "pma_predictive_read_context_v1"
 CLAUDE_MODELS = {"claude-opus-4-8", "claude-opus-5", "claude-fable-5"}
-OPENAI_MODEL = "gpt-6.1-sol"
+OPENAI_MODELS = {"gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra"}
 
 
 def load_profile(raw: bytes, candidate: str) -> tuple[str, dict]:
@@ -41,7 +41,7 @@ def load_profile(raw: bytes, candidate: str) -> tuple[str, dict]:
             raise ValueError("Claude PMA profile route differs")
         if profile.get("temperature") != 1:
             raise ValueError("Claude PMA temperature differs")
-    elif model == OPENAI_MODEL:
+    elif model in OPENAI_MODELS:
         if (profile.get("provider"), profile.get("api_mode")) != ("openai", "responses"):
             raise ValueError("GPT PMA profile must use Responses API")
         if "temperature" in profile or "thinking_type" in profile or profile.get("store") is not False:

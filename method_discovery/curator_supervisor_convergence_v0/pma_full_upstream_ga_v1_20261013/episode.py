@@ -17,7 +17,7 @@ from typing import Any
 from harbor.llms.base import BaseLLM, LLMResponse
 from memory_agent.memory_enabled_agent import MemoryEnabledTerminus2
 
-from pma_model_profile import CLAUDE_MODELS, OPENAI_MODEL, READ_CONTEXT
+from pma_model_profile import CLAUDE_MODELS, OPENAI_MODELS, READ_CONTEXT
 
 
 class DisabledActorLLM(BaseLLM):
@@ -56,7 +56,7 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
         raise ValueError("unknown research candidate")
     if memory_profile is not None:
         model = memory_profile.get("model")
-        if model not in CLAUDE_MODELS | {OPENAI_MODEL} or (
+        if model not in CLAUDE_MODELS | OPENAI_MODELS or (
                 model != "claude-opus-4-8" and research_candidate != READ_CONTEXT):
             raise ValueError("PMA model is not bound to the selected candidate")
         if not memory_profile.get("apibase") or not memory_profile.get("apikey"):
@@ -86,7 +86,7 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
     agent._llm = actor
     if agent._llm is not actor:
         raise RuntimeError("upstream actor backend was not disabled")
-    if memory_profile is not None and memory_profile["model"] == OPENAI_MODEL:
+    if memory_profile is not None and memory_profile["model"] in OPENAI_MODELS:
         from responses_memory_llm import ResponsesMemoryLLM
         agent._memory_llm = ResponsesMemoryLLM(memory_profile)
     if research_candidate in {"pma_predictive_f838_v1", "pma_predictive_context_v1", "pma_predictive_read_context_v1"}:
