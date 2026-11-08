@@ -131,6 +131,9 @@ class ResponsesMemoryLLM(BaseLLM):
         from openai import AsyncOpenAI
 
         self.model = profile["model"]
+        # Upstream MemoryEnabledTerminus2.save_memory reads this LiteLLM
+        # compatibility field when persisting the final trajectory.
+        self._model_name = "openai/" + self.model
         self.max_tokens = profile["max_tokens"]
         self.context_window = profile["model_context_window"]
         self.effort = profile["reasoning_effort"]

@@ -181,6 +181,11 @@ class Model4TransportTests(unittest.TestCase):
                 self.assertTrue(result.operations[0].success)
                 self.assertFalse(result.should_inject)
                 self.assertFalse(responses)
+                saved = Path(directory) / "memory.json"
+                agent.save_memory(str(saved))
+                self.assertTrue(saved.is_file())
+                trajectory = json.loads((Path(directory) / "trajectory_memory.json").read_text())
+                self.assertEqual(trajectory["memory_model_name"], "openai/gpt-6.1-sol")
         asyncio.run(run())
 
 
