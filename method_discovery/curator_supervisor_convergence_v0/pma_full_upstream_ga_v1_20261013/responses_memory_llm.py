@@ -7,6 +7,7 @@ knowledge bank, history trimming and reminder parser remain in their owners.
 from __future__ import annotations
 
 import json
+import copy
 from types import SimpleNamespace
 from typing import Any
 
@@ -46,7 +47,46 @@ def response_input(history: list[dict], prompt: str) -> list[dict]:
             if opaque is not None:
                 if not isinstance(opaque, list) or not opaque:
                     raise ValueError("PMA opaque Responses history invalid")
-                items.extend(opaque)
+                # The GA policy may have compressed the visible text or tool
+                # arguments since the original response. Replay only opaque
+                # reasoning verbatim; rebuild visible items from the *current*
+                # history row so the actual request honors that compression.
+                text_now = _text(row["content"]) if row.get("content") else ""
+                current_calls = {}
+                for call in row.get("tool_calls") or []:
+                    if not isinstance(call, dict) or not isinstance(call.get("function"), dict):
+                        raise ValueError("PMA assistant tool call invalid")
+                    fn = call["function"]
+                    call_id = call.get("id")
+                    if (not isinstance(call_id, str) or not call_id or
+                            call_id in current_calls or
+                            not isinstance(fn.get("name"), str) or
+                            not isinstance(fn.get("arguments"), str)):
+                        raise ValueError("PMA assistant tool call identity invalid")
+                    current_calls[call_id] = fn
+                emitted_message, emitted_calls = False, set()
+                for prior_item in opaque:
+                    if not isinstance(prior_item, dict):
+                        raise ValueError("PMA opaque Responses item invalid")
+                    kind = prior_item.get("type")
+                    if kind == "reasoning":
+                        items.append(copy.deepcopy(prior_item))
+                    elif kind == "message":
+                        if not emitted_message and text_now:
+                            items.append({"role": "assistant", "content": text_now})
+                        emitted_message = True
+                    elif kind == "function_call":
+                        call_id = prior_item.get("call_id")
+                        fn = current_calls.get(call_id)
+                        if fn is None or call_id in emitted_calls or fn["name"] != prior_item.get("name"):
+                            raise ValueError("PMA Responses call history differs from visible history")
+                        items.append({"type": "function_call", "call_id": call_id,
+                                      "name": fn["name"], "arguments": fn["arguments"]})
+                        emitted_calls.add(call_id)
+                    else:
+                        raise ValueError("unsupported PMA opaque Responses item")
+                if emitted_calls != set(current_calls) or (text_now and not emitted_message):
+                    raise ValueError("PMA Responses visible history is incomplete")
                 continue
             if row.get("reasoning_content") or row.get("thinking_blocks"):
                 raise ValueError("foreign provider reasoning cannot enter GPT history")
@@ -149,9 +189,14 @@ class ResponsesMemoryLLM(BaseLLM):
                     function=SimpleNamespace(name=name, arguments=json.loads(arguments))))
             elif kind != "reasoning":
                 raise RuntimeError("unsupported PMA Responses output item")
-        response = LLMResponse(content="\n".join(text), model_name=self.model,
-                               response_id=body.get("id"))
+        # The pinned worker stages the vendor Harbor dataclass, whose
+        # constructor only accepts content/reasoning/usage and optional
+        # tool_calls. Metadata is attached after construction so both the
+        # staged type and the installed SDK-facing type behave identically.
+        response = LLMResponse(content="\n".join(text))
         response.tool_calls = calls
+        response.model_name = self.model
+        response.response_id = body.get("id")
         response.openai_output_items = output
         response.actual_model = body["model"]
         response.provider_usage = body.get("usage")

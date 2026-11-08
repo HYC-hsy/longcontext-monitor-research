@@ -6,7 +6,8 @@ import json
 
 from .context_predictive_memory_agent import ContextPredictiveMemoryAgent, PMAPhaseError
 from .ga_context_history import (GAHistoryConfig, GAHistoryIntegrityError,
-                                 trim_messages_history, _msgs_claude2oai)
+                                 trim_messages_history, _msgs_claude2oai,
+                                 _history_bytes)
 from .predictive_memory_agent import BANK_TOOLS as ADD_TOOLS, MemoryOperation
 
 PHASE1_SYSTEM = """You organize information from the task execution.
@@ -91,7 +92,7 @@ class ReadContextPredictiveMemoryAgent(ContextPredictiveMemoryAgent):
         for row in self._completed_phase1:
             row.pop("_p1_prior_index")
         self._phase1_history = self._p1_messages()
-        size = lambda rows: len(json.dumps(rows, ensure_ascii=False))
+        size = _history_bytes
         self._history_transforms.append({
             "phase": "P1", "before_messages": len(before),
             "after_messages": len(self._phase1_history),

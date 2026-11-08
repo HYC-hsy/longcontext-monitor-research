@@ -152,7 +152,7 @@ async def restore(exec_command, upload_file, cache, manifest, record):
                           'set -eu; for f in ' + explicit_debs + '; do '
                           'p=$(dpkg-deb -f "$f" Package); '
                           'v=$(dpkg-deb -f "$f" Version); '
-                          'test "$(dpkg-query -W -f="${Version}" "$p")" = "$v"; '
+                          "test \"$(dpkg-query -W -f='${Version}' \"$p\")\" = \"$v\"; "
                           'done')
         if schema == SCHEMAS['pip']:
             wheels = sorted('/' + name for name, row in manifest['files'].items()

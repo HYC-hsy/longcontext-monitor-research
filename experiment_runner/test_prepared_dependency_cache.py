@@ -63,6 +63,8 @@ class PreparedDependencyCacheTests(unittest.TestCase):
             self.assertTrue(any('dpkg -i' in cmd for cmd in commands))
             self.assertTrue(any('curl_1_amd64.deb' in cmd for cmd in commands))
             self.assertFalse(any('*.deb' in cmd for cmd in commands))
+            verification = next(cmd for cmd in commands if 'dpkg-query -W' in cmd)
+            self.assertIn("-f='${Version}'", verification)
             self.assertFalse(any('apt-get' in cmd or 'curl ' in cmd for cmd in commands))
             self.assertEqual(receipts[-1]['stage'], 'cache_stage_cleanup')
 

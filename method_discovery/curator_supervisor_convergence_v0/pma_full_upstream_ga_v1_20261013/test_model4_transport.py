@@ -11,6 +11,8 @@ import unittest
 from pma_model_profile import load_profile, READ_CONTEXT
 from responses_memory_llm import ResponsesMemoryLLM, response_input
 from episode import construct_upstream
+from memory_agent.memory.ga_context_history import (
+    _history_bytes, _msgs_claude2oai, compress_history_tags)
 
 
 class Model4TransportTests(unittest.TestCase):
@@ -47,6 +49,40 @@ class Model4TransportTests(unittest.TestCase):
                          ["user", "reasoning", "function_call", "function_call_output", "user"])
         self.assertEqual(items[-2]["call_id"], "c1")
         self.assertEqual(items[-2]["output"], "bank data")
+
+    def test_compression_changes_actual_responses_input_and_budget(self):
+        long_text = "<tool_result>" + "A" * 4000 + "</tool_result>"
+        opaque = [{"type": "reasoning", "encrypted_content": "opaque-private"},
+                  {"type": "message", "content": [{"type": "output_text",
+                                                      "text": long_text}]}]
+        old = {"role": "assistant", "content": [{"type": "text", "text": long_text}],
+               "_openai_output_items": opaque}
+        history = [old, {"role": "user", "content": [{"type": "text", "text": "next"}]}]
+        without_mirror = [{key: value for key, value in old.items()
+                           if key != "_openai_output_items"}, history[1]]
+        self.assertLess(_history_bytes(history) - _history_bytes(without_mirror), 200)
+        before = _history_bytes(history)
+        compress_history_tags(history, keep_recent=1, force=True)
+        self.assertLess(_history_bytes(history), before)
+        converted = _msgs_claude2oai([history[0]])[0]
+        converted["_openai_output_items"] = opaque
+        items = response_input([converted], "Continue.")
+        actual = json.dumps(items)
+        self.assertIn("[Truncated]", actual)
+        self.assertNotIn("A" * 4000, actual)
+        self.assertIn("opaque-private", actual)
+        llm = ResponsesMemoryLLM(self.profile())
+        class FakeResponses:
+            async def create(self, **_):
+                return SimpleNamespace(model_dump=lambda **__: {
+                    "model": "gpt-6.1-sol", "status": "completed", "output": [{
+                        "type": "message", "content": [{"type": "output_text",
+                                                     "text": "<no_intervention/>"}]}]})
+        llm.client.responses = FakeResponses()
+        asyncio.run(llm.call("Continue.", system="system", message_history=[converted]))
+        sent = json.dumps(llm.last_effective_request)
+        self.assertIn("[Truncated]", sent)
+        self.assertNotIn("A" * 4000, sent)
 
     def test_request_and_native_tool_response(self):
         llm = ResponsesMemoryLLM(self.profile())
@@ -118,6 +154,34 @@ class Model4TransportTests(unittest.TestCase):
         self.assertEqual(recorded[0]["input"], [{"role": "user", "content": "task"}])
         self.assertEqual(recorded[0]["reasoning"], {"effort": "high"})
         self.assertFalse(recorded[0]["store"])
+
+    def test_staged_harbor_full_p1_p2_success(self):
+        from harbor.llms.base import LLMResponse
+        self.assertNotIn("model_name", LLMResponse.__dataclass_fields__)
+        async def run():
+            with TemporaryDirectory() as directory:
+                agent = construct_upstream(Path(directory), memory_profile=self.profile(),
+                                           research_candidate=READ_CONTEXT)
+                memory = agent._memory_agent
+                memory.set_phase1_context(task="task description", trajectory="")
+                responses = [
+                    {"model": "gpt-6.1-sol", "status": "completed", "id": "p1",
+                     "output": [{"type": "function_call", "call_id": "call_1",
+                                 "name": "memory_add", "arguments": '{"content":"remember this"}'}]},
+                    {"model": "gpt-6.1-sol", "status": "completed", "id": "p2",
+                     "output": [{"type": "message", "content": [
+                         {"type": "output_text", "text": "<no_intervention/>"}]}]},
+                ]
+                class FakeResponses:
+                    async def create(self, **_):
+                        return SimpleNamespace(model_dump=lambda **__: responses.pop(0))
+                agent._memory_llm.client.responses = FakeResponses()
+                result = await memory.process("task description", step_count=0)
+                self.assertEqual(len(result.operations), 1)
+                self.assertTrue(result.operations[0].success)
+                self.assertFalse(result.should_inject)
+                self.assertFalse(responses)
+        asyncio.run(run())
 
 
 if __name__ == "__main__":

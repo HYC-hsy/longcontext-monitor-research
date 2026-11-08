@@ -10,12 +10,31 @@ import re
 def _telemetry_enabled():
     return False
 
+def _history_bytes(messages):
+    """Count GPT opaque reasoning once, not its duplicate visible output.
+
+    The Responses output mirror is needed for stateless continuation. Its
+    message and function-call items duplicate the GA-visible content already
+    counted in each history row; reasoning items have no visible counterpart.
+    """
+    rows = []
+    for message in messages:
+        row = {key: value for key, value in message.items()
+               if key != '_openai_output_items'}
+        opaque = message.get('_openai_output_items') or []
+        reasoning = [item for item in opaque if isinstance(item, dict)
+                     and item.get('type') == 'reasoning']
+        if reasoning:
+            row['_openai_reasoning_budget'] = reasoning
+        rows.append(row)
+    return sum(len(json.dumps(row, ensure_ascii=False)) for row in rows)
+
 def compress_history_tags(messages, keep_recent=10, max_len=800, force=False, interval=5):
     """Compress <thinking>/<tool_use>/<tool_result> tags in older messages to save tokens."""
     compress_history_tags._cd = getattr(compress_history_tags, '_cd', 0) + 1
     if force: compress_history_tags._cd = 0
     if compress_history_tags._cd % interval != 0: return messages
-    _before = sum(len(json.dumps(m, ensure_ascii=False)) for m in messages)
+    _before = _history_bytes(messages)
     _pats = {tag: re.compile(rf'(<{tag}>)([\s\S]*?)(</{tag}>)') for tag in ('thinking', 'think', 'tool_use', 'tool_result')}
     _hist_pat = re.compile(r'<(history|key_info|earlier_context)>[\s\S]*?</\1>')
     def _trunc_str(s): return s[:max_len//2] + '\n...[Truncated]...\n' + s[-max_len//2:] if isinstance(s, str) and len(s) > max_len else s
@@ -41,7 +60,7 @@ def compress_history_tags(messages, keep_recent=10, max_len=800, force=False, in
                             if isinstance(sub, dict) and sub.get('type') == 'text': sub['text'] = _trunc_str(sub.get('text'))
                 elif t == 'tool_use' and isinstance(b.get('input'), dict):
                     for k, v in b['input'].items(): b['input'][k] = _trunc_str(v)
-    print(f"[Cut] {_before} -> {sum(len(json.dumps(m, ensure_ascii=False)) for m in messages)}")
+    print(f"[Cut] {_before} -> {_history_bytes(messages)}")
     return messages
 
 def _sanitize_leading_user_msg(msg):
@@ -71,7 +90,7 @@ def trim_messages_history(history, sess):
         _research_emit('history_transform_started', before, history_transform_id=transform_id)
     cap = sess.context_win * 3
     target = int(cap * getattr(sess, 'trim_keep_rate', 0.6))
-    def cost(): return sum(len(json.dumps(m, ensure_ascii=False)) for m in history)
+    def cost(): return _history_bytes(history)
     compress_history_tags(history, interval=getattr(sess, 'cut_msg_interval', 5))
     print(f'[Debug] Current context: {cost()} chars, {len(history)} messages.')
     if cost() <= cap:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import json
 
-from .ga_context_history import GAHistoryIntegrityError, prepare_history
+from .ga_context_history import GAHistoryIntegrityError, prepare_history, _history_bytes
 from .predictive_memory_agent import BANK_TOOLS, MemoryAgent as PredictiveMemoryAgent
 from .predictive_memory_agent import PHASE1_SYSTEM, PHASE2_SYSTEM, MemoryAgentResult
 
@@ -34,13 +34,13 @@ class ContextPredictiveMemoryAgent(PredictiveMemoryAgent):
     def _prior(self, phase, prompt):
         history = self._phase1_history if phase == "P1" else self._phase2_history
         before_count = len(history)
-        before_bytes = len(json.dumps(history, ensure_ascii=False, default=str))
+        before_bytes = _history_bytes(history)
         prior = prepare_history(history, prompt)
         self._history_transforms.append({
             "phase": phase, "prior_messages": len(prior),
             "before_messages": before_count, "after_messages": len(history),
             "before_chars": before_bytes,
-            "after_chars": len(json.dumps(history, ensure_ascii=False, default=str)),
+            "after_chars": _history_bytes(history),
             "policy": {"context_win": 30000, "trim_keep_rate": 0.6,
                        "cut_msg_interval": 5},
         })
