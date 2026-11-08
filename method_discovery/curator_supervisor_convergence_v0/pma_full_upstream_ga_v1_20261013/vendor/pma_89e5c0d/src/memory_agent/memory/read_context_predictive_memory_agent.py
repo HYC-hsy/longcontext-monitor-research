@@ -11,7 +11,9 @@ from .predictive_memory_agent import BANK_TOOLS as ADD_TOOLS, MemoryOperation
 
 PHASE1_SYSTEM = """You organize information from the task execution.
 
-Based on the task description and the task agent's trajectory, organize and save information expected to be useful within the next 10 turns. Use memory_read when you need to look up information already saved."""
+Based on the task description and the task agent's trajectory, organize and save information expected to be useful within the next 10 turns. When organizing information, preserve its original meaning and degree of certainty.
+
+Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge"."""
 
 BANK_TOOLS = copy.deepcopy(ADD_TOOLS) + [{
     "type": "function",

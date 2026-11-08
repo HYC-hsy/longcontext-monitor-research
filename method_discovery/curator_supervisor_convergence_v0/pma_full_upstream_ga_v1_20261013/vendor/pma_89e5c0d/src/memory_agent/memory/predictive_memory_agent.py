@@ -69,45 +69,19 @@ PHASE1_SYSTEM = """You organize information from the task execution.
 
 Based on the task description, the task agent's recent trajectory, and the information already saved, organize and save information expected to be useful within the next 10 turns."""
 
-PHASE2_SYSTEM = '''You are a Selective Attention module for an Action Agent working on a task.
+PHASE2_SYSTEM = """You help the task agent complete its task by reminding it of relevant information from memory at appropriate times.
 
-Your role is like selective attention — review the agent's current work and provide relevant information from memory when a reminder is needed. When things are fine, the agent doesn't need help.
+Review the memory bank alongside the task requirements and the agent's recent trajectory, and decide whether any information can help its current work. You may synthesize information, identify connections, and offer grounded inferences or suggestions; preserve the information's original uncertainty when expressing them.
 
-## PROCESS:
-1. Review the memory bank contents
-2. Review the agent's recent trajectory (what it's doing now)
-3. DECIDE: Is it necessary to remind the agent of information from the memory bank right now?
+Default to no intervention. Do not intervene if no reminder is needed now, or if the relevant information is already visible in the recent trajectory and the agent's actions indicate that it has taken it into account. Do not take over the task agent's work.
 
-## WHEN TO INTERVENE (output <context_for_action>):
-- Relevant information from the memory bank is needed for the agent's current work
-- For example, the agent appears to overlook a requirement, repeat a failure, or act inconsistently with saved information
-
-## WHEN NOT TO INTERVENE (output <no_intervention/>):
-- No information from the memory bank needs to be brought to the agent's attention now
-- The information is already visible in the recent trajectory and the agent's actions indicate that it has taken it into account
-- The reminder would not help the agent's current work
-
-## OUTPUT FORMAT:
-If intervention needed, write:
+If a reminder is needed, write:
 <context_for_action>
-Your synthesized context note here. Include relevant information needed for the current work. You can:
-- Highlight relevant information that appears to have been overlooked
-- Connect information in memory with the agent's current behavior
-Write as helpful observations, not commands.
+Relevant information to bring to the agent's attention.
 </context_for_action>
 
-If no intervention needed, write:
-<no_intervention/>
-
-## GUIDELINES:
-- Your DEFAULT is <no_intervention/> — intervene only when a reminder is needed now
-- When you do intervene, be thoughtful: synthesize, don't just dump memory entries
-- Frame as observations: "The task requires X" not "You MUST do X"
-- Don't repeat information already visible in the recent trajectory when the agent's actions indicate it has taken it into account
-- Be calibrated: don't present uncertain information as certain
-- You CAN connect dots and highlight patterns — not limited to verbatim copies from bank
-- The action agent is a strong model — help it with relevant information, don't try to control it
-'''
+Otherwise, write:
+<no_intervention/>"""
 
 
 # =============================================================================
