@@ -10,7 +10,7 @@ import unittest
 
 from pma_model_profile import load_profile, READ_CONTEXT
 from responses_memory_llm import ResponsesMemoryLLM, response_input
-from episode import construct_upstream
+from episode import PMAEpisode, construct_upstream
 from memory_agent.memory.ga_context_history import (
     _history_bytes, _msgs_claude2oai, compress_history_tags)
 
@@ -186,6 +186,40 @@ class Model4TransportTests(unittest.TestCase):
                 self.assertTrue(saved.is_file())
                 trajectory = json.loads((Path(directory) / "trajectory_memory.json").read_text())
                 self.assertEqual(trajectory["memory_model_name"], "openai/gpt-6.1-sol")
+        asyncio.run(run())
+
+    def test_gpt_episode_task_end_persists_both_artifacts(self):
+        async def run():
+            with TemporaryDirectory() as directory:
+                root = Path(directory)
+                agent = construct_upstream(root / "upstream", memory_profile=self.profile(),
+                                           research_candidate=READ_CONTEXT)
+                outputs = [
+                    {"model": "gpt-6.1-sol", "status": "completed", "id": "p1",
+                     "output": [{"type": "message", "content": [{
+                         "type": "output_text", "text": "No memory update."}]}]},
+                    {"model": "gpt-6.1-sol", "status": "completed", "id": "p2",
+                     "output": [{"type": "message", "content": [{
+                         "type": "output_text", "text": "<no_intervention/>"}]}]},
+                ]
+                class FakeResponses:
+                    async def create(self, **_):
+                        return SimpleNamespace(model_dump=lambda **__: outputs.pop(0))
+                agent._memory_llm.client.responses = FakeResponses()
+                episode = PMAEpisode(agent, run_id="synthetic", task_id="synthetic",
+                                     archive=root / "archive")
+                common = {"run_id": "synthetic", "task_id": "synthetic"}
+                started = await episode.handle({**common, "kind": "task_start",
+                    "event_id": "start", "sequence": 1, "initial_user_content": "task"})
+                self.assertEqual(started["status"], "started")
+                ended = await episode.handle({**common, "kind": "task_end",
+                    "event_id": "end", "sequence": 2,
+                    "terminal": {"result": "CURRENT_TASK_DONE"}})
+                self.assertEqual(ended["status"], "saved")
+                self.assertTrue(episode.ended)
+                self.assertFalse(outputs)
+                self.assertTrue((root / "archive" / "memory.json").is_file())
+                self.assertTrue((root / "archive" / "trajectory_memory.json").is_file())
         asyncio.run(run())
 
 
