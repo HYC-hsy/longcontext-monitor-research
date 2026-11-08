@@ -80,11 +80,11 @@ def test_actual_litellm_and_anthropic_translation(monkeypatch, tmp_path):
     assert len((tmp_path / 'memory_transport.jsonl').read_text().splitlines()) == 4
 
 
-def test_actual_episode_keeps_initial_and_eight_new_step_cadence(tmp_path):
+def test_actual_episode_keeps_initial_and_three_new_step_cadence(tmp_path):
     Episode = load_definition(STAGE / 'episode.py', 'PMAEpisode', {
         'Path': Path, 'asyncio': asyncio, 'json': json, 'hashlib': hashlib,
         'os': os, 'stable_initial_text': lambda value: value})
-    llm = Script(response(), response(), response())
+    llm = Script(*(response() for _ in range(7)))
     memory_agent = Agent(llm=llm)
 
     class Host:
@@ -112,13 +112,14 @@ def test_actual_episode_keeps_initial_and_eight_new_step_cadence(tmp_path):
             status = await episode._actor_step({'actor_attempt': i,
                 'step_status': 'parse_error' if i == 3 else 'normal',
                 'public_input': [], 'public_blocks': [], 'public_results': []})
-            assert status['triggered'] == (i in (8, 16))
-        assert episode.batch_steps == 2
+            assert status['triggered'] == (i in (3, 6, 9, 12, 15, 18))
+            assert status['trigger_reason'] == ('3_new_steps' if i % 3 == 0 else 'awaiting_3_steps')
+        assert episode.batch_steps == 0
     asyncio.run(exercise())
-    assert len(llm.calls) == 6
+    assert len(llm.calls) == 14
     assert llm.calls[0]['prompt'] == '[Task Description]\ntask EXACT <history>verbatim</history>'
-    assert llm.calls[2]['prompt'] == '\n\n'.join(f'actor-step-{i}' for i in range(1, 9))
-    assert llm.calls[4]['prompt'] == '\n\n'.join(f'actor-step-{i}' for i in range(9, 17))
+    assert llm.calls[2]['prompt'] == '\n\n'.join(f'actor-step-{i}' for i in range(1, 4))
+    assert llm.calls[4]['prompt'] == '\n\n'.join(f'actor-step-{i}' for i in range(4, 7))
 
 
 def test_candidate_registry_source_identity_and_actor_projection(monkeypatch):

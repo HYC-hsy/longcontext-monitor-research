@@ -481,7 +481,9 @@ class PMAEpisode:
             "step": attempt, "public_blocks": blocks, "public_results": results,
             "public_input": actor_input, "step_status": status})
         self.batch_steps += 1
-        triggered = self.batch_steps == 8
+        wake_interval = (3 if getattr(self.agent, "_research_candidate", None)
+                         == "pma_predictive_read_context_v1" else 8)
+        triggered = self.batch_steps == wake_interval
         if triggered:
             if getattr(self.agent, "_research_candidate", None) == "pma_predictive_read_context_v1":
                 trajectory = "\n\n".join(self.agent._format_step_entry(entry)
@@ -492,7 +494,8 @@ class PMAEpisode:
             self.batch_steps = 0
         self.last_completed_attempt = attempt
         return {"status": "observed", "triggered": triggered,
-                "trigger_reason": "eight_new_steps" if triggered else "awaiting_eight_steps",
+                "trigger_reason": (f"{wake_interval}_new_steps" if triggered else
+                                   f"awaiting_{wake_interval}_steps"),
                 "step_count": attempt}
 
     def _task_end(self, event: dict[str, Any]) -> dict[str, Any]:
