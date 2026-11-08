@@ -61,6 +61,8 @@ class ContextPredictiveMemoryAgent(PredictiveMemoryAgent):
             "type": "text", "text": getattr(response, "content", None) or ""}]}
         if getattr(response, "thinking_blocks", None):
             assistant["_provider_thinking_blocks"] = copy.deepcopy(response.thinking_blocks)
+        if getattr(response, "openai_output_items", None):
+            assistant["_openai_output_items"] = copy.deepcopy(response.openai_output_items)
         self._phase2_history.append(assistant)
         return response
 

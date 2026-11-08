@@ -520,7 +520,7 @@ def run_live(args) -> dict:
     memory_profile_path = None
     if args.condition == 'B' or candidate_profile:
         if not args.pma_profile_file:
-            raise RuntimeError('PMA Opus 4.8 profile is required for B')
+            raise RuntimeError('bound PMA model profile is required for B')
         memory_profile_path = Path(args.pma_profile_file).resolve(strict=True)
         if _sha(memory_profile_path) != manifest.get('pma_profile_sha256'):
             raise RuntimeError('PMA memory profile differs from frozen identity')

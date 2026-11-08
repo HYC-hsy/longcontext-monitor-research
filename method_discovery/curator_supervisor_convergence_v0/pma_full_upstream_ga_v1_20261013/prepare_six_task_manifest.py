@@ -22,6 +22,7 @@ from .offline_launcher import image_identity
 from .six_task_assets import descriptor, materialize_public
 from .six_task_plan import ORDER
 from .export_official_evaluator import SIX_TASKS
+from .pma_model_profile import load_profile
 
 STAGE = Path(__file__).resolve().parent
 SOURCE_FILES = (
@@ -208,11 +209,9 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
         schema = 'pma-ga-live-manifest-v3'
     task_settings = runpy.run_path(str(task_profile))[
         'native_claude_cc_vibe_opus48']
-    pma_settings = json.loads(pma_profile.read_text(encoding='utf-8'))[
-        'claude_monitor_opus48']
-    if (task_settings.get('model') != 'claude-opus-4-8' or
-            pma_settings.get('model') != 'claude-opus-4-8'):
-        raise RuntimeError('frozen Task/PMA models are not Opus 4.8')
+    pma_profile_name, pma_settings = load_profile(pma_profile.read_bytes(), candidate)
+    if task_settings.get('model') != 'claude-opus-4-8':
+        raise RuntimeError('frozen Task model is not Opus 4.8')
     tasks = tuple(dict.fromkeys(row['task'] for row in slots))
     assets = {}
     test_coverage = {}
@@ -253,7 +252,7 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
               'task_turns_max': 300, 'agent_wall_seconds': 14400,
               'harbor_whole_trial_retries': 0,
               'task_profile_name': 'native_claude_cc_vibe_opus48',
-              'pma_profile_name': 'claude_monitor_opus48',
+              'pma_profile_name': pma_profile_name,
               'network': 'official_task_network_with_host_credential_gateway',
               'evaluation': 'native_Harbor_SHARED_pending_lifecycle_certification'}
     if gate is not None:

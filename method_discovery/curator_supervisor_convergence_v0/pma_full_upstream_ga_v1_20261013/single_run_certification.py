@@ -41,6 +41,8 @@ SOURCE_FILES = tuple(dict.fromkeys(V3_SOURCE_FILES + (
     'collect_single_run_fixture.py',
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'harbor_adapter.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'pma_model_profile.py',
 )))
 CANDIDATE_SOURCE_FILES = SOURCE_FILES + (
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
@@ -95,6 +97,8 @@ CONTEXT_PREDICTIVE_SOURCE_FILES = tuple(dict.fromkeys(PREDICTIVE_SOURCE_FILES + 
 READ_CONTEXT_PREDICTIVE_SOURCE_FILES = CONTEXT_PREDICTIVE_SOURCE_FILES + (
     "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/"
     "vendor/pma_89e5c0d/src/memory_agent/memory/read_context_predictive_memory_agent.py",
+    "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/"
+    "responses_memory_llm.py",
 )
 EVIDENCE_FILES = (
     'execution_identity.json',

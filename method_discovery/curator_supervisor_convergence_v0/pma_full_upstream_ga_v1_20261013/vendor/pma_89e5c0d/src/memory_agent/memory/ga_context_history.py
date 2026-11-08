@@ -178,5 +178,10 @@ def prepare_history(history, prompt):
             if len(converted) != 1 or converted[0].get("role") != "assistant":
                 raise GAHistoryIntegrityError("cannot associate signed provider blocks")
             converted[0]["thinking_blocks"] = copy.deepcopy(blocks)
+        output_items = message.get("_openai_output_items")
+        if output_items:
+            if len(converted) != 1 or converted[0].get("role") != "assistant":
+                raise GAHistoryIntegrityError("cannot associate Responses output items")
+            converted[0]["_openai_output_items"] = copy.deepcopy(output_items)
         result.extend(converted)
     return result

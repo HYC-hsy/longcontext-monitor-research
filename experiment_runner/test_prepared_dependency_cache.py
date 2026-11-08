@@ -19,8 +19,11 @@ class PreparedDependencyCacheTests(unittest.TestCase):
             payload = root / 'payload.tar'
             content = root / 'uv'
             content.write_bytes(b'synthetic dependency file')
+            deb = root / 'curl.deb'
+            deb.write_bytes(b'synthetic pinned package')
             with tarfile.open(payload, 'w') as archive:
                 archive.add(content, 'root/.local/bin/uv', recursive=False)
+                archive.add(deb, 'var/cache/evaluation-debs/curl_1_amd64.deb', recursive=False)
             manifest = {
                 'schema': 'ga20-apt-uv-dependency-prototype-v1',
                 'status': 'clean_container_offline_ready',
@@ -58,6 +61,8 @@ class PreparedDependencyCacheTests(unittest.TestCase):
             self.assertTrue(any('sha256sum -c' in cmd for cmd in commands))
             self.assertTrue(any('UV_OFFLINE=1' in cmd for cmd in commands))
             self.assertTrue(any('dpkg -i' in cmd for cmd in commands))
+            self.assertTrue(any('curl_1_amd64.deb' in cmd for cmd in commands))
+            self.assertFalse(any('*.deb' in cmd for cmd in commands))
             self.assertFalse(any('apt-get' in cmd or 'curl ' in cmd for cmd in commands))
             self.assertEqual(receipts[-1]['stage'], 'cache_stage_cleanup')
 

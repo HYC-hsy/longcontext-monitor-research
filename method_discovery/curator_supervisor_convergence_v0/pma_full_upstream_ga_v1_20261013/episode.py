@@ -17,6 +17,8 @@ from typing import Any
 from harbor.llms.base import BaseLLM, LLMResponse
 from memory_agent.memory_enabled_agent import MemoryEnabledTerminus2
 
+from pma_model_profile import CLAUDE_MODELS, OPENAI_MODEL, READ_CONTEXT
+
 
 class DisabledActorLLM(BaseLLM):
     calls = 0
@@ -53,23 +55,24 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
     if research_candidate not in {"U", "V1", "D1", "S", "R", "S2", "R2", "pma_gap_memory_v0", "pma_gap_evidence_v1", "pma_predictive_f838_v1", "pma_predictive_context_v1", "pma_predictive_read_context_v1"}:
         raise ValueError("unknown research candidate")
     if memory_profile is not None:
-        if (memory_profile.get("provider"), memory_profile.get("api_mode"),
-                memory_profile.get("model"), memory_profile.get("thinking_type")) != (
-                "anthropic", "messages", "claude-opus-4-8", "adaptive"):
-            raise ValueError("PMA memory profile is not the frozen Opus 4.8 route")
+        model = memory_profile.get("model")
+        if model not in CLAUDE_MODELS | {OPENAI_MODEL} or (
+                model != "claude-opus-4-8" and research_candidate != READ_CONTEXT):
+            raise ValueError("PMA model is not bound to the selected candidate")
         if not memory_profile.get("apibase") or not memory_profile.get("apikey"):
             raise ValueError("PMA memory profile lacks transport configuration")
     actor = DisabledActorLLM()
     agent = MemoryEnabledTerminus2(
         logs_dir=logs_dir, model_name="disabled-actor-not-ga-task-model",
         llm=actor, parser_name="xml", record_terminal_session=False,
-        memory_model_name=("anthropic/claude-opus-4-8" if memory_profile is not None
+        memory_model_name=((memory_profile["provider"] + "/" + memory_profile["model"])
+                           if memory_profile is not None
                            else "openrouter/anthropic/claude-opus-4.6"),
         memory_api_base=(memory_profile["apibase"] if memory_profile is not None
                          else memory_api_base),
         memory_api_key=(memory_profile["apikey"] if memory_profile is not None
                         else memory_api_key),
-        memory_temperature=(memory_profile["temperature"] if memory_profile is not None
+        memory_temperature=(memory_profile.get("temperature", 0.3) if memory_profile is not None
                             else 0.3), memory_max_thinking_tokens=None,
         memory_keep_thinking=False, memory_use_structured_tools=True,
         trigger_interval=1, trigger_on_first_step=True,
@@ -77,8 +80,15 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
         reset_knowledge_on_episode=False, reset_procedural_on_episode=False,
         injection_method="user_turn",
     )
+    # The pinned Harbor constructor accepts **kwargs but does not consume an
+    # injected `llm` keyword. GA owns the only actor loop; replace the inert
+    # backend before any episode method can call it.
+    agent._llm = actor
     if agent._llm is not actor:
         raise RuntimeError("upstream actor backend was not disabled")
+    if memory_profile is not None and memory_profile["model"] == OPENAI_MODEL:
+        from responses_memory_llm import ResponsesMemoryLLM
+        agent._memory_llm = ResponsesMemoryLLM(memory_profile)
     if research_candidate in {"pma_predictive_f838_v1", "pma_predictive_context_v1", "pma_predictive_read_context_v1"}:
         if research_candidate == "pma_predictive_read_context_v1":
             from memory_agent.memory.read_context_predictive_memory_agent import ReadContextPredictiveMemoryAgent as PredictiveMemoryAgent
@@ -150,7 +160,7 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
             variant=research_candidate, llm=agent._memory_llm, memory=bank,
             keep_thinking=False, use_structured_tools=True)
         agent._research_candidate = research_candidate
-    if memory_profile is not None:
+    if memory_profile is not None and memory_profile["model"] in CLAUDE_MODELS:
         # Transport-only adaptation. The upstream memory prompts, bank, trigger,
         # two-phase process, and LiteLLM retry decorator remain unchanged.
         memory_llm = agent._memory_llm

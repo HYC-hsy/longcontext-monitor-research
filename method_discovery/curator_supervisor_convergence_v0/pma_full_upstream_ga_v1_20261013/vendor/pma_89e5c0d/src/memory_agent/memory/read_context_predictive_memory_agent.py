@@ -110,6 +110,10 @@ class ReadContextPredictiveMemoryAgent(ContextPredictiveMemoryAgent):
                 if len(converted) != 1 or converted[0]["role"] != "assistant":
                     raise GAHistoryIntegrityError("cannot associate signed provider blocks")
                 converted[0]["thinking_blocks"] = copy.deepcopy(row["_provider_thinking_blocks"])
+            if row.get("_openai_output_items"):
+                if len(converted) != 1 or converted[0]["role"] != "assistant":
+                    raise GAHistoryIntegrityError("cannot associate Responses output items")
+                converted[0]["_openai_output_items"] = copy.deepcopy(row["_openai_output_items"])
             prior.extend(converted)
         return copy.deepcopy(prior)
 
@@ -173,6 +177,8 @@ class ReadContextPredictiveMemoryAgent(ContextPredictiveMemoryAgent):
         assistant = {"role": "assistant", "content": blocks}
         if thinking:
             assistant["_provider_thinking_blocks"] = copy.deepcopy(thinking)
+        if getattr(response, "openai_output_items", None):
+            assistant["_openai_output_items"] = copy.deepcopy(response.openai_output_items)
         if parsed:
             blocks.extend({"type": "tool_use", "id": call_id, "name": name,
                            "input": copy.deepcopy(args)} for call_id, name, args in parsed)

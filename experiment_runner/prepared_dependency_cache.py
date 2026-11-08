@@ -140,14 +140,36 @@ async def restore(exec_command, upload_file, cache, manifest, record):
                       f'tar --no-same-owner -xf {remote}/payload.tar -C /')
         schema = manifest['schema']
         if schema == SCHEMAS['apt_curl_uvx']:
+            debs = sorted('/' + name for name, row in manifest['files'].items()
+                          if name.startswith('var/cache/evaluation-debs/') and
+                          name.endswith('.deb') and row['type'] == 'file')
+            if not debs:
+                raise RuntimeError('prepared dependency manifest lists no deb files')
+            explicit_debs = ' '.join(shlex.quote(path) for path in debs)
             await execute('cache_deb_install',
-                          'dpkg -i /var/cache/evaluation-debs/*.deb')
+                          'dpkg -i -- ' + explicit_debs)
+            await execute('cache_deb_verify',
+                          'set -eu; for f in ' + explicit_debs + '; do '
+                          'p=$(dpkg-deb -f "$f" Package); '
+                          'v=$(dpkg-deb -f "$f" Version); '
+                          'test "$(dpkg-query -W -f="${Version}" "$p")" = "$v"; '
+                          'done')
         if schema == SCHEMAS['pip']:
-            packages = ' '.join(shlex.quote(item) for item in manifest['pip_packages'])
+            wheels = sorted('/' + name for name, row in manifest['files'].items()
+                            if name.startswith('var/cache/evaluation-debs/wheels/') and
+                            name.endswith('.whl') and row['type'] == 'file')
+            if not wheels:
+                raise RuntimeError('prepared dependency manifest lists no wheel files')
             flags = ' '.join(shlex.quote(item) for item in manifest['pip_flags'])
             await execute('cache_pip_install',
-                          'pip install --no-index --find-links '
-                          '/var/cache/evaluation-debs/wheels ' + flags + ' ' + packages)
+                          'pip install --no-index --no-deps ' + flags + ' ' +
+                          ' '.join(shlex.quote(path) for path in wheels))
+            expected = sorted({tuple(Path(path).name.split('-')[:2]) for path in wheels})
+            checks = '; '.join(
+                'assert m.version(' + repr(name.replace('_', '-')) + ') == ' + repr(version)
+                for name, version in expected)
+            await execute('cache_pip_verify',
+                          'python -c ' + shlex.quote('import importlib.metadata as m; ' + checks))
         else:
             wheels = ' '.join('-w ' + shlex.quote(item)
                               for item in manifest['uv_wheels'])

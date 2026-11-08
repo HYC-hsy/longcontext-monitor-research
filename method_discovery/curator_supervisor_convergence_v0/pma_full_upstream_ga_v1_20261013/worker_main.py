@@ -48,12 +48,20 @@ def install_transport_audit(agent, archive: Path) -> None:
                  in ('pma_gap_memory_v0', 'pma_gap_evidence_v1') else "bank_management" if tools else "context_decision")
         started = time.time()
         status = "complete"
-        safe_history = copy.deepcopy(message_history or [])
-        for message in safe_history:
-            if isinstance(message, dict):
-                for key in ("thinking_blocks", "_provider_thinking_blocks"):
-                    if key in message:
-                        message[key] = "[provider-private blocks excluded]"
+        def public_history(value):
+            if isinstance(value, list):
+                return [public_history(item) for item in value]
+            if isinstance(value, dict):
+                if value.get('type') == 'reasoning':
+                    return {'type': 'reasoning', 'private_content': '[excluded]'}
+                return {key: ('[provider-private blocks excluded]'
+                              if key in ('thinking_blocks', '_provider_thinking_blocks',
+                                         '_openai_output_items', 'encrypted_content',
+                                         'signature', 'reasoning_content')
+                              else public_history(item))
+                        for key, item in value.items()}
+            return value
+        safe_history = public_history(message_history or [])
         append_private_audit(archive / "memory_payload.jsonl", {
             "phase": phase, "prompt": prompt, "system": system,
             "tools": tools, "message_history": safe_history,
@@ -66,6 +74,26 @@ def install_transport_audit(agent, archive: Path) -> None:
             if message_history is not None:
                 kwargs["message_history"] = message_history
             response = await original(**kwargs)
+            native_calls = []
+            for call in getattr(response, 'tool_calls', None) or []:
+                function = getattr(call, 'function', None)
+                native_calls.append({'id': getattr(call, 'id', None),
+                                     'name': getattr(function, 'name', None),
+                                     'arguments': getattr(function, 'arguments', None)})
+            append_private_audit(archive / 'memory_response.jsonl', {
+                'phase': phase, 'call_sequence': calls,
+                'content': getattr(response, 'content', None),
+                'tool_calls': native_calls,
+                'response_id': getattr(response, 'response_id', None),
+                'actual_model': getattr(response, 'actual_model',
+                                        getattr(response, 'model_name', None)),
+                'usage': getattr(response, 'provider_usage', None),
+                'completed_epoch': time.time()})
+            effective = getattr(agent._memory_llm, 'last_effective_request', None)
+            if effective is not None:
+                append_private_audit(archive / 'memory_effective_request.jsonl', {
+                    'phase': phase, 'call_sequence': calls,
+                    'request': public_history(effective)})
             if getattr(agent, '_research_candidate', None) in ('pma_gap_memory_v0', 'pma_gap_evidence_v1'):
                 append_private_audit(archive / 'gap_visible_transport.jsonl', {
                     'phase': phase, 'call_sequence': calls,
@@ -128,7 +156,8 @@ async def serve(args: argparse.Namespace) -> None:
         expected_hash = os.environ.get("PMA_MEMORY_PROFILE_SHA256")
         if not expected_hash or hashlib.sha256(raw_profile).hexdigest() != expected_hash:
             raise RuntimeError("PMA memory profile identity mismatch")
-        profile = json.loads(raw_profile)["claude_monitor_opus48"]
+        from pma_model_profile import load_profile
+        _, profile = load_profile(raw_profile, args.research_candidate)
     agent = construct_upstream(private / "upstream_agent",
                                memory_api_base=os.environ.get("PMA_MEMORY_API_BASE"),
                                memory_api_key=os.environ.get("PMA_MEMORY_API_KEY"),
