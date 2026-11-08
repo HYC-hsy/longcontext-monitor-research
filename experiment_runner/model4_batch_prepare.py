@@ -16,7 +16,8 @@ import runpy
 
 TASKS = ("kv-store-grpc", "reshard-c4-data", "rstan-to-pystan",
          "largest-eigenval", "filter-js-from-html")
-MODELS = ("claude-opus-4-8", "claude-opus-5", "claude-fable-5", "gpt-6.1-sol")
+CLAUDE_MODELS = ("claude-opus-4-8", "claude-opus-5", "claude-fable-5")
+GPT_MODELS = ("gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra")
 METHOD = "pma-predictive-read-context"
 CACHED = frozenset(TASKS) - {"reshard-c4-data"}
 
@@ -25,7 +26,11 @@ def file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def prepare(templates: Path, output: Path, repo: Path) -> dict:
+def prepare(templates: Path, output: Path, repo: Path,
+            gpt_model: str = "gpt-6.1-sol") -> dict:
+    if gpt_model not in GPT_MODELS:
+        raise ValueError("unsupported GPT model for this fixed comparison")
+    models = CLAUDE_MODELS + (gpt_model,)
     if output.exists():
         raise FileExistsError("batch output directory must be new")
     source = {}
@@ -55,8 +60,8 @@ def prepare(templates: Path, output: Path, repo: Path) -> dict:
     private_configs = output / "private_configs"
     private_profiles.mkdir()
     private_configs.mkdir()
-    for model in MODELS:
-        if model == "gpt-6.1-sol":
+    for model in models:
+        if model == gpt_model:
             oai = runpy.run_path(str(task_profile))["native_oai_cc_vibe_gpt56_sol_high"]
             profile = {"provider": "openai", "api_mode": "responses", "model": model,
                        "apibase": oai["apibase"], "apikey": oai["apikey"],
@@ -70,8 +75,8 @@ def prepare(templates: Path, output: Path, repo: Path) -> dict:
         target.write_text(json.dumps({"pma_model": profile}, ensure_ascii=False,
                                      indent=2) + "\n", encoding="utf-8")
     for task_index, task in enumerate(TASKS):
-        for position in range(len(MODELS)):
-            model = MODELS[(task_index + position) % len(MODELS)]
+        for position in range(len(models)):
+            model = models[(task_index + position) % len(models)]
             config = copy.deepcopy(source[task])
             config["environment"]["paths"]["ga_source"] = str(repo / "GenericAgent-main")
             config["environment"]["paths"]["bench_root"] = str(repo / "long_context_bench")
@@ -97,7 +102,7 @@ def prepare(templates: Path, output: Path, repo: Path) -> dict:
                           "task_profile_sha256": file_hash(task_profile),
                           "pma_profile_sha256": file_hash(private_profiles / (model + ".json"))})
     plan = {"schema": "pma-simple-model4-plan-v1", "method": METHOD,
-            "tasks": TASKS, "models": MODELS, "slots": names}
+            "tasks": TASKS, "models": models, "slots": names}
     (output / "batch_plan.json").write_text(json.dumps(plan, ensure_ascii=False,
                                               indent=2) + "\n", encoding="utf-8")
     return plan
@@ -108,6 +113,7 @@ if __name__ == "__main__":
     parser.add_argument("--templates", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--repo", type=Path, required=True)
+    parser.add_argument("--gpt-model", choices=GPT_MODELS, default="gpt-6.1-sol")
     args = parser.parse_args()
-    result = prepare(args.templates, args.output, args.repo)
+    result = prepare(args.templates, args.output, args.repo, args.gpt_model)
     print(f"prepared {len(result['slots'])} private configs; no model calls")
