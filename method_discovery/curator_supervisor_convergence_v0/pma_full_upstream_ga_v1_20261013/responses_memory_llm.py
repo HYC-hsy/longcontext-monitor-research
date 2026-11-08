@@ -173,6 +173,13 @@ class ResponsesMemoryLLM(BaseLLM):
         output = body.get("output")
         if not isinstance(output, list):
             raise RuntimeError("PMA Responses output missing")
+        # Keep only structural types in transport diagnostics. A completed
+        # provider response can contain an item this adapter cannot replay;
+        # naming its type is necessary to diagnose that boundary safely.
+        self.last_visible_response["output_item_types"] = [
+            item.get("type") if isinstance(item, dict) else type(item).__name__
+            for item in output
+        ]
         text, calls, ids = [], [], set()
         for item in output:
             kind = item.get("type")
@@ -191,7 +198,7 @@ class ResponsesMemoryLLM(BaseLLM):
                 calls.append(SimpleNamespace(id=call_id,
                     function=SimpleNamespace(name=name, arguments=json.loads(arguments))))
             elif kind != "reasoning":
-                raise RuntimeError("unsupported PMA Responses output item")
+                raise RuntimeError(f"unsupported PMA Responses output item: {kind!r}")
         # The pinned worker stages the vendor Harbor dataclass, whose
         # constructor only accepts content/reasoning/usage and optional
         # tool_calls. Metadata is attached after construction so both the

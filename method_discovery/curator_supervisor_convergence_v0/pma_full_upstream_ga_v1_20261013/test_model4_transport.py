@@ -108,6 +108,19 @@ class Model4TransportTests(unittest.TestCase):
         self.assertEqual(calls[0]["tools"][0]["name"], "memory_add")
         self.assertNotIn("temperature", calls[0])
 
+    def test_unknown_response_item_reports_type_without_content(self):
+        llm = ResponsesMemoryLLM(self.profile())
+        class FakeResponses:
+            async def create(self, **_):
+                return SimpleNamespace(model_dump=lambda **__: {
+                    "model": "gpt-6.1-sol", "status": "completed",
+                    "output": [{"type": "new_item", "secret": "not-for-errors"}]})
+        llm.client.responses = FakeResponses()
+        with self.assertRaisesRegex(RuntimeError, "new_item") as caught:
+            asyncio.run(llm.call("task", system="system"))
+        self.assertNotIn("not-for-errors", str(caught.exception))
+        self.assertEqual(llm.last_visible_response["output_item_types"], ["new_item"])
+
     def test_candidate_constructor_model_binding(self):
         for model in ("claude-opus-4-8", "claude-opus-5", "claude-fable-5", "gpt-6.1-sol"):
             if model == "gpt-6.1-sol":
