@@ -161,6 +161,11 @@ class ResponsesMemoryLLM(BaseLLM):
         converted_tools = _tools(tools)
         if converted_tools:
             request["tools"] = converted_tools
+            request["tool_choice"] = {"type": "allowed_tools", "mode": "auto",
+                                      "tools": [{"type": "function", "name": tool["name"]}
+                                                for tool in converted_tools]}
+        else:
+            request["tool_choice"] = "none"
         self.last_effective_request = request
         result = await self.client.responses.create(**request)
         body = result.model_dump(exclude_none=True)

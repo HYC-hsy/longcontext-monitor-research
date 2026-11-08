@@ -106,6 +106,8 @@ class Model4TransportTests(unittest.TestCase):
         self.assertEqual(calls[0]["model"], "gpt-6.1-sol")
         self.assertFalse(calls[0]["store"])
         self.assertEqual(calls[0]["tools"][0]["name"], "memory_add")
+        self.assertEqual(calls[0]["tool_choice"], {"type": "allowed_tools",
+            "mode": "auto", "tools": [{"type": "function", "name": "memory_add"}]})
         self.assertNotIn("temperature", calls[0])
 
     def test_unknown_response_item_reports_type_without_content(self):
@@ -160,17 +162,25 @@ class Model4TransportTests(unittest.TestCase):
                 llm.client = AsyncOpenAI(api_key="test-only",
                     base_url="https://example.invalid/v1", http_client=http_client,
                     max_retries=0)
-                return await llm.call("task", system="system")
+                response = await llm.call("task", system="system")
+                await llm.call("task", system="system", tools=[{
+                    "type": "function", "function": {"name": "memory_read",
+                    "description": "read", "parameters": {"type": "object",
+                    "properties": {"bank_id": {"type": "string"}}}}}])
+                return response
         response = asyncio.run(run())
         self.assertEqual(response.content, "<no_intervention/>")
-        self.assertEqual(len(recorded), 1)
+        self.assertEqual(len(recorded), 2)
         self.assertEqual(recorded[0]["input"], [{"role": "user", "content": "task"}])
         self.assertEqual(recorded[0]["reasoning"], {"effort": "high"})
         self.assertFalse(recorded[0]["store"])
+        self.assertEqual(recorded[0]["tool_choice"], "none")
+        self.assertEqual(recorded[1]["tool_choice"], {"type": "allowed_tools",
+            "mode": "auto", "tools": [{"type": "function", "name": "memory_read"}]})
 
     def test_staged_harbor_full_p1_p2_success(self):
         from harbor.llms.base import LLMResponse
-        self.assertNotIn("model_name", LLMResponse.__dataclass_fields__)
+        self.assertIn("content", LLMResponse.__dataclass_fields__)
         async def run():
             with TemporaryDirectory() as directory:
                 agent = construct_upstream(Path(directory), memory_profile=self.profile(),
