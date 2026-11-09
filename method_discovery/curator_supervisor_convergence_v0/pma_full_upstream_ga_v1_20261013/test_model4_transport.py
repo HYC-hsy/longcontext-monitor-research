@@ -11,6 +11,7 @@ import unittest
 from pma_model_profile import load_profile, READ_CONTEXT
 from responses_memory_llm import ResponsesMemoryLLM, response_input
 from episode import PMAEpisode, construct_upstream
+from worker_main import install_transport_audit
 from memory_agent.memory.ga_context_history import (
     _history_bytes, _msgs_claude2oai, compress_history_tags)
 
@@ -114,6 +115,52 @@ class Model4TransportTests(unittest.TestCase):
         self.assertEqual(calls[0]["tool_choice"], {"type": "allowed_tools",
             "mode": "auto", "tools": [{"type": "function", "name": "memory_add"}]})
         self.assertNotIn("temperature", calls[0])
+
+    def test_returned_model_is_recorded_without_rejecting_response(self):
+        llm = ResponsesMemoryLLM(self.profile("gpt-6-sol"))
+        returned = ["gpt-6-astra", None]
+        class FakeResponses:
+            async def create(self, **_):
+                model = returned.pop(0)
+                return SimpleNamespace(model_dump=lambda **__: {
+                    "id": "response-test", "model": model, "status": "completed",
+                    "output": [{"type": "message", "content": [
+                        {"type": "output_text", "text": "<no_intervention/>"}]}]})
+        llm.client.responses = FakeResponses()
+        for expected in ("gpt-6-astra", None):
+            with self.subTest(returned_model=expected):
+                response = asyncio.run(llm.call("task", system="system"))
+                self.assertEqual(response.content, "<no_intervention/>")
+                self.assertEqual(response.actual_model, expected)
+                self.assertEqual(llm.last_effective_request["model"], "gpt-6-sol")
+                self.assertEqual(llm.last_visible_response["model"], expected)
+                self.assertEqual(llm.last_visible_response["id"], "response-test")
+        self.assertFalse(returned)
+
+    def test_transport_audit_keeps_requested_and_returned_models(self):
+        llm = ResponsesMemoryLLM(self.profile("gpt-6-sol"))
+        class FakeResponses:
+            async def create(self, **_):
+                return SimpleNamespace(model_dump=lambda **__: {
+                    "id": "different-model-response", "model": "gpt-6-astra",
+                    "status": "completed", "output": [{"type": "message",
+                    "content": [{"type": "output_text", "text": "<no_intervention/>"}]}]})
+        llm.client.responses = FakeResponses()
+        agent = SimpleNamespace(_memory_llm=llm,
+                                _memory_agent=SimpleNamespace(_history_transforms=[], _step=8),
+                                _research_candidate=READ_CONTEXT)
+        with TemporaryDirectory() as directory:
+            archive = Path(directory)
+            install_transport_audit(agent, archive)
+            response = asyncio.run(llm.call(prompt="task", system="system"))
+            self.assertEqual(response.actual_model, "gpt-6-astra")
+            transport = json.loads((archive / "memory_transport.jsonl").read_text())
+            self.assertEqual(transport["status"], "complete")
+            self.assertEqual(transport["requested_model"], "gpt-6-sol")
+            self.assertEqual(transport["returned_model"], "gpt-6-astra")
+            self.assertEqual(transport["response_id"], "different-model-response")
+            saved = json.loads((archive / "memory_response.jsonl").read_text())
+            self.assertEqual(saved["actual_model"], "gpt-6-astra")
 
     def test_unknown_response_item_reports_type_without_content(self):
         llm = ResponsesMemoryLLM(self.profile())

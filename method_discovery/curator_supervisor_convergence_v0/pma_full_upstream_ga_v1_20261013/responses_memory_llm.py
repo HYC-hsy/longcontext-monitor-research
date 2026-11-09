@@ -152,6 +152,8 @@ class ResponsesMemoryLLM(BaseLLM):
 
     async def call(self, prompt: str, *, system: str, tools=None,
                    message_history=None) -> LLMResponse:
+        self.last_effective_request = None
+        self.last_visible_response = None
         if not isinstance(system, str):
             raise ValueError("PMA system prompt must be text")
         request = {"model": self.model, "instructions": system,
@@ -171,8 +173,6 @@ class ResponsesMemoryLLM(BaseLLM):
         body = result.model_dump(exclude_none=True)
         self.last_visible_response = {"id": body.get("id"), "model": body.get("model"),
                                       "status": body.get("status"), "usage": body.get("usage")}
-        if body.get("model") != self.model:
-            raise RuntimeError("PMA provider returned a different model identity")
         if body.get("status") != "completed":
             raise RuntimeError("PMA Responses request did not complete")
         output = body.get("output")
@@ -213,6 +213,6 @@ class ResponsesMemoryLLM(BaseLLM):
         response.model_name = self.model
         response.response_id = body.get("id")
         response.openai_output_items = output
-        response.actual_model = body["model"]
+        response.actual_model = body.get("model")
         response.provider_usage = body.get("usage")
         return response

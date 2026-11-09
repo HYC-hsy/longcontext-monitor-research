@@ -105,8 +105,15 @@ def install_transport_audit(agent, archive: Path) -> None:
             status = type(exc).__name__
             raise
         finally:
+            observed = getattr(agent._memory_llm, 'last_visible_response', None)
+            if not isinstance(observed, dict):
+                observed = {}
             append_private_audit(archive / "memory_transport.jsonl", {
                 "phase": phase, "status": status,
+                "requested_model": getattr(agent._memory_llm, 'model', None),
+                "returned_model": observed.get('model'),
+                "response_id": observed.get('id'),
+                "response_status": observed.get('status'),
                 "started_epoch": started, "ended_epoch": time.time()})
 
     agent._memory_llm.call = audited_call
