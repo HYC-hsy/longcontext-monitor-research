@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import copy
+import uuid
 from types import SimpleNamespace
 from typing import Any
 
@@ -143,6 +144,7 @@ class ResponsesMemoryLLM(BaseLLM):
             default_headers=profile.get("http_headers"))
         self.last_effective_request: dict | None = None
         self.last_visible_response: dict | None = None
+        self._used_call_ids: set[str] = set()
 
     def get_model_context_limit(self) -> int:
         return self.context_window
@@ -186,7 +188,9 @@ class ResponsesMemoryLLM(BaseLLM):
             for item in output
         ]
         text, calls, ids = [], [], set()
-        for item in output:
+        normalized_output = copy.deepcopy(output)
+        aliases = []
+        for item in normalized_output:
             kind = item.get("type")
             if kind == "message":
                 for block in item.get("content") or []:
@@ -200,6 +204,15 @@ class ResponsesMemoryLLM(BaseLLM):
                         not isinstance(arguments, str)):
                     raise RuntimeError("PMA Responses function call invalid")
                 ids.add(call_id)
+                if call_id in self._used_call_ids:
+                    original_id = call_id
+                    call_id = "call_pma_" + uuid.uuid4().hex
+                    while call_id in self._used_call_ids or call_id in ids:
+                        call_id = "call_pma_" + uuid.uuid4().hex
+                    item["call_id"] = call_id
+                    aliases.append({"provider_call_id": original_id,
+                                    "history_call_id": call_id})
+                self._used_call_ids.add(call_id)
                 calls.append(SimpleNamespace(id=call_id,
                     function=SimpleNamespace(name=name, arguments=json.loads(arguments))))
             elif kind != "reasoning":
@@ -212,7 +225,8 @@ class ResponsesMemoryLLM(BaseLLM):
         response.tool_calls = calls
         response.model_name = self.model
         response.response_id = body.get("id")
-        response.openai_output_items = output
+        response.openai_output_items = normalized_output
+        self.last_visible_response["call_id_aliases"] = aliases
         response.actual_model = body.get("model")
         response.provider_usage = body.get("usage")
         return response

@@ -116,6 +116,80 @@ class Model4TransportTests(unittest.TestCase):
             "mode": "auto", "tools": [{"type": "function", "name": "memory_add"}]})
         self.assertNotIn("temperature", calls[0])
 
+    def test_repeated_provider_call_id_across_responses_keeps_history_paired(self):
+        llm = ResponsesMemoryLLM(self.profile("gpt-6-sol"))
+        sent = []
+        class FakeResponses:
+            async def create(self, **kwargs):
+                sent.append(kwargs)
+                return SimpleNamespace(model_dump=lambda **_: {
+                    "id": "resp_0", "model": "gpt-6-sol", "status": "completed",
+                    "output": [{"type": "reasoning", "encrypted_content": "opaque"},
+                               {"type": "function_call", "call_id": "sg_call_1",
+                                "name": "memory_add", "arguments": '{"content":"note"}'}]})
+        llm.client.responses = FakeResponses()
+        first = asyncio.run(llm.call("task", system="system"))
+        first_id = first.tool_calls[0].id
+        self.assertEqual(first_id, "sg_call_1")
+        first_history = [{"role": "assistant", "tool_calls": [{"id": first_id,
+            "function": {"name": "memory_add", "arguments": '{"content":"note"}'}}],
+            "_openai_output_items": first.openai_output_items},
+            {"role": "tool", "tool_call_id": first_id, "content": "saved"}]
+        second = asyncio.run(llm.call("next", system="system", message_history=first_history))
+        second_id = second.tool_calls[0].id
+        self.assertNotEqual(second_id, first_id)
+        self.assertEqual(llm.last_visible_response["call_id_aliases"], [
+            {"provider_call_id": "sg_call_1", "history_call_id": second_id}])
+        self.assertEqual(second.openai_output_items[-1]["call_id"], second_id)
+        self.assertEqual(sent[-1]["input"][-3]["call_id"], first_id)
+        combined = first_history + [{"role": "assistant", "tool_calls": [{
+            "id": second_id, "function": {"name": "memory_add",
+            "arguments": '{"content":"note"}'}}],
+            "_openai_output_items": second.openai_output_items},
+            {"role": "tool", "tool_call_id": second_id, "content": "saved"}]
+        items = response_input(combined, "continue")
+        self.assertEqual([item["call_id"] for item in items
+                          if item.get("type") == "function_call"], [first_id, second_id])
+        self.assertEqual([item["call_id"] for item in items
+                          if item.get("type") == "function_call_output"], [first_id, second_id])
+
+    def test_repeated_provider_call_id_within_one_response_still_fails(self):
+        llm = ResponsesMemoryLLM(self.profile("gpt-6-sol"))
+        class FakeResponses:
+            async def create(self, **_):
+                return SimpleNamespace(model_dump=lambda **__: {
+                    "model": "gpt-6-sol", "status": "completed", "output": [
+                        {"type": "function_call", "call_id": "same", "name": "memory_add",
+                         "arguments": '{"content":"one"}'},
+                        {"type": "function_call", "call_id": "same", "name": "memory_add",
+                         "arguments": '{"content":"two"}'}]})
+        llm.client.responses = FakeResponses()
+        with self.assertRaisesRegex(RuntimeError, "function call invalid"):
+            asyncio.run(llm.call("task", system="system"))
+
+    def test_repeated_call_id_alias_is_written_to_private_transport_audit(self):
+        llm = ResponsesMemoryLLM(self.profile("gpt-6-sol"))
+        class FakeResponses:
+            async def create(self, **_):
+                return SimpleNamespace(model_dump=lambda **__: {
+                    "id": "resp_0", "model": "gpt-6-sol", "status": "completed",
+                    "output": [{"type": "function_call", "call_id": "sg_call_1",
+                                "name": "memory_add", "arguments": '{"content":"note"}'}]})
+        llm.client.responses = FakeResponses()
+        agent = SimpleNamespace(_memory_llm=llm,
+                                _memory_agent=SimpleNamespace(_history_transforms=[], _step=8),
+                                _research_candidate=READ_CONTEXT)
+        with TemporaryDirectory() as directory:
+            archive = Path(directory)
+            install_transport_audit(agent, archive)
+            asyncio.run(llm.call(prompt="first", system="system"))
+            asyncio.run(llm.call(prompt="second", system="system"))
+            rows = [json.loads(line) for line in
+                    (archive / "memory_transport.jsonl").read_text().splitlines()]
+            self.assertEqual(rows[0]["call_id_aliases"], [])
+            self.assertEqual(rows[1]["call_id_aliases"][0]["provider_call_id"], "sg_call_1")
+            self.assertNotEqual(rows[1]["call_id_aliases"][0]["history_call_id"], "sg_call_1")
+
     def test_returned_model_is_recorded_without_rejecting_response(self):
         llm = ResponsesMemoryLLM(self.profile("gpt-6-sol"))
         returned = ["gpt-6-astra", None]

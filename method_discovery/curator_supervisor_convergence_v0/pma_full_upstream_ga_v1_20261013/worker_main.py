@@ -114,6 +114,7 @@ def install_transport_audit(agent, archive: Path) -> None:
                 "returned_model": observed.get('model'),
                 "response_id": observed.get('id'),
                 "response_status": observed.get('status'),
+                "call_id_aliases": observed.get('call_id_aliases', []),
                 "started_epoch": started, "ended_epoch": time.time()})
 
     agent._memory_llm.call = audited_call
