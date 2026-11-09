@@ -111,6 +111,32 @@ def install_transport_audit(agent, archive: Path) -> None:
 
     agent._memory_llm.call = audited_call
 
+    if getattr(agent, '_research_candidate', None) == 'pma_predictive_read_context_v1':
+        candidate = agent._memory_agent
+        original_record = candidate._record_p1_response
+
+        def audited_record(response):
+            # Observe actual receipts immediately, including the last add-only
+            # wake. Do not add a model call or infer execution from its text.
+            start = len(candidate._active_phase1)
+            error_type = None
+            try:
+                return original_record(response)
+            except BaseException as exc:
+                error_type = type(exc).__name__
+                raise
+            finally:
+                receipts = [copy.deepcopy(block)
+                    for row in candidate._active_phase1[start:]
+                    for block in row.get('content', [])
+                    if block.get('type') == 'tool_result']
+                append_private_audit(archive / 'memory_tool_results.jsonl', {
+                    'phase': 'bank_management', 'call_sequence': calls,
+                    'recording_error_type': error_type, 'tool_results': receipts,
+                    'completed_epoch': time.time()})
+
+        candidate._record_p1_response = audited_record
+
 
 def fake_evidence_gap_arguments(candidate_agent, prompt):
     """Fixture-only selection from actual displayed P1 sources, never invented IDs."""

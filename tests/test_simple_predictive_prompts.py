@@ -10,7 +10,9 @@ def test_p1_keeps_approved_goal_fidelity_and_tools():
 
 Based on the task description and the task agent's trajectory, organize and save information expected to be useful within the next 10 turns. When organizing information, preserve its original meaning and degree of certainty.
 
-Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge".'''
+Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge".
+
+In the same response as your tool calls, briefly explain in ordinary text what you are saving or looking up and why it is useful. If no action is needed, briefly say why. Give only a short explanation for the user, not private internal reasoning.'''
     assert [t['function']['name'] for t in BANK_TOOLS] == ['memory_add', 'memory_read']
     assert 'next 10 turns' in BANK_TOOLS[0]['function']['description']
 
