@@ -1,7 +1,8 @@
-"""GA history functions copied verbatim from GenericAgent-main/llmcore.py.
+"""GA-derived history helpers and provider-faithful observer continuation.
 
-This host-side copy avoids importing the task-container runtime. Behavioral
-parity against the pinned GA source is tested. Telemetry is not emitted here.
+The legacy GA policy remains available for older candidates. Read-context PMA
+uses the separate observer-only policy below; no task history is modified.
+Telemetry is not emitted by these host-side helpers.
 """
 import copy
 import json
@@ -134,7 +135,9 @@ def _msgs_claude2oai(messages):
             m = {"role": "assistant"}
             if reasoning: m["reasoning_content"] = reasoning
             if text_parts: m["content"] = text_parts
-            elif not tool_calls: m["content"] = "."
+            elif not tool_calls and not (msg.get("_openai_output_items") or
+                                        msg.get("_provider_thinking_blocks")):
+                m["content"] = "."
             if tool_calls: m["tool_calls"] = tool_calls
             result.append(m)
         elif role == "user":
@@ -204,3 +207,122 @@ def prepare_history(history, prompt):
             converted[0]["_openai_output_items"] = copy.deepcopy(output_items)
         result.extend(converted)
     return result
+
+
+def provider_history(messages):
+    """Project native history without manufacturing provider-visible text."""
+    result = []
+    for row in messages:
+        converted = _msgs_claude2oai([row])
+        if row.get("role") == "assistant":
+            content = row.get("content", [])
+            visible = (bool(content) if isinstance(content, str) else any(
+                isinstance(block, dict) and block.get("type") == "text" and block.get("text")
+                for block in content))
+            if not visible:
+                converted[0].pop("content", None)
+                if not (converted[0].get("tool_calls") or row.get("_provider_thinking_blocks")
+                        or row.get("_openai_output_items")):
+                    # A truly empty reply carries no provider continuation state.
+                    # Omit it rather than inventing an assistant utterance.
+                    continue
+        for source, target in (("_provider_thinking_blocks", "thinking_blocks"),
+                               ("_openai_output_items", "_openai_output_items")):
+            if row.get(source):
+                if len(converted) != 1 or converted[0].get("role") != "assistant":
+                    raise GAHistoryIntegrityError("cannot associate provider continuation items")
+                converted[0][target] = copy.deepcopy(row[source])
+        result.extend(converted)
+    return result
+
+
+def _observer_history_groups(messages):
+    """Closed user/assistant turns; native calls and receipts never split.
+
+    The pinned original-task message is managed separately, so the first group
+    may begin with its assistant reply. Do not repair orphan receipts into text:
+    an invalid native history must fail before a provider request is attempted.
+    """
+    groups, current, pending, seen = [], [], set(), set()
+    for row in messages:
+        blocks = row.get("content", [])
+        blocks = blocks if isinstance(blocks, list) else []
+        calls = [block.get("id") for block in blocks if isinstance(block, dict)
+                 and block.get("type") == "tool_use"]
+        receipts = [block.get("tool_use_id") for block in blocks
+                    if isinstance(block, dict) and block.get("type") == "tool_result"]
+        if row.get("role") == "user" and not receipts and not pending and current:
+            groups.append(current)
+            current = []
+        if calls and (row.get("role") != "assistant" or pending):
+            raise GAHistoryIntegrityError("invalid observer tool-call order")
+        for call_id in calls:
+            if not isinstance(call_id, str) or not call_id or call_id in seen:
+                raise GAHistoryIntegrityError("invalid observer tool-call identity")
+            seen.add(call_id)
+            pending.add(call_id)
+        for call_id in receipts:
+            if row.get("role") != "user" or call_id not in pending:
+                raise GAHistoryIntegrityError("orphan observer tool receipt")
+            pending.remove(call_id)
+        current.append(row)
+    if pending:
+        raise GAHistoryIntegrityError("observer tool call lacks its receipt")
+    if current:
+        groups.append(current)
+    return groups
+
+
+def trim_observer_history(completed, protected, sess, *, round_number=1):
+    """Manage only completed observer history, never this wake's task evidence.
+
+    Borrow GA's character budget and text-tag compression, not its destructive
+    leading-result repair. The original task and active wake are immutable and
+    may themselves exceed the heuristic budget. Provider signatures, opaque
+    reasoning, native call arguments and receipts are retained verbatim or
+    evicted together as a closed group. No task-side message is modified.
+    """
+    groups = _observer_history_groups(copy.deepcopy(completed))
+    cap = sess.context_win * 3
+    target = int(cap * getattr(sess, "trim_keep_rate", 0.6))
+    interval = max(1, getattr(sess, "cut_msg_interval", 5))
+
+    def flattened():
+        return [row for group in groups for row in group]
+
+    def cost():
+        return _history_bytes(protected) + _history_bytes(flattened())
+
+    def compress(keep_recent):
+        rows = flattened()
+        history_pattern = re.compile(r"<(history|key_info|earlier_context)>[\s\S]*?</\1>")
+        tag_patterns = [re.compile(rf"(<{tag}>)([\s\S]*?)(</{tag}>)")
+                        for tag in ("thinking", "think", "tool_use", "tool_result")]
+
+        def text_only(text):
+            text = history_pattern.sub(lambda match: f"<{match.group(1)}>[...]</{match.group(1)}>", text)
+            for pattern in tag_patterns:
+                text = pattern.sub(lambda match: match.group(1) + (
+                    match.group(2)[:400] + "\n...[Truncated]...\n" + match.group(2)[-400:]
+                    if len(match.group(2)) > 800 else match.group(2)) + match.group(3), text)
+            return text
+
+        for row in rows[:max(0, len(rows) - keep_recent)]:
+            content = row.get("content")
+            if isinstance(content, str):
+                row["content"] = text_only(content)
+            elif isinstance(content, list):
+                for block in content:
+                    if (isinstance(block, dict) and block.get("type") == "text"
+                            and isinstance(block.get("text"), str)):
+                        block["text"] = text_only(block["text"])
+
+    if round_number % interval == 0:
+        compress(10)
+    if cost() > cap:
+        compress(4)
+        while groups and cost() > target:
+            groups.pop(0)
+    completed[:] = flattened()
+    return {"protected_chars": _history_bytes(protected),
+            "protected_over_budget": _history_bytes(protected) > cap}

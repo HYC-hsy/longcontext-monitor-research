@@ -238,21 +238,34 @@ def test_large_original_and_read_receipt_are_not_new_failure_limits():
 def test_prior_history_uses_existing_ga_compression(monkeypatch):
     from memory_agent.memory import read_context_predictive_memory_agent as module
     from memory_agent.memory.ga_context_history import GAHistoryConfig
-    original = module.trim_messages_history
+    original = module.trim_observer_history
     seen = []
-    def trim(history, config):
-        seen.append(copy.deepcopy(history))
-        return original(history, config)
-    monkeypatch.setattr(module, 'trim_messages_history', trim)
+    def trim(completed, protected, config, *, round_number):
+        before = copy.deepcopy(protected)
+        seen.append((copy.deepcopy(completed), before))
+        result = original(completed, protected, config, round_number=round_number)
+        assert protected == before  # Original task and this wake never enter compression.
+        return result
+    monkeypatch.setattr(module, 'trim_observer_history', trim)
     monkeypatch.setattr(GAHistoryConfig, 'cut_msg_interval', 1)
     old = '<history>OLD_TRAJECTORY_MUST_USE_GA_COMPRESSION</history>'
-    a = Agent(llm=Script(*(response() for _ in range(10))))
+    replies = [response() for _ in range(10)]
+    replies[2] = response(call('memory_add', {'content': 'native old payload'}, 'old-add'))
+    a = Agent(llm=Script(*replies))
     for i in range(10):
         run(a, old if i == 1 else f'fresh actor steps {i}', i,
             task='<history>original task must stay exact</history>')
-    assert len(seen) == 10
+    assert len(seen) == 20  # Both independent phases now protect their active wake.
     latest = str(a.llm.calls[-2])
     assert 'OLD_TRAJECTORY_MUST_USE_GA_COMPRESSION' not in latest
     assert '<history>[...]</history>' in latest
     assert '<history>original task must stay exact</history>' in latest
     assert 'fresh actor steps 9' in latest
+    # The old GA leading-receipt sanitization is intentionally not used: the
+    # native call and receipt remain linked while older visible text compresses.
+    prior = a.llm.calls[-2]['message_history']
+    calls = [item for message in prior for item in message.get('tool_calls', [])]
+    receipts = [message for message in prior if message.get('role') == 'tool']
+    assert [item['id'] for item in calls] == [item['tool_call_id'] for item in receipts] == ['old-add']
+    assert json.loads(calls[0]['function']['arguments']) == {'content': 'native old payload'}
+    assert json.loads(receipts[0]['content'])['success'] is True

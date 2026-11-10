@@ -6,7 +6,7 @@ import json
 
 from .context_predictive_memory_agent import ContextPredictiveMemoryAgent, PMAPhaseError
 from .ga_context_history import (GAHistoryConfig, GAHistoryIntegrityError,
-                                 trim_messages_history, _msgs_claude2oai,
+                                 trim_observer_history, provider_history,
                                  _history_bytes)
 from .predictive_memory_agent import BANK_TOOLS as ADD_TOOLS, MemoryOperation
 
@@ -82,42 +82,49 @@ class ReadContextPredictiveMemoryAgent(ContextPredictiveMemoryAgent):
         else:
             self._active_phase1.append(message)
         before = self._p1_messages()
-        working = copy.deepcopy(before)
-        # Run the existing GA policy, then restore only the pinned task and the
-        # active wake verbatim. Older messages keep GA's own compression,
-        # removal and leading-tool-result sanitization, not a new retention rule.
-        for index, row in enumerate(working[1:1 + len(self._completed_phase1)]):
-            row["_p1_prior_index"] = index
-        trim_messages_history(working, GAHistoryConfig())
-        self._completed_phase1 = [row for row in working if "_p1_prior_index" in row]
-        for row in self._completed_phase1:
-            row.pop("_p1_prior_index")
+        protected = ([self._task_anchor] if self._task_anchor is not None else []) + self._active_phase1
+        state = trim_observer_history(self._completed_phase1, protected, GAHistoryConfig(),
+            round_number=1 + sum(item["phase"] == "P1" for item in self._history_transforms))
         self._phase1_history = self._p1_messages()
-        size = _history_bytes
         self._history_transforms.append({
             "phase": "P1", "before_messages": len(before),
             "after_messages": len(self._phase1_history),
-            "before_chars": size(before), "after_chars": size(self._phase1_history),
+            "before_chars": _history_bytes(before), "after_chars": _history_bytes(self._phase1_history),
             "policy": {"context_win": GAHistoryConfig.context_win,
                        "trim_keep_rate": GAHistoryConfig.trim_keep_rate,
                        "cut_msg_interval": GAHistoryConfig.cut_msg_interval,
-                       "protected": "original_task_and_active_wake"},
+                       "protected": "original_task_and_active_wake",
+                       "eviction": "closed_native_tool_groups"},
+            **state,
         })
-        # The real LiteLLM adapter appends prompt itself. Preserve native IDs and
-        # opaque provider-signed blocks using the same conversion as GA history.
-        prior = []
-        for row in self._phase1_history[:-1]:
-            converted = _msgs_claude2oai([row])
-            if row.get("_provider_thinking_blocks"):
-                if len(converted) != 1 or converted[0]["role"] != "assistant":
-                    raise GAHistoryIntegrityError("cannot associate signed provider blocks")
-                converted[0]["thinking_blocks"] = copy.deepcopy(row["_provider_thinking_blocks"])
-            if row.get("_openai_output_items"):
-                if len(converted) != 1 or converted[0]["role"] != "assistant":
-                    raise GAHistoryIntegrityError("cannot associate Responses output items")
-                converted[0]["_openai_output_items"] = copy.deepcopy(row["_openai_output_items"])
-            prior.extend(converted)
-        return copy.deepcopy(prior)
+        # LiteLLM appends this call's prompt itself. All prior visible messages
+        # and opaque provider continuation items keep their original ordering.
+        return provider_history(self._phase1_history[:-1])
+
+    def _prior(self, phase, prompt):
+        if phase != "P2":
+            return super()._prior(phase, prompt)
+        # P2 has its own persistent provider conversation. Pin its first task
+        # prompt and the current full prompt, independently of P1's history.
+        before = self._phase2_history
+        anchor = before[:1]
+        completed = list(before[1:])
+        current = {"role": "user", "content": [{"type": "text", "text": prompt}]}
+        state = trim_observer_history(completed, anchor + [current], GAHistoryConfig(),
+            round_number=1 + sum(item["phase"] == "P2" for item in self._history_transforms))
+        self._phase2_history = anchor + completed + [current]
+        self._history_transforms.append({
+            "phase": "P2", "before_messages": len(before),
+            "after_messages": len(self._phase2_history),
+            "before_chars": _history_bytes(before), "after_chars": _history_bytes(self._phase2_history),
+            "policy": {"context_win": GAHistoryConfig.context_win,
+                       "trim_keep_rate": GAHistoryConfig.trim_keep_rate,
+                       "cut_msg_interval": GAHistoryConfig.cut_msg_interval,
+                       "protected": "original_task_and_active_wake",
+                       "eviction": "closed_native_tool_groups"},
+            **state,
+        })
+        return provider_history(self._phase2_history[:-1])
 
     def _p1_messages(self):
         return ([self._task_anchor] if self._task_anchor is not None else []) + \
