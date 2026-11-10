@@ -13,7 +13,7 @@ from pathlib import Path
 import runpy
 import subprocess
 from tempfile import TemporaryDirectory
-from experiment_runner.methods import candidate_names
+from experiment_runner.methods import candidate_names, validate_pma_batch_rounds
 
 from long_context_bench.scripts.isolated_run_bundle import digest_tree
 
@@ -67,6 +67,10 @@ V3_SOURCE_FILES = SOURCE_FILES + (
     'GenericAgent-main/agentmain.py',
     'GenericAgent-main/llmcore.py',
     'GenericAgent-main/pma_upstream_bridge.py',
+    'GenericAgent-main/task_trajectory.py',
+    'GenericAgent-main/ga_trajectory.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
+    'public_trajectory.py',
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'prepare_six_task_manifest.py',
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
@@ -107,6 +111,7 @@ def _committed_source_sha(checkout: Path, name: str) -> str:
 
 def prepare(source: Path, task_profile: Path, pma_profile: Path,
             evidence: Path | None = None, plan: dict | None = None) -> dict:
+    pma_batch_rounds = validate_pma_batch_rounds((plan or {}).get('pma_batch_rounds', 8))
     single = plan is not None and plan.get('schema') in {
         'pma-ga-single-plan-v1', 'pma-ga-single-plan-v2'}
     candidate = plan.get('research_candidate', 'U') if single else 'U'
@@ -128,6 +133,8 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
                     'official_source_git_commit', 'task', 'condition', 'occurrence'}
         if versioned:
             required.add('research_candidate')
+        if 'pma_batch_rounds' in plan:
+            required.add('pma_batch_rounds')
         if stateful:
             required.add('task_complete_response_policy')
             required.add('agent_time_protocol')
@@ -250,6 +257,7 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
                         'verifier_timeout_multiplier': 1}
     method = {'conditions': {'A': 'GA_only', 'B': 'GA_plus_fixed_upstream_PMA'},
               'task_turns_max': 300, 'agent_wall_seconds': 14400,
+              'pma_batch_rounds': pma_batch_rounds,
               'harbor_whole_trial_retries': 0,
               'task_profile_name': 'native_claude_cc_vibe_opus48',
               'pma_profile_name': pma_profile_name,

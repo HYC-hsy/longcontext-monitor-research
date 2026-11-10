@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 
 from .dataset_catalog import catalog, safe_task
-from .methods import resolve
+from .methods import resolve, validate_pma_batch_rounds, parse_pma_batch_rounds
 
 DRIVER = 'method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013'
 PATH_KEYS = {'ga_source', 'runtime_root', 'worker_python', 'harbor_python',
@@ -35,9 +35,10 @@ def load_config(path):
                'native_context_policy', 'research_capture_policy', 'execution',
                'evaluation_bootstrap_protocol', 'evaluation_cache',
                'evaluation_download_retry', 'on_slot_failure', 'runtime_reuse',
-               'citation_review_gate', 'citation_review_strategy'}
+               'citation_review_gate', 'citation_review_strategy', 'pma_batch_rounds'}
     if set(config) - allowed or config.get('schema') != 'ga-experiment-plan-v1':
         raise ValueError('unknown configuration schema or keys')
+    config['pma_batch_rounds'] = validate_pma_batch_rounds(config.get('pma_batch_rounds', 8))
     if config.get('execution', 'serial') != 'serial':
         raise ValueError('only serial execution is supported')
     protocol = config.get('evaluation_bootstrap_protocol', 'original')
@@ -113,6 +114,8 @@ def build_plan(config):
     """Only Git public metadata and deterministic parsing, never profile execution."""
     if config.get('schema') != 'ga-experiment-plan-v1' or config.get('execution', 'serial') != 'serial':
         raise ValueError('expected ga-experiment-plan-v1 serial configuration')
+    config = {**config, 'pma_batch_rounds': validate_pma_batch_rounds(
+        config.get('pma_batch_rounds', 8))}
     slots = config.get('slots')
     if not isinstance(slots, list) or not slots:
         raise ValueError('nonempty slots required')
@@ -203,6 +206,7 @@ def execute(plan, output, mode, backend=None):
     from importlib import import_module
     controller = import_module(DRIVER + '.run_selection').execute_serial
     config = plan['config']
+    pma_batch_rounds = validate_pma_batch_rounds(config.get('pma_batch_rounds', 8))
     env = config.get('environment', {})
     profiles = env.get('profiles', {})
     if set(profiles) != {'task_profile_file', 'pma_profile_file'}:
@@ -238,7 +242,7 @@ def execute(plan, output, mode, backend=None):
                     **method.prepare_fields(), fake_only=env.get('fake_only', False),
                     certification_dir=env.get('certifications', {}).get(method.name),
                     candidate_profile_fixture=False, synthetic_pos_fixture=False,
-                    frontend_run_identity=True)
+                    frontend_run_identity=True, pma_batch_rounds=pma_batch_rounds)
         if 'requested_runtime_policy' in row:
             args['runtime_policy'] = row['requested_runtime_policy']
         for key in ('native_context_policy', 'research_capture_policy',
@@ -267,6 +271,10 @@ def execute(plan, output, mode, backend=None):
         if single.get('task_complete_response_policy', 'disabled') != expected_response:
             raise ValueError('driver prepared a different Task response protocol')
         manifest = json.loads((directory / 'manifest.json').read_text())
+        if method.condition != 'P' and any(
+                validate_pma_batch_rounds(actual.get('pma_batch_rounds', 8)) !=
+                pma_batch_rounds for actual in (single, manifest.get('config', {}), outcome)):
+            raise ValueError('driver ignored or changed pma_batch_rounds')
         from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.citation_gate_config import require_gate_binding,require_strategy_binding
         for actual in (single,manifest.get('config',{})):
             require_gate_binding(config.get('citation_review_gate'),actual,method.research_candidate,method.condition)
@@ -392,10 +400,14 @@ def main(argv=None):
     selection.add_argument('--all-tasks', action='store_true',
                            help='run every task in the pinned dataset')
     parser.add_argument('--method', help='override the config method for every selected task')
+    parser.add_argument('--pma-batch-rounds', type=parse_pma_batch_rounds,
+                        help='positive predictive PMA batch interval (default: 8)')
     args = parser.parse_args(argv)
     try:
         config = select_experiment(load_config(args.config), tasks=args.tasks,
                                    all_tasks=args.all_tasks, method=args.method)
+        if args.pma_batch_rounds is not None:
+            config['pma_batch_rounds'] = args.pma_batch_rounds
         if args.command == 'catalog':
             write_new(args.output, catalog(config['dataset']))
         else:

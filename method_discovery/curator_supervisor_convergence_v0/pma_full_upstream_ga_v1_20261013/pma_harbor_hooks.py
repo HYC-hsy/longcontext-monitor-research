@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import asyncio
 import time
+from experiment_runner.methods import validate_pma_batch_rounds
 
 from method_discovery.curator_supervisor_convergence_v0.real_task_effect_pilot_preflight_20261010.pilot_harbor_hooks import (
     PilotTrialHooks, _atomic, _tree_sha256,
@@ -89,6 +90,9 @@ def verify_live_spec(spec: dict) -> None:
         raise RuntimeError('PMA frozen manifest or authorization changed')
     frozen = json.loads(manifest.read_text(encoding='utf-8'))
     granted = json.loads(authorization.read_text(encoding='utf-8'))
+    expected_rounds = validate_pma_batch_rounds(frozen.get('config', {}).get('pma_batch_rounds', 8))
+    if validate_pma_batch_rounds(spec.get('pma_batch_rounds', 8)) != expected_rounds:
+        raise RuntimeError('pma_batch_rounds differs from authorized manifest')
     from .citation_gate_config import require_gate_binding,require_strategy_binding,verify_gate_sources
     require_gate_binding(spec.get('citation_review_gate'),frozen.get('config',{}),
                          spec.get('research_candidate','U'),spec.get('condition','B'))

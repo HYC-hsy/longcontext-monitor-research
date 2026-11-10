@@ -3,8 +3,30 @@ from dataclasses import dataclass, replace
 
 METHOD_PREFIXES = ('GA_STATEFUL_', 'GA_POS_', 'GA_PMA_UPSTREAM_',
                    'GA_MONITOR_', 'GA_M0_')
-METHOD_EXTRA_KEYS = {'GA_PMA_ENABLED', 'GA_EXPERIMENT_TASK_TURNS',
+METHOD_EXTRA_KEYS = {'GA_PMA_ENABLED', 'GA_PMA_BATCH_ROUNDS', 'GA_EXPERIMENT_TASK_TURNS',
                      'GA_TASK_DEADLINE_EPOCH', 'GA_EXPERIMENT_RUNTIME_POLICY'}
+
+
+PREDICTIVE_CANDIDATES = frozenset({
+    'pma_predictive_f838_v1', 'pma_predictive_context_v1',
+    'pma_predictive_read_context_v1'})
+
+
+def validate_pma_batch_rounds(value=8):
+    """Only a positive JSON integer is a round count, never bool or a float."""
+    if type(value) is not int or value < 1:
+        raise ValueError('pma_batch_rounds must be a positive integer')
+    return value
+
+
+def parse_pma_batch_rounds(value):
+    """CLI text parser; JSON callers must use the strict validator directly."""
+    if not isinstance(value, str):
+        return validate_pma_batch_rounds(value)
+    try:
+        return validate_pma_batch_rounds(int(value))
+    except (TypeError, ValueError):
+        raise ValueError('pma_batch_rounds must be a positive integer') from None
 
 
 def clean_candidate_environment(inherited):

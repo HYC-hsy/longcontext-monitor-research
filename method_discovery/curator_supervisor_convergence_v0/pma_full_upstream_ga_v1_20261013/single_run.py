@@ -14,7 +14,8 @@ import os
 from pathlib import Path
 import sys
 import uuid
-from experiment_runner.methods import candidate_names, validate_binding
+from experiment_runner.methods import (candidate_names, validate_binding,
+    validate_pma_batch_rounds, parse_pma_batch_rounds)
 
 def _write_new(path: Path, value: dict) -> None:
     with path.open('x', encoding='utf-8', newline='\n') as stream:
@@ -78,6 +79,7 @@ def run_stateful_fake(args: argparse.Namespace) -> dict:
 def prepare(args: argparse.Namespace) -> dict:
     from .export_official_evaluator import COMMIT
     from .prepare_six_task_manifest import prepare as prepare_manifest
+    pma_batch_rounds = validate_pma_batch_rounds(getattr(args, 'pma_batch_rounds', 8))
     runtime_policy = getattr(args, 'runtime_policy', None)
     bootstrap = getattr(args, 'evaluation_bootstrap_protocol', 'original')
     cache = getattr(args, 'evaluation_cache', None)
@@ -133,6 +135,8 @@ def prepare(args: argparse.Namespace) -> dict:
             'execution_authorized': False,
             'official_source_git_commit': COMMIT, 'task': args.task,
             'condition': args.condition, 'occurrence': args.occurrence}
+    if not pos:
+        plan['pma_batch_rounds'] = pma_batch_rounds
     if pos:
         plan.update(method=getattr(args, 'research_candidate', 'PoS'), synthetic_fixture=bool(
             getattr(args, 'synthetic_pos_fixture', False)))
@@ -201,6 +205,8 @@ def prepare(args: argparse.Namespace) -> dict:
             evidence=(Path(args.certification_dir).resolve(strict=True)
                       if getattr(args, 'certification_dir', None) else None), plan=plan)
     if not pos:
+        if validate_pma_batch_rounds(manifest['config'].get('pma_batch_rounds', 8)) != pma_batch_rounds:
+            raise ValueError('manifest changed pma_batch_rounds')
         from .citation_gate_config import require_gate_binding,require_strategy_binding
         require_gate_binding(gate, manifest['config'], candidate, args.condition)
         require_strategy_binding(strategy,manifest['config'],gate)
@@ -218,6 +224,8 @@ def prepare(args: argparse.Namespace) -> dict:
                 'manifest_sha256': hashlib.sha256(
                     (root / 'manifest.json').read_bytes()).hexdigest(),
                 'execution_authorized': False}
+    if not pos:
+        identity['pma_batch_rounds'] = pma_batch_rounds
     _write_new(root / 'run_identity.json', identity)
     return identity
 
@@ -228,6 +236,10 @@ def run(args: argparse.Namespace) -> dict:
     root = Path(args.output).resolve(strict=True)
     manifest = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))
     identity = json.loads((root / 'run_identity.json').read_text(encoding='utf-8'))
+    if manifest.get('schema') != 'pos-ga-single-manifest-v1':
+        expected_rounds = validate_pma_batch_rounds(manifest.get('config', {}).get('pma_batch_rounds', 8))
+        if validate_pma_batch_rounds(identity.get('pma_batch_rounds', 8)) != expected_rounds:
+            raise RuntimeError('single-run pma_batch_rounds identity mismatch')
     granted = json.loads(Path(args.authorization).read_text(encoding='utf-8'))
     bindings = validate_plan(manifest, granted)
     if (len(bindings) != 1 or bindings[0]['run_id'] != identity['run_id'] or
@@ -290,6 +302,7 @@ def main() -> None:
     prepared.add_argument('--citation-review-strategy',choices=STRATEGIES)
     prepared.add_argument('--research-candidate', choices=sorted(candidate_names()), default='U')
     prepared.add_argument('--occurrence', type=int, default=1)
+    prepared.add_argument('--pma-batch-rounds', type=parse_pma_batch_rounds, default=8)
     prepared.add_argument('--output', required=True)
     prepared.add_argument('--official-source-git', required=True)
     prepared.add_argument('--task-profile-file', required=True)

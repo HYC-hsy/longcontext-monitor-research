@@ -10,7 +10,8 @@ from pathlib import Path
 import re
 import subprocess
 import time
-from experiment_runner.methods import clean_candidate_environment
+from experiment_runner.methods import (clean_candidate_environment,
+    PREDICTIVE_CANDIDATES, validate_pma_batch_rounds)
 import tomllib
 
 from long_context_bench.scripts.isolated_run_bundle import digest_tree
@@ -450,6 +451,7 @@ def run_live(args) -> dict:
             authorized.get('execution_authorized') is not True or
             authorized.get('manifest_sha256') != _sha(manifest_path)):
         raise RuntimeError('PMA authorization absent or changed')
+    pma_batch_rounds = validate_pma_batch_rounds(manifest.get('config', {}).get('pma_batch_rounds', 8))
     task_policy = manifest.get('config', {}).get('task_complete_response_policy', 'disabled')
     actual_task_policy = ('complete-response-v1' if
         os.environ.get('GA_TASK_COMPLETE_RESPONSE') == '1' else 'disabled')
@@ -580,6 +582,7 @@ def run_live(args) -> dict:
         'execution_authorized': True, 'order': order, 'task': args.task,
         'task_id': args.task, 'condition': args.condition, 'run_id': args.run_id,
         'research_candidate': candidate,
+        'pma_batch_rounds': pma_batch_rounds,
         'zero_model_fixture_only': fixture,
         'candidate_profile_fixture_only': profile_fixture,
         'run_root': str(root), 'image_id': prepared['image_id'],
@@ -768,6 +771,8 @@ def run_live(args) -> dict:
                     '--research-candidate', candidate,
                     *(['--fake-memory', '--fake-memory-update'] if fixture and
                       not candidate_profile else [])]
+            if candidate in PREDICTIVE_CANDIDATES:
+                worker_args += ['--pma-batch-rounds', str(pma_batch_rounds)]
             worker_args += worker_flags(gate,candidate,strategy)
             worker = subprocess.Popen(worker_args,
                 cwd=STAGE, env=worker_env,
@@ -779,6 +784,9 @@ def run_live(args) -> dict:
                     raise RuntimeError('PMA host worker not ready')
                 time.sleep(.05)
             ready_data = json.loads(ready.read_text(encoding='utf-8'))
+            if candidate in PREDICTIVE_CANDIDATES and (
+                    validate_pma_batch_rounds(ready_data.get('pma_batch_rounds', 8)) != pma_batch_rounds):
+                raise RuntimeError('worker pma_batch_rounds identity mismatch')
             if ready_data.get('citation_review_gate')!=gate:raise RuntimeError('worker gate identity mismatch')
             require_strategy_binding(ready_data.get('citation_review_strategy'),manifest['config'],gate)
             if stateful:
@@ -869,6 +877,8 @@ def run_live(args) -> dict:
                    GA_PMA_UPSTREAM_ENABLED='1' if args.condition == 'B' and not stateful else '0',
                    GA_PMA_CAPTURE_TASK_REQUESTS='1',
                    GA_PMA_ENABLED='0', GA_MONITOR_ENABLED='0', GA_M0_MONITOR_ENABLED='0')
+        if candidate in PREDICTIVE_CANDIDATES:
+            env['GA_PMA_BATCH_ROUNDS'] = str(pma_batch_rounds)
         if stateful:
             env['GA_STATEFUL_AGENT_TIME_PROTOCOL'] = expected_protocol
         if task_policy == 'complete-response-v1' or (
@@ -927,6 +937,7 @@ def run_live(args) -> dict:
             'argv': command, 'public_env': {name: env[name] for name in (
                 'GA_RUN_ISOLATION', 'GA_PMA_UPSTREAM_ENABLED', 'GA_MONITOR_ENABLED')},
             'agent_deadline_epoch': deadline,
+            'pma_batch_rounds': pma_batch_rounds,
             'task_complete_response_policy': ('complete-response-v1' if
                 env.get('GA_TASK_COMPLETE_RESPONSE') == '1' else 'disabled'),
             'evaluator_timeout_sec': manifest['assets'][args.task].get(
