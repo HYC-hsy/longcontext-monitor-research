@@ -48,6 +48,20 @@ def install_transport_audit(agent, archive: Path) -> None:
                  in ('pma_gap_memory_v0', 'pma_gap_evidence_v1') else "bank_management" if tools else "context_decision")
         started = time.time()
         status = "complete"
+        def public_summary(response):
+            # Only an adapter's explicit, documented display-summary projection
+            # is eligible. Never inspect thinking/reasoning_content or signatures.
+            summary = getattr(response, 'public_reasoning_summary', None)
+            if not isinstance(summary, dict) or summary.get('source') != 'openai.responses.reasoning.summary_text':
+                return {'request_status': 'not_requested', 'result_status': 'not_returned',
+                        'source': None, 'texts': []}
+            texts = summary.get('texts')
+            texts = [text for text in texts if isinstance(text, str) and text.strip()] if isinstance(texts, list) else []
+            return {'request_status': ('requested' if summary.get('request_status') == 'requested'
+                                       else 'not_requested'),
+                    'result_status': 'returned' if texts else 'not_returned',
+                    'source': summary['source'], 'texts': texts}
+
         def public_history(value):
             if isinstance(value, list):
                 return [public_history(item) for item in value]
@@ -83,6 +97,7 @@ def install_transport_audit(agent, archive: Path) -> None:
             append_private_audit(archive / 'memory_response.jsonl', {
                 'phase': phase, 'call_sequence': calls,
                 'content': getattr(response, 'content', None),
+                'public_reasoning_summary': public_summary(response),
                 'tool_calls': native_calls,
                 'response_id': getattr(response, 'response_id', None),
                 'actual_model': getattr(response, 'actual_model',

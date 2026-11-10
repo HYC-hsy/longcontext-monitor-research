@@ -14,6 +14,23 @@ from typing import Any
 from harbor.llms.base import BaseLLM, LLMResponse
 
 
+def public_reasoning_summary(output: list[dict], *, requested: bool) -> dict:
+    """Project only the Responses API's documented display-summary fields."""
+    texts = []
+    for item in output:
+        if not isinstance(item, dict) or item.get("type") != "reasoning":
+            continue
+        summary = item.get("summary")
+        if not isinstance(summary, list):
+            continue
+        texts.extend(block["text"] for block in summary
+                     if isinstance(block, dict) and block.get("type") == "summary_text"
+                     and isinstance(block.get("text"), str) and block["text"].strip())
+    return {"request_status": "requested" if requested else "not_requested",
+            "result_status": "returned" if texts else "not_returned",
+            "source": "openai.responses.reasoning.summary_text", "texts": texts}
+
+
 def _text(value: Any) -> str:
     if isinstance(value, str):
         return value
@@ -137,6 +154,9 @@ class ResponsesMemoryLLM(BaseLLM):
         self.max_tokens = profile["max_tokens"]
         self.context_window = profile["model_context_window"]
         self.effort = profile["reasoning_effort"]
+        self.request_public_summary = profile.get("request_public_summary", False)
+        if type(self.request_public_summary) is not bool:
+            raise ValueError("request_public_summary must be a boolean")
         self.client = AsyncOpenAI(
             api_key=profile["apikey"], base_url=profile["apibase"],
             timeout=profile["read_timeout"], max_retries=profile["max_retries"],
@@ -158,6 +178,8 @@ class ResponsesMemoryLLM(BaseLLM):
                    "input": response_input(message_history or [], prompt),
                    "max_output_tokens": self.max_tokens,
                    "reasoning": {"effort": self.effort}, "store": False}
+        if self.request_public_summary:
+            request["reasoning"]["summary"] = "auto"
         converted_tools = _tools(tools)
         if converted_tools:
             request["tools"] = converted_tools
@@ -215,4 +237,6 @@ class ResponsesMemoryLLM(BaseLLM):
         response.openai_output_items = output
         response.actual_model = body["model"]
         response.provider_usage = body.get("usage")
+        response.public_reasoning_summary = public_reasoning_summary(
+            output, requested=self.request_public_summary)
         return response

@@ -27,6 +27,12 @@ def load_profile(raw: bytes, candidate: str) -> tuple[str, dict]:
         raise ValueError("bound PMA model profile is missing")
     if not profile.get("apibase") or not profile.get("apikey"):
         raise ValueError("PMA model profile lacks transport configuration")
+    request_summary = profile.get("request_public_summary", False)
+    if type(request_summary) is not bool:
+        raise ValueError("request_public_summary must be a boolean")
+    if request_summary and (candidate != READ_CONTEXT or
+            (profile.get("provider"), profile.get("api_mode")) != ("openai", "responses")):
+        raise ValueError("public summary requests are supported only by the Responses adapter")
     if candidate != READ_CONTEXT:
         expected = ("anthropic", "messages", "claude-opus-4-8", "adaptive")
         actual = tuple(profile.get(k) for k in
