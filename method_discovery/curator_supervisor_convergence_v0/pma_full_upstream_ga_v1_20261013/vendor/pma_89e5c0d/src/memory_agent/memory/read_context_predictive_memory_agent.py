@@ -10,13 +10,11 @@ from .ga_context_history import (GAHistoryConfig, GAHistoryIntegrityError,
                                  _history_bytes)
 from .predictive_memory_agent import BANK_TOOLS as ADD_TOOLS, MemoryOperation
 
-PHASE1_SYSTEM = """You organize information from the task execution.
+PHASE1_SYSTEM = """You are a memory manager for the task agent.
 
-Based on the task description and the task agent's trajectory, organize and save information expected to be useful within the next 10 turns. When organizing information, preserve its original meaning and degree of certainty.
+Based on the task description and the task agent's trajectory, first anticipate the problems the task agent may encounter or the decisions it may need to make over the next 10 turns, and what information it will need then; organize and save that information accordingly.
 
-Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge".
-
-In the same response as your tool calls, briefly explain in ordinary text what you are saving or looking up and why it is useful. If no action is needed, briefly say why. Give only a short explanation for the user, not private internal reasoning."""
+Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge"."""
 
 BANK_TOOLS = copy.deepcopy(ADD_TOOLS) + [{
     "type": "function",
@@ -30,6 +28,7 @@ BANK_TOOLS = copy.deepcopy(ADD_TOOLS) + [{
     },
 }]
 BANK_TOOLS[0]["function"]["parameters"]["additionalProperties"] = False
+BANK_TOOLS[0]["function"]["description"] = "Save information in the knowledge memory bank."
 
 MAX_CONSECUTIVE_TOOL_ERROR_ROUNDS = 3
 
