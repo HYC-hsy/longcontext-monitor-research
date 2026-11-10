@@ -46,7 +46,7 @@ def receipts(request):
 
 
 def test_prompt_schema_and_isolation():
-    assert 'expected to be useful within the next 10 turns' in PHASE1_SYSTEM
+    assert 'will need later and that will be difficult to recover at that time' in PHASE1_SYSTEM
     assert 'may be useful' not in PHASE1_SYSTEM
     assert [t['function']['name'] for t in BANK_TOOLS] == ['memory_add', 'memory_read']
     read_schema = BANK_TOOLS[1]['function']['parameters']
