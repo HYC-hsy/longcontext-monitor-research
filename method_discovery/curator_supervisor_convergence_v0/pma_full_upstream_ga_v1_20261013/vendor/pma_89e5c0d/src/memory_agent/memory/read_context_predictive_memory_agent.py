@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 
 from .context_predictive_memory_agent import ContextPredictiveMemoryAgent, PMAPhaseError
 from .ga_context_history import (GAHistoryConfig, GAHistoryIntegrityError,
@@ -14,7 +15,30 @@ PHASE1_SYSTEM = """You are a memory manager for the task agent.
 
 Based on the task description and the task agent's trajectory, first anticipate the problems the task agent may encounter or the decisions it may need to make over the next 10 turns, and what information it will need then; organize and save that information accordingly.
 
+Before using memory tools, briefly state in ordinary reply text the upcoming problems or decisions you anticipate and the information you plan to preserve for them. Give a concise public summary, not private reasoning. No special format is needed.
+
 Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge"."""
+
+PUBLIC_FORECAST_REMINDER = (
+    "Remember to include a brief public summary of the upcoming problems or "
+    "decisions you anticipate and the information you plan to preserve. "
+    "Do not disclose private reasoning.")
+
+
+def has_public_text(text):
+    """Lexical presence only, not a judgment of forecast quality or ordering.
+
+    Read only public reply text. Native reasoning/opaque state is never an
+    input. Markup and punctuation placeholders alone do not count; even 'OK'
+    does count, so this must not be reported as a verified forecast.
+    """
+    if not isinstance(text, str):
+        return False
+    text = re.sub(r"<(think|thinking|tool_call)\b[^>]*>.*?(?:</\1\s*>|$)",
+                  "", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<[^>]*>", "", text)
+    return any(character.isalnum() for character in text)
+
 
 BANK_TOOLS = copy.deepcopy(ADD_TOOLS) + [{
     "type": "function",
@@ -54,6 +78,7 @@ class ReadContextPredictiveMemoryAgent(ContextPredictiveMemoryAgent):
         self._active_phase1 = []
         self._phase1_operations = []
         self._seen_call_ids = set()
+        self._p1_public_text_missing = False
 
     def set_phase1_context(self, *, task, trajectory):
         """Receive exact host fields, never parse task markers from model text."""
@@ -137,14 +162,21 @@ class ReadContextPredictiveMemoryAgent(ContextPredictiveMemoryAgent):
         continuing = False
         error_rounds = 0
         while True:
+            # Soft guidance on an already-scheduled request only. Keep the raw
+            # task/batch unchanged; never add a call or block a tool for this.
+            system = PHASE1_SYSTEM
+            if self._p1_public_text_missing:
+                system += "\n\n" + PUBLIC_FORECAST_REMINDER
             try:
-                response = await self.llm.call(prompt=user_prompt, system=PHASE1_SYSTEM,
+                response = await self.llm.call(prompt=user_prompt, system=system,
                                                tools=self.get_tools_schema(),
                                                message_history=prior)
             except Exception as exc:
                 # Do not turn a broken read continuation into a normal P2/no-op.
                 raise PMAPhaseError("P1", exc) from exc
             operations, called_read = self._record_p1_response(response)
+            self._p1_public_text_missing = not has_public_text(
+                getattr(response, "content", None))
             self._phase1_operations.extend(operations)
             failed = any(not operation.success for operation in operations)
             error_rounds = error_rounds + 1 if failed else 0

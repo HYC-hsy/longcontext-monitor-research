@@ -12,7 +12,8 @@ import pytest
 
 from test_predictive_memory_read import Agent, Script, call, response, run
 from memory_agent.memory.ga_context_history import GAHistoryIntegrityError
-from memory_agent.memory.read_context_predictive_memory_agent import PHASE1_SYSTEM
+from memory_agent.memory.read_context_predictive_memory_agent import (
+    PHASE1_SYSTEM, PUBLIC_FORECAST_REMINDER)
 from memory_agent.memory.predictive_memory_agent import PHASE2_SYSTEM
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,7 +64,8 @@ def test_actual_litellm_and_anthropic_translation(monkeypatch, tmp_path):
                             _research_candidate=CANDIDATE), tmp_path)
     result = run(agent)
     assert len(wire) == 4 and len(result.operations) == 2
-    for body, expected in zip(bodies, [PHASE1_SYSTEM] * 3 + [PHASE2_SYSTEM]):
+    reminded = PHASE1_SYSTEM + '\n\n' + PUBLIC_FORECAST_REMINDER
+    for body, expected in zip(bodies, [PHASE1_SYSTEM, reminded, reminded, PHASE2_SYSTEM]):
         assert "".join(block["text"] for block in body["system"]) == expected
     assert len(agent.memory.knowledge) == 1
     for index, expected in [(1, ['r1']), (2, ['r1', 'a1'])]:

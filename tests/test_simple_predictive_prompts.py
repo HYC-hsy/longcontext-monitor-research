@@ -10,6 +10,8 @@ def test_p1_keeps_approved_forecast_goal_and_tools():
 
 Based on the task description and the task agent's trajectory, first anticipate the problems the task agent may encounter or the decisions it may need to make over the next 10 turns, and what information it will need then; organize and save that information accordingly.
 
+Before using memory tools, briefly state in ordinary reply text the upcoming problems or decisions you anticipate and the information you plan to preserve for them. Give a concise public summary, not private reasoning. No special format is needed.
+
 Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge".'''
     assert [t['function']['name'] for t in BANK_TOOLS] == ['memory_add', 'memory_read']
     assert BANK_TOOLS[0]['function']['description'] == 'Save information in the knowledge memory bank.'
