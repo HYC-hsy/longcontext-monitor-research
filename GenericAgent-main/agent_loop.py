@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 from research_runtime import CompletionProposal, decide_completion, emit as _research_emit, telemetry_enabled as _telemetry_enabled, consume_provider_call as _consume_provider_call, register_pending_pma_reminder as _register_pending_pma_reminder, sha256_json as _sha256_json
 from experiment_conditions import condition_initial_task
-from llmcore import ProviderResponseCancelled, _native_user_content
+from llmcore import ProviderResponseCancelled
 try: from plugins.hooks import trigger as _hook
 except ImportError: _hook = lambda *a, **k: None
 @dataclass
@@ -255,27 +255,14 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                             event, actor_attempt=turn,
                             pma_event_id=pma_upstream.last_event_id)
         _hook('llm_before', locals())
-        pma_prepared_input = None
+        pma_trajectory = None
         if pma_predictive:
+            from ga_trajectory import GATrajectory
             if not hasattr(client, '_pending_tool_ids'):
                 raise RuntimeError('predictive PMA requires native GA input capture')
-            content, results = [], []
-            for message in messages:
-                if message.get('role') == 'system':
-                    continue
-                piece = message.get('content', '')
-                if isinstance(piece, str):
-                    content.append({'type': 'text', 'text': piece})
-                elif isinstance(piece, list):
-                    content.extend(piece)
-                else:
-                    raise RuntimeError('unsupported GA input for predictive PMA')
-                if message.get('role') == 'user':
-                    results.extend(message.get('tool_results') or [])
-            backend = getattr(client, 'backend', None)
-            pending = (client._pending_tool_ids if backend is None or
-                       getattr(backend, 'history', None) else [])
-            pma_prepared_input = _native_user_content(content, results, pending)
+            pma_trajectory = GATrajectory(turn)
+            client.public_trajectory_observer = pma_trajectory
+            handler.parent._pma_trajectory = (turn, pma_trajectory)
         if stateful is not None:
             response_gen = stateful.chat(client, messages, tools_schema, turn)
         elif pos is not None:
@@ -326,7 +313,8 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                 raise
             if pma_upstream is not None:
                 pma_upstream.actor_step(turn, status='provider_cancelled',
-                    **({'public_input': pma_prepared_input} if pma_predictive else {}))
+                    **({'trajectory': pma_trajectory.finish('provider_cancelled')}
+                       if pma_predictive else {}))
             if pos is not None:
                 pos.exchange('finish', reason='provider_cancelled')
                 pos.close()
@@ -336,7 +324,10 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                 "content": "The previous response was interrupted before it became an accepted action.",
             }]
             continue
-        except BaseException:
+        except BaseException as error:
+            if pma_trajectory is not None and not pma_trajectory.finished:
+                pma_upstream.actor_step(turn, status='provider_error',
+                    trajectory=pma_trajectory.finish('provider_error', error=error))
             if stateful is not None:
                 stateful.finish({'result': 'PROVIDER_OR_CAPTURE_FAILURE',
                                  'turn': turn})
@@ -345,8 +336,8 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                 finally: pos.close()
             raise
         _hook('llm_after', locals())
-        if pma_predictive and getattr(response, 'public_blocks', None) is None:
-            raise RuntimeError('predictive PMA cannot capture public actor blocks')
+        if pma_trajectory is not None:
+            pma_trajectory.response(response)
 
         provider_link = _consume_provider_call() if _telemetry_enabled() else None
         if complement:
@@ -443,6 +434,8 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
             barrier = getattr(handler.parent, 'monitor_correction_barrier', None)
             if ((interruption is not None and interruption.is_requested()) or
                     (barrier is not None and barrier.is_active())):
+                if pma_trajectory is not None:
+                    pma_trajectory.settle_pending('cancelled_before_execution')
                 if stateful is not None and stateful_actions:
                     stateful.record_incomplete(turn, 'cancelled_before_execution',
                         stateful_actions, stateful_receipts,
@@ -470,19 +463,25 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                 pos_actions[ii]['status'] = 'started'
                 pos_record('tool_started', {'turn': turn, 'id': tid,
                     'name': tool_name, 'order': ii, 'arguments': pos_actions[ii]['arguments']})
+            streamed_tool = False
             if tool_name == 'no_tool' and completion_decision and completion_decision.decision not in ('ALLOW_COMPLETE', 'ERROR_FAIL_OPEN'):
                 outcome = StepOutcome(None, next_prompt=completion_decision.next_prompt,
                                       should_exit=completion_decision.decision in ('ABSTAIN', 'ERROR_FAIL_CLOSED'))
             else:
+                if pma_trajectory is not None and tool_name != 'no_tool':
+                    pma_trajectory.start(tid)
                 gen = handler.dispatch(tool_name, args, response, index=ii, tool_num=len(tool_calls))
                 try:
                     v = next(gen)
                     def proxy(): yield v; return (yield from gen)
+                    streamed_tool = True
                     if verbose: yield '`````\n'
                     outcome = (yield from proxy()) if verbose else exhaust(proxy())
-                    if verbose: yield '`````\n'
                 except StopIteration as e: outcome = e.value
                 except BaseException as error:
+                    if pma_trajectory is not None and not pma_trajectory.finished:
+                        pma_upstream.actor_step(turn, status='tool_error',
+                            trajectory=pma_trajectory.finish('tool_error', error=error, started_id=tid))
                     if stateful is not None and tool_name != 'no_tool':
                         try:
                             stateful.record_incomplete(turn, 'tool_result_unknown_after_start',
@@ -499,6 +498,13 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                             'turn': turn, 'id': tid, 'name': tool_name,
                             'error_type': type(error).__name__, 'error': str(error)})
                     raise
+            if pma_trajectory is not None and tool_name != 'no_tool':
+                visible_result = (json.dumps(outcome.data, ensure_ascii=False, default=json_default)
+                    if type(outcome.data) in (dict, list) else str(outcome.data)) \
+                    if outcome.data is not None else None
+                pma_trajectory.result(tid, outcome, visible_result)
+            if streamed_tool and verbose:
+                yield '`````\n'
             if pos_actions is not None and tool_name != 'no_tool':
                 pos_actions[ii]['status'] = ('rejected' if tool_name == 'bad_json' or
                     not hasattr(handler, 'do_' + tool_name) else 'executed')
@@ -605,9 +611,8 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                         turn, status='completed', response=response.content or '',
                         commands=[json.dumps(call, ensure_ascii=False, default=json_default)
                                   for call in tool_calls],
-                        **({'public_blocks': response.public_blocks,
-                            'public_blocks_provenance': getattr(response, 'public_blocks_provenance', None),
-                            'public_input': pma_prepared_input} if pma_predictive else {}))
+                        **({'trajectory': pma_trajectory.finish('completed')}
+                           if pma_predictive else {}))
                 break
             next_prompts.add(handler._done_hooks.pop(0))
         next_prompt = handler.turn_end_callback(response, tool_calls, tool_results, turn, '\n'.join(next_prompts), exit_reason)
@@ -642,13 +647,11 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                            'parse_error' if any(call['tool_name'] == 'bad_json'
                                                 for call in tool_calls) else 'normal')
             if pma_predictive:
+                pma_trajectory.ledger.record('framework_input', 'framework_input', {
+                    'role': 'user', 'content': next_prompt, 'tool_results': tool_results})
                 pma_upstream.actor_step(
-                    turn, status=step_status, public_blocks=response.public_blocks,
-                    public_blocks_provenance=getattr(response, 'public_blocks_provenance', None),
-                    public_input=pma_prepared_input,
-                    public_results=_native_user_content(
-                        [{'type': 'text', 'text': next_prompt}], tool_results,
-                        [tc.id for tc in (getattr(response, 'tool_calls', None) or [])]),
+                    turn, status=step_status,
+                    trajectory=pma_trajectory.finish(step_status),
                     request_event_id=(provider_link or {}).get('provider_request_event_id'))
             else:
                 pma_upstream.actor_step(
@@ -710,6 +713,19 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             initial_user_content=initial_user_content, yield_info=yield_info,
             turn_offset=turn_offset))
     finally:
+        active = getattr(parent, '_pma_trajectory', None)
+        if active is not None:
+            turn, trajectory = active
+            if not trajectory.finished:
+                try:
+                    parent.pma_upstream_bridge.actor_step(turn, status='host_interrupted',
+                        trajectory=trajectory.finish('host_interrupted'))
+                except BaseException as error:
+                    _research_emit('pma_capture_failed', {'turn': turn,
+                        'error_type': type(error).__name__})
+            del parent._pma_trajectory
+        if hasattr(client, 'public_trajectory_observer'):
+            del client.public_trajectory_observer
         if stateful_enabled:
             bridge = getattr(parent, '_stateful_memory_bridge', None)
             if bridge is not None and bridge is not old_stateful:

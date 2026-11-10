@@ -158,7 +158,9 @@ class MemoryEnabledTerminus2(Terminus2):
 
         # Sliding window of recent steps (skip first entry which is task description,
         # already included above via [Task Description] section)
-        window = self._accumulated_observations[1:][-self._sliding_window_size:]
+        window = getattr(self, "_public_active_batch", None)
+        if window is None:
+            window = self._accumulated_observations[1:][-self._sliding_window_size:]
         if window:
             parts.append("[Recent Trajectory (last {} steps)]".format(len(window)))
             for entry in window:
@@ -168,6 +170,8 @@ class MemoryEnabledTerminus2(Terminus2):
 
     @staticmethod
     def _format_step_entry(entry: dict) -> str:
+        if "public_trajectory" in entry:
+            return json.dumps(entry["public_trajectory"], ensure_ascii=False, allow_nan=False, sort_keys=True)
         if "public_blocks" in entry:
             sections = [f"[Step {entry['step']}]", "[Prepared input for this actor call]"]
             actor_input = entry.get("public_input")

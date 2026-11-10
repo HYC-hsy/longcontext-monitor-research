@@ -14,11 +14,10 @@ def _public_response_blocks(blocks):
         if kind in ('thinking', 'redacted_thinking'):
             continue
         if kind == 'text' and isinstance(block.get('text'), str):
-            result.append({'type': 'text', 'text': block['text']})
+            result.append(copy.deepcopy(block))
         elif (kind == 'tool_use' and isinstance(block.get('name'), str)
               and isinstance(block.get('input'), dict)):
-            result.append({'type': 'tool_use', 'id': block.get('id', ''),
-                           'name': block['name'], 'input': copy.deepcopy(block['input'])})
+            result.append(copy.deepcopy(block))
         else:
             return None
     return result
@@ -59,6 +58,13 @@ def _native_user_content(combined_content, tool_results, pending_tool_ids):
     filtered = [c for c in combined_content if c.get('text', '').strip()]
     return tool_result_blocks + filtered or [{'type': 'text', 'text': '.'}]
 _parser_capture_emit = contextvars.ContextVar('parser_capture_emit', default=None)
+_public_output_observer = contextvars.ContextVar('public_output_observer', default=None)
+
+def _public_text(text):
+    observer = _public_output_observer.get()
+    if observer is not None:
+        observer.fragment(text)
+    return text
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path: sys.path.append(_ROOT)
 
@@ -209,7 +215,7 @@ def _parse_claude_json(data, *, strict=False):
         and (not b.get('id') or not b.get('name') or not isinstance(b.get('input'), dict)))
     _record_usage(data.get("usage", {}), "messages")
     for b in content_blocks:
-        if b.get("type") == "text": yield b.get("text", "")
+        if b.get("type") == "text": yield globals().get("_public_text", lambda x: x)(b.get("text", ""))
         elif b.get("type") == "thinking": yield ""
     if not strict: return content_blocks
     return ParsedProviderBlocks(content_blocks, {
@@ -325,7 +331,7 @@ def _parse_claude_sse(resp_lines, *, strict=False):
                 text = delta.get("text", "")
                 if current_block and current_block.get("type") == "text": current_block["text"] += text
                 else: parse_errors += 1
-                if text: yield text
+                if text: yield globals().get("_public_text", lambda x: x)(text)
             elif delta.get("type") == "thinking_delta":
                 if current_block and current_block.get("type") == "thinking": current_block["thinking"] += delta.get("thinking", "")
                 else: parse_errors += 1
@@ -446,10 +452,10 @@ def _parse_openai_sse(resp_lines, api_mode="chat_completions"):
             etype = evt.get("type", "")
             if etype == "response.output_text.delta":
                 delta = evt.get("delta", "")
-                if delta: seen_delta = True; content_text += delta; yield delta
+                if delta: seen_delta = True; content_text += delta; yield globals().get("_public_text", lambda x: x)(delta)
             elif etype == "response.output_text.done" and not seen_delta:
                 text = evt.get("text", "")
-                if text: content_text += text; yield text
+                if text: content_text += text; yield globals().get("_public_text", lambda x: x)(text)
             elif etype == "response.output_item.added":
                 item = evt.get("item", {})
                 if item.get("type") == "function_call":
@@ -499,7 +505,7 @@ def _parse_openai_sse(resp_lines, api_mode="chat_completions"):
             if rc := delta.get("reasoning_content") or delta.get("reasoning", ""):
                 reasoning_text += rc; yield rc
             if delta.get("content"):
-                text = delta["content"]; content_text += text; yield text
+                text = delta["content"]; content_text += text; yield globals().get("_public_text", lambda x: x)(text)
             for tc in (delta.get("tool_calls") or []):
                 idx = tc.get("index", 0)
                 has_name = bool(tc.get("function", {}).get("name"))
@@ -567,7 +573,7 @@ def _parse_openai_json(data, api_mode="chat_completions"):
             if item.get("type") == "message":
                 for p in (item.get("content") or []):
                     if p.get("type") in ("output_text", "text") and p.get("text"):
-                        blocks.append({"type": "text", "text": p["text"]}); yield p["text"]
+                        blocks.append({"type": "text", "text": p["text"]}); yield globals().get("_public_text", lambda x: x)(p["text"])
             elif item.get("type") == "function_call":
                 try: args = json.loads(item.get("arguments", "")) if item.get("arguments") else {}
                 except: args = {"_raw": item.get("arguments", "")}
@@ -581,7 +587,7 @@ def _parse_openai_json(data, api_mode="chat_completions"):
             blocks.append({"type": "thinking", "thinking": reasoning})
         content = msg.get("content", "")
         if content:
-            blocks.append({"type": "text", "text": content}); yield content
+            blocks.append({"type": "text", "text": content}); yield globals().get("_public_text", lambda x: x)(content)
         for tc in (msg.get("tool_calls") or []):
             fn = tc.get("function", {})
             try: args = json.loads(fn.get("arguments", "")) if fn.get("arguments") else {}
@@ -823,6 +829,10 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
         except: ra = None
         return max(0.5, ra if ra is not None else min(30.0, 1.5 * (2 ** attempt)))
     for attempt in range(sess.max_retries + 1):
+        observer = globals().get('_public_output_observer')
+        observer = observer.get() if observer is not None else None
+        if observer is not None:
+            observer.begin_attempt(attempt + 1)
         if strict: _task_check_wait(sess, deadline)
         attempt_started = time.monotonic()
         consume_cancel = getattr(sess, '_consume_cancel_request', None)
@@ -909,6 +919,9 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                             if strict: buffered.append(chunk)
                             else: streamed = True; yield chunk
                     except StopIteration as e:
+                        if observer is not None:
+                            observer.parsed_response([copy.deepcopy(block) for block in (e.value or [])
+                                if isinstance(block, dict) and block.get("type") in ("text", "tool_use")])
                         if response_deadline_hit.is_set():
                             raise requests.Timeout(
                                 f"provider response exceeded {total_timeout:g}s wall deadline"
@@ -1963,11 +1976,23 @@ class NativeToolClient:
         if not final_content: final_content = [{"type": "text", "text": "."}]
         merged = {"role": "user", "content": final_content}
         _write_llm_log('Prompt', json.dumps(merged, ensure_ascii=False, indent=2), self.log_path)
+        observer = getattr(self, 'public_trajectory_observer', None)
+        if observer is not None:
+            observer.input(copy.deepcopy(merged))
         gen = self.backend.ask(merged)
         try:
             while True: 
-                chunk = next(gen); yield chunk
+                output_context = globals().get('_public_output_observer')
+                token = output_context.set(observer) if output_context is not None else None
+                try:
+                    chunk = next(gen)
+                finally:
+                    if token is not None:
+                        output_context.reset(token)
+                yield chunk
         except StopIteration as e: resp = e.value
+        if resp is not None and observer is not None:
+            observer.response(resp)
         if resp: _write_llm_log('Response', resp.raw, self.log_path, model=self.backend.model)
         if resp and hasattr(resp, 'tool_calls') and resp.tool_calls: self._pending_tool_ids = [tc.id for tc in resp.tool_calls]
         return resp

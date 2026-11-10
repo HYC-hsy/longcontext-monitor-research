@@ -189,6 +189,7 @@ async def serve(args: argparse.Namespace) -> None:
                                memory_api_key=os.environ.get("PMA_MEMORY_API_KEY"),
                                memory_profile=profile,
                                research_candidate=getattr(args, "research_candidate", "U"),
+                               pma_batch_rounds=getattr(args, "pma_batch_rounds", 8),
                                citation_review_gate=getattr(args,"citation_review_gate",None),
                                citation_review_strategy=getattr(args,"citation_review_strategy",None))
     if args.fake_memory:
@@ -284,6 +285,7 @@ async def serve(args: argparse.Namespace) -> None:
         "run_id": args.run_id, "task_id": args.task_id,
         "deadline_epoch": args.deadline_epoch, "fake_memory": args.fake_memory,
         "research_candidate": getattr(args, "research_candidate", "U"),
+        "pma_batch_rounds": episode.pma_batch_rounds,
         **({"citation_review_gate":args.citation_review_gate} if getattr(args,"citation_review_gate",None) else {}),
         **({"citation_review_strategy":args.citation_review_strategy} if getattr(args,"citation_review_strategy",None) else {})},
         sort_keys=True), encoding="utf-8")
@@ -351,6 +353,11 @@ def main() -> None:
     parser.add_argument("--requests", required=True)
     parser.add_argument("--responses", required=True)
     parser.add_argument("--deadline-epoch", type=lambda value: None if value == 'uncapped' else float(value), required=True)
+    def positive_rounds(value):
+        if not value.isascii() or not value.isdecimal() or int(value) < 1:
+            raise argparse.ArgumentTypeError("pma-batch-rounds must be a positive integer")
+        return int(value)
+    parser.add_argument("--pma-batch-rounds", type=positive_rounds, default=8)
     parser.add_argument("--fake-memory", action="store_true")
     parser.add_argument("--fake-memory-update", action="store_true")
     parser.add_argument("--citation-review-gate",choices=('gate-only','gate-one-repair'))

@@ -47,8 +47,10 @@ def stable_initial_text(content: str | list[dict[str, Any]]) -> str:
 def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
                        memory_api_key: str | None = None,
                        memory_profile: dict[str, Any] | None = None,
-                       research_candidate: str = "U",
+                       research_candidate: str = "U", pma_batch_rounds: int = 8,
                        citation_review_gate: str | None = None, citation_review_strategy: str | None = None) -> MemoryEnabledTerminus2:
+    from public_trajectory import batch_rounds
+    pma_batch_rounds = batch_rounds(pma_batch_rounds)
     from citation_gate_config import validate_gate,validate_strategy
     validate_gate(citation_review_gate,research_candidate)
     review_strategy=validate_strategy(citation_review_gate,citation_review_strategy)
@@ -76,7 +78,7 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
                             else 0.3), memory_max_thinking_tokens=None,
         memory_keep_thinking=False, memory_use_structured_tools=True,
         trigger_interval=1, trigger_on_first_step=True,
-        sliding_window_size=8, reset_status_on_episode=True,
+        sliding_window_size=pma_batch_rounds, reset_status_on_episode=True,
         reset_knowledge_on_episode=False, reset_procedural_on_episode=False,
         injection_method="user_turn",
     )
@@ -199,6 +201,11 @@ class PMAEpisode:
         self.last_completed_attempt = 0
         self.last_sequence = 0
         self.batch_steps = 0
+        self.pma_batch_rounds = getattr(agent, "_sliding_window_size", 8)
+        if type(self.pma_batch_rounds) is not int or self.pma_batch_rounds < 1:
+            raise ValueError("pma_batch_rounds must be a positive integer")
+        self.public_trajectory_schema = None
+        self._pending_public_rounds = []
         self._responses: dict[str, tuple[str, dict[str, Any]]] = {}
         self._lock = asyncio.Lock()
 
@@ -229,6 +236,12 @@ class PMAEpisode:
                 return old_result
             if sequence != self.last_sequence + 1:
                 raise ValueError("event sequence gap or replay with unknown receipt")
+            # Persist the exact received public event before any P1/P2 call.
+            # A later phase failure is not a completed receipt and is never replayed.
+            with (self.archive / "received_events.jsonl").open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+                stream.flush()
+                os.fsync(stream.fileno())
             accepted_path = self.archive / "accepted.jsonl"
             with accepted_path.open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps({"event_id": event_id, "sequence": sequence,
@@ -293,11 +306,18 @@ class PMAEpisode:
     async def _task_start(self, event: dict[str, Any]) -> dict[str, Any]:
         if self.started or self.ended:
             raise ValueError("task_start is only valid once")
+        rounds = event.get("pma_batch_rounds", self.pma_batch_rounds)
+        if type(rounds) is not int or rounds != self.pma_batch_rounds:
+            raise ValueError("Task/worker pma_batch_rounds mismatch")
+        self.public_trajectory_schema = event.get("trajectory_schema")
+        if self.public_trajectory_schema not in (None, "public-task-trajectory-v1"):
+            raise ValueError("unsupported public trajectory schema")
         raw = event.get("initial_user_content")
         text = stable_initial_text(raw)
         self.agent._memory_step_in_episode = 0
         self.agent._trigger.reset()
         self.agent._accumulated_observations.clear()
+        self.agent._public_active_batch = None
         if hasattr(self.agent._memory_agent, "reset_conversation_history"):
             self.agent._memory_agent.reset_conversation_history()
         self.agent._pending_injection = None
@@ -370,7 +390,13 @@ class PMAEpisode:
             raise ValueError("actor step does not match active attempt")
         status = event.get("step_status")
         if getattr(self.agent, "_research_candidate", None) in {"pma_predictive_f838_v1", "pma_predictive_context_v1", "pma_predictive_read_context_v1"}:
-            if status in {"provider_cancelled", "completed"}:
+            trajectory = event.get("trajectory")
+            if self.public_trajectory_schema is not None or trajectory is not None:
+                from public_trajectory import validate_trajectory
+                trajectory = validate_trajectory(trajectory, round_number=attempt, status=status)
+                self._pending_public_rounds.append({"step": attempt,
+                                                     "public_trajectory": trajectory})
+            if status in {"provider_cancelled", "completed", "provider_error", "tool_error", "host_interrupted"}:
                 self.last_completed_attempt = attempt
                 return {"status": "skipped", "reason": status, "actor_attempt": attempt}
             if status not in {"normal", "parse_error"}:
@@ -473,6 +499,38 @@ class PMAEpisode:
 
     async def _predictive_actor_step(self, event: dict[str, Any], attempt: int,
                                      status: str) -> dict[str, Any]:
+        if event.get("trajectory") is not None:
+            from public_trajectory import validate_trajectory
+            trajectory = validate_trajectory(event["trajectory"], round_number=attempt, status=status)
+            entry = {"step": attempt, "public_trajectory": trajectory}
+        else:
+            entry = self._legacy_predictive_entry(event, attempt, status)
+        self.agent._accumulated_observations.append(entry)
+        self.batch_steps += 1
+        triggered = self.batch_steps == self.pma_batch_rounds
+        if triggered:
+            batch = (self._pending_public_rounds if event.get("trajectory") is not None else
+                     self.agent._accumulated_observations[-self.batch_steps:])
+            if event.get("trajectory") is not None:
+                self.agent._public_active_batch = deepcopy(batch)
+            if getattr(self.agent, "_research_candidate", None) == "pma_predictive_read_context_v1":
+                trajectory = "\n\n".join(self.agent._format_step_entry(entry)
+                    for entry in batch)
+                self.agent._memory_agent.set_phase1_context(
+                    task=self.agent._task_description, trajectory=trajectory)
+            await self.agent._trigger_memory_agent(step_count=attempt)
+            self.batch_steps = 0
+            self._pending_public_rounds = []
+        self.last_completed_attempt = attempt
+        return {"status": "observed", "triggered": triggered,
+                "trigger_reason": ("eight_new_steps" if triggered else "awaiting_eight_steps")
+                    if self.pma_batch_rounds == 8 else
+                    ("batch_complete" if triggered else "awaiting_batch"),
+                "pma_batch_rounds": self.pma_batch_rounds, "step_count": attempt}
+
+    @staticmethod
+    def _legacy_predictive_entry(event, attempt, status):
+        """Read the old envelope for archived fixtures; new producers handshake v1."""
         blocks, results = event.get("public_blocks"), event.get("public_results")
         actor_input = event.get("public_input")
         if actor_input is not None and (not isinstance(actor_input, list) or any(
@@ -487,23 +545,8 @@ class PMAEpisode:
                 not isinstance(b, dict) or b.get("type") not in {"text", "tool_result"}
                 for b in results):
             raise ValueError("invalid public result blocks")
-        self.agent._accumulated_observations.append({
-            "step": attempt, "public_blocks": blocks, "public_results": results,
-            "public_input": actor_input, "step_status": status})
-        self.batch_steps += 1
-        triggered = self.batch_steps == 8
-        if triggered:
-            if getattr(self.agent, "_research_candidate", None) == "pma_predictive_read_context_v1":
-                trajectory = "\n\n".join(self.agent._format_step_entry(entry)
-                    for entry in self.agent._accumulated_observations[-self.batch_steps:])
-                self.agent._memory_agent.set_phase1_context(
-                    task=self.agent._task_description, trajectory=trajectory)
-            await self.agent._trigger_memory_agent(step_count=attempt)
-            self.batch_steps = 0
-        self.last_completed_attempt = attempt
-        return {"status": "observed", "triggered": triggered,
-                "trigger_reason": "eight_new_steps" if triggered else "awaiting_eight_steps",
-                "step_count": attempt}
+        return {"step": attempt, "public_blocks": blocks, "public_results": results,
+                "public_input": actor_input, "step_status": status}
 
     def _task_end(self, event: dict[str, Any]) -> dict[str, Any]:
         if not self.started or self.ended or self.finalization_attempted:
@@ -529,10 +572,14 @@ class PMAEpisode:
         result = {"status": "saved", "terminal": terminal,
                   "actor_attempts": self.last_attempt}
         if getattr(self.agent, "_research_candidate", None) in {"pma_predictive_f838_v1", "pma_predictive_context_v1", "pma_predictive_read_context_v1"}:
-            result.update({"unprocessed_tail_steps": self.batch_steps,
+            result.update({"pma_batch_rounds": self.pma_batch_rounds,
+                           "trajectory_schema": self.public_trajectory_schema,
+                           "unprocessed_tail_steps": self.batch_steps,
                            "unprocessed_tail_attempts": [entry["step"] for entry in
-                            self.agent._accumulated_observations[-self.batch_steps:]]
-                            if self.batch_steps else []})
+                               self.agent._accumulated_observations[-self.batch_steps:]]
+                               if self.batch_steps else [],
+                           "unprocessed_public_attempts": [entry["step"] for entry in
+                               self._pending_public_rounds]})
         return result
 
     def finalize_without_event(self, reason: str) -> dict[str, Any]:

@@ -60,7 +60,16 @@ class UpstreamPMAClient:
                      requests=os.environ['GA_PMA_UPSTREAM_REQUESTS'],
                      responses=os.environ['GA_PMA_UPSTREAM_RESPONSES'],
                      deadline=os.environ['GA_PMA_UPSTREAM_DEADLINE_EPOCH'])
-        client.exchange('task_start', initial_user_content=initial_content)
+        config = {}
+        if os.environ.get('GA_PMA_UPSTREAM_CANDIDATE') in (
+                'pma_predictive_f838_v1', 'pma_predictive_context_v1',
+                'pma_predictive_read_context_v1'):
+            rounds = os.environ.get('GA_PMA_BATCH_ROUNDS', '8')
+            if not rounds.isascii() or not rounds.isdecimal() or int(rounds) < 1:
+                raise PMABridgeError('GA_PMA_BATCH_ROUNDS must be a positive integer')
+            config = {'pma_batch_rounds': int(rounds),
+                      'trajectory_schema': 'public-task-trajectory-v1'}
+        client.exchange('task_start', initial_user_content=initial_content, **config)
         return client
 
     def exchange(self, kind, **fields):
@@ -104,11 +113,12 @@ class UpstreamPMAClient:
 
     def actor_step(self, attempt, *, status, response='', commands=(), observation='',
                    request_event_id=None, public_blocks=None, public_results=None,
-                   public_input=None, public_blocks_provenance=None):
+                   public_input=None, public_blocks_provenance=None, trajectory=None):
         return self.exchange('actor_step', actor_attempt=attempt, step_status=status,
                              response=response, commands=list(commands),
                              observation=observation,
                              request_event_id=request_event_id,
+                             **({'trajectory': trajectory} if trajectory is not None else {}),
                              **({'public_blocks': public_blocks,
                                  'public_blocks_provenance': public_blocks_provenance,
                                  'public_results': public_results,
