@@ -15,9 +15,9 @@ from memory_agent.memory.read_context_predictive_memory_agent import (
 
 EXPECTED_SYSTEM = '''You are the task agent's memory manager, responsible for predicting and preserving information it will need in the future and reminding it at appropriate times of memories useful for its current work.
 
-Based on the task description and the task agent's trajectory, anticipate which of the information received this time the task agent will use in its next 10 turns of work; organize and save information accordingly.
+Based on the task description and the task agent's trajectory, anticipate which of the information received this time the task agent will first use only after at least four turns have passed; organize and save that information accordingly.
 
-Before using memory tools, briefly state in ordinary reply text which information you plan to preserve and how you anticipate it will be useful in subsequent work. Give a concise public summary; no special format is needed, and do not disclose private reasoning. Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge".
+Before using memory tools, briefly state in ordinary reply text which information you plan to preserve and how you anticipate it will be useful in work after four turns have passed. Give a concise public summary; no special format is needed, and do not disclose private reasoning. Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge".
 
 Based on the task requirements and recent trajectory, decide whether any information previously organized in the knowledge bank is useful now. If a reminder is needed, make it brief and direct. You may synthesize information, identify connections, and offer grounded inferences or suggestions; preserve the information's original uncertainty when expressing them. Default to no intervention: do not intervene if no reminder is needed now, or if the relevant information is already visible in the recent trajectory and the agent's actions indicate that it has taken it into account. Do not take over the task agent's work.
 
@@ -43,7 +43,7 @@ def test_exact_approved_coherent_system():
 
 
 def test_only_two_prompt_values_change_from_pinned_parent():
-    # SHA-256 of the AST at ef19e9ac6194261f1fbd24c5d8eba5a111e6c7ae
+    # SHA-256 of the AST at 4b5d8642d9f1070921cea122363473de3092d871
     # after masking only UNIFIED_SYSTEM and PUBLIC_FORECAST_REMINDER.
     tree = ast.parse(Path(module.__file__).read_text())
     for node in tree.body:
@@ -107,21 +107,46 @@ def test_actual_system_prompt_and_continuation_are_coherent(provider, monkeypatc
     assert 'private-fixture' not in str(payload)
 
 
-EXPECTED_PUBLIC_REMINDER = 'Remember to include a brief public summary of the information you plan to preserve and how you anticipate it will be useful in subsequent work. Do not disclose private reasoning.'
+EXPECTED_PUBLIC_REMINDER = 'Remember to include a brief public summary of the information you plan to preserve and how you anticipate it will be useful in work after four turns have passed.'
 
 
 def test_public_reminder_matches_information_forecast():
     assert PUBLIC_FORECAST_REMINDER == EXPECTED_PUBLIC_REMINDER
+    assert "private reasoning" not in PUBLIC_FORECAST_REMINDER
+    assert "do not disclose private reasoning" in UNIFIED_SYSTEM
     for text in [UNIFIED_SYSTEM, PUBLIC_FORECAST_REMINDER]:
         assert 'problems or decisions' not in text
-        assert 'how you anticipate it will be useful in subsequent work' in text
+        assert 'how you anticipate it will be useful in work after four turns have passed' in text
     assert 'information received this time' in UNIFIED_SYSTEM
-    assert 'the task agent will use in its next 10 turns of work' in UNIFIED_SYSTEM
+    assert 'the task agent will first use only after at least four turns have passed' in UNIFIED_SYSTEM
     assert 'the task agent may use' not in UNIFIED_SYSTEM
-    assert 'next 10 turns of work' in UNIFIED_SYSTEM
+    assert '10 turns' not in UNIFIED_SYSTEM
+    assert '10 turns' not in PUBLIC_FORECAST_REMINDER
     assert 'brief and direct' in UNIFIED_SYSTEM
 
 
-def test_completion_protocol_is_unchanged_from_ef19():
+def test_completion_protocol_is_unchanged_from_pinned_parent():
     protocol = UNIFIED_SYSTEM.split('Manage memory and decide whether', 1)[1]
     assert hashlib.sha256(protocol.encode()).hexdigest() == 'b1ee9757eb136840a0b9eef29f889c10e105b1357546b925ef5611c98f5f8219'
+
+
+def test_first_use_boundary_applies_to_preservation_not_current_reminders():
+    selection = UNIFIED_SYSTEM.split('\n\n')[1]
+    assert 'will first use only after at least four turns have passed' in selection
+    assert 'organize and save that information accordingly' in selection
+    for weaker_or_extra_rule in ['may use', 'might use', 'next 10', 'fifth turn', 'first four turns']:
+        assert weaker_or_extra_rule not in UNIFIED_SYSTEM
+        assert weaker_or_extra_rule not in PUBLIC_FORECAST_REMINDER
+    reminder = UNIFIED_SYSTEM.split('Based on the task requirements', 1)[1].split(
+        'Manage memory and decide whether', 1)[0]
+    assert 'is useful now' in reminder
+    assert 'brief and direct' in reminder
+    assert 'four turns' not in reminder
+
+
+def test_memory_role_and_reminder_policy_are_unchanged_from_parent():
+    role = UNIFIED_SYSTEM.split('\n\n', 1)[0]
+    assert hashlib.sha256(role.encode()).hexdigest() == '1fd3581adf5ce37c6a1844d108733cbc57ff11c5fb0841f93b7c729511db38b6'
+    reminder = UNIFIED_SYSTEM.split('Based on the task requirements', 1)[1].split(
+        'Manage memory and decide whether', 1)[0]
+    assert hashlib.sha256(reminder.encode()).hexdigest() == 'a17f7b8bd4379dee4d9915a147e1425f5e2473cd371a99c59ee4d640f7132b3d'

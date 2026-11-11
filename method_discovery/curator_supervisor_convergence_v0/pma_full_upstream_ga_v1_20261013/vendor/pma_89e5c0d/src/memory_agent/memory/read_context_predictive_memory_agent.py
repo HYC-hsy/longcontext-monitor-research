@@ -25,9 +25,9 @@ Use memory_add to save information. When you need to look up information already
 # PHASE1_SYSTEM and the imported PHASE2_SYSTEM remain unchanged for compatibility.
 UNIFIED_SYSTEM = """You are the task agent's memory manager, responsible for predicting and preserving information it will need in the future and reminding it at appropriate times of memories useful for its current work.
 
-Based on the task description and the task agent's trajectory, anticipate which of the information received this time the task agent will use in its next 10 turns of work; organize and save information accordingly.
+Based on the task description and the task agent's trajectory, anticipate which of the information received this time the task agent will first use only after at least four turns have passed; organize and save that information accordingly.
 
-Before using memory tools, briefly state in ordinary reply text which information you plan to preserve and how you anticipate it will be useful in subsequent work. Give a concise public summary; no special format is needed, and do not disclose private reasoning. Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge".
+Before using memory tools, briefly state in ordinary reply text which information you plan to preserve and how you anticipate it will be useful in work after four turns have passed. Give a concise public summary; no special format is needed, and do not disclose private reasoning. Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge".
 
 Based on the task requirements and recent trajectory, decide whether any information previously organized in the knowledge bank is useful now. If a reminder is needed, make it brief and direct. You may synthesize information, identify connections, and offer grounded inferences or suggestions; preserve the information's original uncertainty when expressing them. Default to no intervention: do not intervene if no reminder is needed now, or if the relevant information is already visible in the recent trajectory and the agent's actions indicate that it has taken it into account. Do not take over the task agent's work.
 
@@ -104,8 +104,7 @@ def parse_final_decision(raw):
 
 PUBLIC_FORECAST_REMINDER = (
     "Remember to include a brief public summary of the information you plan to "
-    "preserve and how you anticipate it will be useful in subsequent work. "
-    "Do not disclose private reasoning.")
+    "preserve and how you anticipate it will be useful in work after four turns have passed.")
 
 
 def has_public_text(text):
