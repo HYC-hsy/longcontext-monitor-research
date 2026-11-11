@@ -41,7 +41,8 @@ def test_prompts_and_uncertain_note_share_one_call_without_new_tools():
     result = run(agent)
     assert len(llm.calls) == 1
     assert llm.calls[0]['system'] == UNIFIED_SYSTEM
-    assert PHASE1_SYSTEM in UNIFIED_SYSTEM and PHASE2_SYSTEM in UNIFIED_SYSTEM
+    assert PHASE1_SYSTEM not in UNIFIED_SYSTEM and PHASE2_SYSTEM not in UNIFIED_SYSTEM
+    assert "When ready to finish this wake" in UNIFIED_SYSTEM
     assert llm.calls[0]['tools'] == BANK_TOOLS
     assert result.should_inject and note in result.context_for_action
     assert result.raw_response_phase2 is result.user_prompt_phase2 is None
