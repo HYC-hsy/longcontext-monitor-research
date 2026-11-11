@@ -13,13 +13,13 @@ from memory_agent.memory import read_context_predictive_memory_agent as module
 from memory_agent.memory.read_context_predictive_memory_agent import (
     BANK_TOOLS, PUBLIC_FORECAST_REMINDER, UNIFIED_SYSTEM)
 
-EXPECTED_SYSTEM = '''You are the task agent's memory manager, responsible for preserving information it may need next and reminding it at appropriate times when that information can help its current work.
+EXPECTED_SYSTEM = '''You are the task agent's memory manager, responsible for predicting and preserving information it will need in the future and reminding it at appropriate times of memories useful for its current work.
 
-Based on the task description and the task agent's trajectory, anticipate the problems it may encounter, the decisions it may need to make, and the information it will need over the next 10 turns; organize and save information accordingly. At the same time, consider the task requirements and recent trajectory to decide whether any information already in memory needs to be brought to the agent's attention now.
+Based on the task description and the task agent's trajectory, anticipate which of the information received this time the task agent may use in its next 10 turns of work; organize and save information accordingly.
 
-Before using memory tools, briefly state in ordinary reply text the problems or decisions you anticipate and the information you plan to preserve for them. Give a concise public summary; no special format is needed, and do not disclose private reasoning. Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge".
+Before using memory tools, briefly state in ordinary reply text which information you plan to preserve and how you anticipate it will be useful in subsequent work. Give a concise public summary; no special format is needed, and do not disclose private reasoning. Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge".
 
-When giving a reminder, you may synthesize information, identify connections, and offer grounded inferences or suggestions; preserve the information's original uncertainty when expressing them. Default to no intervention: do not intervene if no reminder is needed now, or if the relevant information is already visible in the recent trajectory and the agent's actions indicate that it has taken it into account. Do not take over the task agent's work.
+Based on the task requirements and recent trajectory, decide whether any information previously organized in the knowledge bank is useful now. If a reminder is needed, make it brief and direct. You may synthesize information, identify connections, and offer grounded inferences or suggestions; preserve the information's original uncertainty when expressing them. Default to no intervention: do not intervene if no reminder is needed now, or if the relevant information is already visible in the recent trajectory and the agent's actions indicate that it has taken it into account. Do not take over the task agent's work.
 
 Manage memory and decide whether to give a reminder in this same conversation. Use as many tool rounds as needed, but do not add a round just to finish. When ready to finish this wake, end your reply with exactly one of the following decision tags:
 
@@ -42,16 +42,17 @@ def test_exact_approved_coherent_system():
     assert UNIFIED_SYSTEM.count("<context_for_action>") == 1
 
 
-def test_only_unified_prompt_ast_changes_from_pinned_parent():
-    # SHA-256 of the AST at 352280922aa2b3746bad857452d471e465a5b4a6
-    # after replacing only UNIFIED_SYSTEM's value with this same sentinel.
+def test_only_two_prompt_values_change_from_pinned_parent():
+    # SHA-256 of the AST at ef19e9ac6194261f1fbd24c5d8eba5a111e6c7ae
+    # after masking only UNIFIED_SYSTEM and PUBLIC_FORECAST_REMINDER.
     tree = ast.parse(Path(module.__file__).read_text())
-    assignment = next(node for node in tree.body if isinstance(node, ast.Assign)
-        and any(isinstance(target, ast.Name) and target.id == 'UNIFIED_SYSTEM'
-                for target in node.targets))
-    assignment.value = ast.Constant('PROMPT_VALUE_ONLY')
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name)
+                and target.id in ['UNIFIED_SYSTEM', 'PUBLIC_FORECAST_REMINDER']
+                for target in node.targets):
+            node.value = ast.Constant('PROMPT_VALUE_ONLY')
     digest = hashlib.sha256(ast.dump(tree, include_attributes=False).encode()).hexdigest()
-    assert digest == '9504f0adfb4d1c40a16674506182d56cb7723d4842f84d31ce8daf41a6986e57'
+    assert digest == 'ac2525dece2b84e09f283bc3b772bfb6db2f9aa54e99e41aee722e7fefb67c32'
 
 
 @pytest.mark.parametrize('provider', ['openai', 'anthropic'])
@@ -104,3 +105,21 @@ def test_actual_system_prompt_and_continuation_are_coherent(provider, monkeypatc
     assert 'The endpoint may be /v1; this is not confirmed.' in str(history)
     assert 'MUST NOT ENTER A SECOND PHASE' not in str(payload)
     assert 'private-fixture' not in str(payload)
+
+
+EXPECTED_PUBLIC_REMINDER = 'Remember to include a brief public summary of the information you plan to preserve and how you anticipate it will be useful in subsequent work. Do not disclose private reasoning.'
+
+
+def test_public_reminder_matches_information_forecast():
+    assert PUBLIC_FORECAST_REMINDER == EXPECTED_PUBLIC_REMINDER
+    for text in [UNIFIED_SYSTEM, PUBLIC_FORECAST_REMINDER]:
+        assert 'problems or decisions' not in text
+        assert 'how you anticipate it will be useful in subsequent work' in text
+    assert 'information received this time' in UNIFIED_SYSTEM
+    assert 'next 10 turns of work' in UNIFIED_SYSTEM
+    assert 'brief and direct' in UNIFIED_SYSTEM
+
+
+def test_completion_protocol_is_unchanged_from_ef19():
+    protocol = UNIFIED_SYSTEM.split('Manage memory and decide whether', 1)[1]
+    assert hashlib.sha256(protocol.encode()).hexdigest() == 'b1ee9757eb136840a0b9eef29f889c10e105b1357546b925ef5611c98f5f8219'

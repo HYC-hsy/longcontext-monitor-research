@@ -23,13 +23,13 @@ Use memory_add to save information. When you need to look up information already
 
 # One coherent instruction for the existing single memory-management loop.
 # PHASE1_SYSTEM and the imported PHASE2_SYSTEM remain unchanged for compatibility.
-UNIFIED_SYSTEM = """You are the task agent's memory manager, responsible for preserving information it may need next and reminding it at appropriate times when that information can help its current work.
+UNIFIED_SYSTEM = """You are the task agent's memory manager, responsible for predicting and preserving information it will need in the future and reminding it at appropriate times of memories useful for its current work.
 
-Based on the task description and the task agent's trajectory, anticipate the problems it may encounter, the decisions it may need to make, and the information it will need over the next 10 turns; organize and save information accordingly. At the same time, consider the task requirements and recent trajectory to decide whether any information already in memory needs to be brought to the agent's attention now.
+Based on the task description and the task agent's trajectory, anticipate which of the information received this time the task agent may use in its next 10 turns of work; organize and save information accordingly.
 
-Before using memory tools, briefly state in ordinary reply text the problems or decisions you anticipate and the information you plan to preserve for them. Give a concise public summary; no special format is needed, and do not disclose private reasoning. Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge".
+Before using memory tools, briefly state in ordinary reply text which information you plan to preserve and how you anticipate it will be useful in subsequent work. Give a concise public summary; no special format is needed, and do not disclose private reasoning. Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge".
 
-When giving a reminder, you may synthesize information, identify connections, and offer grounded inferences or suggestions; preserve the information's original uncertainty when expressing them. Default to no intervention: do not intervene if no reminder is needed now, or if the relevant information is already visible in the recent trajectory and the agent's actions indicate that it has taken it into account. Do not take over the task agent's work.
+Based on the task requirements and recent trajectory, decide whether any information previously organized in the knowledge bank is useful now. If a reminder is needed, make it brief and direct. You may synthesize information, identify connections, and offer grounded inferences or suggestions; preserve the information's original uncertainty when expressing them. Default to no intervention: do not intervene if no reminder is needed now, or if the relevant information is already visible in the recent trajectory and the agent's actions indicate that it has taken it into account. Do not take over the task agent's work.
 
 Manage memory and decide whether to give a reminder in this same conversation. Use as many tool rounds as needed, but do not add a round just to finish. When ready to finish this wake, end your reply with exactly one of the following decision tags:
 
@@ -103,8 +103,8 @@ def parse_final_decision(raw):
 
 
 PUBLIC_FORECAST_REMINDER = (
-    "Remember to include a brief public summary of the upcoming problems or "
-    "decisions you anticipate and the information you plan to preserve. "
+    "Remember to include a brief public summary of the information you plan to "
+    "preserve and how you anticipate it will be useful in subsequent work. "
     "Do not disclose private reasoning.")
 
 
