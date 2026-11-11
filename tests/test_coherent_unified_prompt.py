@@ -15,7 +15,7 @@ from memory_agent.memory.read_context_predictive_memory_agent import (
 
 EXPECTED_SYSTEM = '''You are the task agent's memory manager, responsible for predicting and preserving information it will need in the future and reminding it at appropriate times of memories useful for its current work.
 
-Based on the task description and the task agent's trajectory, anticipate which of the information received this time the task agent may use in its next 10 turns of work; organize and save information accordingly.
+Based on the task description and the task agent's trajectory, anticipate which of the information received this time the task agent will use in its next 10 turns of work; organize and save information accordingly.
 
 Before using memory tools, briefly state in ordinary reply text which information you plan to preserve and how you anticipate it will be useful in subsequent work. Give a concise public summary; no special format is needed, and do not disclose private reasoning. Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge".
 
@@ -116,6 +116,8 @@ def test_public_reminder_matches_information_forecast():
         assert 'problems or decisions' not in text
         assert 'how you anticipate it will be useful in subsequent work' in text
     assert 'information received this time' in UNIFIED_SYSTEM
+    assert 'the task agent will use in its next 10 turns of work' in UNIFIED_SYSTEM
+    assert 'the task agent may use' not in UNIFIED_SYSTEM
     assert 'next 10 turns of work' in UNIFIED_SYSTEM
     assert 'brief and direct' in UNIFIED_SYSTEM
 

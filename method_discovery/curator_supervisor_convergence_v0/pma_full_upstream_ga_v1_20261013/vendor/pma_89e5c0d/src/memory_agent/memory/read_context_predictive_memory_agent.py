@@ -25,7 +25,7 @@ Use memory_add to save information. When you need to look up information already
 # PHASE1_SYSTEM and the imported PHASE2_SYSTEM remain unchanged for compatibility.
 UNIFIED_SYSTEM = """You are the task agent's memory manager, responsible for predicting and preserving information it will need in the future and reminding it at appropriate times of memories useful for its current work.
 
-Based on the task description and the task agent's trajectory, anticipate which of the information received this time the task agent may use in its next 10 turns of work; organize and save information accordingly.
+Based on the task description and the task agent's trajectory, anticipate which of the information received this time the task agent will use in its next 10 turns of work; organize and save information accordingly.
 
 Before using memory tools, briefly state in ordinary reply text which information you plan to preserve and how you anticipate it will be useful in subsequent work. Give a concise public summary; no special format is needed, and do not disclose private reasoning. Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge".
 

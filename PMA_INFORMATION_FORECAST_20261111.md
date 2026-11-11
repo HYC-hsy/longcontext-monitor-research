@@ -2,12 +2,13 @@
 
 ## 范围
 
-精确父提交：`ef19e9ac6194261f1fbd24c5d8eba5a111e6c7ae`。
-父树：`12e9e9033373f0d4eb3555402f3128b20b64968b`。
+精确父提交：`6b06a27b142f8910f56837e323ebff98a88bb042`。
+原提示改版基线：`ef19e9ac6194261f1fbd24c5d8eba5a111e6c7ae`。
+父树：`229134bdbc6a44adcfb18f0af3f4453a64210fdd`。
 方法入口仍为 `pma-predictive-read-context` / `pma_predictive_read_context_v1`。
 
-本次只修改实际生效的 `UNIFIED_SYSTEM` 与 `PUBLIC_FORECAST_REMINDER` 文本值，
-把预测对象从未来的问题/决定，改成“本次收到的信息中，哪些可能在接下来 10 轮工作中
+相对最初 ef19 基线，提示改版只涉及实际生效的 `UNIFIED_SYSTEM` 与 `PUBLIC_FORECAST_REMINDER` 文本值，
+把预测对象从未来的问题/决定，改成“本次收到的信息中，哪些会在接下来 10 轮工作中
 用到”，公开概述相应改成“准备保留什么、预想如何用于后续”。知识库提醒明确简短直接。
 多轮工具与最终决定协议逐字保留。10 轮仍是预测跨度，不是 TTL 或删除期限。
 未增加使用场景模板、删除工具、强制格式、筛选阶段、语义判定器或额外模型调用。
@@ -16,13 +17,17 @@
 错误恢复、软提醒触发机制、历史、轨迹投影、唤醒频率、模型、预算和任务名单均保持不变。
 这是用户批准的提示词候选，不改变研究问题，也不声明方法效果。
 
+本次纠正以已发布的 `6b06a27b142f8910f56837e323ebff98a88bb042` 为父提交。该父版误写
+`may use`，中文也误写“可能会”，不符合用户明确要求。本次仅把实际 system 中该处
+改为 `will use`／“会”，同步精确文本测试与说明；软提醒完全不变。不得将父版称为忠实实现。
+
 发布白名单只有：
 
 - `method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/vendor/pma_89e5c0d/src/memory_agent/memory/read_context_predictive_memory_agent.py`。
 - `tests/test_coherent_unified_prompt.py`。
 - 本说明及 `PMA_INFORMATION_FORECAST_VERIFICATION_20261111.json`。
 
-只把白名单覆盖到父提交的完整远端树；本地用于离线测试的 392 文件源码投影不是完整仓库，
+只把白名单覆盖到父提交的完整远端树；本地用于离线测试的有限源码投影不是完整仓库，
 不推送其本地历史，不删除远端未物化文件，不发布私有配置、真实轨迹、模型缓存或临时垃圾。
 
 ## 实际完整基础 system（英文）
@@ -32,7 +37,7 @@
 ```text
 You are the task agent's memory manager, responsible for predicting and preserving information it will need in the future and reminding it at appropriate times of memories useful for its current work.
 
-Based on the task description and the task agent's trajectory, anticipate which of the information received this time the task agent may use in its next 10 turns of work; organize and save information accordingly.
+Based on the task description and the task agent's trajectory, anticipate which of the information received this time the task agent will use in its next 10 turns of work; organize and save information accordingly.
 
 Before using memory tools, briefly state in ordinary reply text which information you plan to preserve and how you anticipate it will be useful in subsequent work. Give a concise public summary; no special format is needed, and do not disclose private reasoning. Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge".
 
@@ -56,7 +61,7 @@ You may include the final decision in the same response as memory tools, but it 
 ```text
 你是任务 Agent 的记忆管理者，负责预测并保留它未来会需要的信息，并适时提醒现在用得上的记忆。
 
-结合任务描述和任务 Agent 的执行轨迹，预想本次收到的信息中，哪些可能会在它接下来的 10 轮工作中用到，据此整理并保存信息。
+结合任务描述和任务 Agent 的执行轨迹，预想本次收到的信息中，哪些会在它接下来的 10 轮工作中用到，据此整理并保存信息。
 
 使用记忆工具前，用普通回复简短说明你准备保留哪些信息，以及预想这些信息会如何用于后续工作。给出简洁的公开概述，不需要特殊格式，也不要披露私有推理。使用 memory_add 保存信息；需要查阅已有记忆时，使用 memory_read，并将 bank_id 设为 "knowledge"。
 
@@ -106,7 +111,7 @@ Remember to include a brief public summary of the information you plan to preser
 完整命令、计数、同环境父版对照、失败项、哈希和独立审查见
 `PMA_INFORMATION_FORECAST_VERIFICATION_20261111.json`。测试使用已有依赖与模拟响应，
 包括真实 SDK/provider 序列化路径；不调用真实模型或 benchmark。
-生产文件遮蔽上述两个常量值后，AST 与精确父版本一致；结束协议摘要也与父版一致。
+生产文件遮蔽 UNIFIED_SYSTEM 值后，AST 与本次精确父版本一致；软提醒与结束协议逐字不变。
 
 扩展测试并非全绿：保留父版已有失败，不在本轮文案范围顺带修复历史断言、夹具或
 未物化的无关文件。区分通过、失败与未运行，不把重点回归通过说成完整仓库 CI 通过。
@@ -115,7 +120,7 @@ Remember to include a brief public summary of the information you plan to preser
 ## 开发线程接入与后续运行指令
 
 1. 从交接消息给出的独立分支获取精确发布 SHA，固定该 SHA，核对唯一父提交是
-   `ef19e9ac6194261f1fbd24c5d8eba5a111e6c7ae`。不使用可能变化的分支 HEAD 代替固定版本。
+   `6b06a27b142f8910f56837e323ebff98a88bb042`。不使用可能变化的分支 HEAD 代替固定版本。
    保留其他工作区改动，不 force-push，不覆盖旧运行证据。
 2. 核对本说明的四文件白名单与 production diff，执行验收 JSON 的重点/扩展命令，
    在同环境对照父版。复核实际 provider 请求的完整 system、条件软提醒、首次原题、
