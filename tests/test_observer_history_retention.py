@@ -26,20 +26,19 @@ def _opaque(ident):
             'encrypted_content': 'opaque-' + ident, 'summary': []}
 
 
-@pytest.mark.parametrize('first_empty', ['P1', 'P2', 'both'])
-def test_reasoning_only_is_replayed_without_invented_text_across_wakes(first_empty, tmp_path):
+@pytest.mark.parametrize('empty_wake', [0, 1, 2])
+def test_reasoning_only_is_replayed_without_invented_text_across_wakes(empty_wake, tmp_path):
     from openai import AsyncOpenAI
     wire, outputs = [], {}
 
     def handler(request):
-        label = ['P1a', 'P2a', 'P1b', 'P2b', 'P1c', 'P2c'][len(wire)]
+        label = f'call-{len(wire)}'
         wire.append(json.loads(request.content))
         output = [_opaque(label)]
-        if not (label.endswith('a') and first_empty in (label[:2], 'both')):
+        if len(wire) - 1 != empty_wake:
             output.append({'type': 'message', 'id': 'm-' + label,
                 'role': 'assistant', 'status': 'completed', 'content': [{
-                    'type': 'output_text', 'text': label if label.startswith('P1') else
-                    '<no_intervention/>', 'annotations': []}]})
+                    'type': 'output_text', 'text': '<no_intervention/>', 'annotations': []}]})
         outputs[label] = copy.deepcopy(output)
         return httpx.Response(200, json={'id': label, 'object': 'response',
             'created_at': 1, 'status': 'completed', 'model': 'gpt-6.1-sol',
@@ -60,17 +59,18 @@ def test_reasoning_only_is_replayed_without_invented_text_across_wakes(first_emp
         return agent
 
     agent = asyncio.run(run())
-    assert len(wire) == 6
-    for index, same, other in [(2, 'P1a', 'P2a'), (3, 'P2a', 'P1a'),
-                                (4, 'P1b', 'P2b'), (5, 'P2b', 'P1b')]:
-        assert _opaque(same) in wire[index]['input']
-        assert _opaque(other) not in wire[index]['input']
+    assert len(wire) == 4
+    for index in range(1, 4):
+        for earlier in range(index):
+            assert _opaque(f'call-{earlier}') in wire[index]['input']
+    # The reasoning-only response is retained without an invented message item.
+    assert outputs[f'call-{empty_wake}'] == [_opaque(f'call-{empty_wake}')]
     assert not any(item.get('role') == 'assistant' and item.get('content') == '.'
                    for request in wire for item in request['input'])
     assert all('include' not in request for request in wire)  # Keep the original request interface.
     assert all(request['store'] is False and request['reasoning'] == {'effort': 'high'}
                for request in wire)
-    assert agent._phase1_history and agent._phase2_history
+    assert agent._phase1_history and agent._phase2_history == []
     visible = ''.join(path.read_text() for path in tmp_path.glob('*.jsonl'))
     assert 'opaque-' not in visible
 
@@ -132,7 +132,7 @@ def test_real_http_body_preserves_oversize_current_batch_and_native_history(prov
     above the HTTP transport boundary.
     """
     wire = []
-    labels = ['P1a', 'P2a', 'P1b', 'P1b_done', 'P2b', 'P1c', 'P2c']
+    labels = ['first', 'read', 'decide', 'next']
     batch = '<tool_result>' + '当前原文-α-🙂-EXACT-' * 8000 + '</tool_result>'
     task = 'Original task must stay exact.'
     signatures = {}
@@ -140,7 +140,7 @@ def test_real_http_body_preserves_oversize_current_batch_and_native_history(prov
     def handler(request):
         label = labels[len(wire)]
         wire.append(json.loads(request.content))
-        tool = label == 'P1b'
+        tool = label == 'read'
         if provider == 'responses':
             output = [_opaque(label)]
             if tool:
@@ -150,7 +150,7 @@ def test_real_http_body_preserves_oversize_current_batch_and_native_history(prov
             else:
                 output.append({'type': 'message', 'id': 'm-' + label, 'role': 'assistant',
                     'status': 'completed', 'content': [{'type': 'output_text',
-                    'text': 'P1 visible' if label.startswith('P1') else '<no_intervention/>',
+                    'text': '<no_intervention/>',
                     'annotations': []}]})
             return httpx.Response(200, json={'id': label, 'object': 'response',
                 'created_at': 1, 'status': 'completed', 'model': 'gpt-6.1-sol',
@@ -160,7 +160,7 @@ def test_real_http_body_preserves_oversize_current_batch_and_native_history(prov
         signatures[label] = signed
         content = copy.deepcopy(signed) + ([{'type': 'tool_use', 'id': 'read-b',
             'name': 'memory_read', 'input': {'bank_id': 'knowledge'}}] if tool else [{
-            'type': 'text', 'text': 'P1 visible' if label.startswith('P1') else '<no_intervention/>'}])
+            'type': 'text', 'text': '<no_intervention/>'}])
         return httpx.Response(200, json={'id': 'msg-' + label, 'type': 'message',
             'role': 'assistant', 'model': 'claude-opus-4-8', 'content': content,
             'stop_reason': 'tool_use' if tool else 'end_turn', 'stop_sequence': None,
@@ -218,25 +218,22 @@ def test_real_http_body_preserves_oversize_current_batch_and_native_history(prov
         return agent
 
     asyncio.run(run())
-    assert len(wire) == 7
-    for index in (2, 3, 4, 5, 6):
+    assert len(wire) == 4
+    for index in (1, 2, 3):
         body = wire[index]['input'] if provider == 'responses' else wire[index]['messages']
         text = json.dumps(body, ensure_ascii=False)
         assert batch in text and task in text
     if provider == 'responses':
-        assert _opaque('P1b') in wire[5]['input'] and _opaque('P2b') not in wire[5]['input']
-        assert _opaque('P2b') in wire[6]['input'] and _opaque('P1b') not in wire[6]['input']
-        calls = [x['call_id'] for x in wire[5]['input'] if x.get('type') == 'function_call']
-        receipts = [x['call_id'] for x in wire[5]['input'] if x.get('type') == 'function_call_output']
+        assert _opaque('read') in wire[3]['input']
+        assert _opaque('decide') in wire[3]['input']
+        calls = [x['call_id'] for x in wire[3]['input'] if x.get('type') == 'function_call']
+        receipts = [x['call_id'] for x in wire[3]['input'] if x.get('type') == 'function_call_output']
     else:
-        p1 = [block for message in wire[5]['messages'] for block in message['content']]
-        p2 = [block for message in wire[6]['messages'] for block in message['content']]
-        assert all(block in p1 for block in signatures['P1b'])
-        assert all(block in p2 for block in signatures['P2b'])
-        assert not any(block in p1 for block in signatures['P2b'])
-        assert not any(block in p2 for block in signatures['P1b'])
-        calls = [x['id'] for x in p1 if x.get('type') == 'tool_use']
-        receipts = [x['tool_use_id'] for x in p1 if x.get('type') == 'tool_result']
+        blocks = [block for message in wire[3]['messages'] for block in message['content']]
+        assert all(block in blocks for block in signatures['read'])
+        assert all(block in blocks for block in signatures['decide'])
+        calls = [x['id'] for x in blocks if x.get('type') == 'tool_use']
+        receipts = [x['tool_use_id'] for x in blocks if x.get('type') == 'tool_result']
     assert calls == receipts == ['read-b']
 
 

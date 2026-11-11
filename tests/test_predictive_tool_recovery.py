@@ -30,14 +30,14 @@ def block_network(monkeypatch):
     monkeypatch.setattr(socket, 'socketpair', local_socketpair)
 
 
-def test_unknown_tool_recovers_before_p2_without_task_execution(tmp_path):
+def test_unknown_tool_recovers_before_decision_without_task_execution(tmp_path):
     marker = tmp_path / 'must-not-exist'
     script = f'open({str(marker)!r}, "w").write("bad")'
     a = Agent(llm=Script(response(call('code_run', {'script': script}, 'bad')),
         response(call('memory_add', {'content': 'recovered exact text'}, 'good')),
         response(), response()))
     result = run(a)
-    assert len(a.llm.calls) == 4
+    assert len(a.llm.calls) == 3
     assert all(c.get('tools') for c in a.llm.calls[:3])
     error = receipts(a.llm.calls[1])[0]
     assert not error['success'] and error['action'] == 'code_run'
@@ -77,7 +77,7 @@ def test_unknown_tool_recovers_before_p2_without_task_execution(tmp_path):
 def test_invalid_arguments_are_receipted_same_wake_and_do_not_mutate(name, args):
     a = Agent(llm=Script(response(call(name, args, 'invalid')), response()))
     result = run(a)
-    assert len(a.llm.calls) == 3 and a.llm.calls[1].get('tools')
+    assert len(a.llm.calls) == 2 and a.llm.calls[1].get('tools')
     assert not receipts(a.llm.calls[1])[0]['success']
     assert result.operations[0].success is False and not a.memory.knowledge
     tool_call = next(m for m in a.llm.calls[1]['message_history'] if m.get('tool_calls'))
@@ -100,7 +100,7 @@ def test_bad_read_then_corrected_read_keeps_full_bank_and_ids(arguments):
     assert [o.success for o in result.operations] == [False, True]
     assert result.operations[1].content == expected
     assert a.memory.to_dict() == before
-    assert len(a.llm.calls) == 4 and all(c.get('tools') for c in a.llm.calls[:3])
+    assert len(a.llm.calls) == 3 and all(c.get('tools') for c in a.llm.calls[:3])
     assert [m['tool_call_id'] for m in a.llm.calls[2]['message_history']
             if m['role'] == 'tool'] == ['bad', 'good']
 
@@ -111,9 +111,9 @@ def test_error_limit_fails_closed_with_all_native_receipts():
                            for i in range(count))))
     with pytest.raises(PMAPhaseError) as caught:
         run(a)
-    assert caught.value.phase == 'P1'
+    assert caught.value.phase == 'unified'
     assert caught.value.error_type == 'PMAToolRecoveryExhausted'
-    assert 'P2 not entered' in str(caught.value.__cause__)
+    assert 'no decision accepted' in str(caught.value.__cause__)
     assert len(a.llm.calls) == count and all(c.get('tools') for c in a.llm.calls)
     results = [b for m in a._phase1_history for b in m['content']
                if b.get('type') == 'tool_result']
@@ -132,7 +132,7 @@ def test_error_budget_is_consecutive_not_cumulative(success_call):
     replies += [response(call('unknown', {}, f'bad-{i}')) for i in range(2, 4)]
     a = Agent(llm=Script(*replies, response()))
     result = run(a)
-    assert len(a.llm.calls) == 7 and len(result.operations) == 5
+    assert len(a.llm.calls) == 6 and len(result.operations) == 5
     assert len(a.memory.knowledge) == int(success_call['function']['name'] == 'memory_add')
 
 
@@ -142,7 +142,7 @@ def test_successful_reads_are_not_capped_by_error_recovery_limit():
                            for i in range(count)), response()))
     result = run(a)
     assert len(result.operations) == count and all(o.success for o in result.operations)
-    assert len(a.llm.calls) == count + 2
+    assert len(a.llm.calls) == count + 1
 
 
 def test_error_budget_resets_on_a_new_wake():
@@ -153,7 +153,7 @@ def test_error_budget_resets_on_a_new_wake():
     a = Agent(llm=Script(*replies))
     run(a)
     result = run(a, 'next exact trajectory', 8)
-    assert len(a.llm.calls) == 8 and len(result.operations) == 2
+    assert len(a.llm.calls) == 6 and len(result.operations) == 2
 
 
 def test_mixed_round_with_an_error_counts_toward_recovery_limit():
@@ -212,7 +212,7 @@ def test_real_litellm_anthropic_tools_and_receipts_roundtrip(monkeypatch, nonemp
         [('bad', *invalid_call)],
         [('read', 'memory_read', {'bank_id': 'knowledge'})],
         [('add', 'memory_add', {'content': 'saved exact <tool_call> text'})],
-        [], [],
+        [],
     ])
     bodies, wire = [], []
 
@@ -251,7 +251,7 @@ def test_real_litellm_anthropic_tools_and_receipts_roundtrip(monkeypatch, nonemp
     before = copy.deepcopy(a.memory.to_dict())
     expected_read = a._format_memory_bank()
     result = run(a, task='Exact task mentions code_run and memory_read. Do not rewrite it.')
-    assert len(wire) == 5 and [o.success for o in result.operations] == [False, True, True]
+    assert len(wire) == 4 and [o.success for o in result.operations] == [False, True, True]
     read = result.operations[1]
     assert read.content == expected_read
     assert ('existing exact saved information' in read.content) == nonempty_bank
@@ -259,7 +259,7 @@ def test_real_litellm_anthropic_tools_and_receipts_roundtrip(monkeypatch, nonemp
     assert len(a.memory.knowledge) == 1 + int(nonempty_bank)
     assert a.memory.to_dict()['knowledge'][:-1] == before['knowledge']
     assert a.memory.to_dict()['procedural'] == before['procedural']
-    for body in bodies[:-1]:
+    for body in bodies:
         assert [t['name'] for t in body['tools']] == ['memory_add', 'memory_read']
         for expected, actual in zip(BANK_TOOLS, body['tools']):
             assert actual['input_schema'] == expected['function']['parameters']
@@ -288,6 +288,7 @@ def test_real_litellm_anthropic_tools_and_receipts_roundtrip(monkeypatch, nonemp
             if isinstance(receipt, list):
                 receipt = ''.join(b['text'] for b in receipt)
             assert json.loads(receipt)['content'] == expected_read
-    assert 'tools' not in wire[-1] and 'tools' not in bodies[-1]
+    assert all(request.get('tools') for request in wire)
+    assert all(body.get('tools') for body in bodies)
     assert 'Exact task mentions code_run and memory_read. Do not rewrite it.' in str(bodies[1])
     assert 'saved exact <tool_call> text' in str(bodies[-1])

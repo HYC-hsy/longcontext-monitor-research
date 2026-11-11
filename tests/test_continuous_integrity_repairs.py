@@ -75,7 +75,7 @@ def test_failed_phase_crosses_actual_host_silence_handler(cls, phase):
     host._record_memory_step = lambda **kwargs: records.append(kwargs)
     with pytest.raises(PMAPhaseError) as caught:
         asyncio.run(host._trigger_memory_agent(step_count=1))
-    assert caught.value.phase == phase
+    assert caught.value.phase == ('unified' if cls is ReadContextPredictiveMemoryAgent else phase)
     assert caught.value.error_type == 'RuntimeError'
     assert caught.value.__cause__ is failure
     assert 'confidential' not in str(caught.value)
@@ -93,7 +93,7 @@ def test_cancellation_is_not_a_decision(cls, phase):
     assert len(agent.llm.calls) == (1 if phase == 'P1' else 2)
 
 
-@pytest.mark.parametrize('cls', VARIANTS)
+@pytest.mark.parametrize('cls', [ContextPredictiveMemoryAgent])
 @pytest.mark.parametrize('method,phase', [('_build_phase1_prompt', 'P1'),
     ('_execute_tool_calls', 'P1'), ('_build_phase2_prompt', 'P2'),
     ('_parse_phase2_response', 'P2')])
@@ -104,7 +104,30 @@ def test_prompt_operation_and_parser_errors_do_not_become_noop(cls, method, phas
     setattr(agent, method, fail)
     with pytest.raises(PMAPhaseError) as caught:
         asyncio.run(agent.process('observation'))
-    assert caught.value.phase == phase
+    assert caught.value.phase == ('unified' if cls is ReadContextPredictiveMemoryAgent else phase)
+
+
+@pytest.mark.parametrize('seam', ['_build_phase1_prompt', '_p1_prior',
+                                  '_record_p1_response', 'parse_final_decision'])
+@pytest.mark.parametrize('integrity', [False, True])
+def test_unified_prompt_history_operation_and_parser_errors_fail_closed(monkeypatch, seam, integrity):
+    from memory_agent.memory import read_context_predictive_memory_agent as module
+    from memory_agent.memory.ga_context_history import GAHistoryIntegrityError
+    agent = prepare(ReadContextPredictiveMemoryAgent, [response(content='<no_intervention/>')])
+    failure = GAHistoryIntegrityError('synthetic') if integrity else ValueError('synthetic')
+    def fail(*args, **kwargs):
+        raise failure
+    target = module if seam == 'parse_final_decision' else agent
+    monkeypatch.setattr(target, seam, fail)
+    wrapped = not integrity
+    with pytest.raises(PMAPhaseError if wrapped else type(failure)) as caught:
+        asyncio.run(agent.process('observation'))
+    if wrapped:
+        assert caught.value.phase == 'unified' and caught.value.__cause__ is failure
+    else:
+        assert caught.value is failure
+    assert not agent.memory.knowledge and not agent._phase2_history
+    assert len(agent.llm.calls) == int(seam in ('_record_p1_response', 'parse_final_decision'))
 
 
 @pytest.mark.parametrize('cls', VARIANTS)
@@ -116,12 +139,15 @@ def test_successful_phase_outputs_and_original_prompts_preserved(cls, decision):
     assert len(result.operations) == 1 and result.operations[0].success
     assert result.should_inject == ('context_for_action' in decision)
     assert result.reasoning_phase1 is result.reasoning_phase2 is None
-    assert result.user_prompt_phase2 == HistoricalAgent._build_phase2_prompt(agent, 'EXACT observation', 8)
     if cls is ContextPredictiveMemoryAgent:
+        assert result.user_prompt_phase2 == HistoricalAgent._build_phase2_prompt(agent, 'EXACT observation', 8)
         empty = HistoricalAgent()
         assert result.user_prompt_phase1 == empty._build_phase1_prompt('EXACT observation', 8)
     else:
         assert result.user_prompt_phase1 == '[Task Description]\nEXACT task'
+        assert result.user_prompt_phase2 is result.raw_response_phase2 is None
+        assert agent._phase2_history == []
+        assert all(request.get('tools') for request in agent.llm.calls)
 
 
 def definitions(path, names, namespace):
@@ -286,7 +312,7 @@ def test_dispatcher_persists_safe_failure_then_worker_stops(cls, phase, tmp_path
             # A failed assertion must not strand the thread's uncapped wait.
             client.deadline = time.time() - 1
     error = asyncio.run(exercise())
-    assert error.phase == phase
+    assert error.phase == ('unified' if cls is ReadContextPredictiveMemoryAgent else phase)
     receipt = next(responses.glob('*.json')).read_text()
     assert json.loads(receipt)['status'] == 'error' and 'SECRET' not in receipt
     assert asyncio.run(dispatcher.serve_once()) == 0  # No replay of accepted failure.

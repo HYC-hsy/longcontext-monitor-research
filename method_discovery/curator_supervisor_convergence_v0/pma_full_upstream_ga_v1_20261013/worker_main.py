@@ -36,7 +36,7 @@ def append_private_audit(path: Path, row: dict) -> None:
 
 
 def install_transport_audit(agent, archive: Path) -> None:
-    """Observe the original two calls without changing its exception policy."""
+    """Observe actual model calls and tool receipts without adding requests."""
     original = agent._memory_llm.call
     calls = 0
 
@@ -45,7 +45,8 @@ def install_transport_audit(agent, archive: Path) -> None:
         calls += 1
         candidate_agent = agent._memory_agent
         phase = (candidate_agent.transport_phase if getattr(agent, '_research_candidate', None)
-                 in ('pma_gap_memory_v0', 'pma_gap_evidence_v1') else "bank_management" if tools else "context_decision")
+                 in ('pma_gap_memory_v0', 'pma_gap_evidence_v1', 'pma_predictive_read_context_v1')
+                 else "bank_management" if tools else "context_decision")
         started = time.time()
         status = "complete"
         def public_history(value):
@@ -76,10 +77,15 @@ def install_transport_audit(agent, archive: Path) -> None:
             response = await original(**kwargs)
             native_calls = []
             for call in getattr(response, 'tool_calls', None) or []:
-                function = getattr(call, 'function', None)
-                native_calls.append({'id': getattr(call, 'id', None),
-                                     'name': getattr(function, 'name', None),
-                                     'arguments': getattr(function, 'arguments', None)})
+                if isinstance(call, dict):
+                    function = call.get('function') or call
+                    native_calls.append({'id': call.get('id'), 'name': function.get('name'),
+                                         'arguments': function.get('arguments', function.get('args'))})
+                else:
+                    function = getattr(call, 'function', None)
+                    native_calls.append({'id': getattr(call, 'id', None),
+                                         'name': getattr(function, 'name', None),
+                                         'arguments': getattr(function, 'arguments', None)})
             append_private_audit(archive / 'memory_response.jsonl', {
                 'phase': phase, 'call_sequence': calls,
                 'content': getattr(response, 'content', None),
@@ -131,11 +137,31 @@ def install_transport_audit(agent, archive: Path) -> None:
                     for block in row.get('content', [])
                     if block.get('type') == 'tool_result']
                 append_private_audit(archive / 'memory_tool_results.jsonl', {
-                    'phase': 'bank_management', 'call_sequence': calls,
+                    'phase': candidate.transport_phase, 'call_sequence': calls,
                     'recording_error_type': error_type, 'tool_results': receipts,
                     'completed_epoch': time.time()})
 
         candidate._record_p1_response = audited_record
+        original_process = candidate.process
+
+        async def audited_process(observation, step_count=0):
+            outcome = "failed"
+            error_type = None
+            try:
+                result = await original_process(observation, step_count)
+                outcome = result.termination
+                return result
+            except BaseException as exc:
+                error_type = type(exc).__name__
+                raise
+            finally:
+                append_private_audit(archive / 'memory_cycle.jsonl', {
+                    'phase': candidate.transport_phase, 'cycle_step': step_count,
+                    'outcome': outcome, 'error_type': error_type,
+                    'loop_rounds': copy.deepcopy(candidate._unified_rounds),
+                    'completed_epoch': time.time()})
+
+        candidate.process = audited_process
 
 
 def fake_evidence_gap_arguments(candidate_agent, prompt):
@@ -207,7 +233,9 @@ async def serve(args: argparse.Namespace) -> None:
                         name='memory_add', arguments={'content':
                         'Synthetic public result remains available.'}))]
                         if getattr(args, 'fake_memory_update', False) else [])
-                    return LLMResponse(content='', tool_calls=calls)
+                    content = ('<context_for_action>Synthetic public result remains available.</context_for_action>'
+                               if args.research_candidate == 'pma_predictive_read_context_v1' else '')
+                    return LLMResponse(content=content, tool_calls=calls)
                 return LLMResponse(content='<context_for_action>Synthetic public result remains available.</context_for_action>')
             if args.research_candidate in ('pma_gap_memory_v0', 'pma_gap_evidence_v1'):
                 phase = agent._memory_agent.transport_phase
@@ -327,7 +355,7 @@ async def serve(args: argparse.Namespace) -> None:
                    "phase": getattr(exc, "phase", None),
                    "cause_type": getattr(exc, "error_type", None),
                    **({"decision_produced": False}
-                      if getattr(exc, "phase", None) in ("P1", "P2") else {})}
+                      if getattr(exc, "phase", None) in ("P1", "P2", "unified") else {})}
         raise
     finally:
         if not episode.ended:

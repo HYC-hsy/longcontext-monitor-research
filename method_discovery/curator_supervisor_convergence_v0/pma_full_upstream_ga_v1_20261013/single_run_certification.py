@@ -247,9 +247,10 @@ def verify_evidence(evidence: Path, *, require_committed: bool = True,
                       (base / 'memory_payload.jsonl').read_text(encoding='utf-8').splitlines()]
             required_phases = ({'maintenance', 'selection'}
                 if research_candidate in ('pma_gap_memory_v0', 'pma_gap_evidence_v1') else
+                {'unified_memory'} if research_candidate == 'pma_predictive_read_context_v1' else
                 {'bank_management', 'context_decision'})
             if not required_phases <= set(phases):
-                raise RuntimeError('generic PMA two-stage transport absent')
+                raise RuntimeError('generic PMA required transport phases absent')
             if research_candidate in ('pma_gap_memory_v0','pma_gap_evidence_v1'):
                 require_gap_phases(phases,citation_review_gate)
             if research_candidate in ('pma_gap_memory_v0', 'pma_gap_evidence_v1') and not (

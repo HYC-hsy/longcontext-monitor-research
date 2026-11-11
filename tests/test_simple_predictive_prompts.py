@@ -1,7 +1,7 @@
 """Approved concise prompt contracts; synthetic checks do not prove task benefit."""
 from test_predictive_memory_read import Agent, Script, call, response, run
 from memory_agent.memory.read_context_predictive_memory_agent import (
-    BANK_TOOLS, PHASE1_SYSTEM)
+    BANK_TOOLS, PHASE1_SYSTEM, UNIFIED_SYSTEM)
 from memory_agent.memory.predictive_memory_agent import PHASE2_SYSTEM
 
 
@@ -33,20 +33,17 @@ Otherwise, write:
 <no_intervention/>'''
 
 
-def test_prompts_and_uncertain_note_reach_actual_phases_without_new_tools():
+def test_prompts_and_uncertain_note_share_one_call_without_new_tools():
     note = 'Possibly helpful next: check the layout; it has not been confirmed.'
-    class ReminderScript(Script):
-        async def call(self, **kwargs):
-            result = await super().call(**kwargs)
-            if not kwargs.get('tools'):
-                return response(content='<context_for_action>' + note + '</context_for_action>')
-            return result
-    llm = ReminderScript(response(call('memory_add', {'content': note})))
+    llm = Script(response(call('memory_add', {'content': note}),
+        content='<context_for_action>' + note + '</context_for_action>'))
     agent = Agent(llm=llm)
     result = run(agent)
-    assert llm.calls[0]['system'] == PHASE1_SYSTEM
-    assert llm.calls[1]['system'] == PHASE2_SYSTEM
-    assert note in llm.calls[1]['prompt']
-    assert 'tools' not in llm.calls[1]
-    assert result.should_inject
+    assert len(llm.calls) == 1
+    assert llm.calls[0]['system'] == UNIFIED_SYSTEM
+    assert PHASE1_SYSTEM in UNIFIED_SYSTEM and PHASE2_SYSTEM in UNIFIED_SYSTEM
+    assert llm.calls[0]['tools'] == BANK_TOOLS
+    assert result.should_inject and note in result.context_for_action
+    assert result.raw_response_phase2 is result.user_prompt_phase2 is None
+    assert agent._phase2_history == []
     assert agent._parse_phase2_response('<no_intervention/>') is None

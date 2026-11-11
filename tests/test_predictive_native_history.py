@@ -9,14 +9,14 @@ from memory_agent.memory.ga_context_history import compress_history_tags, prepar
 from responses_memory_llm import response_input
 
 
-def test_openai_native_items_continue_in_their_own_phase(tmp_path):
+def test_openai_native_items_continue_in_one_shared_history(tmp_path):
     import httpx
     from openai import AsyncOpenAI
     from responses_memory_llm import ResponsesMemoryLLM
     llm = ResponsesMemoryLLM(dict(model='gpt-6.1-sol', model_context_window=200000,
         max_tokens=8192, reasoning_effort='high', max_retries=0, read_timeout=30,
         apikey='synthetic-not-a-key', apibase='https://example.invalid/v1'))
-    phases, wire = iter(['p1a', 'p2a', 'p1b', 'p2b']), []
+    phases, wire = iter(['save', 'decide', 'next']), []
 
     def handler(request):
         phase = next(phases)
@@ -25,9 +25,9 @@ def test_openai_native_items_continue_in_their_own_phase(tmp_path):
                    'encrypted_content': 'opaque-' + phase, 'summary': []},
                   {'type': 'message', 'id': 'm-' + phase, 'role': 'assistant',
                    'status': 'completed', 'content': [{'type': 'output_text',
-                   'text': phase if phase.startswith('p1') else '<no_intervention/>',
+                   'text': phase if phase == 'save' else '<no_intervention/>',
                    'annotations': []}]}]
-        if phase == 'p1a':
+        if phase == 'save':
             output.append({'type': 'function_call', 'id': 'fc-a', 'call_id': 'a',
                            'name': 'memory_add', 'arguments': '{"content":"endpoint=/v1"}',
                            'status': 'completed'})
@@ -41,18 +41,14 @@ def test_openai_native_items_continue_in_their_own_phase(tmp_path):
     agent = Agent(llm=llm)
     install(agent, tmp_path)
     run(agent)
-    p1_native = copy.deepcopy(next(row['_openai_output_items']
-        for row in agent._active_phase1 if '_openai_output_items' in row))
-    p2_native = copy.deepcopy(next(row['_openai_output_items']
-        for row in agent._phase2_history if '_openai_output_items' in row))
+    native = [copy.deepcopy(row['_openai_output_items'])
+        for row in agent._phase1_history if '_openai_output_items' in row]
+    assert len(native) == 2 and agent._phase2_history == []
     run(agent, 'new trajectory', 8)
-    assert len(wire) == 4
-    for index, native, other in [(2, p1_native, p2_native), (3, p2_native, p1_native)]:
-        assert all(item in wire[index]['input'] for item in native if item['type'] == 'reasoning')
-        assert not any(item in wire[index]['input'] for item in other if item['type'] == 'reasoning')
-    assert 'p1a' in json.dumps(wire[2]['input']) and 'p2a' not in json.dumps(wire[2]['input'])
-    assert 'p2a' in json.dumps(wire[3]['input']) and 'p1a' not in json.dumps(wire[3]['input'])
-    assert {'role': 'assistant', 'content': 'p1a'} in wire[2]['input']
+    assert len(wire) == 3
+    for items in native:
+        assert all(item in wire[2]['input'] for item in items if item['type'] == 'reasoning')
+    assert {'role': 'assistant', 'content': 'save'} in wire[2]['input']
     calls = [item for item in wire[2]['input'] if item.get('type') == 'function_call']
     outputs = [item for item in wire[2]['input'] if item.get('type') == 'function_call_output']
     assert len(calls) == len(outputs) == 1
@@ -62,7 +58,7 @@ def test_openai_native_items_continue_in_their_own_phase(tmp_path):
     assert json.loads(outputs[0]['output'])['success'] is True
     assert all(request['reasoning'] == {'effort': 'high'} for request in wire)
     assert all(request['store'] is False for request in wire)
-    assert len(rows(tmp_path, 'memory_tool_results.jsonl')) == 2
+    assert len(rows(tmp_path, 'memory_tool_results.jsonl')) == 3
     assert 'opaque-' not in ''.join(p.read_text() for p in tmp_path.glob('*.jsonl'))
 
 
@@ -80,11 +76,11 @@ def test_native_reasoning_stays_verbatim_when_visible_history_is_trimmed():
     assert '[Truncated]' in json.dumps(actual) and 'x' * 3000 not in json.dumps(actual)
 
 
-def test_claude_signed_and_redacted_blocks_replay_only_in_their_own_phase(monkeypatch):
+def test_claude_signed_and_redacted_blocks_replay_in_shared_history(monkeypatch):
     from harbor.llms import lite_llm
     from harbor.llms.lite_llm import LiteLLM
     from litellm.llms.anthropic.chat.transformation import AnthropicConfig
-    phases = iter(['p1a', 'p2a', 'p1b', 'p2b'])
+    phases = iter(['first', 'next'])
     native, wire = {}, []
 
     async def completion(**kwargs):
@@ -96,16 +92,13 @@ def test_claude_signed_and_redacted_blocks_replay_only_in_their_own_phase(monkey
         native[phase] = [{'type': 'thinking', 'thinking': 'synthetic-' + phase,
                           'signature': 'signed-' + phase},
                          {'type': 'redacted_thinking', 'data': 'opaque-' + phase}]
-        return {'choices': [{'message': {'content': 'P1 text' if kwargs.get('tools')
-                        else '<no_intervention/>', 'thinking_blocks': native[phase]},
+        return {'choices': [{'message': {'content': '<no_intervention/>', 'thinking_blocks': native[phase]},
                             'finish_reason': 'stop'}]}
 
     monkeypatch.setattr(lite_llm.litellm, 'acompletion', completion)
     agent = Agent(llm=LiteLLM('anthropic/claude-opus-5', api_key='synthetic-not-a-key'))
     run(agent)
     run(agent, 'new trajectory', 8)
-    assert len(wire) == 4
-    for index, same, other in [(2, 'p1a', 'p2a'), (3, 'p2a', 'p1a')]:
-        blocks = [block for message in wire[index]['messages'] for block in message['content']]
-        assert all(block in blocks for block in native[same])
-        assert not any(block in blocks for block in native[other])
+    assert len(wire) == 2 and agent._phase2_history == []
+    blocks = [block for message in wire[1]['messages'] for block in message['content']]
+    assert all(block in blocks for block in native['first'])

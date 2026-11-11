@@ -14,7 +14,7 @@ from test_predictive_memory_read_integration import CANDIDATE, STAGE, load_defin
 from test_predictive_tool_recovery import block_network  # noqa: F401
 from memory_agent.memory.context_predictive_memory_agent import PMAPhaseError
 from memory_agent.memory.ga_context_history import GAHistoryIntegrityError
-from memory_agent.memory.read_context_predictive_memory_agent import PHASE1_SYSTEM
+from memory_agent.memory.read_context_predictive_memory_agent import UNIFIED_SYSTEM, PUBLIC_FORECAST_REMINDER, has_public_text, DECISION_RECOVERY_PROMPT
 from memory_agent.memory.predictive_memory_agent import PHASE2_SYSTEM
 
 
@@ -131,7 +131,7 @@ def test_same_response_text_and_add_only_receipt_without_extra_call(provider, te
     assert json.loads(receipt['content'])['memory_id'] == agent.memory.knowledge[0].id
     assert json.loads(receipt['content'])['success'] is True
     payload = rows(tmp_path, 'memory_payload.jsonl')
-    assert [row['system'] for row in payload] == [PHASE1_SYSTEM, PHASE2_SYSTEM]
+    assert [row['system'] for row in payload] == [UNIFIED_SYSTEM, UNIFIED_SYSTEM + ('\n\n' + PUBLIC_FORECAST_REMINDER if not has_public_text(text) else '')]
     assert payload[0]['prompt'] == '[Task Description]\nExact task <history>not rewritten</history>'
     assert result.reasoning_phase1 is result.reasoning_phase2 is None
     assert 'private-fixture' not in ''.join(p.read_text() for p in tmp_path.glob('*.jsonl'))
@@ -144,13 +144,12 @@ def test_existing_read_loop_keeps_public_text_receipts_and_private_replay_separa
          'calls': [('read-one', 'memory_read', {'bank_id': 'knowledge'})]},
         {'text': 'The new endpoint differs, so I will save it.',
          'calls': [('add-two', 'memory_add', {'content': 'endpoint = /v2'})]},
-        {'text': 'No more information needs saving now.'},
-        {'text': '<no_intervention/>'}], monkeypatch)
+        {'text': 'No more information needs saving now. <no_intervention/>'}], monkeypatch)
     agent = Agent(llm=llm)
     agent.memory.save_knowledge('endpoint = /v1')
     install(agent, tmp_path)
     result = run(agent)
-    assert len(wire) == 4 and [op.action for op in result.operations] == ['read', 'add']
+    assert len(wire) == 3 and [op.action for op in result.operations] == ['read', 'add']
     receipts = rows(tmp_path, 'memory_tool_results.jsonl')
     assert [row['call_sequence'] for row in receipts] == [1, 2, 3]
     assert [b['tool_use_id'] for row in receipts for b in row['tool_results']] == ['read-one', 'add-two']
@@ -164,11 +163,12 @@ def test_existing_read_loop_keeps_public_text_receipts_and_private_replay_separa
 
 
 @pytest.mark.parametrize('text', ['', 'No new information is useful for the next steps.'])
-def test_no_action_and_empty_response_are_not_forced_to_continue(text, tmp_path):
-    agent = Agent(llm=Script(response(content=text)))
+def test_no_action_and_empty_response_require_explicit_decision(text, tmp_path):
+    agent = Agent(llm=Script(response(content=text), response()))
     install(agent, tmp_path)
     result = run(agent)
     assert len(agent.llm.calls) == 2 and not result.operations
+    assert agent.llm.calls[1]['prompt'] == DECISION_RECOVERY_PROMPT
     assert rows(tmp_path, 'memory_response.jsonl')[0]['content'] == text
     assert rows(tmp_path, 'memory_tool_results.jsonl')[0]['tool_results'] == []
 
@@ -177,7 +177,7 @@ def test_failed_tool_receipt_is_not_a_success_or_reason_to_hide_public_text(tmp_
     agent = Agent(llm=Script(response(native('memory_read', {}), content='I will look it up.'), response()))
     install(agent, tmp_path)
     result = run(agent)
-    assert not result.operations[0].success and len(agent.llm.calls) == 3
+    assert not result.operations[0].success and len(agent.llm.calls) == 2
     assert rows(tmp_path, 'memory_response.jsonl')[0]['content'] == 'I will look it up.'
     receipt = rows(tmp_path, 'memory_tool_results.jsonl')[0]['tool_results'][0]
     assert receipt['tool_use_id'] == 'one' and json.loads(receipt['content'])['success'] is False
@@ -225,14 +225,9 @@ def test_mixed_tool_results_keep_native_ids_and_actual_outcomes(tmp_path):
     assert len(agent.memory.knowledge) == 1
 
 
-@pytest.mark.parametrize('failure', [RuntimeError('P2 failed'), asyncio.CancelledError()])
-def test_final_add_receipt_survives_p2_failure_or_cancellation(failure, tmp_path):
-    class FailingP2(Script):
-        async def call(self, **kwargs):
-            if not kwargs.get('tools'):
-                raise failure
-            return await super().call(**kwargs)
-    agent = Agent(llm=FailingP2(response(native('memory_add', {'content': 'saved once'}))))
+@pytest.mark.parametrize('failure', [RuntimeError('Continuation failed'), asyncio.CancelledError()])
+def test_add_receipt_survives_continuation_failure_or_cancellation(failure, tmp_path):
+    agent = Agent(llm=Script(response(native('memory_add', {'content': 'saved once'})), failure))
     install(agent, tmp_path)
     with pytest.raises((PMAPhaseError, asyncio.CancelledError)):
         run(agent)

@@ -18,13 +18,14 @@ from .archive_live_six_task import private_values
 HIDDEN_KEYS = frozenset({
     'thinking', 'redacted_thinking', 'reasoning_content', 'signature',
     'thinking_signature', 'encrypted_content', 'encrypted_payload',
+    'thinking_blocks', '_provider_thinking_blocks', '_openai_output_items',
 })
 SENSITIVE_KEYS = frozenset({
     'api_key', 'access_token', 'authorization', 'password', 'credential',
     'client_secret', 'private_key', 'provider_url', 'api_base', 'base_url',
 })
 SUSPICIOUS_TEXT = re.compile(
-    r'(?i)(?:<\s*(?:thinking|redacted_thinking)\s*>|'
+    r'(?i)(?:<\s*(?:think|thinking|redacted_thinking)\b[^>]*>|'
     r'"(?:redacted_thinking|reasoning_content|encrypted_content|signature)"\s*:|'
     r'\bBearer\s+[A-Za-z0-9._~/+=-]{12,}|\bsk-[A-Za-z0-9_-]{12,}|'
     r'\b(?:api[_-]?key|access[_-]?token|password|client[_-]?secret)\s*[:=]\s*'
@@ -305,6 +306,10 @@ def project_slot(directory: Path, target: Path, secrets: list[str]) -> dict:
         requests = parse_jsonl(request_path)
         emit(request_path, 'pma_requests_public.json', [{
             'phase': row.get('phase'), 'started_epoch': row.get('started_epoch'),
+            **({'call_sequence': row.get('call_sequence'), 'cycle_step': row.get('cycle_step'),
+                'message_history': projector.json_value(row.get('message_history'),
+                    f'pma_request[{n}].message_history')}
+               if row.get('phase') == 'unified_memory' else {}),
             'system': projector.text(row.get('system'), f'pma_request[{n}].system'),
             'prompt': projector.text(row.get('prompt'), f'pma_request[{n}].prompt'),
             'tools': projector.json_value(row.get('tools'), f'pma_request[{n}].tools')}
@@ -316,10 +321,28 @@ def project_slot(directory: Path, target: Path, secrets: list[str]) -> dict:
         for row in transport:
             key = f"{row.get('phase')}:{row.get('status')}"
             phases[key] = phases.get(key, 0) + 1
+        # Per-call records matter for partial tool success and recoveries that
+        # never reached a valid decision. Project known public fields only.
+        for filename, public_name, fields in (
+            ('memory_cycle.jsonl', 'pma_cycles_public.json',
+             ('phase', 'cycle_step', 'outcome', 'error_type', 'loop_rounds', 'completed_epoch')),
+            ('memory_response.jsonl', 'pma_responses_public.json',
+             ('phase', 'call_sequence', 'content', 'tool_calls', 'completed_epoch')),
+            ('memory_tool_results.jsonl', 'pma_tool_results_public.json',
+             ('phase', 'call_sequence', 'recording_error_type', 'tool_results', 'completed_epoch'))):
+            path = base / filename
+            if path.is_file():
+                records = parse_jsonl(path)
+                emit(path, public_name, [projector.json_value(
+                    {key: row.get(key) for key in fields}, f'{public_name}[{n}]')
+                    for n, row in enumerate(records, 1)])
         trajectory = json.loads(trajectory_path.read_text(encoding='utf-8'))
         emit(trajectory_path, 'pma_steps_public.json', [{
             **{key: row.get(key) for key in ('step_id', 'timestamp', 'trigger_step',
                                              'step_count', 'observation_len', 'should_inject')},
+            **({'loop_mode': 'unified', 'termination': row.get('termination'),
+                'loop_rounds': projector.json_value(row.get('loop_rounds'),
+                    f'pma_step[{n}].loop_rounds')} if row.get('loop_mode') == 'unified' else {}),
             'operations': [{key: projector.json_value(op.get(key),
                 f'pma_step[{n}].operation[{j}].{key}') for key in
                 ('action', 'memory_id', 'content', 'success', 'error')}
@@ -438,6 +461,7 @@ def archive(root: Path, target: Path, secrets: list[str], run_commit: str) -> di
         relative = path.relative_to(root).as_posix()
         if path.name in {'research_events.jsonl', 'memory_payload.jsonl',
                          'memory_transport.jsonl', 'trajectory_memory.json',
+                         'memory_response.jsonl', 'memory_tool_results.jsonl', 'memory_cycle.jsonl',
                          'memory.json', 'live_result.json'}:
             continue
         excluded_files.append({'private_relative_path': relative,

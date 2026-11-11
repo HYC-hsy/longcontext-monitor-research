@@ -1,7 +1,8 @@
-"""Opt-in continuous P1 with an on-demand, read-all flat memory tool."""
+"""One persistent memory manager: optional tool rounds, explicit wake decision."""
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass, field
 import json
 import re
 
@@ -9,7 +10,8 @@ from .context_predictive_memory_agent import ContextPredictiveMemoryAgent, PMAPh
 from .ga_context_history import (GAHistoryConfig, GAHistoryIntegrityError,
                                  trim_observer_history, provider_history,
                                  _history_bytes)
-from .predictive_memory_agent import BANK_TOOLS as ADD_TOOLS, MemoryOperation
+from .predictive_memory_agent import (BANK_TOOLS as ADD_TOOLS, MemoryOperation,
+                                      MemoryAgentResult, PHASE2_SYSTEM)
 
 PHASE1_SYSTEM = """You are a memory manager for the task agent.
 
@@ -18,6 +20,73 @@ Based on the task description and the task agent's trajectory, first anticipate 
 Before using memory tools, briefly state in ordinary reply text the upcoming problems or decisions you anticipate and the information you plan to preserve for them. Give a concise public summary, not private reasoning. No special format is needed.
 
 Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge"."""
+
+# Retain the public forecast and reminder semantics, but use a single system,
+# tool set and provider history rather than an obligatory P1 -> P2 handoff.
+UNIFIED_SYSTEM = PHASE1_SYSTEM + "\n\n" + PHASE2_SYSTEM + """
+
+Manage memory and decide on a reminder in this same conversation. Use as many tool rounds as needed, but do not add a round just to finish. When ready, end your reply with exactly one of the decision tags above. You may include that final decision in the same response as memory tools; it takes effect only after every tool in that response succeeds. If a tool fails, use its returned error to correct the call or revise your decision in a later reply.
+
+If a memory_read result is needed to make your decision, call the tool without a final decision tag, then decide after seeing its result. Ordinary text or a tool call without a valid decision tag does not finish the wake."""
+
+DECISION_RECOVERY_PROMPT = (
+    "No valid final decision was received. Continue managing memory if needed, "
+    "or end with exactly one nonempty <context_for_action>...</context_for_action> "
+    "or <no_intervention/>. Do not repeat successful memory writes.")
+TOOL_RECOVERY_PROMPT = (
+    "One or more memory tools failed. The decision in that response was not "
+    "accepted. Review the actual tool receipts, correct the failed calls if "
+    "needed, and decide again. Do not repeat successful memory writes.")
+MAX_CONSECUTIVE_DECISION_ERROR_ROUNDS = 2
+
+
+@dataclass
+class UnifiedMemoryAgentResult(MemoryAgentResult):
+    loop_mode: str = "unified"
+    loop_rounds: list[dict] = field(default_factory=list)
+    termination: str | None = None
+
+
+class PMADecisionRecoveryExhausted(RuntimeError):
+    """Missing/malformed decisions are failures, never silent no-intervention."""
+
+
+def parse_final_decision(raw):
+    """Parse only an unambiguous, terminal public tag; no semantic checker."""
+    if not isinstance(raw, str):
+        return None, None
+    # Fail closed on malformed/nested hidden spans. A single regex replacing
+    # the first closing tag could expose text still inside an outer block.
+    visible, end, hidden = [], 0, None
+    for token in re.finditer(r"</?(think|thinking|tool_call)\b[^>]*>", raw, re.IGNORECASE):
+        closing = token.group(0).startswith("</")
+        name = token.group(1).lower()
+        if closing:
+            if hidden != name:
+                return None, None
+            hidden = None
+        else:
+            if hidden is not None:
+                return None, None
+            visible.append(raw[end:token.start()])
+            hidden = name
+        end = token.end()
+    if hidden is not None:
+        return None, None
+    visible.append(raw[end:])
+    public = "".join(visible)
+    if re.search(r"<\s*/?\s*(?:think|thinking|tool_call)\b", public, re.IGNORECASE):
+        return None, None
+    public = re.sub(r"```.*?(?:```|$)|~~~.*?(?:~~~|$)", "", public, flags=re.DOTALL).strip()
+    tokens = re.findall(r"</?(?:context_for_action|no_intervention)\b[^>]*>", public)
+    if tokens == ["<no_intervention/>"] and public.endswith(tokens[0]):
+        return "no_intervention", None
+    if tokens == ["<context_for_action>", "</context_for_action>"]:
+        match = re.search(r"<context_for_action>(.*?)</context_for_action>\s*$", public, re.DOTALL)
+        if match and match.group(1).strip():
+            return "context_for_action", match.group(1).strip()
+    return None, None
+
 
 PUBLIC_FORECAST_REMINDER = (
     "Remember to include a brief public summary of the upcoming problems or "
@@ -62,12 +131,14 @@ class PMAToolRecoveryExhausted(RuntimeError):
 
 
 class ReadContextPredictiveMemoryAgent(ContextPredictiveMemoryAgent):
-    """P2 is inherited unchanged; only P1 uses incremental input and lookup."""
+    """Reuse GA-derived native history/tools; phase1 names are storage aliases."""
+
+    transport_phase = "unified_memory"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if not self.use_structured_tools:
-            raise ValueError("read-context P1 requires native structured tools")
+            raise ValueError("read-context memory manager requires native structured tools")
 
     def reset_conversation_history(self):
         super().reset_conversation_history()
@@ -79,6 +150,7 @@ class ReadContextPredictiveMemoryAgent(ContextPredictiveMemoryAgent):
         self._phase1_operations = []
         self._seen_call_ids = set()
         self._p1_public_text_missing = False
+        self._unified_rounds = []
 
     def set_phase1_context(self, *, task, trajectory):
         """Receive exact host fields, never parse task markers from model text."""
@@ -126,70 +198,77 @@ class ReadContextPredictiveMemoryAgent(ContextPredictiveMemoryAgent):
         # and opaque provider continuation items keep their original ordering.
         return provider_history(self._phase1_history[:-1])
 
-    def _prior(self, phase, prompt):
-        if phase != "P2":
-            return super()._prior(phase, prompt)
-        # P2 has its own persistent provider conversation. Pin its first task
-        # prompt and the current full prompt, independently of P1's history.
-        before = self._phase2_history
-        anchor = before[:1]
-        completed = list(before[1:])
-        current = {"role": "user", "content": [{"type": "text", "text": prompt}]}
-        state = trim_observer_history(completed, anchor + [current], GAHistoryConfig(),
-            round_number=1 + sum(item["phase"] == "P2" for item in self._history_transforms))
-        self._phase2_history = anchor + completed + [current]
-        self._history_transforms.append({
-            "phase": "P2", "before_messages": len(before),
-            "after_messages": len(self._phase2_history),
-            "before_chars": _history_bytes(before), "after_chars": _history_bytes(self._phase2_history),
-            "policy": {"context_win": GAHistoryConfig.context_win,
-                       "trim_keep_rate": GAHistoryConfig.trim_keep_rate,
-                       "cut_msg_interval": GAHistoryConfig.cut_msg_interval,
-                       "protected": "original_task_and_active_wake",
-                       "eviction": "closed_native_tool_groups"},
-            **state,
-        })
-        return provider_history(self._phase2_history[:-1])
-
     def _p1_messages(self):
         return ([self._task_anchor] if self._task_anchor is not None else []) + \
             self._completed_phase1 + self._active_phase1
 
+    async def process(self, observation, step_count=0):
+        self._step = step_count
+        self._unified_rounds = []
+        self._phase1_operations = []
+        try:
+            prompt = self._build_phase1_prompt(observation, step_count)
+            response = await self._call_llm_phase1(prompt)
+            raw = getattr(response, "content", None) or ""
+            kind, context = parse_final_decision(raw)
+            return UnifiedMemoryAgentResult(
+                operations=list(self._phase1_operations),
+                should_inject=kind == "context_for_action", context_for_action=context,
+                # Legacy slot names are retained for older archive readers. There
+                # is no second phase/request, so its slots remain explicitly empty.
+                raw_response_phase1=raw, user_prompt_phase1=prompt,
+                loop_rounds=copy.deepcopy(self._unified_rounds), termination=kind)
+        except Exception as exc:
+            raise PMAPhaseError("unified", exc) from exc
+
     async def _call_llm_phase1(self, user_prompt):
         self._phase1_operations = []
+        self._unified_rounds = []
         prior = self._p1_prior(user_prompt, new_wake=True)
         self._new_trajectory = None  # A second wake must receive new host input.
-        continuing = False
-        error_rounds = 0
+        error_rounds = decision_error_rounds = 0
         while True:
-            # Soft guidance on an already-scheduled request only. Keep the raw
-            # task/batch unchanged; never add a call or block a tool for this.
-            system = PHASE1_SYSTEM
+            system = UNIFIED_SYSTEM
             if self._p1_public_text_missing:
                 system += "\n\n" + PUBLIC_FORECAST_REMINDER
             try:
                 response = await self.llm.call(prompt=user_prompt, system=system,
                                                tools=self.get_tools_schema(),
                                                message_history=prior)
+                # Execute the entire ordered batch and persist actual receipts
+                # before inspecting any proposed end tag. Never replay history.
+                operations, _ = self._record_p1_response(response)
             except Exception as exc:
-                # Do not turn a broken read continuation into a normal P2/no-op.
-                raise PMAPhaseError("P1", exc) from exc
-            operations, called_read = self._record_p1_response(response)
-            self._p1_public_text_missing = not has_public_text(
-                getattr(response, "content", None))
+                raise PMAPhaseError("unified", exc) from exc
+            raw = getattr(response, "content", None) or ""
+            self._p1_public_text_missing = not has_public_text(raw)
             self._phase1_operations.extend(operations)
             failed = any(not operation.success for operation in operations)
+            kind, _ = parse_final_decision(raw)
+            accepted = kind is not None and not failed
+            self._unified_rounds.append({
+                "round": len(self._unified_rounds) + 1, "prompt": user_prompt,
+                "content": raw, "operation_count": len(operations),
+                "tool_error": failed, "decision": kind,
+                "decision_accepted": accepted})
+            if accepted:
+                return response
             error_rounds = error_rounds + 1 if failed else 0
+            if not operations:
+                decision_error_rounds += 1
+            elif any(operation.success for operation in operations):
+                decision_error_rounds = 0
             if error_rounds >= MAX_CONSECUTIVE_TOOL_ERROR_ROUNDS:
                 error = PMAToolRecoveryExhausted(
-                    f"{error_rounds} consecutive tool-error rounds; P2 not entered")
-                raise PMAPhaseError("P1", error) from error
-            # An invalid call must receive feedback in this wake, even before
-            # the first read. Keep successful add-only behavior unchanged.
-            continuing = continuing or called_read or failed
-            if not operations or not continuing:
-                return response
-            user_prompt = "Continue."
+                    f"{error_rounds} consecutive tool-error rounds; no decision accepted")
+                raise PMAPhaseError("unified", error) from error
+            if decision_error_rounds >= MAX_CONSECUTIVE_DECISION_ERROR_ROUNDS:
+                error = PMADecisionRecoveryExhausted(
+                    f"{decision_error_rounds} responses without tools or a valid decision "
+                    "since last successful tool progress")
+                raise PMAPhaseError("unified", error) from error
+            user_prompt = (TOOL_RECOVERY_PROMPT if failed else
+                           "Continue." if operations else DECISION_RECOVERY_PROMPT)
             prior = self._p1_prior(user_prompt, new_wake=False)
 
     def _record_p1_response(self, response):
@@ -257,7 +336,7 @@ class ReadContextPredictiveMemoryAgent(ContextPredictiveMemoryAgent):
         return operations, any(name == "memory_read" for _, name, _ in parsed)
 
     def _execute_tool_calls(self, response):
-        # The inherited process records these once, after P1's internal loop.
+        # Compatibility accessor only; process never executes calls a second time.
         return list(self._phase1_operations)
 
     def get_tools_schema(self):

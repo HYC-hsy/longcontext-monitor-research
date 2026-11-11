@@ -8,10 +8,10 @@ from test_predictive_memory_read import Agent, Script, call, response, run
 from test_predictive_tool_recovery import block_network  # noqa: F401
 from test_predictive_visible_basis import install, provider_llm, rows
 from memory_agent.memory.read_context_predictive_memory_agent import (
-    PHASE1_SYSTEM, PUBLIC_FORECAST_REMINDER, has_public_text)
+    UNIFIED_SYSTEM, PUBLIC_FORECAST_REMINDER, DECISION_RECOVERY_PROMPT, has_public_text)
 from memory_agent.memory.predictive_memory_agent import PHASE2_SYSTEM
 
-REMINDED = PHASE1_SYSTEM + '\n\n' + PUBLIC_FORECAST_REMINDER
+REMINDED = UNIFIED_SYSTEM + '\n\n' + PUBLIC_FORECAST_REMINDER
 
 
 @pytest.mark.parametrize('text', [None, '', ' \t\n', '.', '...', '…', '。。。',
@@ -30,44 +30,38 @@ def test_text_presence_does_not_claim_forecast_quality(text):
     assert has_public_text(text)  # In particular, OK is not a verified forecast.
 
 
-def test_empty_add_executes_once_and_reminds_next_wake_only(tmp_path):
+def test_tool_only_add_continues_with_lexical_reminder(tmp_path):
     a = Agent(llm=Script(
         response(call('memory_add', {'content': 'saved exactly'}, 'a1')),
-        response(call('memory_add', {'content': 'saved next'}, 'a2'), content='A public next step.'),
-        response(content='Done.')))
+        response(content='A public next step. <no_intervention/>'),
+        response(content='Done. <no_intervention/>')))
     install(a, tmp_path)
     result = run(a)
     assert [operation.action for operation in result.operations] == ['add']
     assert len(a.llm.calls) == 2 and len(a.memory.knowledge) == 1
-    assert a.llm.calls[0]['system'] == PHASE1_SYSTEM
+    assert [row['system'] for row in a.llm.calls] == [UNIFIED_SYSTEM, REMINDED]
+    assert a.llm.calls[1]['prompt'] == 'Continue.'
+    assert sum(m.get('tool_call_id') == 'a1' for m in a.llm.calls[1]['message_history']) == 1
     run(a, 'Exact raw batch <history>not rewritten</history>', 8)
-    assert len(a.llm.calls) == 4 and len(a.memory.knowledge) == 2
-    assert a.llm.calls[2]['system'] == REMINDED
+    assert len(a.llm.calls) == 3
+    assert a.llm.calls[2]['system'] == UNIFIED_SYSTEM
     assert a.llm.calls[2]['prompt'] == 'Exact raw batch <history>not rewritten</history>'
-    assert a.llm.calls[2]['message_history'][0]['content'] == [
-        {'type': 'text', 'text': '[Task Description]\nOriginal exact task'}]
-    assert sum(m.get('tool_call_id') == 'a1' for m in a.llm.calls[2]['message_history']) == 1
-    run(a, 'Next batch', 16)
-    assert a.llm.calls[4]['system'] == PHASE1_SYSTEM  # Public text cleared pending.
-    assert all(a.llm.calls[i]['system'] == PHASE2_SYSTEM for i in (1, 3, 5))
     assert PUBLIC_FORECAST_REMINDER not in str(a._phase1_history)
-    assert PUBLIC_FORECAST_REMINDER not in str(a._phase2_history)
-    payload = rows(tmp_path, 'memory_payload.jsonl')
-    assert [row['system'] for row in payload] == [
-        PHASE1_SYSTEM, PHASE2_SYSTEM, REMINDED, PHASE2_SYSTEM,
-        PHASE1_SYSTEM, PHASE2_SYSTEM]
+    assert a._phase2_history == []
+    assert [row['system'] for row in rows(tmp_path, 'memory_payload.jsonl')] == [
+        UNIFIED_SYSTEM, REMINDED, UNIFIED_SYSTEM]
 
 
 def test_read_continuation_keeps_receipts_and_never_stacks_reminders():
     a = Agent(llm=Script(response(call('memory_read', {'bank_id': 'knowledge'}, 'r1')),
         response(call('memory_add', {'content': 'saved'}, 'a1'), content='...'),
         response(call('memory_read', {'bank_id': 'knowledge'}, 'r2')),
-        response(content='Public summary.')))
+        response(content='Public summary. <no_intervention/>')))
     result = run(a)
     assert [operation.action for operation in result.operations] == ['read', 'add', 'read']
-    assert len(a.llm.calls) == 5
+    assert len(a.llm.calls) == 4
     assert [row['system'] for row in a.llm.calls] == [
-        PHASE1_SYSTEM, REMINDED, REMINDED, REMINDED, PHASE2_SYSTEM]
+        UNIFIED_SYSTEM, REMINDED, REMINDED, REMINDED]
     for row in a.llm.calls[1:4]:
         assert row['prompt'] == 'Continue.'
         assert row['system'].count(PUBLIC_FORECAST_REMINDER) == 1
@@ -79,40 +73,40 @@ def test_read_continuation_keeps_receipts_and_never_stacks_reminders():
 def test_error_recovery_is_unchanged_and_not_triggered_by_missing_text():
     a = Agent(llm=Script(response(call('unknown', ident='bad')),
         response(call('memory_add', {'content': 'recovered'}, 'good'), content='Public summary.'),
-        response(content='Done.')))
+        response(content='Done. <no_intervention/>')))
     result = run(a)
-    assert len(a.llm.calls) == 4
+    assert len(a.llm.calls) == 3
     assert [operation.success for operation in result.operations] == [False, True]
     assert [row['system'] for row in a.llm.calls] == [
-        PHASE1_SYSTEM, REMINDED, PHASE1_SYSTEM, PHASE2_SYSTEM]
+        UNIFIED_SYSTEM, REMINDED, UNIFIED_SYSTEM]
     assert json.loads(a.llm.calls[1]['message_history'][-1]['content'])['success'] is False
 
 
-def test_reasoning_only_does_not_add_calls_or_count_as_public_text():
+def test_reasoning_only_recovery_preserves_native_state():
     signed = [{'type': 'thinking', 'thinking': 'private fixture', 'signature': 'signed-fixture'}]
     opaque = [{'type': 'reasoning', 'id': 'opaque-fixture', 'encrypted_content': 'encrypted-fixture'}]
-    a = Agent(llm=Script(response(thinking_blocks=signed, openai_output_items=opaque),
-        response(content='Public summary.')))
+    a = Agent(llm=Script(response(content='', thinking_blocks=signed, openai_output_items=opaque),
+        response(content='Public summary. <no_intervention/>')))
     run(a)
     assert len(a.llm.calls) == 2 and not a.memory.knowledge
-    run(a, 'Raw next batch', 8)
-    assert len(a.llm.calls) == 4 and a.llm.calls[2]['system'] == REMINDED
-    history = a.llm.calls[2]['message_history']
+    assert a.llm.calls[1]['system'] == REMINDED
+    assert a.llm.calls[1]['prompt'] == DECISION_RECOVERY_PROMPT
+    history = a.llm.calls[1]['message_history']
     assert history[-1]['thinking_blocks'] == signed
     assert history[-1]['_openai_output_items'] == opaque
-    assert 'content' not in history[-1]  # No synthetic text from reasoning.
-    assert 'private fixture' not in a.llm.calls[2]['system']
+    assert 'content' not in history[-1]
+    assert 'private fixture' not in a.llm.calls[1]['system']
 
 
 def test_reset_clears_pending_but_does_not_delete_memory():
-    a = Agent(llm=Script(response(call('memory_add', {'content': 'retained'}, 'a1')),
-        response(content='New task.')))
+    a = Agent(llm=Script(response(call('memory_add', {'content': 'retained'}, 'a1'),
+                                content='<no_intervention/>'), response()))
     run(a)
     assert a._p1_public_text_missing
     a.reset_conversation_history()
     run(a, task='Different task')
-    assert a.llm.calls[2]['system'] == PHASE1_SYSTEM
-    assert 'Original exact task' not in str(a.llm.calls[2])
+    assert a.llm.calls[1]['system'] == UNIFIED_SYSTEM
+    assert 'Original exact task' not in str(a.llm.calls[1])
     assert len(a.memory.knowledge) == 1
 
 
@@ -137,17 +131,17 @@ def test_provider_requests_and_public_audit_keep_private_state_private(provider,
     assert len(wire) == 4 and len(a.memory.knowledge) == 2
     if provider == 'openai':
         assert [row['instructions'] for row in wire] == [
-            PHASE1_SYSTEM, PHASE2_SYSTEM, REMINDED, PHASE2_SYSTEM]
+            UNIFIED_SYSTEM, REMINDED, REMINDED, UNIFIED_SYSTEM]
         assert any(item.get('encrypted_content') == 'opaque-private-fixture'
                    for item in wire[2]['input'])
         assert wire[2]['input'][-1] == {'role': 'user', 'content': 'Exact batch 8'}
     else:
         assert [''.join(block['text'] for block in row['system']) for row in wire] == [
-            PHASE1_SYSTEM, PHASE2_SYSTEM, REMINDED, PHASE2_SYSTEM]
+            UNIFIED_SYSTEM, REMINDED, REMINDED, UNIFIED_SYSTEM]
         assert any(block.get('signature') == 'signed-private-fixture'
                    for item in wire[2]['messages'] for block in item['content'])
     visible = ''.join(path.read_text() for path in tmp_path.glob('*.jsonl'))
     assert 'opaque-private-fixture' not in visible
     assert 'private-fixture' not in visible and 'signed-private-fixture' not in visible
     assert [row['system'] for row in rows(tmp_path, 'memory_payload.jsonl')] == [
-        PHASE1_SYSTEM, PHASE2_SYSTEM, REMINDED, PHASE2_SYSTEM]
+        UNIFIED_SYSTEM, REMINDED, REMINDED, UNIFIED_SYSTEM]

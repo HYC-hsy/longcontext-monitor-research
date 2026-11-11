@@ -1,4 +1,4 @@
-"""Offline GA HTTP → file-spool worker → both PMA phases, no external model."""
+"""Offline GA HTTP → file-spool worker → unified PMA loop, no external model."""
 import copy
 import json
 import os
@@ -158,7 +158,7 @@ def test_real_loop_and_worker_batches(monkeypatch, tmp_path, rounds):
     assert end["unprocessed_tail_steps"] == 1 % rounds
     payloads = [json.loads(line) for line in (private / "archive/memory_payload.jsonl").read_text().splitlines()]
     wakes = (rounds * 2 + 1) // rounds
-    assert len(payloads) == 2 * (1 + wakes)
+    assert len(payloads) == 1 + wakes
     for index, item in enumerate(steps):
         trajectory = item["event"]["trajectory"]
         assert validate_trajectory(trajectory, round_number=index + 1) == trajectory
@@ -178,10 +178,9 @@ def test_real_loop_and_worker_batches(monkeypatch, tmp_path, rounds):
         batch = steps[wake * rounds:(wake + 1) * rounds]
         exact = "\n\n".join(json.dumps(item["event"]["trajectory"], ensure_ascii=False, sort_keys=True)
                             for item in batch)
-        p1, p2 = payloads[2 + wake * 2:4 + wake * 2]
-        assert p1["prompt"] == exact
-        assert exact in p2["prompt"]
-        assert p2["tools"] is None
+        request = payloads[1 + wake]
+        assert request["prompt"] == exact
+        assert [tool["function"]["name"] for tool in request["tools"]] == ["memory_add", "memory_read"]
     assert json.loads((private / "archive/memory.json").read_text())["knowledge"] == []
 
 
@@ -305,8 +304,8 @@ def test_cancelled_attempt_kept_in_next_counted_batch(tmp_path):
             worker.terminate(); worker.wait(timeout=5)
         log.close()
     payloads = [json.loads(line) for line in (private / "archive/memory_payload.jsonl").read_text().splitlines()]
-    assert len(payloads) == 4
-    for row in payloads[2:]:
+    assert len(payloads) == 2
+    for row in payloads[1:]:
         assert all(f"real-input-{turn}" in row["prompt"] for turn in range(1, 5))
         assert '"status": "provider_cancelled"' in row["prompt"]
 
@@ -376,8 +375,8 @@ def test_public_provider_extra_fields_preserved():
     assert result[0]['citations'][0]['start'] == 0
 
 
-@pytest.mark.parametrize('failing_phase', ['P1', 'P2'])
-def test_failed_wake_retains_received_raw_event(tmp_path, failing_phase):
+@pytest.mark.parametrize('failing_round', ['first', 'after_add'])
+def test_failed_wake_retains_received_raw_event(tmp_path, failing_round):
     import asyncio
     sys.path[:0] = [str(STAGE), str(VENDOR / 'src'), str(VENDOR / 'external/harbor/src')]
     from episode import construct_upstream, PMAEpisode
@@ -388,13 +387,13 @@ def test_failed_wake_retains_received_raw_event(tmp_path, failing_phase):
     calls = []
     async def fake_call(**kwargs):
         calls.append(kwargs)
-        if len(calls) == (3 if failing_phase == 'P1' else 4):
-            raise RuntimeError('injected phase failure')
-        if len(calls) == 3:
+        if len(calls) == (2 if failing_round == 'first' else 3):
+            raise RuntimeError('injected unified round failure')
+        if len(calls) == 2:
             call = SimpleNamespace(id='memory-call', function=SimpleNamespace(
                 name='memory_add', arguments={'content': 'saved exactly once'}))
             return LLMResponse(content='', tool_calls=[call])
-        return LLMResponse(content='<no_intervention/>' if not kwargs.get('tools') else '')
+        return LLMResponse(content='<no_intervention/>')
     agent._memory_llm.call = fake_call
     episode = PMAEpisode(agent, run_id='r', task_id='t', archive=tmp_path / 'archive')
     def event(sequence, kind, **kwargs):
@@ -410,11 +409,13 @@ def test_failed_wake_retains_received_raw_event(tmp_path, failing_phase):
             pma_batch_rounds=1, trajectory_schema='public-task-trajectory-v1'))
         await episode.handle(event(2, 'before_actor_call', actor_attempt=1))
         await episode.handle(raw)
-    with pytest.raises(PMAPhaseError):
+    with pytest.raises(PMAPhaseError) as caught:
         asyncio.run(scenario())
+    assert caught.value.phase == 'unified'
+    assert all(request.get('tools') for request in calls)
     received = [json.loads(line) for line in (episode.archive / 'received_events.jsonl').read_text().splitlines()]
     assert received[-1] == raw
     completed = [json.loads(line)['event']['event_id'] for line in (episode.archive / 'events.jsonl').read_text().splitlines()]
     assert '3' not in completed
-    assert len(calls) == (3 if failing_phase == 'P1' else 4)
-    assert len(agent._memory.knowledge) == (0 if failing_phase == 'P1' else 1)
+    assert len(calls) == (2 if failing_round == 'first' else 3)
+    assert len(agent._memory.knowledge) == (0 if failing_round == 'first' else 1)

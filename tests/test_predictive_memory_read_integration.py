@@ -13,7 +13,7 @@ import pytest
 from test_predictive_memory_read import Agent, Script, call, response, run
 from memory_agent.memory.ga_context_history import GAHistoryIntegrityError
 from memory_agent.memory.read_context_predictive_memory_agent import (
-    PHASE1_SYSTEM, PUBLIC_FORECAST_REMINDER)
+    UNIFIED_SYSTEM, PUBLIC_FORECAST_REMINDER)
 from memory_agent.memory.predictive_memory_agent import PHASE2_SYSTEM
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,7 +40,7 @@ def test_actual_litellm_and_anthropic_translation(monkeypatch, tmp_path):
          'provider_specific_fields': {'thinking_blocks': signed}, 'reasoning_content': 'synthetic-private'},
         {'content': '', 'tool_calls': [call('memory_add', {'content': 'exact public text'}, 'a1')],
          'thinking_blocks': signed},
-        {'content': 'Finished.'}, {'content': '<no_intervention/>'}])
+        {'content': '<no_intervention/>'}])
     wire, bodies = [], []
 
     async def completion(**kwargs):
@@ -63,9 +63,9 @@ def test_actual_litellm_and_anthropic_translation(monkeypatch, tmp_path):
     install(SimpleNamespace(_memory_llm=llm, _memory_agent=agent,
                             _research_candidate=CANDIDATE), tmp_path)
     result = run(agent)
-    assert len(wire) == 4 and len(result.operations) == 2
-    reminded = PHASE1_SYSTEM + '\n\n' + PUBLIC_FORECAST_REMINDER
-    for body, expected in zip(bodies, [PHASE1_SYSTEM, reminded, reminded, PHASE2_SYSTEM]):
+    assert len(wire) == 3 and len(result.operations) == 2
+    reminded = UNIFIED_SYSTEM + '\n\n' + PUBLIC_FORECAST_REMINDER
+    for body, expected in zip(bodies, [UNIFIED_SYSTEM, reminded, reminded]):
         assert "".join(block["text"] for block in body["system"]) == expected
     assert len(agent.memory.knowledge) == 1
     for index, expected in [(1, ['r1']), (2, ['r1', 'a1'])]:
@@ -74,12 +74,12 @@ def test_actual_litellm_and_anthropic_translation(monkeypatch, tmp_path):
         assert [b['tool_use_id'] for b in blocks if b['type'] == 'tool_result'] == expected
         assert [b['id'] for b in blocks if b['type'] == 'tool_use'] == expected
         assert any(b.get('signature') == 'synthetic-signature' for b in blocks)
-    assert 'tools' not in wire[-1]
+    assert all(request.get('tools') for request in wire)
     assert result.reasoning_phase1 is result.reasoning_phase2 is None
     audit = (tmp_path / 'memory_payload.jsonl').read_text()
     assert 'synthetic-signature' not in audit and 'synthetic-private' not in audit
     assert 'exact public text' in audit
-    assert len((tmp_path / 'memory_transport.jsonl').read_text().splitlines()) == 4
+    assert len((tmp_path / 'memory_transport.jsonl').read_text().splitlines()) == 3
 
 
 def test_actual_episode_keeps_initial_and_eight_new_step_cadence(tmp_path):
@@ -117,10 +117,10 @@ def test_actual_episode_keeps_initial_and_eight_new_step_cadence(tmp_path):
             assert status['triggered'] == (i in (8, 16))
         assert episode.batch_steps == 2
     asyncio.run(exercise())
-    assert len(llm.calls) == 6
+    assert len(llm.calls) == 3
     assert llm.calls[0]['prompt'] == '[Task Description]\ntask EXACT <history>verbatim</history>'
-    assert llm.calls[2]['prompt'] == '\n\n'.join(f'actor-step-{i}' for i in range(1, 9))
-    assert llm.calls[4]['prompt'] == '\n\n'.join(f'actor-step-{i}' for i in range(9, 17))
+    assert llm.calls[1]['prompt'] == '\n\n'.join(f'actor-step-{i}' for i in range(1, 9))
+    assert llm.calls[2]['prompt'] == '\n\n'.join(f'actor-step-{i}' for i in range(9, 17))
 
 
 def test_candidate_registry_source_identity_and_actor_projection(monkeypatch):
@@ -153,7 +153,7 @@ def test_read_only_repeated_read_and_duplicate_replay():
         response(call('memory_read', {'bank_id': 'knowledge'}, ident='two')), response()))
     result = run(a)
     assert [o.action for o in result.operations] == ['read', 'read']
-    assert not a.memory.knowledge and len(a.llm.calls) == 4
+    assert not a.memory.knowledge and len(a.llm.calls) == 3
     a.llm = Script(response(call('memory_add', {'content': 'replay'}, 'one')))
     with pytest.raises(GAHistoryIntegrityError):
         run(a, 'next wake', 8)
@@ -234,7 +234,7 @@ def test_large_original_and_read_receipt_are_not_new_failure_limits():
     assert task in str(next_request)
     read = next(json.loads(m['content']) for m in next_request['message_history'] if m['role'] == 'tool')
     assert read['content'] == f'<memory_bank>\n[{memory_id}] {bank}\n</memory_bank>'
-    assert len(a.llm.calls) == 3
+    assert len(a.llm.calls) == 2
 
 
 def test_prior_history_uses_existing_ga_compression(monkeypatch):
@@ -252,20 +252,20 @@ def test_prior_history_uses_existing_ga_compression(monkeypatch):
     monkeypatch.setattr(GAHistoryConfig, 'cut_msg_interval', 1)
     old = '<history>OLD_TRAJECTORY_MUST_USE_GA_COMPRESSION</history>'
     replies = [response() for _ in range(10)]
-    replies[2] = response(call('memory_add', {'content': 'native old payload'}, 'old-add'))
+    replies[2] = response(call('memory_add', {'content': 'native old payload'}, 'old-add'), content='<no_intervention/>')
     a = Agent(llm=Script(*replies))
     for i in range(10):
         run(a, old if i == 1 else f'fresh actor steps {i}', i,
             task='<history>original task must stay exact</history>')
-    assert len(seen) == 20  # Both independent phases now protect their active wake.
-    latest = str(a.llm.calls[-2])
+    assert len(seen) == 10  # One shared loop protects each active wake.
+    latest = str(a.llm.calls[-1])
     assert 'OLD_TRAJECTORY_MUST_USE_GA_COMPRESSION' not in latest
     assert '<history>[...]</history>' in latest
     assert '<history>original task must stay exact</history>' in latest
     assert 'fresh actor steps 9' in latest
     # The old GA leading-receipt sanitization is intentionally not used: the
     # native call and receipt remain linked while older visible text compresses.
-    prior = a.llm.calls[-2]['message_history']
+    prior = a.llm.calls[-1]['message_history']
     calls = [item for message in prior for item in message.get('tool_calls', [])]
     receipts = [message for message in prior if message.get('role') == 'tool']
     assert [item['id'] for item in calls] == [item['tool_call_id'] for item in receipts] == ['old-add']

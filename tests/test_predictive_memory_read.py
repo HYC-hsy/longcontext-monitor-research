@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from memory_agent.memory.read_context_predictive_memory_agent import (
-    BANK_TOOLS, PHASE1_SYSTEM, ReadContextPredictiveMemoryAgent as Agent)
+    BANK_TOOLS, PHASE1_SYSTEM, UNIFIED_SYSTEM, ReadContextPredictiveMemoryAgent as Agent)
 from memory_agent.memory.context_predictive_memory_agent import ContextPredictiveMemoryAgent
 from memory_agent.memory.ga_context_history import GAHistoryConfig, GAHistoryIntegrityError
 from memory_agent.memory.predictive_memory_agent import PHASE2_SYSTEM
@@ -17,7 +17,11 @@ def call(name, args=None, ident='call-1'):
     return {'id': ident, 'function': {'name': name, 'arguments': json.dumps(args or {})}}
 
 
-def response(*calls, content='', **kwargs):
+_UNSET = object()
+
+def response(*calls, content=_UNSET, **kwargs):
+    if content is _UNSET:
+        content = '' if calls else '<no_intervention/>'
     return SimpleNamespace(content=content, tool_calls=list(calls), **kwargs)
 
 
@@ -28,8 +32,6 @@ class Script:
 
     async def call(self, **kwargs):
         self.calls.append(copy.deepcopy(kwargs))
-        if not kwargs.get('tools'):
-            return response(content='<no_intervention/>')
         value = next(self.replies)
         if isinstance(value, BaseException):
             raise value
@@ -64,8 +66,9 @@ def test_prompt_schema_and_isolation():
     a.memory.save_knowledge('BANK NOT AUTOMATICALLY IN P1')
     run(a)
     assert 'BANK NOT AUTOMATICALLY' not in str(a.llm.calls[0])
-    assert 'BANK NOT AUTOMATICALLY' in a.llm.calls[1]['prompt']
-    assert a.llm.calls[1]['system'] == PHASE2_SYSTEM
+    assert len(a.llm.calls) == 1
+    assert a.llm.calls[0]['system'] == UNIFIED_SYSTEM
+    assert a._phase2_history == []
     assert a._build_phase2_prompt('x', 4) == ContextPredictiveMemoryAgent()._build_phase2_prompt.__func__(a, 'x', 4)
     with pytest.raises(ValueError):
         Agent(use_structured_tools=False)
@@ -81,7 +84,7 @@ def test_read_add_finish_same_wake(nonempty):
     before = copy.deepcopy(a.memory.to_dict())
     expected_read = a._format_memory_bank()
     result = run(a)
-    assert len(llm.calls) == 4
+    assert len(llm.calls) == 3
     assert [op.action for op in result.operations] == ['read', 'add']
     assert not result.should_inject
     read = receipts(llm.calls[1])[0]
@@ -94,25 +97,25 @@ def test_read_add_finish_same_wake(nonempty):
     assert ('(empty)' in read['content']) != nonempty
     assert 'new' not in read['content']
     assert receipts(llm.calls[2])[-1]['memory_id'] == a.memory.knowledge[-1].id
-    assert 'new' in llm.calls[-1]['prompt']
+    assert 'new' in str(llm.calls[-1]['message_history'])
     assert llm.calls[1]['prompt'] == llm.calls[2]['prompt'] == 'Continue.'
 
 
 @pytest.mark.parametrize('add', [False, True])
-def test_no_read_two_calls_next_wake_does_not_reexecute(add):
-    first = response(call('memory_add', {'content': 'saved'})) if add else response()
+def test_no_read_single_call_next_wake_does_not_reexecute(add):
+    first = response(call('memory_add', {'content': 'saved'}), content='<no_intervention/>') if add else response()
     a = Agent(llm=Script(first, response()))
     run(a)
-    assert len(a.llm.calls) == 2
+    assert len(a.llm.calls) == 1
     run(a, 'Only eight new actor steps', 8)
-    assert len(a.llm.calls) == 4
-    request = a.llm.calls[2]
+    assert len(a.llm.calls) == 2
+    request = a.llm.calls[1]
     assert request['prompt'] == 'Only eight new actor steps'
     assert str(request).count('Original exact task') == 1
     assert len(a.memory.knowledge) == int(add)
     assert len(receipts(request)) == int(add)
-    assert not any(m.get('tool_calls') for m in a.llm.calls[3]['message_history'])
-    assert 'UNCHANGED P2 OBSERVATION' in str(a.llm.calls[3]['message_history'])
+    assert a._phase2_history == []
+    assert 'UNCHANGED P2 OBSERVATION' not in str(request)
 
 
 def test_ordered_multiple_reads_and_adds_are_snapshots():
@@ -156,12 +159,12 @@ def test_missing_signed_blocks_and_provider_failure_fail_closed():
 
 def test_long_history_pins_task_current_wake_and_tool_pairs(monkeypatch):
     monkeypatch.setattr(GAHistoryConfig, 'context_win', 800)
-    replies = [response(content='history' * 100) for _ in range(8)]
+    replies = [response(content='history' * 100 + '<no_intervention/>') for _ in range(8)]
     replies += [response(call('memory_read', {'bank_id': 'knowledge'}, ident='final-read')), response()]
     a = Agent(llm=Script(*replies))
     for step in range(9):
         run(a, ('old' if step < 8 else 'LATEST') * 100, step)
-    latest = a.llm.calls[-2]
+    latest = a.llm.calls[-1]
     assert 'Original exact task' in str(latest)
     assert 'LATEST' * 100 in str(latest)
     assert any(m.get('tool_call_id') == 'final-read' for m in latest['message_history'])
@@ -170,14 +173,14 @@ def test_long_history_pins_task_current_wake_and_tool_pairs(monkeypatch):
 
 
 def test_reset_bank_isolation_and_oversize(monkeypatch):
-    a = Agent(llm=Script(response(call('memory_add', {'content': 'kept'})), response()))
+    a = Agent(llm=Script(response(call('memory_add', {'content': 'kept'}), content='<no_intervention/>'), response()))
     run(a)
     a.reset_conversation_history()
     run(a, task='Entirely new task')
-    assert 'Original exact task' not in str(a.llm.calls[-2])
+    assert 'Original exact task' not in str(a.llm.calls[-1])
     assert len(a.memory.knowledge) == 1 and not Agent().memory.knowledge
     monkeypatch.setattr(GAHistoryConfig, 'context_win', 10)
     oversized = Agent(llm=Script(response()))
     run(oversized, task='unaltered task' * 100)
     assert oversized.llm.calls[0]['prompt'] == '[Task Description]\n' + 'unaltered task' * 100
-    assert len(oversized.llm.calls) == 2
+    assert len(oversized.llm.calls) == 1
