@@ -1,0 +1,9 @@
+# Related-reminder five-task diagnostic archive
+
+Execution: `5dc85672dd747af2ff26495462a7432583154084` (`pma-related-reminder-20261112`). Historical reference: `10fe52e9e552da711222afb330229dc0ec21d18e`, archived at `16e10f5027c485f13ff37a17562db731cc030593`. Dataset: `2fd12b88aafdd04a52c298e3940bcb189f9766d6`; Harbor: `459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc`.
+
+This is a **redacted visible projection**, not raw HTTP bytes. The ZIP holds 289 indexed members: actual Task-visible event streams, manager request/response and tool receipts, bank, plans, effective identities/policies, native-evaluation summaries, cleanup records, runner logs and the targeted offline-check log. The external index gives source/public byte counts and SHA-256 per member; the original private files remain on the Windows host. Hidden verifier text, provider-private thinking/signatures, credentials, complete private profiles, private endpoints, unrelated source bundles and private tracebacks are excluded. `facts.json`, `wake_index.json` and `request_check.json` are derived navigation aids; the corresponding visible event records are also in the ZIP.
+
+The five slots ran once each, in task order, 2026-11-12 17:13–18:53 Asia/Shanghai. All completed a native evaluation and confirmed resource cleanup; none was rerun. The focused same-environment check recorded 266 passed, one platform-specific AST-hash assertion failure and seven deselected. The masked parent/candidate AST hashes both equal `ecf8e216eaf18af2f706425b3b6a50aab837c59d7e3c2d166e412e352724e3d2`; the failing test pins a different platform's hash. It is not described as an all-green suite.
+
+See `RESULTS.md` and `WAKE_REVIEW.md`. Public response bodies are not private reasoning. Unknown provider request attempts, PMA token usage/cost and service-side effective defaults are not inferred.
