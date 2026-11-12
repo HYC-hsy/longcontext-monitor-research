@@ -64,7 +64,7 @@ class UpstreamPMAClient:
         if os.environ.get('GA_PMA_UPSTREAM_CANDIDATE') in (
                 'pma_predictive_f838_v1', 'pma_predictive_context_v1',
                 'pma_predictive_read_context_v1'):
-            rounds = os.environ.get('GA_PMA_BATCH_ROUNDS', '8')
+            rounds = os.environ.get('GA_PMA_BATCH_ROUNDS', '4')
             if not rounds.isascii() or not rounds.isdecimal() or int(rounds) < 1:
                 raise PMABridgeError('GA_PMA_BATCH_ROUNDS must be a positive integer')
             config = {'pma_batch_rounds': int(rounds),

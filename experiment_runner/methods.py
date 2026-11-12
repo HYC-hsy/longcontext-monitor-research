@@ -12,7 +12,7 @@ PREDICTIVE_CANDIDATES = frozenset({
     'pma_predictive_read_context_v1'})
 
 
-def validate_pma_batch_rounds(value=8):
+def validate_pma_batch_rounds(value=4):
     """Only a positive JSON integer is a round count, never bool or a float."""
     if type(value) is not int or value < 1:
         raise ValueError('pma_batch_rounds must be a positive integer')

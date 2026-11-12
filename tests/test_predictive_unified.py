@@ -84,6 +84,8 @@ class PredictiveTests(unittest.IsolatedAsyncioTestCase):
             'hashlib': hashlib, 'os': os, 'stable_initial_text': lambda x: x})
 
         class Agent:
+            # This regression intentionally covers the explicit eight-round mode.
+            _sliding_window_size = 8
             _research_candidate = 'pma_predictive_f838_v1'
             _reset_status_on_episode = False
             _reset_knowledge_on_episode = False

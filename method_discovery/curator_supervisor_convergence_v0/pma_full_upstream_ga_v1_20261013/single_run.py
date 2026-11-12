@@ -79,7 +79,7 @@ def run_stateful_fake(args: argparse.Namespace) -> dict:
 def prepare(args: argparse.Namespace) -> dict:
     from .export_official_evaluator import COMMIT
     from .prepare_six_task_manifest import prepare as prepare_manifest
-    pma_batch_rounds = validate_pma_batch_rounds(getattr(args, 'pma_batch_rounds', 8))
+    pma_batch_rounds = validate_pma_batch_rounds(getattr(args, 'pma_batch_rounds', 4))
     runtime_policy = getattr(args, 'runtime_policy', None)
     bootstrap = getattr(args, 'evaluation_bootstrap_protocol', 'original')
     cache = getattr(args, 'evaluation_cache', None)
@@ -205,7 +205,7 @@ def prepare(args: argparse.Namespace) -> dict:
             evidence=(Path(args.certification_dir).resolve(strict=True)
                       if getattr(args, 'certification_dir', None) else None), plan=plan)
     if not pos:
-        if validate_pma_batch_rounds(manifest['config'].get('pma_batch_rounds', 8)) != pma_batch_rounds:
+        if validate_pma_batch_rounds(manifest['config'].get('pma_batch_rounds', 4)) != pma_batch_rounds:
             raise ValueError('manifest changed pma_batch_rounds')
         from .citation_gate_config import require_gate_binding,require_strategy_binding
         require_gate_binding(gate, manifest['config'], candidate, args.condition)
@@ -237,8 +237,8 @@ def run(args: argparse.Namespace) -> dict:
     manifest = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))
     identity = json.loads((root / 'run_identity.json').read_text(encoding='utf-8'))
     if manifest.get('schema') != 'pos-ga-single-manifest-v1':
-        expected_rounds = validate_pma_batch_rounds(manifest.get('config', {}).get('pma_batch_rounds', 8))
-        if validate_pma_batch_rounds(identity.get('pma_batch_rounds', 8)) != expected_rounds:
+        expected_rounds = validate_pma_batch_rounds(manifest.get('config', {}).get('pma_batch_rounds', 4))
+        if validate_pma_batch_rounds(identity.get('pma_batch_rounds', 4)) != expected_rounds:
             raise RuntimeError('single-run pma_batch_rounds identity mismatch')
     granted = json.loads(Path(args.authorization).read_text(encoding='utf-8'))
     bindings = validate_plan(manifest, granted)
@@ -302,7 +302,7 @@ def main() -> None:
     prepared.add_argument('--citation-review-strategy',choices=STRATEGIES)
     prepared.add_argument('--research-candidate', choices=sorted(candidate_names()), default='U')
     prepared.add_argument('--occurrence', type=int, default=1)
-    prepared.add_argument('--pma-batch-rounds', type=parse_pma_batch_rounds, default=8)
+    prepared.add_argument('--pma-batch-rounds', type=parse_pma_batch_rounds, default=4)
     prepared.add_argument('--output', required=True)
     prepared.add_argument('--official-source-git', required=True)
     prepared.add_argument('--task-profile-file', required=True)

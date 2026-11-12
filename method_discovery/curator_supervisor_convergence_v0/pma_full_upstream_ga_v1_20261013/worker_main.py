@@ -215,7 +215,7 @@ async def serve(args: argparse.Namespace) -> None:
                                memory_api_key=os.environ.get("PMA_MEMORY_API_KEY"),
                                memory_profile=profile,
                                research_candidate=getattr(args, "research_candidate", "U"),
-                               pma_batch_rounds=getattr(args, "pma_batch_rounds", 8),
+                               pma_batch_rounds=getattr(args, "pma_batch_rounds", 4),
                                citation_review_gate=getattr(args,"citation_review_gate",None),
                                citation_review_strategy=getattr(args,"citation_review_strategy",None))
     if args.fake_memory:
@@ -385,7 +385,7 @@ def main() -> None:
         if not value.isascii() or not value.isdecimal() or int(value) < 1:
             raise argparse.ArgumentTypeError("pma-batch-rounds must be a positive integer")
         return int(value)
-    parser.add_argument("--pma-batch-rounds", type=positive_rounds, default=8)
+    parser.add_argument("--pma-batch-rounds", type=positive_rounds, default=4)
     parser.add_argument("--fake-memory", action="store_true")
     parser.add_argument("--fake-memory-update", action="store_true")
     parser.add_argument("--citation-review-gate",choices=('gate-only','gate-one-repair'))

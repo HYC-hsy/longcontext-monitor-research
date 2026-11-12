@@ -451,7 +451,7 @@ def run_live(args) -> dict:
             authorized.get('execution_authorized') is not True or
             authorized.get('manifest_sha256') != _sha(manifest_path)):
         raise RuntimeError('PMA authorization absent or changed')
-    pma_batch_rounds = validate_pma_batch_rounds(manifest.get('config', {}).get('pma_batch_rounds', 8))
+    pma_batch_rounds = validate_pma_batch_rounds(manifest.get('config', {}).get('pma_batch_rounds', 4))
     task_policy = manifest.get('config', {}).get('task_complete_response_policy', 'disabled')
     actual_task_policy = ('complete-response-v1' if
         os.environ.get('GA_TASK_COMPLETE_RESPONSE') == '1' else 'disabled')
@@ -785,7 +785,7 @@ def run_live(args) -> dict:
                 time.sleep(.05)
             ready_data = json.loads(ready.read_text(encoding='utf-8'))
             if candidate in PREDICTIVE_CANDIDATES and (
-                    validate_pma_batch_rounds(ready_data.get('pma_batch_rounds', 8)) != pma_batch_rounds):
+                    validate_pma_batch_rounds(ready_data.get('pma_batch_rounds', 4)) != pma_batch_rounds):
                 raise RuntimeError('worker pma_batch_rounds identity mismatch')
             if ready_data.get('citation_review_gate')!=gate:raise RuntimeError('worker gate identity mismatch')
             require_strategy_binding(ready_data.get('citation_review_strategy'),manifest['config'],gate)

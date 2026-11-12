@@ -84,7 +84,7 @@ def test_cli_rejects_invalid_round_counts(value, tmp_path):
     assert not (tmp_path / 'never-written.json').exists()
 
 
-@pytest.mark.parametrize('rounds', (3, 8, None))
+@pytest.mark.parametrize('rounds', (3, 4, 8, None))
 def test_json_to_plan_manifest_and_run_identity(prepared_fixture, tmp_path, rounds):
     config, _ = prepared_fixture
     if rounds is not None:
@@ -92,7 +92,7 @@ def test_json_to_plan_manifest_and_run_identity(prepared_fixture, tmp_path, roun
     path = tmp_path / 'config.json'
     write_json(path, config)
     plan = frontend.build_plan(frontend.load_config(path))
-    expected = 8 if rounds is None else rounds
+    expected = 4 if rounds is None else rounds
     assert plan['config']['pma_batch_rounds'] == expected
     output = tmp_path / 'prepared'
     result = frontend.execute(plan, output, 'prepare')
@@ -132,14 +132,14 @@ def test_cli_override_and_rounds_change_hashes(prepared_fixture, tmp_path):
     assert hashes[0] != hashes[1]
 
 
-def test_single_prepare_cli_and_legacy_default(monkeypatch, tmp_path):
+def test_single_prepare_cli_and_current_default(monkeypatch, tmp_path):
     single = importlib.import_module(DRIVER + '.single_run')
     seen = Mock(return_value={})
     monkeypatch.setattr(single, 'prepare', seen)
     base = ['single_run', 'prepare', '--task', 'db-wal-recovery', '--condition', 'B',
             '--output', str(tmp_path), '--official-source-git', str(tmp_path),
             '--task-profile-file', str(tmp_path / 'unused.py')]
-    for extra, expected in (([], 8), (['--pma-batch-rounds', '3'], 3)):
+    for extra, expected in (([], 4), (['--pma-batch-rounds', '3'], 3)):
         monkeypatch.setattr('sys.argv', base + extra)
         single.main()
         assert seen.call_args.args[0].pma_batch_rounds == expected
@@ -296,7 +296,7 @@ def test_frontend_rejects_a_driver_ignoring_nondefault_rounds(
     assert 'pma_batch_rounds' in result[0]['error']
 
 
-@pytest.mark.parametrize('rounds', (3, 8, None))
+@pytest.mark.parametrize('rounds', (3, 4, 8, None))
 def test_live_spec_accepts_bound_or_legacy_default_rounds(tmp_path, monkeypatch, rounds):
     hooks = importlib.import_module(DRIVER + '.pma_harbor_hooks')
     arms = [dict(order=i, task=task, condition=condition) for i, task, condition in (

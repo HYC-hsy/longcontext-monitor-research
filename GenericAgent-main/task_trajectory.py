@@ -10,7 +10,7 @@ import json
 SCHEMA = "public-task-trajectory-v1"
 
 
-def batch_rounds(value=8):
+def batch_rounds(value=4):
     if type(value) is not int or value < 1:
         raise ValueError("pma_batch_rounds must be a positive integer")
     return value

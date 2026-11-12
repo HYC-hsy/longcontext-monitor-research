@@ -77,7 +77,7 @@ def start_worker(tmp_path, rounds):
     return worker, log, requests, responses, private
 
 
-@pytest.mark.parametrize("rounds", [1, 3, 8, 11])
+@pytest.mark.parametrize("rounds", [1, 3, 4, 8, 11])
 def test_real_loop_and_worker_batches(monkeypatch, tmp_path, rounds):
     from agent_loop import BaseHandler, StepOutcome, agent_runner_loop, exhaust
     from llmcore import NativeClaudeSession, NativeToolClient
@@ -419,3 +419,8 @@ def test_failed_wake_retains_received_raw_event(tmp_path, failing_round):
     assert '3' not in completed
     assert len(calls) == (2 if failing_round == 'first' else 3)
     assert len(agent._memory.knowledge) == (0 if failing_round == 'first' else 1)
+
+
+def test_default_batch_is_four_and_explicit_eight_is_preserved():
+    assert batch_rounds() == 4
+    assert batch_rounds(8) == 8

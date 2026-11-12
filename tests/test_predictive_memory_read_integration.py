@@ -90,6 +90,8 @@ def test_actual_episode_keeps_initial_and_eight_new_step_cadence(tmp_path):
     memory_agent = Agent(llm=llm)
 
     class Host:
+        # This regression intentionally covers the explicit eight-round mode.
+        _sliding_window_size = 8
         _research_candidate = CANDIDATE
         _reset_status_on_episode = _reset_knowledge_on_episode = _reset_procedural_on_episode = False
         def __init__(self):

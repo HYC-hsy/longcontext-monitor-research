@@ -111,7 +111,7 @@ def _committed_source_sha(checkout: Path, name: str) -> str:
 
 def prepare(source: Path, task_profile: Path, pma_profile: Path,
             evidence: Path | None = None, plan: dict | None = None) -> dict:
-    pma_batch_rounds = validate_pma_batch_rounds((plan or {}).get('pma_batch_rounds', 8))
+    pma_batch_rounds = validate_pma_batch_rounds((plan or {}).get('pma_batch_rounds', 4))
     single = plan is not None and plan.get('schema') in {
         'pma-ga-single-plan-v1', 'pma-ga-single-plan-v2'}
     candidate = plan.get('research_candidate', 'U') if single else 'U'

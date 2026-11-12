@@ -47,7 +47,7 @@ def stable_initial_text(content: str | list[dict[str, Any]]) -> str:
 def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
                        memory_api_key: str | None = None,
                        memory_profile: dict[str, Any] | None = None,
-                       research_candidate: str = "U", pma_batch_rounds: int = 8,
+                       research_candidate: str = "U", pma_batch_rounds: int = 4,
                        citation_review_gate: str | None = None, citation_review_strategy: str | None = None) -> MemoryEnabledTerminus2:
     from public_trajectory import batch_rounds
     pma_batch_rounds = batch_rounds(pma_batch_rounds)
@@ -201,7 +201,7 @@ class PMAEpisode:
         self.last_completed_attempt = 0
         self.last_sequence = 0
         self.batch_steps = 0
-        self.pma_batch_rounds = getattr(agent, "_sliding_window_size", 8)
+        self.pma_batch_rounds = getattr(agent, "_sliding_window_size", 4)
         if type(self.pma_batch_rounds) is not int or self.pma_batch_rounds < 1:
             raise ValueError("pma_batch_rounds must be a positive integer")
         self.public_trajectory_schema = None

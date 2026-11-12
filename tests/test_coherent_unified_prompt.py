@@ -19,22 +19,22 @@ The <task_description> tags contain the task agent's original task, and the <tas
 
 Based on the task description and the task agent's trajectory, carry out the following steps:
 
-1. Predict and save. You must predict which information received this time the task agent will first use only after at least ten task-agent turns have passed, and organize and save that information. Before using memory tools, you must briefly state which information you plan to preserve and how you anticipate it will be useful in work after ten task-agent turns have passed.
+1. Predict and save. You must predict which information received this time the task agent will first use only after at least ten task-agent turns have passed, and organize and save that information. You must distinguish confirmed findings from tentative inferences, and save only confirmed findings. Before using memory tools, you must briefly state which information you plan to preserve and how you anticipate it will be useful in work after ten task-agent turns have passed.
 
-2. Remind it of relevant information. The knowledge bank contains information previously organized for the task agent's future work, and it may have forgotten some of it. Therefore, whenever information in the knowledge bank is relevant to the task agent's current work, remind it of that information briefly and directly. If there is no relevant information, do not give a reminder. Do not take over the task agent's work.
+2. Recall relevant information. On every wake, use memory_read with bank_id="knowledge" to read the knowledge bank. From the returned information, select what is relevant to the task agent's current work and provide it briefly and directly for its next turn. If there is no relevant information, provide none. Do not take over the task agent's work.
 
 ## Tools
 - memory_add: Save information in the knowledge bank.
 - memory_read: Read all information currently saved in the knowledge bank. Set bank_id to "knowledge" when calling it.
 
-Manage memory and decide whether to give a reminder in this same conversation. When ready to finish this wake, end your reply with exactly one of the following decision tags:
+Organize information and recall relevant knowledge in this same conversation. When ready to finish this wake, end your reply with exactly one of the following decision tags:
 
-If a reminder is needed:
+If there is relevant information:
 <context_for_action>
-Relevant information to bring to the agent's attention.
+Relevant information for the task agent's next turn.
 </context_for_action>
 
-If no reminder is needed:
+If there is no relevant information:
 <no_intervention/>'''
 
 
@@ -64,10 +64,10 @@ def test_actual_system_prompt_and_continuation_are_coherent(provider, monkeypatc
     # remind the next already-scheduled request, never force an extra call.
     llm, wire = provider_llm(provider, [
         {'text': '<no_intervention/>', 'calls': [('a1', 'memory_add', {
-            'content': 'The endpoint may be /v1; this is not confirmed.'})]},
-        {'text': 'I will read the possible endpoint before the next request.',
+            'content': 'The task specifies the endpoint /v1.'})]},
+        {'text': 'I will read the saved endpoint before the next request.',
          'calls': [('r1', 'memory_read', {'bank_id': 'knowledge'})]},
-        {'text': '<context_for_action>The endpoint may be /v1; verify it before use.</context_for_action>'},
+        {'text': '<context_for_action>The task specifies the endpoint /v1.</context_for_action>'},
     ], monkeypatch)
     agent = Agent(llm=llm)
     install(agent, tmp_path)
@@ -89,7 +89,7 @@ def test_actual_system_prompt_and_continuation_are_coherent(provider, monkeypatc
     assert result.loop_mode == 'unified' and len(result.loop_rounds) == 2
     assert result.loop_rounds[0]['decision_accepted'] is False
     assert result.loop_rounds[1]['decision_accepted'] is True
-    assert result.context_for_action == 'The endpoint may be /v1; verify it before use.'
+    assert result.context_for_action == 'The task specifies the endpoint /v1.'
     assert agent._phase2_history == []
     assert result.user_prompt_phase2 is result.raw_response_phase2 is None
     expected = [EXPECTED_SYSTEM, EXPECTED_SYSTEM + '\n\n' + PUBLIC_FORECAST_REMINDER,
@@ -106,7 +106,7 @@ def test_actual_system_prompt_and_continuation_are_coherent(provider, monkeypatc
     assert all(request['phase'] == 'unified_memory' for request in payload)
     history = payload[-1]['message_history']
     assert any(message.get('tool_call_id') == 'r1' for message in history)
-    assert 'The endpoint may be /v1; this is not confirmed.' in str(history)
+    assert 'The task specifies the endpoint /v1.' in str(history)
     assert 'MUST NOT ENTER A SECOND PHASE' not in str(payload)
     assert 'private-fixture' not in str(payload)
 
@@ -138,13 +138,13 @@ def test_completion_tags_remain_but_long_protocol_guidance_is_removed():
 
 
 def test_first_use_guidance_does_not_delay_related_reminders():
-    selection = UNIFIED_SYSTEM.split('1. Predict and save.', 1)[1].split('2. Remind', 1)[0]
+    selection = UNIFIED_SYSTEM.split('1. Predict and save.', 1)[1].split('2. Recall', 1)[0]
     assert 'will first use only after at least ten task-agent turns have passed' in selection
     assert 'organize and save that information' in selection
-    reminder = UNIFIED_SYSTEM.split('2. Remind', 1)[1].split('## Tools', 1)[0]
-    assert "whenever information in the knowledge bank is relevant to the task agent's current work" in reminder
-    assert 'it may have forgotten some of it' in reminder
-    assert 'If there is no relevant information, do not give a reminder.' in reminder
+    reminder = UNIFIED_SYSTEM.split('2. Recall', 1)[1].split('## Tools', 1)[0]
+    assert "select what is relevant to the task agent's current work" in reminder
+    assert 'On every wake, use memory_read with bank_id="knowledge"' in reminder
+    assert 'If there is no relevant information, provide none.' in reminder
     assert 'ten task-agent turns' not in reminder
     for removed in ['already visible', 'taken it into account', 'Default to no intervention']:
         assert removed not in UNIFIED_SYSTEM
@@ -158,3 +158,12 @@ def test_information_organizer_role_and_separate_tool_guidance():
     assert '## Tools\n- memory_add:' in UNIFIED_SYSTEM
     assert '- memory_read: Read all information currently saved' in UNIFIED_SYSTEM
     assert 'Set bank_id to "knowledge"' in UNIFIED_SYSTEM
+
+
+def test_confirmed_content_rule_does_not_require_verified_future_use():
+    assert 'You must distinguish confirmed findings from tentative inferences, and save only confirmed findings.' in UNIFIED_SYSTEM
+    assert 'Save only information explicitly provided in the task description' not in UNIFIED_SYSTEM
+    assert 'Preserve their scope' not in UNIFIED_SYSTEM
+    assert 'how you anticipate it will be useful' in UNIFIED_SYSTEM
+    assert 'Organize information and recall relevant knowledge in this same conversation.' in UNIFIED_SYSTEM
+    assert 'Manage memory and decide whether' not in UNIFIED_SYSTEM

@@ -29,22 +29,22 @@ The <task_description> tags contain the task agent's original task, and the <tas
 
 Based on the task description and the task agent's trajectory, carry out the following steps:
 
-1. Predict and save. You must predict which information received this time the task agent will first use only after at least ten task-agent turns have passed, and organize and save that information. Before using memory tools, you must briefly state which information you plan to preserve and how you anticipate it will be useful in work after ten task-agent turns have passed.
+1. Predict and save. You must predict which information received this time the task agent will first use only after at least ten task-agent turns have passed, and organize and save that information. You must distinguish confirmed findings from tentative inferences, and save only confirmed findings. Before using memory tools, you must briefly state which information you plan to preserve and how you anticipate it will be useful in work after ten task-agent turns have passed.
 
-2. Remind it of relevant information. The knowledge bank contains information previously organized for the task agent's future work, and it may have forgotten some of it. Therefore, whenever information in the knowledge bank is relevant to the task agent's current work, remind it of that information briefly and directly. If there is no relevant information, do not give a reminder. Do not take over the task agent's work.
+2. Recall relevant information. On every wake, use memory_read with bank_id="knowledge" to read the knowledge bank. From the returned information, select what is relevant to the task agent's current work and provide it briefly and directly for its next turn. If there is no relevant information, provide none. Do not take over the task agent's work.
 
 ## Tools
 - memory_add: Save information in the knowledge bank.
 - memory_read: Read all information currently saved in the knowledge bank. Set bank_id to "knowledge" when calling it.
 
-Manage memory and decide whether to give a reminder in this same conversation. When ready to finish this wake, end your reply with exactly one of the following decision tags:
+Organize information and recall relevant knowledge in this same conversation. When ready to finish this wake, end your reply with exactly one of the following decision tags:
 
-If a reminder is needed:
+If there is relevant information:
 <context_for_action>
-Relevant information to bring to the agent's attention.
+Relevant information for the task agent's next turn.
 </context_for_action>
 
-If no reminder is needed:
+If there is no relevant information:
 <no_intervention/>"""
 
 DECISION_RECOVERY_PROMPT = (
