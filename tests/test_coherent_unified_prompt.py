@@ -19,9 +19,9 @@ The <task_description> tags contain the task agent's original task, and the <tas
 
 Based on the task description and the task agent's trajectory, carry out the following steps:
 
-1. Predict and save. You must predict which information received this time the task agent will first use only after at least ten task-agent turns have passed. Before saving, you must briefly explain which information you considered and how it will be used in the future, distinguishing confirmed findings from tentative inferences. Save only confirmed findings.
+1. Predict and save. You must predict which information received this time the task agent will first use only after at least six task-agent turns have passed. Before saving, you must briefly explain the future uses of this information. You must distinguish confirmed findings from tentative inferences within it, and preserve their respective levels of certainty. Organize and save this information based on your prediction. Save only confirmed findings.
 
-2. Recall relevant information. On every wake, use memory_read with bank_id="knowledge" to read the knowledge bank. From the returned information, select what is relevant to the task agent's current work and provide it briefly and directly for its next turn. If there is no relevant information, provide none. Do not take over the task agent's work.
+2. Recall relevant information. On every wake, use memory_read with bank_id="knowledge" to read the knowledge bank. From the returned information, select what is relevant to the task agent's current work and provide it briefly and directly for its next turn. Preserve the information's original level of certainty. If there is no relevant information, provide none. Do not take over the task agent's work.
 
 ## Tools
 - memory_add: Save information in the knowledge bank.
@@ -46,16 +46,16 @@ def test_exact_approved_coherent_system():
     assert UNIFIED_SYSTEM.count("<context_for_action>") == 1
 
 
-def test_only_unified_system_changes_from_pinned_parent():
-    # AST at 10fe52e after masking only UNIFIED_SYSTEM. This also protects
-    # soft reminder, schemas, recovery, input wrappers and the tool loop.
+def test_only_system_and_soft_reminder_change_from_pinned_parent():
+    # AST at f637998 after masking only the system and soft reminder.
+    # Schemas, recovery, input wrappers and the tool loop remain protected.
     tree = ast.parse(Path(module.__file__).read_text())
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name)
-                and target.id == 'UNIFIED_SYSTEM' for target in node.targets):
+                and target.id in {'UNIFIED_SYSTEM', 'PUBLIC_FORECAST_REMINDER'} for target in node.targets):
             node.value = ast.Constant('PROMPT_VALUE_ONLY')
     digest = hashlib.sha256(ast.dump(tree, include_attributes=False).encode()).hexdigest()
-    assert digest == 'aa92c638efefe527e1b7b82e582affefc4361abe0323e8037e2db0cff6ffcb97'
+    assert digest == 'f0738cf778954a73499bf3cea10fc472447a769a87281c596726a231d89a3915'
 
 
 @pytest.mark.parametrize('provider', ['openai', 'anthropic'])
@@ -111,7 +111,7 @@ def test_actual_system_prompt_and_continuation_are_coherent(provider, monkeypatc
     assert 'private-fixture' not in str(payload)
 
 
-EXPECTED_PUBLIC_REMINDER = 'You must include a brief public summary of the information you plan to preserve and how you anticipate it will be useful in work after ten task-agent turns have passed.'
+EXPECTED_PUBLIC_REMINDER = 'You must include a brief public summary of the information you plan to preserve and how you anticipate it will be useful in work after six task-agent turns have passed.'
 
 
 def test_public_reminder_matches_information_forecast():
@@ -120,10 +120,10 @@ def test_public_reminder_matches_information_forecast():
     assert "do not disclose private reasoning" not in UNIFIED_SYSTEM
     for text in [UNIFIED_SYSTEM, PUBLIC_FORECAST_REMINDER]:
         assert 'problems or decisions' not in text
-    assert 'how you anticipate it will be useful in work after ten task-agent turns have passed' in PUBLIC_FORECAST_REMINDER
-    assert 'how it will be used in the future' in UNIFIED_SYSTEM
+    assert 'how you anticipate it will be useful in work after six task-agent turns have passed' in PUBLIC_FORECAST_REMINDER
+    assert 'the future uses of this information' in UNIFIED_SYSTEM
     assert 'information received this time' in UNIFIED_SYSTEM
-    assert 'the task agent will first use only after at least ten task-agent turns have passed' in UNIFIED_SYSTEM
+    assert 'the task agent will first use only after at least six task-agent turns have passed' in UNIFIED_SYSTEM
     assert 'the task agent may use' not in UNIFIED_SYSTEM
     assert 'four turns' not in UNIFIED_SYSTEM
     assert 'four turns' not in PUBLIC_FORECAST_REMINDER
@@ -140,13 +140,13 @@ def test_completion_tags_remain_but_long_protocol_guidance_is_removed():
 
 def test_first_use_guidance_does_not_delay_related_reminders():
     selection = UNIFIED_SYSTEM.split('1. Predict and save.', 1)[1].split('2. Recall', 1)[0]
-    assert 'will first use only after at least ten task-agent turns have passed' in selection
+    assert 'will first use only after at least six task-agent turns have passed' in selection
     assert 'Save only confirmed findings.' in selection
     reminder = UNIFIED_SYSTEM.split('2. Recall', 1)[1].split('## Tools', 1)[0]
     assert "select what is relevant to the task agent's current work" in reminder
     assert 'On every wake, use memory_read with bank_id="knowledge"' in reminder
     assert 'If there is no relevant information, provide none.' in reminder
-    assert 'ten task-agent turns' not in reminder
+    assert 'six task-agent turns' not in reminder
     for removed in ['already visible', 'taken it into account', 'Default to no intervention']:
         assert removed not in UNIFIED_SYSTEM
 
@@ -162,11 +162,21 @@ def test_information_organizer_role_and_separate_tool_guidance():
 
 
 def test_confirmed_content_rule_does_not_require_verified_future_use():
-    assert 'Before saving, you must briefly explain which information you considered' in UNIFIED_SYSTEM
-    assert 'distinguishing confirmed findings from tentative inferences' in UNIFIED_SYSTEM
+    assert 'Before saving, you must briefly explain the future uses of this information' in UNIFIED_SYSTEM
+    assert 'You must distinguish confirmed findings from tentative inferences within it' in UNIFIED_SYSTEM
     assert 'Save only confirmed findings.' in UNIFIED_SYSTEM
     assert 'Save only information explicitly provided in the task description' not in UNIFIED_SYSTEM
     assert 'Preserve their scope' not in UNIFIED_SYSTEM
-    assert 'how it will be used in the future' in UNIFIED_SYSTEM
+    assert 'the future uses of this information' in UNIFIED_SYSTEM
     assert 'Organize information and recall relevant knowledge in this same conversation.' in UNIFIED_SYSTEM
     assert 'Manage memory and decide whether' not in UNIFIED_SYSTEM
+
+
+def test_recall_preserves_original_certainty_without_changing_tools():
+    reminder = UNIFIED_SYSTEM.split('2. Recall', 1)[1].split('## Tools', 1)[0]
+    assert "Preserve the information's original level of certainty." in reminder
+
+
+def test_presaving_explanation_preserves_certainty():
+    assert "You must distinguish confirmed findings from tentative inferences within it, and preserve their respective levels of certainty." in UNIFIED_SYSTEM
+    assert "Organize and save this information based on your prediction." in UNIFIED_SYSTEM

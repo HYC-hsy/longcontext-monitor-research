@@ -34,7 +34,7 @@ def test_tag_meanings_and_ten_task_turn_instruction_are_explicit():
     assert "<task_trajectory> tags contain the task agent's newly observed execution trajectory" in UNIFIED_SYSTEM
     assert 'not your own task' not in UNIFIED_SYSTEM
     assert 'You must predict which information received this time' in UNIFIED_SYSTEM
-    assert 'will first use only after at least ten task-agent turns have passed' in UNIFIED_SYSTEM
+    assert 'will first use only after at least six task-agent turns have passed' in UNIFIED_SYSTEM
     assert 'Save only confirmed findings.' in UNIFIED_SYSTEM
     assert 'Before saving, you must briefly explain' in UNIFIED_SYSTEM
     assert PUBLIC_FORECAST_REMINDER.startswith('You must include a brief public summary')
