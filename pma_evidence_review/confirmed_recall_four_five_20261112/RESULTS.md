@@ -12,4 +12,12 @@ All five slot dispositions are `completed`; all native evaluations ran. There we
 
 Compared with the earlier `5dc85672...` archive, the reward vector here is `1,1,1,1,0` versus `0,0,0,1,0`. This run changed the save criterion, recall wording, and wake frequency together. Different single trajectories and model stochasticity prevent attribution to any one change or a stable improvement claim. In particular, a delivered reminder is not proof that Task adopted it, and reward is not proof that every saved statement was correct.
 
+| Task | Historical 5dc: wakes / deliveries / tests | Current: wakes / deliveries / tests | Diagnostic difference visible in records |
+|---|---:|---:|---|
+| KV | 2 / 0 / 5/7 | 4 / 1 / 7/7 | Current run saved the observed user-install workaround and later sent verification context; Task then used a test client. Earlier bank had conflicting hyphen/underscore generated filenames. No causal attribution. |
+| Reshard | 4 / 0 / 0/1 | 7 / 2 / 1/1 | Current run recorded the 330-root-shard failure and later cleanup defect, then sent related context at W12/W20. Earlier run saved a completion claim despite failed native evaluation. |
+| RStan | 5 / 1 / 5/6 | 7 / 4 / 6/6 | More recalls were delivered, but current W12 falsely announced completion and W16 proposed a wrong dimension cause before later correction; increased recall did not eliminate unsupported intermediate claims. |
+| Eigen | 3 / 0 / 3/3 | 9 / 2 / 3/3 | Both passed. Current run also attempted an unavailable tool once; later saved failed approaches and sent two contexts. Neither run proves reminder necessity. |
+| HTML | 1 / 0 / 0/2 | 1 / 0 / 0/2 | Both Tasks ended after two steps; the four-step period gave no later wake or delivery opportunity. |
+
 The Task usage records contain provider-reported token fields in the ZIP. Manager responses had no usable per-response usage records or return model IDs, so manager tokens and total cost are `unknown`. Physical HTTP attempts are likewise `unknown`; do not infer them from logical response counts. The Task profile and manager profile hashes in the run configuration establish configuration identity, not service-side defaults.
