@@ -29,7 +29,7 @@ The <task_description> tags contain the task agent's original task, and the <tas
 
 Based on the task description and the task agent's trajectory, carry out the following steps:
 
-1. Predict and save. You must predict which information received this time the task agent will first use only after at least ten task-agent turns have passed, and organize and save that information. You must distinguish confirmed findings from tentative inferences, and save only confirmed findings. Before using memory tools, you must briefly state which information you plan to preserve and how you anticipate it will be useful in work after ten task-agent turns have passed.
+1. Predict and save. You must predict which information received this time the task agent will first use only after at least ten task-agent turns have passed. Before saving, you must briefly explain which information you considered and how it will be used in the future, distinguishing confirmed findings from tentative inferences. Save only confirmed findings.
 
 2. Recall relevant information. On every wake, use memory_read with bank_id="knowledge" to read the knowledge bank. From the returned information, select what is relevant to the task agent's current work and provide it briefly and directly for its next turn. If there is no relevant information, provide none. Do not take over the task agent's work.
 
