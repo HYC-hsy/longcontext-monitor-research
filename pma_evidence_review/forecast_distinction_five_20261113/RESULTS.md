@@ -1,0 +1,21 @@
+# Five real tasks: factual results and historical comparison
+
+Execution code `f63799853f9f976374a572cb4457f68ff721efb9`; parent `76b4181717cdf66c5b54fe74f3d07ca9efb52b7d`. Dataset `2fd12b88aafdd04a52c298e3940bcb189f9766d6`; Harbor `459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc`. Task profile SHA-256 `ed09a811b654b83097bee77942704eae2539d67291bf55aa34476692081ff02e`; organizer profile SHA-256 `c568aac2b3042f852537a7302bae48e756bbaea74f732ff7e985298d7b2a98e6`. Prepared request configuration declared Task `claude-opus-4-8`, organizer `claude-opus-5`; organizer response model IDs were absent (`unknown` service-side confirmation). Manager API: Anthropic Messages, adaptive thinking, requested max_tokens 8192; Task requested max_tokens 64000. Profile values do not prove server defaults. The same profile files/hashes were used in the parent run.
+
+Method `pma-predictive-read-context`, condition B, candidate `pma_predictive_read_context_v1`; 4-step nonoverlapping wake interval plus initialization, no forced tail wake. Task total turns/time and outer deadline were uncapped in the prepared effective policy; official native verifier timeouts were task-specific 900/3600/1800/900/1800 seconds. The actual request check confirms two system variants (base and conditional soft reminder), original task/trajectory tags, and the two declared tools; only the first production system paragraph changed from the parent. The soft reminder did **not** acquire the new explicit distinction wording.
+
+| Task | run_id | Task steps | wakes / manager responses | successful reads / writes | delivered reminders | native tests | reward | cleanup |
+|---|---|---:|---:|---:|---:|---:|---:|---|
+| kv-store-grpc | `pma-8aee3dd516d84516` | 17 | 5 / 22 | 16 / 1 | 0 | 7/7 | 1 | confirmed |
+| reshard-c4-data | `pma-500dfbe393ae4152` | 35 | 9 / 23 | 10 / 3 | 5 | 0/1 | 0 | confirmed |
+| rstan-to-pystan | `pma-b2120b7d69a54090` | 38 | 10 / 47 | 26 / 10 | 5 | 2/6 | 0 | confirmed |
+| largest-eigenval | `pma-d3e9a42658504ff8` | 40 | 10 / 33 | 13 / 9 | 7 | 3/3 | 1 | confirmed |
+| filter-js-from-html | `pma-e6e13af77ccf4a58` | 2 | 1 / 13 | 11 / 1 | 0 | 0/2 | 0 | confirmed |
+
+All five slots completed, all native evaluations executed, and owned-resource cleanup was confirmed. Totals: 35 wakes, 138 organizer responses, 76 successful reads, 24 successful writes, 17 actual reminder deliveries. The 17 delivered reminders are linked to subsequent provider attempts in `wake_index.json`; a generated/queued reminder without such a request is not counted. Four unavailable-tool calls were rejected (`$BROWSER` once in Reshard, `file_read` once in RStan, `$ACTION_read_file` twice in Eigen); they are not successful reads. At least three wakes with a write or reminder lacked the prompt-required read (Reshard W4; Eigen W4/W8). KV W1 had 12 empty-bank reads and HTML W1 had 11, showing repeated tool use rather than a forced single read.
+
+The conditional public-summary soft reminder appeared in 89 actual organizer requests. Of the paired visible responses, 51 had nonempty public text and 38 remained empty. This is an association, not evidence that the soft reminder caused those texts or extra logical calls. A model's empty public text is not evidence that it lacked internal reasoning.
+
+Relative to the parent five-task archive `fd3915f04d14441cccd61bbc546931d228a9f34b`, native rewards changed from `1,1,1,1,0` to `1,0,0,1,0`; Task trajectories and step counts also changed. Parent wakes were `4,7,7,9,1` versus `5,9,10,10,1` here; delivered reminders were `1,2,4,2,0` versus `0,5,5,7,0`. The two runs use the same fixed dataset/model profile hashes and four-step mechanism, but they are single stochastic trajectories. The score change does not establish that this one prompt edit caused either success or failure. See `WRITE_AUDIT.md` for concrete quality/consistency failures and `WAKE_REVIEW.md` for every wake, including no-intervention wakes.
+
+The public package contains Task provider usage fields where logged. Organizer response usage and returned model IDs were absent; organizer tokens, physical HTTP attempts, and total cost are `unknown`, not inferred from the 138 logical responses or text length. Hidden verifier names/assertions/stdout are not included; public native counts and reward are preserved without inventing root causes for failed tests.
